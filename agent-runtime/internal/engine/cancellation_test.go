@@ -42,9 +42,13 @@ type cancellationCheckpointStore struct {
 	mu             sync.Mutex
 	sets           int
 	setSawCanceled bool
+	beforeSet      func()
 }
 
 func (s *cancellationCheckpointStore) Set(ctx context.Context, id string, payload []byte) error {
+	if s.beforeSet != nil {
+		s.beforeSet()
+	}
 	s.mu.Lock()
 	s.sets++
 	s.setSawCanceled = s.setSawCanceled || ctx.Err() != nil
@@ -68,10 +72,15 @@ func TestNativeEinoImmediateStopSavesCheckpointAfterRootCancellation(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	session := &cancellationCheckpointStore{SessionStore: &SessionStore{Store: store, Lease: lease}}
 	blocking := &cancellationCheckpointModel{started: make(chan struct{}), release: make(chan struct{})}
 	root, cancel := context.WithCancel(WithRun(ctx, run))
 	defer cancel()
+	// The real TurnLoop must decide to save its native checkpoint first. Cancel
+	// exactly at the PG-store boundary, preserving the original canceled context.
+	session := &cancellationCheckpointStore{SessionStore: &SessionStore{Store: store, Lease: lease}, beforeSet: cancel}
+	stopContributed := make(chan struct{})
+	var stoppedOnce sync.Once
+	var nativeCancelObserved atomic.Bool
 	loop := adk.NewTurnLoop(adk.TurnLoopConfig[Input, *schema.Message]{
 		GenInput: func(ctx context.Context, _ *adk.TurnLoop[Input, *schema.Message], items []Input) (*adk.GenInputResult[Input, *schema.Message], error) {
 			return &adk.GenInputResult[Input, *schema.Message]{RunCtx: WithRun(ctx, run), Input: &adk.AgentInput{Messages: []*schema.Message{{Role: schema.User, Content: input.Body}}}, Consumed: items}, nil
@@ -79,11 +88,28 @@ func TestNativeEinoImmediateStopSavesCheckpointAfterRootCancellation(t *testing.
 		PrepareAgent: func(ctx context.Context, _ *adk.TurnLoop[Input, *schema.Message], _ []Input) (adk.Agent, error) {
 			return adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{Name: "checkpoint_fixture", Description: "native blocking model fixture", Model: blocking, MaxIterations: 1})
 		},
-		OnAgentEvents: func(_ context.Context, _ *adk.TurnContext[Input, *schema.Message], events *adk.AsyncIterator[*adk.AgentEvent]) error {
+		OnAgentEvents: func(_ context.Context, turn *adk.TurnContext[Input, *schema.Message], events *adk.AsyncIterator[*adk.AgentEvent]) error {
+			callbackDone := make(chan struct{})
+			defer close(callbackDone)
+			go func() {
+				select {
+				case <-turn.Stopped:
+					stoppedOnce.Do(func() { close(stopContributed) })
+				case <-callbackDone:
+				}
+			}()
 			for {
-				_, ok := events.Next()
+				event, ok := events.Next()
 				if !ok {
 					return nil
+				}
+				if event != nil && event.Err != nil {
+					var nativeCancel *adk.CancelError
+					if errors.As(event.Err, &nativeCancel) {
+						nativeCancelObserved.Store(true)
+					} else {
+						return event.Err
+					}
 				}
 			}
 		},
@@ -96,10 +122,17 @@ func TestNativeEinoImmediateStopSavesCheckpointAfterRootCancellation(t *testing.
 	case <-time.After(5 * time.Second):
 		t.Fatal("native model never entered generation")
 	}
-	// Gate model return until BOTH immediate stop and root cancellation happened.
-	// This makes the canceled-context persistence regression deterministic.
+	// Stop returns before watchStop submits the native cancellation. Wait for its
+	// public contribution acknowledgment while the model still blocks. Root stays
+	// alive until native cleanup invokes the checkpoint store's Set hook.
 	loop.Stop(adk.WithImmediate())
-	cancel()
+	select {
+	case <-stopContributed:
+	case <-time.After(5 * time.Second):
+		cancel()
+		close(blocking.release)
+		t.Fatal("native immediate stop did not contribute")
+	}
 	close(blocking.release)
 	stopped := make(chan *adk.TurnLoopExitState[Input, *schema.Message], 1)
 	go func() { stopped <- loop.Wait() }()
@@ -108,6 +141,9 @@ func TestNativeEinoImmediateStopSavesCheckpointAfterRootCancellation(t *testing.
 	case exit = <-stopped:
 	case <-time.After(10 * time.Second):
 		t.Fatal("native turn loop failed to stop and flush")
+	}
+	if !nativeCancelObserved.Load() {
+		t.Fatalf("native CancelError not observed: exit=%v", exit.ExitReason)
 	}
 	if !exit.CheckpointAttempted || exit.CheckpointErr != nil {
 		t.Fatalf("checkpoint attempted=%v error=%v exit=%v", exit.CheckpointAttempted, exit.CheckpointErr, exit.ExitReason)
