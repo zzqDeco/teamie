@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError, TeamieClient } from "@teamie/api-client";
+import type { Agent } from "@teamie/api-client";
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -177,6 +178,126 @@ describe("platform registration invitation transport", () => {
 });
 
 describe("Agent and model gateway boundaries", () => {
+  const profile: Agent = {
+    id: "agent-profile",
+    principalId: "agent-profile",
+    ownerId: "owner",
+    ownerName: "创建者",
+    name: "团队伙伴",
+    description: "整理团队想法",
+    workspaceIds: ["visible-team", "private-team"],
+    enabled: true,
+    createdAt: "2026-10-16T07:00:00Z",
+    updatedAt: "2026-10-16T07:00:00Z",
+  };
+  const unsafeProfile = {
+    ...profile,
+    revision: 42,
+    runtimeState: "running",
+    sessionId: "SESSION-SENTINEL",
+    lastActiveAt: "ACTIVITY-SENTINEL",
+    lastError: "ERROR-SENTINEL",
+    deletedAt: "DELETE-SENTINEL",
+    activeRunId: "RUN-ID-SENTINEL",
+    runs: [{ id: "RUN-ID-SENTINEL", inputCount: 111 }],
+    tasks: [
+      { id: "TASK-ID-SENTINEL", description: "TASK-DESCRIPTION-SENTINEL" },
+    ],
+    events: [{ toolName: "TOOL-SENTINEL", errorCode: "ERROR-CODE-SENTINEL" }],
+  };
+  it("projects only public Agent profile fields from every list/read/write response", async () => {
+    const fetch = vi.fn(
+      async (url: string) =>
+        new Response(
+          JSON.stringify(
+            url.endsWith("/agents")
+              ? { agents: [unsafeProfile], agent: unsafeProfile }
+              : { agent: unsafeProfile },
+          ),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const client = new TeamieClient();
+    const values = [
+      (await client.agents()).agents[0],
+      (await client.agent(profile.id)).agent,
+      (
+        await client.createAgent({
+          name: profile.name,
+          workspaceIds: profile.workspaceIds,
+        })
+      ).agent,
+      (await client.updateAgent(profile.id, { enabled: false })).agent,
+    ];
+    for (const value of values) {
+      expect(value).toEqual(profile);
+      expect(JSON.stringify(value)).not.toContain("SENTINEL");
+    }
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      "/api/v1/agents",
+      "/api/v1/agents/agent-profile",
+      "/api/v1/agents",
+      "/api/v1/agents/agent-profile",
+    ]);
+  });
+  it("limits discovery metadata to the current workspace even if another selected team is returned", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ agents: [unsafeProfile] }), {
+            status: 200,
+          }),
+      ),
+    );
+    const discovered = await new TeamieClient().workspaceAgents("visible-team");
+    expect(discovered.agents[0]).toEqual({
+      ...profile,
+      workspaceIds: ["visible-team"],
+    });
+    expect(JSON.stringify(discovered)).not.toMatch(/private-team|SENTINEL/);
+  });
+  it("does not provide runtime, task, event or recovery browser methods or a public arbitrary-path transport", () => {
+    const client = new TeamieClient();
+    for (const method of [
+      "request",
+      "agentRuntime",
+      "agentRuns",
+      "agentRun",
+      "agentTasks",
+      "agentTask",
+      "agentEvents",
+      "agentEventsURL",
+      "cancelAgentRun",
+      "cancelAgentTask",
+      "retryAgentRun",
+    ]) {
+      expect(client).not.toHaveProperty(method);
+    }
+  });
+  it("sends only basic profile changes even when an input object includes internal metadata", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(
+      async () =>
+        new Response(JSON.stringify({ agent: unsafeProfile }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const client = new TeamieClient();
+    await client.createAgent(unsafeProfile);
+    await client.updateAgent(profile.id, { ...unsafeProfile, enabled: false });
+    for (const call of fetch.mock.calls) {
+      const options = call[1] as RequestInit;
+      const body = JSON.parse(options.body as string);
+      expect(Object.keys(body).sort()).toEqual([
+        "description",
+        "enabled",
+        "name",
+        "workspaceIds",
+      ]);
+      expect(JSON.stringify(body)).not.toContain("SENTINEL");
+      expect(body).not.toHaveProperty("ownerId");
+    }
+  });
   it("strips any accidentally returned credential fields from gateway read and save results", async () => {
     const response = {
       config: {

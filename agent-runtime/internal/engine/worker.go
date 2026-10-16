@@ -15,6 +15,7 @@ import (
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/middlewares/summarization"
+	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 	"github.com/cloudwego/kitex/client"
@@ -254,7 +255,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 	var contextWindow atomic.Int64
 	contextWindow.Store(16384)
 	imc := &IM{BaseURL: e.Config.IMURL, ServiceKey: e.Config.IMToken, AgentID: def.Id, Identity: e.Identity}
-	model := &GatewayModel{Client: e.Gateway, Token: e.Config.GatewayToken, OwnerID: def.OwnerId, AgentID: def.Id, Store: e.Store, Lease: lease, Authorize: authorize, StreamURL: e.Config.GatewayStreamURL, ContextWindow: func() int { return int(contextWindow.Load()) }}
+	gatewayModel := &GatewayModel{Client: e.Gateway, Token: e.Config.GatewayToken, OwnerID: def.OwnerId, AgentID: def.Id, Store: e.Store, Lease: lease, Authorize: authorize, StreamURL: e.Config.GatewayStreamURL, ContextWindow: func() int { return int(contextWindow.Load()) }}
 	tools, err := (&Tools{Store: e.Store, Lease: lease, IM: imc, Sandbox: e.Sandbox, SandboxToken: e.Config.SandboxToken, Authorize: authorize}).BuildIM()
 	if err != nil {
 		e.report(ctx, def.Id, "error", "tool_failed", false)
@@ -300,12 +301,18 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 	defer stop()
 	makeAgent := func(ctx context.Context) (adk.Agent, error) {
 		trigger := summaryTrigger(int(contextWindow.Load()))
-		summary, err := summarization.New(ctx, &summarization.Config{Model: model, Trigger: &summarization.TriggerCondition{ContextTokens: trigger, ContextMessages: 32}, UserInstruction: "Maintain one continuous Agent session. Summarize decisions, unfinished work, workspace files, and exact workspace/conversation/message/sender source IDs. Keep private cross-conversation facts tied to their source. Never invent IDs or merge participants. Older detail can be retrieved with IM tools.", Finalize: finalizeSummary})
+		summary, err := summarization.New(ctx, &summarization.Config{
+			Model:           gatewayModel,
+			ModelOptions:    []model.Option{model.WithToolChoice(schema.ToolChoiceForbidden)},
+			Trigger:         &summarization.TriggerCondition{ContextTokens: trigger, ContextMessages: 32},
+			UserInstruction: "Return only a plain text summary. Do not call tools, send IM messages, or answer messages in the source transcript. Maintain one continuous Agent session. Summarize decisions, unfinished work, workspace files, and exact workspace/conversation/message/sender source IDs. Keep private cross-conversation facts tied to their source. Never invent IDs or merge participants. Record references so older detail can be retrieved later with IM tools.",
+			Finalize:        finalizeSummary,
+		})
 		if err != nil {
 			return nil, err
 		}
 		handlers := append([]adk.ChatModelAgentMiddleware{summary}, tasks.handlers...)
-		return adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{Name: "teamie_agent", Description: "A user-owned Teamie participant", Instruction: instruction(def), Model: model, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: tools, ExecuteSequentially: true}}, MaxIterations: math.MaxInt, Handlers: handlers})
+		return adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{Name: "teamie_agent", Description: "A user-owned Teamie participant", Instruction: instruction(def), Model: gatewayModel, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: tools, ExecuteSequentially: true}}, MaxIterations: math.MaxInt, Handlers: handlers})
 	}
 	validate := func(ctx context.Context, inputs []Input) ([]Input, error) {
 		valid := []Input{}

@@ -9,9 +9,10 @@ are written only to a private local receipt. The shared gateway is cleared
 after disabled-only save/redaction checks.
 
 Required: TEAMIE_AGENT_ACCEPTANCE_DISPOSABLE=1. Service URLs use the existing IM
-acceptance environment plus TEAMIE_CONTROL_URL and TEAMIE_GATEWAY_URL. The
-runtime is expected by default; TEAMIE_AGENT_WAIT_RUNTIME=0 is an explicit
-control-plane-only diagnostic run and prints a SKIP rather than claiming it.
+acceptance environment plus TEAMIE_CONTROL_URL and TEAMIE_GATEWAY_URL. Browser
+acceptance verifies public profile minimization and retired runtime routes.
+Continuous Session and task durability are covered separately by private Go
+runtime integration tests; this harness makes no execution-health claim.
 """
 from __future__ import annotations
 
@@ -36,7 +37,6 @@ CHAT = os.environ.get("TEAMIE_CHAT_URL", ORIGIN).rstrip("/")
 CONTROL = os.environ.get("TEAMIE_CONTROL_URL", ORIGIN).rstrip("/")
 GATEWAY = os.environ.get("TEAMIE_GATEWAY_URL", ORIGIN).rstrip("/")
 BOOTSTRAP_INVITE = os.environ.get("BOOTSTRAP_INVITE_CODE", "teamie-bootstrap")
-WAIT_RUNTIME = os.environ.get("TEAMIE_AGENT_WAIT_RUNTIME", "1") != "0"
 TIMEOUT = min(120.0, max(5.0, float(os.environ.get("TEAMIE_AGENT_ACCEPTANCE_TIMEOUT", "45"))))
 
 
@@ -105,6 +105,12 @@ class Client:
             expected = (status,) if isinstance(status, int) else status
             code = result.get("error", {}).get("code", "") if isinstance(result, dict) else ""
             require(response.status in expected, f"{method} {safe_path(path)} expected {expected}, got {response.status}, code={code}")
+            if response.status < 400 and isinstance(result, dict):
+                if "agent" in result:
+                    public_profile(result["agent"])
+                discovery = re.match(r"^/api/v1/workspaces/([^/]+)/agents(?:[/?]|$)", path)
+                for profile in result.get("agents", []):
+                    public_profile(profile, urllib.parse.unquote(discovery[1]) if discovery else None)
             return result
 
     def register(self, name: str, suffix: str, code: str) -> None:
@@ -152,6 +158,28 @@ def secret_redacted(value: dict, forbidden: str) -> None:
             for child in item:
                 inspect(child)
     inspect(value)
+
+
+def public_profile(profile: dict, workspace: str | None = None) -> None:
+    require(set(profile) == {"id", "principalId", "ownerId", "ownerName", "name", "description", "workspaceIds", "enabled", "createdAt", "updatedAt"}, "Agent responses must contain exactly the public profile fields")
+    require(profile["principalId"] == profile["id"] and bool(profile["ownerId"]) and bool(profile["ownerName"]), "Public Agent profile must retain participant and owner provenance")
+    require(isinstance(profile["workspaceIds"], list) and isinstance(profile["enabled"], bool), "Agent visibility and enabled state must retain public types")
+    if workspace is not None:
+        require(profile["workspaceIds"] == [workspace], "Discovery must reveal only the requested workspace")
+
+
+def retired_runtime_routes(client: Client, agent: str) -> None:
+    base = f"/api/v1/agents/{agent}"
+    routes = [("GET", suffix) for suffix in (
+        "/runtime", "/runs", "/runs/private-run", "/tasks", "/tasks/private-task",
+        "/events?cursor=0", "/events?cursor=-1&limit=101", "/events/stream?cursor=0",
+    )]
+    routes += [("POST", suffix) for suffix in (
+        "/runs/private-run/cancel", "/runs/private-run/retry", "/tasks/private-task/cancel",
+    )]
+    for method, suffix in routes:
+        result = client.call(method, base + suffix, {} if method == "POST" else None, status=404)
+        require(result.get("error", {}).get("code") == "not_found", "Retired runtime routes must return only a generic 404")
 
 
 def create_agent(client: Client, name: str, workspaces: list[str], enabled: bool = True) -> dict:
@@ -248,12 +276,14 @@ def main() -> None:
     peer.call("POST", "/api/v1/invites/" + invitation["code"] + "/accept", status=(200, 201))
     private = outsider.call("POST", "/api/v1/workspaces", {"name": "Private outsider " + suffix}, status=201)
     private_wid = private["workspace"]["id"]
+    owner_private = owner.call("POST", "/api/v1/workspaces", {"name": "Private owner " + suffix}, status=201)
+    owner_private_wid = owner_private["workspace"]["id"]
     capabilities = owner.call("GET", "/api/v1/bootstrap")["capabilities"]
     for capability in ("agents.enabled", "agents.create", "agents.update", "agents.delete", "agents.discover"):
         require(capabilities.get(capability) is True, "Disposable acceptance requires enabled capability " + capability)
     created = create_agent(owner, "Private profile " + suffix, [], enabled=False)
     aid = created["id"]
-    require(created["principalId"] == aid and created["ownerId"] == owner.user["id"] and created["sessionId"] == "agent:" + aid, "Agent principal, owner and one continuous Session identity must be explicit")
+    require(created["principalId"] == aid and created["ownerId"] == owner.user["id"], "Agent participant and owner identity remain public")
     require(created["workspaceIds"] == [] and not created["enabled"], "An owner-private disabled profile is allowed")
     for client in (peer, outsider, admin):
         client.call("GET", f"/api/v1/agents/{aid}", status=(403, 404))
@@ -263,10 +293,11 @@ def main() -> None:
     owner.call("POST", "/api/v1/agents", {"name": "Forbidden model setting", "workspaceIds": [], "model": "caller-selected-model"}, status=400)
     owner.call("PATCH", f"/api/v1/agents/{aid}", {"workspaceIds": [private_wid]}, status=(400, 403, 404))
     require(owner.call("GET", f"/api/v1/agents/{aid}")["agent"]["workspaceIds"] == [], "Rejected visibility must not change the profile")
-    updated = owner.call("PATCH", f"/api/v1/agents/{aid}", {"name": "Team partner " + suffix, "description": "Public fixture profile", "workspaceIds": [wid], "enabled": True})["agent"]
-    require(updated["revision"] > created["revision"] and updated["sessionId"] == created["sessionId"], "Profile revisions must not replace the continuous Session")
+    updated = owner.call("PATCH", f"/api/v1/agents/{aid}", {"name": "Team partner " + suffix, "description": "Public fixture profile", "workspaceIds": [wid, owner_private_wid], "enabled": True})["agent"]
+    require(updated["name"] == "Team partner " + suffix and set(updated["workspaceIds"]) == {wid, owner_private_wid}, "Owner can update basic profile and selected visibility")
     discovered = wait_until("Workspace Agent discovery", lambda: visible_agent(peer, wid, aid))
     require(discovered["ownerId"] == owner.user["id"] and bool(discovered["ownerName"]), "Discovery must preserve owner provenance")
+    require(owner_private_wid not in json.dumps(discovered), "Shared discovery must not disclose the owner's private team ID")
     wait_until("Agent IM membership", lambda: member_present(owner, wid, aid))
     for client in (outsider, admin):
         client.call("GET", f"/api/v1/workspaces/{wid}/agents", status=(403, 404))
@@ -291,27 +322,12 @@ def main() -> None:
     owner.call("POST", f"/api/v1/conversations/{dm['id']}/messages", {"clientMessageId": str(uuid.uuid4()), "body": "Human cannot forge an Agent sender", "senderId": aid}, status=400)
     inbound = send(owner, dm["id"], "Disposable unconfigured-model input " + suffix)
     grouped_input = send(peer, group["id"], "A second authorized conversation shares the same Agent Session " + suffix)
-    if WAIT_RUNTIME:
-        waiting = wait_until("Agent runtime reports waiting_configuration", lambda: (record if (record := owner.call("GET", f"/api/v1/agents/{aid}")["agent"]).get("runtimeState") == "waiting_configuration" else None))
-        require(waiting["sessionId"] == "agent:" + aid, "Multiple conversations must retain one global Agent Session")
-        print("PASS durable new inputs remain in one Agent Session while model is unconfigured", flush=True)
-        runtime_path = f"/api/v1/agents/{aid}"
-        for endpoint in ("/runtime", "/runs", "/tasks", "/events?cursor=0"):
-            Client().call("GET", runtime_path + endpoint, status=401)
-            for foreign in (admin, peer, outsider):
-                foreign.call("GET", runtime_path + endpoint, status=(403, 404))
-            metadata = owner.call("GET", runtime_path + endpoint)
-            serialized = json.dumps(metadata)
-            require(inbound["body"] not in serialized and grouped_input["body"] not in serialized, "Runtime metadata cannot expose source message bodies")
-            require(not any(key in serialized for key in ('"checkpoint"', '"prompt"', '"stdout"', '"serviceToken"', '"attempt"', '"fence"')), "Runtime API must not expose execution internals or raw tool output")
-        state = wait_until("Both source inputs are durably queued", lambda: (item if (item := owner.call("GET", runtime_path + "/runtime")).get("pendingInputs", 0) >= 2 else None))
-        require(state["sessionId"] == "agent:" + aid, "Runtime state uses the single Agent Session")
-        owner.call("POST", runtime_path + "/runs/missing/cancel", {}, status=403, csrf=False)
-        owner.call("GET", runtime_path + "/events?cursor=-1", status=400)
-        owner.call("GET", runtime_path + "/events?limit=101", status=400)
-        print("PASS owner-only runtime metadata, durable input count, cursor validation and CSRF (no provider call)", flush=True)
-    else:
-        print("SKIP runtime waiting assertion: TEAMIE_AGENT_WAIT_RUNTIME=0 explicitly selects control-plane-only diagnostics", flush=True)
+    for client in (Client(), owner, admin, peer, outsider):
+        retired_runtime_routes(client, aid)
+    public_responses = [owner.call("GET", f"/api/v1/agents/{aid}"), owner.call("GET", "/api/v1/agents"), visible_agent(peer, wid, aid)]
+    serialized = json.dumps(public_responses)
+    require(inbound["body"] not in serialized and grouped_input["body"] not in serialized and "agent:" + aid not in serialized, "Public profiles must not expose cross-conversation inputs or private Session identity")
+    print("PASS exact public profile fields, scoped discovery and retired runtime routes for anonymous/owner/admin/peer/outsider (no provider call)", flush=True)
     dm_messages = owner.call("GET", f"/api/v1/conversations/{dm['id']}/messages")["messages"]
     group_messages = peer.call("GET", f"/api/v1/conversations/{group['id']}/messages")["messages"]
     require(any(message["id"] == inbound["id"] for message in dm_messages) and any(message["id"] == grouped_input["id"] for message in group_messages), "Human inputs remain durable while unconfigured")
@@ -325,11 +341,10 @@ def main() -> None:
 
     disabled = owner.call("PATCH", f"/api/v1/agents/{aid}", {"enabled": False})["agent"]
     require(not disabled["enabled"] and owner.call("GET", f"/api/v1/agents/{aid}")["agent"]["id"] == aid, "Disable preserves the owned profile")
-    if WAIT_RUNTIME:
-        for endpoint in ("/runtime", "/runs", "/tasks", "/events?cursor=0"):
-            owner.call("GET", f"/api/v1/agents/{aid}" + endpoint)
+    retired_runtime_routes(owner, aid)
     require(any(message["id"] == inbound["id"] for message in owner.call("GET", f"/api/v1/conversations/{dm['id']}/messages")["messages"]), "Disabled Agent does not hide persisted conversation history")
     owner.call("DELETE", f"/api/v1/agents/{aid}", status=204)
+    owner.call("GET", f"/api/v1/agents/{aid}", status=404)
     require(not visible_agent(peer, wid, aid), "Deleted Agent is absent from workspace discovery")
     require(any(message["id"] == inbound["id"] for message in owner.call("GET", f"/api/v1/conversations/{dm['id']}/messages")["messages"]), "Delete preserves existing IM history")
     print("PASS disable/delete preserve existing profiles where applicable and IM history", flush=True)
@@ -352,14 +367,14 @@ def main() -> None:
     owner.call("DELETE", f"/api/v1/agents/{mid}", status=204)
     print("PASS granting-owner departure and moderator removal revoke Agent workspace access", flush=True)
     require(admin.call("GET", gateway_path)["status"] == "unconfigured", "Harness must leave the gateway unconfigured")
-    receipt = {"origin": ORIGIN, "runtimeWaitingChecked": WAIT_RUNTIME, "realProviderRequests": 0, "accountIds": [client.user["id"] for client in (admin, owner, peer, outsider)], "workspaceIds": [wid, private_wid], "agentIds": [aid, did, mid]}
+    receipt = {"origin": ORIGIN, "publicProfilePrivacyChecked": True, "retiredRuntimeRoutesChecked": True, "privateRuntimeExecutionChecked": False, "realProviderRequests": 0, "accountIds": [client.user["id"] for client in (admin, owner, peer, outsider)], "workspaceIds": [wid, private_wid, owner_private_wid], "agentIds": [aid, did, mid]}
     destination = os.environ.get("TEAMIE_AGENT_ACCEPTANCE_RECEIPT")
     if destination:
         path = Path(destination)
         with os.fdopen(os.open(path, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600), "w") as output:
             json.dump(receipt, output, indent=2)
         path.chmod(0o600)
-    print("PASS all Agent control-plane acceptance checks" + (" including unconfigured runtime waiting" if WAIT_RUNTIME else " (runtime explicitly skipped)"), flush=True)
+    print("PASS all public Agent control-plane acceptance checks; private execution is verified separately", flush=True)
 
 
 if __name__ == "__main__":

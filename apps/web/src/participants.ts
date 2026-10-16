@@ -12,13 +12,13 @@ export function enrichParticipants(
           ...member,
           ownerId: agent?.ownerId || member.ownerId,
           ownerName: agent?.ownerName || member.ownerName,
-          selectable: !!agent && agent.enabled && !agent.deletedAt,
+          selectable: !!agent && agent.enabled,
         }
       : { ...member, selectable: true };
   });
   const existing = new Set(result.map((member) => member.userId));
   for (const agent of agents)
-    if (!existing.has(agent.principalId) && !agent.deletedAt)
+    if (!existing.has(agent.principalId))
       result.push({
         userId: agent.principalId,
         displayName: agent.name,

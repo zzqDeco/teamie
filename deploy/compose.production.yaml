@@ -177,7 +177,6 @@ services:
       COOKIE_SECURE: "true"
       AGENT_RUNTIME_TOKEN: ${AGENT_RUNTIME_TOKEN:?runtime control credential required}
       IM_PRINCIPAL_CONTROL_TOKEN: ${IM_PRINCIPAL_CONTROL_TOKEN:?principal control credential required}
-      AGENT_RUNTIME_RPC_ADDR: agent-runtime:8885
       FEATURE_FLAGS_FILE: /etc/teamie/feature-flags.json
       GOMEMLIMIT: 40MiB
       GOMAXPROCS: "1"

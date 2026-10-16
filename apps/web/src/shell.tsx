@@ -18,12 +18,10 @@ import {
   Menu,
   KeyRound,
   LoaderCircle,
-  LogOut,
   MessageSquarePlus,
   Plus,
   Settings,
   ShieldCheck,
-  Sparkles,
   UserPlus,
   Users,
   WifiOff,
@@ -36,7 +34,9 @@ import { errorText, useChat, useChatState } from "./chat";
 import { ProfileSettings, WorkspaceDialog } from "./dialogs";
 import { PlatformInvitations } from "./admin";
 import { ModelGatewaySettings } from "./model-gateway";
-import { AgentDetail, MyAgents, WorkspaceAgents } from "./agents";
+import { AgentDetail, MyAgents } from "./agents";
+import { AccountMenu } from "./account-menu";
+import { WorkspaceMembers } from "./members";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
 import { GroupMembersDialog } from "./group-members";
 import { enrichParticipants } from "./participants";
@@ -132,7 +132,8 @@ export function Shell() {
     snapshot = useChatState();
   const client = useQueryClient();
   const match = useMatch("/app/w/:workspaceId/c/:conversationId"),
-    directoryMatch = useMatch("/app/w/:workspaceId/agents"),
+    directoryMatch = useMatch("/app/w/:workspaceId/members"),
+    legacyDirectoryMatch = useMatch("/app/w/:workspaceId/agents"),
     agentMatch = useMatch("/app/agents/:agentId"),
     location = useLocation(),
     navigate = useNavigate();
@@ -149,8 +150,13 @@ export function Shell() {
     chat.data?.workspaces.find(
       (w) =>
         w.id ===
-        (match?.params.workspaceId || directoryMatch?.params.workspaceId),
-    ) || (match || directoryMatch ? undefined : chat.data?.workspaces[0]);
+        (match?.params.workspaceId ||
+          directoryMatch?.params.workspaceId ||
+          legacyDirectoryMatch?.params.workspaceId),
+    ) ||
+    (match || directoryMatch || legacyDirectoryMatch
+      ? undefined
+      : chat.data?.workspaces[0]);
   const owner = workspace?.createdBy === user!.id;
   const conversation = match?.params.conversationId
     ? snapshot.conversations[match.params.conversationId]
@@ -179,9 +185,12 @@ export function Shell() {
     enabled: !!workspace && discoveryAllowed,
     refetchInterval: 30_000,
   });
+  const workspaceAgents = discoveryAllowed
+    ? workspaceAgentsQuery.data?.agents || []
+    : [];
   const members = enrichParticipants(
     membersQuery.data?.members || [],
-    workspaceAgentsQuery.data?.agents || [],
+    workspaceAgents,
   );
   const visibleMembers =
     conversation && conversation.type !== "channel"
@@ -273,6 +282,13 @@ export function Shell() {
     setSpaceMenu(false);
   }
   if (chat.loading && !chat.data) return <Loading />;
+  if (legacyDirectoryMatch)
+    return (
+      <Navigate
+        to={`/app/w/${legacyDirectoryMatch.params.workspaceId}/members`}
+        replace
+      />
+    );
   if (chat.error && !chat.data)
     return (
       <div className="loading-screen">
@@ -344,42 +360,6 @@ export function Shell() {
             <Plus size={23} />
           </IconButton>
           <span className="rail-spacer" />
-          <Link
-            to="/app/agents"
-            className={`rail-settings rail-agents ${isAgentsPage ? "selected" : ""}`}
-            aria-label="我的 Agent"
-            title="我的 Agent"
-          >
-            <Bot size={21} />
-          </Link>
-          {user!.platformRole === "admin" && (
-            <>
-              <Link
-                to="/app/admin"
-                className={`rail-settings rail-admin ${isAdminPage ? "selected" : ""}`}
-                aria-label="平台管理：注册邀请"
-                title="平台管理：注册邀请"
-              >
-                <ShieldCheck size={21} />
-              </Link>
-              <Link
-                to="/app/admin/gateway"
-                className={`rail-settings rail-admin ${isGatewayPage ? "selected" : ""}`}
-                aria-label="平台管理：模型网关"
-                title="平台管理：模型网关"
-              >
-                <KeyRound size={20} />
-              </Link>
-            </>
-          )}
-          <Link
-            to="/app/settings"
-            className={`rail-settings ${isSettings ? "selected" : ""}`}
-            aria-label="个人设置"
-            title="个人设置"
-          >
-            <Settings size={21} />
-          </Link>
         </aside>
         <aside className="navigation-sidebar">
           <div className="workspace-header">
@@ -443,55 +423,25 @@ export function Shell() {
                     <Plus size={16} />
                     创建工作空间
                   </button>
-                  <Link to="/app/settings">
-                    <Settings size={16} />
-                    个人设置
-                  </Link>
-                  <Link to="/app/agents">
-                    <Bot size={16} />
-                    我的 Agent
-                  </Link>
-                  {user!.platformRole === "admin" && (
-                    <Link to="/app/admin">
-                      <ShieldCheck size={16} />
-                      注册邀请
-                    </Link>
-                  )}
-                  {user!.platformRole === "admin" && (
-                    <Link to="/app/admin/gateway">
-                      <KeyRound size={16} />
-                      模型网关
-                    </Link>
-                  )}
-                  <button
-                    className="danger-text"
-                    onClick={signOut}
-                    disabled={busy}
-                  >
-                    <LogOut size={16} />
-                    退出登录
-                  </button>
                 </div>
               </>
             )}
           </div>
           <div className="sidebar-scroll">
-            <div className="agent-sidebar-links">
-              <Link to="/app/agents" className={isAgentsPage ? "active" : ""}>
-                <Bot size={16} />
-                <span>我的 Agent</span>
-              </Link>
-              {workspace && discoveryAllowed && (
+            {workspace && (
+              <nav className="workspace-navigation" aria-label="团队">
                 <Link
-                  to={`/app/w/${workspace.id}/agents`}
+                  to={`/app/w/${workspace.id}/members`}
                   className={isDirectoryPage ? "active" : ""}
+                  aria-current={isDirectoryPage ? "page" : undefined}
+                  onClick={() => setSidebar(false)}
                 >
-                  <Sparkles size={15} />
-                  <span>团队 Agent</span>
-                  <ChevronRight size={12} />
+                  <Users size={17} />
+                  <span>成员</span>
+                  <ChevronRight size={14} />
                 </Link>
-              )}
-            </div>
+              </nav>
+            )}
             <div className="nav-section">
               <div className="nav-section-title">
                 <span>
@@ -592,25 +542,12 @@ export function Shell() {
                   : "正在重新连接…"}
             {chat.connection === "offline" && <WifiOff size={12} />}
           </div>
-          <div className="user-panel">
-            <Link to="/app/profile" className="user-profile">
-              <Avatar name={user!.displayName} seed={user!.id} />
-              <span>
-                <b>{user!.displayName}</b>
-                <small>
-                  {user!.platformRole === "admin" ? "平台管理员" : "个人账户"}
-                </small>
-              </span>
-            </Link>
-            <Link
-              className="icon-button"
-              to="/app/settings"
-              title="个人设置"
-              aria-label="个人设置"
-            >
-              <Settings size={17} />
-            </Link>
-          </div>
+          <AccountMenu
+            user={user!}
+            busy={busy}
+            onSignOut={() => void signOut()}
+            onNavigate={() => setSidebar(false)}
+          />
         </aside>
       </div>
       {sidebar && mobile && (
@@ -640,7 +577,9 @@ export function Shell() {
               </IconButton>
               {isGatewayPage ? (
                 <KeyRound size={18} />
-              ) : isAgentsPage || isDirectoryPage ? (
+              ) : isDirectoryPage ? (
+                <Users size={18} />
+              ) : isAgentsPage ? (
                 <Bot size={18} />
               ) : isAdminPage ? (
                 <ShieldCheck size={18} />
@@ -653,10 +592,10 @@ export function Shell() {
                   : isAdminPage
                     ? "注册邀请"
                     : isAgentsPage
-                      ? "我的 Agent"
+                      ? "个人 Agent"
                       : isDirectoryPage
-                        ? "团队 Agent"
-                        : "个人设置"}
+                        ? "成员"
+                        : "账号设置"}
               </span>
               <Link to="/app">
                 <ArrowLeft size={15} />
@@ -694,14 +633,28 @@ export function Shell() {
               )
             ) : isDirectoryPage ? (
               workspace ? (
-                <WorkspaceAgents
+                <WorkspaceMembers
                   key={`${user!.id}:${workspace.id}`}
                   workspace={workspace}
+                  members={members}
+                  agents={workspaceAgents}
+                  loading={
+                    membersQuery.isLoading ||
+                    (discoveryAllowed && workspaceAgentsQuery.isLoading)
+                  }
+                  loadError={
+                    !!membersQuery.error ||
+                    (discoveryAllowed && !!workspaceAgentsQuery.error)
+                  }
+                  onRetry={() => {
+                    void membersQuery.refetch();
+                    if (discoveryAllowed) void workspaceAgentsQuery.refetch();
+                  }}
                 />
               ) : (
                 <div className="unavailable-view">
                   <h2>无法访问这个工作空间</h2>
-                  <p>发现 Agent 需要当前空间成员权限。</p>
+                  <p>查看成员需要当前空间成员权限。</p>
                   <Link className="button" to="/app">
                     返回对话
                   </Link>
@@ -718,7 +671,6 @@ export function Shell() {
             key={`${user!.id}:${conversation.id}`}
             conversation={conversation}
             members={members}
-            agents={workspaceAgentsQuery.data?.agents || []}
             onMembers={() => {
               setSidebar(false);
               setDetails(!details);

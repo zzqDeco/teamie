@@ -1,4 +1,4 @@
-# Agent API and execution contract — v0.3.0
+# Agent API and execution contract — v0.3.2
 
 This contract extends the independent IM product. IM services do not depend on Eino, model configuration, runtime sessions, or sandbox state. New services use separate Go modules, PostgreSQL databases/roles, container images and authenticated Kitex contracts in `contracts/agent.thrift`.
 
@@ -6,27 +6,28 @@ This contract extends the independent IM product. IM services do not depend on E
 
 - A human creates and owns each Agent. Agent ID equals its independent IM participant ID. Ownership does not confer access to other participants' conversations.
 - Owner settings are name, description, selected workspace IDs, and enabled state. No user-supplied model, provider, key, prompt, tool, or budget controls in this release.
+- Agent working context is private across its authorized conversations. A human owner manages the basic profile, workspace visibility and enabled state only. Ownership and platform administration do not grant browser access to Session, run, task, tool, error or activity details.
 - Selected teams are workspace-level visibility. Only workspaces where the owner is currently a member may be selected. Agents use ordinary workspace/conversation membership and IM ACLs. Removing the granting owner revokes delegated memberships. Moderator removals must not be undone by background reconciliation.
 - One durable Session per Agent (`agent:<id>`) intentionally carries working memory across its authorized conversations. Session compaction preserves provenance and original message references. IM history is never deleted by compaction.
 - Newly committed message bodies, sender identity, workspace/conversation/message/event IDs enter the runtime inbox promptly. Self-authored messages are not new work. Each Agent has one Session writer and one serial native TurnLoop. Worker/Attempt/lease/fence are private implementation details; they do not add architecture services or owner settings. Fresh input delivery is independent of the current run batch.
 - Distant history is read through explicit IM tools. Every chat write is an explicit tool invocation with an explicit destination. Ordinary model output and operational errors are never automatically published to IM.
-- Platform administrators configure the shared OpenAI-compatible model gateway. A healthy but unconfigured gateway produces `model_unconfigured`; Agents wait without losing their inbox. Production will initially be unconfigured at the user's request.
+- Platform administrators configure the shared OpenAI-compatible model gateway. A healthy but unconfigured gateway produces `model_unconfigured`; Agents wait without losing their inbox. Releases preserve the administrator's saved gateway configuration and credentials.
 - Tools and Sandbox are platform presets. Execution children have no provider/IM credentials, host Docker socket, network, or arbitrary host mounts. Workspace lifetime and execution-container lifetime are independent.
 
 ## Owner and discovery HTTP
 
 All endpoints require a human cookie session. Writes require the existing CSRF and trusted Origin checks. Agent bearer credentials cannot manage definitions. Platform admin is not an ownership bypass.
 
-`Agent` JSON: `{id,principalId,ownerId,ownerName,name,description,workspaceIds,enabled,revision,createdAt,updatedAt,deletedAt?,runtimeState,sessionId,lastActiveAt?,lastError?}`. `principalId=id`; `sessionId="agent:"+id`. Runtime states: `provisioning`, `waiting_configuration`, `idle`, `running`, `disabled`, `error`. Errors are safe status summaries, not model text, credentials, prompts or raw provider errors.
+Public `Agent` JSON has exactly `{id,principalId,ownerId,ownerName,name,description,workspaceIds,enabled,createdAt,updatedAt}`. `principalId=id`. A separate public DTO projects these fields for every create, update, read, list and discovery response. No runtime state, Session ID, activity timestamp, error, revision, tombstone or other internal metadata is returned. `enabled` is the owner's saved configuration; it does not assert online status or model/provider health. Internal configuration revisions still fence runtime changes; there is no public revision/If-Match contract.
 
 - `GET /api/v1/agents` -> `{agents:[Agent]}` owned by caller.
 - `POST /api/v1/agents` body `{name,description?,workspaceIds,enabled?}` -> 201 `{agent}`. Empty workspace IDs are allowed; the Agent has no team membership until a team is selected.
 - `GET /api/v1/agents/:id` -> `{agent}` owner only.
 - `PATCH /api/v1/agents/:id` accepts optional `name`, `description`, `workspaceIds`, `enabled` -> `{agent}` owner only. Profile/visibility changes fence old configuration revisions. Disable revokes IM credentials and stops active work.
-- `DELETE /api/v1/agents/:id` -> 204 owner only. Tombstone definition, revoke credentials/membership and cancel work; preserve attributable IM message history.
-- `GET /api/v1/workspaces/:id/agents` -> `{agents:[Agent]}` discovery only for current members, selected visibility and actual Agent membership. Do not expose secrets or runtime internals.
+- `DELETE /api/v1/agents/:id` -> 204 owner only. Tombstone definition, revoke credentials/membership and cancel work; preserve attributable IM message history. Deleted profiles return 404 on public reads and are excluded from listings/discovery.
+- `GET /api/v1/workspaces/:id/agents` -> `{agents:[Agent]}` discovery only for current members, selected visibility and actual Agent membership. Each profile's `workspaceIds` contains only the requested workspace ID, including when the caller is the owner. Other selected workspaces remain private. The owned profile endpoints retain the owner's full selected list.
 
-Public capabilities: `agents.enabled`, `agents.create`, `agents.update`, `agents.delete`, `agents.discover`. Existing `im.dm.create` and `im.group.create` govern conversations. Disabled write features preserve persisted profiles/history. Frontend routes: `/app/agents`, `/app/agents/:id`, `/app/w/:workspaceId/agents`.
+Public capabilities: `agents.enabled`, `agents.create`, `agents.update`, `agents.delete`, `agents.discover`. Existing `im.dm.create` and `im.group.create` govern conversations. Disabled write features preserve persisted profiles/history. Personal Agent profile management uses `/app/agents` and `/app/agents/:id`, reached from the account menu. The workspace member directory at `/app/w/:workspaceId/members` lists humans and visible Agents together with an Agent badge and uses the ordinary IM conversation/member APIs. `/app/w/:workspaceId/agents` redirects to this directory. Turning discovery off preserves persisted Agent members and conversations, but does not admit new Agent selections. The account settings page exposes platform management only to human platform administrators; administrator pages are absent from the main navigation.
 
 ## Administrator model gateway HTTP
 
@@ -60,31 +61,26 @@ The runtime owns inbox cursor, pending inputs, worker leases/fencing, run state,
 
 Preset tools: list authorized conversations, query/paginate IM history, fetch a referenced message or sequence context, explicitly send/reply, native filesystem/PlanTask tools, recoverable workspace execution, and native task progress/control tools. Each result is a runtime observation, not an automatic chat post. Send intent and stable `clientMessageId` survive retries; output is acknowledged only after IM persistence. Tool-call recovery must not duplicate already committed sends or unknown external side effects. Gateway calls and cancellation use a distinct execution-attempt ID. Sandbox preserves durable run/request IDs for receipt replay and carries a separate optional executionId for cancellation, so stopping one attempt cannot poison its later retry.
 
-Native summarization stores a bounded source-aware summary plus recent coherent message/tool-call groups. Its model request fits the configured context window and transport limit. Long-term Session persistence and interrupted execution checkpoints are separate. Compatible native checkpoints use Resume; recovery retains model/tool receipts and the run's pinned Session view. A model configuration error leaves durable inputs available for retry after configuration.
+Native summarization stores a bounded source-aware summary plus recent coherent message/tool-call groups. Its model request explicitly forbids tool calls (`tool_choice=none`) and asks for plain summary text; empty or tool-bearing summaries remain invalid and cannot execute IM tools. Ordinary Agent turns retain their tool access. Summary requests fit the configured context window and transport limit. Long-term Session persistence and interrupted execution checkpoints are separate. Compatible native checkpoints use Resume; recovery retains model/tool receipts and the run's pinned Session view. A model configuration error leaves durable inputs available for retry after configuration.
 
 Native Eino background TaskStore, TaskEventStore, NotificationOutbox and writer protocols are implemented in PostgreSQL. A stable logical task ID survives replay. Manager/executor activity and Sandbox execution do not write the Session in parallel; durable completion notifications return through its input queue. The foreground model slot is released during task waits. Async shell has no default command lifetime limit; request transport deadlines do not determine command lifetime. Ordinary gateway streams preserve upstream content/tool deltas and usage, with distinct explicit HTTP, in-stream, interruption and cancellation outcomes.
 
-## Owner runtime HTTP and SSE
+## Private runtime boundary
 
-The same current human cookie, owner check, trusted Origin and CSRF rules apply. An administrator has no ownership bypass. Agent bearer tokens are rejected. Agent Control derives owner identity and proxies private runtime RPC; it never reads the runtime database.
+There are no browser runtime inspection or control APIs. The former routes below return 404 for every caller, including the human owner and platform administrators. They do not authenticate/proxy runtime requests or call internal Runtime RPC:
 
-- `GET /api/v1/agents/:id/runtime` -> `{state,sessionId,activeRunId?,pendingInputs,runningTasks,lastActiveAt?,lastError?}`.
-- `GET /api/v1/agents/:id/runs?cursor=…&limit=…` -> `{runs:[Run],cursor?}`; `GET .../runs/:runId` -> `{run:Run}`.
-- `GET /api/v1/agents/:id/tasks?cursor=…&limit=…` -> `{tasks:[Task],cursor?}`; `GET .../tasks/:taskId` -> `{task:Task}`.
-- `GET /api/v1/agents/:id/events?cursor=0&limit=50` -> `{events:[Event],cursor,hasMore}`. Event cursor is a nonnegative decimal integer; limit is 1–100.
-- `GET /api/v1/agents/:id/events/stream?cursor=0` emits SSE `runtime` events with `id` and JSON metadata. A reconnect's `Last-Event-ID` supersedes its initial query cursor. Current login/ownership is rechecked between pages. `unavailable` is a safe runtime outage event.
-- `POST /api/v1/agents/:id/runs/:runId/cancel`, `POST .../runs/:runId/retry`, and `POST .../tasks/:taskId/cancel` take `{}` and return `{ok:true}`. Retry is limited to retryable states and checks new-work flags; cancellation remains available when new work is disabled.
+- `GET /api/v1/agents/:id/runtime`.
+- `GET /api/v1/agents/:id/runs` and `GET .../runs/:runId`.
+- `GET /api/v1/agents/:id/tasks` and `GET .../tasks/:taskId`.
+- `GET /api/v1/agents/:id/events` and `GET .../events/stream`, including JSON and SSE requests and reconnect headers.
+- `POST /api/v1/agents/:id/runs/:runId/cancel`, `POST .../runs/:runId/retry`, and `POST .../tasks/:taskId/cancel`.
 
-Run metadata: `{id,status,inputCount,createdAt,updatedAt,startedAt?,finishedAt?,errorCode?}`. Status is `queued`, `running`, `waiting_input`, `interrupted`, `retry`, `waiting_configuration`, `completed`, `failed` or `canceled`.
+Agent Control has no outgoing runtime client or `AGENT_RUNTIME_RPC_ADDR` dependency. Internal runtime RPC, its authentication, Session/TurnLoop, durable tasks/events/checkpoints, cancellation/retry and operational diagnostics remain private service functionality. No new administrator debugging UI is part of this contract. IM history and explicit Agent messages remain accessible through ordinary current conversation ACLs.
 
-Task metadata: `{id,runId?,kind,description,status,createdAt,updatedAt,finishedAt?,exitCode?}`. Status is native `pending`, `running`, `waiting_input`, `suspended`, `completed`, `failed` or `canceled`. The description is a fixed safe label, not the submitted command.
-
-Event metadata: `{id,type,runId?,taskId?,toolName?,status?,createdAt,errorCode?}`. No prompt, raw Session event, model response, input body, command, output, secret, worker/attempt or fencing metadata appears in these owner routes. These endpoints stay readable when write flags are disabled.
-
-Default flags revision `agents-v2` adds `agents.runtime.v3` (new runtime work) and `agents.tasks.execute` (new task submission). This is one runtime implementation with feature admission controls, not a permanent second engine. Disabling the submission flag preserves task observation/cancellation.
+Default flags revision `agents-v2` adds `agents.runtime.v3` (new runtime work) and `agents.tasks.execute` (new task submission). This is one runtime implementation with feature admission controls, not a permanent second engine. Disabling submission preserves internal task observation/cancellation and persisted public profiles/IM history; it does not enable browser runtime routes.
 
 ## Release acceptance
 
-Required: owner isolation, workspace discovery and membership revocation, non-impersonation, redacted admin gateway settings, unchanged invitation/IM flows, arrival of fresh input during an active turn, native checkpoint resumption, source-aware summarization, send deduplication, lease exclusion, native task-store conformance, durable completion wakeup, known Sandbox recovery, cancellation/retry, incremental streaming with partial-failure classification, and desktop/mobile interaction. Real provider acceptance remains pending until administrator configuration and authorization; protocol fixtures must be identified as verification infrastructure.
+Required public acceptance: exact profile-field allowlist, owner isolation, workspace-scoped discovery without other team IDs, membership revocation, 404 for all retired runtime routes with no runtime RPC access, non-impersonation, redacted admin gateway settings, unchanged invitation/IM flows and desktop/mobile interaction. Private runtime Go integration tests separately cover the continuous Session, arrival of fresh input during an active turn, native checkpoint resumption, source-aware summarization, send deduplication, lease exclusion, native task-store conformance, durable completion wakeup, known Sandbox recovery, cancellation/retry and incremental streaming with partial-failure classification. Public acceptance must not infer these private execution properties from profile metadata. Real provider acceptance remains pending until administrator configuration and authorization; protocol fixtures must be identified as verification infrastructure.
 
-Release `v0.3.0` from exact checked `main` using a new permanent `release/v0.3.0` archive. Preserve all previous release branches/tags. Forward migrations retain real accounts/workspaces/messages; the schema vector is Identity 2, Chat 2, Control 1, Runtime 2, Gateway 2. Stop the old runtime writer before dependency replacement/migration; quiesce legacy synchronous Sandbox work before its first async upgrade. New image digests, runtime flag identity and execution runner image belong in the release manifest. Cross-schema image rollback is rejected; take and verify a pre-upgrade backup.
+Release `v0.3.2` from exact checked `main` using a new permanent `release/v0.3.2` archive. Preserve all previous release branches/tags, including the failed `release/v0.3.1` archive. Existing accounts/workspaces/messages and gateway settings remain persisted; the schema vector is unchanged at Identity 2, Chat 2, Control 1, Runtime 2, Gateway 2. Stop the old runtime writer before dependency replacement/migration; quiesce legacy synchronous Sandbox work before its first async upgrade. New ACR image digests, runtime flag identity and execution runner image belong in the release manifest. Cross-schema image rollback is rejected; take and verify a pre-upgrade backup.

@@ -10,46 +10,32 @@ import {
   Eye,
   Hash,
   LoaderCircle,
-  MessageCircle,
   Pencil,
   Play,
   Plus,
   Trash2,
-  Users,
 } from "lucide-react";
 import { api, ApiError } from "@teamie/api-client";
 import type { Agent, Workspace } from "@teamie/api-client";
 import { useAuth } from "./auth";
-import { errorText, useChat } from "./chat";
-import { chatStore } from "./store";
+import { useChat } from "./chat";
 import {
   AgentAvatar,
   AgentBadge,
-  AgentStatus,
-  WaitingForConfiguration,
+  AgentEnabledStatus,
   WorkspaceVisibilityFields,
 } from "./agent-ui";
 import {
   agentProfileChanges,
+  agentFailureText,
   agentProfileInput,
   canManageAgent,
-  displayAgentState,
   snapshotAgentProfile,
 } from "./agent-management";
 import { Button, Modal, Notice } from "./ui";
-import { AgentActivity } from "./agent-activity";
-import { AddAgentToGroupDialog } from "./group-members";
-import { WorkspaceDialog } from "./dialogs";
 const queryRetry = (count: number, error: Error) =>
   !(error instanceof ApiError && [401, 403, 404].includes(error.status)) &&
   count < 1;
-const formatDate = (value: string) =>
-  new Date(value).toLocaleString("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 function WorkspaceChips({
   ids,
   workspaces,
@@ -139,7 +125,7 @@ function AgentProfileDialog({
       navigate(`/app/agents/${response.agent.id}`);
       onClose();
     } catch (e) {
-      if (sessionToken === api.csrfToken) setError(errorText(e));
+      if (sessionToken === api.csrfToken) setError(agentFailureText(e));
     } finally {
       setBusy(false);
     }
@@ -205,17 +191,15 @@ function AgentProfileDialog({
 export function MyAgents() {
   const { user } = useAuth();
   const { data } = useChat();
-  const navigate = useNavigate();
   const [creating, setCreating] = useState(false);
   const closeCreate = useCallback(() => setCreating(false), []);
   const query = useQuery({
     queryKey: ["agents", user!.id],
     queryFn: api.agents,
-    refetchInterval: 15_000,
     retry: queryRetry,
   });
-  const agents = (query.data?.agents || []).filter(
-    (agent) => canManageAgent(user, agent) && !agent.deletedAt,
+  const agents = (query.data?.agents || []).filter((agent) =>
+    canManageAgent(user, agent),
   );
   const canCreate =
     !!data?.capabilities["agents.enabled"] &&
@@ -225,7 +209,7 @@ export function MyAgents() {
       <div className="agents-heading">
         <div>
           <h1>
-            我的 Agent <span>{agents.length}</span>
+            个人 Agent <span>{agents.length}</span>
           </h1>
         </div>
         {canCreate && (
@@ -235,14 +219,6 @@ export function MyAgents() {
           </Button>
         )}
       </div>
-      {agents.some(
-        (a) => a.enabled && a.runtimeState === "waiting_configuration",
-      ) && (
-        <WaitingForConfiguration
-          admin={user!.platformRole === "admin"}
-          onConfigure={() => navigate("/app/admin/gateway")}
-        />
-      )}
       {query.isLoading ? (
         <div className="agents-empty">
           <LoaderCircle size={24} className="spin" />
@@ -265,23 +241,16 @@ export function MyAgents() {
             >
               <div className="agent-card-top">
                 <AgentAvatar disabled={!agent.enabled} />
-                <AgentStatus
-                  status={displayAgentState(agent.runtimeState, agent.enabled)}
-                />
+                <AgentEnabledStatus enabled={agent.enabled} />
               </div>
               <h2>{agent.name}</h2>
-              <AgentBadge ownerName={agent.ownerName} />
+              <AgentBadge compact />
               {agent.description && <p>{agent.description}</p>}
               <WorkspaceChips
                 ids={agent.workspaceIds}
                 workspaces={data?.workspaces || []}
               />
               <div className="agent-card-bottom">
-                <span>
-                  {agent.lastActiveAt
-                    ? `最近活跃 ${formatDate(agent.lastActiveAt)}`
-                    : "尚未处理消息"}
-                </span>
                 <span>
                   管理 Agent <ArrowRight size={13} />
                 </span>
@@ -329,7 +298,6 @@ export function AgentDetail({ agentId }: { agentId: string }) {
   const query = useQuery({
     queryKey: ["agent", user!.id, agentId],
     queryFn: () => api.agent(agentId),
-    refetchInterval: 5000,
     retry: queryRetry,
   });
   const agent = query.data?.agent;
@@ -357,7 +325,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         client.invalidateQueries({ queryKey: ["members"] }),
       ]);
     } catch (e) {
-      if (token === api.csrfToken) setError(errorText(e));
+      if (token === api.csrfToken) setError(agentFailureText(e));
     } finally {
       setBusy(false);
     }
@@ -379,7 +347,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
       ]);
       navigate("/app/agents", { replace: true });
     } catch (e) {
-      if (token === api.csrfToken) setError(errorText(e));
+      if (token === api.csrfToken) setError(agentFailureText(e));
     } finally {
       setBusy(false);
     }
@@ -394,7 +362,6 @@ export function AgentDetail({ agentId }: { agentId: string }) {
   if (
     !agent ||
     !allowed ||
-    agent.deletedAt ||
     (query.error instanceof ApiError && [403, 404].includes(query.error.status))
   )
     return (
@@ -405,7 +372,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         <h2>这个 Agent 暂时无法管理</h2>
         <p>请使用所有者账户访问。</p>
         <Link className="button" to="/app/agents">
-          回到我的 Agent
+          回到个人 Agent
         </Link>
       </div>
     );
@@ -413,12 +380,15 @@ export function AgentDetail({ agentId }: { agentId: string }) {
     <div className="agents-view agent-detail-view">
       <Link className="agent-back" to="/app/agents">
         <ArrowLeft size={14} />
-        我的 Agent
+        个人 Agent
       </Link>
       <div className="agent-detail-heading">
         <AgentAvatar size="large" disabled={!agent.enabled} />
         <div>
-          <AgentBadge ownerName={agent.ownerName} />
+          <div className="agent-detail-labels">
+            <AgentBadge compact />
+            <AgentEnabledStatus enabled={agent.enabled} />
+          </div>
           <h1>{agent.name}</h1>
           {agent.description && <p>{agent.description}</p>}
         </div>
@@ -442,13 +412,6 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         </div>
       </div>
       <Notice>{!deleting ? error : ""}</Notice>
-      {agent.enabled && agent.runtimeState === "waiting_configuration" && (
-        <WaitingForConfiguration
-          admin={user!.platformRole === "admin"}
-          onConfigure={() => navigate("/app/admin/gateway")}
-        />
-      )}
-      <AgentActivity agent={agent} controlsAllowed={editable} />
       <section className="agent-profile-section">
         <header>
           <h2>团队可见范围</h2>
@@ -505,178 +468,6 @@ export function AgentDetail({ agentId }: { agentId: string }) {
             </Button>
           </div>
         </Modal>
-      )}
-    </div>
-  );
-}
-export function WorkspaceAgents({ workspace }: { workspace: Workspace }) {
-  const { user } = useAuth();
-  const { data, refresh } = useChat();
-  const navigate = useNavigate();
-  const [busyId, setBusyId] = useState(""),
-    [error, setError] = useState(""),
-    [creating, setCreating] = useState(false),
-    [groupAgent, setGroupAgent] = useState<Agent | null>(null),
-    [newGroupAgent, setNewGroupAgent] = useState<Agent | null>(null);
-  const canDiscover =
-    !!data?.capabilities["agents.enabled"] &&
-    !!data.capabilities["agents.discover"];
-  const query = useQuery({
-    queryKey: ["workspaceAgents", user!.id, workspace.id],
-    queryFn: () => api.workspaceAgents(workspace.id),
-    enabled: canDiscover,
-    refetchInterval: 30_000,
-    retry: queryRetry,
-  });
-  const closeCreate = useCallback(() => setCreating(false), []);
-  const closeGroup = useCallback(() => setGroupAgent(null), []),
-    closeNewGroup = useCallback(() => setNewGroupAgent(null), []);
-  async function direct(agent: Agent) {
-    setBusyId(agent.id);
-    setError("");
-    const generation = chatStore.generation;
-    try {
-      const result = await api.createConversation(workspace.id, {
-        type: "direct",
-        memberIds: [agent.principalId],
-      });
-      if (generation !== chatStore.generation) return;
-      chatStore.addConversation(result.conversation);
-      await refresh();
-      navigate(`/app/w/${workspace.id}/c/${result.conversation.id}`);
-    } catch (e) {
-      if (generation === chatStore.generation) setError(errorText(e));
-    } finally {
-      setBusyId("");
-    }
-  }
-  return (
-    <div className="agents-view agent-directory">
-      <div className="agents-heading">
-        <div>
-          <h1>发现 Agent</h1>
-          <p>
-            <span className="directory-workspace">
-              <Hash size={13} />
-              {workspace.name}
-            </span>{" "}
-          </p>
-        </div>
-        <Link to="/app/agents" className="button secondary">
-          我的 Agent <ArrowRight size={14} />
-        </Link>
-      </div>
-      <Notice>{error}</Notice>
-      {!canDiscover ? (
-        <Notice kind="info">当前无法发现新的 Agent。</Notice>
-      ) : query.isLoading ? (
-        <div className="agents-empty">
-          <LoaderCircle className="spin" size={24} />
-          <p>加载 Agent…</p>
-        </div>
-      ) : query.error ? (
-        <div className="agents-empty">
-          <Notice>无法加载这个工作空间的 Agent，请确认你仍是空间成员。</Notice>
-          <Button className="secondary" onClick={() => void query.refetch()}>
-            重新加载
-          </Button>
-        </div>
-      ) : query.data?.agents.length ? (
-        <div className="agent-card-grid">
-          {query.data.agents
-            .filter((a) => !a.deletedAt)
-            .map((agent) => (
-              <article
-                key={agent.id}
-                className="agent-card directory-agent-card"
-              >
-                <div className="agent-card-top">
-                  <AgentAvatar disabled={!agent.enabled} />
-                  <AgentStatus
-                    status={displayAgentState(
-                      agent.runtimeState,
-                      agent.enabled,
-                    )}
-                  />
-                </div>
-                <h2>{agent.name}</h2>
-                <AgentBadge ownerName={agent.ownerName} />
-                {agent.description && <p>{agent.description}</p>}
-                <div className="directory-agent-actions">
-                  {data?.capabilities["im.dm.create"] && (
-                    <Button
-                      className="secondary"
-                      disabled={!agent.enabled || !!busyId}
-                      busy={busyId === agent.id}
-                      onClick={() => void direct(agent)}
-                    >
-                      <MessageCircle size={14} />
-                      发起私聊
-                    </Button>
-                  )}
-                  {data?.capabilities["im.group.create"] && (
-                    <Button
-                      className="secondary"
-                      disabled={!agent.enabled || !!busyId}
-                      onClick={() => setGroupAgent(agent)}
-                    >
-                      <Users size={14} />
-                      添加到小组
-                    </Button>
-                  )}
-                  {canManageAgent(user, agent) && (
-                    <Link
-                      to={`/app/agents/${agent.id}`}
-                      className="directory-manage-link"
-                    >
-                      管理 <ArrowRight size={12} />
-                    </Link>
-                  )}
-                </div>
-              </article>
-            ))}
-        </div>
-      ) : (
-        <div className="agents-empty">
-          <span className="agents-empty-icon">
-            <Bot size={34} />
-          </span>
-          <h2>团队暂无 Agent</h2>
-          <p>创建 Agent，或请所有者将它加入当前团队。</p>
-          {data?.capabilities["agents.enabled"] &&
-            data.capabilities["agents.create"] && (
-              <Button onClick={() => setCreating(true)}>
-                <Plus size={15} />
-                为这个团队创建 Agent
-              </Button>
-            )}
-        </div>
-      )}
-      {creating && (
-        <AgentProfileDialog
-          workspaces={data?.workspaces || []}
-          initialWorkspaceId={workspace.id}
-          onClose={closeCreate}
-        />
-      )}{" "}
-      {groupAgent && (
-        <AddAgentToGroupDialog
-          agent={groupAgent}
-          workspace={workspace}
-          onClose={closeGroup}
-          onCreateGroup={() => {
-            setNewGroupAgent(groupAgent);
-            setGroupAgent(null);
-          }}
-        />
-      )}{" "}
-      {newGroupAgent && (
-        <WorkspaceDialog
-          kind="group"
-          workspace={workspace}
-          initialMemberIds={[newGroupAgent.principalId]}
-          onClose={closeNewGroup}
-        />
       )}
     </div>
   );

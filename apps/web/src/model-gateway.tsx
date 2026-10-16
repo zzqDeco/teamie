@@ -93,7 +93,7 @@ export function ModelGatewaySettings() {
         <h2>需要平台管理员权限</h2>
         <p>模型连接由平台管理员统一配置。你仍可以管理自己的 Agent。</p>
         <Link className="button" to="/app/agents">
-          查看我的 Agent
+          管理个人 Agent
         </Link>
       </div>
     );

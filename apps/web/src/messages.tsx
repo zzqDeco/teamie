@@ -6,7 +6,6 @@ import {
   ArrowUp,
   CornerUpLeft,
   Hash,
-  KeyRound,
   LoaderCircle,
   MessageCircle,
   MoreHorizontal,
@@ -18,7 +17,7 @@ import {
   X,
 } from "lucide-react";
 import { api } from "@teamie/api-client";
-import type { Agent, Conversation, Member, Message } from "@teamie/api-client";
+import type { Conversation, Member, Message } from "@teamie/api-client";
 import { useAuth } from "./auth";
 import { errorText, sendMessage, useChat, useChatState } from "./chat";
 import { chatStore } from "./store";
@@ -44,14 +43,12 @@ export function conversationName(
 export function ConversationView({
   conversation,
   members,
-  agents = [],
   onMembers,
   membersOpen,
   onMenu,
 }: {
   conversation: Conversation;
   members: Member[];
-  agents?: Agent[];
   onMembers: () => void;
   membersOpen: boolean;
   onMenu: () => void;
@@ -61,12 +58,6 @@ export function ConversationView({
   const snapshot = useChatState();
   const messages = snapshot.messages[conversation.id] || [];
   const name = conversationName(conversation, user!.id, members);
-  const waitingAgents = agents.filter(
-    (agent) =>
-      conversation.memberIds.includes(agent.principalId) &&
-      agent.enabled &&
-      agent.runtimeState === "waiting_configuration",
-  );
   const [actionMessageId, setActionMessageId] = useState("");
   const [loading, setLoading] = useState(true),
     [hasMore, setHasMore] = useState(false),
@@ -313,14 +304,6 @@ export function ConversationView({
           </IconButton>
         </div>
       </header>
-      {waitingAgents.length > 0 && (
-        <div className="agent-conversation-waiting" role="status">
-          <KeyRound size={14} />
-          <span>
-            {waitingAgents.map((agent) => agent.name).join("、")} 等待模型配置
-          </span>
-        </div>
-      )}
       {syncError && (
         <div className="sync-banner" role="status">
           <RefreshCw size={14} />

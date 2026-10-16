@@ -1,4 +1,4 @@
-# Agent Runtime — v0.3.0
+# Agent Runtime — v0.3.2
 
 Independent Go service pinned to CloudWeGo Eino **v0.10.0-alpha.35**. Identity, Chat and Realtime remain independently usable and import no Eino or runtime types. Ordinary authenticated IM APIs, generated Kitex clients, the model gateway and Sandbox are the service boundaries.
 
@@ -9,6 +9,8 @@ The host initially has **one foreground slot**. A model call obtains it, and ind
 ## Sessions, replay and compaction
 
 Native Eino Session events and replacement boundaries persist in Runtime's PostgreSQL database. Summarization follows the administrator-configured model window at 75%, with a conservative 12,000-token transport ceiling and a 32-message trigger. Small windows also cap generated output. Input batches are bounded to 48 KiB of source-envelope JSON. Compaction retains coherent recent user/tool groups and an exact, bounded source-reference index; complete provenance remains in the durable inbox and Session audit. Original IM history is read through explicit server-side search, pagination, neighborhood and reference tools under current Agent ACLs.
+
+Summary requests explicitly disable tool calls and request plain text. Empty or oversized summaries and summaries containing tool calls are rejected before tools can execute. Normal Agent turns retain their explicit IM tools.
 
 Every durable run pins its original Session event position and immutable acceptance watermark. Later accepted attempts cannot change the context used to replay an older model/tool tape. Model responses, file-read observations, tool intents/results and stable IM send IDs persist before dependent effects. A tool receipt recovers a send whose server commit preceded a lost response without posting it twice.
 
@@ -24,9 +26,9 @@ Native PlanTask middleware persists plan JSON in `/workspace/.teamie/plan`. Nati
 
 Disable/delete/revision changes revoke active authority and cancel affected work. Existing task history and source attribution remain persisted. A disabled or deleted Agent cannot accept new work, and platform admin never bypasses owner or IM authorization.
 
-## Owner metadata RPC and configuration
+## Private runtime RPC and configuration
 
-Private Kitex `AgentRuntimeService` listens on `RPC_ADDR` (default `:8885`); health/readiness/version HTTP stays on `HTTP_ADDR` (default `:8085`). Control Plane authenticates the human owner and proxies State, Runs, Run, Tasks, Task, Events, CancelRun, CancelTask and RetryRun. Runtime independently verifies its service token and current definition owner. Owner responses contain IDs, timestamps, statuses, counts, generic task names and fixed error codes. They exclude prompts, message bodies, command text/output, tool arguments and internal attempt/fence metadata. Event cursors are monotonic decimal IDs.
+Private Kitex `AgentRuntimeService` listens on `RPC_ADDR` (default `:8885`); health/readiness/version HTTP stays on `HTTP_ADDR` (default `:8085`). State, Runs, Run, Tasks, Task, Events, CancelRun, CancelTask and RetryRun remain private service functionality. Runtime verifies its service token and current definition owner. Agent Control no longer has an outgoing runtime client; browser runtime inspection and control routes return 404, including for owners and platform administrators. Session IDs, activity, task descriptions, counts and operational error codes stay inside the service boundary. Event cursors are monotonic decimal IDs.
 
 `GATEWAY_STREAM_URL` defaults to `http://llm-gateway:8086/internal/v1/chat/stream`. The adapter consumes real incremental gateway NDJSON backed by upstream streaming; complete model tapes commit before the stream closes and tools can run. There is no Generate-as-Stream adapter. `FEATURE_FLAGS_FILE` uses the shared `{revision,flags}` format: `agents.runtime.v3=false` pauses new foreground work while preserving ingestion/history; `agents.tasks.execute=false` blocks new execution-task submission while preserving existing tasks/results. No second engine is retained.
 

@@ -1,16 +1,6 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import {
-  Bot,
-  Check,
-  CirclePause,
-  Clock3,
-  Eye,
-  KeyRound,
-  LoaderCircle,
-  LockKeyhole,
-  Play,
-} from "lucide-react";
+import { Bot, Check, CirclePause, Eye, LockKeyhole } from "lucide-react";
 import type { Workspace } from "@teamie/api-client";
 import { Button, Notice } from "./ui";
 
@@ -45,7 +35,6 @@ export function AgentAvatar({
       aria-hidden="true"
     >
       <Bot size={size === "large" ? 31 : size === "small" ? 15 : 20} />
-      <i />
     </span>
   );
 }
@@ -106,66 +95,13 @@ export function WorkspaceVisibilityFields({
     </fieldset>
   );
 }
-export type AgentDisplayStatus =
-  | "waiting_configuration"
-  | "idle"
-  | "running"
-  | "disabled"
-  | "paused"
-  | "failed"
-  | "pending";
-export const agentStatusLabels: Record<AgentDisplayStatus, string> = {
-  waiting_configuration: "待配置模型",
-  idle: "等待新消息",
-  running: "正在处理",
-  disabled: "已停用",
-  paused: "已暂停",
-  failed: "处理失败",
-  pending: "等待处理",
-};
-export function AgentStatus({ status }: { status: AgentDisplayStatus }) {
-  const Icon =
-    status === "running"
-      ? LoaderCircle
-      : status === "waiting_configuration"
-        ? KeyRound
-        : status === "disabled" || status === "paused"
-          ? CirclePause
-          : status === "idle"
-            ? Clock3
-            : Play;
+export function AgentEnabledStatus({ enabled }: { enabled: boolean }) {
+  const Icon = enabled ? Check : CirclePause;
   return (
-    <span className={`agent-status ${status}`}>
-      <Icon size={12} className={status === "running" ? "spin" : ""} />
-      {agentStatusLabels[status]}
+    <span className={`agent-status ${enabled ? "enabled" : "disabled"}`}>
+      <Icon size={12} aria-hidden="true" />
+      {enabled ? "已启用" : "已停用"}
     </span>
-  );
-}
-export function WaitingForConfiguration({
-  admin = false,
-  onConfigure,
-}: {
-  admin?: boolean;
-  onConfigure?: () => void;
-}) {
-  return (
-    <div
-      className={`agent-configuration-notice ${admin ? "can-configure" : ""}`}
-      role="status"
-    >
-      <span>
-        <KeyRound size={20} />
-      </span>
-      <div>
-        <b>模型尚未配置</b>
-        {!admin && <p>请联系平台管理员配置模型。</p>}
-        {admin && onConfigure && (
-          <button onClick={onConfigure}>
-            配置模型 <span>↗</span>
-          </button>
-        )}
-      </div>
-    </div>
   );
 }
 export type GatewayFormValue = {
