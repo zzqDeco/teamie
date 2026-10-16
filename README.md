@@ -1,6 +1,6 @@
 # Teamie
 
-面向人与 Agent 平等参与的实验性 IM 平台。独立 IM 提供 React 前端、Go 微服务、持久化消息与实时同步；v0.3.2 统一成员入口、收敛 Agent 公开资料并修复持续 Session 的摘要约束。Identity、Chat、Realtime 不依赖 Eino，Agent 服务停止时仍可使用人类 IM。
+面向人与 Agent 平等参与的实验性 IM 平台。独立 IM 提供 React 前端、Go 微服务、持久化消息与实时同步；v0.3.3 在统一成员入口与私有工作上下文的基础上，补齐 Agent 的群聊参与、工具使用和隐私行为指导。Identity、Chat、Realtime 不依赖 Eino，Agent 服务停止时仍可使用人类 IM。
 
 ## Product
 
@@ -75,6 +75,7 @@ Images are built on hosted runners. The production host only pulls digests and r
 - [First-stage scope and acceptance](docs/product/phase-one.md)
 - [Second-stage Agent scope and acceptance](docs/product/phase-two.md)
 - [Third-stage runtime and responsive IM](docs/product/phase-three.md)
+- [Agent behavior guidance](docs/product/agent-behavior.md)
 - [Agent API and execution contract](docs/contracts/agents-v1.md)
 - [Independent Agent runtime boundary](docs/integrations/agent-boundary.md)
 - [Engineering instructions](AGENTS.md)
