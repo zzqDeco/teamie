@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import {
@@ -28,6 +28,10 @@ const user: User = {
   createdAt: "2026-10-17T00:00:00Z",
 };
 const session: Session = { user, csrfToken: "example-current-session" };
+const nextSession: Session = {
+  user: { ...user, id: "next-user", displayName: "另一位伙伴" },
+  csrfToken: "example-next-account-session",
+};
 const currentPassword = "example-old-password";
 const newPassword = "example-new-password";
 const inviteCode = "example-single-use-invite";
@@ -35,6 +39,7 @@ const inviteCode = "example-single-use-invite";
 let container: HTMLDivElement;
 let root: Root;
 let client: QueryClient;
+let activeAuth: ReturnType<typeof useAuth>;
 
 function Settings() {
   const { user, loading } = useAuth();
@@ -42,12 +47,17 @@ function Settings() {
   return user ? <ProfileSettings /> : <Navigate to="/login" replace />;
 }
 function Probe() {
-  const { user, loading } = useAuth();
+  const auth = useAuth();
+  useEffect(() => {
+    activeAuth = auth;
+  }, [auth]);
+  const { user, loading } = auth;
   const location = useLocation();
   return (
     <>
       <output data-location>{location.pathname + location.search}</output>
       <output data-account>{loading ? "loading" : user?.id || "signed-out"}</output>
+      <output data-auth-error>{auth.error}</output>
     </>
   );
 }
@@ -84,6 +94,23 @@ function find<T extends HTMLElement>(selector: string): T {
 }
 function fill(name: string, value: string) {
   find<HTMLInputElement>(`input[name="${name}"]`).value = value;
+}
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}
+async function editProfileName(value: string) {
+  const input = find<HTMLInputElement>(".settings-form input");
+  await settle(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!
+      .set!.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
 }
 function fillRegistration(password = newPassword, confirmation = password) {
   fill("displayName", user.displayName);
@@ -339,4 +366,194 @@ describe("account password settings", () => {
     expect(find<HTMLButtonElement>('.password-settings button[type="submit"]').disabled).toBe(false);
     expect(api.logout).not.toHaveBeenCalled();
   });
+});
+
+describe("account changes with pending requests", () => {
+  it("continues to save profile changes for the current session", async () => {
+    const updated = { ...user, displayName: "新的显示名称" };
+    vi.spyOn(api, "profile").mockResolvedValue({ user: updated });
+    await mount("/app/settings", true);
+    await editProfileName(updated.displayName);
+    await submit("form.settings-form:not(.password-settings)");
+    expect(activeAuth.user).toEqual(updated);
+    expect(api.csrfToken).toBe(session.csrfToken);
+    expect(container.textContent).toContain("资料已保存。");
+  });
+
+  it("does not let a late profile save restore the account revoked by a password change", async () => {
+    const profile = deferred<{ user: User }>();
+    vi.spyOn(api, "profile").mockReturnValue(profile.promise);
+    await mount("/app/settings", true);
+    await editProfileName("新的显示名称");
+    await submit("form.settings-form:not(.password-settings)");
+    expect(api.profile).toHaveBeenCalledWith("新的显示名称");
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    fillPasswordSettings();
+    await submit(".password-settings");
+    expect(find("[data-account]").textContent).toBe("signed-out");
+    expect(find("[data-location]").textContent).toBe("/login?passwordChanged=1");
+    await settle(() => profile.resolve({ user: { ...user, displayName: "新的显示名称" } }));
+    expect(find("[data-account]").textContent).toBe("signed-out");
+    expect(find("[data-location]").textContent).toBe("/login?passwordChanged=1");
+    expect(invalidate).not.toHaveBeenCalled();
+    expect(api.csrfToken).toBe("");
+  });
+
+  it("ignores a profile save from the previous session even when the same account logs in again", async () => {
+    const profile = deferred<{ user: User }>();
+    vi.spyOn(api, "profile").mockReturnValue(profile.promise);
+    await mount("/app/settings", true);
+    await editProfileName("旧会话的修改");
+    await submit("form.settings-form:not(.password-settings)");
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    await settle(() => activeAuth.setSession({ user, csrfToken: "example-relogin-session" }));
+    await settle(() => profile.resolve({ user: { ...user, displayName: "旧会话的修改" } }));
+    expect(activeAuth.user?.displayName).toBe(user.displayName);
+    expect(invalidate).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain("资料已保存。");
+  });
+
+  it("does not allow profile updates to sign in a logged-out account or replace another account", async () => {
+    await mount("/app", true);
+    await settle(() => activeAuth.updateUser(nextSession.user));
+    expect(activeAuth.user?.id).toBe(user.id);
+    await settle(() => { void activeAuth.logout(); });
+    await settle(() => activeAuth.updateUser(user));
+    expect(find("[data-account]").textContent).toBe("signed-out");
+    await settle(() => activeAuth.setSession(nextSession));
+    await settle(() => activeAuth.updateUser(user));
+    expect(find("[data-account]").textContent).toBe(nextSession.user.id);
+    expect(api.csrfToken).toBe(nextSession.csrfToken);
+  });
+
+  it.each([
+    nextSession,
+    { user, csrfToken: "example-same-account-relogin-session" },
+  ])("preserves a newer login when an old password response arrives late: $csrfToken", async (replacement) => {
+    const password = deferred<void>();
+    vi.mocked(api.changePassword).mockReturnValue(password.promise);
+    await mount("/app/settings", true);
+    fillPasswordSettings();
+    await submit(".password-settings");
+    expect(api.changePassword).toHaveBeenCalledOnce();
+    await settle(() => { void activeAuth.logout(); });
+    await settle(() => activeAuth.setSession(replacement));
+    client.setQueryData(["protected-content", replacement.user.id], "new account content");
+    chatStore.apply({ events: [], cursor: "23", hasMore: false });
+    const location = find("[data-location]").textContent;
+    await settle(() => password.resolve());
+    expect(find("[data-account]").textContent).toBe(replacement.user.id);
+    expect(api.csrfToken).toBe(replacement.csrfToken);
+    expect(client.getQueryData(["protected-content", replacement.user.id])).toBe("new account content");
+    expect(chatStore.getSnapshot()).toMatchObject({ userId: replacement.user.id, cursor: "23" });
+    expect(find("[data-location]").textContent).toBe(location);
+    expect(container.textContent).not.toContain("密码已修改，请重新登录。");
+  });
+
+  it("does not let an old logout clear or redirect a newer login", async () => {
+    const logout = deferred<void>();
+    vi.mocked(api.logout).mockReturnValue(logout.promise);
+    await mount("/app/settings", true);
+    await settle(() => find<HTMLButtonElement>(".session-setting button").click());
+    expect(api.logout).toHaveBeenCalledOnce();
+    await settle(() => activeAuth.setSession(nextSession));
+    client.setQueryData(["protected-content", nextSession.user.id], "new account content");
+    await settle(() => logout.resolve());
+    expect(find("[data-account]").textContent).toBe(nextSession.user.id);
+    expect(api.csrfToken).toBe(nextSession.csrfToken);
+    expect(find("[data-location]").textContent).toBe("/app/settings");
+    expect(client.getQueryData(["protected-content", nextSession.user.id])).toBe("new account content");
+  });
+
+  it("does not show a failed old password request on a newer account's form", async () => {
+    const password = deferred<void>();
+    vi.mocked(api.changePassword).mockReturnValue(password.promise);
+    await mount("/app/settings", true);
+    fillPasswordSettings();
+    await submit(".password-settings");
+    await settle(() => activeAuth.setSession(nextSession));
+    await settle(() => password.reject(new ApiError(401, "unauthorized", "expired")));
+    expect(find("[data-account]").textContent).toBe(nextSession.user.id);
+    expect(api.csrfToken).toBe(nextSession.csrfToken);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(find<HTMLButtonElement>('.password-settings button[type="submit"]').disabled).toBe(false);
+  });
+
+  it("does not let a late session lookup replace a newer login", async () => {
+    const lookup = deferred<Session>();
+    vi.mocked(api.session).mockReturnValue(lookup.promise);
+    vi.mocked(api.login).mockResolvedValue(nextSession);
+    await mount("/login");
+    fill("email", nextSession.user.email);
+    fill("password", currentPassword);
+    await submit();
+    expect(find("[data-account]").textContent).toBe(nextSession.user.id);
+    await settle(() => lookup.resolve(session));
+    expect(find("[data-account]").textContent).toBe(nextSession.user.id);
+    expect(api.csrfToken).toBe(nextSession.csrfToken);
+    expect(find("[data-auth-error]").textContent).toBe("");
+  });
+
+  it("ignores a failed old session lookup after a newer login", async () => {
+    const lookup = deferred<Session>();
+    vi.mocked(api.session).mockReturnValue(lookup.promise);
+    await mount("/login");
+    await settle(() => activeAuth.setSession(nextSession));
+    await settle(() => lookup.reject(new Error("old connection failure")));
+    expect(find("[data-account]").textContent).toBe(nextSession.user.id);
+    expect(find("[data-auth-error]").textContent).toBe("");
+    expect(activeAuth.loading).toBe(false);
+  });
+
+  it("keeps a new login after the old session lookup receives an actual 401", async () => {
+    const response = deferred<Response>();
+    vi.mocked(api.session).mockRestore();
+    vi.stubGlobal("fetch", vi.fn().mockReturnValue(response.promise));
+    await mount("/login");
+    await settle(() => activeAuth.setSession(nextSession));
+    await settle(() => response.resolve(new Response(
+      JSON.stringify({ error: { code: "unauthorized", message: "expired" } }),
+      { status: 401 },
+    )));
+    expect(find("[data-account]").textContent).toBe(nextSession.user.id);
+    expect(api.csrfToken).toBe(nextSession.csrfToken);
+    expect(activeAuth.loading).toBe(false);
+    expect(find("[data-auth-error]").textContent).toBe("");
+  });
+
+  it("finishes initial loading when the current session receives an actual 401", async () => {
+    vi.mocked(api.session).mockRestore();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ error: { code: "unauthorized", message: "expired" } }),
+      { status: 401 },
+    )));
+    await mount("/login");
+    expect(find("[data-account]").textContent).toBe("signed-out");
+    expect(activeAuth.loading).toBe(false);
+    expect(api.csrfToken).toBe("");
+    expect(container.querySelector('input[name="password"]')).toBeTruthy();
+  });
+
+  it.each([false, true])(
+    "ignores a completed auth request from a form unmounted by an account change (register=%s)",
+    async (register) => {
+      const authentication = deferred<Session>();
+      if (register) vi.mocked(api.register).mockReturnValue(authentication.promise);
+      else vi.mocked(api.login).mockReturnValue(authentication.promise);
+      await mount(register ? `/login?mode=register&inviteCode=${inviteCode}` : "/login");
+      if (register) fillRegistration();
+      else {
+        fill("email", user.email);
+        fill("password", currentPassword);
+      }
+      await submit();
+      await settle(() => activeAuth.setSession(nextSession));
+      expect(container.querySelector(".auth-form")).toBeNull();
+      await settle(() => { void activeAuth.logout(); });
+      expect(api.csrfToken).toBe("");
+      await settle(() => authentication.resolve(session));
+      expect(find("[data-account]").textContent).toBe("signed-out");
+      expect(api.csrfToken).toBe("");
+    },
+  );
 });

@@ -127,7 +127,7 @@ func (s *Store) Login(ctx context.Context, email, password string) (api.Session,
 	if errors.Is(e, pgx.ErrNoRows) {
 		hash = "$2a$12$C6UzMDM.H6dfI/f/IKcEe.yr3q8mSrfHGAvQ8N13wZdG.DRZ5V6jW"
 	}
-	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil || u.ID == "" {
+	if len(password) > 72 || bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil || u.ID == "" {
 		return api.Session{}, "", api.Err(401, "invalid_credentials", "Email or password is incorrect")
 	}
 	return s.loginSession(ctx, u, hash)

@@ -137,7 +137,8 @@ func (h *Handler) Routes() http.Handler {
 		if err := h.Store.ChangePassword(r.Context(), s.User.ID, api.Token(r), in.CurrentPassword, in.NewPassword); err != nil {
 			return err
 		}
-		h.cookie(w, "", -1)
+		// The old cookie no longer authenticates after session revocation.
+		// Do not let a delayed response erase a newer login's cookie.
 		api.Write(w, 204, nil)
 		return nil
 	}))

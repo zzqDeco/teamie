@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import {
   Link,
@@ -172,6 +172,13 @@ export function Login() {
   const [invalidField, setInvalidField] = useState("");
   const errorId = useId();
   const pending = useRef(false);
+  const active = useRef(false);
+  useEffect(() => {
+    active.current = true;
+    return () => {
+      active.current = false;
+    };
+  }, []);
   function changeMode(mode: string) {
     setError("");
     setInvalidField("");
@@ -212,6 +219,7 @@ export function Login() {
     }
     pending.current = true;
     setBusy(true);
+    const sessionToken = api.csrfToken;
     try {
       const session = register
         ? await api.register({
@@ -221,14 +229,16 @@ export function Login() {
             inviteCode: String(data.get("inviteCode") || "").trim(),
           })
         : await api.login(String(data.get("email")).trim(), password);
+      if (!active.current || sessionToken !== api.csrfToken) return;
       form.reset();
       setSession(session);
       navigate(next, { replace: true });
     } catch (e) {
-      setError(errorText(e));
+      if (active.current && sessionToken === api.csrfToken)
+        setError(errorText(e));
     } finally {
       pending.current = false;
-      setBusy(false);
+      if (active.current) setBusy(false);
     }
   }
   if (user && !loading) return <Navigate to={next} replace />;

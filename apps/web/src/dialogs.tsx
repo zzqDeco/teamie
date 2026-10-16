@@ -298,28 +298,33 @@ export function ProfileSettings() {
     [saved, setSaved] = useState(false);
   async function save(event: FormEvent) {
     event.preventDefault();
+    const sessionToken = api.csrfToken;
+    const subjectId = user!.id;
     setBusy(true);
     setSaved(false);
     setError("");
     try {
       const result = await api.profile(name.trim());
+      if (sessionToken !== api.csrfToken || result.user.id !== subjectId) return;
       updateUser(result.user);
       await client.invalidateQueries({ queryKey: ["bootstrap"] });
+      if (sessionToken !== api.csrfToken) return;
       setSaved(true);
     } catch (e) {
-      setError(errorText(e));
+      if (sessionToken === api.csrfToken) setError(errorText(e));
     } finally {
       setBusy(false);
     }
   }
   async function signOut() {
+    const sessionToken = api.csrfToken;
     setError("");
     setBusy(true);
     try {
       await logout();
-      navigate("/login");
+      if (!api.csrfToken) navigate("/login");
     } catch (e) {
-      setError(errorText(e));
+      if (sessionToken === api.csrfToken) setError(errorText(e));
     } finally {
       setBusy(false);
     }

@@ -83,6 +83,41 @@ describe("account-bound transport", () => {
     await expect(request).rejects.toBeInstanceOf(ApiError);
     expect(client.onUnauthorized).not.toHaveBeenCalled();
   });
+  it.each(["profile", "password"] as const)(
+    "does not invalidate a new session for an old %s response with 401",
+    async (endpoint) => {
+      let finish!: (response: Response) => void;
+      vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => { finish = resolve; })));
+      const client = new TeamieClient();
+      client.csrfToken = "old-session";
+      client.onUnauthorized = vi.fn();
+      const request = endpoint === "profile"
+        ? client.profile("旧会话的资料")
+        : client.changePassword("example-old-password", "example-new-password");
+      client.csrfToken = "new-session";
+      finish(new Response(
+        JSON.stringify({ error: { code: "unauthorized", message: "expired" } }),
+        { status: 401 },
+      ));
+      await expect(request).rejects.toMatchObject({ status: 401 });
+      expect(client.onUnauthorized).not.toHaveBeenCalled();
+      expect(client.csrfToken).toBe("new-session");
+    },
+  );
+  it("rechecks the session after parsing an old unauthorized response", async () => {
+    let finishBody!: (value: unknown) => void;
+    const json = vi.fn(() => new Promise((resolve) => { finishBody = resolve; }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401, json }));
+    const client = new TeamieClient();
+    client.csrfToken = "old-session";
+    client.onUnauthorized = vi.fn();
+    const request = client.profile("旧会话的资料");
+    await vi.waitFor(() => expect(json).toHaveBeenCalledOnce());
+    client.csrfToken = "new-session";
+    finishBody({ error: { code: "unauthorized", message: "expired" } });
+    await expect(request).rejects.toMatchObject({ status: 401 });
+    expect(client.onUnauthorized).not.toHaveBeenCalled();
+  });
   it("invalidates protected cache on a current-account membership denial", async () => {
     vi.stubGlobal(
       "fetch",

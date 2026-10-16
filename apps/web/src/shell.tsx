@@ -285,13 +285,14 @@ export function Shell() {
     }
   }
   async function signOut() {
+    const sessionToken = api.csrfToken;
     setBusy(true);
     setError("");
     try {
       await logout();
-      navigate("/login");
+      if (!api.csrfToken) navigate("/login");
     } catch (e) {
-      setError(errorText(e));
+      if (sessionToken === api.csrfToken) setError(errorText(e));
     } finally {
       setBusy(false);
     }

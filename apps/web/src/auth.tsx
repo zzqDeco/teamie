@@ -4,6 +4,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import type { ReactNode } from "react";
@@ -29,16 +30,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
+  const generation = useRef(0);
+  const subject = useRef<string | null>(null);
   const client = useQueryClient();
   const navigate = useNavigate();
   const reset = useCallback(() => {
+    generation.current += 1;
+    subject.current = null;
     api.csrfToken = "";
     chatStore.clear();
     client.clear();
     setUser(null);
+    setError("");
+    setLoading(false);
   }, [client]);
   const setSession = useCallback(
     (session: Session) => {
+      generation.current += 1;
+      subject.current = session.user.id;
       client.clear();
       chatStore.begin(session.user.id);
       api.csrfToken = session.csrfToken;
@@ -48,37 +57,57 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     [client],
   );
+  const updateUser = useCallback((nextUser: User) => {
+    if (subject.current !== nextUser.id) return;
+    setUser((current) => current?.id === nextUser.id ? nextUser : current);
+  }, []);
   useEffect(() => {
     let active = true;
+    const requestGeneration = generation.current;
+    const isCurrent = () => active && requestGeneration === generation.current;
     api.onUnauthorized = reset;
     setLoading(true);
     setError("");
     api
       .session()
       .then((session) => {
-        if (active) setSession(session);
+        if (isCurrent()) setSession(session);
       })
       .catch((e) => {
-        if (active && !(e instanceof ApiError && e.status === 401))
+        if (isCurrent() && !(e instanceof ApiError && e.status === 401))
           setError("暂时无法连接 Teamie，请检查网络后重试。");
       })
       .finally(() => {
-        if (active) setLoading(false);
+        if (isCurrent()) setLoading(false);
       });
     return () => {
       active = false;
-      api.onUnauthorized = undefined;
+      if (api.onUnauthorized === reset) api.onUnauthorized = undefined;
     };
   }, [attempt, reset, setSession]);
   const logout = async () => {
+    const requestGeneration = generation.current;
+    const requestSubject = subject.current;
     await api.logout();
+    if (
+      requestGeneration !== generation.current ||
+      requestSubject !== subject.current
+    )
+      return;
     reset();
   };
   const changePassword = async (
     currentPassword: string,
     newPassword: string,
   ) => {
+    const requestGeneration = generation.current;
+    const requestSubject = subject.current;
     await api.changePassword(currentPassword, newPassword);
+    if (
+      requestGeneration !== generation.current ||
+      requestSubject !== subject.current
+    )
+      return;
     // Update the auth guard and route together so its redirect cannot win.
     startTransition(() => {
       reset();
@@ -92,7 +121,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loading,
         error,
         setSession,
-        updateUser: setUser,
+        updateUser,
         logout,
         changePassword,
         retry: () => setAttempt((n) => n + 1),

@@ -61,11 +61,13 @@ func (s *Store) ChangePassword(ctx context.Context, userID, sessionToken, curren
 	if err != nil {
 		return err
 	}
-	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(currentPassword)) != nil {
+	if len(currentPassword) > 72 || bcrypt.CompareHashAndPassword([]byte(hash), []byte(currentPassword)) != nil {
 		// A wrong current password leaves the signed-in session intact.
 		return api.Err(400, "invalid_current_password", "Current password is incorrect")
 	}
-	if currentPassword == newPassword {
+	// bcrypt can treat different byte strings as the same effective key. The
+	// changed credential must reject the previous password, not just look new.
+	if currentPassword == newPassword || bcrypt.CompareHashAndPassword([]byte(hash), []byte(newPassword)) == nil {
 		return api.Err(400, "password_unchanged", "Choose a different new password")
 	}
 	nextHash, err := bcrypt.GenerateFromPassword([]byte(newPassword), 12)

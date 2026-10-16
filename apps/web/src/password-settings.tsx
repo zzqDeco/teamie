@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { ApiError } from "@teamie/api-client";
+import { api, ApiError } from "@teamie/api-client";
 import { useAuth } from "./auth";
 import { errorText } from "./chat";
 import { passwordPolicyError } from "./password-policy";
@@ -62,10 +62,12 @@ export function PasswordSettings() {
     setBusy(true);
     setError("");
     setInvalidField(undefined);
+    const sessionToken = api.csrfToken;
     try {
       await changePassword(currentPassword, newPassword);
       form.reset();
     } catch (error) {
+      if (sessionToken !== api.csrfToken) return;
       fail(
         error instanceof ApiError
           ? errorText(error)
