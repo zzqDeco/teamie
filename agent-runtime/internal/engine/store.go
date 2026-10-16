@@ -293,6 +293,11 @@ type SessionStore struct {
 }
 
 func (s *SessionStore) AppendEvents(ctx context.Context, sessionID string, events []*adk.SessionEvent[*schema.Message]) error {
+	// Native Eino flushes terminal events/checkpoints after cancellation. Keep
+	// values and lease fencing while bounding the independent persistence work.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+
 	r, e := CurrentRun(ctx)
 	if e != nil {
 		return e
@@ -407,6 +412,11 @@ func (s *SessionStore) Get(ctx context.Context, id string) ([]byte, bool, error)
 	return b, e == nil, e
 }
 func (s *SessionStore) Set(ctx context.Context, id string, b []byte) error {
+	// Native Eino flushes terminal events/checkpoints after cancellation. Keep
+	// values and lease fencing while bounding the independent persistence work.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+
 	if !strings.Contains(id, s.Lease.AgentID) {
 		return errors.New("checkpoint scope mismatch")
 	}
@@ -425,6 +435,11 @@ func (s *SessionStore) Set(ctx context.Context, id string, b []byte) error {
 	return tx.Commit(ctx)
 }
 func (s *SessionStore) Delete(ctx context.Context, id string) error {
+	// Native Eino flushes terminal events/checkpoints after cancellation. Keep
+	// values and lease fencing while bounding the independent persistence work.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+
 	if !strings.Contains(id, s.Lease.AgentID) {
 		return errors.New("checkpoint scope mismatch")
 	}
