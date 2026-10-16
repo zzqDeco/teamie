@@ -1,54 +1,29 @@
-import { useEffect, useId, useRef, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
-import { Bot, ChevronUp, LogOut, Settings } from "lucide-react";
+import { Link } from "react-router-dom";
+import { LogOut, Settings } from "lucide-react";
 import type { User } from "@teamie/api-client";
+import type { Connection } from "./chat";
 import { Avatar } from "./ui";
+import { usePopover } from "./popover";
 
 export function AccountMenu({
   user,
   busy,
+  active,
+  connection,
+  connectionLabel,
   onSignOut,
   onNavigate,
 }: {
   user: User;
   busy: boolean;
+  active: boolean;
+  connection: Connection;
+  connectionLabel: string;
   onSignOut: () => void;
   onNavigate: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const panel = useRef<HTMLDivElement>(null);
-  const trigger = useRef<HTMLButtonElement>(null);
-  const menu = useRef<HTMLElement>(null);
-  const menuId = useId();
-  const location = useLocation();
-
-  useEffect(() => setOpen(false), [location.pathname]);
-  useEffect(() => {
-    if (!open) return;
-    menu.current?.querySelector<HTMLElement>("a[href]")?.focus();
-    function dismiss(event: PointerEvent) {
-      if (
-        event.target instanceof Node &&
-        !panel.current?.contains(event.target)
-      ) {
-        setOpen(false);
-        trigger.current?.focus({ preventScroll: true });
-      }
-    }
-    function escape(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopPropagation();
-      setOpen(false);
-      trigger.current?.focus({ preventScroll: true });
-    }
-    document.addEventListener("pointerdown", dismiss);
-    document.addEventListener("keydown", escape, true);
-    return () => {
-      document.removeEventListener("pointerdown", dismiss);
-      document.removeEventListener("keydown", escape, true);
-    };
-  }, [open]);
+  const { expanded, setOpen, panel, trigger, popover, id, onBlur } =
+    usePopover(active);
 
   function navigate() {
     setOpen(false);
@@ -56,39 +31,33 @@ export function AccountMenu({
   }
 
   return (
-    <div
-      className="user-panel account-panel"
-      ref={panel}
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
-      }}
-    >
+    <div className="account-panel" ref={panel} onBlur={onBlur}>
       <button
         ref={trigger}
-        className="user-profile account-trigger"
+        className="account-trigger"
         aria-label={`账号菜单：${user.displayName}`}
-        aria-expanded={open}
-        aria-controls={menuId}
-        onClick={() => setOpen(!open)}
+        title={`${user.displayName} · ${connectionLabel}`}
+        aria-expanded={expanded}
+        aria-controls={id}
+        onClick={() => setOpen(!expanded)}
       >
         <Avatar name={user.displayName} seed={user.id} />
-        <span className="account-identity">
-          <b>{user.displayName}</b>
-          <small>个人账户</small>
+        <span
+          className={`rail-connection-status ${connection}`}
+          role="status"
+          aria-label={connectionLabel}
+        >
+          <span className="status-dot" aria-hidden="true" />
+          <span className="sr-only">{connectionLabel}</span>
         </span>
-        <ChevronUp size={16} aria-hidden="true" />
       </button>
-      {open && (
+      {expanded && (
         <nav
-          id={menuId}
+          id={id}
           className="account-menu"
           aria-label="个人账户"
-          ref={menu}
+          ref={popover}
         >
-          <Link to="/app/agents" onClick={navigate}>
-            <Bot size={17} aria-hidden="true" />
-            个人 Agent
-          </Link>
           <Link to="/app/settings" onClick={navigate}>
             <Settings size={17} aria-hidden="true" />
             账号设置
@@ -98,6 +67,7 @@ export function AccountMenu({
             disabled={busy}
             onClick={() => {
               setOpen(false);
+              onNavigate();
               onSignOut();
             }}
           >

@@ -154,6 +154,17 @@ async function click(selector: string) {
     node.click();
   });
 }
+async function escape() {
+  await settle(() =>
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Escape",
+        bubbles: true,
+        cancelable: true,
+      }),
+    ),
+  );
+}
 async function input(selector: string, value: string) {
   const node = find<HTMLInputElement>(selector);
   await settle(() => {
@@ -215,17 +226,22 @@ afterEach(async () => {
 });
 
 describe("member and account navigation", () => {
-  it("keeps a single member entry and moves Agent/admin management behind the account menu", async () => {
+  it("places personal navigation in the rail and keeps member/admin management out of the sidebar", async () => {
     activeUser.platformRole = "admin";
     await mount();
     const navigation = find(".app-navigation");
     expect(
       navigation.querySelector('a[href="/app/w/team/members"]'),
-    ).not.toBeNull();
-    expect(navigation.querySelector('a[href="/app/agents"]')).toBeNull();
+    ).toBeNull();
+    const rail = find(".workspace-rail");
+    expect(find(".rail-agents").nextElementSibling).toBe(find(".account-panel"));
+    expect(rail.querySelector('a[href="/app/agents"]')).toBeTruthy();
+    expect(rail.querySelector(".account-trigger")).toBeTruthy();
+    expect(find(".navigation-sidebar").querySelector(".account-panel")).toBeNull();
+    expect(find(".workspace-title").tagName).toBe("DIV");
     expect(navigation.querySelector('a[href^="/app/admin"]')).toBeNull();
     await click(".account-trigger");
-    expect(find(".account-menu").textContent).toContain("个人 Agent");
+    expect(find(".account-menu").textContent).not.toContain("个人 Agent");
     expect(find(".account-menu").textContent).toContain("账号设置");
     expect(find(".account-menu").textContent).not.toContain("平台管理");
     await click('.account-menu a[href="/app/settings"]');
@@ -249,15 +265,7 @@ describe("member and account navigation", () => {
     await click('[aria-label="打开频道列表"]');
     await click(".account-trigger");
     expect(document.activeElement).toBe(find(".account-menu a"));
-    await settle(() =>
-      document.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          key: "Escape",
-          bubbles: true,
-          cancelable: true,
-        }),
-      ),
-    );
+    await escape();
     expect(container.querySelector(".account-menu")).toBeNull();
     expect(find(".app-shell").classList.contains("sidebar-open")).toBe(true);
     expect(document.activeElement).toBe(find(".account-trigger"));
@@ -270,13 +278,120 @@ describe("member and account navigation", () => {
     expect(container.querySelector(".account-menu")).toBeNull();
     expect(document.activeElement).toBe(find(".account-trigger"));
     await click(".account-trigger");
-    await click('.account-menu a[href="/app/agents"]');
-    expect(find("[data-location]").textContent).toBe("/app/agents");
+    await click('.account-menu a[href="/app/settings"]');
+    expect(find("[data-location]").textContent).toBe("/app/settings");
     expect(container.querySelector(".account-menu")).toBeNull();
     expect(find(".app-shell").classList.contains("sidebar-open")).toBe(false);
     expect(document.activeElement).toBe(find('[aria-label="打开频道列表"]'));
     await click('[aria-label="打开频道列表"]');
     expect(container.querySelector(".account-menu")).toBeNull();
+  });
+
+  it("keeps the personal Agent rail link usable with write flags disabled and closes mobile navigation", async () => {
+    for (const capability of ["agents.enabled", "agents.create", "agents.update", "agents.delete", "agents.discover"]) {
+      bootstrap.capabilities[capability] = false;
+    }
+    await mount("/app/w/team/c/general", true);
+    await click('[aria-label="打开对话列表"]');
+    await click(".rail-agents");
+    await settle();
+    expect(find("[data-location]").textContent).toBe("/app/agents");
+    expect(find(".rail-agents").getAttribute("aria-current")).toBe("page");
+    expect(find(".app-shell").classList.contains("sidebar-open")).toBe(false);
+    expect(document.activeElement).toBe(find('[aria-label="打开频道列表"]'));
+    expect(find(".agent-card").textContent).toContain(agent.name);
+    await click(`a.agent-card[href="/app/agents/${agent.id}"]`);
+    await settle();
+    expect(find(".rail-agents").getAttribute("aria-current")).toBe("page");
+    expect(find(".agent-detail-heading").textContent).toContain(agent.name);
+  });
+
+  it.each([
+    [true, true, ["发起私聊", "创建小组"]],
+    [true, false, ["发起私聊"]],
+    [false, true, ["创建小组"]],
+  ] as const)(
+    "offers only allowed conversation actions (direct=%s, group=%s)",
+    async (canDirect, canGroup, labels) => {
+      bootstrap.capabilities["im.dm.create"] = canDirect;
+      bootstrap.capabilities["im.group.create"] = canGroup;
+      await mount("/app/w/team/c/general");
+      await click(".conversation-actions-trigger");
+      const menu = find(".conversation-actions-menu");
+      expect(Array.from(menu.querySelectorAll("button"), (node) => node.textContent)).toEqual(labels);
+      expect(document.activeElement).toBe(menu.querySelector("button"));
+      expect(find(".conversation-actions-trigger").getAttribute("aria-controls")).toBe(menu.id);
+      expect(find(".conversation-actions-trigger").getAttribute("aria-expanded")).toBe("true");
+      expect(find('a[href="/app/w/team/c/general"]').getAttribute("aria-current")).toBe("page");
+      await escape();
+      expect(container.querySelector(".conversation-actions-menu")).toBeNull();
+      expect(document.activeElement).toBe(find(".conversation-actions-trigger"));
+    },
+  );
+
+  it.each([false, true])(
+    "dismisses conversation actions on Escape, outside click and focus leaving (mobile=%s)",
+    async (mobile) => {
+      await mount("/app/w/team/c/general", mobile);
+      if (mobile) await click('[aria-label="打开对话列表"]');
+      await click(".conversation-actions-trigger");
+      await escape();
+      expect(container.querySelector(".conversation-actions-menu")).toBeNull();
+      expect(find(".app-shell").classList.contains("sidebar-open")).toBe(mobile);
+      expect(document.activeElement).toBe(find(".conversation-actions-trigger"));
+      await click(".conversation-actions-trigger");
+      await settle(() =>
+        find(".workspace-title").dispatchEvent(new MouseEvent("pointerdown", { bubbles: true })),
+      );
+      expect(container.querySelector(".conversation-actions-menu")).toBeNull();
+      expect(document.activeElement).toBe(find(".conversation-actions-trigger"));
+      await click(".conversation-actions-trigger");
+      await settle(() => find(".rail-agents").focus());
+      expect(container.querySelector(".conversation-actions-menu")).toBeNull();
+      if (mobile) {
+        await escape();
+        expect(find(".app-shell").classList.contains("sidebar-open")).toBe(false);
+        expect(document.activeElement).toBe(find('[aria-label="打开对话列表"]'));
+      }
+    },
+  );
+
+  it.each([
+    [false, "direct"],
+    [false, "group"],
+    [true, "direct"],
+    [true, "group"],
+  ] as const)(
+    "opens the selected dialog and restores focus after closing (mobile=%s, action=%s)",
+    async (mobile, kind) => {
+      await mount("/app/w/team/c/general", mobile);
+      if (mobile) await click('[aria-label="打开对话列表"]');
+      await click(".conversation-actions-trigger");
+      await click(`.conversation-actions-menu button:${kind === "direct" ? "first" : "last"}-child`);
+      expect(container.querySelector(".conversation-actions-menu")).toBeNull();
+      expect(find(".app-shell").classList.contains("sidebar-open")).toBe(false);
+      const modal = find(".modal");
+      expect(modal.querySelector("h2")?.textContent).toBe(kind === "direct" ? "发起私信" : "创建小组");
+      expect(modal.contains(document.activeElement)).toBe(true);
+      await click('[aria-label="关闭弹窗"]');
+      expect(container.querySelector(".modal")).toBeNull();
+      expect(document.activeElement).toBe(find(mobile ? '[aria-label="打开对话列表"]' : ".conversation-actions-trigger"));
+    },
+  );
+
+  it("hides the new-conversation trigger when creation is off while preserving conversations", async () => {
+    bootstrap.capabilities["im.dm.create"] = false;
+    bootstrap.capabilities["im.group.create"] = false;
+    await mount("/app/w/team/c/general");
+    expect(container.querySelector(".conversation-actions-trigger")).toBeNull();
+    expect(find('a[href="/app/w/team/c/general"]').textContent).toContain("general");
+    expect(find('a[href="/app/w/team/c/group"]').textContent).toContain(group.name);
+  });
+
+  it("hides workspace conversation actions without a current workspace", async () => {
+    await mount("/app/w/private/members");
+    expect(container.querySelector(".conversation-actions-trigger")).toBeNull();
+    expect(find(".workspace-title").textContent).toBe("我的 Teamie");
   });
 
   it("shows people and Agents together, searches the creator and preserves owner-only management", async () => {

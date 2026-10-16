@@ -1387,54 +1387,6 @@ label > .copy-input {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.workspace-title > b > svg {
-  color: #b5a7bf;
-}
-.popover-dismiss {
-  position: fixed;
-  inset: 0;
-  z-index: 20;
-  cursor: default;
-}
-.space-popover {
-  position: absolute;
-  top: 72px;
-  left: 12px;
-  right: 12px;
-  z-index: 21;
-  border: 1px solid #e6deed;
-  background: white;
-  border-radius: 9px;
-  box-shadow: 0 8px 25px #31213f15;
-  padding: 6px;
-}
-.space-popover > span {
-  font-size: 9px;
-  padding: 10px 9px;
-  color: #b7a5c5;
-  display: block;
-  border-bottom: 1px solid #f2edf6;
-  margin-bottom: 4px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.space-popover > button,
-.space-popover > a {
-  padding: 10px;
-  font-size: 11px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  border-radius: 5px;
-  color: #8e7a9e;
-}
-.space-popover > button:hover,
-.space-popover > a:hover {
-  background: #f6f2fa;
-  color: #755b93;
-}
 .sidebar-scroll {
   padding: 16px 11px;
   overflow: auto;
@@ -1580,20 +1532,6 @@ label > .copy-input {
   line-height: 1.8;
   padding: 9px 13px;
 }
-.sidebar-new-chat {
-  padding: 8px 12px;
-  color: #b3a1c3;
-  font-size: 10px;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  width: 100%;
-  border-radius: 5px;
-}
-.sidebar-new-chat:hover {
-  background: #eee7f6;
-  color: #9274ad;
-}
 .sidebar-invite {
   border: 1px solid #e7deee;
   border-radius: 9px;
@@ -1638,77 +1576,11 @@ label > .copy-input {
   line-height: 1;
   transform: rotate(8deg);
 }
-.connection-status {
-  height: 27px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 8px;
-  color: #baa9c8;
-  padding: 0 19px;
-}
 .status-dot {
   width: 4px;
   height: 4px;
   border-radius: 50%;
   background: #c5b1ce;
-}
-.connection-status.connected .status-dot {
-  background: #a5b992;
-}
-.connection-status.offline .status-dot {
-  background: #cba175;
-}
-.connection-status.offline {
-  color: #b79b8f;
-}
-.connection-status > svg {
-  margin-left: auto;
-}
-.user-panel {
-  height: 73px;
-  flex-shrink: 0;
-  padding: 15px 13px 15px 17px;
-  border-top: 1px solid #eae3f0;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  background: #f2edf7;
-}
-.user-profile {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  min-width: 0;
-  flex: 1;
-}
-.user-profile > .avatar {
-  width: 33px;
-  height: 33px;
-  border-radius: 10px;
-  font-size: 13px;
-}
-.user-profile > span:last-child {
-  min-width: 0;
-  flex: 1;
-}
-.user-profile b {
-  display: block;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 10px;
-  font-weight: 550;
-  color: #847092;
-}
-.user-profile small {
-  display: block;
-  font-size: 8px;
-  color: #baacc7;
-  margin-top: 4px;
-}
-.user-panel > .icon-button {
-  color: #b49fc4;
 }
 .app-main {
   flex: 1;
@@ -4182,9 +4054,6 @@ label > .copy-input {
 .workspace-title > b {
   color: #63516f;
 }
-.user-profile b {
-  color: #80648e;
-}
 .members-description h3,
 .member-row b {
   color: #9576a8;
@@ -4255,10 +4124,6 @@ label > .copy-input {
   font-size: 10px;
   color: #ae9bbb;
 }
-.app-shell .sidebar-new-chat {
-  font-size: 11px;
-  color: #a28ab5;
-}
 .app-shell .sidebar-invite > strong {
   font-size: 11px;
   color: #9b80ad;
@@ -4272,18 +4137,6 @@ label > .copy-input {
 }
 .app-shell .sidebar-invite > button {
   color: #a087b4;
-}
-.app-shell .connection-status {
-  font-size: 9px;
-  color: #a58db5;
-}
-.app-shell .user-profile b {
-  font-size: 12px;
-  color: #7a618a;
-}
-.app-shell .user-profile small {
-  font-size: 9px;
-  color: #ab95bb;
 }
 .app-shell .conversation-header h1 {
   font-size: 16px;
@@ -5564,34 +5417,6 @@ label > .copy-input {
 /* Agent ownership, discovery and a deliberately small control surface. */
 .rail-agents {
   margin-bottom: 8px;
-}
-.workspace-navigation {
-  margin: 0 5px 18px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid #eae1f2;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.workspace-navigation > a {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  color: #a28bb4;
-  border-radius: 6px;
-  padding: 9px 7px;
-}
-.workspace-navigation > a > span {
-  flex: 1;
-}
-.workspace-navigation > a > svg {
-  color: #b79dcc;
-}
-.workspace-navigation > a:hover,
-.workspace-navigation > a.active {
-  background: #eee6f8;
-  color: #9477ad;
 }
 .admin-section-nav {
   display: flex;
