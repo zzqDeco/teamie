@@ -65,7 +65,9 @@ mkdir "$DOCKER_CONFIG"
 # Registry host and credential provider come only from the validated target.
 # Authentication failures are redacted; credentials never enter a host env file.
 python3 "$manifest_tool" registry-login "$manifest"
-"${COMPOSE[@]}" pull --quiet
+# Personal ACR uses shared resources; keep image pulls below its documented
+# recommendation of ten concurrent pulls without changing daemon-wide settings.
+COMPOSE_PARALLEL_LIMIT=4 "${COMPOSE[@]}" pull --quiet
 runner_image=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["images"].get("sandbox-runner",""))' "$manifest")
 if [[ -n $runner_image ]]; then docker pull --quiet "$runner_image" >/dev/null; fi
 # Already-pulled immutable digests do not require persisted registry credentials.
