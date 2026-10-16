@@ -28,21 +28,22 @@ type Lease struct {
 	Fence          int64
 }
 type Input struct {
-	EventID        string `json:"eventId"`
-	WorkspaceID    string `json:"workspaceId"`
-	ConversationID string `json:"conversationId"`
-	MessageID      string `json:"messageId"`
-	SenderID       string `json:"senderId"`
-	SenderName     string `json:"senderName"`
-	SenderKind     string `json:"senderKind"`
-	Body           string `json:"body"`
-	ReplyToID      string `json:"replyToId,omitempty"`
-	Seq            int64  `json:"seq"`
-	CreatedAt      string `json:"createdAt"`
-	Kind           string `json:"kind,omitempty"`
-	TaskID         string `json:"taskId,omitempty"`
-	NotificationID string `json:"notificationId,omitempty"`
-	Status         string `json:"status,omitempty"`
+	EventID        string       `json:"eventId"`
+	WorkspaceID    string       `json:"workspaceId"`
+	ConversationID string       `json:"conversationId"`
+	MessageID      string       `json:"messageId"`
+	SenderID       string       `json:"senderId"`
+	SenderName     string       `json:"senderName"`
+	SenderKind     string       `json:"senderKind"`
+	Body           string       `json:"body"`
+	Attachments    []Attachment `json:"attachments,omitempty"`
+	ReplyToID      string       `json:"replyToId,omitempty"`
+	Seq            int64        `json:"seq"`
+	CreatedAt      string       `json:"createdAt"`
+	Kind           string       `json:"kind,omitempty"`
+	TaskID         string       `json:"taskId,omitempty"`
+	NotificationID string       `json:"notificationId,omitempty"`
+	Status         string       `json:"status,omitempty"`
 }
 type Run struct {
 	ID, Attempt, AgentID        string

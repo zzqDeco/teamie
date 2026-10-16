@@ -163,16 +163,17 @@ type Conversation struct {
 	MemberIDs   []string `json:"memberIds"`
 }
 type Message struct {
-	ID             string  `json:"id"`
-	ConversationID string  `json:"conversationId"`
-	SenderID       string  `json:"senderId"`
-	SenderName     string  `json:"senderName"`
-	SenderKind     string  `json:"senderKind"`
-	Body           string  `json:"body"`
-	ReplyToID      string  `json:"replyToId,omitempty"`
-	Seq            int64   `json:"seq"`
-	CreatedAt      string  `json:"createdAt"`
-	RetractedAt    *string `json:"retractedAt,omitempty"`
+	ID             string       `json:"id"`
+	ConversationID string       `json:"conversationId"`
+	SenderID       string       `json:"senderId"`
+	SenderName     string       `json:"senderName"`
+	SenderKind     string       `json:"senderKind"`
+	Body           string       `json:"body"`
+	ReplyToID      string       `json:"replyToId,omitempty"`
+	Seq            int64        `json:"seq"`
+	CreatedAt      string       `json:"createdAt"`
+	RetractedAt    *string      `json:"retractedAt,omitempty"`
+	Attachments    []Attachment `json:"attachments,omitempty"`
 }
 type Bootstrap struct {
 	Conversations []Conversation `json:"conversations"`
@@ -381,7 +382,11 @@ func (t *Tools) BuildIM() ([]tool.BaseTool, error) {
 	if e != nil {
 		return nil, e
 	}
-	return []tool.BaseTool{a, b, c, d}, nil
+	attachment, e := t.attachmentTool()
+	if e != nil {
+		return nil, e
+	}
+	return []tool.BaseTool{a, b, c, d, attachment}, nil
 }
 
 // Bound observations while retaining a correct older-page cursor. Examine newest

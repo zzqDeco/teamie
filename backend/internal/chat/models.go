@@ -21,18 +21,27 @@ type Conversation struct {
 	CanManageMembers bool      `json:"canManageMembers"`
 }
 type Message struct {
-	ID              string     `json:"id"`
-	ConversationID  string     `json:"conversationId"`
-	SenderID        string     `json:"senderId"`
-	SenderName      string     `json:"senderName"`
-	SenderKind      string     `json:"senderKind"`
-	ClientMessageID string     `json:"clientMessageId"`
-	Seq             int64      `json:"seq"`
-	Body            string     `json:"body"`
-	ReplyToID       *string    `json:"replyToId,omitempty"`
-	CreatedAt       time.Time  `json:"createdAt"`
-	EditedAt        *time.Time `json:"editedAt,omitempty"`
-	RetractedAt     *time.Time `json:"retractedAt,omitempty"`
+	ID              string       `json:"id"`
+	ConversationID  string       `json:"conversationId"`
+	SenderID        string       `json:"senderId"`
+	SenderName      string       `json:"senderName"`
+	SenderKind      string       `json:"senderKind"`
+	ClientMessageID string       `json:"clientMessageId"`
+	Seq             int64        `json:"seq"`
+	Body            string       `json:"body"`
+	ReplyToID       *string      `json:"replyToId,omitempty"`
+	CreatedAt       time.Time    `json:"createdAt"`
+	EditedAt        *time.Time   `json:"editedAt,omitempty"`
+	RetractedAt     *time.Time   `json:"retractedAt,omitempty"`
+	Attachments     []Attachment `json:"attachments,omitempty"`
+}
+
+type Attachment struct {
+	ID        string `json:"id"`
+	Filename  string `json:"filename"`
+	MediaType string `json:"mediaType"`
+	SizeBytes int    `json:"sizeBytes"`
+	SHA256    string `json:"sha256"`
 }
 type Event struct {
 	ID             string        `json:"id"`

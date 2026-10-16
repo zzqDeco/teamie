@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -289,7 +290,7 @@ func TestNativeEinoExplicitServerHistorySearchAndReferences(t *testing.T) {
 			if err = json.Unmarshal(observation.Data, &page); err != nil {
 				return chatMessage{}, err
 			}
-			if !observation.OK || page.HasMore || len(page.Messages) != 1 || page.Messages[0] != history.older {
+			if !observation.OK || page.HasMore || len(page.Messages) != 1 || !reflect.DeepEqual(page.Messages[0], history.older) {
 				return chatMessage{}, fmt.Errorf("server search or source provenance lost: %+v", page)
 			}
 			return toolPathCall("im_get_message", "history-reference", getMessageArgs{ConversationID: history.conversation, MessageID: history.older.ID})
@@ -301,7 +302,7 @@ func TestNativeEinoExplicitServerHistorySearchAndReferences(t *testing.T) {
 			}
 			var message Message
 			_ = json.Unmarshal(observation.Data, &message)
-			if !observation.OK || message != history.older {
+			if !observation.OK || !reflect.DeepEqual(message, history.older) {
 				return chatMessage{}, fmt.Errorf("reference lost source")
 			}
 			return toolPathCall("im_get_message", "history-tombstone", getMessageArgs{ConversationID: history.conversation, MessageID: history.tombstone.ID})

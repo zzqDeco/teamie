@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -349,13 +350,14 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 				}
 				return nil, err
 			}
-			if message.RetractedAt != nil || message.Body == "" {
+			if message.RetractedAt != nil || message.Body == "" && len(message.Attachments) == 0 {
 				if err = e.Store.Skip(ctx, lease, in.EventID); err != nil {
 					return nil, err
 				}
 				continue
 			}
 			in.Body = message.Body
+			in.Attachments = message.Attachments
 			in.ReplyToID = message.ReplyToID
 			valid = append(valid, in)
 		}
@@ -415,7 +417,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 				_ = e.Store.FinishRun(ctx, lease, run, "retry", "im_unavailable", true)
 				return nil, nil, nil, &ModelError{Code: "im_unavailable", Retry: true}
 			}
-			if m.RetractedAt != nil || m.Body != in.Body {
+			if m.RetractedAt != nil || m.Body != in.Body || !slices.Equal(m.Attachments, in.Attachments) {
 				invalid = append(invalid, in.EventID)
 			}
 		}
@@ -757,7 +759,7 @@ func (e *Engine) ingest(ctx context.Context, imc *IM, l *Lease) error {
 	var bootstrap *Bootstrap
 	for _, event := range page.Events {
 		m := event.Message
-		if event.Type != "message.created" || m == nil || m.SenderID == l.AgentID || m.RetractedAt != nil || m.Body == "" {
+		if event.Type != "message.created" || m == nil || m.SenderID == l.AgentID || m.RetractedAt != nil || m.Body == "" && len(m.Attachments) == 0 {
 			continue
 		}
 		ws := event.WorkspaceID
@@ -775,7 +777,7 @@ func (e *Engine) ingest(ctx context.Context, imc *IM, l *Lease) error {
 				}
 			}
 		}
-		inputs = append(inputs, Input{EventID: event.ID, WorkspaceID: ws, ConversationID: event.ConversationID, MessageID: m.ID, SenderID: m.SenderID, SenderName: m.SenderName, SenderKind: m.SenderKind, Body: m.Body, ReplyToID: m.ReplyToID, Seq: m.Seq, CreatedAt: m.CreatedAt})
+		inputs = append(inputs, Input{EventID: event.ID, WorkspaceID: ws, ConversationID: event.ConversationID, MessageID: m.ID, SenderID: m.SenderID, SenderName: m.SenderName, SenderKind: m.SenderKind, Body: m.Body, Attachments: m.Attachments, ReplyToID: m.ReplyToID, Seq: m.Seq, CreatedAt: m.CreatedAt})
 	}
 	return e.Store.Ingest(ctx, l, page.Cursor, inputs)
 }
@@ -795,6 +797,24 @@ func finalizeSummary(_ context.Context, original []*schema.Message, summary *sch
 		for _, key := range []string{"eventId", "workspaceId", "conversationId", "messageId", "replyToId", "senderId", "senderKind"} {
 			if value, ok := source[key].(string); ok {
 				clean[key] = value
+			}
+		}
+		// Retain bounded attachment references through repeated compaction;
+		// metadata/content can be retrieved explicitly from the source message.
+		switch ids := source["attachmentIds"].(type) {
+		case []string:
+			if len(ids) <= 8 {
+				clean["attachmentIds"] = ids
+			}
+		case []any:
+			retained := []string{}
+			for _, value := range ids {
+				if id, ok := value.(string); ok && validUUID(id) && len(retained) < 8 {
+					retained = append(retained, id)
+				}
+			}
+			if len(retained) > 0 {
+				clean["attachmentIds"] = retained
 			}
 		}
 		sources = append(sources, clean)
@@ -818,7 +838,11 @@ func finalizeSummary(_ context.Context, original []*schema.Message, summary *sch
 		}
 		var in Input
 		if json.Unmarshal([]byte(strings.TrimPrefix(message.Content, "TEAMIE_NEW_MESSAGE ")), &in) == nil {
-			appendSource(map[string]any{"eventId": in.EventID, "workspaceId": in.WorkspaceID, "conversationId": in.ConversationID, "messageId": in.MessageID, "replyToId": in.ReplyToID, "senderId": in.SenderID, "senderKind": in.SenderKind})
+			attachmentIDs := []string{}
+			for _, a := range in.Attachments {
+				attachmentIDs = append(attachmentIDs, a.ID)
+			}
+			appendSource(map[string]any{"eventId": in.EventID, "workspaceId": in.WorkspaceID, "conversationId": in.ConversationID, "messageId": in.MessageID, "replyToId": in.ReplyToID, "senderId": in.SenderID, "senderKind": in.SenderKind, "attachmentIds": attachmentIDs})
 		}
 	}
 	// Full provenance remains in durable inbox/session audit; the working

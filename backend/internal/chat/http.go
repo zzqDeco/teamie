@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 	"teamie/backend/internal/api"
+	"teamie/backend/pkg/imlimits"
 )
 
 type Handler struct {
@@ -37,6 +38,7 @@ func (h *Handler) Routes() http.Handler {
 			return next(w, r, s)
 		}))
 	}
+	h.attachmentRoutes(auth)
 	auth("GET /api/v1/bootstrap", func(w http.ResponseWriter, r *http.Request, s api.Session) error {
 		ws, e := h.Store.Workspaces(r.Context(), s.User.ID)
 		if e != nil {
@@ -58,7 +60,7 @@ func (h *Handler) Routes() http.Handler {
 			}
 		}
 		flags.Flags["im.channel.create"] = flags.Flags["im.channel.create"] && owner
-		api.Write(w, 200, map[string]any{"user": s.User, "workspaces": ws, "conversations": cs, "capabilities": flags.Flags, "flagsRevision": flags.Revision, "syncCursor": head})
+		api.Write(w, 200, map[string]any{"user": s.User, "workspaces": ws, "conversations": cs, "capabilities": flags.Flags, "flagsRevision": flags.Revision, "syncCursor": head, "attachmentLimits": map[string]int{"maxFileBytes": imlimits.AttachmentBytes, "maxFilesPerMessage": imlimits.AttachmentsPerMessage}})
 		return nil
 	})
 	auth("POST /api/v1/workspaces", func(w http.ResponseWriter, r *http.Request, s api.Session) error {
@@ -192,14 +194,15 @@ func (h *Handler) Routes() http.Handler {
 	})
 	auth("POST /api/v1/conversations/{id}/messages", func(w http.ResponseWriter, r *http.Request, s api.Session) error {
 		var in struct {
-			ClientMessageID string  `json:"clientMessageId"`
-			Body            string  `json:"body"`
-			ReplyToID       *string `json:"replyToId"`
+			ClientMessageID string   `json:"clientMessageId"`
+			Body            string   `json:"body"`
+			ReplyToID       *string  `json:"replyToId"`
+			AttachmentIDs   []string `json:"attachmentIds"`
 		}
 		if e := api.Decode(w, r, &in); e != nil {
 			return e
 		}
-		msg, created, e := h.Store.Send(r.Context(), s.User, r.PathValue("id"), in.ClientMessageID, in.Body, in.ReplyToID)
+		msg, created, e := h.Store.SendWithAttachments(r.Context(), s.User, r.PathValue("id"), in.ClientMessageID, in.Body, in.ReplyToID, in.AttachmentIDs)
 		if e != nil {
 			return e
 		}

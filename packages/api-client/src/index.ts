@@ -134,6 +134,21 @@ function publicModelGateway(value: ModelGateway): ModelGateway {
     status: value.status,
   };
 }
+export type Attachment = {
+  id: string;
+  filename: string;
+  mediaType: string;
+  sizeBytes: number;
+  sha256: string;
+};
+export type AttachmentLimits = {
+  maxFileBytes: number;
+  maxFilesPerMessage: number;
+};
+export const defaultAttachmentLimits: AttachmentLimits = {
+  maxFileBytes: 4 * 1024 * 1024,
+  maxFilesPerMessage: 8,
+};
 export type Message = {
   id: string;
   conversationId: string;
@@ -147,6 +162,7 @@ export type Message = {
   createdAt: string;
   editedAt?: string;
   retractedAt?: string;
+  attachments?: Attachment[];
 };
 export type Bootstrap = {
   user: User;
@@ -155,6 +171,7 @@ export type Bootstrap = {
   capabilities: Record<string, boolean>;
   flagsRevision: string;
   syncCursor: string;
+  attachmentLimits?: AttachmentLimits;
 };
 export type SyncEvent = {
   id: string;
@@ -193,11 +210,16 @@ export class TeamieClient {
   csrfToken = "";
   onUnauthorized?: () => void;
   onForbidden?: () => void;
-  async #request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  async #request<T>(
+    path: string,
+    options: RequestInit = {},
+    responseType: "json" | "blob" = "json",
+  ): Promise<T> {
     const method = options.method ?? "GET";
     const sessionToken = this.csrfToken;
     const headers = new Headers(options.headers);
-    if (options.body) headers.set("Content-Type", "application/json");
+    if (options.body && !(options.body instanceof FormData))
+      headers.set("Content-Type", "application/json");
     if (method !== "GET" && sessionToken)
       headers.set("X-CSRF-Token", sessionToken);
     const response = await fetch(`/api/v1${path}`, {
@@ -228,6 +250,7 @@ export class TeamieClient {
       );
     }
     if (response.status === 204) return undefined as T;
+    if (responseType === "blob") return response.blob() as Promise<T>;
     return response.json() as Promise<T>;
   }
   session = () => this.#request<Session>("/auth/session");
@@ -378,12 +401,40 @@ export class TeamieClient {
     );
   send = (
     id: string,
-    data: { clientMessageId: string; body: string; replyToId?: string },
+    data: {
+      clientMessageId: string;
+      body: string;
+      replyToId?: string;
+      attachmentIds?: string[];
+    },
   ) =>
     this.#request<{ message: Message }>(`/conversations/${part(id)}/messages`, {
       method: "POST",
       body: JSON.stringify(data),
     });
+  uploadAttachment = (
+    conversationId: string,
+    file: File,
+    signal?: AbortSignal,
+  ) => {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    return this.#request<{ attachment: Attachment }>(
+      `/conversations/${part(conversationId)}/attachments`,
+      { method: "POST", body: form, signal },
+    );
+  };
+  deletePendingAttachment = (conversationId: string, attachmentId: string) =>
+    this.#request<void>(
+      `/conversations/${part(conversationId)}/attachments/${part(attachmentId)}`,
+      { method: "DELETE" },
+    );
+  attachmentContent = (conversationId: string, attachmentId: string) =>
+    this.#request<Blob>(
+      `/conversations/${part(conversationId)}/attachments/${part(attachmentId)}/content`,
+      {},
+      "blob",
+    );
   edit = (conversationId: string, id: string, body: string) =>
     this.#request<{ message: Message }>(
       `/conversations/${part(conversationId)}/messages/${part(id)}`,

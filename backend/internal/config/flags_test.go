@@ -13,7 +13,7 @@ func TestUnsupportedCapabilitiesRemainOffAndBadReloadFailsClosed(t *testing.T) {
 	}
 	f := Flags{Path: path}
 	s := f.Load()
-	if s.Revision != "one" || s.Flags["auth.public_signup"] || !s.Flags["im.message.edit"] || s.Flags["im.attachments.upload"] || s.Flags["im.presence.publish"] || s.Flags["im.dm.create"] {
+	if s.Revision != "one" || s.Flags["auth.public_signup"] || !s.Flags["im.message.edit"] || !s.Flags["im.attachments.upload"] || s.Flags["im.presence.publish"] || s.Flags["im.dm.create"] {
 		t.Fatal("flags do not intersect implementation")
 	}
 	for _, key := range []string{"agents.enabled", "agents.create", "agents.update", "agents.delete", "agents.discover"} {

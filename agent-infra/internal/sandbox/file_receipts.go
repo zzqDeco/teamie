@@ -103,7 +103,7 @@ func (s *Service) mutateWorkspace(r *agent.SandboxWorkspaceRequest, in workspace
 	if len(content) > maxFileBytes {
 		return workspaceError("file_too_large")
 	}
-	if !diskAvailable(s.WorkspaceRoot) {
+	if !diskAvailable(s.WorkspaceRoot) || r.Operation != "delete" && !workspaceCapacity(root, name, int64(len(content))) {
 		return workspaceError("workspace_capacity")
 	}
 	data := workspaceResult(map[string]any{"path": virtual(name), "bytes": len(content)})

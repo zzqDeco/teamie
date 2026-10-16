@@ -1,5 +1,5 @@
 {
-  "revision": "agents-v2",
+  "revision": "im-attachments-v1",
   "flags": {
     "auth.public_signup": false,
     "im.dm.create": true,
@@ -9,7 +9,7 @@
     "im.message.retract": true,
     "im.typing.publish": true,
     "im.presence.publish": false,
-    "im.attachments.upload": false,
+    "im.attachments.upload": true,
     "im.reactions.create": false,
     "im.threads.create": false,
     "agents.enabled": true,

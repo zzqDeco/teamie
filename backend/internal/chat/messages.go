@@ -4,20 +4,22 @@ import (
 	"context"
 	"errors"
 	"github.com/jackc/pgx/v5"
+	"slices"
 	"strings"
 	"teamie/backend/internal/api"
 	"time"
 )
 
-const messageColumns = "id,conversation_id,sender_id,sender_name,sender_kind,client_message_id,seq,body,reply_to_id,created_at,edited_at,retracted_at"
+const messageColumns = "id,conversation_id,sender_id,sender_name,sender_kind,client_message_id,seq,body,reply_to_id,created_at,edited_at,retracted_at,attachments"
 
 type scanner interface{ Scan(...any) error }
 
 func scanMessage(row scanner) (Message, error) {
 	var m Message
-	e := row.Scan(&m.ID, &m.ConversationID, &m.SenderID, &m.SenderName, &m.SenderKind, &m.ClientMessageID, &m.Seq, &m.Body, &m.ReplyToID, &m.CreatedAt, &m.EditedAt, &m.RetractedAt)
+	e := row.Scan(&m.ID, &m.ConversationID, &m.SenderID, &m.SenderName, &m.SenderKind, &m.ClientMessageID, &m.Seq, &m.Body, &m.ReplyToID, &m.CreatedAt, &m.EditedAt, &m.RetractedAt, &m.Attachments)
 	if m.RetractedAt != nil {
 		m.Body = ""
+		m.Attachments = nil
 	}
 	return m, e
 }
@@ -99,9 +101,26 @@ func (s *Store) MessageHistory(ctx context.Context, user, conversation string, b
 	return out, more, nil
 }
 func (s *Store) Send(ctx context.Context, user api.User, conversation, clientID, body string, reply *string) (Message, bool, error) {
+	return s.SendWithAttachments(ctx, user, conversation, clientID, body, reply, nil)
+}
+
+func validateMessage(body string, attachmentCount int) error {
+	if attachmentCount == 0 {
+		return validateBody(body)
+	}
+	if len([]rune(body)) > 8000 {
+		return api.Err(400, "invalid_body", "Message text must be at most 8000 characters")
+	}
+	return nil
+}
+
+func (s *Store) SendWithAttachments(ctx context.Context, user api.User, conversation, clientID, body string, reply *string, ids []string) (Message, bool, error) {
 	var m Message
-	if e := validateBody(body); e != nil {
+	if e := validateAttachmentIDs(ids); e != nil {
 		return m, false, e
+	}
+	if ids == nil {
+		ids = []string{}
 	}
 	if !api.BoundedString(clientID, 1, 128) {
 		return m, false, api.Err(400, "invalid_client_message_id", "clientMessageId is required and must be at most 128 characters")
@@ -125,17 +144,26 @@ func (s *Store) Send(ctx context.Context, user api.User, conversation, clientID,
 	m, e = scanMessage(tx.QueryRow(ctx, "SELECT "+messageColumns+" FROM messages WHERE sender_id=$1 AND client_message_id=$2", user.ID, clientID))
 	if e == nil {
 		var hash string
-		if e = tx.QueryRow(ctx, "SELECT original_body_hash FROM messages WHERE id=$1", m.ID).Scan(&hash); e != nil {
+		var originalIDs []string
+		if e = tx.QueryRow(ctx, "SELECT original_body_hash,original_attachment_ids FROM messages WHERE id=$1", m.ID).Scan(&hash, &originalIDs); e != nil {
 			return m, false, e
 		}
 		sameReply := (reply == nil && m.ReplyToID == nil) || (reply != nil && m.ReplyToID != nil && *reply == *m.ReplyToID)
-		if m.ConversationID != conversation || hash != api.Hash(body) || !sameReply {
+		if m.ConversationID != conversation || hash != api.Hash(body) || !sameReply || !slices.Equal(ids, originalIDs) {
 			return m, false, api.Err(409, "idempotency_conflict", "This clientMessageId was used for a different message")
 		}
 		return m, false, tx.Commit(ctx)
 	}
 	if !errors.Is(e, pgx.ErrNoRows) {
 		return m, false, e
+	}
+	if e = validateMessage(body, len(ids)); e != nil {
+		return m, false, e
+	}
+	if len(ids) > 0 {
+		if e = s.requireFlag("im.attachments.upload"); e != nil {
+			return m, false, e
+		}
 	}
 	if reply != nil {
 		var exists bool
@@ -156,6 +184,14 @@ func (s *Store) Send(ctx context.Context, user api.User, conversation, clientID,
 	if e != nil {
 		return m, false, e
 	}
+	if len(ids) > 0 {
+		if m.Attachments, e = attachFiles(ctx, tx, user.ID, conversation, m.ID, ids); e != nil {
+			return m, false, e
+		}
+		if _, e = tx.Exec(ctx, "UPDATE messages SET attachments=$2,original_attachment_ids=$3 WHERE id=$1", m.ID, m.Attachments, ids); e != nil {
+			return m, false, e
+		}
+	}
 	if e = fanout(ctx, tx, c.MemberIDs, Event{Type: "message.created", WorkspaceID: c.WorkspaceID, ConversationID: conversation, Message: &m}); e != nil {
 		return m, false, e
 	}
@@ -169,11 +205,6 @@ func (s *Store) ChangeMessage(ctx context.Context, user, conversation, id, body 
 	}
 	if e := s.requireFlag(flag); e != nil {
 		return m, e
-	}
-	if !retract {
-		if e := validateBody(body); e != nil {
-			return m, e
-		}
 	}
 	tx, e := s.DB.Begin(ctx)
 	if e != nil {
@@ -191,6 +222,11 @@ func (s *Store) ChangeMessage(ctx context.Context, user, conversation, id, body 
 	if m.SenderID != user {
 		return m, api.Err(403, "forbidden", "Only the author can change a message")
 	}
+	if !retract {
+		if e = validateMessage(body, len(m.Attachments)); e != nil {
+			return m, e
+		}
+	}
 	event := "message.updated"
 	now := time.Now().UTC()
 	if retract {
@@ -199,8 +235,12 @@ func (s *Store) ChangeMessage(ctx context.Context, user, conversation, id, body 
 		}
 		m.RetractedAt = &now
 		m.Body = ""
+		m.Attachments = nil
 		event = "message.retracted"
-		_, e = tx.Exec(ctx, "UPDATE messages SET body='',retracted_at=$2 WHERE id=$1", id, now)
+		_, e = tx.Exec(ctx, "UPDATE messages SET body='',attachments='[]',retracted_at=$2 WHERE id=$1", id, now)
+		if e == nil {
+			_, e = tx.Exec(ctx, "DELETE FROM attachments WHERE message_id=$1", id)
+		}
 	} else {
 		if m.RetractedAt != nil {
 			return m, api.Err(409, "message_retracted", "A retracted message cannot be edited")

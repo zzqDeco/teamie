@@ -291,6 +291,11 @@ export function errorText(error: unknown) {
     conflict: "这条消息与之前的发送记录冲突，请刷新后重试。",
     feature_disabled: "此功能已由工作空间管理员关闭。",
     rate_limited: "操作过于频繁，请稍后再试。",
+    attachment_busy: "文件传输繁忙，请稍后重试。",
+    attachment_capacity: "待发送文件过多，请移除部分文件后重试。",
+    attachment_too_large: "文件不能超过 4 MiB。",
+    invalid_attachment: "文件已过期或不可用，请重新上传。",
+    invalid_filename: "文件名无效，请重命名后上传。",
     email_exists: "此邮箱已注册，请直接登录。",
   };
   return messages[error.code] || error.message;
@@ -302,6 +307,9 @@ export async function sendMessage(message: Message, generation: number) {
       clientMessageId: message.clientMessageId,
       body: message.body,
       replyToId: message.replyToId,
+      ...(message.attachments?.length
+        ? { attachmentIds: message.attachments.map((a) => a.id) }
+        : {}),
     });
     if (chatStore.generation === generation)
       chatStore.merge([response.message]);

@@ -42,7 +42,10 @@ export function reconcileMessages(
   incoming: LocalMessage[],
 ): LocalMessage[] {
   const output = [...existing];
-  for (const message of incoming) {
+  for (const incomingMessage of incoming) {
+    const message = incomingMessage.retractedAt
+      ? { ...incomingMessage, body: "", attachments: undefined }
+      : incomingMessage;
     const index = output.findIndex(
       (m) =>
         m.id === message.id ||
