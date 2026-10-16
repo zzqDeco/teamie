@@ -248,7 +248,16 @@ func (h *Handler) attachmentRoutes(auth func(string, api.AuthedHandler)) {
 		w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
 		w.Header().Set("X-Attachment-SHA256", a.SHA256)
 		w.Header().Set("Content-Length", strconv.Itoa(len(content)))
-		_, _ = w.Write(content)
+		if _, e = w.Write(content); e != nil {
+			return nil
+		}
+		// Hertz's Content-Length adaptor buffers Write until Flush. Keep the
+		// transfer slot until that synchronous network write completes or fails,
+		// rather than letting slow peers retain buffers after releasing capacity.
+		// The binary response has begun: a write/flush failure must never append
+		// the auth wrapper's JSON error body. Hertz also captures Flusher errors
+		// internally, so ResponseController cannot report those errors here.
+		_ = http.NewResponseController(w).Flush()
 		return nil
 	})
 }
