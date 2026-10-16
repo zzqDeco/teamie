@@ -707,12 +707,13 @@ var fieldIDToName_GatewayChatResponse = map[int16]string{
 }
 
 type SandboxExecRequest struct {
-	ServiceToken   string `thrift:"serviceToken,1,required" frugal:"1,required,string" json:"serviceToken"`
-	AgentId        string `thrift:"agentId,2,required" frugal:"2,required,string" json:"agentId"`
-	RunId          string `thrift:"runId,3,required" frugal:"3,required,string" json:"runId"`
-	RequestId      string `thrift:"requestId,4,required" frugal:"4,required,string" json:"requestId"`
-	Command        string `thrift:"command,5,required" frugal:"5,required,string" json:"command"`
-	TimeoutSeconds int32  `thrift:"timeoutSeconds,6,required" frugal:"6,required,i32" json:"timeoutSeconds"`
+	ServiceToken   string  `thrift:"serviceToken,1,required" frugal:"1,required,string" json:"serviceToken"`
+	AgentId        string  `thrift:"agentId,2,required" frugal:"2,required,string" json:"agentId"`
+	RunId          string  `thrift:"runId,3,required" frugal:"3,required,string" json:"runId"`
+	RequestId      string  `thrift:"requestId,4,required" frugal:"4,required,string" json:"requestId"`
+	Command        string  `thrift:"command,5,required" frugal:"5,required,string" json:"command"`
+	TimeoutSeconds int32   `thrift:"timeoutSeconds,6,required" frugal:"6,required,i32" json:"timeoutSeconds"`
+	ExecutionId    *string `thrift:"executionId,7,optional" frugal:"7,optional,string" json:"executionId,omitempty"`
 }
 
 func NewSandboxExecRequest() *SandboxExecRequest {
@@ -745,6 +746,15 @@ func (p *SandboxExecRequest) GetCommand() (v string) {
 func (p *SandboxExecRequest) GetTimeoutSeconds() (v int32) {
 	return p.TimeoutSeconds
 }
+
+var SandboxExecRequest_ExecutionId_DEFAULT string
+
+func (p *SandboxExecRequest) GetExecutionId() (v string) {
+	if !p.IsSetExecutionId() {
+		return SandboxExecRequest_ExecutionId_DEFAULT
+	}
+	return *p.ExecutionId
+}
 func (p *SandboxExecRequest) SetServiceToken(val string) {
 	p.ServiceToken = val
 }
@@ -763,6 +773,13 @@ func (p *SandboxExecRequest) SetCommand(val string) {
 func (p *SandboxExecRequest) SetTimeoutSeconds(val int32) {
 	p.TimeoutSeconds = val
 }
+func (p *SandboxExecRequest) SetExecutionId(val *string) {
+	p.ExecutionId = val
+}
+
+func (p *SandboxExecRequest) IsSetExecutionId() bool {
+	return p.ExecutionId != nil
+}
 
 func (p *SandboxExecRequest) String() string {
 	if p == nil {
@@ -778,6 +795,7 @@ var fieldIDToName_SandboxExecRequest = map[int16]string{
 	4: "requestId",
 	5: "command",
 	6: "timeoutSeconds",
+	7: "executionId",
 }
 
 type SandboxExecResponse struct {

@@ -93,7 +93,7 @@ func (e *Engine) cancelRun(id string, run *Run) {
 	}()
 	go func() {
 		defer wg.Done()
-		_, _ = e.Sandbox.Cancel(ctx, &wire.CancelRequest{ServiceToken: e.Config.SandboxToken, AgentId: id, RunId: run.ID})
+		_, _ = e.Sandbox.Cancel(ctx, &wire.CancelRequest{ServiceToken: e.Config.SandboxToken, AgentId: id, RunId: executionID(run)})
 	}()
 	wg.Wait()
 }

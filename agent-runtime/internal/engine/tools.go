@@ -347,7 +347,7 @@ func (t *Tools) Build() ([]tool.BaseTool, error) {
 				return &Observation{Error: "invalid_arguments"}, nil
 			}
 			run, _ := CurrentRun(ctx)
-			r, e := t.Sandbox.Exec(ctx, &wire.SandboxExecRequest{ServiceToken: t.SandboxToken, AgentId: run.AgentID, RunId: run.ID, RequestId: id, Command: args.Command, TimeoutSeconds: args.TimeoutSeconds})
+			r, e := t.Sandbox.Exec(ctx, &wire.SandboxExecRequest{ServiceToken: t.SandboxToken, AgentId: run.AgentID, RunId: run.ID, ExecutionId: ptrExecutionID(run), RequestId: id, Command: args.Command, TimeoutSeconds: args.TimeoutSeconds})
 			if e != nil {
 				return nil, &ModelError{Code: "sandbox_unavailable", Retry: true}
 			}
@@ -387,3 +387,5 @@ func historyPage(messages []Message, hasMore bool, keyword string) ([]Message, i
 	}
 	return out, cursor, hasMore || examined < len(messages)
 }
+
+func ptrExecutionID(run *Run) *string { id := executionID(run); return &id }

@@ -162,3 +162,66 @@ func TestChildPolicyAndOutputBounds(t *testing.T) {
 		t.Fatal(len(out), len(errout), truncated, e)
 	}
 }
+
+func TestExecutionAttemptCancellationKeepsDurableReceipts(t *testing.T) {
+	engine := &fakeEngine{}
+	s := fixture(t, engine)
+	firstAttempt, secondAttempt := "run-a:attempt-1", "run-a:attempt-2"
+	r := request()
+	r.ExecutionId = &firstAttempt
+	completed, _ := s.Exec(context.Background(), r)
+	if !completed.Ok || engine.calls.Load() != 1 {
+		t.Fatal(completed)
+	}
+	ack, _ := s.Cancel(context.Background(), &agent.CancelRequest{ServiceToken: token, AgentId: r.AgentId, RunId: firstAttempt})
+	if !ack.Ok {
+		t.Fatal(ack)
+	}
+	// A completed durable request survives cancellation of its prior execution attempt.
+	r.ExecutionId = &secondAttempt
+	replay, _ := s.Exec(context.Background(), r)
+	if !replay.Ok || replay.Stdout != completed.Stdout || engine.calls.Load() != 1 {
+		t.Fatal(replay, engine.calls.Load())
+	}
+	// A new tool request in the retry must not inherit the old attempt's tombstone.
+	r.RequestId = "request-new"
+	next, _ := s.Exec(context.Background(), r)
+	if !next.Ok || engine.calls.Load() != 2 {
+		t.Fatal(next, engine.calls.Load())
+	}
+}
+
+func TestCanceledExecutionReceiptIsNotRerunInLaterAttempt(t *testing.T) {
+	engine := &fakeEngine{block: true, started: make(chan struct{})}
+	s := fixture(t, engine)
+	firstAttempt, secondAttempt := "run-a:attempt-1", "run-a:attempt-2"
+	r := request()
+	r.ExecutionId = &firstAttempt
+	done := make(chan *agent.SandboxExecResponse, 1)
+	go func() { res, _ := s.Exec(context.Background(), r); done <- res }()
+	<-engine.started
+	_, _ = s.Cancel(context.Background(), &agent.CancelRequest{ServiceToken: token, AgentId: r.AgentId, RunId: firstAttempt})
+	canceled := <-done
+	if canceled.GetErrorCode() != "execution_canceled" {
+		t.Fatal(canceled)
+	}
+	r.ExecutionId = &secondAttempt
+	replay, _ := s.Exec(context.Background(), r)
+	if replay.GetErrorCode() != "execution_canceled" || engine.calls.Load() != 1 {
+		t.Fatal(replay, engine.calls.Load())
+	}
+	engine.block = false
+	engine.started = nil
+	r.RequestId = "request-next-attempt"
+	next, _ := s.Exec(context.Background(), r)
+	if !next.Ok || engine.calls.Load() != 2 {
+		t.Fatal(next, engine.calls.Load())
+	}
+	empty := ""
+	r.ExecutionId = &empty
+	r.RequestId = "invalid-attempt"
+	invalid, _ := s.Exec(context.Background(), r)
+	if invalid.GetErrorCode() != "invalid_request" || engine.calls.Load() != 2 {
+		t.Fatal(invalid)
+	}
+}

@@ -555,3 +555,12 @@ func TestGatewayAttemptIdentityAllowsRetryAfterCancellation(t *testing.T) {
 		t.Fatal("attempt cancellation poisons a future retry")
 	}
 }
+
+func TestTransientPersistenceFailureRemainsRetryable(t *testing.T) {
+	if !retryError(errors.Join(adk.ErrSessionEventPersistence, errors.New("temporary unavailable"))) {
+		t.Fatal("session persistence failure discarded durable input")
+	}
+	if retryError(errors.Join(adk.ErrSessionEventPersistence, ErrReplayConflict)) {
+		t.Fatal("corrupt replay retried indefinitely")
+	}
+}

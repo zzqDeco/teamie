@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
+	"strings"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	wire "teamie/agent-protocol/kitex_gen/agent"
 	"teamie/agent-protocol/kitex_gen/agent/modelgatewayservice"
 )
@@ -205,6 +208,22 @@ func SafeError(err error) string {
 	return "execution_failed"
 }
 func retryError(err error) bool {
+	if errors.Is(err, ErrReplayConflict) || errors.Is(err, adk.ErrInvalidEventID) || errors.Is(err, adk.ErrDuplicateEventID) {
+		return false
+	}
+	if errors.Is(err, adk.ErrSessionEventPersistence) {
+		return true
+	}
+	var databaseError *pgconn.PgError
+	if errors.As(err, &databaseError) {
+		code := databaseError.Code
+		return strings.HasPrefix(code, "08") || strings.HasPrefix(code, "53") || code == "40001" || code == "40P01" || code == "57P01" || code == "57P02" || code == "57P03"
+	}
+	var networkError net.Error
+	if errors.As(err, &networkError) || pgconn.SafeToRetry(err) || pgconn.Timeout(err) {
+		return true
+	}
+
 	var cancelled *adk.CancelError
 	if errors.As(err, &cancelled) {
 		return true

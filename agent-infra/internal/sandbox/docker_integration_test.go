@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,14 @@ func TestRealDockerExecutionSeparationAndCleanup(t *testing.T) {
 	if runner == "" {
 		t.Skip("SANDBOX_TEST_RUNNER_IMAGE is unset")
 	}
+	// Deliberately seed supervisor-only fixture credentials; Docker must not inherit them.
+	fixtureSecret := "sandbox-parent-private-fixture-sentinel"
+	fixtureMaster := strings.Repeat("cd", 32)
+	for _, name := range []string{"AGENT_RUNTIME_TOKEN", "IM_PRINCIPAL_CONTROL_TOKEN", "IM_PRINCIPAL_RUNTIME_TOKEN", "GATEWAY_RUNTIME_TOKEN", "DATABASE_URL", "POSTGRES_PASSWORD"} {
+		t.Setenv(name, fixtureSecret)
+	}
+	t.Setenv("SANDBOX_RUNTIME_TOKEN", token)
+	t.Setenv("GATEWAY_MASTER_KEY", fixtureMaster)
 	docker := NewDocker("/var/run/docker.sock")
 	root := t.TempDir()
 	s, e := New(docker, token, image, filepath.Join(root, "workspace"), filepath.Join(root, "state"))
@@ -31,7 +40,7 @@ func TestRealDockerExecutionSeparationAndCleanup(t *testing.T) {
 		t.Fatal(e)
 	}
 	r := request()
-	r.Command = `python3 - <<'PY'
+	r.Command = fmt.Sprintf(`python3 - <<'PY'
 import os,socket,resource
 assert int(open("/sys/fs/cgroup/memory.max").read())==134217728
 assert int(open("/sys/fs/cgroup/pids.max").read())==32
@@ -40,7 +49,19 @@ assert quota/period==0.5
 assert resource.getrlimit(resource.RLIMIT_FSIZE)==(8388608,8388608)
 assert os.getuid()==10001
 assert not os.path.exists('/var/run/docker.sock')
-assert not any('TOKEN' in k or 'KEY' in k or 'PASSWORD' in k for k in os.environ)
+# Official Python image metadata may include public GPG_KEY; only platform
+# credential names and private supervisor fixture values are forbidden.
+forbidden_names = {
+ 'AGENT_RUNTIME_TOKEN','IM_PRINCIPAL_CONTROL_TOKEN','IM_PRINCIPAL_RUNTIME_TOKEN',
+ 'GATEWAY_RUNTIME_TOKEN','GATEWAY_MASTER_KEY','SANDBOX_RUNTIME_TOKEN',
+ 'DATABASE_URL','DATABASE_URL_TEST','TEAMIE_RUNTIME_TEST_DATABASE_URL',
+ 'IDENTITY_DATABASE_URL','CHAT_DATABASE_URL','AGENT_CONTROL_DATABASE_URL',
+ 'AGENT_RUNTIME_DATABASE_URL','GATEWAY_DATABASE_URL','DOCKER_SOCKET','DOCKER_HOST',
+}
+assert forbidden_names.isdisjoint(os.environ)
+assert not any(k.startswith('POSTGRES_') and k.endswith('PASSWORD') for k in os.environ)
+fixture_credentials = (%q,%q,%q)
+assert not any(secret in value for value in os.environ.values() for secret in fixture_credentials)
 try:
  open('/root-write','w').write('bad')
  raise AssertionError('root fs writable')
@@ -51,7 +72,7 @@ try:
 except OSError: pass
 open('persistent.txt','w').write('retained')
 print('isolated')
-PY`
+PY`, token, fixtureSecret, fixtureMaster)
 	first, _ := s.Exec(ctx, r)
 	if !first.Ok || first.ExitCode != 0 || !strings.Contains(first.Stdout, "isolated") {
 		t.Fatal(first)

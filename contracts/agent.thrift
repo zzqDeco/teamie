@@ -72,6 +72,8 @@ struct SandboxExecRequest {
   4: required string requestId
   5: required string command
   6: required i32 timeoutSeconds
+  // Ephemeral attempt identity for cancellation; runId/requestId remain durable.
+  7: optional string executionId
 }
 struct SandboxExecResponse {
   1: required bool ok

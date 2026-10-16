@@ -149,6 +149,13 @@ func (s *Service) Exec(ctx context.Context, r *agent.SandboxExecRequest) (*agent
 	if !validID(r.AgentId) || !validID(r.RunId) || !validID(r.RequestId) || len(r.Command) == 0 || len(r.Command) > 16384 || strings.ContainsRune(r.Command, 0) || r.TimeoutSeconds < 0 || r.TimeoutSeconds > 60 {
 		return failure("invalid_request"), nil
 	}
+	executionID := r.RunId
+	if r.ExecutionId != nil {
+		executionID = r.GetExecutionId()
+		if !validID(executionID) {
+			return failure("invalid_request"), nil
+		}
+	}
 	timeout := r.TimeoutSeconds
 	if timeout == 0 {
 		timeout = 30
@@ -205,7 +212,7 @@ func (s *Service) Exec(ctx context.Context, r *agent.SandboxExecRequest) (*agent
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
-	index := r.AgentId + "/" + r.RunId
+	index := r.AgentId + "/" + executionID
 	s.mu.Lock()
 	s.active[index] = cancel
 	if at, ok := s.canceled[index]; ok && time.Since(at) < 2*time.Minute {
