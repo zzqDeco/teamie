@@ -19,6 +19,9 @@ import (
 //go:embed schema.sql
 var schema string
 
+//go:embed migrations/002_membership_management.sql
+var schemaV2 string
+
 type Store struct {
 	DB    *pgxpool.Pool
 	Flags config.Flags
@@ -41,18 +44,7 @@ func Open(ctx context.Context, url string, flags config.Flags) (*Store, error) {
 	return s, nil
 }
 func (s *Store) Migrate(ctx context.Context) error {
-	tx, e := s.DB.Begin(ctx)
-	if e != nil {
-		return e
-	}
-	defer tx.Rollback(ctx)
-	if _, e = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(704102)"); e != nil {
-		return e
-	}
-	if _, e = tx.Exec(ctx, schema); e != nil {
-		return e
-	}
-	return tx.Commit(ctx)
+	return database.Migrate(ctx, s.DB, 704102, "chat_schema_migrations", []database.Migration{{Version: 1, SQL: schema}, {Version: 2, SQL: schemaV2}})
 }
 func (s *Store) Ping(ctx context.Context) error { return s.DB.Ping(ctx) }
 func notFound(e error) error {
@@ -84,10 +76,12 @@ func workspaceLock(ctx context.Context, tx pgx.Tx, id, user string, owner, exclu
 }
 func conversationAccess(ctx context.Context, q querier, id, user string) (Conversation, error) {
 	var c Conversation
-	e := q.QueryRow(ctx, `SELECT c.id,c.workspace_id,c.type,c.name,c.last_seq,COALESCE(r.seq,0),c.updated_at FROM conversations c JOIN workspace_members wm ON wm.workspace_id=c.workspace_id AND wm.user_id=$2 LEFT JOIN read_cursors r ON r.conversation_id=c.id AND r.user_id=$2 WHERE c.id=$1 AND (c.type='channel' OR EXISTS(SELECT 1 FROM conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id=$2))`, id, user).Scan(&c.ID, &c.WorkspaceID, &c.Type, &c.Name, &c.LastSeq, &c.ReadSeq, &c.UpdatedAt)
+	var role string
+	e := q.QueryRow(ctx, `SELECT c.id,c.workspace_id,c.type,c.name,c.last_seq,COALESCE(r.seq,0),c.updated_at,COALESCE(c.created_by,''),wm.role FROM conversations c JOIN workspace_members wm ON wm.workspace_id=c.workspace_id AND wm.user_id=$2 LEFT JOIN read_cursors r ON r.conversation_id=c.id AND r.user_id=$2 WHERE c.id=$1 AND (c.type='channel' OR EXISTS(SELECT 1 FROM conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id=$2))`, id, user).Scan(&c.ID, &c.WorkspaceID, &c.Type, &c.Name, &c.LastSeq, &c.ReadSeq, &c.UpdatedAt, &c.CreatedBy, &role)
 	if e != nil {
 		return c, notFound(e)
 	}
+	c.CanManageMembers = c.Type == "group" && (c.CreatedBy == user || role == "owner")
 	c.MemberIDs, e = recipients(ctx, q, c)
 	return c, e
 }
@@ -141,6 +135,13 @@ func fanout(ctx context.Context, tx pgx.Tx, ids []string, event Event) error {
 		var cursor int64
 		if e := tx.QueryRow(ctx, "UPDATE sync_heads SET last_id=last_id+1 WHERE user_id=$1 RETURNING last_id", id).Scan(&cursor); e != nil {
 			return e
+		}
+		if event.Conversation != nil {
+			c, e := conversationAccess(ctx, tx, event.Conversation.ID, id)
+			if e != nil {
+				return e
+			}
+			event.Conversation = &c
 		}
 		event.ID = strconv.FormatInt(cursor, 10)
 		b, e := json.Marshal(event)

@@ -62,6 +62,16 @@ func (c *Identity) Ping(ctx context.Context) error {
 	}
 	return nil
 }
+func (c *Identity) ValidatePrincipal(ctx context.Context, token, key string) (api.Session, error) {
+	r, e := c.Client.ValidatePrincipalToken(ctx, &im.PrincipalAuthRequest{Token: token, ServiceToken: key})
+	if e != nil {
+		return api.Session{}, api.Err(503, "identity_unavailable", "Identity service is temporarily unavailable")
+	}
+	if !r.Valid || r.User == nil {
+		return api.Session{}, api.Err(401, "unauthenticated", "Participant credential expired or revoked")
+	}
+	return api.Session{User: FromUser(r.User), ServicePrincipal: true}, nil
+}
 
 type Chat struct{ Client chatservice.Client }
 

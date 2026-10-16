@@ -19,10 +19,15 @@ import (
 //go:embed schema.sql
 var schema string
 
+//go:embed migrations/002_principals.sql
+var schemaV2 string
+
 type Store struct {
 	DB                  *pgxpool.Pool
 	Flags               config.Flags
 	BootstrapInviteCode string
+	ControlToken        string
+	RuntimeToken        string
 }
 
 func Open(ctx context.Context, url string, flags config.Flags, code string) (*Store, error) {
@@ -41,18 +46,7 @@ func Open(ctx context.Context, url string, flags config.Flags, code string) (*St
 	return s, nil
 }
 func (s *Store) Migrate(ctx context.Context) error {
-	tx, e := s.DB.Begin(ctx)
-	if e != nil {
-		return e
-	}
-	defer tx.Rollback(ctx)
-	if _, e = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(704101)"); e != nil {
-		return e
-	}
-	if _, e = tx.Exec(ctx, schema); e != nil {
-		return e
-	}
-	return tx.Commit(ctx)
+	return database.Migrate(ctx, s.DB, 704101, "identity_schema_migrations", []database.Migration{{Version: 1, SQL: schema}, {Version: 2, SQL: schemaV2}})
 }
 func (s *Store) Ping(ctx context.Context) error { return s.DB.Ping(ctx) }
 func normalizeEmail(v string) (string, error) {
@@ -126,7 +120,7 @@ func (s *Store) Login(ctx context.Context, email, password string) (api.Session,
 	email = strings.ToLower(strings.TrimSpace(email))
 	var u api.User
 	var hash string
-	e := s.DB.QueryRow(ctx, "SELECT id,email,display_name,kind,platform_role,created_at,password_hash FROM identity_users WHERE email=$1", email).Scan(&u.ID, &u.Email, &u.DisplayName, &u.Kind, &u.PlatformRole, &u.CreatedAt, &hash)
+	e := s.DB.QueryRow(ctx, "SELECT id,email,display_name,kind,platform_role,created_at,password_hash FROM identity_users WHERE email=$1 AND kind='human' AND enabled AND deleted_at IS NULL", email).Scan(&u.ID, &u.Email, &u.DisplayName, &u.Kind, &u.PlatformRole, &u.CreatedAt, &hash)
 	if e != nil && !errors.Is(e, pgx.ErrNoRows) {
 		return api.Session{}, "", e
 	}
@@ -152,7 +146,7 @@ func (s *Store) Validate(ctx context.Context, token string) (api.Session, error)
 	if len(token) != 64 {
 		return ss, api.Err(401, "unauthenticated", "Sign in to continue")
 	}
-	e := s.DB.QueryRow(ctx, `SELECT u.id,u.email,u.display_name,u.kind,u.platform_role,u.created_at,s.csrf_token FROM identity_sessions s JOIN identity_users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now()`, api.Hash(token)).Scan(&ss.User.ID, &ss.User.Email, &ss.User.DisplayName, &ss.User.Kind, &ss.User.PlatformRole, &ss.User.CreatedAt, &ss.CSRFToken)
+	e := s.DB.QueryRow(ctx, `SELECT u.id,u.email,u.display_name,u.kind,u.platform_role,u.created_at,s.csrf_token FROM identity_sessions s JOIN identity_users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now() AND u.kind='human' AND u.enabled AND u.deleted_at IS NULL`, api.Hash(token)).Scan(&ss.User.ID, &ss.User.Email, &ss.User.DisplayName, &ss.User.Kind, &ss.User.PlatformRole, &ss.User.CreatedAt, &ss.CSRFToken)
 	if errors.Is(e, pgx.ErrNoRows) {
 		e = api.Err(401, "unauthenticated", "Session expired or revoked")
 	}
@@ -163,7 +157,7 @@ func (s *Store) Users(ctx context.Context, ids []string) ([]api.User, error) {
 	if len(ids) > 1000 {
 		return nil, api.Err(400, "invalid_request", "Too many users")
 	}
-	rows, e := s.DB.Query(ctx, "SELECT id,email,display_name,kind,platform_role,created_at FROM identity_users WHERE id=ANY($1)", ids)
+	rows, e := s.DB.Query(ctx, "SELECT id,COALESCE(email,''),display_name,kind,platform_role,created_at FROM identity_users WHERE id=ANY($1)", ids)
 	if e != nil {
 		return nil, e
 	}

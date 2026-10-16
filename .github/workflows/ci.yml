@@ -70,6 +70,58 @@ jobs:
       - name: Full HTTP and WebSocket acceptance against disposable processes
         run: bash ops/ci-acceptance.sh
 
+  agents:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: ci-only-postgres
+          POSTGRES_DB: teamie_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d teamie_test"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:7.4-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: agent-infra/go.mod
+          cache-dependency-path: |
+            agent-protocol/go.sum
+            agent-control/go.sum
+            agent-runtime/go.sum
+            agent-infra/go.sum
+      - name: Build immutable disposable execution runner
+        run: |
+          docker build --tag teamie-sandbox-runner-ci --file agent-infra/runner/Dockerfile .
+          printf 'SANDBOX_TEST_RUNNER_IMAGE=%s\n' "$(docker image inspect teamie-sandbox-runner-ci --format '{{.Id}}')" >> "$GITHUB_ENV"
+      - name: Create isolated runtime integration database
+        run: docker exec "$POSTGRES_CONTAINER_ID" createdb -U postgres runtime_test
+        env:
+          POSTGRES_CONTAINER_ID: ${{ job.services.postgres.id }}
+      - name: Race tests and checks across independently rooted Go modules
+        env:
+          TEAMIE_RUNTIME_TEST_DATABASE_URL: postgres://postgres:ci-only-postgres@127.0.0.1:5432/runtime_test?sslmode=disable
+          DATABASE_URL_TEST: postgres://postgres:ci-only-postgres@127.0.0.1:5432/teamie_test?sslmode=disable
+        run: |
+          for module in agent-protocol agent-control agent-runtime agent-infra; do
+            (cd "$module" && go test -race -timeout 180s ./... && go vet ./... && go build ./...)
+          done
+      - name: Agent owner/admin/runtime acceptance against fresh disposable processes
+        run: bash ops/ci-agent-acceptance.sh
+      - name: Restore every service database into a disposable target and verify data
+        run: bash ops/ci-restore.sh
+        env:
+          POSTGRES_CONTAINER_ID: ${{ job.services.postgres.id }}
+
   containers:
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -82,6 +134,11 @@ jobs:
           - {service: chat, dockerfile: backend/Dockerfile}
           - {service: realtime, dockerfile: backend/Dockerfile}
           - {service: web, dockerfile: apps/web/Dockerfile}
+          - {service: agent-control, dockerfile: agent-control/Dockerfile}
+          - {service: agent-runtime, dockerfile: agent-runtime/Dockerfile}
+          - {service: llm-gateway, dockerfile: agent-infra/Dockerfile}
+          - {service: sandbox, dockerfile: agent-infra/Dockerfile}
+          - {service: sandbox-runner, dockerfile: agent-infra/runner/Dockerfile}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1

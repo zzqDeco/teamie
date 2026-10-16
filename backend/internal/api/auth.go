@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"net/http"
+	"strings"
 )
 
 type Identity interface {
@@ -12,15 +13,46 @@ type Identity interface {
 	Ping(context.Context) error
 }
 type AuthedHandler func(http.ResponseWriter, *http.Request, Session) error
+type PrincipalIdentity interface {
+	ValidatePrincipal(context.Context, string, string) (Session, error)
+}
+
+func ValidServiceKey(expected, provided string) bool {
+	return expected != "" && provided != "" && subtle.ConstantTimeCompare([]byte(expected), []byte(provided)) == 1
+}
+func HumanAuth(identity Identity, origin string, next AuthedHandler) http.HandlerFunc {
+	return Auth(identity, origin, func(w http.ResponseWriter, r *http.Request, s Session) error {
+		if s.User.Kind != "human" {
+			return Err(403, "forbidden", "A human session is required")
+		}
+		return next(w, r, s)
+	})
+}
 
 func Auth(identity Identity, origin string, next AuthedHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		s, err := identity.Validate(r.Context(), Token(r))
+		var s Session
+		var err error
+		if auth := r.Header.Get("Authorization"); auth != "" {
+			p, ok := identity.(PrincipalIdentity)
+			if !ok || !strings.HasPrefix(auth, "Bearer ") {
+				Fail(w, Err(401, "unauthenticated", "Invalid participant credential"))
+				return
+			}
+			// Machine credentials are never accepted from browser contexts.
+			if r.Header.Get("Origin") != "" || r.Header.Get("Sec-Fetch-Site") != "" {
+				Fail(w, Err(403, "forbidden", "Machine credentials are not browser sessions"))
+				return
+			}
+			s, err = p.ValidatePrincipal(r.Context(), strings.TrimPrefix(auth, "Bearer "), r.Header.Get("X-Teamie-Service-Key"))
+		} else {
+			s, err = identity.Validate(r.Context(), Token(r))
+		}
 		if err != nil {
 			Fail(w, err)
 			return
 		}
-		if Mutating(r) {
+		if Mutating(r) && !s.ServicePrincipal {
 			if err = CheckOrigin(r, origin); err != nil {
 				Fail(w, err)
 				return

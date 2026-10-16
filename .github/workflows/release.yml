@@ -64,6 +64,11 @@ jobs:
           - {service: chat, dockerfile: backend/Dockerfile, upstream: ""}
           - {service: realtime, dockerfile: backend/Dockerfile, upstream: ""}
           - {service: web, dockerfile: apps/web/Dockerfile, upstream: ""}
+          - {service: agent-control, dockerfile: agent-control/Dockerfile, upstream: ""}
+          - {service: agent-runtime, dockerfile: agent-runtime/Dockerfile, upstream: ""}
+          - {service: llm-gateway, dockerfile: agent-infra/Dockerfile, upstream: ""}
+          - {service: sandbox, dockerfile: agent-infra/Dockerfile, upstream: ""}
+          - {service: sandbox-runner, dockerfile: agent-infra/runner/Dockerfile, upstream: ""}
           - {service: caddy, dockerfile: "", upstream: "caddy:2.11.7-alpine"}
           - {service: postgres, dockerfile: "", upstream: "postgres:17-alpine"}
           - {service: redis, dockerfile: "", upstream: "redis:7.4-alpine"}
@@ -174,7 +179,7 @@ jobs:
     needs: [validate, manifest]
     runs-on: ubuntu-latest
     environment: production
-    timeout-minutes: 25
+    timeout-minutes: 45
     concurrency:
       group: teamie-production
       cancel-in-progress: false

@@ -50,6 +50,8 @@ chmod 0600 "$deploy_home/.ssh/authorized_keys"
 install -d -o "$deploy_user" -g "$deploy_user" -m 0700 \
   /srv/teamie /srv/teamie/config /srv/teamie/tls \
   /srv/teamie/releases /srv/teamie/incoming /srv/teamie/state /srv/teamie/backups
+# Only the trusted supervisor can traverse these roots. Jobs see one bind mount.
+install -d -o root -g root -m 0700 /srv/teamie/sandbox-workspaces /srv/teamie/sandbox-state
 # Preserve root ownership when an operator has provisioned file-based TLS keys.
 if [[ ! -d /srv/teamie/tls/certs ]]; then
   install -d -o "$deploy_user" -g "$deploy_user" -m 0700 /srv/teamie/tls/certs

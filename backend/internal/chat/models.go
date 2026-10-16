@@ -9,14 +9,16 @@ type Workspace struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 type Conversation struct {
-	ID          string    `json:"id"`
-	WorkspaceID string    `json:"workspaceId"`
-	Type        string    `json:"type"`
-	Name        string    `json:"name"`
-	MemberIDs   []string  `json:"memberIds"`
-	LastSeq     int64     `json:"lastSeq"`
-	ReadSeq     int64     `json:"readSeq"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	ID               string    `json:"id"`
+	WorkspaceID      string    `json:"workspaceId"`
+	Type             string    `json:"type"`
+	Name             string    `json:"name"`
+	MemberIDs        []string  `json:"memberIds"`
+	LastSeq          int64     `json:"lastSeq"`
+	ReadSeq          int64     `json:"readSeq"`
+	UpdatedAt        time.Time `json:"updatedAt"`
+	CreatedBy        string    `json:"createdBy,omitempty"`
+	CanManageMembers bool      `json:"canManageMembers"`
 }
 type Message struct {
 	ID              string     `json:"id"`

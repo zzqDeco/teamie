@@ -27,6 +27,26 @@ func validateBody(body string) error {
 	}
 	return nil
 }
+func (s *Store) Message(ctx context.Context, user, conversation, id string) (Message, error) {
+	var m Message
+	tx, e := s.DB.Begin(ctx)
+	if e != nil {
+		return m, e
+	}
+	defer tx.Rollback(ctx)
+	var ws string
+	if e = tx.QueryRow(ctx, "SELECT workspace_id FROM conversations WHERE id=$1", conversation).Scan(&ws); e != nil {
+		return m, notFound(e)
+	}
+	if e = workspaceLock(ctx, tx, ws, user, false, false); e != nil {
+		return m, e
+	}
+	if _, e = conversationAccess(ctx, tx, conversation, user); e != nil {
+		return m, e
+	}
+	m, e = scanMessage(tx.QueryRow(ctx, "SELECT "+messageColumns+" FROM messages WHERE id=$1 AND conversation_id=$2", id, conversation))
+	return m, notFound(e)
+}
 func (s *Store) Messages(ctx context.Context, user, conversation string, before int64, limit int) ([]Message, bool, error) {
 	tx, e := s.DB.Begin(ctx)
 	if e != nil {

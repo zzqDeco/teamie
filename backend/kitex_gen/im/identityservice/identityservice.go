@@ -34,6 +34,27 @@ var serviceMethods = map[string]kitex.MethodInfo{
 		false,
 		kitex.WithStreamingMode(kitex.StreamingNone),
 	),
+	"ProvisionPrincipal": kitex.NewMethodInfo(
+		provisionPrincipalHandler,
+		newIdentityServiceProvisionPrincipalArgs,
+		newIdentityServiceProvisionPrincipalResult,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
+	"IssuePrincipalToken": kitex.NewMethodInfo(
+		issuePrincipalTokenHandler,
+		newIdentityServiceIssuePrincipalTokenArgs,
+		newIdentityServiceIssuePrincipalTokenResult,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
+	"ValidatePrincipalToken": kitex.NewMethodInfo(
+		validatePrincipalTokenHandler,
+		newIdentityServiceValidatePrincipalTokenArgs,
+		newIdentityServiceValidatePrincipalTokenResult,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
 }
 
 var (
@@ -154,6 +175,60 @@ func newIdentityServicePingResult() interface{} {
 	return im.NewIdentityServicePingResult()
 }
 
+func provisionPrincipalHandler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*im.IdentityServiceProvisionPrincipalArgs)
+	realResult := result.(*im.IdentityServiceProvisionPrincipalResult)
+	success, err := handler.(im.IdentityService).ProvisionPrincipal(ctx, realArg.Request)
+	if err != nil {
+		return err
+	}
+	realResult.Success = success
+	return nil
+}
+func newIdentityServiceProvisionPrincipalArgs() interface{} {
+	return im.NewIdentityServiceProvisionPrincipalArgs()
+}
+
+func newIdentityServiceProvisionPrincipalResult() interface{} {
+	return im.NewIdentityServiceProvisionPrincipalResult()
+}
+
+func issuePrincipalTokenHandler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*im.IdentityServiceIssuePrincipalTokenArgs)
+	realResult := result.(*im.IdentityServiceIssuePrincipalTokenResult)
+	success, err := handler.(im.IdentityService).IssuePrincipalToken(ctx, realArg.Request)
+	if err != nil {
+		return err
+	}
+	realResult.Success = success
+	return nil
+}
+func newIdentityServiceIssuePrincipalTokenArgs() interface{} {
+	return im.NewIdentityServiceIssuePrincipalTokenArgs()
+}
+
+func newIdentityServiceIssuePrincipalTokenResult() interface{} {
+	return im.NewIdentityServiceIssuePrincipalTokenResult()
+}
+
+func validatePrincipalTokenHandler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*im.IdentityServiceValidatePrincipalTokenArgs)
+	realResult := result.(*im.IdentityServiceValidatePrincipalTokenResult)
+	success, err := handler.(im.IdentityService).ValidatePrincipalToken(ctx, realArg.Request)
+	if err != nil {
+		return err
+	}
+	realResult.Success = success
+	return nil
+}
+func newIdentityServiceValidatePrincipalTokenArgs() interface{} {
+	return im.NewIdentityServiceValidatePrincipalTokenArgs()
+}
+
+func newIdentityServiceValidatePrincipalTokenResult() interface{} {
+	return im.NewIdentityServiceValidatePrincipalTokenResult()
+}
+
 type kClient struct {
 	c client.Client
 }
@@ -189,6 +264,36 @@ func (p *kClient) Ping(ctx context.Context, request *im.PingRequest) (r *im.Ping
 	_args.Request = request
 	var _result im.IdentityServicePingResult
 	if err = p.c.Call(ctx, "Ping", &_args, &_result); err != nil {
+		return
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) ProvisionPrincipal(ctx context.Context, request *im.PrincipalControlRequest) (r *im.PrincipalResponse, err error) {
+	var _args im.IdentityServiceProvisionPrincipalArgs
+	_args.Request = request
+	var _result im.IdentityServiceProvisionPrincipalResult
+	if err = p.c.Call(ctx, "ProvisionPrincipal", &_args, &_result); err != nil {
+		return
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) IssuePrincipalToken(ctx context.Context, request *im.PrincipalTokenRequest) (r *im.PrincipalTokenResponse, err error) {
+	var _args im.IdentityServiceIssuePrincipalTokenArgs
+	_args.Request = request
+	var _result im.IdentityServiceIssuePrincipalTokenResult
+	if err = p.c.Call(ctx, "IssuePrincipalToken", &_args, &_result); err != nil {
+		return
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) ValidatePrincipalToken(ctx context.Context, request *im.PrincipalAuthRequest) (r *im.SessionResponse, err error) {
+	var _args im.IdentityServiceValidatePrincipalTokenArgs
+	_args.Request = request
+	var _result im.IdentityServiceValidatePrincipalTokenResult
+	if err = p.c.Call(ctx, "ValidatePrincipalToken", &_args, &_result); err != nil {
 		return
 	}
 	return _result.GetSuccess(), nil

@@ -15,6 +15,14 @@
 	handle @auth {
 		reverse_proxy identity:8081
 	}
+	@gateway path /api/v1/admin/model-gateway /api/v1/admin/model-gateway/*
+	handle @gateway {
+		reverse_proxy llm-gateway:8086
+	}
+	@agents path /api/v1/agents /api/v1/agents/* /api/v1/workspaces/*/agents
+	handle @agents {
+		reverse_proxy agent-control:8084
+	}
 	@websocket path /api/v1/ws
 	handle @websocket {
 		reverse_proxy realtime:8083

@@ -1,5 +1,5 @@
 {
-  "revision": "im-v1",
+  "revision": "agents-v1",
   "flags": {
     "auth.public_signup": false,
     "im.dm.create": true,
@@ -11,6 +11,11 @@
     "im.presence.publish": false,
     "im.attachments.upload": false,
     "im.reactions.create": false,
-    "im.threads.create": false
+    "im.threads.create": false,
+    "agents.enabled": true,
+    "agents.create": true,
+    "agents.update": true,
+    "agents.delete": true,
+    "agents.discover": true
   }
 }

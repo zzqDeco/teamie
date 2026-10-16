@@ -18,7 +18,8 @@ stamp=$(date -u +%Y%m%dT%H%M%SZ)
 destination=$(mktemp -d "$TEAMIE_ROOT/backups/$stamp-XXXXXX")
 complete=0
 trap '[[ $complete == 1 ]] || rm -rf -- "$destination"' EXIT
-for database in teamie_identity teamie_chat; do
+databases=$(python3 -c 'import json,sys; print(" ".join("teamie_"+name for name in json.load(open(sys.argv[1]))["schema"]))' "$current/release-manifest.json")
+for database in $databases; do
   # Expand the protected password inside the PostgreSQL container, not on the host.
   # shellcheck disable=SC2016
   "${COMPOSE[@]}" exec -T postgres sh -ec \
@@ -28,7 +29,7 @@ for database in teamie_identity teamie_chat; do
 done
 cp "$current/release-manifest.json" "$destination/release-manifest.json"
 cp "$current/deployment.json" "$destination/deployment.json"
-(cd "$destination" && sha256sum teamie_identity.dump teamie_chat.dump > SHA256SUMS)
+(cd "$destination" && sha256sum ./*.dump > SHA256SUMS)
 complete=1
 # Seven full days of complete local backups; never prune incomplete runs as success.
 find "$TEAMIE_ROOT/backups" -mindepth 1 -maxdepth 1 -type d -mtime +7 -exec rm -rf -- {} +

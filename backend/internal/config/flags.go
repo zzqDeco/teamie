@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 )
 
 type Snapshot struct {
@@ -13,6 +14,7 @@ type Snapshot struct {
 type Flags struct{ Path string }
 
 var Implemented = map[string]bool{
+	"agents.enabled": true, "agents.create": true, "agents.update": true, "agents.delete": true, "agents.discover": true,
 	"auth.public_signup": false, "im.dm.create": true, "im.group.create": true, "im.channel.create": true,
 	"im.message.edit": true, "im.message.retract": true, "im.typing.publish": true,
 	"im.presence.publish": false, "im.attachments.upload": false, "im.reactions.create": false, "im.threads.create": false,
@@ -21,7 +23,7 @@ var Implemented = map[string]bool{
 func (f Flags) Load() Snapshot {
 	s := Snapshot{Revision: "default-v1", Flags: map[string]bool{}}
 	for k, v := range Implemented {
-		s.Flags[k] = v && k != "auth.public_signup"
+		s.Flags[k] = v && k != "auth.public_signup" && !strings.HasPrefix(k, "agents.")
 	}
 	if f.Path == "" {
 		return s

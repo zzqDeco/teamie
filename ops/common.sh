@@ -7,6 +7,7 @@ export COMPOSE_PARALLEL_LIMIT=1
 
 compose_for() {
   local recipe=$1 image_env=$2
+  COMPOSE_RECIPE=$recipe
   COMPOSE=(docker compose --project-name teamie --file "$recipe/deploy/compose.production.yaml"
     --env-file "$HOST_ENV" --env-file "$image_env")
 }
@@ -14,8 +15,15 @@ compose_for() {
 rollout() {
   # Every service migration is forward-only and runs before its /readyz is healthy.
   "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 postgres redis || return
+  if [[ $("${COMPOSE[@]}" config --services) == *llm-gateway* ]]; then
+    "${COMPOSE[@]}" exec -T postgres env TEAMIE_VERIFY_DB_CREDENTIALS=1 bash -s < "${COMPOSE_RECIPE}/deploy/postgres/01-databases.sh" || return
+  fi
   "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 identity || return
   "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 chat || return
   "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 realtime web || return
+  if [[ $("${COMPOSE[@]}" config --services) == *llm-gateway* ]]; then
+    "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 agent-control llm-gateway sandbox || return
+    "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 agent-runtime || return
+  fi
   "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 caddy || return
 }

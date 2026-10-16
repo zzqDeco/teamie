@@ -37,13 +37,81 @@ export type Conversation = {
   lastSeq: number;
   readSeq: number;
   updatedAt: string;
+  createdBy?: string;
+  canManageMembers?: boolean;
 };
 export type Member = {
   userId: string;
   displayName: string;
   role: "owner" | "member";
   kind: "human" | "agent";
+  ownerId?: string;
+  ownerName?: string;
 };
+export type AgentRuntimeState =
+  | "waiting_configuration"
+  | "idle"
+  | "running"
+  | "disabled"
+  | "error"
+  | "provisioning";
+export type Agent = {
+  id: string;
+  principalId: string;
+  ownerId: string;
+  ownerName: string;
+  name: string;
+  description: string;
+  workspaceIds: string[];
+  enabled: boolean;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string;
+  runtimeState: AgentRuntimeState;
+  lastActiveAt?: string;
+  lastError?: string;
+  sessionId: string;
+};
+export type AgentProfileInput = {
+  name: string;
+  description?: string;
+  workspaceIds: string[];
+  enabled?: boolean;
+};
+export type ModelGatewayConfig = {
+  baseUrl: string;
+  model: string;
+  hasApiKey: boolean;
+  enabled: boolean;
+  configured: boolean;
+  updatedAt: string;
+};
+export type ModelGateway = {
+  config: ModelGatewayConfig;
+  status: "unconfigured" | "ready" | "disabled";
+};
+export type ModelGatewayInput = {
+  baseUrl: string;
+  model: string;
+  apiKey?: string;
+  enabled: boolean;
+  clearApiKey?: boolean;
+};
+function publicModelGateway(value: ModelGateway): ModelGateway {
+  // Project only public metadata even if a server accidentally adds a secret field.
+  return {
+    config: {
+      baseUrl: value.config.baseUrl,
+      model: value.config.model,
+      hasApiKey: value.config.hasApiKey,
+      enabled: value.config.enabled,
+      configured: value.config.configured,
+      updatedAt: value.config.updatedAt,
+    },
+    status: value.status,
+  };
+}
 export type Message = {
   id: string;
   conversationId: string;
@@ -151,6 +219,38 @@ export class TeamieClient {
     });
   revokeRegistrationInvite = (id: string) =>
     this.request<void>(`/auth/admin/invites/${part(id)}`, { method: "DELETE" });
+  agents = () => this.request<{ agents: Agent[] }>("/agents");
+  agent = (id: string) => this.request<{ agent: Agent }>(`/agents/${part(id)}`);
+  createAgent = (profile: AgentProfileInput) =>
+    this.request<{ agent: Agent }>("/agents", {
+      method: "POST",
+      body: JSON.stringify(profile),
+    });
+  updateAgent = (id: string, profile: Partial<AgentProfileInput>) =>
+    this.request<{ agent: Agent }>(`/agents/${part(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(profile),
+    });
+  deleteAgent = (id: string) =>
+    this.request<void>(`/agents/${part(id)}`, { method: "DELETE" });
+  workspaceAgents = (id: string) =>
+    this.request<{ agents: Agent[] }>(`/workspaces/${part(id)}/agents`);
+  modelGateway = async () =>
+    publicModelGateway(
+      await this.request<ModelGateway>("/admin/model-gateway"),
+    );
+  saveModelGateway = async (config: ModelGatewayInput) =>
+    publicModelGateway(
+      await this.request<ModelGateway>("/admin/model-gateway", {
+        method: "PUT",
+        body: JSON.stringify(config),
+      }),
+    );
+  testModelGateway = () =>
+    this.request<{ ok: boolean; model: string; latencyMs: number }>(
+      "/admin/model-gateway/test",
+      { method: "POST", body: JSON.stringify({}) },
+    );
   login = (email: string, password: string) =>
     this.request<Session>("/auth/login", {
       method: "POST",
@@ -203,6 +303,16 @@ export class TeamieClient {
   conversations = (id: string) =>
     this.request<{ conversations: Conversation[] }>(
       `/workspaces/${part(id)}/conversations`,
+    );
+  addConversationMember = (id: string, userId: string) =>
+    this.request<{ conversation: Conversation }>(
+      `/conversations/${part(id)}/members`,
+      { method: "POST", body: JSON.stringify({ userId }) },
+    );
+  removeConversationMember = (id: string, userId: string) =>
+    this.request<{ conversation: Conversation }>(
+      `/conversations/${part(id)}/members/${part(userId)}`,
+      { method: "DELETE" },
     );
   createConversation = (
     id: string,

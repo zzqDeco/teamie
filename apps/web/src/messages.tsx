@@ -6,6 +6,7 @@ import {
   Check,
   CornerUpLeft,
   Hash,
+  KeyRound,
   LoaderCircle,
   MessageCircle,
   Pencil,
@@ -16,12 +17,13 @@ import {
   X,
 } from "lucide-react";
 import { api } from "@teamie/api-client";
-import type { Conversation, Member, Message } from "@teamie/api-client";
+import type { Agent, Conversation, Member, Message } from "@teamie/api-client";
 import { useAuth } from "./auth";
 import { errorText, sendMessage, useChat, useChatState } from "./chat";
 import { chatStore } from "./store";
 import type { LocalMessage } from "./store";
 import { Avatar, Button, date, IconButton, Modal, Notice, time } from "./ui";
+import { AgentAvatar, AgentBadge } from "./agent-ui";
 
 export function conversationName(
   conversation: Conversation,
@@ -41,11 +43,13 @@ export function conversationName(
 export function ConversationView({
   conversation,
   members,
+  agents = [],
   onMembers,
   onMenu,
 }: {
   conversation: Conversation;
   members: Member[];
+  agents?: Agent[];
   onMembers: () => void;
   onMenu: () => void;
 }) {
@@ -54,6 +58,12 @@ export function ConversationView({
   const snapshot = useChatState();
   const messages = snapshot.messages[conversation.id] || [];
   const name = conversationName(conversation, user!.id, members);
+  const waitingAgents = agents.filter(
+    (agent) =>
+      conversation.memberIds.includes(agent.principalId) &&
+      agent.enabled &&
+      agent.runtimeState === "waiting_configuration",
+  );
   const [loading, setLoading] = useState(true),
     [hasMore, setHasMore] = useState(false),
     [loadingOlder, setLoadingOlder] = useState(false),
@@ -234,7 +244,7 @@ export function ConversationView({
       setActionBusy(false);
     }
   }
-  const closeRetract = useCallback(() => setRetracting(null), []);
+  const closeRetract = useCallback(() => setRetracting(null), [setRetracting]);
   const otherTyping = typing[conversation.id] || [];
   const firstUnread = messages.find(
     (m) => !m.status && m.seq > conversation.readSeq,
@@ -274,6 +284,15 @@ export function ConversationView({
           </IconButton>
         </div>
       </header>
+      {waitingAgents.length > 0 && (
+        <div className="agent-conversation-waiting" role="status">
+          <KeyRound size={14} />
+          <span>
+            {waitingAgents.map((agent) => agent.name).join("、")}{" "}
+            正在等待管理员配置模型，暂时不会生成回复。对话消息会正常保存。
+          </span>
+        </div>
+      )}
       {syncError && (
         <div className="sync-banner" role="status">
           <RefreshCw size={14} />
@@ -372,7 +391,14 @@ export function ConversationView({
               >
                 <div className="message-avatar">
                   {!compact ? (
-                    <Avatar name={message.senderName} seed={message.senderId} />
+                    message.senderKind === "agent" ? (
+                      <AgentAvatar />
+                    ) : (
+                      <Avatar
+                        name={message.senderName}
+                        seed={message.senderId}
+                      />
+                    )
                   ) : (
                     <span>{time(message.createdAt)}</span>
                   )}
@@ -381,6 +407,15 @@ export function ConversationView({
                   {!compact && (
                     <div className="message-meta">
                       <b>{message.senderName}</b>
+                      {message.senderKind === "agent" && (
+                        <AgentBadge
+                          ownerName={
+                            members.find(
+                              (member) => member.userId === message.senderId,
+                            )?.ownerName
+                          }
+                        />
+                      )}
                       {message.senderId === user!.id && (
                         <span className="you-label">你</span>
                       )}

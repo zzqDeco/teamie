@@ -65,7 +65,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     let ws: WebSocket | null = null;
     const revoke = () => {
       chatStore.revoke();
-      client.removeQueries({ predicate: (q) => q.queryKey[0] === "members" });
+      client.removeQueries({
+        predicate: (q) =>
+          ["members", "workspaceAgents"].includes(String(q.queryKey[0])),
+      });
       void client.resetQueries({ queryKey: ["bootstrap"] });
     };
     api.onForbidden = revoke;
@@ -101,6 +104,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               });
               client.setQueryData(["bootstrap", user!.id], fresh);
               void client.invalidateQueries({ queryKey: ["members"] });
+              void client.invalidateQueries({ queryKey: ["workspaceAgents"] });
             }
             chatStore.apply(page);
             hasMore = page.hasMore;

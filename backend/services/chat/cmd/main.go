@@ -44,7 +44,7 @@ func main() {
 	if e != nil {
 		log.Fatal(e)
 	}
-	rpc := chatservice.NewServer(&chat.RPC{Store: store}, server.WithServiceAddr(addr))
+	rpc := chatservice.NewServer(&chat.RPC{Store: store, Identity: identity, ControlToken: api.Env("IM_PRINCIPAL_CONTROL_TOKEN", "")}, server.WithServiceAddr(addr))
 	defer rpc.Stop()
 	go func() {
 		if e := rpc.Run(); e != nil {

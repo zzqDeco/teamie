@@ -106,12 +106,12 @@ func (h *Handler) Routes() http.Handler {
 	}
 	m.HandleFunc("POST /api/v1/auth/register", login(true))
 	m.HandleFunc("POST /api/v1/auth/login", login(false))
-	m.HandleFunc("GET /api/v1/auth/session", api.Auth(h.Store, h.Origin, func(w http.ResponseWriter, r *http.Request, s api.Session) error {
+	m.HandleFunc("GET /api/v1/auth/session", api.HumanAuth(h.Store, h.Origin, func(w http.ResponseWriter, r *http.Request, s api.Session) error {
 		w.Header().Set("Cache-Control", "no-store")
 		api.Write(w, 200, s)
 		return nil
 	}))
-	m.HandleFunc("POST /api/v1/auth/logout", api.Auth(h.Store, h.Origin, func(w http.ResponseWriter, r *http.Request, s api.Session) error {
+	m.HandleFunc("POST /api/v1/auth/logout", api.HumanAuth(h.Store, h.Origin, func(w http.ResponseWriter, r *http.Request, s api.Session) error {
 		if e := h.Store.Logout(r.Context(), api.Token(r)); e != nil {
 			return e
 		}
@@ -119,7 +119,7 @@ func (h *Handler) Routes() http.Handler {
 		api.Write(w, 204, nil)
 		return nil
 	}))
-	m.HandleFunc("PATCH /api/v1/auth/profile", api.Auth(h.Store, h.Origin, func(w http.ResponseWriter, r *http.Request, s api.Session) error {
+	m.HandleFunc("PATCH /api/v1/auth/profile", api.HumanAuth(h.Store, h.Origin, func(w http.ResponseWriter, r *http.Request, s api.Session) error {
 		var in struct {
 			DisplayName string `json:"displayName"`
 		}
@@ -133,7 +133,7 @@ func (h *Handler) Routes() http.Handler {
 		api.Write(w, 200, map[string]any{"user": u})
 		return nil
 	}))
-	m.HandleFunc("GET /api/v1/auth/admin/invites", api.Auth(h.Store, h.Origin, func(w http.ResponseWriter, r *http.Request, s api.Session) error {
+	m.HandleFunc("GET /api/v1/auth/admin/invites", api.HumanAuth(h.Store, h.Origin, func(w http.ResponseWriter, r *http.Request, s api.Session) error {
 		w.Header().Set("Cache-Control", "no-store")
 		invites, e := h.Store.RegistrationInvites(r.Context(), s.User.ID)
 		if e != nil {
@@ -142,7 +142,7 @@ func (h *Handler) Routes() http.Handler {
 		api.Write(w, 200, map[string]any{"invites": invites})
 		return nil
 	}))
-	m.HandleFunc("POST /api/v1/auth/admin/invites", api.Auth(h.Store, h.Origin, func(w http.ResponseWriter, r *http.Request, s api.Session) error {
+	m.HandleFunc("POST /api/v1/auth/admin/invites", api.HumanAuth(h.Store, h.Origin, func(w http.ResponseWriter, r *http.Request, s api.Session) error {
 		w.Header().Set("Cache-Control", "no-store")
 		// Check permission before parsing a management request.
 		if e := h.Store.requireAdmin(r.Context(), s.User.ID); e != nil {
@@ -161,7 +161,7 @@ func (h *Handler) Routes() http.Handler {
 		}{invite, code}, "url": "/login?mode=register&inviteCode=" + code})
 		return nil
 	}))
-	m.HandleFunc("DELETE /api/v1/auth/admin/invites/{id}", api.Auth(h.Store, h.Origin, func(w http.ResponseWriter, r *http.Request, s api.Session) error {
+	m.HandleFunc("DELETE /api/v1/auth/admin/invites/{id}", api.HumanAuth(h.Store, h.Origin, func(w http.ResponseWriter, r *http.Request, s api.Session) error {
 		w.Header().Set("Cache-Control", "no-store")
 		if e := h.Store.RevokeRegistrationInvite(r.Context(), s.User.ID, r.PathValue("id")); e != nil {
 			return e

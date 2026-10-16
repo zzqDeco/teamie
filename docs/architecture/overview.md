@@ -1,6 +1,6 @@
-# Standalone IM architecture
+# IM and independent Agent services
 
-Teamie's first release is an IM platform. Humans and future agents share the participant contract, membership rules and message protocol. Agent scheduling, model invocation, turns and sandbox execution are owned by a separate future system.
+Teamie keeps durable IM and Agent execution independent. Humans and Agents share authenticated participant identity, ordinary membership rules and the same message protocol. Identity, Chat and Realtime do not import Eino or runtime types. Agent services can stop without disabling human message delivery.
 
 ```mermaid
 flowchart LR
@@ -8,53 +8,78 @@ flowchart LR
   Edge --> Web[Static web]
   Edge --> Identity[Identity · Hertz]
   Edge --> Chat[Chat · Hertz]
-  Edge --> RT[Realtime · Hertz + Gorilla WS]
-  Chat -->|Kitex Thrift| Identity
-  RT -->|Kitex Thrift| Identity
-  RT -->|Kitex Thrift| Chat
+  Edge --> RT[Realtime · Hertz + Gorilla]
+  Edge --> CP[Agent Control Plane]
+  Edge --> Gateway[Admin model gateway]
+  Chat -->|Kitex| Identity
+  RT -->|Kitex| Identity
+  RT -->|Kitex| Chat
+  CP -->|Generic principal RPC| Identity
+  CP -->|Generic membership RPC| Chat
+  Runtime[Eino runtime] -->|Definitions / safe status RPC| CP
+  Runtime -->|Own participant HTTP| Chat
+  Runtime -->|Scoped token RPC| Identity
+  Runtime -->|Model RPC| Gateway
+  Runtime -->|Execution RPC| Sandbox[Sandbox service]
+  Sandbox --> Child[Isolated execution child]
   Identity --> IDB[(Identity DB)]
   Chat --> CDB[(Chat DB)]
-  Chat --> Redis[(Redis hints)]
+  CP --> ADB[(Control DB)]
+  Runtime --> RDB[(Runtime DB)]
+  Gateway --> GDB[(Gateway DB)]
+  Chat --> Redis[(Disposable Redis hints)]
   RT --> Redis
-  Agent[Future external Agent adapter] -. authenticated IM API .-> Edge
 ```
 
 ## Service ownership
 
-| Service | Owns | Does not own |
-| --- | --- | --- |
-| Identity | User credentials, platform roles, single-use registration invitations, profiles, opaque sessions, CSRF tokens | Workspace admission and message authorization |
-| Chat | Workspaces, memberships, conversations, message history, read cursor, durable sync and outbox | Login sessions and Agent execution |
-| Realtime | Connections, heartbeats, disposable typing signals, sync hints | Message persistence and authorization policy |
+| Service | Owns |
+| --- | --- |
+| Identity | Human credentials/platform roles, registration invitations, profiles, sessions/CSRF; generic machine principals and scoped expiring credentials |
+| Chat | Workspaces, current normal memberships, conversations, durable messages/read/sync/outbox; generic delegated grants and moderation |
+| Realtime | Connections, heartbeats, disposable typing and sync hints; authorization checked through RPC |
+| Agent Control Plane | Human-owned Agent profiles, selected visibility/enabled state, reconciliation revisions and safe runtime status |
+| Agent runtime | Durable inbox/cursor, one Session per Agent, leases/fences, TurnLoop, checkpoints, compaction and model/tool receipts |
+| Model gateway | Platform-admin provider/model policy, encrypted secrets and upstream invocation |
+| Sandbox | Protected per-Agent filesystem workspaces, execution receipts, cancellation and isolated child containers |
 
-All three binaries are independently built and deployed from the backend monorepo. Identity and Chat have separate PostgreSQL databases and application roles. They share an instance to fit the initial host; they do not query each other's tables. Membership and message writes are in Chat so authorization and persistence can share a transaction. Realtime checks authority through Kitex. It cannot bypass membership by querying storage directly.
+Five persistent services own separate PostgreSQL databases and application roles: Identity, Chat, Agent Control Plane, runtime and gateway. Sandbox owns protected filesystem data; Realtime has no durable database. Sharing a PostgreSQL instance does not authorize foreign-table reads. Cross-service authority is expressed through authenticated Kitex RPC or the ordinary IM participant HTTP API.
 
-The edge and web container are the only public application entry points. HTTP auth routes go to Identity; chat routes go to Chat; WebSocket upgrades go to Realtime. Internal HTTP/RPC, PostgreSQL and Redis ports stay on the container network. Browser APIs are same-origin.
+Only Caddy publishes host HTTP/HTTPS. Static web and public API paths are routed through it; backend HTTP/RPC, PostgreSQL, Redis, gateway runtime RPC and Sandbox RPC remain private. Browser requests are same-origin. CP/worker credentials stay out of browser bundles and Sandbox children.
 
-Identity serializes first-account initialization: only the configured bootstrap invitation can create the first account, which becomes platform administrator. `BOOTSTRAP_INVITE_CODE` defaults to `teamie-bootstrap` when unset. Once any account exists this code cannot create another account. An authenticated platform administrator generates cryptographically random ordinary invitations; each hashed invitation admits exactly one successful registration, expires in seven days, and may be revoked before consumption. Failed account creation rolls back invitation consumption. Platform roles and workspace roles are independent; the platform administrator still requires workspace membership to read messages.
+Identity serializes first-account initialization: the configured bootstrap invitation creates exactly one first platform admin. `BOOTSTRAP_INVITE_CODE` defaults to `teamie-bootstrap`; after any account exists it cannot admit another account. An admin creates a separate random ordinary invitation for each additional successful registration. Hashed codes expire in seven days, support revocation, and are consumed in the account/session transaction. Platform and workspace roles remain independent.
 
-## Message guarantees
+## IM guarantees
 
-1. The current server session determines the sender. A caller cannot impersonate another participant by supplying an ID.
-2. A conversation serializes its message sequence. A client-generated message ID provides retry idempotence; changing content under the same ID is a conflict.
-3. A transaction commits the message, authorized recipients' durable sync events and outbox together. API success means the data has committed.
-4. Redis/WS provide at-least-once hints. Clients fetch durable events from HTTP sync and reconcile by message ID and event order.
-5. Reconnect starts from the last applied per-account cursor. Pagination must drain all pages before assuming it is caught up. Invalid/future cursors fail explicitly.
-6. Current membership is checked for history, sync, writes and typing delivery. Losing membership clears the client's cached view. Pending old protected events are filtered while the sync cursor continues advancing.
-7. Retraction leaves a tombstone. Read cursors only advance. Disabling edit/retract does not make old content unreadable.
+1. Authenticated server identity determines the sender. No client-supplied sender ID can impersonate a participant.
+2. Each conversation serializes message sequence allocation. A stable sender/client message ID is idempotent; reusing it with different content or conversation conflicts.
+3. One transaction commits the message, recipients' per-user durable sync events and outbox. API success means the data committed. Sorted sync-head locks prevent cursors from skipping earlier concurrent commits.
+4. Redis and WebSocket carry replaceable hints. Clients drain paginated durable HTTP sync from their last applied cursor and reconcile by message/event ID. Periodic sync covers lost hints; no exactly-once transport claim is made.
+5. Current workspace and explicit private conversation membership authorize history, sends, reads, sync and typing. Revoked old payloads are filtered while the cursor advances. Group additions/removals use ordinary participant management, regardless of kind.
+6. Retraction leaves a redacted tombstone in history, point lookup and historical sync. Read cursors only advance. Disabled write features preserve persisted reads.
 
-The outbox provides durable notification retry, while periodic sync covers lost hints. No exactly-once transport claim is made. A single host is not highly available; a failed host interrupts all services.
+Agent visibility creates ordinary membership selected from its human owner's current workspaces. Public channels retain their existing workspace scope; direct/private group conversations require explicit membership. Owner/grantor loss cascades delegated revocation, and background reconciliation never recreates a moderator-removed membership. Neither platform admin nor Agent ownership bypasses IM privacy.
 
-## Flags and permissions
+## Agent execution
 
-Feature definitions and defaults are versioned in Git; protected production overrides carry a revision. Backend capability output is the intersection of implemented functionality, enabled flag and permission. The frontend consumes these capabilities and the backend independently enforces them. Attachments, reactions, threads, search and Agent execution are out of the first release.
+`agent-control`, `agent-runtime`, `agent-infra` and `agent-protocol` are independent Go modules outside IM. Runtime pins **Eino v0.10.0-alpha.35**. Eino provides composition, Session and TurnLoop; Teamie's storage and worker code provide distributed leases, durable cursors, retry fencing and tool receipts.
 
-## Initial infrastructure
+Each Agent has one durable global Session `agent:<id>`. Fresh message bodies plus sender/workspace/conversation/message/event IDs enter the input envelope. Bounded source-aware compaction preserves context references, while old IM history remains available through explicit tools. All sends/replies use an explicit destination tool; ordinary model output and operational errors are never automatically sent to IM.
 
-One Debian x86_64 ECS host runs Docker Compose with Caddy, web, Identity, Chat, Realtime, PostgreSQL and Redis. Images are built on hosted GitHub runners and pulled by immutable GHCR digest. Infra images are mirrored to GHCR because direct Docker Hub access from the initial host is unreliable. Application data, PostgreSQL, certificate storage and backups have persistent storage; containers are replaceable.
+Desired definition state is persisted before provisioning; Identity is disabled while CP reconciles membership/configuration, then enabled only for the applied revision. Tokens rotate/expire and are revoked on disable/delete/revision. Runtime definitions and tool/model preflight checks stop stale work. Inbox persistence and IM cursor advancement commit together. Stable sends and known tool results replay without duplicate public messages; unknown execution effects are not silently rerun.
 
-A public IP uses an explicitly configured Let's Encrypt ACME `shortlived` issuer. The certificate must be publicly trusted and automatically renewed before release acceptance. Caddy's implicit internal CA for IPs is insufficient. See [Caddy TLS configuration](https://caddyserver.com/docs/caddyfile/directives/tls) and [Let's Encrypt IP certificate availability](https://letsencrypt.org/2026/01/15/6day-and-ip-general-availability).
+The initial runtime process has **one global turn slot** and a durable lease per Agent. This limits concurrent model work for the initial host. It is not a multi-host throughput guarantee. Sandbox workspaces persist independently of short-lived execution children. Children receive fixed platform mounts/resource policy and no network, host socket or service/provider credentials.
 
-IP clients may omit TLS SNI, while Caddy sees a private container destination address. `TLS_SERVER_NAME` must equal the public origin hostname; Caddy uses it as `default_sni` so the correct public certificate is selected. CI verifies the no-SNI handshake with an explicitly trusted disposable IP certificate, rather than disabling certificate verification.
+Production starts with an unconfigured model gateway at the user's request. Healthy readiness does not imply a configured model or real-provider acceptance. Agents wait with durable inputs until a platform admin configures/enables the gateway. CI uses explicit protocol fixtures; live provider verification remains a separate gate.
 
-Memory limits are initial budgets for a 2-vCPU/2-GB host, not measured capacity claims. Database connection pools, RPC concurrency and WS buffers must be bounded. Backups on the same disk provide recovery from mistakes but do not protect against losing the host; external backup storage remains a future operational addition.
+## Flags, infrastructure and release
+
+Versioned backend flag files carry a revision. Effective capabilities intersect implemented behavior and enabled keys; the backend independently checks authorization. Agent capabilities are false when absent from an older v1 file. Disabled write features keep persisted profiles/history readable. Attachments, reactions, threads and general IM search remain unavailable.
+
+One Debian x86_64 host runs the Compose services. The release contains twelve immutable GHCR images: web, Identity, Chat, Realtime, Control Plane, runtime, gateway, Sandbox, execution-runner, Caddy, PostgreSQL and Redis. Execution-runner is an on-demand child image. Hosted CI builds images; the production host pulls digest-pinned artifacts. Persistent volumes preserve databases, workspaces, receipts, certificates and backups.
+
+Only `production` is deployed; disposable CI databases do not constitute a second environment. `main` is the ongoing trunk. Published `release/vx.x.x` branches/tags are immutable permanent archives; fixes require a new version. Forward migrations preserve existing accounts/messages. Identity/Chat schema 2 adopt unchanged published v1 migrations; Control Plane/runtime/gateway each begin at schema 1. Cross-schema image rollback is rejected; verify a pre-upgrade backup/restore path before migration.
+
+The public IP uses the configured Let's Encrypt ACME `shortlived` issuer and `TLS_SERVER_NAME`/`default_sni` for non-SNI clients. Public trusted HTTPS and renewal are separate acceptance gates. Internal-CA or disabled-verification checks do not establish public trust.
+
+Memory/CPU limits are initial budgets for a 2-vCPU/2-GB host, not measured capacity claims. Connections, queues, concurrent turns and execution children are bounded. A single host is not highly available. Same-disk backups cover some mistakes but not host loss; off-host storage remains future operational work.
