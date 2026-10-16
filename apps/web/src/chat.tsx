@@ -280,6 +280,10 @@ export function errorText(error: unknown) {
     return error instanceof Error ? error.message : "请求失败，请稍后重试";
   const messages: Record<string, string> = {
     invalid_credentials: "邮箱或密码不正确，请重新输入。",
+    invalid_current_password: "当前密码不正确，请重新输入。",
+    invalid_password: "密码需至少 12 个字符，且不超过 72 字节。",
+    password_unchanged: "新密码不能与当前密码相同。",
+    unauthorized: "登录已失效，请重新登录。",
     invalid_invite: "邀请码无效、已使用或已失效，请联系管理员获取新的邀请。",
     invalid_invitation:
       "邀请码无效、已使用或已失效，请联系管理员获取新的邀请。",

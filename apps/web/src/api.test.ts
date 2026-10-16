@@ -5,6 +5,41 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe("account-bound transport", () => {
+  it("changes the password using the authenticated CSRF-protected endpoint and handles an empty 204", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetch);
+    const client = new TeamieClient();
+    client.csrfToken = "current-session";
+    expect(await client.changePassword("example-old-password", "example-new-password")).toBeUndefined();
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/auth/password");
+    const options = fetch.mock.calls[0][1];
+    expect(options.method).toBe("POST");
+    expect(options.credentials).toBe("same-origin");
+    expect(options.cache).toBe("no-store");
+    expect(options.headers.get("X-CSRF-Token")).toBe("current-session");
+    expect(options.headers.get("Content-Type")).toBe("application/json");
+    expect(JSON.parse(options.body)).toEqual({
+      currentPassword: "example-old-password",
+      newPassword: "example-new-password",
+    });
+  });
+  it.each([
+    [400, "invalid_current_password", false],
+    [400, "invalid_password", false],
+    [429, "rate_limited", false],
+    [401, "unauthorized", true],
+  ])("only invalidates a password-change session for an actual 401: %s %s", async (status, code, unauthorized) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ error: { code, message: "example error" } }),
+      { status: status as number },
+    )));
+    const client = new TeamieClient();
+    client.csrfToken = "current-session";
+    client.onUnauthorized = vi.fn();
+    await expect(client.changePassword("example-old-password", "example-new-password")).rejects.toMatchObject({ status, code });
+    expect(client.onUnauthorized).toHaveBeenCalledTimes(unauthorized ? 1 : 0);
+    expect(client.csrfToken).toBe("current-session");
+  });
   it("sends relative same-origin writes with the current CSRF token", async () => {
     const fetch = vi
       .fn()
@@ -46,6 +81,41 @@ describe("account-bound transport", () => {
       ),
     );
     await expect(request).rejects.toBeInstanceOf(ApiError);
+    expect(client.onUnauthorized).not.toHaveBeenCalled();
+  });
+  it.each(["profile", "password"] as const)(
+    "does not invalidate a new session for an old %s response with 401",
+    async (endpoint) => {
+      let finish!: (response: Response) => void;
+      vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => { finish = resolve; })));
+      const client = new TeamieClient();
+      client.csrfToken = "old-session";
+      client.onUnauthorized = vi.fn();
+      const request = endpoint === "profile"
+        ? client.profile("旧会话的资料")
+        : client.changePassword("example-old-password", "example-new-password");
+      client.csrfToken = "new-session";
+      finish(new Response(
+        JSON.stringify({ error: { code: "unauthorized", message: "expired" } }),
+        { status: 401 },
+      ));
+      await expect(request).rejects.toMatchObject({ status: 401 });
+      expect(client.onUnauthorized).not.toHaveBeenCalled();
+      expect(client.csrfToken).toBe("new-session");
+    },
+  );
+  it("rechecks the session after parsing an old unauthorized response", async () => {
+    let finishBody!: (value: unknown) => void;
+    const json = vi.fn(() => new Promise((resolve) => { finishBody = resolve; }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401, json }));
+    const client = new TeamieClient();
+    client.csrfToken = "old-session";
+    client.onUnauthorized = vi.fn();
+    const request = client.profile("旧会话的资料");
+    await vi.waitFor(() => expect(json).toHaveBeenCalledOnce());
+    client.csrfToken = "new-session";
+    finishBody({ error: { code: "unauthorized", message: "expired" } });
+    await expect(request).rejects.toMatchObject({ status: 401 });
     expect(client.onUnauthorized).not.toHaveBeenCalled();
   });
   it("invalidates protected cache on a current-account membership denial", async () => {

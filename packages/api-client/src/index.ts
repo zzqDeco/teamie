@@ -198,8 +198,8 @@ export class TeamieClient {
     const sessionToken = this.csrfToken;
     const headers = new Headers(options.headers);
     if (options.body) headers.set("Content-Type", "application/json");
-    if (method !== "GET" && this.csrfToken)
-      headers.set("X-CSRF-Token", this.csrfToken);
+    if (method !== "GET" && sessionToken)
+      headers.set("X-CSRF-Token", sessionToken);
     const response = await fetch(`/api/v1${path}`, {
       ...options,
       headers,
@@ -312,6 +312,11 @@ export class TeamieClient {
       body: JSON.stringify(data),
     });
   logout = () => this.#request<void>("/auth/logout", { method: "POST" });
+  changePassword = (currentPassword: string, newPassword: string) =>
+    this.#request<void>("/auth/password", {
+      method: "POST",
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
   profile = (displayName: string) =>
     this.#request<{ user: User }>("/auth/profile", {
       method: "PATCH",

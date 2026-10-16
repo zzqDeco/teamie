@@ -717,6 +717,17 @@ textarea:disabled {
 .settings-view {
   max-width: 800px;
 }
+.password-settings {
+  margin-top: 32px;
+  padding-top: 28px;
+  border-top: 1px solid #f0e7f5;
+}
+.password-settings > h3 {
+  margin-bottom: 8px;
+}
+.password-settings > .field-help {
+  margin-bottom: 22px;
+}
 .profile-banner {
   height: 54px;
 }

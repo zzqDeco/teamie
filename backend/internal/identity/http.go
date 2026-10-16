@@ -119,6 +119,29 @@ func (h *Handler) Routes() http.Handler {
 		api.Write(w, 204, nil)
 		return nil
 	}))
+	m.HandleFunc("POST /api/v1/auth/password", api.HumanAuth(h.Store, h.Origin, func(w http.ResponseWriter, r *http.Request, s api.Session) error {
+		w.Header().Set("Cache-Control", "no-store")
+		if s.ServicePrincipal {
+			return api.Err(403, "forbidden", "A human login session is required")
+		}
+		if !h.limit(s.User.Email) {
+			return api.Err(429, "rate_limited", "Try again in a minute")
+		}
+		var in struct {
+			CurrentPassword string `json:"currentPassword"`
+			NewPassword     string `json:"newPassword"`
+		}
+		if err := api.Decode(w, r, &in); err != nil {
+			return err
+		}
+		if err := h.Store.ChangePassword(r.Context(), s.User.ID, api.Token(r), in.CurrentPassword, in.NewPassword); err != nil {
+			return err
+		}
+		// The old cookie no longer authenticates after session revocation.
+		// Do not let a delayed response erase a newer login's cookie.
+		api.Write(w, 204, nil)
+		return nil
+	}))
 	m.HandleFunc("PATCH /api/v1/auth/profile", api.HumanAuth(h.Store, h.Origin, func(w http.ResponseWriter, r *http.Request, s api.Session) error {
 		var in struct {
 			DisplayName string `json:"displayName"`
