@@ -18,7 +18,7 @@ var Implemented = map[string]bool{
 	"agents.runtime.v3": true, "agents.tasks.execute": true,
 	"auth.public_signup": false, "im.dm.create": true, "im.group.create": true, "im.channel.create": true,
 	"im.message.edit": true, "im.message.retract": true, "im.typing.publish": true,
-	"im.presence.publish": false, "im.attachments.upload": false, "im.reactions.create": false, "im.threads.create": false,
+	"im.presence.publish": false, "im.attachments.upload": true, "im.reactions.create": false, "im.threads.create": false,
 }
 
 func (f Flags) Load() Snapshot {

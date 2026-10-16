@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"github.com/cloudwego/kitex/pkg/remote/codec"
 	"github.com/cloudwego/kitex/server"
 	"log"
 	"net"
 	"teamie/agent-infra/internal/api"
 	"teamie/agent-infra/internal/sandbox"
 	"teamie/agent-protocol/kitex_gen/agent/sandboxservice"
+	"teamie/backend/pkg/imlimits"
 	"time"
 )
 
@@ -32,7 +34,7 @@ func main() {
 	if e != nil {
 		log.Fatal("invalid RPC_ADDR")
 	}
-	rpc := sandboxservice.NewServer(service, server.WithServiceAddr(addr))
+	rpc := sandboxservice.NewServer(service, server.WithServiceAddr(addr), server.WithCodec(codec.NewDefaultCodecWithSizeLimit(imlimits.AttachmentRequestBytes)))
 	defer rpc.Stop()
 	go func() {
 		if rpc.Run() != nil {

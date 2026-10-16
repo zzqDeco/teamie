@@ -155,6 +155,18 @@ struct SandboxWorkspaceResponse {
   3: optional string errorCode
   4: optional string errorMessage
 }
+// Explicit binary import. Content never uses the text Workspace API or enters
+// a model observation. The service validates sha256, confines path and persists
+// a stable request receipt before atomically publishing a new file.
+struct SandboxImportRequest {
+  1: required string serviceToken
+  2: required string agentId
+  3: required string runId
+  4: required string requestId
+  5: required string path
+  6: required binary content
+  7: required string sha256
+}
 service SandboxService {
   SandboxExecResponse Exec(1: SandboxExecRequest request)
   Ack Cancel(1: CancelRequest request)
@@ -164,4 +176,5 @@ service SandboxService {
   SandboxTaskResponse ReadOutput(1: SandboxTaskRequest request)
   SandboxTaskResponse CancelTask(1: SandboxTaskRequest request)
   SandboxWorkspaceResponse Workspace(1: SandboxWorkspaceRequest request)
+  SandboxWorkspaceResponse ImportFile(1: SandboxImportRequest request)
 }

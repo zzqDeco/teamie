@@ -67,6 +67,30 @@ class Client:
             require(response.status in allowed, f"{method} {path}: expected {allowed}, got {response.status}, code={result.get('error', {}).get('code', '')}")
             return result
 
+    def upload(self, conversation: str, filename: str, content: bytes, status: int = 201) -> dict:
+        boundary = "teamie-" + uuid.uuid4().hex
+        data = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{filename}"\r\nContent-Type: image/png\r\n\r\n'.encode() + content + f"\r\n--{boundary}--\r\n".encode())
+        request = urllib.request.Request(CHAT + f"/api/v1/conversations/{conversation}/attachments", data=data, method="POST", headers={"Origin": ORIGIN, "X-CSRF-Token": self.csrf, "Content-Type": "multipart/form-data; boundary=" + boundary})
+        try:
+            response = self.opener.open(request, timeout=30)
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            result = json.loads(response.read())
+            require(response.status == status, f"upload expected {status}, got {response.status}, code={result.get('error', {}).get('code', '')}")
+            return result
+
+    def download(self, conversation: str, attachment: str, status: int = 200) -> tuple[bytes, dict]:
+        request = urllib.request.Request(CHAT + f"/api/v1/conversations/{conversation}/attachments/{attachment}/content", headers={"Origin": ORIGIN})
+        try:
+            response = self.opener.open(request, timeout=30)
+        except urllib.error.HTTPError as error:
+            response = error
+        with response:
+            data = response.read()
+            require(response.status == status, f"download expected {status}, got {response.status}")
+            return data, dict(response.headers)
+
     def register(self, name: str, suffix: str, invite_code: str) -> None:
         self.email = f"acceptance-{name}-{suffix}@example.invalid"
         self.password = secrets.token_urlsafe(20)
@@ -251,7 +275,8 @@ def main() -> None:
     bootstrap = owner.call("GET", "/api/v1/bootstrap")
     require(bootstrap["user"].get("platformRole") == "admin", "platform role propagates through real Identity RPC")
     require(not bootstrap["capabilities"].get("auth.public_signup", False), "public signup never bypasses invitation-only policy")
-    for key in ("im.attachments.upload", "im.reactions.create", "im.threads.create"):
+    require(bootstrap["capabilities"].get("im.attachments.upload") and bootstrap.get("attachmentLimits") == {"maxFileBytes": 4194304, "maxFilesPerMessage": 8}, "implemented attachment capability and limits")
+    for key in ("im.reactions.create", "im.threads.create"):
         require(not bootstrap["capabilities"].get(key, False), "unsupported feature remains unavailable")
     print("PASS workspace invite admission and authorization")
 
@@ -268,6 +293,32 @@ def main() -> None:
     require(group["type"] == "group" and set(group["memberIds"]) == {owner.user["id"], member.user["id"]}, "explicit group membership")
     outsider.call("GET", f"/api/v1/conversations/{direct['id']}/messages", status=(403, 404))
     print("PASS direct conversation uniqueness and explicit group scope")
+
+    file_cid = group["id"]
+    binary = bytes([0, 255, 254, 128, 65, 0, 13, 10]) * (4194304 // 8)
+    attachment = owner.upload(file_cid, "binary-check.bin", binary)["attachment"]
+    require(attachment["sizeBytes"] == len(binary) and attachment["sha256"] == hashlib.sha256(binary).hexdigest() and attachment["mediaType"] != "image/png", "maximum binary upload and MIME sniffing")
+    member.download(file_cid, attachment["id"], status=404)
+    outsider.download(file_cid, attachment["id"], status=404)
+    file_body = {"clientMessageId": str(uuid.uuid4()), "body": "", "attachmentIds": [attachment["id"]]}
+    member.call("POST", f"/api/v1/conversations/{file_cid}/messages", file_body, status=400)
+    file_message = owner.call("POST", f"/api/v1/conversations/{file_cid}/messages", file_body, status=201)["message"]
+    require(file_message["attachments"] == [attachment] and file_message["body"] == "", "file-only message descriptors")
+    file_retry = owner.call("POST", f"/api/v1/conversations/{file_cid}/messages", file_body)["message"]
+    require(file_retry["id"] == file_message["id"], "attachment retry identity")
+    owner.call("POST", f"/api/v1/conversations/{file_cid}/messages", dict(file_body, attachmentIds=[]), status=409)
+    downloaded, headers = member.download(file_cid, attachment["id"])
+    require(downloaded == binary and headers.get("Content-Type") == "application/octet-stream" and headers.get("X-Content-Type-Options") == "nosniff" and headers.get("Content-Disposition", "").startswith("attachment;"), "authorized byte equality and forced download")
+    require(member.call("GET", f"/api/v1/conversations/{file_cid}/messages")["messages"][0]["attachments"] == [attachment], "attachment descriptors survive history")
+    owner.call("DELETE", f"/api/v1/conversations/{file_cid}/messages/{file_message['id']}")
+    owner.download(file_cid, attachment["id"], status=404)
+    file_events, _ = drain(member)
+    require(all(not event.get("message", {}).get("attachments") for event in file_events if event.get("message", {}).get("id") == file_message["id"]), "old sync cannot resurrect retracted files")
+    owner.upload(file_cid, "over-limit.bin", binary + b"x", status=413)
+    pending = owner.upload(file_cid, "discard.bin", b"\x00\xff")["attachment"]
+    owner.call("DELETE", f"/api/v1/conversations/{file_cid}/attachments/{pending['id']}", status=204)
+    owner.download(file_cid, pending["id"], status=404)
+    print("PASS real Hertz maximum multipart binary upload, file-only retry, ACL, history/sync, retraction and download byte equality")
 
     ws = WebSocket(member)
     require(ws.receive()["type"] == "ready", "WS ready event")

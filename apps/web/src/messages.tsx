@@ -16,6 +16,13 @@ import {
   Users,
   X,
 } from "lucide-react";
+import { defaultAttachmentLimits } from "@teamie/api-client";
+import {
+  AttachmentDraft,
+  AttachmentPicker,
+  MessageAttachments,
+  useAttachmentDraft,
+} from "./attachments";
 import { api } from "@teamie/api-client";
 import type { Conversation, Member, Message } from "@teamie/api-client";
 import { useAuth } from "./auth";
@@ -55,6 +62,13 @@ export function ConversationView({
 }) {
   const { user } = useAuth();
   const { data, syncError, sync, sendTyping, typing } = useChat();
+  const attachments = useAttachmentDraft(
+    conversation.id,
+    data?.attachmentLimits || defaultAttachmentLimits,
+  );
+  const uploadsEnabled = !!data?.capabilities["im.attachments.upload"];
+  const attachmentBlocked =
+    attachments.blocked || (attachments.files.length > 0 && !uploadsEnabled);
   const snapshot = useChatState();
   const messages = snapshot.messages[conversation.id] || [];
   const name = conversationName(conversation, user!.id, members);
@@ -186,13 +200,20 @@ export function ConversationView({
   function submit(event?: FormEvent) {
     event?.preventDefault();
     const text = body.trim();
-    if (!text || text.length > 8000) return;
+    if (
+      (!text && !attachments.ready) ||
+      text.length > 8000 ||
+      attachmentBlocked
+    )
+      return;
+    const files = attachments.consume();
     const clientMessageId = crypto.randomUUID();
     const message: Message = {
       id: `local:${clientMessageId}`,
       clientMessageId,
       conversationId: conversation.id,
       body: text,
+      ...(files.length ? { attachments: files } : {}),
       senderId: user!.id,
       senderName: user!.displayName,
       senderKind: user!.kind,
@@ -220,7 +241,7 @@ export function ConversationView({
   }
   async function edit(event: FormEvent) {
     event.preventDefault();
-    if (!editing || !editBody.trim()) return;
+    if (!editing || (!editBody.trim() && !editing.attachments?.length)) return;
     const token = chatStore.generation;
     setActionBusy(true);
     setActionError("");
@@ -457,7 +478,10 @@ export function ConversationView({
                       <span>
                         {target?.retractedAt
                           ? "消息已撤回"
-                          : target?.body || "引用了一条较早的消息"}
+                          : target?.body ||
+                            (target?.attachments?.length
+                              ? `${target.attachments.length} 个文件`
+                              : "引用了一条较早的消息")}
                       </span>
                     </button>
                   )}
@@ -468,7 +492,7 @@ export function ConversationView({
                         value={editBody}
                         onChange={(e) => setEditBody(e.target.value)}
                         maxLength={8000}
-                        required
+                        required={!editing.attachments?.length}
                         aria-label="编辑消息内容"
                         onKeyDown={(e) => {
                           if (e.key === "Escape") setEditing(null);
@@ -488,7 +512,9 @@ export function ConversationView({
                           type="submit"
                           className="small-button"
                           busy={actionBusy}
-                          disabled={!editBody.trim()}
+                          disabled={
+                            !editBody.trim() && !editing.attachments?.length
+                          }
                         >
                           保存修改
                         </Button>
@@ -501,6 +527,12 @@ export function ConversationView({
                         <span className="edited-label">（已编辑）</span>
                       )}
                     </p>
+                  )}
+                  {!message.retractedAt && !!message.attachments?.length && (
+                    <MessageAttachments
+                      conversationId={conversation.id}
+                      attachments={message.attachments}
+                    />
                   )}
                   {message.status === "sending" && (
                     <span className="send-status">
@@ -604,12 +636,27 @@ export function ConversationView({
         </button>
       )}
       <div className="composer-area">
+        <AttachmentDraft
+          files={attachments.files}
+          error={
+            attachments.error ||
+            (attachments.files.length && !uploadsEnabled
+              ? "文件上传已关闭，请移除待发送文件"
+              : "")
+          }
+          onRemove={attachments.remove}
+          onRetry={attachments.retry}
+        />
         {reply && (
           <div className="reply-preview">
             <CornerUpLeft size={15} />
             <div>
               回复 <b>{reply.senderName}</b>
-              <span>{reply.retractedAt ? "消息已撤回" : reply.body}</span>
+              <span>
+                {reply.retractedAt
+                  ? "消息已撤回"
+                  : reply.body || `${reply.attachments?.length || 0} 个文件`}
+              </span>
             </div>
             <IconButton label="取消回复" onClick={() => setReply(null)}>
               <X size={16} />
@@ -641,13 +688,29 @@ export function ConversationView({
             aria-label="消息内容"
           />
           <div className="composer-tools">
+            {uploadsEnabled && (
+              <AttachmentPicker
+                onSelect={attachments.add}
+                disabled={
+                  attachments.files.length >=
+                  (data?.attachmentLimits || defaultAttachmentLimits)
+                    .maxFilesPerMessage
+                }
+                limit={
+                  (data?.attachmentLimits || defaultAttachmentLimits)
+                    .maxFileBytes
+                }
+              />
+            )}
             {body.length > 7600 && (
               <span className="character-count">{body.length}/8000</span>
             )}
             <button
               className="send-button"
               type="submit"
-              disabled={!body.trim()}
+              disabled={
+                (!body.trim() && !attachments.ready) || attachmentBlocked
+              }
               aria-label="发送消息"
               title="发送消息"
             >

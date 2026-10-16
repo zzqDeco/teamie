@@ -558,7 +558,7 @@ func (s *Service) supervise(ctx context.Context, key string, t *taskReceipt, rec
 			s.taskMu.Unlock()
 			cancelRequested = true
 		}
-		if !cancelRequested && !diskAvailable(s.WorkspaceRoot) {
+		if !cancelRequested && (!diskAvailable(s.WorkspaceRoot) || !workspaceWithinQuota(filepath.Join(s.WorkspaceRoot, digest(agentID)))) {
 			s.taskMu.Lock()
 			t.CancelRequested = true
 			t.CancelCode = "execution_disk_limit"

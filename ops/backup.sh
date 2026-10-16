@@ -20,6 +20,8 @@ complete=0
 trap '[[ $complete == 1 ]] || rm -rf -- "$destination"' EXIT
 databases=$(python3 -c 'import json,sys; print(" ".join("teamie_"+name for name in json.load(open(sys.argv[1]))["schema"]))' "$current/release-manifest.json")
 for database in $databases; do
+  # Chat's bounded bytea file content and its message relationships are part of
+  # this logical database dump, alongside metadata; no attachment volume exists.
   # Expand the protected password inside the PostgreSQL container, not on the host.
   # shellcheck disable=SC2016
   "${COMPOSE[@]}" exec -T postgres sh -ec \

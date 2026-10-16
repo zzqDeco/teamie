@@ -69,6 +69,13 @@ var serviceMethods = map[string]kitex.MethodInfo{
 		false,
 		kitex.WithStreamingMode(kitex.StreamingNone),
 	),
+	"ImportFile": kitex.NewMethodInfo(
+		importFileHandler,
+		newSandboxServiceImportFileArgs,
+		newSandboxServiceImportFileResult,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
 }
 
 var (
@@ -279,6 +286,24 @@ func newSandboxServiceWorkspaceResult() interface{} {
 	return agent.NewSandboxServiceWorkspaceResult()
 }
 
+func importFileHandler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*agent.SandboxServiceImportFileArgs)
+	realResult := result.(*agent.SandboxServiceImportFileResult)
+	success, err := handler.(agent.SandboxService).ImportFile(ctx, realArg.Request)
+	if err != nil {
+		return err
+	}
+	realResult.Success = success
+	return nil
+}
+func newSandboxServiceImportFileArgs() interface{} {
+	return agent.NewSandboxServiceImportFileArgs()
+}
+
+func newSandboxServiceImportFileResult() interface{} {
+	return agent.NewSandboxServiceImportFileResult()
+}
+
 type kClient struct {
 	c client.Client
 }
@@ -364,6 +389,16 @@ func (p *kClient) Workspace(ctx context.Context, request *agent.SandboxWorkspace
 	_args.Request = request
 	var _result agent.SandboxServiceWorkspaceResult
 	if err = p.c.Call(ctx, "Workspace", &_args, &_result); err != nil {
+		return
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) ImportFile(ctx context.Context, request *agent.SandboxImportRequest) (r *agent.SandboxWorkspaceResponse, err error) {
+	var _args agent.SandboxServiceImportFileArgs
+	_args.Request = request
+	var _result agent.SandboxServiceImportFileResult
+	if err = p.c.Call(ctx, "ImportFile", &_args, &_result); err != nil {
 		return
 	}
 	return _result.GetSuccess(), nil

@@ -1615,6 +1615,89 @@ var fieldIDToName_SandboxWorkspaceResponse = map[int16]string{
 	4: "errorMessage",
 }
 
+type SandboxImportRequest struct {
+	ServiceToken string `thrift:"serviceToken,1,required" frugal:"1,required,string" json:"serviceToken"`
+	AgentId      string `thrift:"agentId,2,required" frugal:"2,required,string" json:"agentId"`
+	RunId        string `thrift:"runId,3,required" frugal:"3,required,string" json:"runId"`
+	RequestId    string `thrift:"requestId,4,required" frugal:"4,required,string" json:"requestId"`
+	Path         string `thrift:"path,5,required" frugal:"5,required,string" json:"path"`
+	Content      []byte `thrift:"content,6,required" frugal:"6,required,binary" json:"content"`
+	Sha256       string `thrift:"sha256,7,required" frugal:"7,required,string" json:"sha256"`
+}
+
+func NewSandboxImportRequest() *SandboxImportRequest {
+	return &SandboxImportRequest{}
+}
+
+func (p *SandboxImportRequest) InitDefault() {
+}
+
+func (p *SandboxImportRequest) GetServiceToken() (v string) {
+	return p.ServiceToken
+}
+
+func (p *SandboxImportRequest) GetAgentId() (v string) {
+	return p.AgentId
+}
+
+func (p *SandboxImportRequest) GetRunId() (v string) {
+	return p.RunId
+}
+
+func (p *SandboxImportRequest) GetRequestId() (v string) {
+	return p.RequestId
+}
+
+func (p *SandboxImportRequest) GetPath() (v string) {
+	return p.Path
+}
+
+func (p *SandboxImportRequest) GetContent() (v []byte) {
+	return p.Content
+}
+
+func (p *SandboxImportRequest) GetSha256() (v string) {
+	return p.Sha256
+}
+func (p *SandboxImportRequest) SetServiceToken(val string) {
+	p.ServiceToken = val
+}
+func (p *SandboxImportRequest) SetAgentId(val string) {
+	p.AgentId = val
+}
+func (p *SandboxImportRequest) SetRunId(val string) {
+	p.RunId = val
+}
+func (p *SandboxImportRequest) SetRequestId(val string) {
+	p.RequestId = val
+}
+func (p *SandboxImportRequest) SetPath(val string) {
+	p.Path = val
+}
+func (p *SandboxImportRequest) SetContent(val []byte) {
+	p.Content = val
+}
+func (p *SandboxImportRequest) SetSha256(val string) {
+	p.Sha256 = val
+}
+
+func (p *SandboxImportRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SandboxImportRequest(%+v)", *p)
+}
+
+var fieldIDToName_SandboxImportRequest = map[int16]string{
+	1: "serviceToken",
+	2: "agentId",
+	3: "runId",
+	4: "requestId",
+	5: "path",
+	6: "content",
+	7: "sha256",
+}
+
 type AgentControlService interface {
 	ListAgents(ctx context.Context, request *AgentListRequest) (r *AgentListResponse, err error)
 
@@ -2885,6 +2968,8 @@ type SandboxService interface {
 	CancelTask(ctx context.Context, request *SandboxTaskRequest) (r *SandboxTaskResponse, err error)
 
 	Workspace(ctx context.Context, request *SandboxWorkspaceRequest) (r *SandboxWorkspaceResponse, err error)
+
+	ImportFile(ctx context.Context, request *SandboxImportRequest) (r *SandboxWorkspaceResponse, err error)
 }
 
 type SandboxServiceExecArgs struct {
@@ -3492,5 +3577,81 @@ func (p *SandboxServiceWorkspaceResult) String() string {
 }
 
 var fieldIDToName_SandboxServiceWorkspaceResult = map[int16]string{
+	0: "success",
+}
+
+type SandboxServiceImportFileArgs struct {
+	Request *SandboxImportRequest `thrift:"request,1" frugal:"1,default,SandboxImportRequest" json:"request"`
+}
+
+func NewSandboxServiceImportFileArgs() *SandboxServiceImportFileArgs {
+	return &SandboxServiceImportFileArgs{}
+}
+
+func (p *SandboxServiceImportFileArgs) InitDefault() {
+}
+
+var SandboxServiceImportFileArgs_Request_DEFAULT *SandboxImportRequest
+
+func (p *SandboxServiceImportFileArgs) GetRequest() (v *SandboxImportRequest) {
+	if !p.IsSetRequest() {
+		return SandboxServiceImportFileArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *SandboxServiceImportFileArgs) SetRequest(val *SandboxImportRequest) {
+	p.Request = val
+}
+
+func (p *SandboxServiceImportFileArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *SandboxServiceImportFileArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SandboxServiceImportFileArgs(%+v)", *p)
+}
+
+var fieldIDToName_SandboxServiceImportFileArgs = map[int16]string{
+	1: "request",
+}
+
+type SandboxServiceImportFileResult struct {
+	Success *SandboxWorkspaceResponse `thrift:"success,0,optional" frugal:"0,optional,SandboxWorkspaceResponse" json:"success,omitempty"`
+}
+
+func NewSandboxServiceImportFileResult() *SandboxServiceImportFileResult {
+	return &SandboxServiceImportFileResult{}
+}
+
+func (p *SandboxServiceImportFileResult) InitDefault() {
+}
+
+var SandboxServiceImportFileResult_Success_DEFAULT *SandboxWorkspaceResponse
+
+func (p *SandboxServiceImportFileResult) GetSuccess() (v *SandboxWorkspaceResponse) {
+	if !p.IsSetSuccess() {
+		return SandboxServiceImportFileResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *SandboxServiceImportFileResult) SetSuccess(x interface{}) {
+	p.Success = x.(*SandboxWorkspaceResponse)
+}
+
+func (p *SandboxServiceImportFileResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *SandboxServiceImportFileResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SandboxServiceImportFileResult(%+v)", *p)
+}
+
+var fieldIDToName_SandboxServiceImportFileResult = map[int16]string{
 	0: "success",
 }

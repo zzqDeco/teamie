@@ -1,0 +1,203 @@
+openapi: 3.1.0
+info:
+  title: Teamie IM conversation file routes
+  version: 1.0.0
+  description: Changed IM v1 routes. Current conversation ACLs apply to cookie and generic principal authentication. No public download URLs exist.
+security:
+  - session: []
+  - principal: []
+paths:
+  /api/v1/conversations/{id}/attachments:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+    post:
+      operationId: uploadAttachment
+      description: Upload exactly one file. Requires enabled write flag and normal CSRF/Origin for browser writes. Unlinked uploads expire in 24 hours.
+      parameters:
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Non-empty file, maximum 4194304 binary bytes. Filename is validated; MIME is server-sniffed.
+      responses:
+        '201':
+          description: Private pending file descriptor
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [attachment]
+                properties:
+                  attachment:
+                    $ref: '#/components/schemas/Attachment'
+        '400':
+          $ref: '#/components/responses/Failure'
+        '403':
+          $ref: '#/components/responses/Failure'
+        '404':
+          $ref: '#/components/responses/Failure'
+        '413':
+          $ref: '#/components/responses/Failure'
+        '429':
+          $ref: '#/components/responses/Failure'
+  /api/v1/conversations/{id}/attachments/{attachmentId}:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+      - $ref: '#/components/parameters/AttachmentId'
+    delete:
+      operationId: deletePendingAttachment
+      description: Remove the current uploader's unlinked file. A missing file is idempotent; linked or someone else's file is unavailable. Current ACL and CSRF apply, even when upload writes are disabled.
+      parameters:
+        - $ref: '#/components/parameters/CSRF'
+      responses:
+        '204':
+          description: Pending file removed or already absent
+        '404':
+          $ref: '#/components/responses/Failure'
+  /api/v1/conversations/{id}/attachments/{attachmentId}/content:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+      - $ref: '#/components/parameters/AttachmentId'
+    get:
+      operationId: downloadAttachment
+      description: Current conversation members may read linked, unretracted files; only the uploader may read unexpired unlinked files. Upload flag does not restrict persisted reads.
+      responses:
+        '200':
+          description: Original bytes, with no-store, nosniff, sandbox CSP and forced attachment disposition
+          headers:
+            Content-Disposition:
+              schema: {type: string}
+            X-Attachment-SHA256:
+              schema: {type: string, pattern: '^[0-9a-f]{64}$'}
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        '404':
+          $ref: '#/components/responses/Failure'
+        '429':
+          $ref: '#/components/responses/Failure'
+  /api/v1/conversations/{id}/messages:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+    post:
+      operationId: sendMessage
+      description: Atomic attachment binding and message commit. Files must be the sender's unexpired unlinked uploads in this conversation. A stable clientMessageId compares original body, destination, reply and ordered attachment IDs. File-only messages are allowed.
+      parameters:
+        - $ref: '#/components/parameters/CSRF'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [clientMessageId, body]
+              properties:
+                clientMessageId: {type: string, minLength: 1, maxLength: 128}
+                body: {type: string, maxLength: 8000}
+                replyToId: {type: string}
+                attachmentIds:
+                  type: array
+                  maxItems: 8
+                  uniqueItems: true
+                  items: {type: string}
+      responses:
+        '201':
+          $ref: '#/components/responses/Message'
+        '200':
+          $ref: '#/components/responses/Message'
+        '400':
+          $ref: '#/components/responses/Failure'
+        '409':
+          $ref: '#/components/responses/Failure'
+components:
+  securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: teamie_session
+    principal:
+      type: http
+      scheme: bearer
+      description: Internal generic participant bearer, also requires X-Teamie-Service-Key and forbids browser contexts.
+  parameters:
+    ConversationId:
+      name: id
+      in: path
+      required: true
+      schema: {type: string}
+    AttachmentId:
+      name: attachmentId
+      in: path
+      required: true
+      schema: {type: string}
+    CSRF:
+      name: X-CSRF-Token
+      in: header
+      description: Required for cookie-authenticated writes; trusted Origin is checked separately.
+      schema: {type: string}
+  schemas:
+    Attachment:
+      type: object
+      additionalProperties: false
+      required: [id, filename, mediaType, sizeBytes, sha256]
+      properties:
+        id: {type: string}
+        filename: {type: string, minLength: 1, maxLength: 180}
+        mediaType: {type: string}
+        sizeBytes: {type: integer, minimum: 1, maximum: 4194304}
+        sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+    Message:
+      type: object
+      required: [id, conversationId, senderId, clientMessageId, seq, body, createdAt]
+      properties:
+        id: {type: string}
+        conversationId: {type: string}
+        senderId: {type: string}
+        senderName: {type: string}
+        senderKind: {type: string, enum: [human, agent]}
+        clientMessageId: {type: string}
+        seq: {type: integer}
+        body: {type: string}
+        replyToId: {type: string}
+        attachments:
+          type: array
+          maxItems: 8
+          items: {$ref: '#/components/schemas/Attachment'}
+        createdAt: {type: string, format: date-time}
+        editedAt: {type: string, format: date-time}
+        retractedAt: {type: string, format: date-time}
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: {type: string}
+            message: {type: string}
+  responses:
+    Failure:
+      description: Defined authentication, ACL, validation, conflict or capacity error
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Message:
+      description: Persisted message, or the same current message on retry
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [message]
+            properties:
+              message: {$ref: '#/components/schemas/Message'}

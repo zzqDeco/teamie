@@ -22,6 +22,9 @@ var schema string
 //go:embed migrations/002_membership_management.sql
 var schemaV2 string
 
+//go:embed migrations/003_attachments.sql
+var schemaV3 string
+
 type Store struct {
 	DB    *pgxpool.Pool
 	Flags config.Flags
@@ -44,7 +47,7 @@ func Open(ctx context.Context, url string, flags config.Flags) (*Store, error) {
 	return s, nil
 }
 func (s *Store) Migrate(ctx context.Context) error {
-	return database.Migrate(ctx, s.DB, 704102, "chat_schema_migrations", []database.Migration{{Version: 1, SQL: schema}, {Version: 2, SQL: schemaV2}})
+	return database.Migrate(ctx, s.DB, 704102, "chat_schema_migrations", []database.Migration{{Version: 1, SQL: schema}, {Version: 2, SQL: schemaV2}, {Version: 3, SQL: schemaV3}})
 }
 func (s *Store) Ping(ctx context.Context) error { return s.DB.Ping(ctx) }
 func notFound(e error) error {
@@ -263,6 +266,7 @@ func (s *Store) Sync(ctx context.Context, user, cursor string, limit int) ([]Eve
 		// Erase body from historical sync events after a later retraction, too.
 		if ev.Message != nil && deleted {
 			ev.Message.Body = ""
+			ev.Message.Attachments = nil
 		}
 		out = append(out, ev)
 	}

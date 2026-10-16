@@ -40,6 +40,7 @@ func main() {
 	rdb := redis.NewClient(&redis.Options{Addr: api.Env("REDIS_ADDR", "redis:6379")})
 	defer rdb.Close()
 	go store.RunOutbox(ctx, rdb)
+	go store.RunAttachmentCleanup(ctx)
 	addr, e := net.ResolveTCPAddr("tcp", api.Env("RPC_ADDR", ":8882"))
 	if e != nil {
 		log.Fatal(e)

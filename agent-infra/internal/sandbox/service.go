@@ -295,7 +295,7 @@ func (s *Service) Exec(ctx context.Context, r *agent.SandboxExecRequest) (*agent
 				return
 			case <-ticker.C:
 				var fs syscall.Statfs_t
-				if syscall.Statfs(s.WorkspaceRoot, &fs) != nil || fs.Bavail <= 0 || uint64(fs.Bavail)*uint64(fs.Bsize) < 2*1024*1024*1024 {
+				if syscall.Statfs(s.WorkspaceRoot, &fs) != nil || fs.Bavail <= 0 || uint64(fs.Bavail)*uint64(fs.Bsize) < 2*1024*1024*1024 || !workspaceWithinQuota(workspace) {
 					monitorMu.Lock()
 					diskLimited = true
 					monitorMu.Unlock()

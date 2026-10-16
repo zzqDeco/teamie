@@ -167,7 +167,7 @@ func TestChatV1UpgradePreservesMessages(t *testing.T) {
 		t.Fatal("published data lost", e)
 	}
 	var version int
-	if e = s.DB.QueryRow(ctx, "SELECT max(version) FROM chat_schema_migrations").Scan(&version); e != nil || version != 2 {
+	if e = s.DB.QueryRow(ctx, "SELECT max(version) FROM chat_schema_migrations").Scan(&version); e != nil || version != 3 {
 		t.Fatal("ledger", version, e)
 	}
 }

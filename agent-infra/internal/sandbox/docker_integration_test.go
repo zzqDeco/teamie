@@ -40,6 +40,12 @@ func TestRealDockerExecutionSeparationAndCleanup(t *testing.T) {
 	if e = s.Ready(ctx); e != nil {
 		t.Fatal(e)
 	}
+	// Binary IM imports must be readable by the isolated non-root child without
+	// converting bytes into the text Workspace API or exposing service tokens.
+	imported, e := s.ImportFile(ctx, importRequest([]byte{0, 255, 254, 128, 0, 65, 13, 10}))
+	if e != nil || !imported.Ok {
+		t.Fatal("binary import before isolated execution", imported, e)
+	}
 	r := request()
 	r.Command = fmt.Sprintf(`python3 - <<'PY'
 import os,socket,resource
@@ -49,6 +55,7 @@ quota,period=map(int,open("/sys/fs/cgroup/cpu.max").read().split())
 assert quota/period==0.5
 assert resource.getrlimit(resource.RLIMIT_FSIZE)==(8388608,8388608)
 assert os.getuid()==10001
+assert open('/workspace/attachments/raw.bin','rb').read()==bytes([0,255,254,128,0,65,13,10])
 assert not os.path.exists('/var/run/docker.sock')
 # Official Python image metadata may include public GPG_KEY; only platform
 # credential names and private supervisor fixture values are forbidden.
@@ -87,7 +94,7 @@ PY`, token, fixtureSecret, fixtureMaster)
 	}
 	r.AgentId = "agent-b"
 	r.RequestId = "separate"
-	r.Command = "test ! -e persistent.txt"
+	r.Command = "test ! -e persistent.txt && test ! -e attachments/raw.bin"
 	other, _ := s.Exec(ctx, r)
 	if other.ExitCode != 0 {
 		t.Fatal(other)
