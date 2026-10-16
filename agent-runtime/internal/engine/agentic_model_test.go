@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -120,6 +121,142 @@ func TestNativeStreamCloseCancelsSilentHTTPWithoutReceipt(t *testing.T) {
 	if count(t, s, `SELECT count(*) FROM runtime_model_calls`) != 0 {
 		t.Fatal("closed partial stream became a complete model receipt")
 	}
+}
+
+func TestNativeActiveStreamSurvivesForcedGCAndCommitsCompleteReceipt(t *testing.T) {
+	s, l, run := nativeModelRun(t)
+	proceed := make(chan struct{})
+	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		send := func(block *schema.ContentBlock) bool {
+			m := &schema.AgenticMessage{Role: schema.AgenticRoleTypeAssistant, ContentBlocks: []*schema.ContentBlock{block}}
+			b, e := (&schema.HumanReadableSerializer{}).Marshal(m)
+			if e != nil {
+				t.Error(e)
+				return false
+			}
+			if e = json.NewEncoder(w).Encode(map[string]string{"type": "chunk", "responseJson": string(b)}); e != nil {
+				return false
+			}
+			w.(http.Flusher).Flush()
+			return true
+		}
+		if !send(schema.NewContentBlockChunk(&schema.Reasoning{Text: "thinking "}, &schema.StreamingMeta{Index: 0})) {
+			return
+		}
+		select {
+		case <-proceed:
+		case <-r.Context().Done():
+			return
+		}
+		for _, block := range []*schema.ContentBlock{
+			schema.NewContentBlockChunk(&schema.Reasoning{Text: "continued"}, &schema.StreamingMeta{Index: 0}),
+			schema.NewContentBlockChunk(&schema.AssistantGenText{Text: "private "}, &schema.StreamingMeta{Index: 1}),
+			schema.NewContentBlockChunk(&schema.AssistantGenText{Text: "answer"}, &schema.StreamingMeta{Index: 1}),
+			schema.NewContentBlockChunk(&schema.FunctionToolCall{CallID: "gc-stable-call", Name: "im_send_message", Arguments: `{"body":`}, &schema.StreamingMeta{Index: 2}),
+			schema.NewContentBlockChunk(&schema.FunctionToolCall{Arguments: `"explicit"}`}, &schema.StreamingMeta{Index: 2}),
+		} {
+			if !send(block) {
+				return
+			}
+		}
+		meta := &schema.AgenticMessage{Role: schema.AgenticRoleTypeAssistant, ResponseMeta: &schema.AgenticResponseMeta{TokenUsage: &schema.TokenUsage{PromptTokens: 8, CompletionTokens: 4, TotalTokens: 12}, Extension: &agenticopenai.ChatResponseMetaExtension{ID: "gc-response", FinishReason: "tool_calls"}}}
+		b, e := (&schema.HumanReadableSerializer{}).Marshal(meta)
+		if e != nil {
+			t.Error(e)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"type": "chunk", "responseJson": string(b)})
+		_ = json.NewEncoder(w).Encode(map[string]string{"type": "done"})
+	}))
+	ctx, cancel := context.WithTimeout(WithRun(context.Background(), run), 5*time.Second)
+	defer func() { cancel(); fixture.Close() }()
+	gateway := &GatewayModel{Store: s, Lease: l, AgentID: l.AgentID, StreamURL: fixture.URL}
+	reader, e := gateway.Stream(ctx, inputMessages(run.Inputs))
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer reader.Close()
+	first, e := reader.Recv()
+	if e != nil || first.ContentBlocks[0].Reasoning.Text != "thinking " {
+		t.Fatal("initial live chunk missing", e)
+	}
+	for i := 0; i < 5; i++ {
+		runtime.GC()
+		runtime.Gosched()
+		time.Sleep(10 * time.Millisecond)
+	}
+	close(proceed)
+	chunks := []*schema.AgenticMessage{first}
+	for {
+		chunk, err := reader.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		chunks = append(chunks, chunk)
+	}
+	result, e := schema.ConcatAgenticMessages(chunks)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if len(result.ContentBlocks) != 3 || result.ContentBlocks[0].Reasoning.Text != "thinking continued" || result.ContentBlocks[1].AssistantGenText.Text != "private answer" || result.ContentBlocks[2].FunctionToolCall.CallID != "gc-stable-call" || result.ContentBlocks[2].FunctionToolCall.Arguments != `{"body":"explicit"}` {
+		t.Fatal("GC truncated an active stream or lost structured suffixes")
+	}
+	if count(t, s, `SELECT count(*) FROM runtime_model_calls`) != 1 {
+		t.Fatal("active stream did not persist its complete receipt")
+	}
+	var saved []byte
+	if e = s.DB.QueryRow(ctx, `SELECT response FROM runtime_model_calls WHERE run_id=$1`, run.ID).Scan(&saved); e != nil {
+		t.Fatal(e)
+	}
+	cached, e := decodeAgenticMessage(saved)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if len(cached.ContentBlocks) != 3 || cached.ContentBlocks[2].FunctionToolCall.CallID != "gc-stable-call" || cached.ResponseMeta.TokenUsage.TotalTokens != 12 {
+		t.Fatal("receipt contains only a prefix after active GC")
+	}
+}
+
+func TestNativeAbandonedStreamGCCancelsSilentHTTPWithoutReceipt(t *testing.T) {
+	s, l, run := nativeModelRun(t)
+	canceled := make(chan struct{})
+	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		w.WriteHeader(200)
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+		close(canceled)
+	}))
+	ctx, cancel := context.WithCancel(WithRun(context.Background(), run))
+	defer func() { cancel(); fixture.Close() }()
+	gateway := &GatewayModel{Store: s, Lease: l, AgentID: l.AgentID, StreamURL: fixture.URL}
+	func() {
+		reader, e := gateway.Stream(ctx, inputMessages(run.Inputs))
+		if e != nil {
+			t.Fatal(e)
+		}
+		runtime.KeepAlive(reader) // Deliberately abandon the final reader without Close.
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		runtime.GC()
+		runtime.Gosched()
+		select {
+		case <-canceled:
+			if count(t, s, `SELECT count(*) FROM runtime_model_calls`) != 0 {
+				t.Fatal("abandoned stream became a complete receipt")
+			}
+			return
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	t.Fatal("GC of the final reader left the silent request running")
 }
 
 func TestNativeRequestFingerprintKeepsSourcesAndIgnoresOnlyFrameworkMessageID(t *testing.T) {

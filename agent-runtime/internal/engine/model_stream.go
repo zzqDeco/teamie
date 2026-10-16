@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"runtime"
 	"sync"
 	"time"
 
@@ -178,9 +179,7 @@ var gatewayStreamHTTP = &http.Client{Transport: &http.Transport{DialContext: (&n
 // observable even while the HTTP producer is waiting on a silent upstream. No
 // pulse becomes a model chunk; completion and cancellation join this watcher.
 func cancelStreamOnClose(reader *schema.StreamReader[*schema.AgenticMessage], cancel context.CancelFunc) (*schema.StreamReader[*schema.AgenticMessage], func()) {
-	reader.SetAutomaticClose()
 	pulse, writer := schema.Pipe[*schema.AgenticMessage](0)
-	pulse.SetAutomaticClose()
 	stopped, joined := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(joined)
@@ -200,7 +199,17 @@ func cancelStreamOnClose(reader *schema.StreamReader[*schema.AgenticMessage], ca
 		}
 	}()
 	merged := schema.MergeStreamReaders([]*schema.StreamReader[*schema.AgenticMessage]{reader, pulse})
+	// Pipe automatic-close finalizers attach to the original reader wrapper,
+	// which Merge discards while retaining its stream. Set the idempotent-close
+	// flags after merging so collecting an unused wrapper cannot end live data.
+	merged.SetAutomaticClose()
+	// The producer retains the underlying streams, so their own finalizers
+	// cannot reclaim an abandoned consumer. Only the returned conversion holds
+	// this token: it keeps active reads alive and cancels/closes when abandoned.
+	lifetime := &modelStreamLifetime{cancel: cancel, reader: merged}
+	runtime.SetFinalizer(lifetime, func(l *modelStreamLifetime) { l.cancel(); l.reader.Close() })
 	out := schema.StreamReaderWithConvert(merged, func(m *schema.AgenticMessage) (*schema.AgenticMessage, error) {
+		runtime.KeepAlive(lifetime)
 		if m == nil {
 			return nil, schema.ErrNoValue
 		}
@@ -208,4 +217,9 @@ func cancelStreamOnClose(reader *schema.StreamReader[*schema.AgenticMessage], ca
 	})
 	var once sync.Once
 	return out, func() { once.Do(func() { close(stopped); pulse.Close(); <-joined }) }
+}
+
+type modelStreamLifetime struct {
+	cancel context.CancelFunc
+	reader *schema.StreamReader[*schema.AgenticMessage]
 }
