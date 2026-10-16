@@ -44,6 +44,8 @@ Identity owns credentials/sessions and generic participant tokens; Chat owns wor
 
 Runtime 固定使用 **Eino v0.10.0-alpha.35**。每个 Agent 的 Session 单写，原生 TurnLoop 串行推进；Worker、Attempt、租约和 fence 都是服务内部细节。应用自己实现持久游标、重放与发送幂等；原生后台 TaskStore、事件与通知 outbox 使用独立 runtime 数据库。初始进程只有一个全局前台模型 slot，后台任务等待时释放，适配 2-vCPU/2-GB 主机预算，不能据此宣称横向扩容或吞吐能力。
 
+v0.3.6 补齐已有请求跨模型格式升级后的恢复：同一 Run 保留原工具列表和摘要格式，已完成工具结果使用持久记录，模型缓存仍需完整请求哈希匹配。新请求继续支持附件工具；不改写历史收据，也不自动重新排队已失败的旧请求。
+
 ## Verification
 
 ```sh
@@ -68,7 +70,7 @@ There is one deployed environment: `production`. `main` is the ongoing developme
 
 **Release branches and tags are permanent archives. Never delete, force-push, or append to a published release branch.** Corrections require a new version. The workflow rejects updates to an existing release branch and checks its SHA again before publication. The initial private GitHub account does not support server-enforced branch/ruleset protection on its current plan (API returned 403); enabling that protection requires an eligible plan. Workflow guards cannot prevent an owner from manually changing an unprotected ref.
 
-Images are built on hosted runners. The production host only pulls digests and runs containers. Runtime credentials stay in protected host configuration and the GitHub `production` Environment. Only Caddy publishes ports; service RPC, PostgreSQL and Redis stay private. Forward migrations preserve existing accounts/messages; v0.3.5 uses schema vector `2/3/1/2/2` for Identity/Chat/Control/Runtime/Gateway. Verify a pre-upgrade backup/restore path; cross-schema image rollback is rejected. Compatible rollback does not restore an old database over new user data. Same-host backups are included; off-host backup storage is not yet configured.
+Images are built on hosted runners. The production host only pulls digests and runs containers. Runtime credentials stay in protected host configuration and the GitHub `production` Environment. Only Caddy publishes ports; service RPC, PostgreSQL and Redis stay private. Forward migrations preserve existing accounts/messages; v0.3.5 and v0.3.6 use schema vector `2/3/1/2/2` for Identity/Chat/Control/Runtime/Gateway. Verify a pre-upgrade backup/restore path; cross-schema image rollback is rejected. Compatible rollback does not restore an old database over new user data. Same-host backups are included; off-host backup storage is not yet configured.
 
 ## Design references
 
