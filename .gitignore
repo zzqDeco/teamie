@@ -1,0 +1,17 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+*.log
+*.pem
+*.key
+secrets/
+.runtime/
+.cache/
+backend/bin/
+release-manifest.json
