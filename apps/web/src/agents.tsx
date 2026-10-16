@@ -33,9 +33,11 @@ import {
   WorkspaceVisibilityFields,
 } from "./agent-ui";
 import {
+  agentProfileChanges,
   agentProfileInput,
   canManageAgent,
   displayAgentState,
+  snapshotAgentProfile,
 } from "./agent-management";
 import { Avatar, Button, Modal, Notice } from "./ui";
 import { AddAgentToGroupDialog } from "./group-members";
@@ -89,12 +91,17 @@ function AgentProfileDialog({
   const client = useQueryClient();
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [name, setName] = useState(agent?.name || ""),
-    [description, setDescription] = useState(agent?.description || ""),
-    [enabled, setEnabled] = useState(agent?.enabled ?? true);
+  const [initialAgent] = useState(() =>
+    agent ? snapshotAgentProfile(agent) : undefined,
+  );
+  const [name, setName] = useState(initialAgent?.name || ""),
+    [description, setDescription] = useState(initialAgent?.description || ""),
+    [enabled, setEnabled] = useState(initialAgent?.enabled ?? true);
   const [workspaceIds, setWorkspaceIds] = useState(
-    agent
-      ? agent.workspaceIds.filter((id) => workspaces.some((w) => w.id === id))
+    initialAgent
+      ? initialAgent.workspaceIds.filter((id) =>
+          workspaces.some((w) => w.id === id),
+        )
       : initialWorkspaceId
         ? [initialWorkspaceId]
         : [],
@@ -114,8 +121,15 @@ function AgentProfileDialog({
         workspaces,
         enabled,
       );
-      const response = agent
-        ? await api.updateAgent(agent.id, profile)
+      const changes = initialAgent
+        ? agentProfileChanges(initialAgent, profile)
+        : profile;
+      if (initialAgent && Object.keys(changes).length === 0) {
+        onClose();
+        return;
+      }
+      const response = initialAgent
+        ? await api.updateAgent(initialAgent.id, changes)
         : await api.createAgent(profile);
       if (sessionToken !== api.csrfToken) return;
       client.setQueryData(["agent", user!.id, response.agent.id], response);
@@ -134,7 +148,7 @@ function AgentProfileDialog({
   }
   return (
     <Modal
-      title={agent ? "编辑 Agent 资料" : "认识你的新 Agent"}
+      title={initialAgent ? "编辑 Agent 资料" : "认识你的新 Agent"}
       subtitle="给它一个名字，选择哪些团队可以发现它。你始终是它的所有者。"
       onClose={onClose}
     >
@@ -194,7 +208,7 @@ function AgentProfileDialog({
             取消
           </Button>
           <Button type="submit" busy={busy} disabled={!name.trim()}>
-            {agent ? "保存资料" : "创建 Agent"}
+            {initialAgent ? "保存资料" : "创建 Agent"}
           </Button>
         </div>
       </form>

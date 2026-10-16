@@ -40,6 +40,37 @@ export function agentProfileInput(
     enabled,
   };
 }
+export function snapshotAgentProfile(agent: Agent) {
+  return Object.freeze({
+    id: agent.id,
+    name: agent.name,
+    description: agent.description,
+    enabled: agent.enabled,
+    workspaceIds: Object.freeze([...agent.workspaceIds]),
+  });
+}
+export function agentProfileChanges(
+  initial: ReturnType<typeof snapshotAgentProfile>,
+  profile: AgentProfileInput,
+): Partial<AgentProfileInput> {
+  const changes: Partial<AgentProfileInput> = {};
+  if (profile.name !== initial.name) changes.name = profile.name;
+  if (
+    profile.description !== undefined &&
+    profile.description !== initial.description
+  )
+    changes.description = profile.description;
+  if (profile.enabled !== undefined && profile.enabled !== initial.enabled)
+    changes.enabled = profile.enabled;
+  const previous = new Set(initial.workspaceIds);
+  const selected = new Set(profile.workspaceIds);
+  if (
+    previous.size !== selected.size ||
+    [...selected].some((id) => !previous.has(id))
+  )
+    changes.workspaceIds = [...selected];
+  return changes;
+}
 export function displayAgentState(
   state: AgentRuntimeState,
   enabled: boolean,

@@ -3,12 +3,14 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { Agent, User, Workspace } from "@teamie/api-client";
 import { ApiError } from "@teamie/api-client";
 import {
+  agentProfileChanges,
   agentProfileInput,
   canConfigureModelGateway,
   canManageAgent,
   displayAgentState,
   gatewayFailureText,
   modelGatewayInput,
+  snapshotAgentProfile,
 } from "./agent-management";
 import {
   AgentBadge,
@@ -101,6 +103,50 @@ describe("Agent ownership and visible teams", () => {
     expect(html).toContain('type="checkbox"');
     expect(html).toContain("checked");
     expect(html).not.toContain("other-private-team");
+  });
+  it("omits unchanged admission and enablement when a profile form outlives moderator revocation", () => {
+    const latest = { ...agent, workspaceIds: [...agent.workspaceIds] };
+    const initial = snapshotAgentProfile(latest);
+    const profile = agentProfileInput(
+      "新的公开名称",
+      initial.description,
+      [...initial.workspaceIds],
+      [workspace],
+      initial.enabled,
+    );
+    // Polling can replace or prune the live Agent while this form stays open.
+    latest.workspaceIds.splice(0);
+    latest.enabled = false;
+    expect(agentProfileChanges(initial, profile)).toEqual({
+      name: "新的公开名称",
+    });
+    expect(initial.workspaceIds).toEqual([workspace.id]);
+    expect(initial.enabled).toBe(true);
+  });
+  it("preserves only explicit team or enablement changes and ignores scope ordering", () => {
+    const initial = snapshotAgentProfile({
+      ...agent,
+      workspaceIds: [workspace.id, "second-team"],
+    });
+    const profile = {
+      name: initial.name,
+      description: initial.description,
+      enabled: initial.enabled,
+      workspaceIds: ["second-team", workspace.id, workspace.id],
+    };
+    expect(agentProfileChanges(initial, profile)).toEqual({});
+    expect(
+      agentProfileChanges(initial, {
+        ...profile,
+        workspaceIds: [workspace.id, "new-explicit-team"],
+      }),
+    ).toEqual({ workspaceIds: [workspace.id, "new-explicit-team"] });
+    expect(
+      agentProfileChanges(initial, { ...profile, enabled: false }),
+    ).toEqual({ enabled: false });
+    expect(
+      agentProfileChanges(initial, { ...profile, description: "新的简介" }),
+    ).toEqual({ description: "新的简介" });
   });
   it("enriches people and Agents through the same participant list with provenance, excluding disabled Agents from new selection", () => {
     const participants = enrichParticipants(

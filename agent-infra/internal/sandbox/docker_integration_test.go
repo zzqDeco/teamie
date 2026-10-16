@@ -101,7 +101,7 @@ PY`, token, fixtureSecret, fixtureMaster)
 	r.TimeoutSeconds = 1
 	timed, _ := s.Exec(ctx, r)
 	if timed.GetErrorCode() != "execution_timeout" {
-		t.Fatal(timed)
+		t.Fatalf("timeout phase: code=%q exit=%d stdout=%q stderr=%q", timed.GetErrorCode(), timed.ExitCode, timed.Stdout, timed.Stderr)
 	}
 	res, e := docker.request(ctx, "GET", "/containers/json?all=true&filters=%7B%22label%22%3A%5B%22io.teamie.sandbox%3Dtrue%22%5D%7D", nil)
 	if e != nil {

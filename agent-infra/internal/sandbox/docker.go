@@ -126,10 +126,24 @@ func (d *Docker) Run(ctx context.Context, j Job) (result Result, err error) {
 	if e != nil || created.ID == "" {
 		return result, errors.New("container creation failed")
 	}
+	cleanupFailed := false
+	// Cancellation can interrupt response BODY reads after Docker sent HTTP 200.
+	// Classify every post-create path, while failed cleanup remains unknown.
+	defer func() {
+		if ctx.Err() != nil && !cleanupFailed {
+			result.ExitCode = -1
+			result.ErrorCode = "execution_canceled"
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				result.ErrorCode = "execution_timeout"
+			}
+			err = nil
+		}
+	}()
 	defer func() {
 		clean, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if e := d.remove(clean, created.ID); e != nil {
+			cleanupFailed = true
 			err = errors.New("container cleanup failed")
 		}
 	}()
