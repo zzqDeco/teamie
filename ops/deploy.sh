@@ -44,7 +44,7 @@ compose_for "$recipe" "$scratch/images.env"
 # Render secrets only to this private temporary file, never to action logs.
 "${COMPOSE[@]}" config --format json > "$scratch/compose.json"
 origin=$(python3 "$manifest_tool" config "$scratch/compose.json" "$HOST_ENV")
-python3 - "$scratch/compose.json" <<'PY'
+tls_mode=$(python3 - "$scratch/compose.json" <<'PY'
 import ipaddress,json,pathlib,sys
 from urllib.parse import urlsplit
 c=json.load(open(sys.argv[1]))
@@ -60,7 +60,9 @@ try: ipaddress.ip_address(host)
 except ValueError: pass
 else:
     assert ("issuer acme" in text and "profile shortlived" in text and "https://acme-v02.api.letsencrypt.org/directory" in text) or "tls /run/tls/fullchain.pem /run/tls/privkey.pem" in text, "IP HTTPS requires explicit shortlived ACME or provided certificates"
+print("files" if "tls /run/tls/fullchain.pem /run/tls/privkey.pem" in text else "acme")
 PY
+)
 export DOCKER_CONFIG="$scratch/docker"
 mkdir "$DOCKER_CONFIG"
 IFS= read -r registry_token
@@ -71,6 +73,17 @@ unset registry_token
 # Already-pulled immutable digests do not require persisted registry credentials.
 rm -rf -- "$DOCKER_CONFIG"
 unset DOCKER_CONFIG
+
+if [[ $tls_mode == files ]]; then
+  # Run with Caddy's actual UID/capabilities; the SSH user cannot inspect root's key.
+  # shellcheck disable=SC2016
+  "${COMPOSE[@]}" run --rm --no-deps --entrypoint /bin/sh caddy -ec '
+    [ "$(id -u)" = 0 ] || { echo "File-based TLS requires the configured Caddy UID 0." >&2; exit 1; }
+    [ -d /run/tls ] && [ "$(stat -c %u:%g:%a /run/tls)" = 0:0:700 ] || { echo "TLS directory must be root:root mode 0700." >&2; exit 1; }
+    [ -f /run/tls/privkey.pem ] && [ ! -L /run/tls/privkey.pem ] && [ "$(stat -c %u:%g:%a /run/tls/privkey.pem)" = 0:0:600 ] && [ -r /run/tls/privkey.pem ] || { echo "TLS private key must be readable by Caddy and root:root mode 0600." >&2; exit 1; }
+    [ -f /run/tls/fullchain.pem ] && [ ! -L /run/tls/fullchain.pem ] && [ "$(stat -c %u:%g:%a /run/tls/fullchain.pem)" = 0:0:644 ] && [ -r /run/tls/fullchain.pem ] || { echo "TLS public chain must be root:root mode 0644." >&2; exit 1; }
+  '
+fi
 
 if [[ -f $current/release-manifest.json ]]; then
   TEAMIE_DEPLOY_LOCK_HELD=1 "$current/recipe/ops/backup.sh"

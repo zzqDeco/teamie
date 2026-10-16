@@ -20,7 +20,23 @@ const empty = (userId = ""): ChatSnapshot => ({
   revision: 0,
 });
 const storageKey = (userId: string) => `teamie.sync.v1.${userId}`;
-const version = (m: Message) => m.retractedAt || m.editedAt || m.createdAt;
+function timestampNanoseconds(value: string): bigint {
+  const match =
+    /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})$/.exec(
+      value,
+    );
+  if (!match) throw new Error("Invalid RFC3339 message timestamp");
+  // Parse only the whole second: Date.parse alone truncates sub-millisecond edits.
+  const wholeMilliseconds = Date.parse(`${match[1]}${match[3]}`);
+  if (!Number.isFinite(wholeMilliseconds))
+    throw new Error("Invalid RFC3339 message timestamp");
+  return (
+    BigInt(wholeMilliseconds) * 1_000_000n +
+    BigInt((match[2] || "").padEnd(9, "0"))
+  );
+}
+const version = (m: Message) =>
+  timestampNanoseconds(m.retractedAt || m.editedAt || m.createdAt);
 export function reconcileMessages(
   existing: LocalMessage[],
   incoming: LocalMessage[],

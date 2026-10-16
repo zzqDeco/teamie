@@ -48,8 +48,12 @@ touch "$deploy_home/.ssh/authorized_keys"
 chown "$deploy_user:$deploy_user" "$deploy_home/.ssh/authorized_keys"
 chmod 0600 "$deploy_home/.ssh/authorized_keys"
 install -d -o "$deploy_user" -g "$deploy_user" -m 0700 \
-  /srv/teamie /srv/teamie/config /srv/teamie/tls /srv/teamie/tls/certs \
+  /srv/teamie /srv/teamie/config /srv/teamie/tls \
   /srv/teamie/releases /srv/teamie/incoming /srv/teamie/state /srv/teamie/backups
+# Preserve root ownership when an operator has provisioned file-based TLS keys.
+if [[ ! -d /srv/teamie/tls/certs ]]; then
+  install -d -o "$deploy_user" -g "$deploy_user" -m 0700 /srv/teamie/tls/certs
+fi
 docker version --format '{{.Server.Version}}'
 docker compose version --short
 echo 'Bootstrap complete. Add the delivery PUBLIC key to authorized_keys; provision protected production.env and TLS/flag files before deploying.'

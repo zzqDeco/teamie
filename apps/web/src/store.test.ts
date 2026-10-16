@@ -56,6 +56,62 @@ describe("durable message reconciliation", () => {
       ),
     ).toHaveLength(2);
   });
+  it.each([
+    ["2026-10-16T07:00:01.1Z", "2026-10-16T07:00:01.100001Z"],
+    ["2026-10-16T07:00:01Z", "2026-10-16T07:00:01.000000001Z"],
+    ["2026-10-16T07:00:01.100000001Z", "2026-10-16T07:00:01.100000002Z"],
+    ["2026-10-16T07:00:01.999999999Z", "2026-10-16T07:00:02Z"],
+    ["2026-10-16T15:00:01.1+08:00", "2026-10-16T07:00:01.100001Z"],
+  ])(
+    "applies a newer exact timestamp %s -> %s and rejects older history replay",
+    (older, newer) => {
+      const previous = message({ body: "old", editedAt: older });
+      const update = message({ body: "new", editedAt: newer });
+      const updated = reconcileMessages([previous], [update]);
+      expect(updated[0].body).toBe("new");
+      expect(updated[0].editedAt).toBe(newer);
+      expect(reconcileMessages(updated, [previous, message()])[0].body).toBe(
+        "new",
+      );
+    },
+  );
+  it("commits a nanosecond edit with its sync cursor and never resurrects its tombstone", () => {
+    const store = new ChatStore();
+    store.begin("u1");
+    store.merge([message({ body: "old", editedAt: "2026-10-16T07:00:01.1Z" })]);
+    store.apply({
+      events: [
+        {
+          id: "7",
+          type: "message.updated",
+          createdAt: "2026-10-16T07:00:01.100001Z",
+          message: message({
+            body: "new",
+            editedAt: "2026-10-16T07:00:01.100001Z",
+          }),
+        },
+      ],
+      cursor: "7",
+      hasMore: false,
+    });
+    expect(store.getSnapshot().cursor).toBe("7");
+    expect(store.getSnapshot().messages.c1[0].body).toBe("new");
+    store.merge([message({ body: "old", editedAt: "2026-10-16T07:00:01.1Z" })]);
+    expect(store.getSnapshot().messages.c1[0].body).toBe("new");
+    store.merge([
+      message({
+        body: "must be omitted",
+        retractedAt: "2026-10-16T07:00:01.100002Z",
+      }),
+    ]);
+    store.merge([
+      message({ body: "stale history", editedAt: "2026-10-16T07:00:02Z" }),
+    ]);
+    expect(store.getSnapshot().messages.c1[0].body).toBe("");
+    expect(store.getSnapshot().messages.c1[0].retractedAt).toBe(
+      "2026-10-16T07:00:01.100002Z",
+    );
+  });
   it("preserves immutable sequence order after edit and rejects stale page data after a retraction", () => {
     const retracted = message({
       body: "",
