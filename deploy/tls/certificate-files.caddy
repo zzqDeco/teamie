@@ -1,0 +1,5 @@
+# Provision certificates on the host; private keys never belong in Git.
+# Root owns /srv/teamie/tls/certs (0700), privkey.pem (0600), fullchain.pem (0644).
+# Caddy runs as UID 0 with dropped DAC override; deploy-user-owned keys are unreadable.
+# The certificate SAN must cover SITE_ADDRESS. Renew externally and restart Caddy.
+tls /run/tls/fullchain.pem /run/tls/privkey.pem

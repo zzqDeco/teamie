@@ -7,6 +7,7 @@
 - Read `docs/contracts/http-v1.md` before implementation. Coordinate contract changes with dependent components.
 - Each service owns its data. Other services use RPC; never read another service's database tables. Persistent IM messages/sync events live in PostgreSQL; Redis is disposable.
 - Feature flags are enforced by the backend. Disabled write features must not hide persisted content.
+- Registration is strictly invitation-only. `BOOTSTRAP_INVITE_CODE` defaults to `teamie-bootstrap` and can initialize the first platform admin only. Every ordinary admin-generated code admits one user atomically; failure must preserve it. Platform admin does not bypass workspace privacy.
 - Never commit credentials, private keys, production configuration, database exports, generated runtime data or local environment files.
 - Keep service ports and databases on the private container network. Only the edge publishes HTTP/HTTPS.
 - Meaningful tests should exercise authorization, message idempotence, ordering and reconnect behavior. Build/lint alone does not prove the product works.

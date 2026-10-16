@@ -1,0 +1,33 @@
+{
+	admin off
+	default_sni {$TLS_SERVER_NAME}
+}
+
+{$SITE_ADDRESS} {
+	import /etc/caddy/issuer.caddy
+	encode zstd gzip
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy same-origin
+		-Server
+	}
+	@auth path /api/v1/auth/*
+	handle @auth {
+		reverse_proxy identity:8081
+	}
+	@websocket path /api/v1/ws
+	handle @websocket {
+		reverse_proxy realtime:8083
+	}
+	handle /api/* {
+		reverse_proxy chat:8082
+	}
+	handle {
+		reverse_proxy web:80
+	}
+}
+
+# Internal container liveness; this port is never published by Compose.
+http://:8080 {
+	respond /healthz "ok" 200
+}
