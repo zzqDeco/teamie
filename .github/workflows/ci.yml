@@ -115,7 +115,7 @@ jobs:
           for module in agent-protocol agent-control agent-runtime agent-infra; do
             (cd "$module" && go test -race -timeout 180s ./... && go vet ./... && go build ./...)
           done
-      - name: Agent owner/admin/runtime acceptance against fresh disposable processes
+      - name: Agent profile privacy and IM acceptance against fresh disposable processes
         run: bash ops/ci-agent-acceptance.sh
       - name: Restore every service database into a disposable target and verify data
         run: bash ops/ci-restore.sh

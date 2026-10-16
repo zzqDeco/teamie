@@ -11,9 +11,8 @@ import (
 )
 
 type Handler struct {
-	Store   *Store
-	Origin  string
-	Runtime RuntimeAccess
+	Store  *Store
+	Origin string
 }
 type handler func(http.ResponseWriter, *http.Request, *im.User) error
 
@@ -71,12 +70,14 @@ func (h *Handler) one(w http.ResponseWriter, r *http.Request, a Agent, status in
 	if e != nil {
 		return e
 	}
-	write(w, status, map[string]any{"agent": out[0]})
+	write(w, status, map[string]any{"agent": publicProfile(out[0])})
 	return nil
 }
 func (h *Handler) Routes() http.Handler {
 	m := http.NewServeMux()
-	h.runtimeRoutes(m)
+	m.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fail(w, errAPI(404, "not_found", "Resource is unavailable"))
+	})
 	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { write(w, 200, map[string]string{"status": "ok"}) })
 	m.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
 		if h.Store.DB.Ping(r.Context()) != nil || h.Store.IM.Ping(r.Context()) != nil {
@@ -97,7 +98,7 @@ func (h *Handler) Routes() http.Handler {
 		if e != nil {
 			return e
 		}
-		write(w, 200, map[string]any{"agents": a})
+		write(w, 200, map[string]any{"agents": publicProfiles(a, "")})
 		return nil
 	}))
 	m.HandleFunc("POST /api/v1/agents", h.auth(func(w http.ResponseWriter, r *http.Request, u *im.User) error {
@@ -145,7 +146,7 @@ func (h *Handler) Routes() http.Handler {
 		if e != nil {
 			return e
 		}
-		write(w, 200, map[string]any{"agents": a})
+		write(w, 200, map[string]any{"agents": publicProfiles(a, r.PathValue("id"))})
 		return nil
 	}))
 	return m
