@@ -12,14 +12,14 @@ import (
 )
 
 func ToUser(u api.User) *im.User {
-	return &im.User{Id: u.ID, Email: u.Email, DisplayName: u.DisplayName, Kind: u.Kind, CreatedAt: u.CreatedAt.Format(time.RFC3339Nano)}
+	return &im.User{Id: u.ID, Email: u.Email, DisplayName: u.DisplayName, Kind: u.Kind, PlatformRole: u.PlatformRole, CreatedAt: u.CreatedAt.Format(time.RFC3339Nano)}
 }
 func FromUser(u *im.User) api.User {
 	if u == nil {
 		return api.User{}
 	}
 	at, _ := time.Parse(time.RFC3339Nano, u.CreatedAt)
-	return api.User{ID: u.Id, Email: u.Email, DisplayName: u.DisplayName, Kind: u.Kind, CreatedAt: at}
+	return api.User{ID: u.Id, Email: u.Email, DisplayName: u.DisplayName, Kind: u.Kind, PlatformRole: u.PlatformRole, CreatedAt: at}
 }
 
 type Identity struct{ Client identityservice.Client }

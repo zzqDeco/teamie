@@ -7,6 +7,7 @@ struct User {
   3: required string displayName
   4: required string kind
   5: required string createdAt
+  6: required string platformRole
 }
 struct SessionRequest { 1: required string token }
 struct SessionResponse {

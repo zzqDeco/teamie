@@ -276,7 +276,9 @@ export function errorText(error: unknown) {
     return error instanceof Error ? error.message : "请求失败，请稍后重试";
   const messages: Record<string, string> = {
     invalid_credentials: "邮箱或密码不正确，请重新输入。",
-    invalid_invite: "邀请码无效或已过期，请联系邀请人。",
+    invalid_invite: "邀请码无效、已使用或已失效，请联系管理员获取新的邀请。",
+    invalid_invitation:
+      "邀请码无效、已使用或已失效，请联系管理员获取新的邀请。",
     forbidden: "你当前没有执行此操作的权限。",
     conflict: "这条消息与之前的发送记录冲突，请刷新后重试。",
     feature_disabled: "此功能已由工作空间管理员关闭。",

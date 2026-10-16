@@ -33,6 +33,7 @@ import type { Conversation, Member, Workspace } from "@teamie/api-client";
 import { useAuth } from "./auth";
 import { errorText, useChat, useChatState } from "./chat";
 import { ProfileSettings, WorkspaceDialog } from "./dialogs";
+import { PlatformInvitations } from "./admin";
 import type { DialogKind } from "./dialogs";
 import { ConversationView, conversationName } from "./messages";
 import { Avatar, Button, IconButton, Loading, Logo, Modal, Notice } from "./ui";
@@ -190,6 +191,7 @@ export function Shell() {
   const isSettings = ["/app/settings", "/app/profile"].includes(
     location.pathname,
   );
+  const isAdminPage = location.pathname === "/app/admin";
   return (
     <div
       className={`app-shell ${sidebar ? "sidebar-open" : ""} ${details ? "details-open" : ""}`}
@@ -221,6 +223,16 @@ export function Shell() {
           <Plus size={23} />
         </IconButton>
         <span className="rail-spacer" />
+        {user!.platformRole === "admin" && (
+          <Link
+            to="/app/admin"
+            className={`rail-settings rail-admin ${isAdminPage ? "selected" : ""}`}
+            aria-label="平台管理：注册邀请"
+            title="平台管理：注册邀请"
+          >
+            <ShieldCheck size={21} />
+          </Link>
+        )}
         <Link
           to="/app/settings"
           className={`rail-settings ${isSettings ? "selected" : ""}`}
@@ -283,6 +295,12 @@ export function Shell() {
                   <Settings size={16} />
                   个人设置
                 </Link>
+                {user!.platformRole === "admin" && (
+                  <Link to="/app/admin">
+                    <ShieldCheck size={16} />
+                    平台管理 · 注册邀请
+                  </Link>
+                )}
                 <button
                   className="danger-text"
                   onClick={signOut}
@@ -415,7 +433,9 @@ export function Shell() {
             <Avatar name={user!.displayName} seed={user!.id} />
             <span>
               <b>{user!.displayName}</b>
-              <small>我的个人账户</small>
+              <small>
+                {user!.platformRole === "admin" ? "平台管理员" : "我的个人账户"}
+              </small>
             </span>
           </Link>
           <Link
@@ -437,7 +457,7 @@ export function Shell() {
       )}
       <main className="app-main">
         {error && !removing && <Notice>{error}</Notice>}
-        {isSettings ? (
+        {isSettings || isAdminPage ? (
           <>
             <header className="settings-header">
               <IconButton
@@ -447,14 +467,18 @@ export function Shell() {
               >
                 <span>☰</span>
               </IconButton>
-              <Settings size={18} />
-              <span>个人设置</span>
+              {isAdminPage ? <ShieldCheck size={18} /> : <Settings size={18} />}
+              <span>{isAdminPage ? "平台管理 · 注册邀请" : "个人设置"}</span>
               <Link to="/app">
                 回到对话
                 <ChevronRight size={15} />
               </Link>
             </header>
-            <ProfileSettings />
+            {isAdminPage ? (
+              <PlatformInvitations key={user!.id} />
+            ) : (
+              <ProfileSettings />
+            )}
           </>
         ) : conversation &&
           workspace &&
@@ -501,7 +525,7 @@ export function Shell() {
           </div>
         )}
       </main>
-      {details && !isSettings && workspace && (
+      {details && !isSettings && !isAdminPage && workspace && (
         <aside className="members-pane">
           <header>
             <span>

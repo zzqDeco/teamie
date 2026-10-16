@@ -18,11 +18,12 @@ import (
 const CookieName = "teamie_session"
 
 type User struct {
-	ID          string    `json:"id"`
-	Email       string    `json:"email"`
-	DisplayName string    `json:"displayName"`
-	Kind        string    `json:"kind"`
-	CreatedAt   time.Time `json:"createdAt"`
+	ID           string    `json:"id"`
+	Email        string    `json:"email"`
+	DisplayName  string    `json:"displayName"`
+	Kind         string    `json:"kind"`
+	PlatformRole string    `json:"platformRole"`
+	CreatedAt    time.Time `json:"createdAt"`
 }
 type Session struct {
 	User      User   `json:"user"`

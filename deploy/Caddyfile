@@ -1,5 +1,6 @@
 {
 	admin off
+	default_sni {$TLS_SERVER_NAME}
 }
 
 {$SITE_ADDRESS} {

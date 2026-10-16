@@ -19,4 +19,15 @@ for name,service in config['services'].items():
     assert int(service['mem_limit'])>0
 assert sum(int(s['mem_limit']) for s in config['services'].values())==960*1024*1024
 assert config['networks']['private']['internal'] is True
+assert config['services']['caddy']['environment']['TLS_SERVER_NAME']=='YOUR_PUBLIC_IP'
+assert config['services']['identity']['environment']['BOOTSTRAP_INVITE_CODE']
+assert 'REGISTRATION_CODE' not in config['services']['identity']['environment']
+PY
+# An empty optional host value must select the explicit first-user default.
+BOOTSTRAP_INVITE_CODE='' docker compose --file deploy/compose.production.yaml \
+  --env-file deploy/production.env.example --env-file "$scratch/images.env" \
+  config --format json > "$scratch/default-bootstrap.json"
+python3 - "$scratch/default-bootstrap.json" <<'PY'
+import json,sys
+assert json.load(open(sys.argv[1]))['services']['identity']['environment']['BOOTSTRAP_INVITE_CODE']=='teamie-bootstrap'
 PY

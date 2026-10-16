@@ -28,7 +28,7 @@ ORIGIN = os.environ.get("TEAMIE_ACCEPTANCE_URL", "http://127.0.0.1:8080").rstrip
 IDENTITY = os.environ.get("TEAMIE_IDENTITY_URL", ORIGIN).rstrip("/")
 CHAT = os.environ.get("TEAMIE_CHAT_URL", ORIGIN).rstrip("/")
 WS_URL = os.environ.get("TEAMIE_WS_URL", ORIGIN.replace("https://", "wss://").replace("http://", "ws://") + "/api/v1/ws")
-INVITE = os.environ.get("REGISTRATION_CODE", "")
+BOOTSTRAP_INVITE = os.environ.get("BOOTSTRAP_INVITE_CODE", "teamie-bootstrap")
 
 
 def require(condition: bool, description: str) -> None:
@@ -64,10 +64,10 @@ class Client:
             require(response.status in allowed, f"{method} {path}: expected {allowed}, got {response.status}, code={result.get('error', {}).get('code', '')}")
             return result
 
-    def register(self, name: str, suffix: str) -> None:
+    def register(self, name: str, suffix: str, invite_code: str) -> None:
         self.email = f"acceptance-{name}-{suffix}@example.invalid"
         self.password = secrets.token_urlsafe(20)
-        result = self.call("POST", "/api/v1/auth/register", {"email": self.email, "password": self.password, "displayName": name, "inviteCode": INVITE}, status=201)
+        result = self.call("POST", "/api/v1/auth/register", {"email": self.email, "password": self.password, "displayName": name, "inviteCode": invite_code}, status=201)
         self.user, self.csrf = result["user"], result["csrfToken"]
         require(bool(self.user["id"]) and bool(self.csrf), "registration establishes authenticated identity and CSRF")
 
@@ -158,7 +158,7 @@ def drain(client: Client, cursor: str = "0") -> tuple[list[dict], str]:
 
 
 def main() -> None:
-    require(bool(INVITE), "REGISTRATION_CODE must be provided")
+    require(bool(BOOTSTRAP_INVITE), "BOOTSTRAP_INVITE_CODE must not be empty")
     for base in (ORIGIN, IDENTITY, CHAT):
         parsed = urllib.parse.urlsplit(base)
         require(parsed.scheme == "https" or parsed.hostname in ("127.0.0.1", "localhost", "::1"), "plain HTTP is allowed only for disposable loopback CI")
@@ -174,10 +174,61 @@ def main() -> None:
                 json.dump(receipt, output, indent=2)
             path.chmod(0o600)
 
-    for client, name in ((owner, "Owner"), (member, "Member"), (outsider, "Outsider")):
-        client.register(name, suffix)
+    def account_record(client: Client, name: str) -> None:
         receipt["accounts"].append({"id": client.user["id"], "email": client.email, "password": client.password, "displayName": name})
         record()
+
+    state = Client().call("GET", "/api/v1/auth/registration")
+    require(state == {"mode": "invite", "bootstrapRequired": True}, "acceptance requires fresh invitation-only identity storage")
+    owner.register("Owner", suffix, BOOTSTRAP_INVITE)
+    account_record(owner, "Owner")
+    require(owner.user.get("platformRole") == "admin", "first bootstrap account becomes platform administrator")
+    require(not Client().call("GET", "/api/v1/auth/registration")["bootstrapRequired"], "bootstrap closes after first account")
+
+    def rejected_registration(code: str, name: str, password: str | None = None, status: int = 403) -> None:
+        Client().call("POST", "/api/v1/auth/register", {"email": f"rejected-{name}-{suffix}@example.invalid", "password": password or secrets.token_urlsafe(20), "displayName": name, "inviteCode": code}, status=status)
+
+    rejected_registration(BOOTSTRAP_INVITE, "bootstrap-reuse")
+    member_invite = owner.call("POST", "/api/v1/auth/admin/invites", {}, status=201)["invite"]
+    member.register("Member", suffix, member_invite["code"])
+    account_record(member, "Member")
+    require(member.user.get("platformRole") == "user", "ordinary invitation never grants administrator")
+    rejected_registration(member_invite["code"], "used-invite")
+    owner.call("POST", "/api/v1/auth/admin/invites", {}, status=403, csrf=False)
+    failed_invite = owner.call("POST", "/api/v1/auth/admin/invites", {}, status=201)["invite"]
+    rejected_registration(failed_invite["code"], "invalid-password", password="short", status=400)
+    Client().call("POST", "/api/v1/auth/register", {"email": f"forged-admin-{suffix}@example.invalid", "password": secrets.token_urlsafe(20), "displayName": "Forged", "inviteCode": failed_invite["code"], "platformRole": "admin"}, status=400)
+    outsider.register("Outsider", suffix, failed_invite["code"])
+    account_record(outsider, "Outsider")
+    require(outsider.user.get("platformRole") == "user", "failed role forgery preserves invite without elevating the next user")
+    member.call("GET", "/api/v1/auth/admin/invites", status=403)
+    member.call("POST", "/api/v1/auth/admin/invites", {}, status=403)
+    revoked = owner.call("POST", "/api/v1/auth/admin/invites", {}, status=201)["invite"]
+    member.call("DELETE", "/api/v1/auth/admin/invites/" + revoked["id"], status=403)
+    owner.call("DELETE", "/api/v1/auth/admin/invites/" + revoked["id"], status=204)
+    rejected_registration(revoked["code"], "revoked-invite")
+
+    raced = owner.call("POST", "/api/v1/auth/admin/invites", {}, status=201)["invite"]
+
+    def race_register(index: int) -> Client | None:
+        client = Client()
+        client.email = f"race-{index}-{suffix}@example.invalid"
+        client.password = secrets.token_urlsafe(20)
+        response = client.call("POST", "/api/v1/auth/register", {"email": client.email, "password": client.password, "displayName": "Race", "inviteCode": raced["code"]}, status=(201, 403))
+        if "user" not in response:
+            return None
+        client.user, client.csrf = response["user"], response["csrfToken"]
+        return client
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        race_winners = [client for client in pool.map(race_register, range(2)) if client is not None]
+    require(len(race_winners) == 1, "concurrent registration consumes one invitation exactly once")
+    account_record(race_winners[0], "Race")
+    listed = owner.call("GET", "/api/v1/auth/admin/invites")["invites"]
+    require(all("code" not in invite for invite in listed), "raw invitation codes are not recoverable from listing")
+    require(any(invite["id"] == member_invite["id"] and invite.get("usedAt") for invite in listed), "used invitation state is durable")
+    require(any(invite["id"] == revoked["id"] and invite.get("revokedAt") for invite in listed), "revoked invitation state is durable")
+    print("PASS first-admin bootstrap, single-use invitation races, failed-registration preservation and admin permissions")
     owner.call("POST", "/api/v1/auth/logout", status=403, csrf=False)
     require(owner.call("GET", "/api/v1/auth/session")["user"]["id"] == owner.user["id"], "CSRF rejection preserves session")
     print("PASS invitation registration, session and CSRF")
@@ -195,9 +246,17 @@ def main() -> None:
     outsider.call("GET", f"/api/v1/conversations/{cid}/messages", status=(403, 404))
     member.call("POST", f"/api/v1/workspaces/{wid}/conversations", {"type": "channel", "name": "forbidden"}, status=403)
     bootstrap = owner.call("GET", "/api/v1/bootstrap")
+    require(bootstrap["user"].get("platformRole") == "admin", "platform role propagates through real Identity RPC")
+    require(not bootstrap["capabilities"].get("auth.public_signup", False), "public signup never bypasses invitation-only policy")
     for key in ("im.attachments.upload", "im.reactions.create", "im.threads.create"):
         require(not bootstrap["capabilities"].get(key, False), "unsupported feature remains unavailable")
     print("PASS workspace invite admission and authorization")
+
+    private = outsider.call("POST", "/api/v1/workspaces", {"name": "Private " + suffix}, status=201)
+    receipt["workspaces"].append({"id": private["workspace"]["id"], "ownerId": outsider.user["id"], "name": private["workspace"]["name"]})
+    record()
+    owner.call("GET", f"/api/v1/conversations/{private['conversation']['id']}/messages", status=(403, 404))
+    print("PASS platform administrator does not bypass workspace privacy")
 
     direct = owner.call("POST", f"/api/v1/workspaces/{wid}/conversations", {"type": "direct", "memberIds": [member.user["id"]]}, status=(200, 201))["conversation"]
     reverse = member.call("POST", f"/api/v1/workspaces/{wid}/conversations", {"type": "direct", "memberIds": [owner.user["id"]]}, status=(200, 201))["conversation"]

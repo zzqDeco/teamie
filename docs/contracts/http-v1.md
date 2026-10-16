@@ -4,13 +4,23 @@ This file coordinates the initial frontend, backend and deployment. JSON fields 
 
 ## Identity and session
 
-- `POST /api/v1/auth/register` body `{email, password, displayName, inviteCode}` -> 201 `{user, csrfToken}` and login cookie. Registration is invitation-only by default; the first release uses a deployment registration code, separate from workspace invitation codes. `auth.public_signup` may enable public registration. Password minimum 12 characters. Email uniqueness is case-insensitive.
+- `POST /api/v1/auth/register` body `{email, password, displayName, inviteCode}` -> 201 `{user, csrfToken}` and login cookie. Registration is strictly invitation-only. When no accounts exist, only `BOOTSTRAP_INVITE_CODE` is accepted; its default is `teamie-bootstrap` if unset. That first account atomically becomes platform admin. After the first account exists, the bootstrap code is invalid for registration; only unused, unexpired, unrevoked admin-generated registration codes are accepted. Each ordinary code is consumed by exactly one successfully created user in the same transaction. Failed registration must not consume it. Concurrent requests must not create two bootstrap admins or spend one ordinary code twice. Password minimum 12 characters. Email uniqueness is case-insensitive.
+- `GET /api/v1/auth/registration` -> `{mode:"invite",bootstrapRequired:boolean}`. Public, no-store, never returns any configured or generated invitation secret.
 - `POST /api/v1/auth/login` body `{email,password}` -> `{user,csrfToken}` and cookie.
 - `GET /api/v1/auth/session` -> `{user,csrfToken}` or 401.
 - `POST /api/v1/auth/logout` -> 204, revokes the stored session.
 - `PATCH /api/v1/auth/profile` body `{displayName}` -> `{user}`.
-- User: `{id,email,displayName,kind:"human",createdAt}`. Reserve `kind:"agent"` in contracts only. Server derives the sender ID from a validated session.
+- User: `{id,email,displayName,kind:"human",platformRole:"admin"|"user",createdAt}`. Reserve `kind:"agent"` in contracts only. Server derives sender ID and platform role from persisted identity; neither is accepted from registration input. Platform admin is separate from workspace owner and receives no implicit access to other workspaces' messages.
 - Opaque random `teamie_session` cookie, HttpOnly, SameSite=Lax, Secure on production HTTPS. Writes after login require `X-CSRF-Token`; reject untrusted Origin. Login/register also reject untrusted Origin. WebSocket requires matching Origin and current session.
+
+## Platform registration invitations
+
+- Only authenticated `platformRole=admin` may call these Identity-owned APIs. They use the same CSRF/Origin enforcement as other writes.
+- `GET /api/v1/auth/admin/invites` -> `{invites:[{id,createdAt,expiresAt,usedAt?,revokedAt?}]}`. Do not return raw codes after creation or password/token material. A consumed user's ID may be included as `usedBy` for the administrator.
+- `POST /api/v1/auth/admin/invites` body `{}` -> 201 `{invite:{id,code,createdAt,expiresAt},url}`. Codes are cryptographically random, single-use, expire after seven days, and stored only as a hash. `url` is the frontend-relative `/login?mode=register&inviteCode=<code>`. Raw code is shown only in this response.
+- `DELETE /api/v1/auth/admin/invites/:id` -> 204; revoke an unused code (idempotent). A used code stays used and can never become reusable. Every invitation is consumed atomically with account/session creation. Invalid/expired/revoked/used codes return a consistent invalid-invitation error.
+- Frontend route `/app/admin` provides generation, one-time code/link copy, status list and revoke for platform administrators. The login registration form accepts `inviteCode` from the URL and explains initialization when `bootstrapRequired=true`.
+- `auth.public_signup` remains an unsupported false capability in this release: setting it true in a host file cannot bypass invitations.
 
 ## Chat bootstrap and workspaces
 
@@ -51,6 +61,8 @@ This file coordinates the initial frontend, backend and deployment. JSON fields 
 
 ## Operational contract
 
-Identity: HTTP `:8081`, Kitex RPC `:8881`; Chat: HTTP `:8082`, Kitex RPC `:8882`; Realtime: HTTP/WS `:8083`. Each exposes `/healthz` (liveness), `/readyz` (dependencies), `/version` with build SHA/version. Use env `HTTP_ADDR`, `RPC_ADDR`, `IDENTITY_RPC_ADDR`, `CHAT_RPC_ADDR`, `DATABASE_URL`, `REDIS_ADDR`, `APP_ORIGIN`, `COOKIE_SECURE`, `REGISTRATION_CODE`, `FEATURE_FLAGS_FILE`. Runtime secrets may use env backed by protected host config; never bake them into images. Each service applies its own embedded, forward-only idempotent migrations before readiness. Release scripts serialize migration and rollout.
+Identity: HTTP `:8081`, Kitex RPC `:8881`; Chat: HTTP `:8082`, Kitex RPC `:8882`; Realtime: HTTP/WS `:8083`. Each exposes `/healthz` (liveness), `/readyz` (dependencies), `/version` with build SHA/version. Use env `HTTP_ADDR`, `RPC_ADDR`, `IDENTITY_RPC_ADDR`, `CHAT_RPC_ADDR`, `DATABASE_URL`, `REDIS_ADDR`, `APP_ORIGIN`, `COOKIE_SECURE`, `BOOTSTRAP_INVITE_CODE` (optional, default `teamie-bootstrap`), `FEATURE_FLAGS_FILE`. `REGISTRATION_CODE` is removed from the new pre-release design. Runtime secrets may use env backed by protected host config; never bake them into images. Each service applies its own embedded, forward-only idempotent migrations before readiness. Release scripts serialize migration and rollout.
 
 Caddy routes `/api/v1/auth/*` to Identity, `/api/v1/ws` to Realtime, other `/api/*` to Chat, and remaining requests to the static web container. Frontend uses same-origin relative URLs. Build context for backend Dockerfile is repository root, build arg `SERVICE=identity|chat|realtime`; executable packages are `./services/<service>/cmd`. Web build context is repository root, Dockerfile `apps/web/Dockerfile`.
+
+Edge configuration requires `SITE_ADDRESS` equal to `APP_ORIGIN` and `TLS_SERVER_NAME` equal to that origin's hostname (without scheme/port). The latter configures Caddy `default_sni` for IP clients that omit SNI. It does not change the browser Origin or authorize another hostname.

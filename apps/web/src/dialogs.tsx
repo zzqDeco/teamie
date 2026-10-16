@@ -325,7 +325,11 @@ export function ProfileSettings() {
           <Avatar name={user!.displayName} seed={user!.id} size="large" />
           <h2>{user!.displayName}</h2>
           <p>{user!.email}</p>
-          <span className="profile-tag">团队伙伴</span>
+          <span
+            className={`profile-tag ${user!.platformRole === "admin" ? "admin-profile-tag" : ""}`}
+          >
+            {user!.platformRole === "admin" ? "平台管理员" : "团队伙伴"}
+          </span>
         </div>
       </div>
       <form className="settings-form" onSubmit={save}>

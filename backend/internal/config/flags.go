@@ -13,7 +13,7 @@ type Snapshot struct {
 type Flags struct{ Path string }
 
 var Implemented = map[string]bool{
-	"auth.public_signup": true, "im.dm.create": true, "im.group.create": true, "im.channel.create": true,
+	"auth.public_signup": false, "im.dm.create": true, "im.group.create": true, "im.channel.create": true,
 	"im.message.edit": true, "im.message.retract": true, "im.typing.publish": true,
 	"im.presence.publish": false, "im.attachments.upload": false, "im.reactions.create": false, "im.threads.create": false,
 }

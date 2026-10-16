@@ -237,6 +237,14 @@ export function Login() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const register = params.get("mode") === "register";
+  const inviteCode = params.get("inviteCode") || "";
+  const registration = useQuery({
+    queryKey: ["registrationPolicy"],
+    queryFn: api.registration,
+    enabled: register && !loading,
+    staleTime: 0,
+    retry: 1,
+  });
   const redirectParam = params.get("next") || "/app";
   const next =
     redirectParam.startsWith("/") && !redirectParam.startsWith("//")
@@ -249,6 +257,11 @@ export function Login() {
     setBusy(true);
     setError("");
     const data = new FormData(event.currentTarget);
+    if (register && !String(data.get("inviteCode") || "").trim()) {
+      setError("请填写管理员提供的注册邀请码。每个邀请码仅限注册一个账户。");
+      setBusy(false);
+      return;
+    }
     try {
       const session = register
         ? await api.register({
@@ -324,6 +337,7 @@ export function Login() {
                 setError("");
                 setParams({
                   ...(params.get("next") ? { next } : {}),
+                  ...(inviteCode ? { inviteCode } : {}),
                   mode: "login",
                 });
               }}
@@ -336,6 +350,7 @@ export function Login() {
                 setError("");
                 setParams({
                   ...(params.get("next") ? { next } : {}),
+                  ...(inviteCode ? { inviteCode } : {}),
                   mode: "register",
                 });
               }}
@@ -343,7 +358,20 @@ export function Login() {
               创建账户
             </button>
           </div>
-          <form onSubmit={submit} key={register ? "register" : "login"}>
+          {register && registration.data?.bootstrapRequired && (
+            <Notice kind="info">
+              首次初始化：第一个成功注册的账户将成为平台管理员。请使用部署管理员提供的初始化邀请码；首个账户创建后，该邀请码立即失效。
+            </Notice>
+          )}
+          {register && registration.isError && (
+            <Notice kind="info">
+              暂时无法确认初始化状态。注册始终需要有效邀请码，请使用管理员提供的邀请后重试。
+            </Notice>
+          )}
+          <form
+            onSubmit={submit}
+            key={register ? `register:${inviteCode}` : "login"}
+          >
             <Notice>{error}</Notice>
             {register && (
               <label>
@@ -380,15 +408,21 @@ export function Login() {
             </label>
             {register && (
               <label>
-                注册邀请码{" "}
-                <span className="optional">由 Teamie 管理员提供</span>
+                {registration.data?.bootstrapRequired
+                  ? "初始化邀请码"
+                  : "一次性注册邀请码"}{" "}
+                <span className="optional">必填 · 由管理员提供</span>
                 <input
                   name="inviteCode"
                   autoComplete="off"
-                  placeholder="输入部署注册邀请码（如有）"
+                  defaultValue={inviteCode}
+                  placeholder="输入管理员提供的注册邀请码"
+                  required
                 />
                 <small className="field-help">
-                  当前默认采用邀请注册。此邀请码与工作空间邀请链接不同；开放注册时可留空。
+                  {registration.data?.bootstrapRequired
+                    ? "初始化邀请码只用于创建第一个管理员账户。"
+                    : "每个邀请码仅能注册一个账户，生成后七天内有效。此邀请码与工作空间邀请链接不同。"}
                 </small>
               </label>
             )}

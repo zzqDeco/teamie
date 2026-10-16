@@ -8,11 +8,12 @@ import (
 )
 
 type User struct {
-	Id          string `thrift:"id,1,required" frugal:"1,required,string" json:"id"`
-	Email       string `thrift:"email,2,required" frugal:"2,required,string" json:"email"`
-	DisplayName string `thrift:"displayName,3,required" frugal:"3,required,string" json:"displayName"`
-	Kind        string `thrift:"kind,4,required" frugal:"4,required,string" json:"kind"`
-	CreatedAt   string `thrift:"createdAt,5,required" frugal:"5,required,string" json:"createdAt"`
+	Id           string `thrift:"id,1,required" frugal:"1,required,string" json:"id"`
+	Email        string `thrift:"email,2,required" frugal:"2,required,string" json:"email"`
+	DisplayName  string `thrift:"displayName,3,required" frugal:"3,required,string" json:"displayName"`
+	Kind         string `thrift:"kind,4,required" frugal:"4,required,string" json:"kind"`
+	CreatedAt    string `thrift:"createdAt,5,required" frugal:"5,required,string" json:"createdAt"`
+	PlatformRole string `thrift:"platformRole,6,required" frugal:"6,required,string" json:"platformRole"`
 }
 
 func NewUser() *User {
@@ -41,6 +42,10 @@ func (p *User) GetKind() (v string) {
 func (p *User) GetCreatedAt() (v string) {
 	return p.CreatedAt
 }
+
+func (p *User) GetPlatformRole() (v string) {
+	return p.PlatformRole
+}
 func (p *User) SetId(val string) {
 	p.Id = val
 }
@@ -56,6 +61,9 @@ func (p *User) SetKind(val string) {
 func (p *User) SetCreatedAt(val string) {
 	p.CreatedAt = val
 }
+func (p *User) SetPlatformRole(val string) {
+	p.PlatformRole = val
+}
 
 func (p *User) String() string {
 	if p == nil {
@@ -70,6 +78,7 @@ var fieldIDToName_User = map[int16]string{
 	3: "displayName",
 	4: "kind",
 	5: "createdAt",
+	6: "platformRole",
 }
 
 type SessionRequest struct {

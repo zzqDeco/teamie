@@ -99,6 +99,8 @@ def validate_config(config, host_env):
     require(parsed.path in ("", "/") and not parsed.query and not parsed.fragment, "APP_ORIGIN must be an origin")
     require(origin == origin.rstrip("/"), "APP_ORIGIN must not have a trailing slash")
     require(services["caddy"]["environment"]["SITE_ADDRESS"] == origin, "SITE_ADDRESS and APP_ORIGIN must match")
+    require(services["caddy"]["environment"].get("TLS_SERVER_NAME") == parsed.hostname,
+            "TLS_SERVER_NAME must equal the APP_ORIGIN hostname without scheme or port")
     pg_env = services["postgres"]["environment"]
     for name in ("identity", "chat", "realtime"):
         env = services[name]["environment"]
@@ -111,9 +113,10 @@ def validate_config(config, host_env):
         require(db.username == "teamie_" + name and db.path == "/teamie_" + name, f"{name} must own a separate role/database")
         require(unquote(db.password or "") == pg_env["POSTGRES_" + name.upper() + "_PASSWORD"], f"{name} initialization/runtime passwords disagree")
     credentials = [pg_env[k] for k in ("POSTGRES_PASSWORD", "POSTGRES_IDENTITY_PASSWORD", "POSTGRES_CHAT_PASSWORD")]
-    credentials.append(services["identity"]["environment"]["REGISTRATION_CODE"])
-    require(all(len(value) >= 24 and "REPLACE" not in value for value in credentials), "replace every credential with a random value of at least 24 characters")
-    require(len(set(credentials)) == len(credentials), "database and registration credentials must be independent")
+    require(all(len(value) >= 24 and "REPLACE" not in value for value in credentials), "replace every database credential with a random value of at least 24 characters")
+    require(len(set(credentials)) == len(credentials), "database credentials must be independent")
+    bootstrap = services["identity"]["environment"].get("BOOTSTRAP_INVITE_CODE", "teamie-bootstrap")
+    require(isinstance(bootstrap, str) and bool(bootstrap.strip()), "bootstrap invitation must resolve to a nonempty code or its default")
     for name, service in services.items():
         require(name == "caddy" or not service.get("ports"), "only Caddy may publish host ports")
     return origin

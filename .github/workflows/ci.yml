@@ -117,7 +117,14 @@ jobs:
       - run: bash ops/check-compose.sh
       - name: Validate explicit public-IP ACME configuration
         run: |
-          docker run --rm --network none --env SITE_ADDRESS=https://192.0.2.1 \
+          docker run --rm --network none --env SITE_ADDRESS=https://192.0.2.1 --env TLS_SERVER_NAME=192.0.2.1 \
             --volume "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
             --volume "$PWD/deploy/tls/acme-ip.caddy:/etc/caddy/issuer.caddy:ro" \
             caddy:2.11.7-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+      - name: Verify trusted IP HTTPS without SNI across a different local address
+        run: |
+          scratch=$(mktemp -d)
+          container=$(docker create caddy:2.11.7-alpine)
+          trap 'docker rm "$container" >/dev/null 2>&1 || true; rm -rf "$scratch"' EXIT
+          docker cp "$container:/usr/bin/caddy" "$scratch/caddy"
+          python3 ops/check-ip-tls.py --caddy "$scratch/caddy"

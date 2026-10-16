@@ -3,9 +3,25 @@ export type User = {
   email: string;
   displayName: string;
   kind: "human" | "agent";
+  platformRole: "admin" | "user";
   createdAt: string;
 };
 export type Session = { user: User; csrfToken: string };
+export type RegistrationPolicy = { mode: "invite"; bootstrapRequired: boolean };
+export type RegistrationInvite = {
+  id: string;
+  createdAt: string;
+  expiresAt: string;
+  usedAt?: string;
+  revokedAt?: string;
+  usedBy?: string;
+};
+export type CreatedRegistrationInvite = {
+  invite: Pick<RegistrationInvite, "id" | "createdAt" | "expiresAt"> & {
+    code: string;
+  };
+  url: string;
+};
 export type Workspace = {
   id: string;
   name: string;
@@ -125,6 +141,16 @@ export class TeamieClient {
     return response.json() as Promise<T>;
   }
   session = () => this.request<Session>("/auth/session");
+  registration = () => this.request<RegistrationPolicy>("/auth/registration");
+  registrationInvites = () =>
+    this.request<{ invites: RegistrationInvite[] }>("/auth/admin/invites");
+  createRegistrationInvite = () =>
+    this.request<CreatedRegistrationInvite>("/auth/admin/invites", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  revokeRegistrationInvite = (id: string) =>
+    this.request<void>(`/auth/admin/invites/${part(id)}`, { method: "DELETE" });
   login = (email: string, password: string) =>
     this.request<Session>("/auth/login", {
       method: "POST",

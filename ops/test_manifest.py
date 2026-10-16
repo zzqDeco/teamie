@@ -96,11 +96,11 @@ class ProductionConfigTest(unittest.TestCase):
         self.env.touch(mode=0o600)
         self.config = {"services": {
             "identity": {"environment": {"APP_ORIGIN": "https://192.0.2.1", "COOKIE_SECURE": "true",
-                "REGISTRATION_CODE": "r" * 64, "DATABASE_URL": "postgres://teamie_identity:" + "i" * 64 + "@postgres:5432/teamie_identity?sslmode=disable"}},
+                "BOOTSTRAP_INVITE_CODE": "teamie-bootstrap", "DATABASE_URL": "postgres://teamie_identity:" + "i" * 64 + "@postgres:5432/teamie_identity?sslmode=disable"}},
             "chat": {"environment": {"APP_ORIGIN": "https://192.0.2.1", "COOKIE_SECURE": "true",
                 "DATABASE_URL": "postgres://teamie_chat:" + "c" * 64 + "@postgres:5432/teamie_chat?sslmode=disable"}},
             "realtime": {"environment": {"APP_ORIGIN": "https://192.0.2.1", "COOKIE_SECURE": "true"}},
-            "caddy": {"environment": {"SITE_ADDRESS": "https://192.0.2.1"}},
+            "caddy": {"environment": {"SITE_ADDRESS": "https://192.0.2.1", "TLS_SERVER_NAME": "192.0.2.1"}},
             "postgres": {"environment": {"POSTGRES_PASSWORD": "a" * 64, "POSTGRES_IDENTITY_PASSWORD": "i" * 64, "POSTGRES_CHAT_PASSWORD": "c" * 64}}
         }}
 
@@ -108,6 +108,40 @@ class ProductionConfigTest(unittest.TestCase):
 
     def test_valid_secure_private_config(self):
         self.assertEqual(manifest.validate_config(self.config, self.env), "https://192.0.2.1")
+
+    def test_no_sni_certificate_name_must_match_public_origin(self):
+        for value in (None, "127.0.0.1", "https://192.0.2.1", "192.0.2.1:443"):
+            candidate = copy.deepcopy(self.config)
+            if value is None:
+                del candidate["services"]["caddy"]["environment"]["TLS_SERVER_NAME"]
+            else:
+                candidate["services"]["caddy"]["environment"]["TLS_SERVER_NAME"] = value
+            with self.assertRaises(ValueError): manifest.validate_config(candidate, self.env)
+
+    def test_bootstrap_invite_accepts_default_and_short_configured_code(self):
+        for code in ("teamie-bootstrap", "custom-code"):
+            candidate = copy.deepcopy(self.config)
+            candidate["services"]["identity"]["environment"]["BOOTSTRAP_INVITE_CODE"] = code
+            manifest.validate_config(candidate, self.env)
+        candidate = copy.deepcopy(self.config)
+        del candidate["services"]["identity"]["environment"]["BOOTSTRAP_INVITE_CODE"]
+        manifest.validate_config(candidate, self.env)
+
+    def test_bootstrap_invite_cannot_resolve_to_blank(self):
+        for code in ("", "   "):
+            candidate = copy.deepcopy(self.config)
+            candidate["services"]["identity"]["environment"]["BOOTSTRAP_INVITE_CODE"] = code
+            with self.assertRaises(ValueError): manifest.validate_config(candidate, self.env)
+
+    def test_database_credentials_remain_long_and_independent(self):
+        candidate = copy.deepcopy(self.config)
+        candidate["services"]["postgres"]["environment"]["POSTGRES_PASSWORD"] = "short"
+        with self.assertRaises(ValueError): manifest.validate_config(candidate, self.env)
+        candidate = copy.deepcopy(self.config)
+        pg = candidate["services"]["postgres"]["environment"]
+        pg["POSTGRES_CHAT_PASSWORD"] = pg["POSTGRES_IDENTITY_PASSWORD"]
+        candidate["services"]["chat"]["environment"]["DATABASE_URL"] = "postgres://teamie_chat:" + "i" * 64 + "@postgres:5432/teamie_chat?sslmode=disable"
+        with self.assertRaises(ValueError): manifest.validate_config(candidate, self.env)
 
     def test_rejects_nonsecure_cookies_cross_service_db_access_and_public_ports(self):
         for mutate in (

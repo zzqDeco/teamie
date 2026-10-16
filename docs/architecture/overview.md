@@ -23,13 +23,15 @@ flowchart LR
 
 | Service | Owns | Does not own |
 | --- | --- | --- |
-| Identity | User credentials, profiles, opaque sessions, CSRF tokens | Workspace admission and message authorization |
+| Identity | User credentials, platform roles, single-use registration invitations, profiles, opaque sessions, CSRF tokens | Workspace admission and message authorization |
 | Chat | Workspaces, memberships, conversations, message history, read cursor, durable sync and outbox | Login sessions and Agent execution |
 | Realtime | Connections, heartbeats, disposable typing signals, sync hints | Message persistence and authorization policy |
 
 All three binaries are independently built and deployed from the backend monorepo. Identity and Chat have separate PostgreSQL databases and application roles. They share an instance to fit the initial host; they do not query each other's tables. Membership and message writes are in Chat so authorization and persistence can share a transaction. Realtime checks authority through Kitex. It cannot bypass membership by querying storage directly.
 
 The edge and web container are the only public application entry points. HTTP auth routes go to Identity; chat routes go to Chat; WebSocket upgrades go to Realtime. Internal HTTP/RPC, PostgreSQL and Redis ports stay on the container network. Browser APIs are same-origin.
+
+Identity serializes first-account initialization: only the configured bootstrap invitation can create the first account, which becomes platform administrator. `BOOTSTRAP_INVITE_CODE` defaults to `teamie-bootstrap` when unset. Once any account exists this code cannot create another account. An authenticated platform administrator generates cryptographically random ordinary invitations; each hashed invitation admits exactly one successful registration, expires in seven days, and may be revoked before consumption. Failed account creation rolls back invitation consumption. Platform roles and workspace roles are independent; the platform administrator still requires workspace membership to read messages.
 
 ## Message guarantees
 
@@ -52,5 +54,7 @@ Feature definitions and defaults are versioned in Git; protected production over
 One Debian x86_64 ECS host runs Docker Compose with Caddy, web, Identity, Chat, Realtime, PostgreSQL and Redis. Images are built on hosted GitHub runners and pulled by immutable GHCR digest. Infra images are mirrored to GHCR because direct Docker Hub access from the initial host is unreliable. Application data, PostgreSQL, certificate storage and backups have persistent storage; containers are replaceable.
 
 A public IP uses an explicitly configured Let's Encrypt ACME `shortlived` issuer. The certificate must be publicly trusted and automatically renewed before release acceptance. Caddy's implicit internal CA for IPs is insufficient. See [Caddy TLS configuration](https://caddyserver.com/docs/caddyfile/directives/tls) and [Let's Encrypt IP certificate availability](https://letsencrypt.org/2026/01/15/6day-and-ip-general-availability).
+
+IP clients may omit TLS SNI, while Caddy sees a private container destination address. `TLS_SERVER_NAME` must equal the public origin hostname; Caddy uses it as `default_sni` so the correct public certificate is selected. CI verifies the no-SNI handshake with an explicitly trusted disposable IP certificate, rather than disabling certificate verification.
 
 Memory limits are initial budgets for a 2-vCPU/2-GB host, not measured capacity claims. Database connection pools, RPC concurrency and WS buffers must be bounded. Backups on the same disk provide recovery from mistakes but do not protect against losing the host; external backup storage remains a future operational addition.

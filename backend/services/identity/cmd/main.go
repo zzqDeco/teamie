@@ -24,7 +24,7 @@ func main() {
 	if origin == "" {
 		log.Fatal("APP_ORIGIN is required")
 	}
-	store, e := identity.Open(context.Background(), dbURL, flags, api.Env("REGISTRATION_CODE", ""))
+	store, e := identity.Open(context.Background(), dbURL, flags, api.Env("BOOTSTRAP_INVITE_CODE", identity.DefaultBootstrapInviteCode))
 	if e != nil {
 		log.Fatal(e)
 	}

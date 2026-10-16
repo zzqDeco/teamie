@@ -56,6 +56,15 @@ func (h *Handler) cookie(w http.ResponseWriter, token string, maxAge int) {
 func (h *Handler) Routes() http.Handler {
 	m := http.NewServeMux()
 	api.Operations(m, func(r *http.Request) error { return h.Store.Ping(r.Context()) })
+	m.HandleFunc("GET /api/v1/auth/registration", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		required, e := h.Store.BootstrapRequired(r.Context())
+		if e != nil {
+			api.Fail(w, e)
+			return
+		}
+		api.Write(w, 200, map[string]any{"mode": "invite", "bootstrapRequired": required})
+	})
 	login := func(register bool) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			if e := api.CheckOrigin(r, h.Origin); e != nil {
@@ -122,6 +131,42 @@ func (h *Handler) Routes() http.Handler {
 			return e
 		}
 		api.Write(w, 200, map[string]any{"user": u})
+		return nil
+	}))
+	m.HandleFunc("GET /api/v1/auth/admin/invites", api.Auth(h.Store, h.Origin, func(w http.ResponseWriter, r *http.Request, s api.Session) error {
+		w.Header().Set("Cache-Control", "no-store")
+		invites, e := h.Store.RegistrationInvites(r.Context(), s.User.ID)
+		if e != nil {
+			return e
+		}
+		api.Write(w, 200, map[string]any{"invites": invites})
+		return nil
+	}))
+	m.HandleFunc("POST /api/v1/auth/admin/invites", api.Auth(h.Store, h.Origin, func(w http.ResponseWriter, r *http.Request, s api.Session) error {
+		w.Header().Set("Cache-Control", "no-store")
+		// Check permission before parsing a management request.
+		if e := h.Store.requireAdmin(r.Context(), s.User.ID); e != nil {
+			return e
+		}
+		if e := api.Decode(w, r, &struct{}{}); e != nil {
+			return e
+		}
+		invite, code, e := h.Store.CreateRegistrationInvite(r.Context(), s.User.ID)
+		if e != nil {
+			return e
+		}
+		api.Write(w, 201, map[string]any{"invite": struct {
+			RegistrationInvite
+			Code string `json:"code"`
+		}{invite, code}, "url": "/login?mode=register&inviteCode=" + code})
+		return nil
+	}))
+	m.HandleFunc("DELETE /api/v1/auth/admin/invites/{id}", api.Auth(h.Store, h.Origin, func(w http.ResponseWriter, r *http.Request, s api.Session) error {
+		w.Header().Set("Cache-Control", "no-store")
+		if e := h.Store.RevokeRegistrationInvite(r.Context(), s.User.ID, r.PathValue("id")); e != nil {
+			return e
+		}
+		api.Write(w, 204, nil)
 		return nil
 	}))
 	return m

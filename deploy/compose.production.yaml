@@ -26,6 +26,7 @@ services:
     cap_add: [NET_BIND_SERVICE]
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:?HTTPS site address required}
+      TLS_SERVER_NAME: ${TLS_SERVER_NAME:?public hostname required for clients without SNI}
       GOMEMLIMIT: 48MiB
     ports: ["80:80", "443:443", "443:443/udp"]
     volumes:
@@ -83,7 +84,7 @@ services:
       REDIS_ADDR: redis:6379
       APP_ORIGIN: ${APP_ORIGIN:?HTTPS origin required}
       COOKIE_SECURE: "true"
-      REGISTRATION_CODE: ${REGISTRATION_CODE:?registration code required}
+      BOOTSTRAP_INVITE_CODE: ${BOOTSTRAP_INVITE_CODE:-teamie-bootstrap}
       FEATURE_FLAGS_FILE: /etc/teamie/feature-flags.json
       GOMEMLIMIT: 72MiB
       GOMAXPROCS: "1"

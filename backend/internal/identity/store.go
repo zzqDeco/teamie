@@ -2,7 +2,6 @@ package identity
 
 import (
 	"context"
-	"crypto/subtle"
 	_ "embed"
 	"errors"
 	"github.com/jackc/pgx/v5"
@@ -21,9 +20,9 @@ import (
 var schema string
 
 type Store struct {
-	DB               *pgxpool.Pool
-	Flags            config.Flags
-	RegistrationCode string
+	DB                  *pgxpool.Pool
+	Flags               config.Flags
+	BootstrapInviteCode string
 }
 
 func Open(ctx context.Context, url string, flags config.Flags, code string) (*Store, error) {
@@ -31,7 +30,10 @@ func Open(ctx context.Context, url string, flags config.Flags, code string) (*St
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{db, flags, code}
+	if code == "" {
+		code = DefaultBootstrapInviteCode
+	}
+	s := &Store{DB: db, Flags: flags, BootstrapInviteCode: code}
 	if err = s.Migrate(ctx); err != nil {
 		db.Close()
 		return nil, err
@@ -67,9 +69,6 @@ func (s *Store) newSession(ctx context.Context, tx pgx.Tx, u api.User) (api.Sess
 	return api.Session{User: u, CSRFToken: csrf}, token, e
 }
 func (s *Store) Register(ctx context.Context, email, password, name, code string) (api.Session, string, error) {
-	if !s.Flags.Load().Flags["auth.public_signup"] && (s.RegistrationCode == "" || subtle.ConstantTimeCompare([]byte(s.RegistrationCode), []byte(code)) != 1) {
-		return api.Session{}, "", api.Err(403, "invite_required", "A valid registration invitation is required")
-	}
 	email, e := normalizeEmail(email)
 	if e != nil {
 		return api.Session{}, "", e
@@ -81,17 +80,29 @@ func (s *Store) Register(ctx context.Context, email, password, name, code string
 	if len([]rune(password)) < 12 || len(password) > 72 {
 		return api.Session{}, "", api.Err(400, "invalid_password", "Password must contain at least 12 characters and at most 72 bytes")
 	}
+	// Cheap eligibility check avoids hashing requests with unusable codes. The
+	// transaction repeats it under the registration lock before changing state.
+	if _, _, e = s.registrationAdmission(ctx, s.DB, code, false); e != nil {
+		return api.Session{}, "", e
+	}
 	hash, e := bcrypt.GenerateFromPassword([]byte(password), 12)
 	if e != nil {
 		return api.Session{}, "", e
 	}
-	tx, e := s.DB.Begin(ctx)
+	tx, e := s.DB.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if e != nil {
 		return api.Session{}, "", e
 	}
 	defer tx.Rollback(ctx)
-	u := api.User{ID: api.ID(), Email: email, DisplayName: name, Kind: "human"}
-	e = tx.QueryRow(ctx, "INSERT INTO identity_users(id,email,display_name,password_hash) VALUES($1,$2,$3,$4) RETURNING created_at", u.ID, u.Email, u.DisplayName, string(hash)).Scan(&u.CreatedAt)
+	if _, e = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(704104)"); e != nil {
+		return api.Session{}, "", e
+	}
+	role, inviteID, e := s.registrationAdmission(ctx, tx, code, true)
+	if e != nil {
+		return api.Session{}, "", e
+	}
+	u := api.User{ID: api.ID(), Email: email, DisplayName: name, Kind: "human", PlatformRole: role}
+	e = tx.QueryRow(ctx, "INSERT INTO identity_users(id,email,display_name,password_hash,platform_role) VALUES($1,$2,$3,$4,$5) RETURNING created_at", u.ID, u.Email, u.DisplayName, string(hash), u.PlatformRole).Scan(&u.CreatedAt)
 	if e != nil {
 		var pe *pgconn.PgError
 		if errors.As(e, &pe) && pe.Code == "23505" {
@@ -100,16 +111,22 @@ func (s *Store) Register(ctx context.Context, email, password, name, code string
 		return api.Session{}, "", e
 	}
 	ss, token, e := s.newSession(ctx, tx, u)
-	if e == nil {
-		e = tx.Commit(ctx)
+	if e != nil {
+		return api.Session{}, "", e
 	}
+	if inviteID != "" {
+		if _, e = tx.Exec(ctx, "UPDATE registration_invites SET used_at=now(),used_by=$2 WHERE id=$1", inviteID, u.ID); e != nil {
+			return api.Session{}, "", e
+		}
+	}
+	e = tx.Commit(ctx)
 	return ss, token, e
 }
 func (s *Store) Login(ctx context.Context, email, password string) (api.Session, string, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	var u api.User
 	var hash string
-	e := s.DB.QueryRow(ctx, "SELECT id,email,display_name,kind,created_at,password_hash FROM identity_users WHERE email=$1", email).Scan(&u.ID, &u.Email, &u.DisplayName, &u.Kind, &u.CreatedAt, &hash)
+	e := s.DB.QueryRow(ctx, "SELECT id,email,display_name,kind,platform_role,created_at,password_hash FROM identity_users WHERE email=$1", email).Scan(&u.ID, &u.Email, &u.DisplayName, &u.Kind, &u.PlatformRole, &u.CreatedAt, &hash)
 	if e != nil && !errors.Is(e, pgx.ErrNoRows) {
 		return api.Session{}, "", e
 	}
@@ -135,7 +152,7 @@ func (s *Store) Validate(ctx context.Context, token string) (api.Session, error)
 	if len(token) != 64 {
 		return ss, api.Err(401, "unauthenticated", "Sign in to continue")
 	}
-	e := s.DB.QueryRow(ctx, `SELECT u.id,u.email,u.display_name,u.kind,u.created_at,s.csrf_token FROM identity_sessions s JOIN identity_users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now()`, api.Hash(token)).Scan(&ss.User.ID, &ss.User.Email, &ss.User.DisplayName, &ss.User.Kind, &ss.User.CreatedAt, &ss.CSRFToken)
+	e := s.DB.QueryRow(ctx, `SELECT u.id,u.email,u.display_name,u.kind,u.platform_role,u.created_at,s.csrf_token FROM identity_sessions s JOIN identity_users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now()`, api.Hash(token)).Scan(&ss.User.ID, &ss.User.Email, &ss.User.DisplayName, &ss.User.Kind, &ss.User.PlatformRole, &ss.User.CreatedAt, &ss.CSRFToken)
 	if errors.Is(e, pgx.ErrNoRows) {
 		e = api.Err(401, "unauthenticated", "Session expired or revoked")
 	}
@@ -146,14 +163,14 @@ func (s *Store) Users(ctx context.Context, ids []string) ([]api.User, error) {
 	if len(ids) > 1000 {
 		return nil, api.Err(400, "invalid_request", "Too many users")
 	}
-	rows, e := s.DB.Query(ctx, "SELECT id,email,display_name,kind,created_at FROM identity_users WHERE id=ANY($1)", ids)
+	rows, e := s.DB.Query(ctx, "SELECT id,email,display_name,kind,platform_role,created_at FROM identity_users WHERE id=ANY($1)", ids)
 	if e != nil {
 		return nil, e
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var u api.User
-		if e = rows.Scan(&u.ID, &u.Email, &u.DisplayName, &u.Kind, &u.CreatedAt); e != nil {
+		if e = rows.Scan(&u.ID, &u.Email, &u.DisplayName, &u.Kind, &u.PlatformRole, &u.CreatedAt); e != nil {
 			return nil, e
 		}
 		users = append(users, u)
@@ -170,6 +187,6 @@ func (s *Store) Profile(ctx context.Context, id, name string) (api.User, error) 
 	if !api.BoundedString(name, 1, 80) {
 		return u, api.Err(400, "invalid_name", "Display name must contain 1 to 80 characters")
 	}
-	e := s.DB.QueryRow(ctx, "UPDATE identity_users SET display_name=$2 WHERE id=$1 RETURNING id,email,display_name,kind,created_at", id, name).Scan(&u.ID, &u.Email, &u.DisplayName, &u.Kind, &u.CreatedAt)
+	e := s.DB.QueryRow(ctx, "UPDATE identity_users SET display_name=$2 WHERE id=$1 RETURNING id,email,display_name,kind,platform_role,created_at", id, name).Scan(&u.ID, &u.Email, &u.DisplayName, &u.Kind, &u.PlatformRole, &u.CreatedAt)
 	return u, e
 }

@@ -15,7 +15,7 @@ import (
 
 func TestInvitationSessionCSRFAndRevocation(t *testing.T) {
 	ctx := context.Background()
-	s, e := Open(ctx, testdb.URL(t), config.Flags{}, "test-registration-code")
+	s, e := Open(ctx, testdb.URL(t), config.Flags{}, "test-bootstrap-code")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -23,10 +23,10 @@ func TestInvitationSessionCSRFAndRevocation(t *testing.T) {
 	if _, _, e = s.Register(ctx, "alice@example.invalid", "very-long-password", "Alice", "wrong"); e == nil {
 		t.Fatal("registration bypassed invitation")
 	}
-	if _, _, e = s.Register(ctx, "alice@example.invalid", "short", "Alice", "test-registration-code"); e == nil {
+	if _, _, e = s.Register(ctx, "alice@example.invalid", "short", "Alice", "test-bootstrap-code"); e == nil {
 		t.Fatal("short password accepted")
 	}
-	ss, token, e := s.Register(ctx, "ALICE@example.invalid", "very-long-password", "Alice", "test-registration-code")
+	ss, token, e := s.Register(ctx, "ALICE@example.invalid", "very-long-password", "Alice", "test-bootstrap-code")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -36,7 +36,7 @@ func TestInvitationSessionCSRFAndRevocation(t *testing.T) {
 	if ss.User.CreatedAt.Location() != time.UTC {
 		t.Fatal("wire timestamps must be UTC")
 	}
-	if _, _, e = s.Register(ctx, "alice@example.invalid", "very-long-password", "Another", "test-registration-code"); e == nil {
+	if _, _, e = s.Register(ctx, "alice@example.invalid", "very-long-password", "Another", "test-bootstrap-code"); e == nil {
 		t.Fatal("case-insensitive duplicate email accepted")
 	}
 	if _, _, e = s.Login(ctx, "alice@example.invalid", "wrong-password"); e == nil {
