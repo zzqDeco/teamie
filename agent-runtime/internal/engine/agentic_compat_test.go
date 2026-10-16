@@ -181,6 +181,16 @@ func fixtureV3Cutover(t *testing.T, s *Store, request []byte) {
 	if opts.AgenticToolChoice != nil {
 		opts.ToolChoice = &opts.AgenticToolChoice.Type
 	}
+	// v0.3.4/0ce504f advertised the four original IM tools. Converting the
+	// current response format alone would retain v0.3.5's added attachment
+	// tool and fail to exercise recovery of a real pre-upgrade request hash.
+	previousTools := make([]*schema.ToolInfo, 0, len(opts.Tools))
+	for _, info := range opts.Tools {
+		if info.Name != "im_get_attachment" {
+			previousTools = append(previousTools, info)
+		}
+	}
+	opts.Tools = previousTools
 	classic, err := legacyMessages(messages)
 	if err != nil {
 		t.Fatal(err)

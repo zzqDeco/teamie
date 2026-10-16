@@ -216,6 +216,18 @@ type Observation struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
 	Data  any    `json:"data,omitempty"`
+	// New output and its receipt share bytes. Old receipts may restore an
+	// actual historical Session wire for read compatibility. Re-marshalling
+	// Data through any can reorder fields or round large integers on replay.
+	raw []byte
+}
+
+func marshalObservation(_ context.Context, output any) (string, error) {
+	observation, ok := output.(*Observation)
+	if !ok || observation == nil || len(observation.raw) == 0 {
+		return "", errors.New("tool observation has no committed output")
+	}
+	return string(observation.raw), nil
 }
 
 func observeError(e error) *Observation {
@@ -254,11 +266,18 @@ func (t *Tools) execute(ctx context.Context, name string, args any, fn func(cont
 		if e = json.Unmarshal(cached, &out); e != nil {
 			return nil, e
 		}
+		out.raw, e = t.Store.replayToolWire(ctx, run, callID, name, cached)
+		if e != nil {
+			return nil, e
+		}
 		return &out, nil
 	}
 	out, e := fn(ctx, "tool-"+digest([]byte(run.AgentID+"/"+run.ID+"/"+callID)))
 	if e != nil {
 		return nil, e
+	}
+	if out == nil {
+		return nil, errors.New("tool observation is nil")
 	}
 	b, e := json.Marshal(out)
 	if e != nil {
@@ -267,6 +286,7 @@ func (t *Tools) execute(ctx context.Context, name string, args any, fn func(cont
 	if e = t.Store.ToolResult(ctx, t.Lease, run, callID, b); e != nil {
 		return nil, e
 	}
+	out.raw = b
 	return out, nil
 }
 
@@ -309,7 +329,7 @@ func (t *Tools) BuildIM() ([]tool.BaseTool, error) {
 			}
 			return &Observation{OK: true, Data: out}, nil
 		})
-	})
+	}, utils.WithMarshalOutput(marshalObservation))
 	if e != nil {
 		return nil, e
 	}
@@ -341,7 +361,7 @@ func (t *Tools) BuildIM() ([]tool.BaseTool, error) {
 			return &Observation{OK: true, Data: map[string]any{"messages": out, "hasMore": more, "nextBeforeSeq": cursor}}, nil
 
 		})
-	})
+	}, utils.WithMarshalOutput(marshalObservation))
 	if e != nil {
 		return nil, e
 	}
@@ -353,7 +373,7 @@ func (t *Tools) BuildIM() ([]tool.BaseTool, error) {
 			}
 			return &Observation{OK: true, Data: m}, nil
 		})
-	})
+	}, utils.WithMarshalOutput(marshalObservation))
 	if e != nil {
 		return nil, e
 	}
@@ -378,7 +398,7 @@ func (t *Tools) BuildIM() ([]tool.BaseTool, error) {
 			}
 			return &Observation{OK: true, Data: out.Message}, nil
 		})
-	})
+	}, utils.WithMarshalOutput(marshalObservation))
 	if e != nil {
 		return nil, e
 	}
