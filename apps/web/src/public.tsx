@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import {
   Link,
@@ -23,6 +23,7 @@ import { api } from "@teamie/api-client";
 import { useAuth } from "./auth";
 import { errorText } from "./chat";
 import { Avatar, Button, Logo, Notice, PublicHeader } from "./ui";
+import { passwordPolicyError } from "./password-policy";
 
 export function Landing() {
   const { user } = useAuth();
@@ -168,8 +169,12 @@ export function Login() {
       : "/app";
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
+  const [invalidField, setInvalidField] = useState("");
+  const errorId = useId();
+  const pending = useRef(false);
   function changeMode(mode: string) {
     setError("");
+    setInvalidField("");
     setParams({
       ...(params.get("next") ? { next } : {}),
       ...(inviteCode ? { inviteCode } : {}),
@@ -178,31 +183,51 @@ export function Login() {
   }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setBusy(true);
+    if (pending.current) return;
     setError("");
-    const data = new FormData(event.currentTarget);
-    if (register && !String(data.get("inviteCode") || "").trim()) {
-      setError("请填写注册邀请码。");
-      setBusy(false);
-      return;
+    setInvalidField("");
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const password = String(data.get("password") || "");
+    function fail(message: string, field: string) {
+      setError(message);
+      setInvalidField(field);
+      const input = form.elements.namedItem(field);
+      if (input instanceof HTMLInputElement) input.focus();
     }
+    if (register) {
+      const policyError = passwordPolicyError(password);
+      if (policyError) {
+        fail(policyError, "password");
+        return;
+      }
+      if (password !== String(data.get("confirmPassword") || "")) {
+        fail("两次输入的密码不一致。", "confirmPassword");
+        return;
+      }
+      if (!String(data.get("inviteCode") || "").trim()) {
+        fail("请填写注册邀请码。", "inviteCode");
+        return;
+      }
+    }
+    pending.current = true;
+    setBusy(true);
     try {
       const session = register
         ? await api.register({
             email: String(data.get("email")).trim(),
-            password: String(data.get("password")),
+            password,
             displayName: String(data.get("displayName")).trim(),
             inviteCode: String(data.get("inviteCode") || "").trim(),
           })
-        : await api.login(
-            String(data.get("email")).trim(),
-            String(data.get("password")),
-          );
+        : await api.login(String(data.get("email")).trim(), password);
+      form.reset();
       setSession(session);
       navigate(next, { replace: true });
     } catch (e) {
       setError(errorText(e));
     } finally {
+      pending.current = false;
       setBusy(false);
     }
   }
@@ -239,6 +264,7 @@ export function Login() {
             <button
               className={!register ? "active" : ""}
               aria-pressed={!register}
+              disabled={busy}
               onClick={() => changeMode("login")}
             >
               登录
@@ -246,6 +272,7 @@ export function Login() {
             <button
               className={register ? "active" : ""}
               aria-pressed={register}
+              disabled={busy}
               onClick={() => changeMode("register")}
             >
               受邀注册
@@ -261,11 +288,15 @@ export function Login() {
               暂时无法读取注册状态，请使用有效邀请码重试。
             </Notice>
           )}
+          {!register && params.get("passwordChanged") === "1" && (
+            <Notice kind="success">密码已修改，请重新登录。</Notice>
+          )}
           <form
             onSubmit={submit}
             key={register ? `register:${inviteCode}` : "login"}
+            aria-busy={busy}
           >
-            <Notice>{error}</Notice>
+            <Notice id={errorId}>{error}</Notice>
             {register && (
               <label>
                 显示名称
@@ -300,10 +331,31 @@ export function Login() {
                 autoComplete={register ? "new-password" : "current-password"}
                 placeholder={register ? "至少 12 个字符" : "输入密码"}
                 minLength={register ? 12 : undefined}
+                aria-invalid={invalidField === "password" || undefined}
+                aria-describedby={
+                  invalidField === "password" ? errorId : undefined
+                }
                 required
                 disabled={busy}
               />
             </label>
+            {register && (
+              <label>
+                确认密码
+                <input
+                  type="password"
+                  name="confirmPassword"
+                  autoComplete="new-password"
+                  placeholder="再次输入密码"
+                  aria-invalid={invalidField === "confirmPassword" || undefined}
+                  aria-describedby={
+                    invalidField === "confirmPassword" ? errorId : undefined
+                  }
+                  required
+                  disabled={busy}
+                />
+              </label>
+            )}
             {register && (
               <label>
                 {registration.data?.bootstrapRequired
@@ -316,6 +368,10 @@ export function Login() {
                   autoCapitalize="none"
                   spellCheck={false}
                   defaultValue={inviteCode}
+                  aria-invalid={invalidField === "inviteCode" || undefined}
+                  aria-describedby={
+                    invalidField === "inviteCode" ? errorId : undefined
+                  }
                   placeholder="输入邀请码"
                   required
                   disabled={busy}

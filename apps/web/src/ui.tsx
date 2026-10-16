@@ -80,12 +80,15 @@ export function IconButton({
 export function Notice({
   children,
   kind = "error",
+  id,
 }: {
   children: ReactNode;
   kind?: "error" | "success" | "info";
+  id?: string;
 }) {
   return children ? (
     <div
+      id={id}
       className={`notice ${kind}`}
       role={kind === "error" ? "alert" : "status"}
     >

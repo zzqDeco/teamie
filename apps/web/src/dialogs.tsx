@@ -21,6 +21,7 @@ import { Avatar, Button, Modal, Notice } from "./ui";
 import { enrichParticipants } from "./participants";
 import { ParticipantIdentity } from "./group-members";
 import { canConfigureModelGateway } from "./agent-management";
+import { PasswordSettings } from "./password-settings";
 export type DialogKind =
   | "workspace"
   | "channel"
@@ -368,6 +369,7 @@ export function ProfileSettings() {
           保存更改
         </Button>
       </form>
+      <PasswordSettings />
       {canConfigureModelGateway(user) && (
         <Link to="/app/admin" className="platform-management-link">
           <ShieldCheck size={19} aria-hidden="true" />

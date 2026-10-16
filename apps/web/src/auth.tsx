@@ -1,5 +1,6 @@
 import {
   createContext,
+  startTransition,
   useCallback,
   useContext,
   useEffect,
@@ -7,6 +8,7 @@ import {
 } from "react";
 import type { ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "@teamie/api-client";
 import type { Session, User } from "@teamie/api-client";
 import { chatStore } from "./store";
@@ -18,6 +20,7 @@ type Auth = {
   setSession: (session: Session) => void;
   updateUser: (user: User) => void;
   logout: () => Promise<void>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   retry: () => void;
 };
 const AuthContext = createContext<Auth | null>(null);
@@ -27,6 +30,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
   const client = useQueryClient();
+  const navigate = useNavigate();
   const reset = useCallback(() => {
     api.csrfToken = "";
     chatStore.clear();
@@ -70,6 +74,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await api.logout();
     reset();
   };
+  const changePassword = async (
+    currentPassword: string,
+    newPassword: string,
+  ) => {
+    await api.changePassword(currentPassword, newPassword);
+    // Update the auth guard and route together so its redirect cannot win.
+    startTransition(() => {
+      reset();
+      navigate("/login?passwordChanged=1", { replace: true });
+    });
+  };
   return (
     <AuthContext.Provider
       value={{
@@ -79,6 +94,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setSession,
         updateUser: setUser,
         logout,
+        changePassword,
         retry: () => setAttempt((n) => n + 1),
       }}
     >

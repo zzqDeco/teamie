@@ -312,6 +312,11 @@ export class TeamieClient {
       body: JSON.stringify(data),
     });
   logout = () => this.#request<void>("/auth/logout", { method: "POST" });
+  changePassword = (currentPassword: string, newPassword: string) =>
+    this.#request<void>("/auth/password", {
+      method: "POST",
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
   profile = (displayName: string) =>
     this.#request<{ user: User }>("/auth/profile", {
       method: "PATCH",

@@ -5,6 +5,41 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe("account-bound transport", () => {
+  it("changes the password using the authenticated CSRF-protected endpoint and handles an empty 204", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetch);
+    const client = new TeamieClient();
+    client.csrfToken = "current-session";
+    expect(await client.changePassword("example-old-password", "example-new-password")).toBeUndefined();
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/auth/password");
+    const options = fetch.mock.calls[0][1];
+    expect(options.method).toBe("POST");
+    expect(options.credentials).toBe("same-origin");
+    expect(options.cache).toBe("no-store");
+    expect(options.headers.get("X-CSRF-Token")).toBe("current-session");
+    expect(options.headers.get("Content-Type")).toBe("application/json");
+    expect(JSON.parse(options.body)).toEqual({
+      currentPassword: "example-old-password",
+      newPassword: "example-new-password",
+    });
+  });
+  it.each([
+    [400, "invalid_current_password", false],
+    [400, "invalid_password", false],
+    [429, "rate_limited", false],
+    [401, "unauthorized", true],
+  ])("only invalidates a password-change session for an actual 401: %s %s", async (status, code, unauthorized) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ error: { code, message: "example error" } }),
+      { status: status as number },
+    )));
+    const client = new TeamieClient();
+    client.csrfToken = "current-session";
+    client.onUnauthorized = vi.fn();
+    await expect(client.changePassword("example-old-password", "example-new-password")).rejects.toMatchObject({ status, code });
+    expect(client.onUnauthorized).toHaveBeenCalledTimes(unauthorized ? 1 : 0);
+    expect(client.csrfToken).toBe("current-session");
+  });
   it("sends relative same-origin writes with the current CSRF token", async () => {
     const fetch = vi
       .fn()

@@ -71,8 +71,8 @@ func (s *Store) Register(ctx context.Context, email, password, name, code string
 	if !api.BoundedString(name, 1, 80) {
 		return api.Session{}, "", api.Err(400, "invalid_name", "Display name must contain 1 to 80 characters")
 	}
-	if len([]rune(password)) < 12 || len(password) > 72 {
-		return api.Session{}, "", api.Err(400, "invalid_password", "Password must contain at least 12 characters and at most 72 bytes")
+	if e = validatePassword(password); e != nil {
+		return api.Session{}, "", e
 	}
 	// Cheap eligibility check avoids hashing requests with unusable codes. The
 	// transaction repeats it under the registration lock before changing state.
@@ -130,16 +130,7 @@ func (s *Store) Login(ctx context.Context, email, password string) (api.Session,
 	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil || u.ID == "" {
 		return api.Session{}, "", api.Err(401, "invalid_credentials", "Email or password is incorrect")
 	}
-	tx, e := s.DB.Begin(ctx)
-	if e != nil {
-		return api.Session{}, "", e
-	}
-	defer tx.Rollback(ctx)
-	ss, token, e := s.newSession(ctx, tx, u)
-	if e == nil {
-		e = tx.Commit(ctx)
-	}
-	return ss, token, e
+	return s.loginSession(ctx, u, hash)
 }
 func (s *Store) Validate(ctx context.Context, token string) (api.Session, error) {
 	var ss api.Session
