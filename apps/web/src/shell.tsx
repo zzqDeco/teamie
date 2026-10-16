@@ -671,7 +671,6 @@ export function Shell() {
             key={`${user!.id}:${conversation.id}`}
             conversation={conversation}
             members={members}
-            agents={workspaceAgents}
             onMembers={() => {
               setSidebar(false);
               setDetails(!details);

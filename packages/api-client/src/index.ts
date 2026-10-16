@@ -48,58 +48,6 @@ export type Member = {
   ownerId?: string;
   ownerName?: string;
 };
-export type AgentRuntimeState =
-  | "waiting_configuration"
-  | "idle"
-  | "running"
-  | "disabled"
-  | "error"
-  | "provisioning";
-export type AgentRun = {
-  id: string;
-  status: string;
-  inputCount: number;
-  createdAt: string;
-  updatedAt: string;
-  startedAt?: string;
-  finishedAt?: string;
-  errorCode?: string;
-};
-export type AgentTask = {
-  id: string;
-  runId?: string;
-  kind: string;
-  description: string;
-  status: string;
-  createdAt: string;
-  updatedAt: string;
-  finishedAt?: string;
-  exitCode?: number;
-};
-export type AgentRuntime = {
-  state: string;
-  sessionId: string;
-  activeRunId?: string;
-  pendingInputs: number;
-  runningTasks: number;
-  lastActiveAt?: string;
-  lastError?: string;
-};
-export type AgentRuntimeEvent = {
-  id: string;
-  type: string;
-  runId?: string;
-  taskId?: string;
-  toolName?: string;
-  status?: string;
-  createdAt: string;
-  errorCode?: string;
-};
-export type AgentEventPage = {
-  events: AgentRuntimeEvent[];
-  cursor: string;
-  hasMore: boolean;
-};
 export type Agent = {
   id: string;
   principalId: string;
@@ -109,21 +57,45 @@ export type Agent = {
   description: string;
   workspaceIds: string[];
   enabled: boolean;
-  revision: number;
   createdAt: string;
   updatedAt: string;
-  deletedAt?: string;
-  runtimeState: AgentRuntimeState;
-  lastActiveAt?: string;
-  lastError?: string;
-  sessionId: string;
 };
+function publicAgent(value: Agent, workspaceId?: string): Agent {
+  return {
+    id: value.id,
+    principalId: value.principalId,
+    ownerId: value.ownerId,
+    ownerName: value.ownerName,
+    name: value.name,
+    description: value.description,
+    workspaceIds: value.workspaceIds.filter(
+      (id) => workspaceId === undefined || id === workspaceId,
+    ),
+    enabled: value.enabled,
+    createdAt: value.createdAt,
+    updatedAt: value.updatedAt,
+  };
+}
 export type AgentProfileInput = {
   name: string;
   description?: string;
   workspaceIds: string[];
   enabled?: boolean;
 };
+function publicAgentProfile(
+  value: Partial<AgentProfileInput>,
+): Partial<AgentProfileInput> {
+  return {
+    ...(value.name === undefined ? {} : { name: value.name }),
+    ...(value.description === undefined
+      ? {}
+      : { description: value.description }),
+    ...(value.workspaceIds === undefined
+      ? {}
+      : { workspaceIds: [...value.workspaceIds] }),
+    ...(value.enabled === undefined ? {} : { enabled: value.enabled }),
+  };
+}
 export type ModelGatewayConfig = {
   baseUrl: string;
   model: string;
@@ -221,7 +193,7 @@ export class TeamieClient {
   csrfToken = "";
   onUnauthorized?: () => void;
   onForbidden?: () => void;
-  async request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  async #request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const method = options.method ?? "GET";
     const sessionToken = this.csrfToken;
     const headers = new Headers(options.headers);
@@ -258,81 +230,74 @@ export class TeamieClient {
     if (response.status === 204) return undefined as T;
     return response.json() as Promise<T>;
   }
-  session = () => this.request<Session>("/auth/session");
-  registration = () => this.request<RegistrationPolicy>("/auth/registration");
+  session = () => this.#request<Session>("/auth/session");
+  registration = () => this.#request<RegistrationPolicy>("/auth/registration");
   registrationInvites = () =>
-    this.request<{ invites: RegistrationInvite[] }>("/auth/admin/invites");
+    this.#request<{ invites: RegistrationInvite[] }>("/auth/admin/invites");
   createRegistrationInvite = () =>
-    this.request<CreatedRegistrationInvite>("/auth/admin/invites", {
+    this.#request<CreatedRegistrationInvite>("/auth/admin/invites", {
       method: "POST",
       body: JSON.stringify({}),
     });
   revokeRegistrationInvite = (id: string) =>
-    this.request<void>(`/auth/admin/invites/${part(id)}`, { method: "DELETE" });
-  agents = () => this.request<{ agents: Agent[] }>("/agents");
-  agent = (id: string) => this.request<{ agent: Agent }>(`/agents/${part(id)}`);
-  createAgent = (profile: AgentProfileInput) =>
-    this.request<{ agent: Agent }>("/agents", {
-      method: "POST",
-      body: JSON.stringify(profile),
+    this.#request<void>(`/auth/admin/invites/${part(id)}`, {
+      method: "DELETE",
     });
-  updateAgent = (id: string, profile: Partial<AgentProfileInput>) =>
-    this.request<{ agent: Agent }>(`/agents/${part(id)}`, {
-      method: "PATCH",
-      body: JSON.stringify(profile),
-    });
+  agents = async () => ({
+    agents: (await this.#request<{ agents: Agent[] }>("/agents")).agents.map(
+      (agent) => publicAgent(agent),
+    ),
+  });
+  agent = async (id: string) => ({
+    agent: publicAgent(
+      (await this.#request<{ agent: Agent }>(`/agents/${part(id)}`)).agent,
+    ),
+  });
+  createAgent = async (profile: AgentProfileInput) => ({
+    agent: publicAgent(
+      (
+        await this.#request<{ agent: Agent }>("/agents", {
+          method: "POST",
+          body: JSON.stringify(publicAgentProfile(profile)),
+        })
+      ).agent,
+    ),
+  });
+  updateAgent = async (id: string, profile: Partial<AgentProfileInput>) => ({
+    agent: publicAgent(
+      (
+        await this.#request<{ agent: Agent }>(`/agents/${part(id)}`, {
+          method: "PATCH",
+          body: JSON.stringify(publicAgentProfile(profile)),
+        })
+      ).agent,
+    ),
+  });
   deleteAgent = (id: string) =>
-    this.request<void>(`/agents/${part(id)}`, { method: "DELETE" });
-  workspaceAgents = (id: string) =>
-    this.request<{ agents: Agent[] }>(`/workspaces/${part(id)}/agents`);
-  agentRuntime = (id: string) =>
-    this.request<AgentRuntime>(`/agents/${part(id)}/runtime`);
-  agentRuns = (id: string, cursor?: string) =>
-    this.request<{ runs: AgentRun[]; cursor?: string }>(
-      `/agents/${part(id)}/runs?limit=30${cursor ? `&cursor=${part(cursor)}` : ""}`,
-    );
-  agentRun = (id: string, runId: string) =>
-    this.request<{ run: AgentRun }>(`/agents/${part(id)}/runs/${part(runId)}`);
-  agentTasks = (id: string, cursor?: string) =>
-    this.request<{ tasks: AgentTask[]; cursor?: string }>(
-      `/agents/${part(id)}/tasks?limit=30${cursor ? `&cursor=${part(cursor)}` : ""}`,
-    );
-  agentTask = (id: string, taskId: string) =>
-    this.request<{ task: AgentTask }>(`/agents/${part(id)}/tasks/${part(taskId)}`);
-  agentEvents = (id: string, cursor = "0") =>
-    this.request<AgentEventPage>(`/agents/${part(id)}/events?cursor=${part(cursor)}&limit=100`);
-  agentEventsURL = (id: string, cursor = "0") =>
-    `/api/v1/agents/${part(id)}/events/stream?cursor=${part(cursor)}`;
-  cancelAgentRun = (id: string, runId: string) =>
-    this.request<{ ok: boolean }>(`/agents/${part(id)}/runs/${part(runId)}/cancel`, {
-      method: "POST", body: JSON.stringify({}),
-    });
-  cancelAgentTask = (id: string, taskId: string) =>
-    this.request<{ ok: boolean }>(`/agents/${part(id)}/tasks/${part(taskId)}/cancel`, {
-      method: "POST", body: JSON.stringify({}),
-    });
-  retryAgentRun = (id: string, runId: string) =>
-    this.request<{ ok: boolean }>(`/agents/${part(id)}/runs/${part(runId)}/retry`, {
-      method: "POST", body: JSON.stringify({}),
-    });
+    this.#request<void>(`/agents/${part(id)}`, { method: "DELETE" });
+  workspaceAgents = async (id: string) => ({
+    agents: (
+      await this.#request<{ agents: Agent[] }>(`/workspaces/${part(id)}/agents`)
+    ).agents.map((agent) => publicAgent(agent, id)),
+  });
   modelGateway = async () =>
     publicModelGateway(
-      await this.request<ModelGateway>("/admin/model-gateway"),
+      await this.#request<ModelGateway>("/admin/model-gateway"),
     );
   saveModelGateway = async (config: ModelGatewayInput) =>
     publicModelGateway(
-      await this.request<ModelGateway>("/admin/model-gateway", {
+      await this.#request<ModelGateway>("/admin/model-gateway", {
         method: "PUT",
         body: JSON.stringify(config),
       }),
     );
   testModelGateway = () =>
-    this.request<{ ok: boolean; model: string; latencyMs: number }>(
+    this.#request<{ ok: boolean; model: string; latencyMs: number }>(
       "/admin/model-gateway/test",
       { method: "POST", body: JSON.stringify({}) },
     );
   login = (email: string, password: string) =>
-    this.request<Session>("/auth/login", {
+    this.#request<Session>("/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
     });
@@ -342,55 +307,55 @@ export class TeamieClient {
     displayName: string;
     inviteCode: string;
   }) =>
-    this.request<Session>("/auth/register", {
+    this.#request<Session>("/auth/register", {
       method: "POST",
       body: JSON.stringify(data),
     });
-  logout = () => this.request<void>("/auth/logout", { method: "POST" });
+  logout = () => this.#request<void>("/auth/logout", { method: "POST" });
   profile = (displayName: string) =>
-    this.request<{ user: User }>("/auth/profile", {
+    this.#request<{ user: User }>("/auth/profile", {
       method: "PATCH",
       body: JSON.stringify({ displayName }),
     });
-  bootstrap = () => this.request<Bootstrap>("/bootstrap");
+  bootstrap = () => this.#request<Bootstrap>("/bootstrap");
   createWorkspace = (name: string) =>
-    this.request<{ workspace: Workspace; conversation: Conversation }>(
+    this.#request<{ workspace: Workspace; conversation: Conversation }>(
       "/workspaces",
       { method: "POST", body: JSON.stringify({ name }) },
     );
   members = (id: string) =>
-    this.request<{ members: Member[] }>(`/workspaces/${part(id)}/members`);
+    this.#request<{ members: Member[] }>(`/workspaces/${part(id)}/members`);
   createInvite = (id: string) =>
-    this.request<{ code: string; expiresAt: string }>(
+    this.#request<{ code: string; expiresAt: string }>(
       `/workspaces/${part(id)}/invites`,
       { method: "POST" },
     );
   invite = (code: string) =>
-    this.request<{
+    this.#request<{
       workspace: Pick<Workspace, "id" | "name">;
       expiresAt: string;
     }>(`/invites/${part(code)}`);
   acceptInvite = (code: string) =>
-    this.request<{ workspace: Workspace; conversations: Conversation[] }>(
+    this.#request<{ workspace: Workspace; conversations: Conversation[] }>(
       `/invites/${part(code)}/accept`,
       { method: "POST" },
     );
   removeMember = (workspaceId: string, userId: string) =>
-    this.request<void>(
+    this.#request<void>(
       `/workspaces/${part(workspaceId)}/members/${part(userId)}`,
       { method: "DELETE" },
     );
   conversations = (id: string) =>
-    this.request<{ conversations: Conversation[] }>(
+    this.#request<{ conversations: Conversation[] }>(
       `/workspaces/${part(id)}/conversations`,
     );
   addConversationMember = (id: string, userId: string) =>
-    this.request<{ conversation: Conversation }>(
+    this.#request<{ conversation: Conversation }>(
       `/conversations/${part(id)}/members`,
       { method: "POST", body: JSON.stringify({ userId }) },
     );
   removeConversationMember = (id: string, userId: string) =>
-    this.request<{ conversation: Conversation }>(
+    this.#request<{ conversation: Conversation }>(
       `/conversations/${part(id)}/members/${part(userId)}`,
       { method: "DELETE" },
     );
@@ -398,38 +363,38 @@ export class TeamieClient {
     id: string,
     data: { type: Conversation["type"]; name?: string; memberIds?: string[] },
   ) =>
-    this.request<{ conversation: Conversation }>(
+    this.#request<{ conversation: Conversation }>(
       `/workspaces/${part(id)}/conversations`,
       { method: "POST", body: JSON.stringify(data) },
     );
   messages = (id: string, beforeSeq?: number) =>
-    this.request<MessagePage>(
+    this.#request<MessagePage>(
       `/conversations/${part(id)}/messages?limit=50${beforeSeq ? `&beforeSeq=${beforeSeq}` : ""}`,
     );
   send = (
     id: string,
     data: { clientMessageId: string; body: string; replyToId?: string },
   ) =>
-    this.request<{ message: Message }>(`/conversations/${part(id)}/messages`, {
+    this.#request<{ message: Message }>(`/conversations/${part(id)}/messages`, {
       method: "POST",
       body: JSON.stringify(data),
     });
   edit = (conversationId: string, id: string, body: string) =>
-    this.request<{ message: Message }>(
+    this.#request<{ message: Message }>(
       `/conversations/${part(conversationId)}/messages/${part(id)}`,
       { method: "PATCH", body: JSON.stringify({ body }) },
     );
   retract = (conversationId: string, id: string) =>
-    this.request<{ message: Message }>(
+    this.#request<{ message: Message }>(
       `/conversations/${part(conversationId)}/messages/${part(id)}`,
       { method: "DELETE" },
     );
   read = (id: string, seq: number) =>
-    this.request<{ readSeq: number }>(`/conversations/${part(id)}/read`, {
+    this.#request<{ readSeq: number }>(`/conversations/${part(id)}/read`, {
       method: "POST",
       body: JSON.stringify({ seq }),
     });
   sync = (cursor: string) =>
-    this.request<SyncPage>(`/sync?cursor=${part(cursor)}&limit=100`);
+    this.#request<SyncPage>(`/sync?cursor=${part(cursor)}&limit=100`);
 }
 export const api = new TeamieClient();

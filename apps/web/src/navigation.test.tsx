@@ -40,11 +40,8 @@ const agent: Agent = {
   description: "整理想法",
   workspaceIds: [workspace.id],
   enabled: true,
-  revision: 1,
   createdAt: owner.createdAt,
   updatedAt: owner.createdAt,
-  runtimeState: "idle",
-  sessionId: "agent:agent",
 };
 const persistedMembers: Member[] = [
   {
@@ -198,14 +195,6 @@ beforeEach(() => {
   vi.spyOn(api, "agent").mockResolvedValue({ agent });
   vi.spyOn(api, "registrationInvites").mockResolvedValue({ invites: [] });
   vi.spyOn(api, "modelGateway");
-  vi.spyOn(api, "agentRuntime").mockResolvedValue({
-    state: "idle",
-    sessionId: agent.sessionId,
-    pendingInputs: 0,
-    runningTasks: 0,
-  });
-  vi.spyOn(api, "agentRuns").mockResolvedValue({ runs: [] });
-  vi.spyOn(api, "agentTasks").mockResolvedValue({ tasks: [] });
   vi.spyOn(api, "messages").mockResolvedValue({ messages: [], hasMore: false });
   vi.spyOn(api, "read").mockResolvedValue({ readSeq: 0 });
   container = document.createElement("div");
@@ -368,16 +357,14 @@ describe("member and account navigation", () => {
     async (isAgent) => {
       const id = isAgent ? agent.id : "human";
       const name = isAgent ? agent.name : "设计伙伴";
-      const create = vi
-        .spyOn(api, "createConversation")
-        .mockResolvedValue({
-          conversation: {
-            ...channel,
-            id: `dm-${id}`,
-            type: "direct",
-            memberIds: [owner.id, id],
-          },
-        });
+      const create = vi.spyOn(api, "createConversation").mockResolvedValue({
+        conversation: {
+          ...channel,
+          id: `dm-${id}`,
+          type: "direct",
+          memberIds: [owner.id, id],
+        },
+      });
       await mount();
       await click(`[aria-label="与 ${name} 发起私聊"]`);
       expect(create).toHaveBeenCalledWith(workspace.id, {
@@ -407,11 +394,9 @@ describe("member and account navigation", () => {
         workspaceId: "private",
         name: "其他团队的小组",
       });
-      const add = vi
-        .spyOn(api, "addConversationMember")
-        .mockResolvedValue({
-          conversation: { ...group, memberIds: [owner.id, id] },
-        });
+      const add = vi.spyOn(api, "addConversationMember").mockResolvedValue({
+        conversation: { ...group, memberIds: [owner.id, id] },
+      });
       await mount();
       await click(`[aria-label="将 ${name} 添加到小组"]`);
       const modal = find('[role="dialog"]');
@@ -436,15 +421,13 @@ describe("member and account navigation", () => {
     vi.mocked(api.workspaceAgents).mockResolvedValue({
       agents: [agent, disabled],
     });
-    const create = vi
-      .spyOn(api, "createConversation")
-      .mockResolvedValue({
-        conversation: {
-          ...group,
-          id: "new-group",
-          memberIds: [owner.id, agent.id],
-        },
-      });
+    const create = vi.spyOn(api, "createConversation").mockResolvedValue({
+      conversation: {
+        ...group,
+        id: "new-group",
+        memberIds: [owner.id, agent.id],
+      },
+    });
     await mount();
     expect(
       find<HTMLButtonElement>('[aria-label="与 停用伙伴 发起私聊"]').disabled,
@@ -461,20 +444,134 @@ describe("member and account navigation", () => {
     });
   });
 
-  it("preserves owner activity and tasks on the independent Agent settings page", async () => {
+  it("keeps only basic owner management and does not fetch or subscribe to internal activity", async () => {
+    const fetch = vi.fn();
+    const events = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    vi.stubGlobal("EventSource", events);
+    const unsafeAgent = {
+      ...agent,
+      runtimeState: "running",
+      sessionId: "SESSION-SENTINEL",
+      lastActiveAt: "ACTIVITY-SENTINEL",
+      lastError: "ERROR-SENTINEL",
+      revision: 999,
+      runs: [{ id: "RUN-ID-SENTINEL", inputCount: 999 }],
+      tasks: [
+        { id: "TASK-ID-SENTINEL", description: "TASK-DESCRIPTION-SENTINEL" },
+      ],
+    };
+    vi.mocked(api.agent).mockResolvedValue({ agent: unsafeAgent });
     await mount(`/app/agents/${agent.id}`);
     expect(container.textContent).toContain("编辑资料");
-    expect(api.agentRuntime).toHaveBeenCalledWith(agent.id);
-    expect(api.agentRuns).toHaveBeenCalledWith(agent.id, undefined);
-    const tasks = Array.from(
-      container.querySelectorAll<HTMLButtonElement>(".activity-tabs button"),
-    ).find((button) => button.textContent?.trim() === "任务");
-    expect(tasks).toBeDefined();
-    await settle(() => tasks!.click());
-    expect(api.agentTasks).toHaveBeenCalledWith(agent.id, undefined);
+    expect(container.textContent).toContain("已启用");
+    expect(container.textContent).toContain("团队可见范围");
+    expect(container.innerHTML).not.toMatch(
+      /SENTINEL|运行与任务|最近活跃|Session|模型|在线/,
+    );
+    expect(fetch).not.toHaveBeenCalled();
+    expect(events).not.toHaveBeenCalled();
   });
 
-  it("does not open private workspace directories or let a platform admin inspect another owner's activity", async () => {
+  it("shows only configured enablement on personal cards, including unexpected internal response fields", async () => {
+    const fetch = vi.fn();
+    const events = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    vi.stubGlobal("EventSource", events);
+    vi.mocked(api.agents).mockResolvedValue({
+      agents: [
+        {
+          ...agent,
+          ...{
+            sessionId: "SESSION-SENTINEL",
+            runtimeState: "running",
+            lastError: "ERROR-SENTINEL",
+            lastActiveAt: "ACTIVITY-SENTINEL",
+            tasks: [{ description: "TASK-DESCRIPTION-SENTINEL" }],
+          },
+        },
+        {
+          ...agent,
+          id: "disabled",
+          principalId: "disabled",
+          name: "已停用的伙伴",
+          enabled: false,
+        },
+      ],
+    });
+    await mount("/app/agents");
+    expect(container.querySelectorAll(".agent-card")).toHaveLength(2);
+    expect(container.textContent).toContain("已启用");
+    expect(container.textContent).toContain("已停用");
+    expect(container.innerHTML).not.toMatch(
+      /SENTINEL|运行与任务|最近活跃|尚未处理|Session|模型|在线/,
+    );
+    expect(fetch).not.toHaveBeenCalled();
+    expect(events).not.toHaveBeenCalled();
+  });
+
+  it("keeps owner enablement, profile edits and deletion usable without activity APIs", async () => {
+    const disabled = { ...agent, enabled: false };
+    const update = vi
+      .spyOn(api, "updateAgent")
+      .mockResolvedValue({ agent: disabled });
+    const remove = vi.spyOn(api, "deleteAgent").mockResolvedValue(undefined);
+    await mount(`/app/agents/${agent.id}`);
+    vi.mocked(api.agent).mockResolvedValue({ agent: disabled });
+    await click(".agent-detail-actions .button:last-child");
+    expect(update).toHaveBeenLastCalledWith(agent.id, { enabled: false });
+    expect(find(".agent-detail-labels").textContent).toContain("已停用");
+    await click(".agent-detail-actions .button:first-child");
+    await input('.modal input[maxlength="80"]', "新的伙伴名称");
+    const renamed = { ...disabled, name: "新的伙伴名称" };
+    update.mockResolvedValue({ agent: renamed });
+    vi.mocked(api.agent).mockResolvedValue({ agent: renamed });
+    await click('.modal-actions .button[type="submit"]');
+    expect(update).toHaveBeenLastCalledWith(agent.id, { name: "新的伙伴名称" });
+    expect(find(".agent-detail-heading h1").textContent).toBe("新的伙伴名称");
+    await click(".agent-delete-section .button");
+    vi.mocked(api.agents).mockResolvedValue({ agents: [] });
+    await click(".modal-actions .button.danger");
+    await settle();
+    expect(remove).toHaveBeenCalledWith(agent.id);
+    expect(find("[data-location]").textContent).toBe("/app/agents");
+    expect(container.textContent).toContain("还没有 Agent");
+  });
+
+  it("keeps IM Agent identity without showing gateway or runtime configuration hints", async () => {
+    const events = vi.fn();
+    vi.stubGlobal("EventSource", events);
+    vi.mocked(api.workspaceAgents).mockResolvedValue({
+      agents: [
+        {
+          ...agent,
+          ...{
+            runtimeState: "waiting_configuration",
+            sessionId: "SESSION-SENTINEL",
+            lastError: "GATEWAY-ERROR-SENTINEL",
+          },
+        },
+      ],
+    });
+    chatStore.addConversation({
+      ...channel,
+      id: "agent-dm",
+      name: "",
+      type: "direct",
+      memberIds: [owner.id, agent.id],
+    });
+    await mount("/app/w/team/c/agent-dm");
+    expect(find(".conversation-header").textContent).toContain(agent.name);
+    expect(
+      find('a[href="/app/w/team/c/agent-dm"] .agent-badge').textContent,
+    ).toContain("Agent");
+    expect(container.innerHTML).not.toMatch(
+      /SENTINEL|等待模型配置|模型网关|Session/,
+    );
+    expect(events).not.toHaveBeenCalled();
+  });
+
+  it("does not open private workspace directories or let a platform admin manage another owner's Agent", async () => {
     activeUser = { ...owner, id: "platform-admin", platformRole: "admin" };
     await mount("/app/w/private/members");
     expect(container.textContent).toContain("无法访问这个工作空间");
@@ -484,8 +581,7 @@ describe("member and account navigation", () => {
     root = createRoot(container);
     await mount(`/app/agents/${agent.id}`);
     expect(container.textContent).toContain("请使用所有者账户访问");
-    expect(api.agentRuntime).not.toHaveBeenCalled();
-    expect(api.agentRuns).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain("编辑资料");
   });
 
   it("preserves directory content when conversation creation flags are off", async () => {

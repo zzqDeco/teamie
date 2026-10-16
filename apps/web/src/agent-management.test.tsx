@@ -7,15 +7,15 @@ import {
   agentProfileInput,
   canConfigureModelGateway,
   canManageAgent,
-  displayAgentState,
+  agentFailureText,
   gatewayFailureText,
   modelGatewayInput,
   snapshotAgentProfile,
 } from "./agent-management";
 import {
   AgentBadge,
+  AgentEnabledStatus,
   GatewayConfigurationFields,
-  WaitingForConfiguration,
   WorkspaceVisibilityFields,
 } from "./agent-ui";
 import { enrichParticipants } from "./participants";
@@ -46,11 +46,8 @@ const agent: Agent = {
   description: "整理团队想法",
   workspaceIds: [workspace.id],
   enabled: true,
-  revision: 1,
   createdAt: "2026-10-16T07:00:00Z",
   updatedAt: "2026-10-16T07:00:00Z",
-  runtimeState: "waiting_configuration",
-  sessionId: "agent:agent-1",
 };
 describe("Agent ownership and visible teams", () => {
   it("lets only the human owner manage an Agent, without a platform admin bypass", () => {
@@ -171,15 +168,31 @@ describe("Agent ownership and visible teams", () => {
     expect(html).toContain("Agent");
     expect(html).toContain("创建者");
   });
-  it("shows waiting configuration explicitly and never presents a fabricated model response", () => {
-    expect(displayAgentState("waiting_configuration", true)).toBe(
-      "waiting_configuration",
+  it("shows only the configured enabled state without claiming online or runtime health", () => {
+    const enabled = renderToStaticMarkup(<AgentEnabledStatus enabled />);
+    const disabled = renderToStaticMarkup(
+      <AgentEnabledStatus enabled={false} />,
     );
-    expect(displayAgentState("running", false)).toBe("disabled");
-    const html = renderToStaticMarkup(<WaitingForConfiguration />);
-    expect(html).toContain("模型尚未配置");
-    expect(html).toContain("请联系平台管理员配置模型");
-    expect(html).not.toContain("<button");
+    expect(enabled).toContain("已启用");
+    expect(disabled).toContain("已停用");
+    for (const html of [enabled, disabled]) {
+      expect(html).not.toMatch(/在线|运行|模型|错误|Session/);
+    }
+  });
+  it("does not display operational errors returned during basic profile changes", () => {
+    for (const status of [400, 401, 403, 404, 409, 500]) {
+      const text = agentFailureText(
+        new ApiError(
+          status,
+          "internal_error",
+          "TASK-DESCRIPTION-SENTINEL Session:private gateway:private",
+        ),
+      );
+      expect(text).not.toMatch(/SENTINEL|Session|gateway|internal_error/);
+    }
+    expect(
+      agentFailureText(new Error("PRIVATE-RUNTIME-SENTINEL")),
+    ).not.toContain("PRIVATE-RUNTIME-SENTINEL");
   });
 });
 describe("write-only gateway credentials", () => {

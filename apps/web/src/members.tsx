@@ -126,7 +126,7 @@ export function WorkspaceMembers({
         <ul className="member-directory-list" aria-label="团队成员">
           {filtered.map((member) => {
             const agent = agents.find(
-              (item) => item.principalId === member.userId && !item.deletedAt,
+              (item) => item.principalId === member.userId,
             );
             const self = member.userId === user!.id;
             return (
@@ -135,7 +135,9 @@ export function WorkspaceMembers({
                   <ParticipantIdentity member={member} />
                   {self && <span className="member-self-label">你</span>}
                   {member.kind === "agent" && member.selectable === false && (
-                    <span className="member-unavailable">暂不可用</span>
+                    <span className="member-unavailable">
+                      {agent && !agent.enabled ? "已停用" : "暂不可添加"}
+                    </span>
                   )}
                 </div>
                 <div className="member-directory-actions">

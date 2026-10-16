@@ -685,17 +685,7 @@ textarea:disabled {
   min-height: 36px;
   font-size: 13px;
 }
-.agent-configuration-notice {
-  margin-bottom: 20px;
-  padding: 16px;
-}
-.agent-configuration-notice > div > b {
-  font-size: 14px;
-}
 .agent-configuration-notice p,
-.agent-configuration-notice button {
-  font-size: 13px;
-}
 .gateway-configuration-form > label,
 .modal label {
   font-size: 13px;
@@ -1399,17 +1389,7 @@ textarea:disabled {
   .agent-delete-section p {
     font-size: 12px;
   }
-  .agent-configuration-notice > div > b {
-    font-size: 14px;
-  }
   .agent-configuration-notice p,
-  .agent-configuration-notice button {
-    font-size: 13px;
-  }
-  .agent-conversation-waiting {
-    padding: 9px 14px;
-    font-size: 12px;
-  }
   .admin-heading {
     gap: 10px;
   }
@@ -1612,202 +1592,6 @@ textarea:disabled {
     transition-duration: 0.01ms !important;
   }
 }
-.agent-activity {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  overflow: hidden;
-  margin: 24px 0;
-}
-.agent-activity > header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 20px;
-}
-.agent-activity h2 {
-  font-size: 16px;
-}
-.activity-summary {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 14px;
-  padding: 0 20px 18px;
-  font-size: 12px;
-  color: #81738f;
-}
-.activity-summary b {
-  font-weight: 600;
-  color: #5b4e68;
-  margin-left: 3px;
-}
-.activity-summary-error {
-  color: #a76f4c;
-}
-.activity-tabs {
-  display: flex;
-  gap: 22px;
-  border-top: 1px solid #f3eef6;
-  border-bottom: 1px solid var(--border);
-  padding: 0 20px;
-}
-.activity-tabs > button {
-  min-height: 44px;
-  font-size: 13px;
-  color: #8b7c98;
-  border-bottom: 2px solid transparent;
-  padding: 0 2px;
-}
-.activity-tabs > button.active {
-  color: var(--purple-dark);
-  border-color: var(--purple);
-}
-.activity-row {
-  display: flex;
-  gap: 16px;
-  align-items: flex-start;
-  padding: 17px 20px;
-  border-bottom: 1px solid #f3eef6;
-}
-.activity-row:last-child {
-  border-bottom: 0;
-}
-.activity-status {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
-  font-size: 11px;
-  color: #8b7c98;
-  min-width: 75px;
-  padding-top: 3px;
-  white-space: nowrap;
-}
-.activity-status.running {
-  color: #7463d4;
-}
-.activity-status.completed,
-.activity-status.succeeded {
-  color: #668748;
-}
-.activity-status.failed,
-.activity-status.error,
-.activity-status.interrupted {
-  color: #bd6b71;
-}
-.activity-item-main {
-  min-width: 0;
-  flex: 1;
-}
-.activity-item-main > b {
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1.6;
-  display: block;
-  overflow-wrap: anywhere;
-}
-.activity-item-main > span {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 5px;
-  font-size: 11px;
-  color: #9b8da6;
-}
-.activity-item-main > small {
-  display: block;
-  color: #a76f4c;
-  margin-top: 6px;
-  font-size: 12px;
-}
-.activity-item-id {
-  font-variant-numeric: tabular-nums;
-}
-.activity-item-actions {
-  display: flex;
-  flex-shrink: 0;
-  gap: 6px;
-}
-.activity-item-actions .button {
-  min-height: 34px;
-  font-size: 12px;
-  padding: 8px 10px;
-  gap: 5px;
-}
-.activity-empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 38px 20px;
-  font-size: 13px;
-  color: #8b7c98;
-}
-.agent-activity > .notice {
-  margin: 0 18px 16px;
-}
-.activity-empty .notice {
-  margin: 0;
-}
-.activity-pagination {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 20px;
-  border-top: 1px solid var(--border);
-}
-@media (max-width: 780px) {
-  .agent-activity {
-    margin: 22px 0;
-  }
-  .agent-activity > header {
-    padding: 12px 16px;
-  }
-  .activity-summary {
-    padding: 0 16px 16px;
-    gap: 10px;
-  }
-  .activity-tabs {
-    padding: 0 16px;
-  }
-  .activity-tabs > button {
-    font-size: 14px;
-  }
-  .activity-row {
-    flex-wrap: wrap;
-    gap: 8px 12px;
-    padding: 16px;
-    position: relative;
-  }
-  .activity-status {
-    font-size: 12px;
-    width: 100%;
-    padding: 0;
-  }
-  .activity-item-main > b {
-    font-size: 14px;
-  }
-  .activity-item-main > span {
-    font-size: 12px;
-    gap: 10px;
-  }
-  .activity-item-actions .button {
-    min-height: 44px;
-    font-size: 13px;
-  }
-  .activity-item-id {
-    display: none;
-  }
-  .activity-pagination {
-    padding: 12px;
-  }
-  .activity-pagination .button {
-    font-size: 13px;
-    padding: 10px;
-  }
-}
-
 @media (max-width: 780px) {
   .group-member-remove,
   .gateway-advanced > summary {
@@ -1913,19 +1697,6 @@ textarea:disabled {
     min-height: 44px;
     font-size: 13px;
   }
-}
-
-.agent-configuration-notice.can-configure > div {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.agent-configuration-notice.can-configure button {
-  margin-top: 0;
-  min-height: 36px;
 }
 
 /* Account navigation and a shared directory for every IM participant. */
@@ -2242,4 +2013,18 @@ textarea:disabled {
     max-height: min(55dvh, 240px);
     overflow: auto;
   }
+}
+
+.agent-detail-labels {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.agent-card-bottom {
+  justify-content: flex-end;
+}
+.agent-card-bottom > span:last-child {
+  font-size: 13px;
+  color: #7560ab;
 }

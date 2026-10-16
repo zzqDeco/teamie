@@ -18,33 +18,24 @@ import {
 import { api, ApiError } from "@teamie/api-client";
 import type { Agent, Workspace } from "@teamie/api-client";
 import { useAuth } from "./auth";
-import { errorText, useChat } from "./chat";
+import { useChat } from "./chat";
 import {
   AgentAvatar,
   AgentBadge,
-  AgentStatus,
-  WaitingForConfiguration,
+  AgentEnabledStatus,
   WorkspaceVisibilityFields,
 } from "./agent-ui";
 import {
   agentProfileChanges,
+  agentFailureText,
   agentProfileInput,
   canManageAgent,
-  displayAgentState,
   snapshotAgentProfile,
 } from "./agent-management";
 import { Button, Modal, Notice } from "./ui";
-import { AgentActivity } from "./agent-activity";
 const queryRetry = (count: number, error: Error) =>
   !(error instanceof ApiError && [401, 403, 404].includes(error.status)) &&
   count < 1;
-const formatDate = (value: string) =>
-  new Date(value).toLocaleString("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 function WorkspaceChips({
   ids,
   workspaces,
@@ -134,7 +125,7 @@ function AgentProfileDialog({
       navigate(`/app/agents/${response.agent.id}`);
       onClose();
     } catch (e) {
-      if (sessionToken === api.csrfToken) setError(errorText(e));
+      if (sessionToken === api.csrfToken) setError(agentFailureText(e));
     } finally {
       setBusy(false);
     }
@@ -200,17 +191,15 @@ function AgentProfileDialog({
 export function MyAgents() {
   const { user } = useAuth();
   const { data } = useChat();
-  const navigate = useNavigate();
   const [creating, setCreating] = useState(false);
   const closeCreate = useCallback(() => setCreating(false), []);
   const query = useQuery({
     queryKey: ["agents", user!.id],
     queryFn: api.agents,
-    refetchInterval: 15_000,
     retry: queryRetry,
   });
-  const agents = (query.data?.agents || []).filter(
-    (agent) => canManageAgent(user, agent) && !agent.deletedAt,
+  const agents = (query.data?.agents || []).filter((agent) =>
+    canManageAgent(user, agent),
   );
   const canCreate =
     !!data?.capabilities["agents.enabled"] &&
@@ -230,14 +219,6 @@ export function MyAgents() {
           </Button>
         )}
       </div>
-      {agents.some(
-        (a) => a.enabled && a.runtimeState === "waiting_configuration",
-      ) && (
-        <WaitingForConfiguration
-          admin={user!.platformRole === "admin"}
-          onConfigure={() => navigate("/app/admin/gateway")}
-        />
-      )}
       {query.isLoading ? (
         <div className="agents-empty">
           <LoaderCircle size={24} className="spin" />
@@ -260,23 +241,16 @@ export function MyAgents() {
             >
               <div className="agent-card-top">
                 <AgentAvatar disabled={!agent.enabled} />
-                <AgentStatus
-                  status={displayAgentState(agent.runtimeState, agent.enabled)}
-                />
+                <AgentEnabledStatus enabled={agent.enabled} />
               </div>
               <h2>{agent.name}</h2>
-              <AgentBadge ownerName={agent.ownerName} />
+              <AgentBadge compact />
               {agent.description && <p>{agent.description}</p>}
               <WorkspaceChips
                 ids={agent.workspaceIds}
                 workspaces={data?.workspaces || []}
               />
               <div className="agent-card-bottom">
-                <span>
-                  {agent.lastActiveAt
-                    ? `最近活跃 ${formatDate(agent.lastActiveAt)}`
-                    : "尚未处理消息"}
-                </span>
                 <span>
                   管理 Agent <ArrowRight size={13} />
                 </span>
@@ -324,7 +298,6 @@ export function AgentDetail({ agentId }: { agentId: string }) {
   const query = useQuery({
     queryKey: ["agent", user!.id, agentId],
     queryFn: () => api.agent(agentId),
-    refetchInterval: 5000,
     retry: queryRetry,
   });
   const agent = query.data?.agent;
@@ -352,7 +325,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         client.invalidateQueries({ queryKey: ["members"] }),
       ]);
     } catch (e) {
-      if (token === api.csrfToken) setError(errorText(e));
+      if (token === api.csrfToken) setError(agentFailureText(e));
     } finally {
       setBusy(false);
     }
@@ -374,7 +347,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
       ]);
       navigate("/app/agents", { replace: true });
     } catch (e) {
-      if (token === api.csrfToken) setError(errorText(e));
+      if (token === api.csrfToken) setError(agentFailureText(e));
     } finally {
       setBusy(false);
     }
@@ -389,7 +362,6 @@ export function AgentDetail({ agentId }: { agentId: string }) {
   if (
     !agent ||
     !allowed ||
-    agent.deletedAt ||
     (query.error instanceof ApiError && [403, 404].includes(query.error.status))
   )
     return (
@@ -413,7 +385,10 @@ export function AgentDetail({ agentId }: { agentId: string }) {
       <div className="agent-detail-heading">
         <AgentAvatar size="large" disabled={!agent.enabled} />
         <div>
-          <AgentBadge ownerName={agent.ownerName} />
+          <div className="agent-detail-labels">
+            <AgentBadge compact />
+            <AgentEnabledStatus enabled={agent.enabled} />
+          </div>
           <h1>{agent.name}</h1>
           {agent.description && <p>{agent.description}</p>}
         </div>
@@ -437,13 +412,6 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         </div>
       </div>
       <Notice>{!deleting ? error : ""}</Notice>
-      {agent.enabled && agent.runtimeState === "waiting_configuration" && (
-        <WaitingForConfiguration
-          admin={user!.platformRole === "admin"}
-          onConfigure={() => navigate("/app/admin/gateway")}
-        />
-      )}
-      <AgentActivity agent={agent} controlsAllowed={editable} />
       <section className="agent-profile-section">
         <header>
           <h2>团队可见范围</h2>
