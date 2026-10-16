@@ -17,23 +17,27 @@ import { useAuth } from "./auth";
 import { errorText, useChat } from "./chat";
 import { chatStore } from "./store";
 import { Avatar, Button, Modal, Notice } from "./ui";
+import { enrichParticipants } from "./participants";
+import { ParticipantIdentity } from "./group-members";
 export type DialogKind =
   "workspace" | "channel" | "direct" | "group" | "invite";
 export function WorkspaceDialog({
   kind,
   workspace,
+  initialMemberIds = [],
   onClose,
 }: {
   kind: DialogKind;
   workspace?: Workspace;
+  initialMemberIds?: string[];
   onClose: () => void;
 }) {
   const { user } = useAuth();
-  const { refresh } = useChat();
+  const { refresh, data } = useChat();
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
-    [selected, setSelected] = useState<string[]>([]);
+    [selected, setSelected] = useState<string[]>(initialMemberIds);
   const [invite, setInvite] = useState<{
       code: string;
       expiresAt: string;
@@ -44,6 +48,27 @@ export function WorkspaceDialog({
     queryFn: () => api.members(workspace!.id),
     enabled: !!workspace && ["direct", "group"].includes(kind),
   });
+  const agentsQuery = useQuery({
+    queryKey: ["workspaceAgents", user!.id, workspace?.id],
+    queryFn: () => api.workspaceAgents(workspace!.id),
+    enabled:
+      !!workspace &&
+      ["direct", "group"].includes(kind) &&
+      !!data?.capabilities["agents.enabled"] &&
+      !!data.capabilities["agents.discover"],
+  });
+  const participants = enrichParticipants(
+    memberQuery.data?.members || [],
+    (data?.capabilities["agents.enabled"] &&
+    data.capabilities["agents.discover"]
+      ? agentsQuery.data?.agents
+      : []) || [],
+  ).filter(
+    (member) => member.userId !== user!.id && member.selectable !== false,
+  );
+  const eligibleSelected = selected.filter((id) =>
+    participants.some((member) => member.userId === id),
+  );
   const titles: Record<DialogKind, [string, string]> = {
     workspace: [
       "给团队一个新空间",
@@ -79,7 +104,7 @@ export function WorkspaceDialog({
         const result = await api.createConversation(workspace!.id, {
           type: kind as Conversation["type"],
           ...(name ? { name } : {}),
-          ...(selected.length ? { memberIds: selected } : {}),
+          ...(eligibleSelected.length ? { memberIds: eligibleSelected } : {}),
         });
         if (generation !== chatStore.generation) return;
         chatStore.addConversation(result.conversation);
@@ -169,45 +194,39 @@ export function WorkspaceDialog({
             <span className="label-text">
               {kind === "direct"
                 ? "选择一位伙伴"
-                : `选择小组成员 · 已选 ${selected.length} 人`}
+                : `选择小组成员 · 已选 ${eligibleSelected.length} 位`}
             </span>
             {memberQuery.isLoading && <p className="muted">正在加载成员…</p>}
             {memberQuery.error && <Notice>成员加载失败，请关闭后重试。</Notice>}
-            {memberQuery.data?.members
-              .filter((m) => m.userId !== user!.id)
-              .map((member) => (
-                <button
-                  key={member.userId}
-                  type="button"
-                  className={`member-option ${selected.includes(member.userId) ? "selected" : ""}`}
-                  onClick={() =>
-                    setSelected((old) =>
-                      kind === "direct"
-                        ? [member.userId]
-                        : old.includes(member.userId)
-                          ? old.filter((id) => id !== member.userId)
-                          : [...old, member.userId],
-                    )
-                  }
-                >
-                  <Avatar name={member.displayName} seed={member.userId} />
-                  <span>
-                    {member.displayName}
-                    <small>
-                      {member.role === "owner" ? "空间所有者" : "团队成员"}
-                    </small>
-                  </span>
-                  <span className="selection-check">
-                    {selected.includes(member.userId) && <Check size={14} />}
-                  </span>
-                </button>
-              ))}
-            {memberQuery.data?.members.filter((m) => m.userId !== user!.id)
-              .length === 0 && (
-              <div className="mini-empty">
-                空间里还只有你。先邀请一位伙伴加入吧。
-              </div>
-            )}
+            {participants.map((member) => (
+              <button
+                key={member.userId}
+                type="button"
+                className={`member-option ${selected.includes(member.userId) ? "selected" : ""}`}
+                onClick={() =>
+                  setSelected((old) =>
+                    kind === "direct"
+                      ? [member.userId]
+                      : old.includes(member.userId)
+                        ? old.filter((id) => id !== member.userId)
+                        : [...old, member.userId],
+                  )
+                }
+              >
+                <ParticipantIdentity member={member} />
+                <span className="selection-check">
+                  {selected.includes(member.userId) && <Check size={14} />}
+                </span>
+              </button>
+            ))}
+            {!memberQuery.isLoading &&
+              !agentsQuery.isLoading &&
+              participants.length === 0 && (
+                <div className="mini-empty">
+                  还没有可选的伙伴。可以邀请团队成员，或让 Agent
+                  在这个空间内可见。
+                </div>
+              )}
           </div>
         )}
         {kind === "invite" && (
@@ -256,7 +275,9 @@ export function WorkspaceDialog({
               busy={busy}
               disabled={
                 ["direct", "group"].includes(kind) &&
-                selected.length < (kind === "group" ? 2 : 1)
+                (eligibleSelected.length < 1 ||
+                  memberQuery.isLoading ||
+                  agentsQuery.isLoading)
               }
             >
               {kind === "invite"

@@ -12,6 +12,7 @@ trap cleanup EXIT
 export APP_ORIGIN=http://127.0.0.1:8080 COOKIE_SECURE=false
 export REDIS_ADDR=127.0.0.1:6379
 export BOOTSTRAP_INVITE_CODE=ci-disposable-bootstrap-invite-only
+export IM_PRINCIPAL_CONTROL_TOKEN=ci-only-principal-control-credential IM_PRINCIPAL_RUNTIME_TOKEN=ci-only-principal-runtime-credential
 export FEATURE_FLAGS_FILE="$PWD/deploy/feature-flags.default.json"
 for database in teamie_identity teamie_chat; do
   PGPASSWORD=ci-only-postgres psql --host 127.0.0.1 --username postgres --dbname postgres \

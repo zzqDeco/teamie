@@ -23,7 +23,7 @@ def release(release_version="v0.1.0", sha="a" * 40):
         "storage": {"postgresMajor": 17},
         "featureFlags": {"revision": "im-v1", "sha256": "f" * 64},
         "images": {service: "ghcr.io/zzqdeco/teamie-" + service + "@sha256:" + "0" * 64
-                   for service in manifest.SERVICES},
+                   for service in manifest.LEGACY_SERVICES},
     }
 
 
@@ -87,6 +87,30 @@ class ManifestTest(unittest.TestCase):
                                     env={**os.environ, "COMMON": common, "COUNTER": counter}, capture_output=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(Path(counter).read_text(), "x")
+
+
+class AgentManifestTest(unittest.TestCase):
+    def modern(self):
+        data = release("v0.2.0")
+        data.update(manifestVersion=2, schema=dict(manifest.SCHEMA_V2))
+        data["images"].update({s: "ghcr.io/zzqdeco/teamie-"+s+"@sha256:"+"1"*64 for s in manifest.SERVICES if s not in manifest.LEGACY_SERVICES})
+        return data
+
+    def test_v1_archive_and_v2_forward_compatibility(self):
+        old, modern = release(), self.modern()
+        manifest.validate(old)
+        manifest.check_transition(modern, old, old)
+        self.assertEqual(len(manifest.image_env(modern).splitlines()), 12)
+        self.assertIn("SANDBOX_RUNNER_IMAGE=", manifest.image_env(modern))
+        self.assertIn("LLM_GATEWAY_IMAGE=", manifest.image_env(modern))
+        with self.assertRaises(ValueError): manifest.check_transition(old, modern, rollback=True)
+        with self.assertRaises(ValueError): manifest.check_transition(old, modern)
+
+    def test_vector_cannot_omit_runner_or_add_unknown_database(self):
+        data = self.modern(); del data["images"]["sandbox-runner"]
+        with self.assertRaises(ValueError): manifest.validate(data)
+        data = self.modern(); data["schema"]["shared"] = 1
+        with self.assertRaises(ValueError): manifest.validate(data)
 
 
 class ProductionConfigTest(unittest.TestCase):

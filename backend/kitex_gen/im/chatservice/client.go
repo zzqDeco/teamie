@@ -13,6 +13,9 @@ import (
 type Client interface {
 	CheckAccess(ctx context.Context, request *im.AccessRequest, callOptions ...callopt.Option) (r *im.AccessResponse, err error)
 	Ping(ctx context.Context, request *im.PingRequest, callOptions ...callopt.Option) (r *im.PingResponse, err error)
+	GetParticipantWorkspaces(ctx context.Context, request *im.ParticipantWorkspacesRequest, callOptions ...callopt.Option) (r *im.ParticipantWorkspacesResponse, err error)
+	GetWorkspaceParticipants(ctx context.Context, request *im.WorkspaceParticipantsRequest, callOptions ...callopt.Option) (r *im.WorkspaceParticipantsResponse, err error)
+	SetPrincipalWorkspaces(ctx context.Context, request *im.PrincipalWorkspacesRequest, callOptions ...callopt.Option) (r *im.ParticipantWorkspacesResponse, err error)
 }
 
 // NewClient creates a client for the service defined in IDL.
@@ -52,4 +55,19 @@ func (p *kChatServiceClient) CheckAccess(ctx context.Context, request *im.Access
 func (p *kChatServiceClient) Ping(ctx context.Context, request *im.PingRequest, callOptions ...callopt.Option) (r *im.PingResponse, err error) {
 	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
 	return p.kClient.Ping(ctx, request)
+}
+
+func (p *kChatServiceClient) GetParticipantWorkspaces(ctx context.Context, request *im.ParticipantWorkspacesRequest, callOptions ...callopt.Option) (r *im.ParticipantWorkspacesResponse, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.GetParticipantWorkspaces(ctx, request)
+}
+
+func (p *kChatServiceClient) GetWorkspaceParticipants(ctx context.Context, request *im.WorkspaceParticipantsRequest, callOptions ...callopt.Option) (r *im.WorkspaceParticipantsResponse, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.GetWorkspaceParticipants(ctx, request)
+}
+
+func (p *kChatServiceClient) SetPrincipalWorkspaces(ctx context.Context, request *im.PrincipalWorkspacesRequest, callOptions ...callopt.Option) (r *im.ParticipantWorkspacesResponse, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.SetPrincipalWorkspaces(ctx, request)
 }

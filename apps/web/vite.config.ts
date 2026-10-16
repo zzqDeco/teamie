@@ -19,6 +19,15 @@ export default defineConfig({
         target: process.env.REALTIME_HTTP_ORIGIN || "http://localhost:8083",
         ws: true,
       },
+      "/api/v1/agents": {
+        target: process.env.CONTROLPLANE_HTTP_ORIGIN || "http://localhost:8084",
+      },
+      "^/api/v1/workspaces/[^/]+/agents(?:[/?]|$)": {
+        target: process.env.CONTROLPLANE_HTTP_ORIGIN || "http://localhost:8084",
+      },
+      "/api/v1/admin/model-gateway": {
+        target: process.env.GATEWAY_HTTP_ORIGIN || "http://localhost:8086",
+      },
       "/api": {
         target: process.env.CHAT_HTTP_ORIGIN || "http://localhost:8082",
       },

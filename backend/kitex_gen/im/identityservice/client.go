@@ -14,6 +14,9 @@ type Client interface {
 	ValidateSession(ctx context.Context, request *im.SessionRequest, callOptions ...callopt.Option) (r *im.SessionResponse, err error)
 	GetUsers(ctx context.Context, request *im.UsersRequest, callOptions ...callopt.Option) (r *im.UsersResponse, err error)
 	Ping(ctx context.Context, request *im.PingRequest, callOptions ...callopt.Option) (r *im.PingResponse, err error)
+	ProvisionPrincipal(ctx context.Context, request *im.PrincipalControlRequest, callOptions ...callopt.Option) (r *im.PrincipalResponse, err error)
+	IssuePrincipalToken(ctx context.Context, request *im.PrincipalTokenRequest, callOptions ...callopt.Option) (r *im.PrincipalTokenResponse, err error)
+	ValidatePrincipalToken(ctx context.Context, request *im.PrincipalAuthRequest, callOptions ...callopt.Option) (r *im.SessionResponse, err error)
 }
 
 // NewClient creates a client for the service defined in IDL.
@@ -58,4 +61,19 @@ func (p *kIdentityServiceClient) GetUsers(ctx context.Context, request *im.Users
 func (p *kIdentityServiceClient) Ping(ctx context.Context, request *im.PingRequest, callOptions ...callopt.Option) (r *im.PingResponse, err error) {
 	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
 	return p.kClient.Ping(ctx, request)
+}
+
+func (p *kIdentityServiceClient) ProvisionPrincipal(ctx context.Context, request *im.PrincipalControlRequest, callOptions ...callopt.Option) (r *im.PrincipalResponse, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.ProvisionPrincipal(ctx, request)
+}
+
+func (p *kIdentityServiceClient) IssuePrincipalToken(ctx context.Context, request *im.PrincipalTokenRequest, callOptions ...callopt.Option) (r *im.PrincipalTokenResponse, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.IssuePrincipalToken(ctx, request)
+}
+
+func (p *kIdentityServiceClient) ValidatePrincipalToken(ctx context.Context, request *im.PrincipalAuthRequest, callOptions ...callopt.Option) (r *im.SessionResponse, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.ValidatePrincipalToken(ctx, request)
 }

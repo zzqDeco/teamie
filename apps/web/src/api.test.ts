@@ -95,13 +95,11 @@ describe("platform registration invitation transport", () => {
       platformRole: "admin",
       createdAt: "2026-10-16T07:00:00Z",
     };
-    const fetch = vi
-      .fn()
-      .mockResolvedValue(
-        new Response(JSON.stringify({ user, csrfToken: "session-token" }), {
-          status: 201,
-        }),
-      );
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ user, csrfToken: "session-token" }), {
+        status: 201,
+      }),
+    );
     vi.stubGlobal("fetch", fetch);
     const client = new TeamieClient();
     const session = await client.register({
@@ -159,16 +157,14 @@ describe("platform registration invitation transport", () => {
   it("surfaces server administrator denial without granting workspace access or clearing membership data", async () => {
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockResolvedValue(
-          new Response(
-            JSON.stringify({
-              error: { code: "forbidden", message: "admin required" },
-            }),
-            { status: 403 },
-          ),
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: { code: "forbidden", message: "admin required" },
+          }),
+          { status: 403 },
         ),
+      ),
     );
     const client = new TeamieClient();
     client.onForbidden = vi.fn();
@@ -177,5 +173,105 @@ describe("platform registration invitation transport", () => {
       code: "forbidden",
     });
     expect(client.onForbidden).not.toHaveBeenCalled();
+  });
+});
+
+describe("Agent and model gateway boundaries", () => {
+  it("strips any accidentally returned credential fields from gateway read and save results", async () => {
+    const response = {
+      config: {
+        baseUrl: "https://model.example.test/v1",
+        model: "model-id",
+        hasApiKey: true,
+        apiKey: "example-never-returned-key",
+        encryptedApiKey: "example-ciphertext",
+        enabled: true,
+        configured: true,
+        updatedAt: "2026-10-16T07:00:00Z",
+      },
+      status: "ready",
+      apiKey: "example-top-level-secret",
+    };
+    const fetch = vi
+      .fn()
+      .mockImplementation(
+        async () => new Response(JSON.stringify(response), { status: 200 }),
+      );
+    vi.stubGlobal("fetch", fetch);
+    const client = new TeamieClient();
+    client.csrfToken = "admin-session";
+    const read = await client.modelGateway();
+    const saved = await client.saveModelGateway({
+      baseUrl: response.config.baseUrl,
+      model: response.config.model,
+      apiKey: "example-request-key",
+      enabled: true,
+    });
+    for (const value of [read, saved]) {
+      expect(JSON.stringify(value)).not.toContain("example-never-returned-key");
+      expect(JSON.stringify(value)).not.toContain("example-ciphertext");
+      expect(JSON.stringify(value)).not.toContain("example-top-level-secret");
+      expect(value.config).not.toHaveProperty("apiKey");
+    }
+    expect(fetch.mock.calls[1][0]).toBe("/api/v1/admin/model-gateway");
+    expect(fetch.mock.calls[1][0]).not.toContain("example-request-key");
+    expect(fetch.mock.calls[1][1].method).toBe("PUT");
+    expect(fetch.mock.calls[1][1].headers.get("X-CSRF-Token")).toBe(
+      "admin-session",
+    );
+  });
+  it("keeps Agent ownership checks on the server and creates group members through the shared IM endpoint", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: { code: "forbidden", message: "owner only" },
+          }),
+          { status: 403 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ conversation: { id: "group-1" } }), {
+          status: 200,
+        }),
+      );
+    vi.stubGlobal("fetch", fetch);
+    const client = new TeamieClient();
+    client.csrfToken = "human-session";
+    client.onForbidden = vi.fn();
+    await expect(
+      client.updateAgent("other-agent", { enabled: false }),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(client.onForbidden).not.toHaveBeenCalled();
+    await client.addConversationMember("group-1", "agent-1");
+    expect(fetch.mock.calls[1][0]).toBe(
+      "/api/v1/conversations/group-1/members",
+    );
+    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({
+      userId: "agent-1",
+    });
+    expect(fetch.mock.calls[1][1].headers.get("X-CSRF-Token")).toBe(
+      "human-session",
+    );
+  });
+  it("only tests the saved model through an explicit dedicated POST without credentials", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ ok: true, model: "saved-model", latencyMs: 32 }),
+          { status: 200 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetch);
+    const client = new TeamieClient();
+    client.csrfToken = "admin-session";
+    expect(await client.testModelGateway()).toMatchObject({
+      ok: true,
+      model: "saved-model",
+    });
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/admin/model-gateway/test");
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({});
   });
 });

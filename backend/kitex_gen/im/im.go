@@ -281,6 +281,277 @@ var fieldIDToName_PingResponse = map[int16]string{
 	1: "ready",
 }
 
+type PrincipalControlRequest struct {
+	ServiceToken string `thrift:"serviceToken,1,required" frugal:"1,required,string" json:"serviceToken"`
+	PrincipalId  string `thrift:"principalId,2,required" frugal:"2,required,string" json:"principalId"`
+	DisplayName  string `thrift:"displayName,3,required" frugal:"3,required,string" json:"displayName"`
+	Kind         string `thrift:"kind,4,required" frugal:"4,required,string" json:"kind"`
+	Enabled      bool   `thrift:"enabled,5,required" frugal:"5,required,bool" json:"enabled"`
+	Deleted      bool   `thrift:"deleted,6,required" frugal:"6,required,bool" json:"deleted"`
+	Revision     int64  `thrift:"revision,7,required" frugal:"7,required,i64" json:"revision"`
+}
+
+func NewPrincipalControlRequest() *PrincipalControlRequest {
+	return &PrincipalControlRequest{}
+}
+
+func (p *PrincipalControlRequest) InitDefault() {
+}
+
+func (p *PrincipalControlRequest) GetServiceToken() (v string) {
+	return p.ServiceToken
+}
+
+func (p *PrincipalControlRequest) GetPrincipalId() (v string) {
+	return p.PrincipalId
+}
+
+func (p *PrincipalControlRequest) GetDisplayName() (v string) {
+	return p.DisplayName
+}
+
+func (p *PrincipalControlRequest) GetKind() (v string) {
+	return p.Kind
+}
+
+func (p *PrincipalControlRequest) GetEnabled() (v bool) {
+	return p.Enabled
+}
+
+func (p *PrincipalControlRequest) GetDeleted() (v bool) {
+	return p.Deleted
+}
+
+func (p *PrincipalControlRequest) GetRevision() (v int64) {
+	return p.Revision
+}
+func (p *PrincipalControlRequest) SetServiceToken(val string) {
+	p.ServiceToken = val
+}
+func (p *PrincipalControlRequest) SetPrincipalId(val string) {
+	p.PrincipalId = val
+}
+func (p *PrincipalControlRequest) SetDisplayName(val string) {
+	p.DisplayName = val
+}
+func (p *PrincipalControlRequest) SetKind(val string) {
+	p.Kind = val
+}
+func (p *PrincipalControlRequest) SetEnabled(val bool) {
+	p.Enabled = val
+}
+func (p *PrincipalControlRequest) SetDeleted(val bool) {
+	p.Deleted = val
+}
+func (p *PrincipalControlRequest) SetRevision(val int64) {
+	p.Revision = val
+}
+
+func (p *PrincipalControlRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PrincipalControlRequest(%+v)", *p)
+}
+
+var fieldIDToName_PrincipalControlRequest = map[int16]string{
+	1: "serviceToken",
+	2: "principalId",
+	3: "displayName",
+	4: "kind",
+	5: "enabled",
+	6: "deleted",
+	7: "revision",
+}
+
+type PrincipalResponse struct {
+	Ok        bool   `thrift:"ok,1,required" frugal:"1,required,bool" json:"ok"`
+	ErrorCode string `thrift:"errorCode,2,required" frugal:"2,required,string" json:"errorCode"`
+	User      *User  `thrift:"user,3,optional" frugal:"3,optional,User" json:"user,omitempty"`
+}
+
+func NewPrincipalResponse() *PrincipalResponse {
+	return &PrincipalResponse{}
+}
+
+func (p *PrincipalResponse) InitDefault() {
+}
+
+func (p *PrincipalResponse) GetOk() (v bool) {
+	return p.Ok
+}
+
+func (p *PrincipalResponse) GetErrorCode() (v string) {
+	return p.ErrorCode
+}
+
+var PrincipalResponse_User_DEFAULT *User
+
+func (p *PrincipalResponse) GetUser() (v *User) {
+	if !p.IsSetUser() {
+		return PrincipalResponse_User_DEFAULT
+	}
+	return p.User
+}
+func (p *PrincipalResponse) SetOk(val bool) {
+	p.Ok = val
+}
+func (p *PrincipalResponse) SetErrorCode(val string) {
+	p.ErrorCode = val
+}
+func (p *PrincipalResponse) SetUser(val *User) {
+	p.User = val
+}
+
+func (p *PrincipalResponse) IsSetUser() bool {
+	return p.User != nil
+}
+
+func (p *PrincipalResponse) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PrincipalResponse(%+v)", *p)
+}
+
+var fieldIDToName_PrincipalResponse = map[int16]string{
+	1: "ok",
+	2: "errorCode",
+	3: "user",
+}
+
+type PrincipalTokenRequest struct {
+	ServiceToken string `thrift:"serviceToken,1,required" frugal:"1,required,string" json:"serviceToken"`
+	PrincipalId  string `thrift:"principalId,2,required" frugal:"2,required,string" json:"principalId"`
+}
+
+func NewPrincipalTokenRequest() *PrincipalTokenRequest {
+	return &PrincipalTokenRequest{}
+}
+
+func (p *PrincipalTokenRequest) InitDefault() {
+}
+
+func (p *PrincipalTokenRequest) GetServiceToken() (v string) {
+	return p.ServiceToken
+}
+
+func (p *PrincipalTokenRequest) GetPrincipalId() (v string) {
+	return p.PrincipalId
+}
+func (p *PrincipalTokenRequest) SetServiceToken(val string) {
+	p.ServiceToken = val
+}
+func (p *PrincipalTokenRequest) SetPrincipalId(val string) {
+	p.PrincipalId = val
+}
+
+func (p *PrincipalTokenRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PrincipalTokenRequest(%+v)", *p)
+}
+
+var fieldIDToName_PrincipalTokenRequest = map[int16]string{
+	1: "serviceToken",
+	2: "principalId",
+}
+
+type PrincipalTokenResponse struct {
+	Ok        bool   `thrift:"ok,1,required" frugal:"1,required,bool" json:"ok"`
+	ErrorCode string `thrift:"errorCode,2,required" frugal:"2,required,string" json:"errorCode"`
+	Token     string `thrift:"token,3,required" frugal:"3,required,string" json:"token"`
+	ExpiresAt string `thrift:"expiresAt,4,required" frugal:"4,required,string" json:"expiresAt"`
+}
+
+func NewPrincipalTokenResponse() *PrincipalTokenResponse {
+	return &PrincipalTokenResponse{}
+}
+
+func (p *PrincipalTokenResponse) InitDefault() {
+}
+
+func (p *PrincipalTokenResponse) GetOk() (v bool) {
+	return p.Ok
+}
+
+func (p *PrincipalTokenResponse) GetErrorCode() (v string) {
+	return p.ErrorCode
+}
+
+func (p *PrincipalTokenResponse) GetToken() (v string) {
+	return p.Token
+}
+
+func (p *PrincipalTokenResponse) GetExpiresAt() (v string) {
+	return p.ExpiresAt
+}
+func (p *PrincipalTokenResponse) SetOk(val bool) {
+	p.Ok = val
+}
+func (p *PrincipalTokenResponse) SetErrorCode(val string) {
+	p.ErrorCode = val
+}
+func (p *PrincipalTokenResponse) SetToken(val string) {
+	p.Token = val
+}
+func (p *PrincipalTokenResponse) SetExpiresAt(val string) {
+	p.ExpiresAt = val
+}
+
+func (p *PrincipalTokenResponse) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PrincipalTokenResponse(%+v)", *p)
+}
+
+var fieldIDToName_PrincipalTokenResponse = map[int16]string{
+	1: "ok",
+	2: "errorCode",
+	3: "token",
+	4: "expiresAt",
+}
+
+type PrincipalAuthRequest struct {
+	ServiceToken string `thrift:"serviceToken,1,required" frugal:"1,required,string" json:"serviceToken"`
+	Token        string `thrift:"token,2,required" frugal:"2,required,string" json:"token"`
+}
+
+func NewPrincipalAuthRequest() *PrincipalAuthRequest {
+	return &PrincipalAuthRequest{}
+}
+
+func (p *PrincipalAuthRequest) InitDefault() {
+}
+
+func (p *PrincipalAuthRequest) GetServiceToken() (v string) {
+	return p.ServiceToken
+}
+
+func (p *PrincipalAuthRequest) GetToken() (v string) {
+	return p.Token
+}
+func (p *PrincipalAuthRequest) SetServiceToken(val string) {
+	p.ServiceToken = val
+}
+func (p *PrincipalAuthRequest) SetToken(val string) {
+	p.Token = val
+}
+
+func (p *PrincipalAuthRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PrincipalAuthRequest(%+v)", *p)
+}
+
+var fieldIDToName_PrincipalAuthRequest = map[int16]string{
+	1: "serviceToken",
+	2: "token",
+}
+
 type AccessRequest struct {
 	UserId         string `thrift:"userId,1,required" frugal:"1,required,string" json:"userId"`
 	ConversationId string `thrift:"conversationId,2,required" frugal:"2,required,string" json:"conversationId"`
@@ -366,12 +637,262 @@ var fieldIDToName_AccessResponse = map[int16]string{
 	3: "typingEnabled",
 }
 
+type ParticipantWorkspacesRequest struct {
+	ServiceToken string `thrift:"serviceToken,1,required" frugal:"1,required,string" json:"serviceToken"`
+	UserId       string `thrift:"userId,2,required" frugal:"2,required,string" json:"userId"`
+}
+
+func NewParticipantWorkspacesRequest() *ParticipantWorkspacesRequest {
+	return &ParticipantWorkspacesRequest{}
+}
+
+func (p *ParticipantWorkspacesRequest) InitDefault() {
+}
+
+func (p *ParticipantWorkspacesRequest) GetServiceToken() (v string) {
+	return p.ServiceToken
+}
+
+func (p *ParticipantWorkspacesRequest) GetUserId() (v string) {
+	return p.UserId
+}
+func (p *ParticipantWorkspacesRequest) SetServiceToken(val string) {
+	p.ServiceToken = val
+}
+func (p *ParticipantWorkspacesRequest) SetUserId(val string) {
+	p.UserId = val
+}
+
+func (p *ParticipantWorkspacesRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ParticipantWorkspacesRequest(%+v)", *p)
+}
+
+var fieldIDToName_ParticipantWorkspacesRequest = map[int16]string{
+	1: "serviceToken",
+	2: "userId",
+}
+
+type ParticipantWorkspacesResponse struct {
+	Ok           bool     `thrift:"ok,1,required" frugal:"1,required,bool" json:"ok"`
+	ErrorCode    string   `thrift:"errorCode,2,required" frugal:"2,required,string" json:"errorCode"`
+	WorkspaceIds []string `thrift:"workspaceIds,3,required" frugal:"3,required,list<string>" json:"workspaceIds"`
+}
+
+func NewParticipantWorkspacesResponse() *ParticipantWorkspacesResponse {
+	return &ParticipantWorkspacesResponse{}
+}
+
+func (p *ParticipantWorkspacesResponse) InitDefault() {
+}
+
+func (p *ParticipantWorkspacesResponse) GetOk() (v bool) {
+	return p.Ok
+}
+
+func (p *ParticipantWorkspacesResponse) GetErrorCode() (v string) {
+	return p.ErrorCode
+}
+
+func (p *ParticipantWorkspacesResponse) GetWorkspaceIds() (v []string) {
+	return p.WorkspaceIds
+}
+func (p *ParticipantWorkspacesResponse) SetOk(val bool) {
+	p.Ok = val
+}
+func (p *ParticipantWorkspacesResponse) SetErrorCode(val string) {
+	p.ErrorCode = val
+}
+func (p *ParticipantWorkspacesResponse) SetWorkspaceIds(val []string) {
+	p.WorkspaceIds = val
+}
+
+func (p *ParticipantWorkspacesResponse) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ParticipantWorkspacesResponse(%+v)", *p)
+}
+
+var fieldIDToName_ParticipantWorkspacesResponse = map[int16]string{
+	1: "ok",
+	2: "errorCode",
+	3: "workspaceIds",
+}
+
+type WorkspaceParticipantsRequest struct {
+	ServiceToken string `thrift:"serviceToken,1,required" frugal:"1,required,string" json:"serviceToken"`
+	WorkspaceId  string `thrift:"workspaceId,2,required" frugal:"2,required,string" json:"workspaceId"`
+	RequesterId  string `thrift:"requesterId,3,required" frugal:"3,required,string" json:"requesterId"`
+}
+
+func NewWorkspaceParticipantsRequest() *WorkspaceParticipantsRequest {
+	return &WorkspaceParticipantsRequest{}
+}
+
+func (p *WorkspaceParticipantsRequest) InitDefault() {
+}
+
+func (p *WorkspaceParticipantsRequest) GetServiceToken() (v string) {
+	return p.ServiceToken
+}
+
+func (p *WorkspaceParticipantsRequest) GetWorkspaceId() (v string) {
+	return p.WorkspaceId
+}
+
+func (p *WorkspaceParticipantsRequest) GetRequesterId() (v string) {
+	return p.RequesterId
+}
+func (p *WorkspaceParticipantsRequest) SetServiceToken(val string) {
+	p.ServiceToken = val
+}
+func (p *WorkspaceParticipantsRequest) SetWorkspaceId(val string) {
+	p.WorkspaceId = val
+}
+func (p *WorkspaceParticipantsRequest) SetRequesterId(val string) {
+	p.RequesterId = val
+}
+
+func (p *WorkspaceParticipantsRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("WorkspaceParticipantsRequest(%+v)", *p)
+}
+
+var fieldIDToName_WorkspaceParticipantsRequest = map[int16]string{
+	1: "serviceToken",
+	2: "workspaceId",
+	3: "requesterId",
+}
+
+type WorkspaceParticipantsResponse struct {
+	Ok        bool     `thrift:"ok,1,required" frugal:"1,required,bool" json:"ok"`
+	ErrorCode string   `thrift:"errorCode,2,required" frugal:"2,required,string" json:"errorCode"`
+	MemberIds []string `thrift:"memberIds,3,required" frugal:"3,required,list<string>" json:"memberIds"`
+}
+
+func NewWorkspaceParticipantsResponse() *WorkspaceParticipantsResponse {
+	return &WorkspaceParticipantsResponse{}
+}
+
+func (p *WorkspaceParticipantsResponse) InitDefault() {
+}
+
+func (p *WorkspaceParticipantsResponse) GetOk() (v bool) {
+	return p.Ok
+}
+
+func (p *WorkspaceParticipantsResponse) GetErrorCode() (v string) {
+	return p.ErrorCode
+}
+
+func (p *WorkspaceParticipantsResponse) GetMemberIds() (v []string) {
+	return p.MemberIds
+}
+func (p *WorkspaceParticipantsResponse) SetOk(val bool) {
+	p.Ok = val
+}
+func (p *WorkspaceParticipantsResponse) SetErrorCode(val string) {
+	p.ErrorCode = val
+}
+func (p *WorkspaceParticipantsResponse) SetMemberIds(val []string) {
+	p.MemberIds = val
+}
+
+func (p *WorkspaceParticipantsResponse) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("WorkspaceParticipantsResponse(%+v)", *p)
+}
+
+var fieldIDToName_WorkspaceParticipantsResponse = map[int16]string{
+	1: "ok",
+	2: "errorCode",
+	3: "memberIds",
+}
+
+type PrincipalWorkspacesRequest struct {
+	ServiceToken  string   `thrift:"serviceToken,1,required" frugal:"1,required,string" json:"serviceToken"`
+	PrincipalId   string   `thrift:"principalId,2,required" frugal:"2,required,string" json:"principalId"`
+	GrantorUserId string   `thrift:"grantorUserId,3,required" frugal:"3,required,string" json:"grantorUserId"`
+	WorkspaceIds  []string `thrift:"workspaceIds,4,required" frugal:"4,required,list<string>" json:"workspaceIds"`
+	Revision      int64    `thrift:"revision,5,required" frugal:"5,required,i64" json:"revision"`
+}
+
+func NewPrincipalWorkspacesRequest() *PrincipalWorkspacesRequest {
+	return &PrincipalWorkspacesRequest{}
+}
+
+func (p *PrincipalWorkspacesRequest) InitDefault() {
+}
+
+func (p *PrincipalWorkspacesRequest) GetServiceToken() (v string) {
+	return p.ServiceToken
+}
+
+func (p *PrincipalWorkspacesRequest) GetPrincipalId() (v string) {
+	return p.PrincipalId
+}
+
+func (p *PrincipalWorkspacesRequest) GetGrantorUserId() (v string) {
+	return p.GrantorUserId
+}
+
+func (p *PrincipalWorkspacesRequest) GetWorkspaceIds() (v []string) {
+	return p.WorkspaceIds
+}
+
+func (p *PrincipalWorkspacesRequest) GetRevision() (v int64) {
+	return p.Revision
+}
+func (p *PrincipalWorkspacesRequest) SetServiceToken(val string) {
+	p.ServiceToken = val
+}
+func (p *PrincipalWorkspacesRequest) SetPrincipalId(val string) {
+	p.PrincipalId = val
+}
+func (p *PrincipalWorkspacesRequest) SetGrantorUserId(val string) {
+	p.GrantorUserId = val
+}
+func (p *PrincipalWorkspacesRequest) SetWorkspaceIds(val []string) {
+	p.WorkspaceIds = val
+}
+func (p *PrincipalWorkspacesRequest) SetRevision(val int64) {
+	p.Revision = val
+}
+
+func (p *PrincipalWorkspacesRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PrincipalWorkspacesRequest(%+v)", *p)
+}
+
+var fieldIDToName_PrincipalWorkspacesRequest = map[int16]string{
+	1: "serviceToken",
+	2: "principalId",
+	3: "grantorUserId",
+	4: "workspaceIds",
+	5: "revision",
+}
+
 type IdentityService interface {
 	ValidateSession(ctx context.Context, request *SessionRequest) (r *SessionResponse, err error)
 
 	GetUsers(ctx context.Context, request *UsersRequest) (r *UsersResponse, err error)
 
 	Ping(ctx context.Context, request *PingRequest) (r *PingResponse, err error)
+
+	ProvisionPrincipal(ctx context.Context, request *PrincipalControlRequest) (r *PrincipalResponse, err error)
+
+	IssuePrincipalToken(ctx context.Context, request *PrincipalTokenRequest) (r *PrincipalTokenResponse, err error)
+
+	ValidatePrincipalToken(ctx context.Context, request *PrincipalAuthRequest) (r *SessionResponse, err error)
 }
 
 type IdentityServiceValidateSessionArgs struct {
@@ -602,10 +1123,244 @@ var fieldIDToName_IdentityServicePingResult = map[int16]string{
 	0: "success",
 }
 
+type IdentityServiceProvisionPrincipalArgs struct {
+	Request *PrincipalControlRequest `thrift:"request,1" frugal:"1,default,PrincipalControlRequest" json:"request"`
+}
+
+func NewIdentityServiceProvisionPrincipalArgs() *IdentityServiceProvisionPrincipalArgs {
+	return &IdentityServiceProvisionPrincipalArgs{}
+}
+
+func (p *IdentityServiceProvisionPrincipalArgs) InitDefault() {
+}
+
+var IdentityServiceProvisionPrincipalArgs_Request_DEFAULT *PrincipalControlRequest
+
+func (p *IdentityServiceProvisionPrincipalArgs) GetRequest() (v *PrincipalControlRequest) {
+	if !p.IsSetRequest() {
+		return IdentityServiceProvisionPrincipalArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *IdentityServiceProvisionPrincipalArgs) SetRequest(val *PrincipalControlRequest) {
+	p.Request = val
+}
+
+func (p *IdentityServiceProvisionPrincipalArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *IdentityServiceProvisionPrincipalArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("IdentityServiceProvisionPrincipalArgs(%+v)", *p)
+}
+
+var fieldIDToName_IdentityServiceProvisionPrincipalArgs = map[int16]string{
+	1: "request",
+}
+
+type IdentityServiceProvisionPrincipalResult struct {
+	Success *PrincipalResponse `thrift:"success,0,optional" frugal:"0,optional,PrincipalResponse" json:"success,omitempty"`
+}
+
+func NewIdentityServiceProvisionPrincipalResult() *IdentityServiceProvisionPrincipalResult {
+	return &IdentityServiceProvisionPrincipalResult{}
+}
+
+func (p *IdentityServiceProvisionPrincipalResult) InitDefault() {
+}
+
+var IdentityServiceProvisionPrincipalResult_Success_DEFAULT *PrincipalResponse
+
+func (p *IdentityServiceProvisionPrincipalResult) GetSuccess() (v *PrincipalResponse) {
+	if !p.IsSetSuccess() {
+		return IdentityServiceProvisionPrincipalResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *IdentityServiceProvisionPrincipalResult) SetSuccess(x interface{}) {
+	p.Success = x.(*PrincipalResponse)
+}
+
+func (p *IdentityServiceProvisionPrincipalResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *IdentityServiceProvisionPrincipalResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("IdentityServiceProvisionPrincipalResult(%+v)", *p)
+}
+
+var fieldIDToName_IdentityServiceProvisionPrincipalResult = map[int16]string{
+	0: "success",
+}
+
+type IdentityServiceIssuePrincipalTokenArgs struct {
+	Request *PrincipalTokenRequest `thrift:"request,1" frugal:"1,default,PrincipalTokenRequest" json:"request"`
+}
+
+func NewIdentityServiceIssuePrincipalTokenArgs() *IdentityServiceIssuePrincipalTokenArgs {
+	return &IdentityServiceIssuePrincipalTokenArgs{}
+}
+
+func (p *IdentityServiceIssuePrincipalTokenArgs) InitDefault() {
+}
+
+var IdentityServiceIssuePrincipalTokenArgs_Request_DEFAULT *PrincipalTokenRequest
+
+func (p *IdentityServiceIssuePrincipalTokenArgs) GetRequest() (v *PrincipalTokenRequest) {
+	if !p.IsSetRequest() {
+		return IdentityServiceIssuePrincipalTokenArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *IdentityServiceIssuePrincipalTokenArgs) SetRequest(val *PrincipalTokenRequest) {
+	p.Request = val
+}
+
+func (p *IdentityServiceIssuePrincipalTokenArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *IdentityServiceIssuePrincipalTokenArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("IdentityServiceIssuePrincipalTokenArgs(%+v)", *p)
+}
+
+var fieldIDToName_IdentityServiceIssuePrincipalTokenArgs = map[int16]string{
+	1: "request",
+}
+
+type IdentityServiceIssuePrincipalTokenResult struct {
+	Success *PrincipalTokenResponse `thrift:"success,0,optional" frugal:"0,optional,PrincipalTokenResponse" json:"success,omitempty"`
+}
+
+func NewIdentityServiceIssuePrincipalTokenResult() *IdentityServiceIssuePrincipalTokenResult {
+	return &IdentityServiceIssuePrincipalTokenResult{}
+}
+
+func (p *IdentityServiceIssuePrincipalTokenResult) InitDefault() {
+}
+
+var IdentityServiceIssuePrincipalTokenResult_Success_DEFAULT *PrincipalTokenResponse
+
+func (p *IdentityServiceIssuePrincipalTokenResult) GetSuccess() (v *PrincipalTokenResponse) {
+	if !p.IsSetSuccess() {
+		return IdentityServiceIssuePrincipalTokenResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *IdentityServiceIssuePrincipalTokenResult) SetSuccess(x interface{}) {
+	p.Success = x.(*PrincipalTokenResponse)
+}
+
+func (p *IdentityServiceIssuePrincipalTokenResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *IdentityServiceIssuePrincipalTokenResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("IdentityServiceIssuePrincipalTokenResult(%+v)", *p)
+}
+
+var fieldIDToName_IdentityServiceIssuePrincipalTokenResult = map[int16]string{
+	0: "success",
+}
+
+type IdentityServiceValidatePrincipalTokenArgs struct {
+	Request *PrincipalAuthRequest `thrift:"request,1" frugal:"1,default,PrincipalAuthRequest" json:"request"`
+}
+
+func NewIdentityServiceValidatePrincipalTokenArgs() *IdentityServiceValidatePrincipalTokenArgs {
+	return &IdentityServiceValidatePrincipalTokenArgs{}
+}
+
+func (p *IdentityServiceValidatePrincipalTokenArgs) InitDefault() {
+}
+
+var IdentityServiceValidatePrincipalTokenArgs_Request_DEFAULT *PrincipalAuthRequest
+
+func (p *IdentityServiceValidatePrincipalTokenArgs) GetRequest() (v *PrincipalAuthRequest) {
+	if !p.IsSetRequest() {
+		return IdentityServiceValidatePrincipalTokenArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *IdentityServiceValidatePrincipalTokenArgs) SetRequest(val *PrincipalAuthRequest) {
+	p.Request = val
+}
+
+func (p *IdentityServiceValidatePrincipalTokenArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *IdentityServiceValidatePrincipalTokenArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("IdentityServiceValidatePrincipalTokenArgs(%+v)", *p)
+}
+
+var fieldIDToName_IdentityServiceValidatePrincipalTokenArgs = map[int16]string{
+	1: "request",
+}
+
+type IdentityServiceValidatePrincipalTokenResult struct {
+	Success *SessionResponse `thrift:"success,0,optional" frugal:"0,optional,SessionResponse" json:"success,omitempty"`
+}
+
+func NewIdentityServiceValidatePrincipalTokenResult() *IdentityServiceValidatePrincipalTokenResult {
+	return &IdentityServiceValidatePrincipalTokenResult{}
+}
+
+func (p *IdentityServiceValidatePrincipalTokenResult) InitDefault() {
+}
+
+var IdentityServiceValidatePrincipalTokenResult_Success_DEFAULT *SessionResponse
+
+func (p *IdentityServiceValidatePrincipalTokenResult) GetSuccess() (v *SessionResponse) {
+	if !p.IsSetSuccess() {
+		return IdentityServiceValidatePrincipalTokenResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *IdentityServiceValidatePrincipalTokenResult) SetSuccess(x interface{}) {
+	p.Success = x.(*SessionResponse)
+}
+
+func (p *IdentityServiceValidatePrincipalTokenResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *IdentityServiceValidatePrincipalTokenResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("IdentityServiceValidatePrincipalTokenResult(%+v)", *p)
+}
+
+var fieldIDToName_IdentityServiceValidatePrincipalTokenResult = map[int16]string{
+	0: "success",
+}
+
 type ChatService interface {
 	CheckAccess(ctx context.Context, request *AccessRequest) (r *AccessResponse, err error)
 
 	Ping(ctx context.Context, request *PingRequest) (r *PingResponse, err error)
+
+	GetParticipantWorkspaces(ctx context.Context, request *ParticipantWorkspacesRequest) (r *ParticipantWorkspacesResponse, err error)
+
+	GetWorkspaceParticipants(ctx context.Context, request *WorkspaceParticipantsRequest) (r *WorkspaceParticipantsResponse, err error)
+
+	SetPrincipalWorkspaces(ctx context.Context, request *PrincipalWorkspacesRequest) (r *ParticipantWorkspacesResponse, err error)
 }
 
 type ChatServiceCheckAccessArgs struct {
@@ -757,5 +1512,233 @@ func (p *ChatServicePingResult) String() string {
 }
 
 var fieldIDToName_ChatServicePingResult = map[int16]string{
+	0: "success",
+}
+
+type ChatServiceGetParticipantWorkspacesArgs struct {
+	Request *ParticipantWorkspacesRequest `thrift:"request,1" frugal:"1,default,ParticipantWorkspacesRequest" json:"request"`
+}
+
+func NewChatServiceGetParticipantWorkspacesArgs() *ChatServiceGetParticipantWorkspacesArgs {
+	return &ChatServiceGetParticipantWorkspacesArgs{}
+}
+
+func (p *ChatServiceGetParticipantWorkspacesArgs) InitDefault() {
+}
+
+var ChatServiceGetParticipantWorkspacesArgs_Request_DEFAULT *ParticipantWorkspacesRequest
+
+func (p *ChatServiceGetParticipantWorkspacesArgs) GetRequest() (v *ParticipantWorkspacesRequest) {
+	if !p.IsSetRequest() {
+		return ChatServiceGetParticipantWorkspacesArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *ChatServiceGetParticipantWorkspacesArgs) SetRequest(val *ParticipantWorkspacesRequest) {
+	p.Request = val
+}
+
+func (p *ChatServiceGetParticipantWorkspacesArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *ChatServiceGetParticipantWorkspacesArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ChatServiceGetParticipantWorkspacesArgs(%+v)", *p)
+}
+
+var fieldIDToName_ChatServiceGetParticipantWorkspacesArgs = map[int16]string{
+	1: "request",
+}
+
+type ChatServiceGetParticipantWorkspacesResult struct {
+	Success *ParticipantWorkspacesResponse `thrift:"success,0,optional" frugal:"0,optional,ParticipantWorkspacesResponse" json:"success,omitempty"`
+}
+
+func NewChatServiceGetParticipantWorkspacesResult() *ChatServiceGetParticipantWorkspacesResult {
+	return &ChatServiceGetParticipantWorkspacesResult{}
+}
+
+func (p *ChatServiceGetParticipantWorkspacesResult) InitDefault() {
+}
+
+var ChatServiceGetParticipantWorkspacesResult_Success_DEFAULT *ParticipantWorkspacesResponse
+
+func (p *ChatServiceGetParticipantWorkspacesResult) GetSuccess() (v *ParticipantWorkspacesResponse) {
+	if !p.IsSetSuccess() {
+		return ChatServiceGetParticipantWorkspacesResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *ChatServiceGetParticipantWorkspacesResult) SetSuccess(x interface{}) {
+	p.Success = x.(*ParticipantWorkspacesResponse)
+}
+
+func (p *ChatServiceGetParticipantWorkspacesResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *ChatServiceGetParticipantWorkspacesResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ChatServiceGetParticipantWorkspacesResult(%+v)", *p)
+}
+
+var fieldIDToName_ChatServiceGetParticipantWorkspacesResult = map[int16]string{
+	0: "success",
+}
+
+type ChatServiceGetWorkspaceParticipantsArgs struct {
+	Request *WorkspaceParticipantsRequest `thrift:"request,1" frugal:"1,default,WorkspaceParticipantsRequest" json:"request"`
+}
+
+func NewChatServiceGetWorkspaceParticipantsArgs() *ChatServiceGetWorkspaceParticipantsArgs {
+	return &ChatServiceGetWorkspaceParticipantsArgs{}
+}
+
+func (p *ChatServiceGetWorkspaceParticipantsArgs) InitDefault() {
+}
+
+var ChatServiceGetWorkspaceParticipantsArgs_Request_DEFAULT *WorkspaceParticipantsRequest
+
+func (p *ChatServiceGetWorkspaceParticipantsArgs) GetRequest() (v *WorkspaceParticipantsRequest) {
+	if !p.IsSetRequest() {
+		return ChatServiceGetWorkspaceParticipantsArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *ChatServiceGetWorkspaceParticipantsArgs) SetRequest(val *WorkspaceParticipantsRequest) {
+	p.Request = val
+}
+
+func (p *ChatServiceGetWorkspaceParticipantsArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *ChatServiceGetWorkspaceParticipantsArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ChatServiceGetWorkspaceParticipantsArgs(%+v)", *p)
+}
+
+var fieldIDToName_ChatServiceGetWorkspaceParticipantsArgs = map[int16]string{
+	1: "request",
+}
+
+type ChatServiceGetWorkspaceParticipantsResult struct {
+	Success *WorkspaceParticipantsResponse `thrift:"success,0,optional" frugal:"0,optional,WorkspaceParticipantsResponse" json:"success,omitempty"`
+}
+
+func NewChatServiceGetWorkspaceParticipantsResult() *ChatServiceGetWorkspaceParticipantsResult {
+	return &ChatServiceGetWorkspaceParticipantsResult{}
+}
+
+func (p *ChatServiceGetWorkspaceParticipantsResult) InitDefault() {
+}
+
+var ChatServiceGetWorkspaceParticipantsResult_Success_DEFAULT *WorkspaceParticipantsResponse
+
+func (p *ChatServiceGetWorkspaceParticipantsResult) GetSuccess() (v *WorkspaceParticipantsResponse) {
+	if !p.IsSetSuccess() {
+		return ChatServiceGetWorkspaceParticipantsResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *ChatServiceGetWorkspaceParticipantsResult) SetSuccess(x interface{}) {
+	p.Success = x.(*WorkspaceParticipantsResponse)
+}
+
+func (p *ChatServiceGetWorkspaceParticipantsResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *ChatServiceGetWorkspaceParticipantsResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ChatServiceGetWorkspaceParticipantsResult(%+v)", *p)
+}
+
+var fieldIDToName_ChatServiceGetWorkspaceParticipantsResult = map[int16]string{
+	0: "success",
+}
+
+type ChatServiceSetPrincipalWorkspacesArgs struct {
+	Request *PrincipalWorkspacesRequest `thrift:"request,1" frugal:"1,default,PrincipalWorkspacesRequest" json:"request"`
+}
+
+func NewChatServiceSetPrincipalWorkspacesArgs() *ChatServiceSetPrincipalWorkspacesArgs {
+	return &ChatServiceSetPrincipalWorkspacesArgs{}
+}
+
+func (p *ChatServiceSetPrincipalWorkspacesArgs) InitDefault() {
+}
+
+var ChatServiceSetPrincipalWorkspacesArgs_Request_DEFAULT *PrincipalWorkspacesRequest
+
+func (p *ChatServiceSetPrincipalWorkspacesArgs) GetRequest() (v *PrincipalWorkspacesRequest) {
+	if !p.IsSetRequest() {
+		return ChatServiceSetPrincipalWorkspacesArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *ChatServiceSetPrincipalWorkspacesArgs) SetRequest(val *PrincipalWorkspacesRequest) {
+	p.Request = val
+}
+
+func (p *ChatServiceSetPrincipalWorkspacesArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *ChatServiceSetPrincipalWorkspacesArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ChatServiceSetPrincipalWorkspacesArgs(%+v)", *p)
+}
+
+var fieldIDToName_ChatServiceSetPrincipalWorkspacesArgs = map[int16]string{
+	1: "request",
+}
+
+type ChatServiceSetPrincipalWorkspacesResult struct {
+	Success *ParticipantWorkspacesResponse `thrift:"success,0,optional" frugal:"0,optional,ParticipantWorkspacesResponse" json:"success,omitempty"`
+}
+
+func NewChatServiceSetPrincipalWorkspacesResult() *ChatServiceSetPrincipalWorkspacesResult {
+	return &ChatServiceSetPrincipalWorkspacesResult{}
+}
+
+func (p *ChatServiceSetPrincipalWorkspacesResult) InitDefault() {
+}
+
+var ChatServiceSetPrincipalWorkspacesResult_Success_DEFAULT *ParticipantWorkspacesResponse
+
+func (p *ChatServiceSetPrincipalWorkspacesResult) GetSuccess() (v *ParticipantWorkspacesResponse) {
+	if !p.IsSetSuccess() {
+		return ChatServiceSetPrincipalWorkspacesResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *ChatServiceSetPrincipalWorkspacesResult) SetSuccess(x interface{}) {
+	p.Success = x.(*ParticipantWorkspacesResponse)
+}
+
+func (p *ChatServiceSetPrincipalWorkspacesResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *ChatServiceSetPrincipalWorkspacesResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ChatServiceSetPrincipalWorkspacesResult(%+v)", *p)
+}
+
+var fieldIDToName_ChatServiceSetPrincipalWorkspacesResult = map[int16]string{
 	0: "success",
 }

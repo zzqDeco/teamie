@@ -70,6 +70,8 @@ IFS= read -r registry_token
 printf '%s' "$registry_token" | docker login ghcr.io --username "$registry_user" --password-stdin >/dev/null
 unset registry_token
 "${COMPOSE[@]}" pull --quiet
+runner_image=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["images"].get("sandbox-runner",""))' "$manifest")
+if [[ -n $runner_image ]]; then docker pull --quiet "$runner_image" >/dev/null; fi
 # Already-pulled immutable digests do not require persisted registry credentials.
 rm -rf -- "$DOCKER_CONFIG"
 unset DOCKER_CONFIG
@@ -106,7 +108,7 @@ PY
 
 if ! rollout; then restore_previous; exit 1; fi
 # Check the migration ledgers against release metadata before considering rollback safe.
-for database in identity chat; do
+for database in $(python3 -c 'import json,sys; print(" ".join(json.load(open(sys.argv[1]))["schema"]))' "$manifest"); do
   expected_schema=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["schema"][sys.argv[2]])' "$manifest" "$database")
   # shellcheck disable=SC2016
   actual_schema=$("${COMPOSE[@]}" exec -T postgres sh -ec \
@@ -128,11 +130,17 @@ for name,service in c["services"].items():
     assert actual==service["image"], f"running {name} image differs from release digest"
 PY
 then restore_previous; exit 1; fi
-for service in identity chat realtime web; do
+app_services="identity chat realtime web"
+if [[ -n $runner_image ]]; then app_services+=" agent-control agent-runtime llm-gateway sandbox"; fi
+for service in $app_services; do
   case "$service" in
     identity) version_url=http://127.0.0.1:8081/version;;
     chat) version_url=http://127.0.0.1:8082/version;;
     realtime) version_url=http://127.0.0.1:8083/version;;
+    agent-control) version_url=http://127.0.0.1:8084/version;;
+    agent-runtime) version_url=http://127.0.0.1:8085/version;;
+    llm-gateway) version_url=http://127.0.0.1:8086/version;;
+    sandbox) version_url=http://127.0.0.1:8087/version;;
     web) version_url=http://127.0.0.1/version.json;;
   esac
   if ! "${COMPOSE[@]}" exec -T "$service" wget -q -O - "$version_url" | \

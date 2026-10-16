@@ -28,8 +28,8 @@ func (s *Store) CreateWorkspace(ctx context.Context, user, name string) (Workspa
 	if _, e = tx.Exec(ctx, "INSERT INTO workspace_members(workspace_id,user_id,role) VALUES($1,$2,'owner')", ws.ID, user); e != nil {
 		return ws, c, e
 	}
-	c = Conversation{ID: api.ID(), WorkspaceID: ws.ID, Type: "channel", Name: "general", MemberIDs: []string{user}}
-	if e = tx.QueryRow(ctx, "INSERT INTO conversations(id,workspace_id,type,name) VALUES($1,$2,$3,$4) RETURNING updated_at", c.ID, ws.ID, c.Type, c.Name).Scan(&c.UpdatedAt); e != nil {
+	c = Conversation{ID: api.ID(), WorkspaceID: ws.ID, Type: "channel", Name: "general", CreatedBy: user, MemberIDs: []string{user}}
+	if e = tx.QueryRow(ctx, "INSERT INTO conversations(id,workspace_id,type,name,created_by) VALUES($1,$2,$3,$4,$5) RETURNING updated_at", c.ID, ws.ID, c.Type, c.Name, user).Scan(&c.UpdatedAt); e != nil {
 		return ws, c, e
 	}
 	if e = fanout(ctx, tx, []string{user}, Event{Type: "conversation.created", WorkspaceID: ws.ID, ConversationID: c.ID, Conversation: &c}); e != nil {
@@ -149,10 +149,28 @@ func (s *Store) RemoveMember(ctx context.Context, user, ws, target string) error
 	if e != nil {
 		return e
 	}
-	if _, e = tx.Exec(ctx, "DELETE FROM conversation_members cm USING conversations c WHERE cm.conversation_id=c.id AND c.workspace_id=$1 AND cm.user_id=$2", ws, target); e != nil {
+	rows, e := tx.Query(ctx, "SELECT user_id FROM workspace_members WHERE workspace_id=$1 AND(user_id=$2 OR granted_by=$2)", ws, target)
+	if e != nil {
 		return e
 	}
-	if _, e = tx.Exec(ctx, "DELETE FROM workspace_members WHERE workspace_id=$1 AND user_id=$2", ws, target); e != nil {
+	removed := []string{}
+	for rows.Next() {
+		var id string
+		if e = rows.Scan(&id); e != nil {
+			rows.Close()
+			return e
+		}
+		removed = append(removed, id)
+	}
+	e = rows.Err()
+	rows.Close()
+	if e != nil {
+		return e
+	}
+	if _, e = tx.Exec(ctx, "DELETE FROM conversation_members cm USING conversations c WHERE cm.conversation_id=c.id AND c.workspace_id=$1 AND cm.user_id=ANY($2)", ws, removed); e != nil {
+		return e
+	}
+	if _, e = tx.Exec(ctx, "DELETE FROM workspace_members WHERE workspace_id=$1 AND user_id=ANY($2)", ws, removed); e != nil {
 		return e
 	}
 	if e = fanout(ctx, tx, ids, Event{Type: "membership.changed", WorkspaceID: ws}); e != nil {
@@ -236,8 +254,8 @@ func (s *Store) CreateConversation(ctx context.Context, user, ws, kind, name str
 			}
 		}
 	}
-	c = Conversation{ID: api.ID(), WorkspaceID: ws, Type: kind, Name: name, MemberIDs: ids}
-	e = tx.QueryRow(ctx, "INSERT INTO conversations(id,workspace_id,type,name,pair_key) VALUES($1,$2,$3,$4,NULLIF($5,'')) RETURNING updated_at", c.ID, ws, kind, name, pair).Scan(&c.UpdatedAt)
+	c = Conversation{ID: api.ID(), WorkspaceID: ws, Type: kind, Name: name, MemberIDs: ids, CreatedBy: user, CanManageMembers: kind == "group"}
+	e = tx.QueryRow(ctx, "INSERT INTO conversations(id,workspace_id,type,name,pair_key,created_by) VALUES($1,$2,$3,$4,NULLIF($5,''),$6) RETURNING updated_at", c.ID, ws, kind, name, pair, user).Scan(&c.UpdatedAt)
 	if e != nil {
 		return c, e
 	}

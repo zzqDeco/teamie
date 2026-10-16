@@ -1,13 +1,18 @@
 # Teamie engineering instructions
 
-- Build the IM product first. Identity, Chat and Realtime must not import Eino or Agent runtime types. Future Agent integration uses the same authenticated participant and public IM API/event contracts.
+- Keep IM independently usable. Identity, Chat and Realtime must not import Eino, Agent runtime types or provider configuration. Agent integration uses generic authenticated principals and the same public IM API/event contracts.
 - React/TypeScript frontend; Go Hertz HTTP/WebSocket and Kitex internal RPC with Thrift. Read current framework documentation through Context7 before framework-specific work.
 - The only deployed environment is `production`. CI jobs may use disposable database containers. Do not introduce dev, staging or preview deployments.
 - `main` is the only ongoing development branch. `release/vx.x.x` branches are permanent archives. Never delete or rewrite a published release branch/tag. Fixes require a new version.
-- Read `docs/contracts/http-v1.md` before implementation. Coordinate contract changes with dependent components.
+- Read `docs/contracts/http-v1.md` before implementation, plus `docs/contracts/agents-v1.md` for Agent work. Coordinate contract changes with dependent components.
 - Each service owns its data. Other services use RPC; never read another service's database tables. Persistent IM messages/sync events live in PostgreSQL; Redis is disposable.
 - Feature flags are enforced by the backend. Disabled write features must not hide persisted content.
+- A human owns each Agent and manages only its basic profile, selected workspaces and enabled state. Selected workspaces must be current memberships of that owner. Agents use normal IM workspace/conversation ACLs; neither ownership nor platform admin bypasses them. Moderator removals must not be automatically rejoined.
+- Agent Control Plane, Eino runtime, model gateway and Sandbox remain separate services/modules. Identity, Chat, Control Plane, runtime and gateway each own a PostgreSQL database/role; Sandbox owns isolated workspaces/receipts. No service reads another service's database tables.
+- Runtime pins Eino v0.10.0-alpha.35. One global Session per Agent intentionally spans its authorized conversations; preserve source IDs through persistence and compaction. New message bodies and sender/workspace/conversation/message/event IDs enter the turn input. Older history and all IM sends use explicit tools; model output/errors never automatically become IM messages.
+- Model/provider secrets and policy belong to the platform-admin gateway, never owner settings, browser reads or Sandbox children. Sandbox execution children receive no service/provider credentials, host Docker socket or network access.
+- Persist inbox inputs before advancing IM cursors. Fence worker leases, preserve stable send IDs/tool receipts across replay, and cancel disabled/deleted/revised Agents. The initial production runtime has one global turn slot for the host budget; do not claim horizontal capacity from this setting.
 - Registration is strictly invitation-only. `BOOTSTRAP_INVITE_CODE` defaults to `teamie-bootstrap` and can initialize the first platform admin only. Every ordinary admin-generated code admits one user atomically; failure must preserve it. Platform admin does not bypass workspace privacy.
 - Never commit credentials, private keys, production configuration, database exports, generated runtime data or local environment files.
 - Keep service ports and databases on the private container network. Only the edge publishes HTTP/HTTPS.
-- Meaningful tests should exercise authorization, message idempotence, ordering and reconnect behavior. Build/lint alone does not prove the product works.
+- Meaningful tests should exercise authorization, message idempotence, ordering, reconnect, owner/delegated revocation, lease/replay/cancellation and Sandbox isolation. Build/lint alone does not prove the product works. Keep provider acceptance explicitly pending until the user configures and authorizes a real model.

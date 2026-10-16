@@ -3,8 +3,8 @@ set -euo pipefail
 umask 077
 scratch=$(mktemp -d)
 trap 'rm -rf -- "$scratch"' EXIT
-for service in identity chat realtime web caddy postgres redis; do
-  key=$(printf '%s' "$service" | tr '[:lower:]' '[:upper:]')
+for service in identity chat realtime web caddy postgres redis agent-control agent-runtime llm-gateway sandbox sandbox-runner; do
+  key=$(printf '%s' "$service" | tr '[:lower:]-' '[:upper:]_')
   printf '%s_IMAGE=ghcr.io/zzqdeco/teamie-%s@sha256:%064d\n' "$key" "$service" 0 >> "$scratch/images.env"
 done
 docker compose --file deploy/compose.production.yaml --env-file deploy/production.env.example \
@@ -17,8 +17,13 @@ for name,service in config['services'].items():
     for mount in service.get('tmpfs',[]):
         assert mount.startswith('/'), 'tmpfs entries must preserve their quoted comma-separated options'
     assert int(service['mem_limit'])>0
-assert sum(int(s['mem_limit']) for s in config['services'].values())==960*1024*1024
+assert sum(int(s['mem_limit']) for s in config['services'].values())==1280*1024*1024
 assert config['networks']['private']['internal'] is True
+assert set(config['services']['llm-gateway']['networks'])=={'private','egress'}
+assert set(config['services']['sandbox']['networks'])=={'private'}
+assert config['services']['sandbox']['environment']['SANDBOX_RUNNER_IMAGE'].startswith('ghcr.io/zzqdeco/teamie-sandbox-runner@sha256:')
+for name,service in config['services'].items():
+    assert name=='sandbox' or not any(v.get('target')=='/var/run/docker.sock' for v in service.get('volumes',[]))
 assert config['services']['caddy']['environment']['TLS_SERVER_NAME']=='YOUR_PUBLIC_IP'
 assert config['services']['identity']['environment']['BOOTSTRAP_INVITE_CODE']
 assert 'REGISTRATION_CODE' not in config['services']['identity']['environment']
@@ -30,4 +35,31 @@ BOOTSTRAP_INVITE_CODE='' docker compose --file deploy/compose.production.yaml \
 python3 - "$scratch/default-bootstrap.json" <<'PY'
 import json,sys
 assert json.load(open(sys.argv[1]))['services']['identity']['environment']['BOOTSTRAP_INVITE_CODE']=='teamie-bootstrap'
+PY
+# Render a fully valid disposable secret set and exercise production-only guards.
+python3 - "$scratch/production.env" <<'PY'
+import hashlib,pathlib,re,sys
+text=pathlib.Path('deploy/production.env.example').read_text().replace('YOUR_PUBLIC_IP','192.0.2.1')
+text=re.sub(r'REPLACE_[A-Z_]+',lambda m:hashlib.sha256(m.group().encode()).hexdigest(),text)
+pathlib.Path(sys.argv[1]).write_text(text)
+PY
+docker compose --file deploy/compose.production.yaml --env-file "$scratch/production.env" \
+  --env-file "$scratch/images.env" config --format json > "$scratch/valid.json"
+python3 - "$scratch/valid.json" "$scratch/production.env" <<'PY'
+import copy,importlib.util,json,sys
+spec=importlib.util.spec_from_file_location('manifest','ops/manifest.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+c=json.load(open(sys.argv[1])); assert m.validate_config(c,sys.argv[2])=='https://192.0.2.1'
+for mutate in (
+    lambda s:s['llm-gateway']['environment'].update(GATEWAY_MASTER_KEY='invalid'),
+    lambda s:s['agent-runtime']['environment'].update(GATEWAY_RUNTIME_TOKEN='x'*64),
+    lambda s:s['sandbox']['environment'].update(GATEWAY_MASTER_KEY='a'*64),
+    lambda s:s['sandbox']['environment'].update(SANDBOX_RUNNER_IMAGE='python:latest'),
+    lambda s:s['agent-control']['environment'].update(DATABASE_URL=s['chat']['environment']['DATABASE_URL']),
+    lambda s:s['chat'].setdefault('volumes',[]).append({'target':'/var/run/docker.sock'}),
+    lambda s:s['llm-gateway'].update(networks={'private':{}}),
+):
+    changed=copy.deepcopy(c);mutate(changed['services'])
+    try:m.validate_config(changed,sys.argv[2])
+    except ValueError:pass
+    else:raise AssertionError('unsafe Agent production configuration accepted')
 PY

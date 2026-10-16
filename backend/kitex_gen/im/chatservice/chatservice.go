@@ -27,6 +27,27 @@ var serviceMethods = map[string]kitex.MethodInfo{
 		false,
 		kitex.WithStreamingMode(kitex.StreamingNone),
 	),
+	"GetParticipantWorkspaces": kitex.NewMethodInfo(
+		getParticipantWorkspacesHandler,
+		newChatServiceGetParticipantWorkspacesArgs,
+		newChatServiceGetParticipantWorkspacesResult,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
+	"GetWorkspaceParticipants": kitex.NewMethodInfo(
+		getWorkspaceParticipantsHandler,
+		newChatServiceGetWorkspaceParticipantsArgs,
+		newChatServiceGetWorkspaceParticipantsResult,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
+	"SetPrincipalWorkspaces": kitex.NewMethodInfo(
+		setPrincipalWorkspacesHandler,
+		newChatServiceSetPrincipalWorkspacesArgs,
+		newChatServiceSetPrincipalWorkspacesResult,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
 }
 
 var (
@@ -129,6 +150,60 @@ func newChatServicePingResult() interface{} {
 	return im.NewChatServicePingResult()
 }
 
+func getParticipantWorkspacesHandler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*im.ChatServiceGetParticipantWorkspacesArgs)
+	realResult := result.(*im.ChatServiceGetParticipantWorkspacesResult)
+	success, err := handler.(im.ChatService).GetParticipantWorkspaces(ctx, realArg.Request)
+	if err != nil {
+		return err
+	}
+	realResult.Success = success
+	return nil
+}
+func newChatServiceGetParticipantWorkspacesArgs() interface{} {
+	return im.NewChatServiceGetParticipantWorkspacesArgs()
+}
+
+func newChatServiceGetParticipantWorkspacesResult() interface{} {
+	return im.NewChatServiceGetParticipantWorkspacesResult()
+}
+
+func getWorkspaceParticipantsHandler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*im.ChatServiceGetWorkspaceParticipantsArgs)
+	realResult := result.(*im.ChatServiceGetWorkspaceParticipantsResult)
+	success, err := handler.(im.ChatService).GetWorkspaceParticipants(ctx, realArg.Request)
+	if err != nil {
+		return err
+	}
+	realResult.Success = success
+	return nil
+}
+func newChatServiceGetWorkspaceParticipantsArgs() interface{} {
+	return im.NewChatServiceGetWorkspaceParticipantsArgs()
+}
+
+func newChatServiceGetWorkspaceParticipantsResult() interface{} {
+	return im.NewChatServiceGetWorkspaceParticipantsResult()
+}
+
+func setPrincipalWorkspacesHandler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*im.ChatServiceSetPrincipalWorkspacesArgs)
+	realResult := result.(*im.ChatServiceSetPrincipalWorkspacesResult)
+	success, err := handler.(im.ChatService).SetPrincipalWorkspaces(ctx, realArg.Request)
+	if err != nil {
+		return err
+	}
+	realResult.Success = success
+	return nil
+}
+func newChatServiceSetPrincipalWorkspacesArgs() interface{} {
+	return im.NewChatServiceSetPrincipalWorkspacesArgs()
+}
+
+func newChatServiceSetPrincipalWorkspacesResult() interface{} {
+	return im.NewChatServiceSetPrincipalWorkspacesResult()
+}
+
 type kClient struct {
 	c client.Client
 }
@@ -154,6 +229,36 @@ func (p *kClient) Ping(ctx context.Context, request *im.PingRequest) (r *im.Ping
 	_args.Request = request
 	var _result im.ChatServicePingResult
 	if err = p.c.Call(ctx, "Ping", &_args, &_result); err != nil {
+		return
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) GetParticipantWorkspaces(ctx context.Context, request *im.ParticipantWorkspacesRequest) (r *im.ParticipantWorkspacesResponse, err error) {
+	var _args im.ChatServiceGetParticipantWorkspacesArgs
+	_args.Request = request
+	var _result im.ChatServiceGetParticipantWorkspacesResult
+	if err = p.c.Call(ctx, "GetParticipantWorkspaces", &_args, &_result); err != nil {
+		return
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) GetWorkspaceParticipants(ctx context.Context, request *im.WorkspaceParticipantsRequest) (r *im.WorkspaceParticipantsResponse, err error) {
+	var _args im.ChatServiceGetWorkspaceParticipantsArgs
+	_args.Request = request
+	var _result im.ChatServiceGetWorkspaceParticipantsResult
+	if err = p.c.Call(ctx, "GetWorkspaceParticipants", &_args, &_result); err != nil {
+		return
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) SetPrincipalWorkspaces(ctx context.Context, request *im.PrincipalWorkspacesRequest) (r *im.ParticipantWorkspacesResponse, err error) {
+	var _args im.ChatServiceSetPrincipalWorkspacesArgs
+	_args.Request = request
+	var _result im.ChatServiceSetPrincipalWorkspacesResult
+	if err = p.c.Call(ctx, "SetPrincipalWorkspaces", &_args, &_result); err != nil {
 		return
 	}
 	return _result.GetSuccess(), nil

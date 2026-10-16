@@ -43,6 +43,8 @@ services:
       chat: {condition: service_healthy}
       realtime: {condition: service_healthy}
       web: {condition: service_healthy}
+      agent-control: {condition: service_healthy}
+      llm-gateway: {condition: service_healthy}
     healthcheck:
       test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8080/healthz]
       interval: 15s
@@ -84,6 +86,8 @@ services:
       REDIS_ADDR: redis:6379
       APP_ORIGIN: ${APP_ORIGIN:?HTTPS origin required}
       COOKIE_SECURE: "true"
+      IM_PRINCIPAL_CONTROL_TOKEN: ${IM_PRINCIPAL_CONTROL_TOKEN:?principal control credential required}
+      IM_PRINCIPAL_RUNTIME_TOKEN: ${IM_PRINCIPAL_RUNTIME_TOKEN:?principal runtime credential required}
       BOOTSTRAP_INVITE_CODE: ${BOOTSTRAP_INVITE_CODE:-teamie-bootstrap}
       FEATURE_FLAGS_FILE: /etc/teamie/feature-flags.json
       GOMEMLIMIT: 72MiB
@@ -109,6 +113,7 @@ services:
       HTTP_ADDR: :8082
       RPC_ADDR: :8882
       IDENTITY_RPC_ADDR: identity:8881
+      IM_PRINCIPAL_CONTROL_TOKEN: ${IM_PRINCIPAL_CONTROL_TOKEN:?principal control credential required}
       DATABASE_URL: ${CHAT_DATABASE_URL:?chat database required}
       REDIS_ADDR: redis:6379
       APP_ORIGIN: ${APP_ORIGIN:?HTTPS origin required}
@@ -157,6 +162,126 @@ services:
       retries: 12
       start_period: 30s
 
+  agent-control:
+    <<: *app
+    image: ${AGENT_CONTROL_IMAGE:?manifest image required}
+    mem_limit: 64m
+    memswap_limit: 64m
+    environment:
+      HTTP_ADDR: :8084
+      RPC_ADDR: :8884
+      DATABASE_URL: ${AGENT_CONTROL_DATABASE_URL:?agent control database required}
+      IDENTITY_RPC_ADDR: identity:8881
+      CHAT_RPC_ADDR: chat:8882
+      APP_ORIGIN: ${APP_ORIGIN:?HTTPS origin required}
+      COOKIE_SECURE: "true"
+      AGENT_RUNTIME_TOKEN: ${AGENT_RUNTIME_TOKEN:?runtime control credential required}
+      IM_PRINCIPAL_CONTROL_TOKEN: ${IM_PRINCIPAL_CONTROL_TOKEN:?principal control credential required}
+      FEATURE_FLAGS_FILE: /etc/teamie/feature-flags.json
+      GOMEMLIMIT: 40MiB
+      GOMAXPROCS: "1"
+    volumes:
+      - ${FEATURE_FLAGS_PATH:-/srv/teamie/config/feature-flags.json}:/etc/teamie/feature-flags.json:ro
+    depends_on:
+      postgres: {condition: service_healthy}
+      identity: {condition: service_healthy}
+      chat: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8084/readyz]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
+
+  agent-runtime:
+    <<: *app
+    image: ${AGENT_RUNTIME_IMAGE:?manifest image required}
+    mem_limit: 128m
+    memswap_limit: 128m
+    environment:
+      HTTP_ADDR: :8085
+      DATABASE_URL: ${AGENT_RUNTIME_DATABASE_URL:?agent runtime database required}
+      AGENT_CONTROL_RPC_ADDR: agent-control:8884
+      IDENTITY_RPC_ADDR: identity:8881
+      CHAT_RPC_ADDR: chat:8882
+      IM_API_URL: http://chat:8082
+      APP_ORIGIN: ${APP_ORIGIN:?HTTPS origin required}
+      AGENT_RUNTIME_TOKEN: ${AGENT_RUNTIME_TOKEN:?runtime control credential required}
+      IM_PRINCIPAL_RUNTIME_TOKEN: ${IM_PRINCIPAL_RUNTIME_TOKEN:?principal runtime credential required}
+      GATEWAY_RPC_ADDR: llm-gateway:8886
+      GATEWAY_RUNTIME_TOKEN: ${GATEWAY_RUNTIME_TOKEN:?gateway runtime credential required}
+      SANDBOX_RPC_ADDR: sandbox:8887
+      SANDBOX_RUNTIME_TOKEN: ${SANDBOX_RUNTIME_TOKEN:?sandbox runtime credential required}
+      FEATURE_FLAGS_FILE: /etc/teamie/feature-flags.json
+      GOMEMLIMIT: 96MiB
+      GOMAXPROCS: "1"
+    volumes:
+      - ${FEATURE_FLAGS_PATH:-/srv/teamie/config/feature-flags.json}:/etc/teamie/feature-flags.json:ro
+    depends_on:
+      postgres: {condition: service_healthy}
+      agent-control: {condition: service_healthy}
+      llm-gateway: {condition: service_healthy}
+      sandbox: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8085/readyz]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
+
+  llm-gateway:
+    <<: *app
+    image: ${LLM_GATEWAY_IMAGE:?manifest image required}
+    mem_limit: 64m
+    memswap_limit: 64m
+    networks: [private, egress]
+    environment:
+      HTTP_ADDR: :8086
+      RPC_ADDR: :8886
+      DATABASE_URL: ${GATEWAY_DATABASE_URL:?gateway database required}
+      IDENTITY_RPC_ADDR: identity:8881
+      APP_ORIGIN: ${APP_ORIGIN:?HTTPS origin required}
+      COOKIE_SECURE: "true"
+      GATEWAY_MASTER_KEY: ${GATEWAY_MASTER_KEY:?64 hex master key required}
+      GATEWAY_RUNTIME_TOKEN: ${GATEWAY_RUNTIME_TOKEN:?gateway runtime credential required}
+      GOMEMLIMIT: 40MiB
+      GOMAXPROCS: "1"
+    depends_on:
+      postgres: {condition: service_healthy}
+      identity: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8086/readyz]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
+
+  sandbox:
+    <<: *app
+    image: ${SANDBOX_IMAGE:?manifest image required}
+    mem_limit: 64m
+    memswap_limit: 64m
+    environment:
+      HTTP_ADDR: :8087
+      RPC_ADDR: :8887
+      SANDBOX_RUNTIME_TOKEN: ${SANDBOX_RUNTIME_TOKEN:?sandbox runtime credential required}
+      SANDBOX_RUNNER_IMAGE: ${SANDBOX_RUNNER_IMAGE:?immutable runner image required}
+      SANDBOX_WORKSPACE_ROOT: /srv/teamie/sandbox-workspaces
+      SANDBOX_STATE_ROOT: /srv/teamie/sandbox-state
+      DOCKER_SOCKET: /var/run/docker.sock
+      GOMEMLIMIT: 40MiB
+      GOMAXPROCS: "1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /srv/teamie/sandbox-workspaces:/srv/teamie/sandbox-workspaces
+      - /srv/teamie/sandbox-state:/srv/teamie/sandbox-state
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8087/readyz]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
+
   postgres:
     image: ${POSTGRES_IMAGE:?manifest image required}
     restart: unless-stopped
@@ -171,6 +296,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?database admin password required}
       POSTGRES_IDENTITY_PASSWORD: ${POSTGRES_IDENTITY_PASSWORD:?identity password required}
       POSTGRES_CHAT_PASSWORD: ${POSTGRES_CHAT_PASSWORD:?chat password required}
+      POSTGRES_AGENT_CONTROL_PASSWORD: ${POSTGRES_AGENT_CONTROL_PASSWORD:?agent control password required}
+      POSTGRES_AGENT_RUNTIME_PASSWORD: ${POSTGRES_AGENT_RUNTIME_PASSWORD:?agent runtime password required}
+      POSTGRES_GATEWAY_PASSWORD: ${POSTGRES_GATEWAY_PASSWORD:?gateway password required}
       POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
     command: [postgres, -c, shared_buffers=64MB, -c, work_mem=2MB, -c, maintenance_work_mem=32MB, -c, max_connections=40]
     volumes:
@@ -207,6 +335,7 @@ services:
 
 networks:
   edge: {}
+  egress: {}
   private: {internal: true}
 volumes:
   postgres_data: {}

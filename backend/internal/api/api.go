@@ -26,8 +26,9 @@ type User struct {
 	CreatedAt    time.Time `json:"createdAt"`
 }
 type Session struct {
-	User      User   `json:"user"`
-	CSRFToken string `json:"csrfToken"`
+	User             User   `json:"user"`
+	CSRFToken        string `json:"csrfToken"`
+	ServicePrincipal bool   `json:"-"`
 }
 type Error struct {
 	Status        int

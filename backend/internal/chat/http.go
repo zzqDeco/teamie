@@ -62,6 +62,9 @@ func (h *Handler) Routes() http.Handler {
 		return nil
 	})
 	auth("POST /api/v1/workspaces", func(w http.ResponseWriter, r *http.Request, s api.Session) error {
+		if s.User.Kind != "human" {
+			return api.Err(403, "forbidden", "A human manages workspace membership")
+		}
 		var in struct {
 			Name string `json:"name"`
 		}
@@ -118,6 +121,9 @@ func (h *Handler) Routes() http.Handler {
 		api.Write(w, 200, map[string]any{"workspace": map[string]string{"id": ws.ID, "name": ws.Name}, "expiresAt": expiry})
 	})
 	auth("POST /api/v1/invites/{code}/accept", func(w http.ResponseWriter, r *http.Request, s api.Session) error {
+		if s.User.Kind != "human" {
+			return api.Err(403, "forbidden", "A human manages workspace membership")
+		}
 		ws, cs, e := h.Store.AcceptInvite(r.Context(), s.User.ID, r.PathValue("code"))
 		if e != nil {
 			return e
@@ -170,6 +176,14 @@ func (h *Handler) Routes() http.Handler {
 			return e
 		}
 		api.Write(w, 200, map[string]any{"messages": ms, "hasMore": more})
+		return nil
+	})
+	auth("GET /api/v1/conversations/{id}/messages/{messageId}", func(w http.ResponseWriter, r *http.Request, s api.Session) error {
+		m, e := h.Store.Message(r.Context(), s.User.ID, r.PathValue("id"), r.PathValue("messageId"))
+		if e != nil {
+			return e
+		}
+		api.Write(w, 200, map[string]any{"message": m})
 		return nil
 	})
 	auth("POST /api/v1/conversations/{id}/messages", func(w http.ResponseWriter, r *http.Request, s api.Session) error {
@@ -236,6 +250,28 @@ func (h *Handler) Routes() http.Handler {
 			return e
 		}
 		api.Write(w, 200, map[string]any{"events": events, "cursor": cursor, "hasMore": more})
+		return nil
+	})
+	auth("POST /api/v1/conversations/{id}/members", func(w http.ResponseWriter, r *http.Request, s api.Session) error {
+		var in struct {
+			UserID string `json:"userId"`
+		}
+		if e := api.Decode(w, r, &in); e != nil {
+			return e
+		}
+		c, e := h.Store.GroupMember(r.Context(), s.User.ID, r.PathValue("id"), in.UserID, true)
+		if e != nil {
+			return e
+		}
+		api.Write(w, 200, map[string]any{"conversation": c})
+		return nil
+	})
+	auth("DELETE /api/v1/conversations/{id}/members/{userId}", func(w http.ResponseWriter, r *http.Request, s api.Session) error {
+		c, e := h.Store.GroupMember(r.Context(), s.User.ID, r.PathValue("id"), r.PathValue("userId"), false)
+		if e != nil {
+			return e
+		}
+		api.Write(w, 200, map[string]any{"conversation": c})
 		return nil
 	})
 	return m

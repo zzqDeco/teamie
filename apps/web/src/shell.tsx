@@ -9,12 +9,14 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
+  Bot,
   Check,
   ChevronDown,
   ChevronRight,
   CircleHelp,
   Hash,
   Home,
+  KeyRound,
   LoaderCircle,
   LogOut,
   MessageCircle,
@@ -34,6 +36,12 @@ import { useAuth } from "./auth";
 import { errorText, useChat, useChatState } from "./chat";
 import { ProfileSettings, WorkspaceDialog } from "./dialogs";
 import { PlatformInvitations } from "./admin";
+import { ModelGatewaySettings } from "./model-gateway";
+import { AgentDetail, MyAgents, WorkspaceAgents } from "./agents";
+import { AgentAvatar, AgentBadge } from "./agent-ui";
+import { GroupMembersDialog } from "./group-members";
+import { enrichParticipants } from "./participants";
+import { chatStore } from "./store";
 import type { DialogKind } from "./dialogs";
 import { ConversationView, conversationName } from "./messages";
 import { Avatar, Button, IconButton, Loading, Logo, Modal, Notice } from "./ui";
@@ -54,6 +62,11 @@ function ConversationItem({
 }) {
   const { user } = useAuth();
   const unread = Math.max(0, conversation.lastSeq - conversation.readSeq);
+  const otherMember = members.find(
+    (member) =>
+      member.userId !== user!.id &&
+      conversation.memberIds.includes(member.userId),
+  );
   return (
     <Link
       to={route(conversation)}
@@ -67,6 +80,8 @@ function ConversationItem({
         <span className="group-avatar">
           <Users size={15} />
         </span>
+      ) : otherMember?.kind === "agent" ? (
+        <AgentAvatar size="small" />
       ) : (
         <Avatar
           size="small"
@@ -75,6 +90,9 @@ function ConversationItem({
         />
       )}
       <span>{conversationName(conversation, user!.id, members)}</span>
+      {conversation.type === "direct" && otherMember?.kind === "agent" && (
+        <AgentBadge compact ownerName={otherMember.ownerName} />
+      )}
       {unread > 0 && (
         <span className="unread-badge" aria-label={`${unread} 条未读`}>
           {unread > 99 ? "99+" : unread}
@@ -89,18 +107,25 @@ export function Shell() {
     snapshot = useChatState();
   const client = useQueryClient();
   const match = useMatch("/app/w/:workspaceId/c/:conversationId"),
+    directoryMatch = useMatch("/app/w/:workspaceId/agents"),
+    agentMatch = useMatch("/app/agents/:agentId"),
     location = useLocation(),
     navigate = useNavigate();
   const [dialog, setDialog] = useState<DialogKind | null>(null),
     [spaceMenu, setSpaceMenu] = useState(false),
     [sidebar, setSidebar] = useState(false),
-    [details, setDetails] = useState(window.innerWidth >= 1360);
+    [details, setDetails] = useState(window.innerWidth >= 1360),
+    [managingGroup, setManagingGroup] = useState(false),
+    [removingFromGroup, setRemovingFromGroup] = useState(false);
   const [removing, setRemoving] = useState<Member | null>(null),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const workspace =
-    chat.data?.workspaces.find((w) => w.id === match?.params.workspaceId) ||
-    (match ? undefined : chat.data?.workspaces[0]);
+    chat.data?.workspaces.find(
+      (w) =>
+        w.id ===
+        (match?.params.workspaceId || directoryMatch?.params.workspaceId),
+    ) || (match || directoryMatch ? undefined : chat.data?.workspaces[0]);
   const owner = workspace?.createdBy === user!.id;
   const conversation = match?.params.conversationId
     ? snapshot.conversations[match.params.conversationId]
@@ -120,16 +145,30 @@ export function Shell() {
     enabled: !!workspace,
     refetchInterval: 60_000,
   });
-  const members = membersQuery.data?.members || [];
+  const discoveryAllowed =
+    !!chat.data?.capabilities["agents.enabled"] &&
+    !!chat.data.capabilities["agents.discover"];
+  const workspaceAgentsQuery = useQuery({
+    queryKey: ["workspaceAgents", user!.id, workspace?.id],
+    queryFn: () => api.workspaceAgents(workspace!.id),
+    enabled: !!workspace && discoveryAllowed,
+    refetchInterval: 30_000,
+  });
+  const members = enrichParticipants(
+    membersQuery.data?.members || [],
+    workspaceAgentsQuery.data?.agents || [],
+  );
   const visibleMembers =
     conversation && conversation.type !== "channel"
       ? members.filter((m) => conversation.memberIds.includes(m.userId))
       : members;
   const closeDialog = useCallback(() => setDialog(null), []),
-    closeRemoving = useCallback(() => setRemoving(null), []);
+    closeRemoving = useCallback(() => setRemoving(null), []),
+    closeGroupManager = useCallback(() => setManagingGroup(false), []);
   useEffect(() => {
     setSidebar(false);
     setSpaceMenu(false);
+    setManagingGroup(false);
   }, [location.pathname]);
   const caps = chat.data?.capabilities || {};
   async function remove() {
@@ -137,7 +176,14 @@ export function Shell() {
     setBusy(true);
     setError("");
     try {
-      await api.removeMember(workspace.id, removing.userId);
+      if (removingFromGroup && conversation) {
+        const result = await api.removeConversationMember(
+          conversation.id,
+          removing.userId,
+        );
+        chatStore.addConversation(result.conversation);
+        await chat.refresh();
+      } else await api.removeMember(workspace.id, removing.userId);
       setRemoving(null);
       await client.invalidateQueries({ queryKey: ["members"] });
       chat.sync();
@@ -192,6 +238,15 @@ export function Shell() {
     location.pathname,
   );
   const isAdminPage = location.pathname === "/app/admin";
+  const isGatewayPage = location.pathname === "/app/admin/gateway";
+  const isAgentsPage = location.pathname === "/app/agents" || !!agentMatch;
+  const isDirectoryPage = !!directoryMatch;
+  const isManagement =
+    isSettings ||
+    isAdminPage ||
+    isGatewayPage ||
+    isAgentsPage ||
+    isDirectoryPage;
   return (
     <div
       className={`app-shell ${sidebar ? "sidebar-open" : ""} ${details ? "details-open" : ""}`}
@@ -223,15 +278,33 @@ export function Shell() {
           <Plus size={23} />
         </IconButton>
         <span className="rail-spacer" />
+        <Link
+          to="/app/agents"
+          className={`rail-settings rail-agents ${isAgentsPage ? "selected" : ""}`}
+          aria-label="我的 Agent"
+          title="我的 Agent"
+        >
+          <Bot size={21} />
+        </Link>
         {user!.platformRole === "admin" && (
-          <Link
-            to="/app/admin"
-            className={`rail-settings rail-admin ${isAdminPage ? "selected" : ""}`}
-            aria-label="平台管理：注册邀请"
-            title="平台管理：注册邀请"
-          >
-            <ShieldCheck size={21} />
-          </Link>
+          <>
+            <Link
+              to="/app/admin"
+              className={`rail-settings rail-admin ${isAdminPage ? "selected" : ""}`}
+              aria-label="平台管理：注册邀请"
+              title="平台管理：注册邀请"
+            >
+              <ShieldCheck size={21} />
+            </Link>
+            <Link
+              to="/app/admin/gateway"
+              className={`rail-settings rail-admin ${isGatewayPage ? "selected" : ""}`}
+              aria-label="平台管理：模型网关"
+              title="平台管理：模型网关"
+            >
+              <KeyRound size={20} />
+            </Link>
+          </>
         )}
         <Link
           to="/app/settings"
@@ -295,10 +368,20 @@ export function Shell() {
                   <Settings size={16} />
                   个人设置
                 </Link>
+                <Link to="/app/agents">
+                  <Bot size={16} />
+                  我的 Agent
+                </Link>
                 {user!.platformRole === "admin" && (
                   <Link to="/app/admin">
                     <ShieldCheck size={16} />
                     平台管理 · 注册邀请
+                  </Link>
+                )}
+                {user!.platformRole === "admin" && (
+                  <Link to="/app/admin/gateway">
+                    <KeyRound size={16} />
+                    平台管理 · 模型网关
                   </Link>
                 )}
                 <button
@@ -314,6 +397,22 @@ export function Shell() {
           )}
         </div>
         <div className="sidebar-scroll">
+          <div className="agent-sidebar-links">
+            <Link to="/app/agents" className={isAgentsPage ? "active" : ""}>
+              <Bot size={16} />
+              <span>我的 Agent</span>
+            </Link>
+            {workspace && discoveryAllowed && (
+              <Link
+                to={`/app/w/${workspace.id}/agents`}
+                className={isDirectoryPage ? "active" : ""}
+              >
+                <Sparkles size={15} />
+                <span>发现团队 Agent</span>
+                <ChevronRight size={12} />
+              </Link>
+            )}
+          </div>
           <div className="sidebar-overview">
             <span className="overview-icon">
               <MessageCircle size={17} />
@@ -457,7 +556,7 @@ export function Shell() {
       )}
       <main className="app-main">
         {error && !removing && <Notice>{error}</Notice>}
-        {isSettings || isAdminPage ? (
+        {isManagement ? (
           <>
             <header className="settings-header">
               <IconButton
@@ -467,15 +566,75 @@ export function Shell() {
               >
                 <span>☰</span>
               </IconButton>
-              {isAdminPage ? <ShieldCheck size={18} /> : <Settings size={18} />}
-              <span>{isAdminPage ? "平台管理 · 注册邀请" : "个人设置"}</span>
+              {isGatewayPage ? (
+                <KeyRound size={18} />
+              ) : isAgentsPage || isDirectoryPage ? (
+                <Bot size={18} />
+              ) : isAdminPage ? (
+                <ShieldCheck size={18} />
+              ) : (
+                <Settings size={18} />
+              )}
+              <span>
+                {isGatewayPage
+                  ? "平台管理 · 模型网关"
+                  : isAdminPage
+                    ? "平台管理 · 注册邀请"
+                    : isAgentsPage
+                      ? "我的 Agent"
+                      : isDirectoryPage
+                        ? "发现团队 Agent"
+                        : "个人设置"}
+              </span>
               <Link to="/app">
                 回到对话
                 <ChevronRight size={15} />
               </Link>
             </header>
-            {isAdminPage ? (
+            {(isAdminPage || isGatewayPage) &&
+              user!.platformRole === "admin" && (
+                <nav className="admin-section-nav">
+                  <Link to="/app/admin" className={isAdminPage ? "active" : ""}>
+                    <ShieldCheck size={13} />
+                    注册邀请
+                  </Link>
+                  <Link
+                    to="/app/admin/gateway"
+                    className={isGatewayPage ? "active" : ""}
+                  >
+                    <KeyRound size={13} />
+                    模型网关
+                  </Link>
+                </nav>
+              )}
+            {isGatewayPage ? (
+              <ModelGatewaySettings key={user!.id} />
+            ) : isAdminPage ? (
               <PlatformInvitations key={user!.id} />
+            ) : isAgentsPage ? (
+              agentMatch?.params.agentId ? (
+                <AgentDetail
+                  key={`${user!.id}:${agentMatch.params.agentId}`}
+                  agentId={agentMatch.params.agentId}
+                />
+              ) : (
+                <MyAgents key={user!.id} />
+              )
+            ) : isDirectoryPage ? (
+              workspace ? (
+                <WorkspaceAgents
+                  key={`${user!.id}:${workspace.id}`}
+                  workspace={workspace}
+                />
+              ) : (
+                <div className="unavailable-view">
+                  <h2>无法访问这个工作空间</h2>
+                  <p>发现 Agent 需要当前空间成员权限。</p>
+                  <Link className="button" to="/app">
+                    回到我的工作空间
+                  </Link>
+                </div>
+              )
             ) : (
               <ProfileSettings />
             )}
@@ -487,6 +646,7 @@ export function Shell() {
             key={`${user!.id}:${conversation.id}`}
             conversation={conversation}
             members={members}
+            agents={workspaceAgentsQuery.data?.agents || []}
             onMembers={() => setDetails(!details)}
             onMenu={() => setSidebar(true)}
           />
@@ -525,7 +685,7 @@ export function Shell() {
           </div>
         )}
       </main>
-      {details && !isSettings && !isAdminPage && workspace && (
+      {details && !isManagement && workspace && (
         <aside className="members-pane">
           <header>
             <span>
@@ -565,27 +725,44 @@ export function Shell() {
             {membersQuery.error && <Notice>成员暂时无法加载。</Notice>}
             {visibleMembers.map((member) => (
               <div className="member-row" key={member.userId}>
-                <Avatar name={member.displayName} seed={member.userId} />
+                {member.kind === "agent" ? (
+                  <AgentAvatar />
+                ) : (
+                  <Avatar name={member.displayName} seed={member.userId} />
+                )}
                 <div>
                   <b>
                     {member.displayName}
                     {member.userId === user!.id && <small>你</small>}
+                    {member.kind === "agent" && (
+                      <AgentBadge compact ownerName={member.ownerName} />
+                    )}
                   </b>
                   <span>
-                    {member.role === "owner" ? "空间所有者" : "团队成员"}
+                    {member.kind === "agent"
+                      ? member.ownerName
+                        ? `由 ${member.ownerName} 创建`
+                        : "Agent · 所有者信息暂不可用"
+                      : member.role === "owner"
+                        ? "空间所有者"
+                        : "团队成员"}
                   </span>
                 </div>
                 {member.role === "owner" && (
                   <ShieldCheck size={14} className="owner-shield" />
                 )}
-                {owner &&
-                  member.userId !== user!.id &&
-                  member.role !== "owner" && (
+                {((conversation?.type === "group" &&
+                  conversation.canManageMembers) ||
+                  (conversation?.type === "channel" &&
+                    owner &&
+                    member.role !== "owner")) &&
+                  member.userId !== user!.id && (
                     <IconButton
                       className="remove-member"
-                      label={`移除成员 ${member.displayName}`}
+                      label={`${conversation?.type === "group" ? "从小组" : "从空间"}移除 ${member.displayName}`}
                       onClick={() => {
                         setRemoving(member);
+                        setRemovingFromGroup(conversation?.type === "group");
                         setError("");
                       }}
                     >
@@ -595,7 +772,17 @@ export function Shell() {
               </div>
             ))}
           </div>
-          {owner && (
+          {conversation?.type === "group" && conversation.canManageMembers && (
+            <button
+              className="members-invite"
+              onClick={() => setManagingGroup(true)}
+            >
+              <Users size={16} />
+              管理小组成员
+              <Plus size={14} />
+            </button>
+          )}
+          {owner && conversation?.type === "channel" && (
             <button
               className="members-invite"
               onClick={() => setDialog("invite")}
@@ -622,10 +809,23 @@ export function Shell() {
           onClose={closeDialog}
         />
       )}{" "}
+      {managingGroup &&
+        conversation?.type === "group" &&
+        conversation.canManageMembers && (
+          <GroupMembersDialog
+            conversation={conversation}
+            members={members}
+            onClose={closeGroupManager}
+          />
+        )}
       {removing && (
         <Modal
           title={`移除 ${removing.displayName}？`}
-          subtitle="该成员将无法继续访问这个工作空间及其中的对话。可以通过新邀请重新加入。"
+          subtitle={
+            removingFromGroup
+              ? "该成员将无法继续访问这个小组对话。工作空间成员资格不受影响。"
+              : "该成员将无法继续访问这个工作空间及其中的对话。可以通过新邀请重新加入。"
+          }
           onClose={closeRemoving}
         >
           <Notice>{error}</Notice>

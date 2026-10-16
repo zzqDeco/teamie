@@ -29,6 +29,8 @@ func main() {
 		log.Fatal(e)
 	}
 	defer store.DB.Close()
+	store.ControlToken = api.Env("IM_PRINCIPAL_CONTROL_TOKEN", "")
+	store.RuntimeToken = api.Env("IM_PRINCIPAL_RUNTIME_TOKEN", "")
 	addr, e := net.ResolveTCPAddr("tcp", api.Env("RPC_ADDR", ":8881"))
 	if e != nil {
 		log.Fatal(e)
