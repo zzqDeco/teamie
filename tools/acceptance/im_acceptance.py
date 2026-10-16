@@ -27,6 +27,7 @@ import uuid
 ORIGIN = os.environ.get("TEAMIE_ACCEPTANCE_URL", "http://127.0.0.1:8080").rstrip("/")
 IDENTITY = os.environ.get("TEAMIE_IDENTITY_URL", ORIGIN).rstrip("/")
 CHAT = os.environ.get("TEAMIE_CHAT_URL", ORIGIN).rstrip("/")
+REALTIME = os.environ.get("TEAMIE_REALTIME_URL", ORIGIN).rstrip("/")
 WS_URL = os.environ.get("TEAMIE_WS_URL", ORIGIN.replace("https://", "wss://").replace("http://", "ws://") + "/api/v1/ws")
 BOOTSTRAP_INVITE = os.environ.get("BOOTSTRAP_INVITE_CODE", "teamie-bootstrap")
 
@@ -45,6 +46,8 @@ class Client:
 
     def call(self, method: str, path: str, body: dict | None = None, status: int | tuple[int, ...] = 200, csrf: bool = True) -> dict:
         base = IDENTITY if path.startswith("/api/v1/auth/") else CHAT
+        if path.startswith("/api/v1/conversations/") and path.endswith("/typing"):
+            base = REALTIME
         headers = {"Origin": ORIGIN, "Accept": "application/json"}
         if method not in ("GET", "HEAD") and csrf and self.csrf:
             headers["X-CSRF-Token"] = self.csrf
@@ -273,6 +276,22 @@ def main() -> None:
             ws.receive(timeout=0.3)
     except socket.timeout:
         pass
+    typing_path = f"/api/v1/conversations/{cid}/typing"
+    owner.call("POST", typing_path, {"isTyping": True, "userId": outsider.user["id"]}, status=400)
+    outsider.call("POST", typing_path, {"isTyping": True}, status=403)
+    owner.call("POST", typing_path, {"isTyping": True}, status=403, csrf=False)
+    for active in (True, False):
+        owner.call("POST", typing_path, {"isTyping": active}, status=204)
+        end = time.monotonic() + 5
+        while time.monotonic() < end:
+            hint = ws.receive(timeout=max(0.1, end - time.monotonic()))
+            if hint.get("type") != "typing":
+                continue
+            require(hint == {"type": "typing", "conversationId": cid, "userId": owner.user["id"], "displayName": owner.user["displayName"], "isTyping": active}, "HTTP typing uses ordinary participant identity and never exposes internal fields")
+            break
+        else:
+            raise AssertionError("HTTP typing hint did not reach the current conversation member")
+    print("PASS generic HTTP typing authorization, Redis-to-WebSocket delivery and immediate clear")
     payload = {"clientMessageId": str(uuid.uuid4()), "body": "Durable message"}
     owner.call("POST", f"/api/v1/conversations/{cid}/messages", dict(payload, senderId=outsider.user["id"]), status=400)
     message = owner.call("POST", f"/api/v1/conversations/{cid}/messages", payload, status=201)["message"]

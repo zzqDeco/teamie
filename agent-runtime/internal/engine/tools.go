@@ -30,36 +30,72 @@ type APIError struct {
 func (e *APIError) Error() string { return "im: " + e.Code }
 
 type IM struct {
-	BaseURL, ServiceKey, AgentID string
-	Identity                     identityservice.Client
-	HTTP                         *http.Client
-	mu                           sync.Mutex
-	token                        string
-	expiry                       time.Time
+	BaseURL, RealtimeURL, ServiceKey, AgentID string
+	Identity                                  identityservice.Client
+	HTTP                                      *http.Client
+	mu                                        sync.Mutex
+	token                                     string
+	expiry                                    time.Time
+	issuing                                   chan struct{}
 }
 
 func (imc *IM) credential(ctx context.Context) (string, error) {
-	imc.mu.Lock()
-	defer imc.mu.Unlock()
-	if imc.token != "" && time.Until(imc.expiry) > time.Minute {
-		return imc.token, nil
+	for {
+		imc.mu.Lock()
+		if imc.token != "" && time.Until(imc.expiry) > time.Minute {
+			token := imc.token
+			imc.mu.Unlock()
+			return token, nil
+		}
+		if pending := imc.issuing; pending != nil {
+			imc.mu.Unlock()
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-pending:
+				continue
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			imc.mu.Unlock()
+			return "", err
+		}
+		pending := make(chan struct{})
+		imc.issuing = pending
+		imc.mu.Unlock()
+		// Identity rotates a principal's sole token. Keep one issuer while
+		// allowing canceled short-lived typing calls to leave the wait queue.
+		token, expiry, err := imc.issueCredential(ctx)
+		imc.mu.Lock()
+		if err == nil {
+			imc.token, imc.expiry = token, expiry
+		}
+		imc.issuing = nil
+		close(pending)
+		imc.mu.Unlock()
+		return token, err
 	}
+}
+
+func (imc *IM) issueCredential(ctx context.Context) (string, time.Time, error) {
 	r, e := imc.Identity.IssuePrincipalToken(ctx, &im.PrincipalTokenRequest{ServiceToken: imc.ServiceKey, PrincipalId: imc.AgentID})
-	if e != nil {
-		return "", errors.New("identity_unavailable")
+	if e != nil || r == nil {
+		return "", time.Time{}, errors.New("identity_unavailable")
 	}
 	if !r.Ok {
-		return "", &APIError{Status: 403, Code: r.GetErrorCode()}
+		return "", time.Time{}, &APIError{Status: 403, Code: r.GetErrorCode()}
 	}
 	expiry, e := time.Parse(time.RFC3339Nano, r.ExpiresAt)
 	if e != nil {
-		return "", errors.New("invalid_principal_expiry")
+		return "", time.Time{}, errors.New("invalid_principal_expiry")
 	}
-	imc.token = r.Token
-	imc.expiry = expiry
-	return imc.token, nil
+	return r.Token, expiry, nil
 }
 func (imc *IM) Call(ctx context.Context, method, path string, body any, out any) error {
+	return imc.callAt(ctx, imc.BaseURL, method, path, body, out)
+}
+
+func (imc *IM) callAt(ctx context.Context, baseURL, method, path string, body any, out any) error {
 	token, e := imc.credential(ctx)
 	if e != nil {
 		return e
@@ -71,7 +107,7 @@ func (imc *IM) Call(ctx context.Context, method, path string, body any, out any)
 			return e
 		}
 	}
-	req, e := http.NewRequestWithContext(ctx, method, strings.TrimRight(imc.BaseURL, "/")+path, bytes.NewReader(data))
+	req, e := http.NewRequestWithContext(ctx, method, strings.TrimRight(baseURL, "/")+path, bytes.NewReader(data))
 	if e != nil {
 		return e
 	}

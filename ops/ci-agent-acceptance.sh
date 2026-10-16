@@ -29,6 +29,7 @@ export IDENTITY_RPC_ADDR="127.0.0.1:$((rpc_base+1))" CHAT_RPC_ADDR="127.0.0.1:$(
 export AGENT_CONTROL_RPC_ADDR="127.0.0.1:$((rpc_base+4))" GATEWAY_RPC_ADDR="127.0.0.1:$((rpc_base+6))" SANDBOX_RPC_ADDR="127.0.0.1:$((rpc_base+7))"
 export GATEWAY_STREAM_URL="http://127.0.0.1:$((http_base+6))/internal/v1/chat/stream"
 export IM_API_URL="http://127.0.0.1:$((http_base+2))"
+export IM_REALTIME_URL="http://127.0.0.1:$((http_base+3))"
 if [[ ${TEAMIE_AGENT_SKIP_SANDBOX:-0} != 1 ]]; then
   : "${SANDBOX_TEST_RUNNER_IMAGE:?disposable CI runner image ID required}"
   export SANDBOX_RUNNER_IMAGE=$SANDBOX_TEST_RUNNER_IMAGE

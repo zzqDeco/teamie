@@ -41,5 +41,6 @@ done
 TEAMIE_ACCEPTANCE_URL="$APP_ORIGIN" \
 TEAMIE_IDENTITY_URL=http://127.0.0.1:8081 \
 TEAMIE_CHAT_URL=http://127.0.0.1:8082 \
+TEAMIE_REALTIME_URL=http://127.0.0.1:8083 \
 TEAMIE_WS_URL=ws://127.0.0.1:8083/api/v1/ws \
   python3 tools/acceptance/im_acceptance.py
