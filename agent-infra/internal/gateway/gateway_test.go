@@ -125,11 +125,11 @@ func TestProtocolFixtureModelLimitsToolsAndUsage(t *testing.T) {
 	store := &memoryStore{c: Config{BaseURL: fixture.URL + "/v1", Model: "configured", CipherKey: encrypted, Enabled: true}}
 	s := New(store, crypto, testToken)
 	s.Provider = Provider{fixture.Client()}
-	r, e := s.Chat(context.Background(), &agent.GatewayChatRequest{ServiceToken: testToken, OwnerId: "owner", AgentId: "agent", SessionId: "session", RunId: "run", RequestJson: `{"model":"bypass","messages":[{"role":"user","content":"hello"}],"max_tokens":99999,"tools":[{"type":"function","function":{"name":"exec","parameters":{"type":"object"}}}]}`})
+	r, e := s.Chat(context.Background(), &agent.GatewayChatRequest{ServiceToken: testToken, OwnerId: "owner", AgentId: "agent", SessionId: "session", RunId: "run", RequestJson: fixtureNativeRequest(`{"model":"bypass","messages":[{"role":"user","content":"hello"}],"max_tokens":99999,"tools":[{"type":"function","function":{"name":"exec","parameters":{"type":"object"}}}]}`, false)})
 	if e != nil || !r.Ok {
 		t.Fatalf("%+v %v", r, e)
 	}
-	if string(observed["model"]) != `"configured"` || string(observed["max_tokens"]) != "4096" || !strings.Contains(r.GetResponseJson(), "tool_calls") {
+	if string(observed["model"]) != `"configured"` || string(observed["max_completion_tokens"]) != "4096" || !strings.Contains(r.GetResponseJson(), "function_tool_call") {
 		t.Fatal(observed)
 	}
 	if len(store.usage) != 1 || store.usage[0].OwnerID != "owner" || store.usage[0].PromptTokens != 12 || store.usage[0].CompletionTokens != 8 {
@@ -168,7 +168,7 @@ func TestCancellationAndRedactedUpstreamErrors(t *testing.T) {
 	s.Provider = Provider{fixture.Client()}
 	done := make(chan *agent.GatewayChatResponse, 1)
 	go func() {
-		r, _ := s.Chat(context.Background(), &agent.GatewayChatRequest{ServiceToken: testToken, OwnerId: "o", AgentId: "a", SessionId: "s", RunId: "r", RequestJson: `{"messages":[{"role":"user","content":"hello"}]}`})
+		r, _ := s.Chat(context.Background(), &agent.GatewayChatRequest{ServiceToken: testToken, OwnerId: "o", AgentId: "a", SessionId: "s", RunId: "r", RequestJson: fixtureNativeRequest(`{"messages":[{"role":"user","content":"hello"}]}`, false)})
 		done <- r
 	}()
 	<-started
@@ -211,7 +211,7 @@ func TestCanceledAttemptDoesNotCancelNewAttempt(t *testing.T) {
 	s := New(&memoryStore{c: Config{BaseURL: fixture.URL, Model: "fixture", Enabled: true, CipherKey: encrypted}}, crypto, testToken)
 	s.Provider = Provider{fixture.Client()}
 	_, _ = s.Cancel(context.Background(), &agent.CancelRequest{ServiceToken: testToken, AgentId: "a", RunId: "durable-run:attempt-1"})
-	req := &agent.GatewayChatRequest{ServiceToken: testToken, OwnerId: "owner", AgentId: "a", SessionId: "session", RunId: "durable-run:attempt-1", RequestJson: `{"messages":[{"role":"user","content":"hi"}]}`}
+	req := &agent.GatewayChatRequest{ServiceToken: testToken, OwnerId: "owner", AgentId: "a", SessionId: "session", RunId: "durable-run:attempt-1", RequestJson: fixtureNativeRequest(`{"messages":[{"role":"user","content":"hi"}]}`, false)}
 	old, _ := s.Chat(context.Background(), req)
 	if old.GetErrorCode() != "canceled" || calls != 0 {
 		t.Fatal(old, calls)

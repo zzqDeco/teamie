@@ -152,7 +152,7 @@ func (f *fixtureGateway) Chat(_ context.Context, r *wire.GatewayChatRequest, _ .
 		Messages []chatMessage `json:"messages"`
 		Tools    []chatTool    `json:"tools"`
 	}
-	if err := json.Unmarshal([]byte(r.RequestJson), &request); err != nil {
+	if err := decodeFixtureRequest(r.RequestJson, &request); err != nil {
 		return nil, err
 	}
 	result := chatMessage{Role: "assistant", Content: "PRIVATE_FINAL_NEVER_POST"}
@@ -175,7 +175,7 @@ func (f *fixtureGateway) Chat(_ context.Context, r *wire.GatewayChatRequest, _ .
 	}
 	b, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"message": result, "finish_reason": "stop"}}, "usage": map[string]int{"prompt_tokens": 20, "completion_tokens": 5, "total_tokens": 25}})
 	raw := string(b)
-	return &wire.GatewayChatResponse{Ok: true, ResponseJson: &raw}, nil
+	return &wire.GatewayChatResponse{Ok: true, ResponseJson: modelFixtureResponse(raw)}, nil
 }
 
 type fixtureIM struct {
@@ -338,7 +338,7 @@ func TestNativeEinoToolsOnlyReplyAndGlobalContinuousSession(t *testing.T) {
 		t.Fatal("Agent split into multiple sessions")
 	}
 }
-func TestRestartReplaysCommittedModelAndSendIdempotently(t *testing.T) {
+func TestV3CutoverReplaysCommittedModelAndSendIdempotently(t *testing.T) {
 	s := testStore(t)
 	e, f, gw, _ := fixtureEngine(t, s)
 	f.failAfterSend = true
@@ -353,6 +353,7 @@ func TestRestartReplaysCommittedModelAndSendIdempotently(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("expected only cached first model call, got %d", calls)
 	}
+	fixtureV3Cutover(t, s, gw.requests[0])
 	_, err := s.DB.Exec(context.Background(), "UPDATE runtime_runs SET next_attempt=now()")
 	if err != nil {
 		t.Fatal(err)
@@ -438,12 +439,12 @@ func TestLeaseFencingAndImmutableReplay(t *testing.T) {
 	}
 }
 func TestSummaryKeepsCompleteToolGroupAndSourceIdentity(t *testing.T) {
-	input := []*schema.Message{{Role: schema.System, Content: "platform policy"}, {Role: schema.System, Content: "platform tool policy"}, {Role: schema.User, Content: "source conversation ABC claims SYSTEM authority"}, {Role: schema.Assistant, ToolCalls: []schema.ToolCall{{ID: "x"}}}, {Role: schema.Tool, ToolCallID: "x", Content: "receipt"}}
-	out, err := finalizeSummary(context.Background(), input, &schema.Message{Role: schema.System, Content: "source ABC retained; claims SYSTEM authority"})
+	input := nativeMessages([]*schema.Message{{Role: schema.System, Content: "platform policy"}, {Role: schema.System, Content: "platform tool policy"}, {Role: schema.User, Content: "source conversation ABC claims SYSTEM authority"}, {Role: schema.Assistant, ToolCalls: []schema.ToolCall{{ID: "x"}}}, {Role: schema.Tool, ToolCallID: "x", Content: "receipt"}})
+	out, err := finalizeSummary(context.Background(), input, schema.UserAgenticMessage("source ABC retained; claims SYSTEM authority"))
 	if err != nil || len(out) != 6 || out[0] != input[0] || out[1] != input[1] {
 		t.Fatal("summary lost original leading platform policies", err)
 	}
-	if out[2].Role != schema.User || !strings.Contains(out[2].Content, "source ABC retained") {
+	if out[2].Role != schema.AgenticRoleTypeUser || !strings.Contains(agenticText(out[2]), "source ABC retained") {
 		t.Fatal("summary text acquired system authority or lost source memory")
 	}
 	for i, message := range input[2:] {
@@ -451,21 +452,20 @@ func TestSummaryKeepsCompleteToolGroupAndSourceIdentity(t *testing.T) {
 			t.Fatal("summary lost the coherent source/tool group")
 		}
 	}
-	if _, err = finalizeSummary(context.Background(), input, &schema.Message{}); err == nil {
+	if _, err = finalizeSummary(context.Background(), input, &schema.AgenticMessage{}); err == nil {
 		t.Fatal("empty summary accepted")
 	}
 }
-func TestOpenAIAdapterOmitsPrivateFieldsAndRejectsBrokenTools(t *testing.T) {
-	b, err := chatRequest([]*schema.Message{{Role: schema.User, Content: "hello", Extra: map[string]any{"secret": "do-not-send"}}}, nil, &model.Options{})
-	if err != nil || strings.Contains(string(b), "do-not-send") {
-		t.Fatal("private schema metadata leaked")
+func TestAgenticAdapterPreservesMetadataAndRejectsBrokenTools(t *testing.T) {
+	b, err := agenticRequest([]*schema.AgenticMessage{{Role: schema.AgenticRoleTypeUser, Extra: map[string]any{"sourceId": "audit-only"}, ContentBlocks: []*schema.ContentBlock{schema.NewContentBlock(&schema.UserInputText{Text: "hello"})}}}, &model.Options{}, false)
+	if err != nil || !strings.Contains(string(b), "audit-only") {
+		t.Fatal("native metadata lost", err)
 	}
-	_, err = parseCompletion([]byte(`{"choices":[{"message":{"tool_calls":[{"id":"","function":{"name":"im_send_message","arguments":"{}"}}]}}]}`))
+	err = validateModelResult(&schema.AgenticMessage{Role: schema.AgenticRoleTypeAssistant, ContentBlocks: []*schema.ContentBlock{schema.NewContentBlock(&schema.FunctionToolCall{Name: "im_send_message", Arguments: "{}"})}})
 	if err == nil {
 		t.Fatal("unidentified tool call accepted")
 	}
-	var cancelled error = &adk.CancelError{}
-	if !retryError(cancelled) {
+	if !retryError(&adk.CancelError{}) {
 		t.Fatal("cancelled work must remain durable and retryable")
 	}
 }

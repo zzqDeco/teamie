@@ -293,10 +293,10 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		}
 		_ = tasks.manager.Close(pc)
 	}()
-	session := &SessionStore{Store: e.Store, Lease: lease, Revision: def.Revision}
+	session := &SessionStore[*schema.AgenticMessage]{Store: e.Store, Lease: lease, Revision: def.Revision}
 	guard := &turnGuard{}
-	var loop *adk.TurnLoop[Input, *schema.Message]
-	var loopDone chan *adk.TurnLoopExitState[Input, *schema.Message]
+	var loop *adk.TurnLoop[Input, *schema.AgenticMessage]
+	var loopDone chan *adk.TurnLoopExitState[Input, *schema.AgenticMessage]
 	var loopCancel context.CancelFunc
 	generation := int64(0)
 	queued := map[string]int64{}
@@ -317,11 +317,11 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		clearQueue()
 	}
 	defer stop()
-	makeAgent := func(ctx context.Context) (adk.Agent, error) {
+	makeAgent := func(ctx context.Context) (adk.TypedAgent[*schema.AgenticMessage], error) {
 		trigger := summaryTrigger(int(contextWindow.Load()))
-		summary, err := summarization.New(ctx, &summarization.Config{
+		summary, err := summarization.NewTyped(ctx, &summarization.TypedConfig[*schema.AgenticMessage]{
 			Model:           gatewayModel,
-			ModelOptions:    []model.Option{model.WithToolChoice(schema.ToolChoiceForbidden)},
+			ModelOptions:    []model.Option{model.WithAgenticToolChoice(&schema.AgenticToolChoice{Type: schema.ToolChoiceForbidden})},
 			Trigger:         &summarization.TriggerCondition{ContextTokens: trigger, ContextMessages: 32},
 			UserInstruction: summaryInstruction,
 			Finalize:        finalizeSummary,
@@ -329,8 +329,8 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		if err != nil {
 			return nil, err
 		}
-		handlers := append([]adk.ChatModelAgentMiddleware{summary}, tasks.handlers...)
-		return adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{Name: "teamie_agent", Description: "A user-owned Teamie participant", Instruction: instruction(def), Model: gatewayModel, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: tools, ExecuteSequentially: true}}, MaxIterations: math.MaxInt, Handlers: handlers})
+		handlers := append([]adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]{summary}, tasks.handlers...)
+		return adk.NewTypedChatModelAgent(ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{Name: "teamie_agent", Description: "A user-owned Teamie participant", Instruction: instruction(def), Model: gatewayModel, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: tools, ExecuteSequentially: true}}, MaxIterations: math.MaxInt, Handlers: handlers})
 	}
 	validate := func(ctx context.Context, inputs []Input) ([]Input, error) {
 		valid := []Input{}
@@ -470,19 +470,19 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		e.report(runctx, def.Id, "running", "", true)
 		return run, runctx, remaining, nil
 	}
-	makeInput := func(ctx context.Context, _ *adk.TurnLoop[Input, *schema.Message], items []Input) (*adk.GenInputResult[Input, *schema.Message], error) {
+	makeInput := func(ctx context.Context, _ *adk.TurnLoop[Input, *schema.AgenticMessage], items []Input) (*adk.GenInputResult[Input, *schema.AgenticMessage], error) {
 		run, runctx, remaining, err := prepare(ctx, items, nil)
 		if err != nil {
 			return nil, err
 		}
-		return &adk.GenInputResult[Input, *schema.Message]{RunCtx: runctx, Input: &adk.AgentInput{Messages: inputMessages(run.Inputs), EnableStreaming: e.Config.GatewayStreamURL != ""}, Consumed: run.Inputs, Remaining: remaining}, nil
+		return &adk.GenInputResult[Input, *schema.AgenticMessage]{RunCtx: runctx, Input: &adk.TypedAgentInput[*schema.AgenticMessage]{Messages: inputMessages(run.Inputs), EnableStreaming: e.Config.GatewayStreamURL != ""}, Consumed: run.Inputs, Remaining: remaining}, nil
 	}
 	start := func() {
 		generation++
 		lc, cancel := context.WithCancel(ctx)
 		loopCancel = cancel
-		loopDone = make(chan *adk.TurnLoopExitState[Input, *schema.Message], 1)
-		loop = adk.NewTurnLoop(adk.TurnLoopConfig[Input, *schema.Message]{GenInput: makeInput, GenResume: func(ctx context.Context, active *adk.TurnLoop[Input, *schema.Message], interrupted, unhandled, newItems []Input) (*adk.GenResumeResult[Input, *schema.Message], error) {
+		loopDone = make(chan *adk.TurnLoopExitState[Input, *schema.AgenticMessage], 1)
+		loop = adk.NewTurnLoop(adk.TurnLoopConfig[Input, *schema.AgenticMessage]{GenInput: makeInput, GenResume: func(ctx context.Context, active *adk.TurnLoop[Input, *schema.AgenticMessage], interrupted, unhandled, newItems []Input) (*adk.GenResumeResult[Input, *schema.AgenticMessage], error) {
 			metadata, _ := e.Store.ResumeMetadata(ctx, "turnloop:"+def.Id)
 			all := append(append(append([]Input{}, interrupted...), unhandled...), newItems...)
 			run, runctx, remaining, err := prepare(ctx, all, metadata)
@@ -494,12 +494,12 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 				for _, id := range metadata.Targets {
 					targets[id] = nil
 				}
-				return &adk.GenResumeResult[Input, *schema.Message]{RunCtx: runctx, Decision: adk.TurnLoopResumeDecisionResume, ResumeParams: &adk.ResumeParams{Targets: targets}, Consumed: run.Inputs, Remaining: remaining}, nil
+				return &adk.GenResumeResult[Input, *schema.AgenticMessage]{RunCtx: runctx, Decision: adk.TurnLoopResumeDecisionResume, ResumeParams: &adk.ResumeParams{Targets: targets}, Consumed: run.Inputs, Remaining: remaining}, nil
 			}
-			return &adk.GenResumeResult[Input, *schema.Message]{RunCtx: runctx, Decision: adk.TurnLoopResumeDecisionStartNewTurn, Input: &adk.AgentInput{Messages: inputMessages(run.Inputs), EnableStreaming: e.Config.GatewayStreamURL != ""}, Consumed: run.Inputs, Remaining: remaining}, nil
-		}, PrepareAgent: func(ctx context.Context, _ *adk.TurnLoop[Input, *schema.Message], _ []Input) (adk.Agent, error) {
+			return &adk.GenResumeResult[Input, *schema.AgenticMessage]{RunCtx: runctx, Decision: adk.TurnLoopResumeDecisionStartNewTurn, Input: &adk.TypedAgentInput[*schema.AgenticMessage]{Messages: inputMessages(run.Inputs), EnableStreaming: e.Config.GatewayStreamURL != ""}, Consumed: run.Inputs, Remaining: remaining}, nil
+		}, PrepareAgent: func(ctx context.Context, _ *adk.TurnLoop[Input, *schema.AgenticMessage], _ []Input) (adk.TypedAgent[*schema.AgenticMessage], error) {
 			return makeAgent(ctx)
-		}, OnAgentEvents: func(ctx context.Context, tc *adk.TurnContext[Input, *schema.Message], events *adk.AsyncIterator[*adk.AgentEvent]) error {
+		}, OnAgentEvents: func(ctx context.Context, tc *adk.TurnContext[Input, *schema.AgenticMessage], events *adk.AsyncIterator[*adk.TypedAgentEvent[*schema.AgenticMessage]]) error {
 			defer guard.finish()
 			var failure error
 			var businessTargets []string
@@ -604,7 +604,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		}
 		qmu.Unlock()
 		loop.Run(lc)
-		go func(active *adk.TurnLoop[Input, *schema.Message], done chan *adk.TurnLoopExitState[Input, *schema.Message]) {
+		go func(active *adk.TurnLoop[Input, *schema.AgenticMessage], done chan *adk.TurnLoopExitState[Input, *schema.AgenticMessage]) {
 			done <- active.Wait()
 		}(loop, loopDone)
 	}
@@ -691,9 +691,9 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 				if queued[in.EventID] == generation {
 					continue
 				}
-				ok, _ := loop.Push(in, adk.WithPushStrategy(func(_ context.Context, tc *adk.TurnContext[Input, *schema.Message]) []adk.PushOption[Input, *schema.Message] {
+				ok, _ := loop.Push(in, adk.WithPushStrategy(func(_ context.Context, tc *adk.TurnContext[Input, *schema.AgenticMessage]) []adk.PushOption[Input, *schema.AgenticMessage] {
 					if relevantInput(in, tc) {
-						return []adk.PushOption[Input, *schema.Message]{adk.WithPreempt[Input, *schema.Message](adk.AnySafePoint)}
+						return []adk.PushOption[Input, *schema.AgenticMessage]{adk.WithPreempt[Input, *schema.AgenticMessage](adk.AnySafePoint)}
 					}
 					return nil
 				}))
@@ -781,8 +781,8 @@ func (e *Engine) ingest(ctx context.Context, imc *IM, l *Lease) error {
 	}
 	return e.Store.Ingest(ctx, l, page.Cursor, inputs)
 }
-func finalizeSummary(_ context.Context, original []*schema.Message, summary *schema.Message) ([]*schema.Message, error) {
-	if summary == nil || summary.Content == "" || len(summary.Content) > 32768 || len(summary.ToolCalls) > 0 {
+func finalizeSummary(_ context.Context, original []*schema.AgenticMessage, summary *schema.AgenticMessage) ([]*schema.AgenticMessage, error) {
+	if summary == nil || agenticText(summary) == "" || len(agenticText(summary)) > 32768 || hasToolCalls(summary) {
 		return nil, errors.New("invalid_context_summary")
 	}
 	sources := []map[string]any{}
@@ -823,21 +823,21 @@ func finalizeSummary(_ context.Context, original []*schema.Message, summary *sch
 		if message == nil {
 			continue
 		}
-		if strings.HasPrefix(message.Content, "TEAMIE_SESSION_SUMMARY ") {
-			if index := strings.LastIndex(message.Content, "\nTEAMIE_SOURCE_REFERENCES "); index >= 0 {
+		if strings.HasPrefix(agenticText(message), "TEAMIE_SESSION_SUMMARY ") {
+			if index := strings.LastIndex(agenticText(message), "\nTEAMIE_SOURCE_REFERENCES "); index >= 0 {
 				var previous []map[string]any
-				if json.Unmarshal([]byte(message.Content[index+len("\nTEAMIE_SOURCE_REFERENCES "):]), &previous) == nil {
+				if json.Unmarshal([]byte(agenticText(message)[index+len("\nTEAMIE_SOURCE_REFERENCES "):]), &previous) == nil {
 					for _, source := range previous {
 						appendSource(source)
 					}
 				}
 			}
 		}
-		if !strings.HasPrefix(message.Content, "TEAMIE_NEW_MESSAGE ") {
+		if !strings.HasPrefix(agenticText(message), "TEAMIE_NEW_MESSAGE ") {
 			continue
 		}
 		var in Input
-		if json.Unmarshal([]byte(strings.TrimPrefix(message.Content, "TEAMIE_NEW_MESSAGE ")), &in) == nil {
+		if json.Unmarshal([]byte(strings.TrimPrefix(agenticText(message), "TEAMIE_NEW_MESSAGE ")), &in) == nil {
 			attachmentIDs := []string{}
 			for _, a := range in.Attachments {
 				attachmentIDs = append(attachmentIDs, a.ID)
@@ -854,17 +854,17 @@ func finalizeSummary(_ context.Context, original []*schema.Message, summary *sch
 	// Native summarization replaces the complete in-flight model state. Retain
 	// the actual leading platform policy; only transcript data is compacted.
 	// Summary content remains a user message regardless of the model's role.
-	out := make([]*schema.Message, 0, len(original)+1)
+	out := make([]*schema.AgenticMessage, 0, len(original)+1)
 	for _, message := range original {
-		if message == nil || message.Role != schema.System {
+		if message == nil || message.Role != schema.AgenticRoleTypeSystem {
 			break
 		}
 		out = append(out, message)
 	}
-	out = append(out, &schema.Message{Role: schema.User, Content: "TEAMIE_SESSION_SUMMARY (source-scoped memory; verify current access using tools):\n" + summary.Content + "\nTEAMIE_SOURCE_REFERENCES " + string(provenance)})
+	out = append(out, schema.UserAgenticMessage("TEAMIE_SESSION_SUMMARY (source-scoped memory; verify current access using tools):\n"+agenticText(summary)+"\nTEAMIE_SOURCE_REFERENCES "+string(provenance)))
 	start := len(original)
 	for i := len(original) - 1; i >= 0; i-- {
-		if original[i] != nil && original[i].Role == schema.User && len(original)-i <= 12 {
+		if original[i] != nil && original[i].Role == schema.AgenticRoleTypeUser && !hasToolResults(original[i]) && len(original)-i <= 12 {
 			start = i
 			break
 		}

@@ -85,11 +85,14 @@ type planGatewayFixture struct {
 }
 
 func (g *planGatewayFixture) Chat(_ context.Context, r *wire.GatewayChatRequest, _ ...callopt.Option) (*wire.GatewayChatResponse, error) {
+	g.fixtureGateway.mu.Lock()
+	g.fixtureGateway.requests = append(g.fixtureGateway.requests, []byte(r.RequestJson))
+	g.fixtureGateway.mu.Unlock()
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.calls++
 	var request toolPathRequest
-	_ = json.Unmarshal([]byte(r.RequestJson), &request)
+	_ = decodeFixtureRequest(r.RequestJson, &request)
 	last := request.Messages[len(request.Messages)-1]
 	var result chatMessage
 	if last.Role != "tool" {
@@ -107,9 +110,9 @@ func (g *planGatewayFixture) Chat(_ context.Context, r *wire.GatewayChatRequest,
 	}
 	b, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"message": result, "finish_reason": "stop"}}})
 	raw := string(b)
-	return &wire.GatewayChatResponse{Ok: true, ResponseJson: &raw}, nil
+	return &wire.GatewayChatResponse{Ok: true, ResponseJson: modelFixtureResponse(raw)}, nil
 }
-func TestNativePlanTaskPersistsAndCrashReplayKeepsID(t *testing.T) {
+func TestV3CutoverPlanTaskPersistsAndCrashReplayKeepsID(t *testing.T) {
 	s := testStore(t)
 	e, f, base, _ := fixtureEngine(t, s)
 	sb := &workspaceFixture{}
@@ -124,6 +127,7 @@ func TestNativePlanTaskPersistsAndCrashReplayKeepsID(t *testing.T) {
 	waitFor(t, func() bool { return count(t, s, `SELECT count(*) FROM runtime_runs WHERE state='retry'`) == 1 })
 	cancel()
 	<-done
+	fixtureV3Cutover(t, s, base.requests[0])
 	if _, err := s.DB.Exec(context.Background(), `DROP TRIGGER crash_plan_receipt ON runtime_tool_calls;UPDATE runtime_runs SET next_attempt=now()`); err != nil {
 		t.Fatal(err)
 	}

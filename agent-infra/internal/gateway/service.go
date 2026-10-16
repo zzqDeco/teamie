@@ -11,6 +11,7 @@ import (
 
 	"teamie/agent-infra/internal/api"
 	"teamie/agent-protocol/kitex_gen/agent"
+	"teamie/agent-protocol/modeltransport"
 )
 
 type Service struct {
@@ -204,7 +205,7 @@ func (s *Service) Routes(auth api.AdminAuth) http.Handler {
 			return
 		}
 		start := time.Now()
-		raw, _ := json.Marshal(map[string]any{"messages": []map[string]string{{"role": "user", "content": "Reply with OK."}}, "max_completion_tokens": 8})
+		raw, _ := json.Marshal(modeltransport.Request{Protocol: modeltransport.Version, Messages: json.RawMessage(`[{"role":"user","content_blocks":[{"type":"user_input_text","user_input_text":{"text":"Reply with OK."}}]}]`), Options: json.RawMessage(`{"MaxTokens":8,"AgenticToolChoice":{"Type":"forbidden"}}`)})
 		res := s.call(r.Context(), owner, "admin-test", "admin-test", time.Now().UTC().Format("20060102T150405.000000000"), string(raw))
 		if !res.Ok {
 			api.Fail(w, api.Err(int(res.GetStatusCode()), res.GetErrorCode(), res.GetErrorMessage()))

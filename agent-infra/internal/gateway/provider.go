@@ -1,12 +1,10 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
-	"io"
 	"net"
 	"net/http"
 	"net/netip"
@@ -167,73 +165,3 @@ func normalizeMode(raw, model string, streaming bool) ([]byte, error) {
 }
 
 type Provider struct{ HTTP *http.Client }
-
-func (p Provider) Chat(ctx context.Context, c Config, key, raw string) (string, int64, int64, error) {
-	if ctx.Err() != nil {
-		return "", 0, 0, api.Err(499, "canceled", "Model request canceled")
-	}
-	payload, e := normalizeRequest(raw, c.Model)
-	if e != nil {
-		return "", 0, 0, e
-	}
-	u, e := endpoint(c.BaseURL)
-	if e != nil {
-		return "", 0, 0, e
-	}
-	u.Path = strings.TrimRight(u.Path, "/") + "/chat/completions"
-	req, e := http.NewRequestWithContext(ctx, "POST", u.String(), bytes.NewReader(payload))
-	if e != nil {
-		return "", 0, 0, api.Err(502, "upstream_error", "Provider request could not be created")
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+key)
-	res, e := p.HTTP.Do(req)
-	if e != nil {
-		if ctx.Err() != nil {
-			return "", 0, 0, api.Err(499, "canceled", "Model request canceled")
-		}
-		return "", 0, 0, api.Err(502, "upstream_unavailable", "Provider could not be reached")
-	}
-	defer res.Body.Close()
-	if res.StatusCode != 200 {
-		code := "upstream_error"
-		status := 502
-		if res.StatusCode == 429 {
-			code = "upstream_rate_limited"
-			status = 429
-		}
-		return "", 0, 0, api.Err(status, code, "Provider rejected the request")
-	}
-	body, e := io.ReadAll(io.LimitReader(res.Body, MaxResponseBytes+1))
-	if e != nil || len(body) > MaxResponseBytes {
-		if ctx.Err() != nil {
-			return "", 0, 0, api.Err(499, "canceled", "Model request canceled")
-		}
-		return "", 0, 0, api.Err(502, "invalid_upstream_response", "Provider response exceeded limits")
-	}
-	var upstream struct {
-		Error json.RawMessage `json:"error"`
-	}
-	if json.Unmarshal(body, &upstream) == nil && len(upstream.Error) > 0 && string(upstream.Error) != "null" {
-		return "", 0, 0, api.Err(502, "upstream_in_stream_error", "Provider reported a model error in its response")
-	}
-	var result struct {
-		Object  string `json:"object"`
-		Choices []struct {
-			Message struct {
-				Role string `json:"role"`
-			} `json:"message"`
-		} `json:"choices"`
-		Usage struct {
-			PromptTokens     int64 `json:"prompt_tokens"`
-			CompletionTokens int64 `json:"completion_tokens"`
-		} `json:"usage"`
-	}
-	if json.Unmarshal(body, &result) != nil || result.Object != "chat.completion" || len(result.Choices) != 1 || result.Choices[0].Message.Role != "assistant" || result.Usage.PromptTokens < 0 || result.Usage.CompletionTokens < 0 {
-		return "", 0, 0, api.Err(502, "invalid_upstream_response", "Invalid chat completion response")
-	}
-	if e := guardSingleResponse(string(body), key); e != nil {
-		return "", 0, 0, e
-	}
-	return string(body), result.Usage.PromptTokens, result.Usage.CompletionTokens, nil
-}

@@ -38,7 +38,7 @@ func (m *cancellationCheckpointModel) WithTools([]*schema.ToolInfo) (model.ToolC
 }
 
 type cancellationCheckpointStore struct {
-	*SessionStore
+	*SessionStore[*schema.Message]
 	mu             sync.Mutex
 	sets           int
 	setSawCanceled bool
@@ -77,7 +77,7 @@ func TestNativeEinoImmediateStopSavesCheckpointAfterRootCancellation(t *testing.
 	defer cancel()
 	// The real TurnLoop must decide to save its native checkpoint first. Cancel
 	// exactly at the PG-store boundary, preserving the original canceled context.
-	session := &cancellationCheckpointStore{SessionStore: &SessionStore{Store: store, Lease: lease}, beforeSet: cancel}
+	session := &cancellationCheckpointStore{SessionStore: &SessionStore[*schema.Message]{Store: store, Lease: lease}, beforeSet: cancel}
 	stopContributed := make(chan struct{})
 	var stoppedOnce sync.Once
 	var nativeCancelObserved atomic.Bool
@@ -193,7 +193,7 @@ func TestCanceledContextPersistenceStillRejectsStaleLease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	old := &SessionStore{Store: store, Lease: first}
+	old := &SessionStore[*schema.Message]{Store: store, Lease: first}
 	id := "turnloop:" + agentID
 	original := []byte("existing durable checkpoint")
 	if err = old.Set(WithRun(ctx, run), id, original); err != nil {
@@ -218,7 +218,7 @@ func TestCanceledContextPersistenceStillRejectsStaleLease(t *testing.T) {
 	if err = old.AppendEvents(canceled, "agent:"+agentID, []*adk.SessionEvent[*schema.Message]{event}); !errors.Is(err, ErrLeaseLost) {
 		t.Fatalf("stale canceled AppendEvents bypassed fencing: %v", err)
 	}
-	current := &SessionStore{Store: store, Lease: second}
+	current := &SessionStore[*schema.Message]{Store: store, Lease: second}
 	payload, exists, err := current.Get(ctx, id)
 	if err != nil || !exists || !bytes.Equal(payload, original) {
 		t.Fatal("stale worker changed checkpoint", err)

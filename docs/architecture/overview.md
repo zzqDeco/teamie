@@ -16,7 +16,6 @@ flowchart LR
   RT -->|Kitex| Chat
   CP -->|Generic principal RPC| Identity
   CP -->|Generic membership RPC| Chat
-  CP -->|Owner operations / event metadata RPC| Runtime
   Runtime[Eino runtime] -->|Definitions / safe status RPC| CP
   Runtime -->|Own participant HTTP| Chat
   Runtime -->|Scoped token RPC| Identity
@@ -69,7 +68,9 @@ Each Agent has one durable global Session `agent:<id>`, with a single writer and
 
 Desired definition state is persisted before provisioning; Identity is disabled while CP reconciles membership/configuration, then enabled only for the applied revision. Tokens rotate/expire and are revoked on disable/delete/revision. Runtime definitions and tool/model preflight checks stop stale work. Inbox persistence and IM cursor advancement commit together. Stable sends and known tool results replay without duplicate public messages; unknown execution effects are not silently rerun.
 
-The initial runtime process has **one global foreground model slot** and a durable lease per Agent. Native background tasks release that slot while waiting for Sandbox execution; the Agent's Session writer stays serial. Eino background-task Manager, PostgreSQL TaskStore/events and notification outbox recover task completion into the Agent inbox. Workers, attempts and fencing are internal implementation details, not additional architecture services. Owner APIs expose only operational run/task/event metadata and cancellation/retry. This is not a multi-host throughput guarantee. Sandbox workspaces persist independently of execution children. Children receive fixed platform mounts/resource policy and no network, host socket or service/provider credentials.
+The initial runtime process has **one global foreground model slot** and a durable lease per Agent. Native background tasks release that slot while waiting for Sandbox execution; the Agent's Session writer stays serial. Eino background-task Manager, PostgreSQL TaskStore/events and notification outbox recover task completion into the Agent inbox. Workers, attempts and fencing are internal implementation details, not additional architecture services. Browser APIs expose only the basic Agent profile, selected workspace visibility and enabled state. Session, runs, tasks, tools, errors, events and operational control remain private; Control Plane has no outgoing runtime client. The single foreground slot is not a multi-host throughput guarantee. Sandbox workspaces persist independently of execution children. Children receive fixed platform mounts/resource policy and no network, host socket or service/provider credentials.
+
+The gateway uses the official CloudWeGo `agenticopenai.NewChatModel` extension for its existing OpenAI-compatible Chat Completions endpoint. Runtime uses a native typed Agentic ChatModelAgent, Session, TurnLoop and middleware; ordered reasoning, text and tool blocks survive model receipts and Session persistence. Its authenticated private transport carries native messages and common model options, while the gateway owns provider serialization, administrator-selected policy and encrypted credentials. [Model gateway architecture](model-gateway.md) describes dependency compatibility, transport guards and the read-compatible format cutover.
 
 Production starts with an unconfigured model gateway at the user's request. Healthy readiness does not imply a configured model or real-provider acceptance. Agents wait with durable inputs until a platform admin configures/enables the gateway. CI uses explicit protocol fixtures; live provider verification remains a separate gate.
 

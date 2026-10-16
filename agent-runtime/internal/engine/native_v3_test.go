@@ -131,11 +131,14 @@ type nativeGatewayFixture struct {
 }
 
 func (f *nativeGatewayFixture) Chat(_ context.Context, r *wire.GatewayChatRequest, _ ...callopt.Option) (*wire.GatewayChatResponse, error) {
+	f.fixtureGateway.mu.Lock()
+	f.fixtureGateway.requests = append(f.fixtureGateway.requests, []byte(r.RequestJson))
+	f.fixtureGateway.mu.Unlock()
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
 	var req toolPathRequest
-	_ = json.Unmarshal([]byte(r.RequestJson), &req)
+	_ = decodeFixtureRequest(r.RequestJson, &req)
 	message := chatMessage{Role: "assistant", Content: "PRIVATE_NATIVE_FINAL"}
 	last := req.Messages[len(req.Messages)-1]
 	if last.Role == "tool" {
@@ -147,9 +150,9 @@ func (f *nativeGatewayFixture) Chat(_ context.Context, r *wire.GatewayChatReques
 	}
 	b, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"message": message, "finish_reason": "stop"}}})
 	raw := string(b)
-	return &wire.GatewayChatResponse{Ok: true, ResponseJson: &raw}, nil
+	return &wire.GatewayChatResponse{Ok: true, ResponseJson: modelFixtureResponse(raw)}, nil
 }
-func TestNativeTaskCrashBeforeToolReceiptAndCompletionWakeup(t *testing.T) {
+func TestV3CutoverNativeTaskCrashBeforeToolReceiptAndCompletionWakeup(t *testing.T) {
 	s := testStore(t)
 	e, f, base, _ := fixtureEngine(t, s)
 	sb := &asyncSandboxFixture{}
@@ -175,6 +178,7 @@ func TestNativeTaskCrashBeforeToolReceiptAndCompletionWakeup(t *testing.T) {
 	if count(t, s, `SELECT count(*) FROM runtime_session_events WHERE kind=$1`, string(bg.SessionEventTaskCreated)) != 1 {
 		t.Fatal("task creation was not durably in the native timeline")
 	}
+	fixtureV3Cutover(t, s, base.requests[0])
 	if _, err = s.DB.Exec(context.Background(), `DROP TRIGGER crash_native_receipt ON runtime_tool_calls;UPDATE runtime_runs SET next_attempt=now()`); err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +319,7 @@ func TestGatewayActualIncrementalStreamAndTape(t *testing.T) {
 			t.Error("not upstream streaming")
 		}
 		send := func(content string) {
-			chunk, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"role": "assistant", "content": content}}}})
+			chunk, _ := json.Marshal(&schema.AgenticMessage{Role: schema.AgenticRoleTypeAssistant, ContentBlocks: []*schema.ContentBlock{schema.NewContentBlockChunk(&schema.AssistantGenText{Text: content}, &schema.StreamingMeta{Index: 0})}})
 			_ = json.NewEncoder(w).Encode(map[string]string{"type": "chunk", "responseJson": string(chunk)})
 			w.(http.Flusher).Flush()
 		}
@@ -327,14 +331,14 @@ func TestGatewayActualIncrementalStreamAndTape(t *testing.T) {
 	}))
 	defer server.Close()
 	gateway := &GatewayModel{Store: s, Lease: l, AgentID: agent, OwnerID: uuid.NewString(), Token: "fixture-stream", StreamURL: server.URL}
-	stream, err := gateway.Stream(WithRun(context.Background(), run), []*schema.Message{{Role: schema.User, Content: "silent"}}, model.WithMaxTokens(20))
+	stream, err := gateway.Stream(WithRun(context.Background(), run), []*schema.AgenticMessage{schema.UserAgenticMessage("silent")}, model.WithMaxTokens(20))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer stream.Close()
 	<-firstSent
 	chunk, err := stream.Recv()
-	if err != nil || chunk.Content != "private " {
+	if err != nil || agenticText(chunk) != "private " {
 		t.Fatal("first chunk was buffered until completion", err)
 	}
 	if count(t, s, `SELECT count(*) FROM runtime_model_calls`) != 0 {
@@ -342,7 +346,7 @@ func TestGatewayActualIncrementalStreamAndTape(t *testing.T) {
 	}
 	close(release)
 	var text strings.Builder
-	text.WriteString(chunk.Content)
+	text.WriteString(agenticText(chunk))
 	for {
 		chunk, err = stream.Recv()
 		if err == io.EOF {
@@ -351,7 +355,7 @@ func TestGatewayActualIncrementalStreamAndTape(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		text.WriteString(chunk.Content)
+		text.WriteString(agenticText(chunk))
 	}
 	if text.String() != "private stream" || count(t, s, `SELECT count(*) FROM runtime_model_calls`) != 1 {
 		t.Fatal("complete stream was not committed as one model tape")
@@ -368,7 +372,7 @@ type blockingGatewayFixture struct {
 
 func (g *blockingGatewayFixture) Chat(ctx context.Context, r *wire.GatewayChatRequest, _ ...callopt.Option) (*wire.GatewayChatResponse, error) {
 	var request toolPathRequest
-	_ = json.Unmarshal([]byte(r.RequestJson), &request)
+	_ = decodeFixtureRequest(r.RequestJson, &request)
 	g.mu.Lock()
 	g.requests = append(g.requests, request)
 	first := len(g.requests) == 1
@@ -382,7 +386,7 @@ func (g *blockingGatewayFixture) Chat(ctx context.Context, r *wire.GatewayChatRe
 		}
 	}
 	raw := `{"choices":[{"message":{"role":"assistant","content":"PRIVATE_INPUT_RESULT"},"finish_reason":"stop"}]}`
-	return &wire.GatewayChatResponse{Ok: true, ResponseJson: &raw}, nil
+	return &wire.GatewayChatResponse{Ok: true, ResponseJson: modelFixtureResponse(raw)}, nil
 }
 func TestInputArrivesWhileModelRunsBeyondProcessingPage(t *testing.T) {
 	s := testStore(t)
@@ -495,7 +499,7 @@ func TestSummaryUsesModelWindowAndBoundedTransport(t *testing.T) {
 	if len(batch) != 2 || len(remaining) != 6 {
 		t.Fatal("transport batch not bounded")
 	}
-	sources := []*schema.Message{}
+	sources := []*schema.AgenticMessage{}
 	for _, in := range batch {
 		in.WorkspaceID = uuid.NewString()
 		in.ConversationID = uuid.NewString()
@@ -503,14 +507,14 @@ func TestSummaryUsesModelWindowAndBoundedTransport(t *testing.T) {
 		in.SenderID = uuid.NewString()
 		sources = append(sources, inputMessages([]Input{in})...)
 	}
-	compacted, err := finalizeSummary(context.Background(), sources, &schema.Message{Role: schema.Assistant, Content: "A semantic summary omitting every source ID"})
+	compacted, err := finalizeSummary(context.Background(), sources, schema.UserAgenticMessage("A semantic summary omitting every source ID"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, m := range sources {
 		var in Input
-		_ = json.Unmarshal([]byte(strings.TrimPrefix(m.Content, "TEAMIE_NEW_MESSAGE ")), &in)
-		if !strings.Contains(compacted[0].Content, in.MessageID) || !strings.Contains(compacted[0].Content, in.ConversationID) || !strings.Contains(compacted[0].Content, in.SenderID) {
+		_ = json.Unmarshal([]byte(strings.TrimPrefix(agenticText(m), "TEAMIE_NEW_MESSAGE ")), &in)
+		if !strings.Contains(agenticText(compacted[0]), in.MessageID) || !strings.Contains(agenticText(compacted[0]), in.ConversationID) || !strings.Contains(agenticText(compacted[0]), in.SenderID) {
 			t.Fatal("compaction relied on model to retain provenance")
 		}
 	}
@@ -558,7 +562,7 @@ func (g *retryAfterFreshGateway) Chat(_ context.Context, r *wire.GatewayChatRequ
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	var request toolPathRequest
-	_ = json.Unmarshal([]byte(r.RequestJson), &request)
+	_ = decodeFixtureRequest(r.RequestJson, &request)
 	var input Input
 	for _, message := range request.Messages {
 		if strings.HasPrefix(message.Content, "TEAMIE_NEW_MESSAGE ") {
@@ -578,7 +582,7 @@ func (g *retryAfterFreshGateway) Chat(_ context.Context, r *wire.GatewayChatRequ
 	}
 	b, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"message": result, "finish_reason": "stop"}}})
 	raw := string(b)
-	return &wire.GatewayChatResponse{Ok: true, ResponseJson: &raw}, nil
+	return &wire.GatewayChatResponse{Ok: true, ResponseJson: modelFixtureResponse(raw)}, nil
 }
 func TestOwnerRetryWakesExistingIdleLoopAndUsesPinnedTape(t *testing.T) {
 	s := testStore(t)
@@ -627,7 +631,7 @@ func TestSessionReplayPinsAcceptanceWatermark(t *testing.T) {
 	if err = s.Ingest(ctx, lease, "3", inputs); err != nil {
 		t.Fatal(err)
 	}
-	session := &SessionStore{Store: s, Lease: lease}
+	session := &SessionStore[*schema.Message]{Store: s, Lease: lease}
 	first, err := s.StartRun(ctx, lease, inputs[:1])
 	if err != nil {
 		t.Fatal(err)

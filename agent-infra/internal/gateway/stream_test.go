@@ -41,7 +41,7 @@ func streamFixtureService(t *testing.T, handler http.HandlerFunc) (*Service, *ht
 }
 func streamRequest(t *testing.T, ctx context.Context, url, run string) *http.Request {
 	t.Helper()
-	raw, _ := json.Marshal(map[string]any{"ownerId": "o", "agentId": "a", "sessionId": "s", "runId": run, "requestJson": `{"model":"bypass","messages":[{"role":"user","content":"test"}],"stream":true}`})
+	raw, _ := json.Marshal(map[string]any{"ownerId": "o", "agentId": "a", "sessionId": "s", "runId": run, "requestJson": fixtureNativeRequest(`{"model":"bypass","messages":[{"role":"user","content":"test"}],"stream":true}`, true)})
 	r, e := http.NewRequestWithContext(ctx, http.MethodPost, url+"/internal/v1/chat/stream", bytes.NewReader(raw))
 	if e != nil {
 		t.Fatal(e)
@@ -97,7 +97,7 @@ func TestGatewayActualIncrementalStreamingToolsUsageAndTerminal(t *testing.T) {
 		}
 		events = append(events, event)
 	}
-	if scan.Err() != nil || len(events) != 3 || events[2].Type != "done" || !strings.Contains(events[0].ResponseJSON, "tool_calls") {
+	if scan.Err() != nil || len(events) != 3 || events[2].Type != "done" || !strings.Contains(events[0].ResponseJSON, "function_tool_call") {
 		t.Fatal(events, scan.Err())
 	}
 	store := s.Store.(*memoryStore)

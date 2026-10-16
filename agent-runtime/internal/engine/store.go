@@ -310,7 +310,7 @@ func (s *Store) FinishRun(ctx context.Context, l *Lease, r *Run, state, safeErro
 	return tx.Commit(ctx)
 }
 
-type SessionStore struct {
+type SessionStore[M adk.MessageType] struct {
 	Store    *Store
 	Lease    *Lease
 	mu       sync.Mutex
@@ -319,7 +319,7 @@ type SessionStore struct {
 	Revision int64
 }
 
-func (s *SessionStore) AppendEvents(ctx context.Context, sessionID string, events []*adk.SessionEvent[*schema.Message]) error {
+func (s *SessionStore[M]) AppendEvents(ctx context.Context, sessionID string, events []*adk.SessionEvent[M]) error {
 	// Native Eino flushes terminal events/checkpoints after cancellation. Keep
 	// values and lease fencing while bounding the independent persistence work.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
@@ -369,7 +369,7 @@ func (s *SessionStore) AppendEvents(ctx context.Context, sessionID string, event
 	}
 	return tx.Commit(ctx)
 }
-func (s *SessionStore) LoadEvents(ctx context.Context, sessionID string, req *adk.LoadSessionEventsRequest) (*adk.LoadSessionEventsResult[*schema.Message], error) {
+func (s *SessionStore[M]) LoadEvents(ctx context.Context, sessionID string, req *adk.LoadSessionEventsRequest) (*adk.LoadSessionEventsResult[M], error) {
 	r, e := CurrentRun(ctx)
 	if e != nil {
 		return nil, e
@@ -413,15 +413,14 @@ func (s *SessionStore) LoadEvents(ctx context.Context, sessionID string, req *ad
 		return nil, e
 	}
 	defer rows.Close()
-	out := &adk.LoadSessionEventsResult[*schema.Message]{Events: []*adk.SessionEvent[*schema.Message]{}}
-	ser := &schema.HumanReadableSerializer{}
+	out := &adk.LoadSessionEventsResult[M]{Events: []*adk.SessionEvent[M]{}}
 	for rows.Next() {
 		var b []byte
 		if e = rows.Scan(&b); e != nil {
 			return nil, e
 		}
-		event := new(adk.SessionEvent[*schema.Message])
-		if e = ser.Unmarshal(b, event); e != nil {
+		event := new(adk.SessionEvent[M])
+		if e = decodeSessionPayload(b, event); e != nil {
 			return nil, e
 		}
 		out.Events = append(out.Events, event)
@@ -429,18 +428,24 @@ func (s *SessionStore) LoadEvents(ctx context.Context, sessionID string, req *ad
 	}
 	return out, rows.Err()
 }
-func (s *SessionStore) Get(ctx context.Context, id string) ([]byte, bool, error) {
+func (s *SessionStore[M]) Get(ctx context.Context, id string) ([]byte, bool, error) {
 	if !strings.Contains(id, s.Lease.AgentID) {
 		return nil, false, errors.New("checkpoint scope mismatch")
 	}
-	var b []byte
-	e := s.Store.DB.QueryRow(ctx, `SELECT payload FROM runtime_checkpoints WHERE checkpoint_id=$1`, id).Scan(&b)
+	var b, metadata []byte
+	e := s.Store.DB.QueryRow(ctx, `SELECT payload,metadata FROM runtime_checkpoints WHERE checkpoint_id=$1`, id).Scan(&b, &metadata)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return nil, false, nil
 	}
+	if e == nil && strings.HasPrefix(id, "turnloop:") {
+		var m checkpointMetadata
+		if json.Unmarshal(metadata, &m) != nil || m.Version != nativeRuntimeVersion {
+			return nil, false, nil
+		}
+	}
 	return b, e == nil, e
 }
-func (s *SessionStore) Set(ctx context.Context, id string, b []byte) error {
+func (s *SessionStore[M]) Set(ctx context.Context, id string, b []byte) error {
 	// Native Eino flushes terminal events/checkpoints after cancellation. Keep
 	// values and lease fencing while bounding the independent persistence work.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
@@ -463,7 +468,7 @@ func (s *SessionStore) Set(ctx context.Context, id string, b []byte) error {
 	}
 	return tx.Commit(ctx)
 }
-func (s *SessionStore) Delete(ctx context.Context, id string) error {
+func (s *SessionStore[M]) Delete(ctx context.Context, id string) error {
 	// Native Eino flushes terminal events/checkpoints after cancellation. Keep
 	// values and lease fencing while bounding the independent persistence work.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
