@@ -27,7 +27,6 @@ export SANDBOX_RUNTIME_TOKEN=ci-only-sandbox-runtime-credential
 export GATEWAY_MASTER_KEY=abababababababababababababababababababababababababababababababab
 export IDENTITY_RPC_ADDR="127.0.0.1:$((rpc_base+1))" CHAT_RPC_ADDR="127.0.0.1:$((rpc_base+2))"
 export AGENT_CONTROL_RPC_ADDR="127.0.0.1:$((rpc_base+4))" GATEWAY_RPC_ADDR="127.0.0.1:$((rpc_base+6))" SANDBOX_RPC_ADDR="127.0.0.1:$((rpc_base+7))"
-export AGENT_RUNTIME_RPC_ADDR="127.0.0.1:$((rpc_base+5))"
 export GATEWAY_STREAM_URL="http://127.0.0.1:$((http_base+6))/internal/v1/chat/stream"
 export IM_API_URL="http://127.0.0.1:$((http_base+2))"
 if [[ ${TEAMIE_AGENT_SKIP_SANDBOX:-0} != 1 ]]; then
@@ -80,7 +79,7 @@ for offset in "${offsets[@]}"; do
     echo "Disposable Agent service $port did not become ready." >&2; exit 1
   fi
 done
-TEAMIE_AGENT_ACCEPTANCE_DISPOSABLE=1 TEAMIE_AGENT_WAIT_RUNTIME=1 \
+TEAMIE_AGENT_ACCEPTANCE_DISPOSABLE=1 \
 TEAMIE_ACCEPTANCE_URL="$APP_ORIGIN" TEAMIE_IDENTITY_URL="http://127.0.0.1:$((http_base+1))" \
 TEAMIE_CHAT_URL="http://127.0.0.1:$((http_base+2))" TEAMIE_CONTROL_URL="http://127.0.0.1:$((http_base+4))" \
 TEAMIE_GATEWAY_URL="http://127.0.0.1:$((http_base+6))" python3 ops/acceptance-agents.py
