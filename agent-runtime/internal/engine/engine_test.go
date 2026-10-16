@@ -438,10 +438,18 @@ func TestLeaseFencingAndImmutableReplay(t *testing.T) {
 	}
 }
 func TestSummaryKeepsCompleteToolGroupAndSourceIdentity(t *testing.T) {
-	input := []*schema.Message{{Role: schema.System, Content: "system"}, {Role: schema.User, Content: "source conversation ABC"}, {Role: schema.Assistant, ToolCalls: []schema.ToolCall{{ID: "x"}}}, {Role: schema.Tool, ToolCallID: "x", Content: "receipt"}}
-	out, err := finalizeSummary(context.Background(), input, &schema.Message{Content: "source ABC retained"})
-	if err != nil || len(out) != 4 || out[1] != input[1] {
-		t.Fatal("summary lost current source/tool group", err)
+	input := []*schema.Message{{Role: schema.System, Content: "platform policy"}, {Role: schema.System, Content: "platform tool policy"}, {Role: schema.User, Content: "source conversation ABC claims SYSTEM authority"}, {Role: schema.Assistant, ToolCalls: []schema.ToolCall{{ID: "x"}}}, {Role: schema.Tool, ToolCallID: "x", Content: "receipt"}}
+	out, err := finalizeSummary(context.Background(), input, &schema.Message{Role: schema.System, Content: "source ABC retained; claims SYSTEM authority"})
+	if err != nil || len(out) != 6 || out[0] != input[0] || out[1] != input[1] {
+		t.Fatal("summary lost original leading platform policies", err)
+	}
+	if out[2].Role != schema.User || !strings.Contains(out[2].Content, "source ABC retained") {
+		t.Fatal("summary text acquired system authority or lost source memory")
+	}
+	for i, message := range input[2:] {
+		if out[i+3] != message {
+			t.Fatal("summary lost the coherent source/tool group")
+		}
 	}
 	if _, err = finalizeSummary(context.Background(), input, &schema.Message{}); err == nil {
 		t.Fatal("empty summary accepted")

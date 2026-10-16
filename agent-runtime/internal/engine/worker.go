@@ -798,7 +798,17 @@ func finalizeSummary(_ context.Context, original []*schema.Message, summary *sch
 		sources = sources[len(sources)-32:]
 	}
 	provenance, _ := json.Marshal(sources)
-	out := []*schema.Message{{Role: schema.User, Content: "TEAMIE_SESSION_SUMMARY (source-scoped memory; verify current access using tools):\n" + summary.Content + "\nTEAMIE_SOURCE_REFERENCES " + string(provenance)}}
+	// Native summarization replaces the complete in-flight model state. Retain
+	// the actual leading platform policy; only transcript data is compacted.
+	// Summary content remains a user message regardless of the model's role.
+	out := make([]*schema.Message, 0, len(original)+1)
+	for _, message := range original {
+		if message == nil || message.Role != schema.System {
+			break
+		}
+		out = append(out, message)
+	}
+	out = append(out, &schema.Message{Role: schema.User, Content: "TEAMIE_SESSION_SUMMARY (source-scoped memory; verify current access using tools):\n" + summary.Content + "\nTEAMIE_SOURCE_REFERENCES " + string(provenance)})
 	start := len(original)
 	for i := len(original) - 1; i >= 0; i-- {
 		if original[i] != nil && original[i].Role == schema.User && len(original)-i <= 12 {
