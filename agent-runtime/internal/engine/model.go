@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	wire "teamie/agent-protocol/kitex_gen/agent"
 	"teamie/agent-protocol/kitex_gen/agent/modelgatewayservice"
+	"teamie/agent-protocol/modeltransport"
 )
 
 type ModelError struct {
@@ -32,105 +33,10 @@ type GatewayModel struct {
 	HTTP                    *http.Client
 	Store                   *Store
 	Lease                   *Lease
-	Tools                   []*schema.ToolInfo
 	Authorize               func(context.Context) error
 }
 
-func (m *GatewayModel) WithTools(tools []*schema.ToolInfo) (model.ToolCallingChatModel, error) {
-	copy := *m
-	copy.Tools = append([]*schema.ToolInfo(nil), tools...)
-	return &copy, nil
-}
-
-type chatMessage struct {
-	Role       string            `json:"role"`
-	Content    string            `json:"content"`
-	Name       string            `json:"name,omitempty"`
-	ToolCallID string            `json:"tool_call_id,omitempty"`
-	ToolCalls  []schema.ToolCall `json:"tool_calls,omitempty"`
-}
-type chatTool struct {
-	Type     string       `json:"type"`
-	Function toolFunction `json:"function"`
-}
-type toolFunction struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	Parameters  json.RawMessage `json:"parameters"`
-}
-
-func chatRequest(messages []*schema.Message, tools []*schema.ToolInfo, opts *model.Options) ([]byte, error) {
-	input := make([]chatMessage, 0, len(messages))
-	for _, msg := range messages {
-		if msg != nil {
-			input = append(input, chatMessage{Role: string(msg.Role), Content: msg.Content, Name: msg.Name, ToolCallID: msg.ToolCallID, ToolCalls: msg.ToolCalls})
-		}
-	}
-	toolDefs := []chatTool{}
-	for _, info := range tools {
-		params := json.RawMessage(`{"type":"object","properties":{}}`)
-		if info.ParamsOneOf != nil {
-			js, e := info.ToJSONSchema()
-			if e != nil {
-				return nil, e
-			}
-			b, e := json.Marshal(js)
-			if e != nil {
-				return nil, e
-			}
-			params = b
-		}
-		toolDefs = append(toolDefs, chatTool{Type: "function", Function: toolFunction{Name: info.Name, Description: info.Desc, Parameters: params}})
-	}
-	maxTokens := 2048
-	if opts.MaxTokens != nil && *opts.MaxTokens > 0 && *opts.MaxTokens <= 4096 {
-		maxTokens = *opts.MaxTokens
-	}
-	req := map[string]any{"messages": input, "max_tokens": maxTokens, "stream": false}
-	if len(toolDefs) > 0 {
-		req["tools"] = toolDefs
-		req["tool_choice"] = "auto"
-		req["parallel_tool_calls"] = false
-	}
-	if opts.ToolChoice != nil {
-		switch *opts.ToolChoice {
-		case schema.ToolChoiceForbidden:
-			req["tool_choice"] = "none"
-		case schema.ToolChoiceForced:
-			req["tool_choice"] = "required"
-		}
-	}
-	return json.Marshal(req)
-}
-func parseCompletion(b []byte) (*schema.Message, error) {
-	var response struct {
-		Choices []struct {
-			Message      chatMessage `json:"message"`
-			FinishReason string      `json:"finish_reason"`
-		} `json:"choices"`
-		Usage struct {
-			Prompt     int `json:"prompt_tokens"`
-			Completion int `json:"completion_tokens"`
-			Total      int `json:"total_tokens"`
-		} `json:"usage"`
-	}
-	if json.Unmarshal(b, &response) != nil || len(response.Choices) == 0 {
-		return nil, &ModelError{Code: "invalid_upstream_response", Retry: true}
-	}
-	c := response.Choices[0]
-	if len(c.Message.Content) > 65536 || len(c.Message.ToolCalls) > 16 {
-		return nil, &ModelError{Code: "upstream_response_limit", Retry: false}
-	}
-	seen := map[string]bool{}
-	for _, call := range c.Message.ToolCalls {
-		if call.ID == "" || seen[call.ID] || call.Function.Name == "" || len(call.Function.Arguments) > 65536 {
-			return nil, &ModelError{Code: "invalid_tool_call", Retry: false}
-		}
-		seen[call.ID] = true
-	}
-	return &schema.Message{Role: schema.Assistant, Content: c.Message.Content, ToolCalls: c.Message.ToolCalls, ResponseMeta: &schema.ResponseMeta{FinishReason: c.FinishReason, Usage: &schema.TokenUsage{PromptTokens: response.Usage.Prompt, CompletionTokens: response.Usage.Completion, TotalTokens: response.Usage.Total}}}, nil
-}
-func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.Message, options ...model.Option) (*schema.Message, error) {
+func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticMessage, options ...model.Option) (*schema.AgenticMessage, error) {
 	run, e := CurrentRun(ctx)
 	if e != nil {
 		return nil, e
@@ -146,21 +52,17 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.Message,
 	if e = run.Front.acquire(ctx); e != nil {
 		return nil, e
 	}
-	opts := model.GetCommonOptions(&model.Options{Tools: m.Tools}, options...)
+	opts := model.GetCommonOptions(nil, options...)
 	m.capOutput(opts)
-	request, e := chatRequest(messages, opts.Tools, opts)
+	request, e := agenticRequest(messages, opts, false)
 	if e != nil {
 		return nil, e
 	}
-	hash := digest(request)
+	hash := modelRequestHash(request)
 	step := int(run.Step.Add(1))
-	cached, e := m.Store.CachedModel(ctx, run, step, hash)
+	cached, e := m.cachedModel(ctx, run, step, hash, messages, opts, false)
 	if e == nil {
-		var result schema.Message
-		if e = json.Unmarshal(cached, &result); e != nil {
-			return nil, e
-		}
-		return &result, nil
+		return decodeAgenticMessage(cached)
 	}
 	if !errors.Is(e, pgx.ErrNoRows) {
 		return nil, e
@@ -176,11 +78,14 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.Message,
 		}
 		return nil, &ModelError{Code: code, Retry: code != "invalid_request" && code != "request_too_large"}
 	}
-	result, e := parseCompletion([]byte(response.GetResponseJson()))
+	result, e := decodeAgenticMessage([]byte(response.GetResponseJson()))
 	if e != nil {
 		return nil, e
 	}
-	b, e := json.Marshal(result)
+	if e = validateModelResult(result); e != nil {
+		return nil, e
+	}
+	b, e := (&schema.HumanReadableSerializer{}).Marshal(result)
 	if e != nil {
 		return nil, e
 	}
@@ -236,7 +141,7 @@ func retryError(err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrLeaseLost)
 }
 
-var _ model.ToolCallingChatModel = (*GatewayModel)(nil)
+var _ model.AgenticModel = (*GatewayModel)(nil)
 
 func (m *GatewayModel) capOutput(opts *model.Options) {
 	if m.ContextWindow == nil {
@@ -256,4 +161,110 @@ func (m *GatewayModel) capOutput(opts *model.Options) {
 	} else if *opts.MaxTokens > limit {
 		opts.MaxTokens = &limit
 	}
+}
+
+func agenticRequest(messages []*schema.AgenticMessage, opts *model.Options, streaming bool) ([]byte, error) {
+	if opts.MaxTokens == nil {
+		n := 2048
+		opts.MaxTokens = &n
+	}
+	if *opts.MaxTokens <= 0 {
+		return nil, &ModelError{Code: "invalid_request"}
+	}
+	if *opts.MaxTokens > 4096 {
+		n := 4096
+		opts.MaxTokens = &n
+	}
+	if opts.AgenticToolChoice == nil {
+		choice := schema.ToolChoiceAllowed
+		if opts.ToolChoice != nil {
+			choice = *opts.ToolChoice
+		}
+		opts.AgenticToolChoice = &schema.AgenticToolChoice{Type: choice}
+	}
+	// Model selection belongs solely to the administrator's gateway.
+	opts.Model = nil
+	messagesJSON, err := (&schema.HumanReadableSerializer{}).Marshal(messages)
+	if err != nil {
+		return nil, err
+	}
+	optionsJSON, err := json.Marshal(opts)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(modeltransport.Request{Protocol: modeltransport.Version, Messages: messagesJSON, Options: optionsJSON, Stream: streaming})
+}
+
+// Native Eino assigns fresh internal message IDs when restarting a turn. They
+// are persisted for Session mutation targets but do not affect provider input.
+// Keep them in the transport/audit; exclude only this known ephemeral key from
+// the receipt identity. Source IDs live in the message body and remain hashed.
+func modelRequestHash(raw []byte) string {
+	var envelope modeltransport.Request
+	if json.Unmarshal(raw, &envelope) != nil {
+		return digest(raw)
+	}
+	value, wrapper := serializedValue(envelope.Messages)
+	var messages []map[string]json.RawMessage
+	if json.Unmarshal(value, &messages) != nil {
+		return digest(raw)
+	}
+	for _, message := range messages {
+		var extra map[string]json.RawMessage
+		if json.Unmarshal(message["extra"], &extra) == nil {
+			delete(extra, "_eino_msg_id")
+			if len(extra) == 0 {
+				delete(message, "extra")
+			} else {
+				message["extra"], _ = json.Marshal(extra)
+			}
+		}
+	}
+	value, _ = json.Marshal(messages)
+	if wrapper != nil {
+		wrapper["value"] = value
+		value, _ = json.Marshal(wrapper)
+	}
+	envelope.Messages = value
+	b, _ := json.Marshal(envelope)
+	return digest(b)
+}
+
+func (m *GatewayModel) cachedModel(ctx context.Context, run *Run, step int, hash string, messages []*schema.AgenticMessage, opts *model.Options, streaming bool) ([]byte, error) {
+	b, err := m.Store.CachedModel(ctx, run, step, hash)
+	if !errors.Is(err, ErrReplayConflict) {
+		return b, err
+	}
+	legacy, convertErr := legacyMessages(messages)
+	if convertErr != nil {
+		return nil, err
+	}
+	oldOpts := *opts
+	if oldOpts.AgenticToolChoice != nil {
+		c := oldOpts.AgenticToolChoice
+		if c.Allowed != nil || c.Forced != nil {
+			return nil, err
+		}
+		oldOpts.ToolChoice = &c.Type
+	}
+	raw, convertErr := legacyChatRequest(legacy, oldOpts.Tools, &oldOpts)
+	if convertErr != nil {
+		return nil, err
+	}
+	if streaming {
+		var o map[string]any
+		_ = json.Unmarshal(raw, &o)
+		o["stream"] = true
+		o["stream_options"] = map[string]any{"include_usage": true}
+		raw, _ = json.Marshal(o)
+	}
+	b, err = m.Store.CachedModel(ctx, run, step, digest(raw))
+	if err != nil {
+		return nil, err
+	}
+	// Never permit a native-format receipt to bypass its request identity.
+	if !isLegacyMessage(b) {
+		return nil, ErrReplayConflict
+	}
+	return b, nil
 }

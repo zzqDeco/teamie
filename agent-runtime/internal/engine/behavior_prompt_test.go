@@ -37,7 +37,7 @@ func (g *behaviorGateway) Chat(_ context.Context, r *wire.GatewayChatRequest, _ 
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	var request behaviorRequest
-	if err := json.Unmarshal([]byte(r.RequestJson), &request); err != nil {
+	if err := decodeFixtureRequest(r.RequestJson, &request); err != nil {
 		g.failure = err
 		return nil, err
 	}
@@ -55,7 +55,7 @@ func (g *behaviorGateway) Chat(_ context.Context, r *wire.GatewayChatRequest, _ 
 		return nil, err
 	}
 	raw := string(b)
-	return &wire.GatewayChatResponse{Ok: true, ResponseJson: &raw}, nil
+	return &wire.GatewayChatResponse{Ok: true, ResponseJson: modelFixtureResponse(raw)}, nil
 }
 
 func (g *behaviorGateway) snapshot(t *testing.T) []behaviorRequest {

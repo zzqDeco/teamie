@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const nativeRuntimeVersion = "eino-v0.10.0-alpha.35/teamie-v3"
+const nativeRuntimeVersion = "eino-v0.10.0-alpha.35/teamie-v4-agentic"
 
 type checkpointMetadata struct {
 	Version        string
@@ -34,13 +34,13 @@ func (s *Store) ResumeMetadata(ctx context.Context, id string) (*checkpointMetad
 	err = json.Unmarshal(b, v)
 	return v, err
 }
-func (s *SessionStore) bind(run *Run, targets []string) {
+func (s *SessionStore[M]) bind(run *Run, targets []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.run = run
 	s.targets = append([]string{}, targets...)
 }
-func (s *SessionStore) metadata() []byte {
+func (s *SessionStore[M]) metadata() []byte {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	m := checkpointMetadata{Version: nativeRuntimeVersion, Revision: s.Revision, Targets: append([]string{}, s.targets...)}
@@ -147,19 +147,19 @@ func targetsFromError(err error) []string {
 	}
 	return out
 }
-func inputMessages(inputs []Input) []*schema.Message {
-	out := make([]*schema.Message, 0, len(inputs))
+func inputMessages(inputs []Input) []*schema.AgenticMessage {
+	out := make([]*schema.AgenticMessage, 0, len(inputs))
 	for _, in := range inputs {
 		b, _ := json.Marshal(in)
 		prefix := "TEAMIE_NEW_MESSAGE "
 		if in.Kind == "task.notification" {
 			prefix = "TEAMIE_TASK_NOTIFICATION "
 		}
-		out = append(out, &schema.Message{Role: schema.User, Content: prefix + string(b)})
+		out = append(out, schema.UserAgenticMessage(prefix+string(b)))
 	}
 	return out
 }
-func relevantInput(in Input, tc *adk.TurnContext[Input, *schema.Message]) bool {
+func relevantInput(in Input, tc *adk.TurnContext[Input, *schema.AgenticMessage]) bool {
 	if tc == nil {
 		return false
 	}

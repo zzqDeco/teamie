@@ -49,7 +49,7 @@ func (g *toolPathGateway) Chat(_ context.Context, r *wire.GatewayChatRequest, _ 
 	g.pathMu.Lock()
 	defer g.pathMu.Unlock()
 	var request toolPathRequest
-	if err := json.Unmarshal([]byte(r.RequestJson), &request); err != nil {
+	if err := decodeFixtureRequest(r.RequestJson, &request); err != nil {
 		g.failure = err
 		return nil, err
 	}
@@ -70,7 +70,7 @@ func (g *toolPathGateway) Chat(_ context.Context, r *wire.GatewayChatRequest, _ 
 		return nil, err
 	}
 	response := string(raw)
-	return &wire.GatewayChatResponse{Ok: true, ResponseJson: &response}, nil
+	return &wire.GatewayChatResponse{Ok: true, ResponseJson: modelFixtureResponse(response)}, nil
 }
 
 func toolPathCall(name, id string, args any) (chatMessage, error) {

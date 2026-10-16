@@ -32,7 +32,7 @@ func (f *summaryGatewayFixture) Chat(ctx context.Context, r *wire.GatewayChatReq
 		Tools      []chatTool    `json:"tools"`
 		ToolChoice string        `json:"tool_choice"`
 	}
-	if err := json.Unmarshal([]byte(r.RequestJson), &request); err != nil {
+	if err := decodeFixtureRequest(r.RequestJson, &request); err != nil {
 		f.failure = err
 		return nil, err
 	}
@@ -84,7 +84,7 @@ func (f *summaryGatewayFixture) Chat(ctx context.Context, r *wire.GatewayChatReq
 		return nil, err
 	}
 	response := string(raw)
-	return &wire.GatewayChatResponse{Ok: true, ResponseJson: &response}, nil
+	return &wire.GatewayChatResponse{Ok: true, ResponseJson: modelFixtureResponse(response)}, nil
 }
 
 func TestNativeSummaryForbidsToolsAndKeepsOrdinaryIMTools(t *testing.T) {

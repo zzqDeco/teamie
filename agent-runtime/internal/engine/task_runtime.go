@@ -67,7 +67,7 @@ type workerTasks struct {
 	store    *TaskStore
 	manager  *bg.Manager
 	backend  *SandboxBackend
-	handlers []adk.ChatModelAgentMiddleware
+	handlers []adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]
 }
 
 func (e *Engine) tasks(ctx context.Context, def *wire.AgentDefinition, l *Lease, authorize func(context.Context) error) (*workerTasks, error) {
@@ -79,7 +79,7 @@ func (e *Engine) tasks(ctx context.Context, def *wire.AgentDefinition, l *Lease,
 	}}
 	executors := bg.NewExecutorRegistry()
 	registry := bgtool.NewRegistry()
-	manager, err := bg.New(ctx, &bg.Config{Tasks: store, TaskEvents: store, Executors: executors, SendTaskCreatedEvent: bg.TaskCreatedSessionEventSender[*schema.Message](), ContextSnapshotter: taskContexts{agentID: def.Id, revision: def.Revision}, IDGen: func(ctx context.Context, _ *bg.AllocateTaskIDRequest) (string, error) {
+	manager, err := bg.New(ctx, &bg.Config{Tasks: store, TaskEvents: store, Executors: executors, SendTaskCreatedEvent: bg.TaskCreatedSessionEventSender[*schema.AgenticMessage](), ContextSnapshotter: taskContexts{agentID: def.Id, revision: def.Revision}, IDGen: func(ctx context.Context, _ *bg.AllocateTaskIDRequest) (string, error) {
 		r, err := CurrentRun(ctx)
 		if err != nil {
 			return "", err
@@ -95,7 +95,7 @@ func (e *Engine) tasks(ctx context.Context, def *wire.AgentDefinition, l *Lease,
 	}
 	backend := &SandboxBackend{Client: e.Sandbox, Token: e.Config.SandboxToken, AgentID: def.Id, Authorize: authorize, Store: e.Store, Lease: l}
 	timeout := 1000
-	filesystem, err := fsmiddleware.New(ctx, &fsmiddleware.MiddlewareConfig{Backend: backend, ExecuteToolConfig: &fsmiddleware.ExecuteToolConfig{ToolConfig: fsmiddleware.ToolConfig{Name: "workspace_execute"}}, Background: &fsmiddleware.BackgroundConfig{NotificationSessionID: func(context.Context) (string, error) { return "agent:" + def.Id, nil }, Recoverable: &fsmiddleware.RecoverableBackgroundConfig{Shell: backend, Manager: manager, Executors: executors, ToolRegistry: registry, ForegroundTimeoutMs: &timeout, ShouldAutoBackground: func(context.Context, *bg.ForegroundCandidate) bool { return true }}}})
+	filesystem, err := fsmiddleware.NewTyped[*schema.AgenticMessage](ctx, &fsmiddleware.MiddlewareConfig{Backend: backend, ExecuteToolConfig: &fsmiddleware.ExecuteToolConfig{ToolConfig: fsmiddleware.ToolConfig{Name: "workspace_execute"}}, Background: &fsmiddleware.BackgroundConfig{NotificationSessionID: func(context.Context) (string, error) { return "agent:" + def.Id, nil }, Recoverable: &fsmiddleware.RecoverableBackgroundConfig{Shell: backend, Manager: manager, Executors: executors, ToolRegistry: registry, ForegroundTimeoutMs: &timeout, ShouldAutoBackground: func(context.Context, *bg.ForegroundCandidate) bool { return true }}}})
 	if err != nil {
 		return nil, err
 	}
@@ -103,23 +103,23 @@ func (e *Engine) tasks(ctx context.Context, def *wire.AgentDefinition, l *Lease,
 	if err != nil {
 		return nil, err
 	}
-	control, err := bgmiddleware.New(ctx, &bgmiddleware.Config{Manager: manager, ProgressReadersByExecutorKey: map[string]bgmiddleware.TaskProgressReader{bgtool.RecoverableExecutorKey: progress}})
+	control, err := bgmiddleware.NewTyped(ctx, &bgmiddleware.TypedConfig[*schema.AgenticMessage]{Manager: manager, ProgressReadersByExecutorKey: map[string]bgmiddleware.TaskProgressReader{bgtool.RecoverableExecutorKey: progress}})
 	if err != nil {
 		return nil, err
 	}
-	plan, err := plantask.New(ctx, &plantask.Config{Backend: backend, BaseDir: "/workspace/.teamie/plan"})
+	plan, err := plantask.NewTyped[*schema.AgenticMessage](ctx, &plantask.Config{Backend: backend, BaseDir: "/workspace/.teamie/plan"})
 	if err != nil {
 		return nil, err
 	}
 	receipts := &nativeToolReceipts{Store: e.Store, Lease: l, Tasks: store, Manager: manager, Authorize: authorize}
-	return &workerTasks{store: store, manager: manager, backend: backend, handlers: []adk.ChatModelAgentMiddleware{receipts, filesystem, control, plan}}, nil
+	return &workerTasks{store: store, manager: manager, backend: backend, handlers: []adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]{receipts, filesystem, control, plan}}, nil
 }
 
 // nativeToolReceipts protects native filesystem/control effects using the same
 // persisted receipt boundary as IM tools. All shell executions are submitted
 // durably before StartCommand, even if the model asks to wait in foreground.
 type nativeToolReceipts struct {
-	*adk.BaseChatModelAgentMiddleware
+	*adk.TypedBaseChatModelAgentMiddleware[*schema.AgenticMessage]
 	Store     *Store
 	Lease     *Lease
 	Tasks     *TaskStore
@@ -197,7 +197,7 @@ func (m *nativeToolReceipts) WrapEnhancedInvokableToolCall(_ context.Context, ne
 					return nil, err
 				}
 				if !exists {
-					if err = bg.TaskCreatedSessionEventSender[*schema.Message]()(ctx, existing); err != nil {
+					if err = bg.TaskCreatedSessionEventSender[*schema.AgenticMessage]()(ctx, existing); err != nil {
 						return nil, err
 					}
 				}

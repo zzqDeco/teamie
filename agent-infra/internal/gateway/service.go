@@ -11,6 +11,7 @@ import (
 
 	"teamie/agent-infra/internal/api"
 	"teamie/agent-protocol/kitex_gen/agent"
+	"teamie/agent-protocol/modeltransport"
 )
 
 type Service struct {
@@ -51,7 +52,9 @@ func (s *Service) Chat(ctx context.Context, r *agent.GatewayChatRequest) (*agent
 	if !validID(r.OwnerId) || !validID(r.AgentId) || !validID(r.SessionId) || !validID(r.RunId) {
 		return failed(api.Err(400, "invalid_request", "Invalid attribution identifiers")), nil
 	}
-	return s.call(ctx, r.OwnerId, r.AgentId, r.SessionId, r.RunId, r.RequestJson), nil
+	// Plain Thrift unary cancellation only releases the caller. Keeping a
+	// provider call here could orphan the single model slot indefinitely.
+	return failed(api.Err(400, "protocol_unsupported", "Model generation requires the private HTTP transport")), nil
 }
 func (s *Service) call(ctx context.Context, owner, id, session, run, raw string) *agent.GatewayChatResponse {
 	c, e := s.Store.Load(ctx)
@@ -74,7 +77,7 @@ func (s *Service) call(ctx context.Context, owner, id, session, run, raw string)
 	if e != nil {
 		return failed(api.Err(503, "credential_unavailable", "Saved model credential could not be decrypted"))
 	}
-	ctx, cancel := context.WithTimeout(ctx, 50*time.Second)
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	index := id + "/" + run
 	s.mu.Lock()
@@ -131,7 +134,8 @@ func (s *Service) CancelRun(id, run string) {
 func (s *Service) Routes(auth api.AdminAuth) http.Handler {
 	m := http.NewServeMux()
 	api.Operations(m, s.Store.Ready)
-	m.HandleFunc("POST /internal/v1/chat/stream", s.streamHTTP)
+	m.HandleFunc("POST "+modeltransport.GeneratePath, s.generateHTTP)
+	m.HandleFunc("POST "+modeltransport.StreamPath, s.streamHTTP)
 	wrap := func(fn func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			u, e := auth.Require(r)
@@ -204,7 +208,7 @@ func (s *Service) Routes(auth api.AdminAuth) http.Handler {
 			return
 		}
 		start := time.Now()
-		raw, _ := json.Marshal(map[string]any{"messages": []map[string]string{{"role": "user", "content": "Reply with OK."}}, "max_completion_tokens": 8})
+		raw, _ := json.Marshal(modeltransport.Request{Protocol: modeltransport.Version, Messages: json.RawMessage(`[{"role":"user","content_blocks":[{"type":"user_input_text","user_input_text":{"text":"Reply with OK."}}]}]`), Options: json.RawMessage(`{"MaxTokens":8,"AgenticToolChoice":{"Type":"forbidden"}}`)})
 		res := s.call(r.Context(), owner, "admin-test", "admin-test", time.Now().UTC().Format("20060102T150405.000000000"), string(raw))
 		if !res.Ok {
 			api.Fail(w, api.Err(int(res.GetStatusCode()), res.GetErrorCode(), res.GetErrorMessage()))

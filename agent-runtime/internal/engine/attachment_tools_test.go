@@ -165,7 +165,7 @@ func TestFileOnlyInboxDeliversDescriptorsWithoutBinary(t *testing.T) {
 		t.Fatal("file descriptors lost", err)
 	}
 	messages := inputMessages([]Input{in})
-	if len(messages) != 1 || !strings.Contains(messages[0].Content, descriptor.ID) || strings.Contains(messages[0].Content, "base64") {
+	if len(messages) != 1 || !strings.Contains(agenticText(messages[0]), descriptor.ID) || strings.Contains(agenticText(messages[0]), "base64") {
 		t.Fatal("invalid model input")
 	}
 }
@@ -192,12 +192,12 @@ func TestAttachmentDownloadRejectsRedirectsAndHashMismatch(t *testing.T) {
 func TestAttachmentReferencesSurviveRepeatedCompaction(t *testing.T) {
 	id := uuid.NewString()
 	in := Input{EventID: "1", WorkspaceID: uuid.NewString(), ConversationID: uuid.NewString(), MessageID: uuid.NewString(), Attachments: []Attachment{{ID: id, Filename: "source.bin", SizeBytes: 1}}}
-	first, e := finalizeSummary(context.Background(), inputMessages([]Input{in}), &schema.Message{Content: "A referenced source file remains available through explicit tools."})
-	if e != nil || len(first) == 0 || !strings.Contains(first[0].Content, id) {
+	first, e := finalizeSummary(context.Background(), inputMessages([]Input{in}), schema.UserAgenticMessage("A referenced source file remains available through explicit tools."))
+	if e != nil || len(first) == 0 || !strings.Contains(agenticText(first[0]), id) {
 		t.Fatal("attachment provenance lost", e)
 	}
-	second, e := finalizeSummary(context.Background(), first, &schema.Message{Content: "Keep the file's originating conversation."})
-	if e != nil || len(second) == 0 || !strings.Contains(second[0].Content, id) || !strings.Contains(second[0].Content, in.ConversationID) {
+	second, e := finalizeSummary(context.Background(), first, schema.UserAgenticMessage("Keep the file's originating conversation."))
+	if e != nil || len(second) == 0 || !strings.Contains(agenticText(second[0]), id) || !strings.Contains(agenticText(second[0]), in.ConversationID) {
 		t.Fatal("repeat compaction lost file source", e)
 	}
 }

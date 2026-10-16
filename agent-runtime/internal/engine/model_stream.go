@@ -9,14 +9,17 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"runtime"
+	"sync"
 	"time"
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 	"github.com/jackc/pgx/v5"
+	"teamie/agent-protocol/modeltransport"
 )
 
-func (m *GatewayModel) Stream(ctx context.Context, input []*schema.Message, options ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessage, options ...model.Option) (*schema.StreamReader[*schema.AgenticMessage], error) {
 	run, err := CurrentRun(ctx)
 	if err != nil {
 		return nil, err
@@ -32,26 +35,21 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.Message, opti
 	if err = run.Front.acquire(ctx); err != nil {
 		return nil, err
 	}
-	opts := model.GetCommonOptions(&model.Options{Tools: m.Tools}, options...)
+	opts := model.GetCommonOptions(nil, options...)
 	m.capOutput(opts)
-	request, err := chatRequest(input, opts.Tools, opts)
+	request, err := agenticRequest(input, opts, true)
 	if err != nil {
 		return nil, err
 	}
-	var object map[string]any
-	_ = json.Unmarshal(request, &object)
-	object["stream"] = true
-	object["stream_options"] = map[string]any{"include_usage": true}
-	request, _ = json.Marshal(object)
-	hash := digest(request)
+	hash := modelRequestHash(request)
 	step := int(run.Step.Add(1))
-	cached, err := m.Store.CachedModel(ctx, run, step, hash)
+	cached, err := m.cachedModel(ctx, run, step, hash, input, opts, true)
 	if err == nil {
-		var result schema.Message
-		if err = json.Unmarshal(cached, &result); err != nil {
-			return nil, err
+		result, e := decodeAgenticMessage(cached)
+		if e != nil {
+			return nil, e
 		}
-		return schema.StreamReaderFromArray([]*schema.Message{&result}), nil
+		return schema.StreamReaderFromArray([]*schema.AgenticMessage{result}), nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
@@ -59,8 +57,8 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.Message, opti
 	if m.StreamURL == "" {
 		return nil, &ModelError{Code: "gateway_stream_unavailable", Retry: true}
 	}
-	body, _ := json.Marshal(map[string]string{"ownerId": m.OwnerID, "agentId": m.AgentID, "sessionId": "agent:" + m.AgentID, "runId": executionID(run), "requestJson": string(request)})
-	requestCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	body, _ := json.Marshal(modeltransport.CallRequest{OwnerID: m.OwnerID, AgentID: m.AgentID, SessionID: "agent:" + m.AgentID, RunID: executionID(run), RequestJSON: string(request)})
+	requestCtx, cancel := context.WithCancel(ctx)
 	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, m.StreamURL, bytes.NewReader(body))
 	if err != nil {
 		cancel()
@@ -82,14 +80,16 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.Message, opti
 		cancel()
 		return nil, &ModelError{Code: "gateway_unavailable", Retry: true}
 	}
-	reader, writer := schema.Pipe[*schema.Message](8)
+	reader, writer := schema.Pipe[*schema.AgenticMessage](8)
+	output, bridgeDone := cancelStreamOnClose(reader, cancel)
 	go func() {
 		defer cancel()
+		defer bridgeDone()
 		defer response.Body.Close()
 		defer writer.Close()
 		scanner := bufio.NewScanner(io.LimitReader(response.Body, 8<<20+1))
 		scanner.Buffer(make([]byte, 4096), 512<<10)
-		chunks := []*schema.Message{}
+		chunks := []*schema.AgenticMessage{}
 		total := 0
 		done := false
 		for scanner.Scan() {
@@ -109,7 +109,7 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.Message, opti
 			}
 			switch frame.Type {
 			case "chunk":
-				message, e := streamChunk([]byte(frame.ResponseJSON))
+				message, e := decodeAgenticMessage([]byte(frame.ResponseJSON))
 				if e != nil {
 					writer.Send(nil, e)
 					return
@@ -147,24 +147,16 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.Message, opti
 			writer.Send(nil, &ModelError{Code: "invalid_upstream_response", Retry: true})
 			return
 		}
-		result, err := schema.ConcatMessages(chunks)
+		result, err := schema.ConcatAgenticMessages(chunks)
 		if err != nil {
 			writer.Send(nil, &ModelError{Code: "invalid_upstream_response", Retry: true})
 			return
 		}
-		if len(result.Content) > 65536 || len(result.ToolCalls) > 16 {
-			writer.Send(nil, &ModelError{Code: "upstream_response_limit"})
+		if err = validateModelResult(result); err != nil {
+			writer.Send(nil, err)
 			return
 		}
-		seen := map[string]bool{}
-		for _, call := range result.ToolCalls {
-			if call.ID == "" || seen[call.ID] || call.Function.Name == "" || len(call.Function.Arguments) > 65536 {
-				writer.Send(nil, &ModelError{Code: "invalid_tool_call"})
-				return
-			}
-			seen[call.ID] = true
-		}
-		b, err := json.Marshal(result)
+		b, err := (&schema.HumanReadableSerializer{}).Marshal(result)
 		if err == nil {
 			err = m.Store.SaveModel(ctx, m.Lease, run, step, hash, b)
 		}
@@ -172,47 +164,63 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.Message, opti
 			writer.Send(nil, err)
 		}
 	}()
-	return reader, nil
-}
-func streamChunk(b []byte) (*schema.Message, error) {
-	var r struct {
-		Choices []struct {
-			Delta        chatMessage `json:"delta"`
-			FinishReason string      `json:"finish_reason"`
-		} `json:"choices"`
-		Usage *struct {
-			Prompt     int `json:"prompt_tokens"`
-			Completion int `json:"completion_tokens"`
-			Total      int `json:"total_tokens"`
-		} `json:"usage"`
-	}
-	if json.Unmarshal(b, &r) != nil {
-		return nil, &ModelError{Code: "invalid_upstream_response", Retry: true}
-	}
-	m := &schema.Message{}
-	if len(r.Choices) > 0 {
-		c := r.Choices[0]
-		m.Role = schema.Assistant
-		m.Content = c.Delta.Content
-		m.ToolCalls = c.Delta.ToolCalls
-		if c.FinishReason != "" {
-			m.ResponseMeta = &schema.ResponseMeta{FinishReason: c.FinishReason}
-		}
-	}
-	if r.Usage != nil {
-		if m.ResponseMeta == nil {
-			m.ResponseMeta = &schema.ResponseMeta{}
-		}
-		m.ResponseMeta.Usage = &schema.TokenUsage{PromptTokens: r.Usage.Prompt, CompletionTokens: r.Usage.Completion, TotalTokens: r.Usage.Total}
-	}
-	return m, nil
+	return output, nil
 }
 func safeGatewayCode(code string) string {
 	switch code {
-	case "model_unconfigured", "model_disabled", "gateway_unavailable", "upstream_unavailable", "upstream_timeout", "upstream_error", "invalid_request", "request_too_large", "upstream_response_limit", "invalid_upstream_response", "run_cancelled":
+	case "model_unconfigured", "model_disabled", "gateway_unavailable", "upstream_unavailable", "upstream_timeout", "upstream_error", "invalid_request", "request_too_large", "upstream_response_limit", "invalid_upstream_response", "run_cancelled", "gateway_busy", "upstream_rate_limited", "upstream_http_error", "upstream_in_stream_error", "upstream_interrupted", "client_interrupted", "canceled", "protocol_unsupported":
 		return code
 	}
 	return "gateway_error"
 }
 
-var gatewayStreamHTTP = &http.Client{Transport: &http.Transport{DialContext: (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext, ResponseHeaderTimeout: 15 * time.Second, IdleConnTimeout: 30 * time.Second, TLSHandshakeTimeout: 10 * time.Second, MaxIdleConns: 8, MaxIdleConnsPerHost: 2}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+var gatewayStreamHTTP = &http.Client{Transport: &http.Transport{Proxy: nil, DialContext: (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext, IdleConnTimeout: 30 * time.Second, TLSHandshakeTimeout: 10 * time.Second, MaxIdleConns: 8, MaxIdleConnsPerHost: 2}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+
+// Eino .35's Pipe has no Close hook. A private pulse source makes consumer Close
+// observable even while the HTTP producer is waiting on a silent upstream. No
+// pulse becomes a model chunk; completion and cancellation join this watcher.
+func cancelStreamOnClose(reader *schema.StreamReader[*schema.AgenticMessage], cancel context.CancelFunc) (*schema.StreamReader[*schema.AgenticMessage], func()) {
+	pulse, writer := schema.Pipe[*schema.AgenticMessage](0)
+	stopped, joined := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(joined)
+		defer writer.Close()
+		ticker := time.NewTicker(25 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopped:
+				return
+			case <-ticker.C:
+				if writer.Send(nil, nil) {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	merged := schema.MergeStreamReaders([]*schema.StreamReader[*schema.AgenticMessage]{reader, pulse})
+	// Pipe automatic-close finalizers attach to the original reader wrapper,
+	// which Merge discards while retaining its stream. Set the idempotent-close
+	// flags after merging so collecting an unused wrapper cannot end live data.
+	merged.SetAutomaticClose()
+	// The producer retains the underlying streams, so their own finalizers
+	// cannot reclaim an abandoned consumer. Only the returned conversion holds
+	// this token: it keeps active reads alive and cancels/closes when abandoned.
+	lifetime := &modelStreamLifetime{cancel: cancel, reader: merged}
+	runtime.SetFinalizer(lifetime, func(l *modelStreamLifetime) { l.cancel(); l.reader.Close() })
+	out := schema.StreamReaderWithConvert(merged, func(m *schema.AgenticMessage) (*schema.AgenticMessage, error) {
+		runtime.KeepAlive(lifetime)
+		if m == nil {
+			return nil, schema.ErrNoValue
+		}
+		return m, nil
+	})
+	var once sync.Once
+	return out, func() { once.Do(func() { close(stopped); pulse.Close(); <-joined }) }
+}
+
+type modelStreamLifetime struct {
+	cancel context.CancelFunc
+	reader *schema.StreamReader[*schema.AgenticMessage]
+}
