@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"teamie/agent-protocol/kitex_gen/agent"
 	"testing"
 	"time"
 )
@@ -58,6 +59,7 @@ forbidden_names = {
  'IDENTITY_DATABASE_URL','CHAT_DATABASE_URL','AGENT_CONTROL_DATABASE_URL',
  'AGENT_RUNTIME_DATABASE_URL','GATEWAY_DATABASE_URL','DOCKER_SOCKET','DOCKER_HOST',
 }
+
 assert forbidden_names.isdisjoint(os.environ)
 assert not any(k.startswith('POSTGRES_') and k.endswith('PASSWORD') for k in os.environ)
 fixture_credentials = (%q,%q,%q)
@@ -111,5 +113,54 @@ PY`, token, fixtureSecret, fixtureMaster)
 	var list []any
 	if json.NewDecoder(res.Body).Decode(&list) != nil || len(list) != 0 {
 		t.Fatal("ephemeral sandbox containers were not cleaned")
+	}
+}
+
+// This runs in the same required disposable-Docker CI gate as isolation tests.
+// Closing the supervisor models lost transport/process ownership while the
+// Docker daemon retains a live command; recovery must adopt it exactly once.
+func TestRealDockerAsyncSupervisorRestartAndStableTask(t *testing.T) {
+	runner := os.Getenv("SANDBOX_TEST_RUNNER_IMAGE")
+	if runner == "" {
+		t.Skip("SANDBOX_TEST_RUNNER_IMAGE is unset; real Docker async recovery is unverified locally")
+	}
+	engine := NewDocker("/var/run/docker.sock")
+	root := t.TempDir()
+	s, e := New(engine, token, image, filepath.Join(root, "workspaces"), filepath.Join(root, "state"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer s.Close()
+	s.Image = runner
+	r := startRequest()
+	r.Command = "printf first; sleep 2; printf second; printf once >> side-effect.txt"
+	res, _ := s.Start(context.Background(), r)
+	if !res.Ok {
+		t.Fatal(res)
+	}
+	awaitTask(t, s, func(r *agent.SandboxTaskResponse) bool { return r.GetStdout() == "first" })
+	s.Close()
+	recovered, e := New(engine, token, image, s.WorkspaceRoot, s.StateRoot)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer recovered.Close()
+	recovered.Image = runner
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if e = recovered.Recover(ctx); e != nil {
+		t.Fatal(e)
+	}
+	res, _ = recovered.Start(ctx, r)
+	if !res.Ok {
+		t.Fatal(res)
+	}
+	res = awaitTask(t, recovered, completed)
+	if res.GetStdout() != "firstsecond" {
+		t.Fatal(res)
+	}
+	file, _ := recovered.Workspace(ctx, &agent.SandboxWorkspaceRequest{ServiceToken: token, AgentId: r.AgentId, Operation: "read", ArgsJson: `{"path":"side-effect.txt"}`})
+	if !file.Ok || !strings.Contains(file.GetDataJson(), `"content":"once"`) {
+		t.Fatal(file)
 	}
 }

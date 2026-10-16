@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Link,
   Navigate,
@@ -8,18 +8,17 @@ import {
 } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowRight,
+  ArrowLeft,
   Bot,
   Check,
   ChevronDown,
   ChevronRight,
-  CircleHelp,
   Hash,
   Home,
+  Menu,
   KeyRound,
   LoaderCircle,
   LogOut,
-  MessageCircle,
   MessageSquarePlus,
   Plus,
   Settings,
@@ -44,7 +43,16 @@ import { enrichParticipants } from "./participants";
 import { chatStore } from "./store";
 import type { DialogKind } from "./dialogs";
 import { ConversationView, conversationName } from "./messages";
-import { Avatar, Button, IconButton, Loading, Logo, Modal, Notice } from "./ui";
+import {
+  Avatar,
+  Button,
+  IconButton,
+  Loading,
+  Logo,
+  Modal,
+  Notice,
+  useOverlayFocus,
+} from "./ui";
 
 function route(conversation: Conversation) {
   return `/app/w/${conversation.workspaceId}/c/${conversation.id}`;
@@ -101,8 +109,25 @@ function ConversationItem({
     </Link>
   );
 }
+function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(
+    () => window.matchMedia(query).matches,
+  );
+  useEffect(() => {
+    const media = window.matchMedia(query);
+    const change = () => setMatches(media.matches);
+    change();
+    media.addEventListener("change", change);
+    return () => media.removeEventListener("change", change);
+  }, [query]);
+  return matches;
+}
 export function Shell() {
   const { user, logout } = useAuth();
+  const mobile = useMediaQuery("(max-width: 780px)");
+  const overlayMembers = useMediaQuery("(max-width: 1250px)");
+  const navigationRef = useRef<HTMLDivElement>(null);
+  const membersRef = useRef<HTMLElement>(null);
   const chat = useChat(),
     snapshot = useChatState();
   const client = useQueryClient();
@@ -114,7 +139,7 @@ export function Shell() {
   const [dialog, setDialog] = useState<DialogKind | null>(null),
     [spaceMenu, setSpaceMenu] = useState(false),
     [sidebar, setSidebar] = useState(false),
-    [details, setDetails] = useState(window.innerWidth >= 1360),
+    [details, setDetails] = useState(false),
     [managingGroup, setManagingGroup] = useState(false),
     [removingFromGroup, setRemovingFromGroup] = useState(false);
   const [removing, setRemoving] = useState<Member | null>(null),
@@ -170,6 +195,36 @@ export function Shell() {
     setSpaceMenu(false);
     setManagingGroup(false);
   }, [location.pathname]);
+  const closeSidebar = useCallback(() => setSidebar(false), []);
+  const closeDetails = useCallback(() => setDetails(false), []);
+  useOverlayFocus(navigationRef, mobile && sidebar && !dialog, closeSidebar);
+  useOverlayFocus(
+    membersRef,
+    overlayMembers &&
+      details &&
+      !sidebar &&
+      !dialog &&
+      !managingGroup &&
+      !removing &&
+      !!conversation,
+    closeDetails,
+  );
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    const resize = () =>
+      document.documentElement.style.setProperty(
+        "--app-height",
+        `${viewport?.height || window.innerHeight}px`,
+      );
+    resize();
+    viewport?.addEventListener("resize", resize);
+    window.addEventListener("resize", resize);
+    return () => {
+      viewport?.removeEventListener("resize", resize);
+      window.removeEventListener("resize", resize);
+      document.documentElement.style.removeProperty("--app-height");
+    };
+  }, []);
   const caps = chat.data?.capabilities || {};
   async function remove() {
     if (!workspace || !removing) return;
@@ -214,6 +269,8 @@ export function Shell() {
         (c) => c.workspaceId === space.id,
       );
     if (first) navigate(route(first));
+    setSidebar(false);
+    setSpaceMenu(false);
   }
   if (chat.loading && !chat.data) return <Loading />;
   if (chat.error && !chat.data)
@@ -251,310 +308,325 @@ export function Shell() {
     <div
       className={`app-shell ${sidebar ? "sidebar-open" : ""} ${details ? "details-open" : ""}`}
     >
-      <aside className="workspace-rail" aria-label="工作空间切换">
-        <Link className="rail-home" to="/" title="Teamie 首页">
-          <Logo compact />
-        </Link>
-        <div className="rail-divider" />
-        <div className="workspace-buttons">
-          {chat.data?.workspaces.map((space) => (
-            <button
-              key={space.id}
-              className={`workspace-button ${space.id === workspace?.id ? "selected" : ""}`}
-              title={space.name}
-              aria-label={`打开工作空间 ${space.name}`}
-              onClick={() => selectWorkspace(space)}
-            >
-              <span>{Array.from(space.name).slice(0, 2).join("")}</span>
-              {space.id === workspace?.id && <i />}
-            </button>
-          ))}
-        </div>
-        <IconButton
-          label="创建工作空间"
-          className="rail-add"
-          onClick={() => setDialog("workspace")}
-        >
-          <Plus size={23} />
-        </IconButton>
-        <span className="rail-spacer" />
-        <Link
-          to="/app/agents"
-          className={`rail-settings rail-agents ${isAgentsPage ? "selected" : ""}`}
-          aria-label="我的 Agent"
-          title="我的 Agent"
-        >
-          <Bot size={21} />
-        </Link>
-        {user!.platformRole === "admin" && (
-          <>
-            <Link
-              to="/app/admin"
-              className={`rail-settings rail-admin ${isAdminPage ? "selected" : ""}`}
-              aria-label="平台管理：注册邀请"
-              title="平台管理：注册邀请"
-            >
-              <ShieldCheck size={21} />
-            </Link>
-            <Link
-              to="/app/admin/gateway"
-              className={`rail-settings rail-admin ${isGatewayPage ? "selected" : ""}`}
-              aria-label="平台管理：模型网关"
-              title="平台管理：模型网关"
-            >
-              <KeyRound size={20} />
-            </Link>
-          </>
-        )}
-        <Link
-          to="/app/settings"
-          className={`rail-settings ${isSettings ? "selected" : ""}`}
-          aria-label="个人设置"
-          title="个人设置"
-        >
-          <Settings size={21} />
-        </Link>
-      </aside>
-      <aside className="navigation-sidebar">
-        <div className="workspace-header">
-          <button
-            className="workspace-title"
-            onClick={() => setSpaceMenu(!spaceMenu)}
-            aria-expanded={spaceMenu}
-          >
-            <span className="workspace-eyebrow">YOUR WORKSPACE</span>
-            <b>
-              {workspace?.name || "我的 Teamie"}
-              <ChevronDown size={17} />
-            </b>
-          </button>
-          <IconButton
-            className="mobile-close"
-            label="关闭频道列表"
-            onClick={() => setSidebar(false)}
-          >
-            <X size={18} />
-          </IconButton>
-          {spaceMenu && (
-            <>
+      <div
+        className="app-navigation"
+        ref={navigationRef}
+        role={mobile && sidebar ? "dialog" : undefined}
+        aria-modal={mobile && sidebar ? true : undefined}
+        aria-label={mobile ? "对话与团队导航" : undefined}
+        tabIndex={-1}
+        inert={mobile && !sidebar}
+      >
+        <aside className="workspace-rail" aria-label="工作空间切换">
+          <Link className="rail-home" to="/" title="Teamie 首页">
+            <Logo compact />
+          </Link>
+          <div className="rail-divider" />
+          <div className="workspace-buttons">
+            {chat.data?.workspaces.map((space) => (
               <button
-                className="popover-dismiss"
-                aria-label="关闭菜单"
-                onClick={() => setSpaceMenu(false)}
-              />
-              <div className="space-popover">
-                <span>{workspace?.name || "我的工作空间"}</span>
-                {workspace && owner && (
+                key={space.id}
+                className={`workspace-button ${space.id === workspace?.id ? "selected" : ""}`}
+                title={space.name}
+                aria-label={`打开工作空间 ${space.name}`}
+                onClick={() => selectWorkspace(space)}
+              >
+                <span>{Array.from(space.name).slice(0, 2).join("")}</span>
+                {space.id === workspace?.id && <i />}
+              </button>
+            ))}
+          </div>
+          <IconButton
+            label="创建工作空间"
+            className="rail-add"
+            onClick={() => setDialog("workspace")}
+          >
+            <Plus size={23} />
+          </IconButton>
+          <span className="rail-spacer" />
+          <Link
+            to="/app/agents"
+            className={`rail-settings rail-agents ${isAgentsPage ? "selected" : ""}`}
+            aria-label="我的 Agent"
+            title="我的 Agent"
+          >
+            <Bot size={21} />
+          </Link>
+          {user!.platformRole === "admin" && (
+            <>
+              <Link
+                to="/app/admin"
+                className={`rail-settings rail-admin ${isAdminPage ? "selected" : ""}`}
+                aria-label="平台管理：注册邀请"
+                title="平台管理：注册邀请"
+              >
+                <ShieldCheck size={21} />
+              </Link>
+              <Link
+                to="/app/admin/gateway"
+                className={`rail-settings rail-admin ${isGatewayPage ? "selected" : ""}`}
+                aria-label="平台管理：模型网关"
+                title="平台管理：模型网关"
+              >
+                <KeyRound size={20} />
+              </Link>
+            </>
+          )}
+          <Link
+            to="/app/settings"
+            className={`rail-settings ${isSettings ? "selected" : ""}`}
+            aria-label="个人设置"
+            title="个人设置"
+          >
+            <Settings size={21} />
+          </Link>
+        </aside>
+        <aside className="navigation-sidebar">
+          <div className="workspace-header">
+            <button
+              className="workspace-title"
+              onClick={() => setSpaceMenu(!spaceMenu)}
+              aria-expanded={spaceMenu}
+              aria-label={`切换团队：${workspace?.name || "我的 Teamie"}`}
+            >
+              <b>
+                {workspace?.name || "我的 Teamie"}
+                <ChevronDown size={17} />
+              </b>
+            </button>
+            <IconButton
+              className="mobile-close"
+              label="关闭频道列表"
+              onClick={() => setSidebar(false)}
+            >
+              <X size={18} />
+            </IconButton>
+            {spaceMenu && (
+              <>
+                <button
+                  className="popover-dismiss"
+                  aria-label="关闭菜单"
+                  onClick={() => setSpaceMenu(false)}
+                />
+                <div className="space-popover">
+                  <span>切换团队</span>
+                  {chat.data?.workspaces.map((space) => (
+                    <button
+                      key={space.id}
+                      className="workspace-menu-item"
+                      onClick={() => {
+                        selectWorkspace(space);
+                        setSpaceMenu(false);
+                      }}
+                    >
+                      <span>{space.name}</span>
+                      {space.id === workspace?.id && <Check size={14} />}
+                    </button>
+                  ))}
+                  {workspace && owner && (
+                    <button
+                      onClick={() => {
+                        setDialog("invite");
+                        setSpaceMenu(false);
+                      }}
+                    >
+                      <UserPlus size={16} />
+                      邀请伙伴
+                    </button>
+                  )}
                   <button
                     onClick={() => {
-                      setDialog("invite");
+                      setDialog("workspace");
                       setSpaceMenu(false);
                     }}
                   >
-                    <UserPlus size={16} />
-                    邀请伙伴
+                    <Plus size={16} />
+                    创建工作空间
                   </button>
-                )}
-                <button
-                  onClick={() => {
-                    setDialog("workspace");
-                    setSpaceMenu(false);
-                  }}
-                >
-                  <Plus size={16} />
-                  创建工作空间
-                </button>
-                <Link to="/app/settings">
-                  <Settings size={16} />
-                  个人设置
-                </Link>
-                <Link to="/app/agents">
-                  <Bot size={16} />
-                  我的 Agent
-                </Link>
-                {user!.platformRole === "admin" && (
-                  <Link to="/app/admin">
-                    <ShieldCheck size={16} />
-                    平台管理 · 注册邀请
+                  <Link to="/app/settings">
+                    <Settings size={16} />
+                    个人设置
                   </Link>
-                )}
-                {user!.platformRole === "admin" && (
-                  <Link to="/app/admin/gateway">
-                    <KeyRound size={16} />
-                    平台管理 · 模型网关
+                  <Link to="/app/agents">
+                    <Bot size={16} />
+                    我的 Agent
                   </Link>
-                )}
-                <button
-                  className="danger-text"
-                  onClick={signOut}
-                  disabled={busy}
-                >
-                  <LogOut size={16} />
-                  退出登录
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-        <div className="sidebar-scroll">
-          <div className="agent-sidebar-links">
-            <Link to="/app/agents" className={isAgentsPage ? "active" : ""}>
-              <Bot size={16} />
-              <span>我的 Agent</span>
-            </Link>
-            {workspace && discoveryAllowed && (
-              <Link
-                to={`/app/w/${workspace.id}/agents`}
-                className={isDirectoryPage ? "active" : ""}
-              >
-                <Sparkles size={15} />
-                <span>发现团队 Agent</span>
-                <ChevronRight size={12} />
-              </Link>
+                  {user!.platformRole === "admin" && (
+                    <Link to="/app/admin">
+                      <ShieldCheck size={16} />
+                      注册邀请
+                    </Link>
+                  )}
+                  {user!.platformRole === "admin" && (
+                    <Link to="/app/admin/gateway">
+                      <KeyRound size={16} />
+                      模型网关
+                    </Link>
+                  )}
+                  <button
+                    className="danger-text"
+                    onClick={signOut}
+                    disabled={busy}
+                  >
+                    <LogOut size={16} />
+                    退出登录
+                  </button>
+                </div>
+              </>
             )}
           </div>
-          <div className="sidebar-overview">
-            <span className="overview-icon">
-              <MessageCircle size={17} />
-            </span>
-            <span>
-              让好对话发生<small>YOUR TEAM, IN SYNC.</small>
-            </span>
-            <Sparkles size={15} />
-          </div>
-          <div className="nav-section">
-            <div className="nav-section-title">
-              <span>
-                <ChevronDown size={12} /> 团队频道
-              </span>
-              {workspace && owner && caps["im.channel.create"] && (
-                <IconButton
-                  label="创建频道"
-                  onClick={() => setDialog("channel")}
+          <div className="sidebar-scroll">
+            <div className="agent-sidebar-links">
+              <Link to="/app/agents" className={isAgentsPage ? "active" : ""}>
+                <Bot size={16} />
+                <span>我的 Agent</span>
+              </Link>
+              {workspace && discoveryAllowed && (
+                <Link
+                  to={`/app/w/${workspace.id}/agents`}
+                  className={isDirectoryPage ? "active" : ""}
                 >
-                  <Plus size={15} />
-                </IconButton>
+                  <Sparkles size={15} />
+                  <span>团队 Agent</span>
+                  <ChevronRight size={12} />
+                </Link>
               )}
             </div>
-            {channels.map((c) => (
-              <ConversationItem
-                key={c.id}
-                conversation={c}
-                selected={c.id === conversation?.id}
-                members={members}
-                onClick={() => setSidebar(false)}
-              />
-            ))}
-            {channels.length === 0 && (
-              <div className="sidebar-empty">
-                {workspace ? "频道正在准备中" : "创建空间，开启第一段对话"}
-              </div>
-            )}
-          </div>
-          <div className="nav-section">
-            <div className="nav-section-title">
-              <span>
-                <ChevronDown size={12} /> 私信与小组
-              </span>
-              {workspace &&
-                (caps["im.dm.create"] || caps["im.group.create"]) && (
+            <div className="nav-section">
+              <div className="nav-section-title">
+                <span>
+                  <ChevronDown size={12} /> 团队频道
+                </span>
+                {workspace && owner && caps["im.channel.create"] && (
                   <IconButton
-                    label="开始新对话"
-                    onClick={() =>
-                      setDialog(caps["im.dm.create"] ? "direct" : "group")
-                    }
+                    label="创建频道"
+                    onClick={() => setDialog("channel")}
                   >
                     <Plus size={15} />
                   </IconButton>
                 )}
-            </div>
-            {direct.map((c) => (
-              <ConversationItem
-                key={c.id}
-                conversation={c}
-                selected={c.id === conversation?.id}
-                members={members}
-                onClick={() => setSidebar(false)}
-              />
-            ))}
-            {direct.length === 0 && (
-              <div className="sidebar-empty">
-                {workspace
-                  ? "一句你好，让默契开始。"
-                  : "你的伙伴，会在这里相遇。"}
               </div>
-            )}
-            {workspace && caps["im.dm.create"] && (
-              <button
-                className="sidebar-new-chat"
-                onClick={() => setDialog("direct")}
-              >
-                <MessageSquarePlus size={15} />
-                发起私聊
-              </button>
-            )}
-            {workspace && caps["im.group.create"] && (
-              <button
-                className="sidebar-new-chat"
-                onClick={() => setDialog("group")}
-              >
-                <Users size={15} />
-                创建小组
-              </button>
-            )}
+              {channels.map((c) => (
+                <ConversationItem
+                  key={c.id}
+                  conversation={c}
+                  selected={c.id === conversation?.id}
+                  members={members}
+                  onClick={() => setSidebar(false)}
+                />
+              ))}
+              {channels.length === 0 && (
+                <div className="sidebar-empty">
+                  {workspace ? "暂无频道" : "暂无团队"}
+                </div>
+              )}
+            </div>
+            <div className="nav-section">
+              <div className="nav-section-title">
+                <span>
+                  <ChevronDown size={12} /> 私信与小组
+                </span>
+                {workspace &&
+                  (caps["im.dm.create"] || caps["im.group.create"]) && (
+                    <IconButton
+                      label="开始新对话"
+                      onClick={() =>
+                        setDialog(caps["im.dm.create"] ? "direct" : "group")
+                      }
+                    >
+                      <Plus size={15} />
+                    </IconButton>
+                  )}
+              </div>
+              {direct.map((c) => (
+                <ConversationItem
+                  key={c.id}
+                  conversation={c}
+                  selected={c.id === conversation?.id}
+                  members={members}
+                  onClick={() => setSidebar(false)}
+                />
+              ))}
+              {direct.length === 0 && (
+                <div className="sidebar-empty">
+                  {workspace ? "暂无对话" : "暂无对话"}
+                </div>
+              )}
+              {workspace && caps["im.dm.create"] && (
+                <button
+                  className="sidebar-new-chat"
+                  onClick={() => setDialog("direct")}
+                >
+                  <MessageSquarePlus size={15} />
+                  发起私聊
+                </button>
+              )}
+              {workspace && caps["im.group.create"] && (
+                <button
+                  className="sidebar-new-chat"
+                  onClick={() => setDialog("group")}
+                >
+                  <Users size={15} />
+                  创建小组
+                </button>
+              )}
+            </div>
           </div>
-        </div>
-        {workspace && owner && (
-          <div className="sidebar-invite">
-            <span className="invite-doodle">✳</span>
-            <strong>好伙伴，都在这里。</strong>
-            <p>给团队多留一个位置。</p>
-            <button onClick={() => setDialog("invite")}>
-              <UserPlus size={14} />
-              邀请伙伴
-              <ArrowRight size={14} />
+          {workspace && owner && (
+            <button
+              className="sidebar-invite-button"
+              onClick={() => setDialog("invite")}
+            >
+              <UserPlus size={16} />
+              邀请成员
             </button>
+          )}
+          <div className={`connection-status ${chat.connection}`}>
+            <span className="status-dot" />
+            {chat.connection === "connected"
+              ? "消息已连接"
+              : chat.connection === "connecting"
+                ? "正在连接…"
+                : chat.connection === "offline"
+                  ? "网络已断开"
+                  : "正在重新连接…"}
+            {chat.connection === "offline" && <WifiOff size={12} />}
           </div>
-        )}
-        <div className={`connection-status ${chat.connection}`}>
-          <span className="status-dot" />
-          {chat.connection === "connected"
-            ? "消息已连接"
-            : chat.connection === "connecting"
-              ? "正在连接…"
-              : chat.connection === "offline"
-                ? "网络已断开"
-                : "正在重新连接…"}
-          {chat.connection === "offline" && <WifiOff size={12} />}
-        </div>
-        <div className="user-panel">
-          <Link to="/app/profile" className="user-profile">
-            <Avatar name={user!.displayName} seed={user!.id} />
-            <span>
-              <b>{user!.displayName}</b>
-              <small>
-                {user!.platformRole === "admin" ? "平台管理员" : "我的个人账户"}
-              </small>
-            </span>
-          </Link>
-          <Link
-            className="icon-button"
-            to="/app/settings"
-            title="个人设置"
-            aria-label="个人设置"
-          >
-            <Settings size={17} />
-          </Link>
-        </div>
-      </aside>
-      {sidebar && (
+          <div className="user-panel">
+            <Link to="/app/profile" className="user-profile">
+              <Avatar name={user!.displayName} seed={user!.id} />
+              <span>
+                <b>{user!.displayName}</b>
+                <small>
+                  {user!.platformRole === "admin" ? "平台管理员" : "个人账户"}
+                </small>
+              </span>
+            </Link>
+            <Link
+              className="icon-button"
+              to="/app/settings"
+              title="个人设置"
+              aria-label="个人设置"
+            >
+              <Settings size={17} />
+            </Link>
+          </div>
+        </aside>
+      </div>
+      {sidebar && mobile && (
         <button
           className="sidebar-shade"
           onClick={() => setSidebar(false)}
           aria-label="关闭侧栏"
         />
       )}
-      <main className="app-main">
+      <main
+        className="app-main"
+        inert={
+          (mobile && sidebar) ||
+          (overlayMembers && details && !isManagement && !!conversation)
+        }
+      >
         {error && !removing && <Notice>{error}</Notice>}
         {isManagement ? (
           <>
@@ -564,7 +636,7 @@ export function Shell() {
                 className="mobile-menu"
                 onClick={() => setSidebar(true)}
               >
-                <span>☰</span>
+                <Menu size={21} />
               </IconButton>
               {isGatewayPage ? (
                 <KeyRound size={18} />
@@ -577,18 +649,18 @@ export function Shell() {
               )}
               <span>
                 {isGatewayPage
-                  ? "平台管理 · 模型网关"
+                  ? "模型网关"
                   : isAdminPage
-                    ? "平台管理 · 注册邀请"
+                    ? "注册邀请"
                     : isAgentsPage
                       ? "我的 Agent"
                       : isDirectoryPage
-                        ? "发现团队 Agent"
+                        ? "团队 Agent"
                         : "个人设置"}
               </span>
               <Link to="/app">
-                回到对话
-                <ChevronRight size={15} />
+                <ArrowLeft size={15} />
+                <span>对话</span>
               </Link>
             </header>
             {(isAdminPage || isGatewayPage) &&
@@ -631,7 +703,7 @@ export function Shell() {
                   <h2>无法访问这个工作空间</h2>
                   <p>发现 Agent 需要当前空间成员权限。</p>
                   <Link className="button" to="/app">
-                    回到我的工作空间
+                    返回对话
                   </Link>
                 </div>
               )
@@ -647,7 +719,11 @@ export function Shell() {
             conversation={conversation}
             members={members}
             agents={workspaceAgentsQuery.data?.agents || []}
-            onMembers={() => setDetails(!details)}
+            onMembers={() => {
+              setSidebar(false);
+              setDetails(!details);
+            }}
+            membersOpen={details}
             onMenu={() => setSidebar(true)}
           />
         ) : chat.data?.workspaces.length === 0 ? (
@@ -663,16 +739,16 @@ export function Shell() {
               className="mobile-menu"
               onClick={() => setSidebar(true)}
             >
-              <span>☰</span>
+              <Menu size={21} />
             </IconButton>
             <span className="large-symbol">
               <Hash size={40} />
             </span>
-            <h2>{match ? "这个对话暂时无法访问" : "找个话题，接着聊。"}</h2>
+            <h2>{match ? "这个对话暂时无法访问" : "选择一个对话"}</h2>
             <p>
               {match
                 ? "你可能已离开工作空间，或尚未加入这个对话。"
-                : "从左侧选择一个频道，或和伙伴开始一段私聊。"}
+                : "打开对话列表，选择频道或私信。"}
             </p>
             <Button
               onClick={() => {
@@ -680,127 +756,135 @@ export function Shell() {
                 navigate("/app");
               }}
             >
-              回到我的工作空间
+              返回对话
             </Button>
           </div>
         )}
       </main>
-      {details && !isManagement && workspace && (
-        <aside className="members-pane">
-          <header>
-            <span>
-              对话成员 <b>{visibleMembers.length}</b>
-            </span>
-            <IconButton label="关闭成员列表" onClick={() => setDetails(false)}>
-              <X size={17} />
-            </IconButton>
-          </header>
-          <div className="members-description">
-            <span className="member-cover">
-              <Users size={27} />
-            </span>
-            <h3>
-              {conversation
-                ? conversationName(conversation, user!.id, members)
-                : workspace.name}
-            </h3>
-            <p>
-              {conversation?.type === "channel"
-                ? "团队的好点子，在这里碰头。"
-                : "每一位伙伴，都让对话更好。"}
-            </p>
-          </div>
-          <div className="members-list">
-            <span className="members-list-label">
-              {conversation?.type === "channel"
-                ? "工作空间成员"
-                : "当前对话成员"}
-            </span>
-            {membersQuery.isLoading && (
-              <div className="member-loading">
-                <LoaderCircle size={16} className="spin" />
-                加载成员…
-              </div>
-            )}
-            {membersQuery.error && <Notice>成员暂时无法加载。</Notice>}
-            {visibleMembers.map((member) => (
-              <div className="member-row" key={member.userId}>
-                {member.kind === "agent" ? (
-                  <AgentAvatar />
-                ) : (
-                  <Avatar name={member.displayName} seed={member.userId} />
-                )}
-                <div>
-                  <b>
-                    {member.displayName}
-                    {member.userId === user!.id && <small>你</small>}
-                    {member.kind === "agent" && (
-                      <AgentBadge compact ownerName={member.ownerName} />
-                    )}
-                  </b>
-                  <span>
-                    {member.kind === "agent"
-                      ? member.ownerName
-                        ? `由 ${member.ownerName} 创建`
-                        : "Agent · 所有者信息暂不可用"
-                      : member.role === "owner"
-                        ? "空间所有者"
-                        : "团队成员"}
-                  </span>
+      {details && !isManagement && workspace && conversation && (
+        <>
+          {overlayMembers && !sidebar && (
+            <button
+              className="members-shade"
+              aria-label="关闭成员列表"
+              onClick={closeDetails}
+            />
+          )}
+          <aside
+            className="members-pane"
+            ref={membersRef}
+            role={overlayMembers ? "dialog" : undefined}
+            aria-modal={overlayMembers ? true : undefined}
+            aria-label="对话成员"
+            tabIndex={-1}
+            inert={mobile && sidebar}
+          >
+            <header>
+              <span>
+                对话成员 <b>{visibleMembers.length}</b>
+              </span>
+              <IconButton
+                label="关闭成员列表"
+                onClick={() => setDetails(false)}
+              >
+                <X size={17} />
+              </IconButton>
+            </header>
+            <div className="members-description">
+              <span className="member-cover">
+                <Users size={27} />
+              </span>
+              <h3>
+                {conversation
+                  ? conversationName(conversation, user!.id, members)
+                  : workspace.name}
+              </h3>
+            </div>
+            <div className="members-list">
+              <span className="members-list-label">
+                {conversation?.type === "channel"
+                  ? "工作空间成员"
+                  : "当前对话成员"}
+              </span>
+              {membersQuery.isLoading && (
+                <div className="member-loading">
+                  <LoaderCircle size={16} className="spin" />
+                  加载成员…
                 </div>
-                {member.role === "owner" && (
-                  <ShieldCheck size={14} className="owner-shield" />
-                )}
-                {((conversation?.type === "group" &&
-                  conversation.canManageMembers) ||
-                  (conversation?.type === "channel" &&
-                    owner &&
-                    member.role !== "owner")) &&
-                  member.userId !== user!.id && (
-                    <IconButton
-                      className="remove-member"
-                      label={`${conversation?.type === "group" ? "从小组" : "从空间"}移除 ${member.displayName}`}
-                      onClick={() => {
-                        setRemoving(member);
-                        setRemovingFromGroup(conversation?.type === "group");
-                        setError("");
-                      }}
-                    >
-                      <X size={14} />
-                    </IconButton>
+              )}
+              {membersQuery.error && <Notice>成员暂时无法加载。</Notice>}
+              {visibleMembers.map((member) => (
+                <div className="member-row" key={member.userId}>
+                  {member.kind === "agent" ? (
+                    <AgentAvatar />
+                  ) : (
+                    <Avatar name={member.displayName} seed={member.userId} />
                   )}
-              </div>
-            ))}
-          </div>
-          {conversation?.type === "group" && conversation.canManageMembers && (
-            <button
-              className="members-invite"
-              onClick={() => setManagingGroup(true)}
-            >
-              <Users size={16} />
-              管理小组成员
-              <Plus size={14} />
-            </button>
-          )}
-          {owner && conversation?.type === "channel" && (
-            <button
-              className="members-invite"
-              onClick={() => setDialog("invite")}
-            >
-              <UserPlus size={16} />
-              邀请更多伙伴
-              <Plus size={14} />
-            </button>
-          )}
-          <div className="member-pane-note">
-            <span>✧</span>
-            <p>
-              好团队的超能力，
-              <br />
-              是每个人都在场。
-            </p>
-          </div>
-        </aside>
+                  <div>
+                    <b>
+                      {member.displayName}
+                      {member.userId === user!.id && <small>你</small>}
+                      {member.kind === "agent" && (
+                        <AgentBadge compact ownerName={member.ownerName} />
+                      )}
+                    </b>
+                    <span>
+                      {member.kind === "agent"
+                        ? member.ownerName
+                          ? `由 ${member.ownerName} 创建`
+                          : "Agent"
+                        : member.role === "owner"
+                          ? "空间所有者"
+                          : "团队成员"}
+                    </span>
+                  </div>
+                  {member.role === "owner" && (
+                    <ShieldCheck size={14} className="owner-shield" />
+                  )}
+                  {((conversation?.type === "group" &&
+                    conversation.canManageMembers) ||
+                    (conversation?.type === "channel" &&
+                      owner &&
+                      member.role !== "owner")) &&
+                    member.userId !== user!.id && (
+                      <IconButton
+                        className="remove-member"
+                        label={`${conversation?.type === "group" ? "从小组" : "从空间"}移除 ${member.displayName}`}
+                        onClick={() => {
+                          setRemoving(member);
+                          setRemovingFromGroup(conversation?.type === "group");
+                          setError("");
+                        }}
+                      >
+                        <X size={14} />
+                      </IconButton>
+                    )}
+                </div>
+              ))}
+            </div>
+            {conversation?.type === "group" &&
+              conversation.canManageMembers && (
+                <button
+                  className="members-invite"
+                  onClick={() => setManagingGroup(true)}
+                >
+                  <Users size={16} />
+                  管理小组成员
+                  <Plus size={14} />
+                </button>
+              )}
+            {owner && conversation?.type === "channel" && (
+              <button
+                className="members-invite"
+                onClick={() => setDialog("invite")}
+              >
+                <UserPlus size={16} />
+                邀请成员
+                <Plus size={14} />
+              </button>
+            )}
+          </aside>
+        </>
       )}
       {dialog && (
         <WorkspaceDialog
@@ -855,61 +939,30 @@ function Welcome({
     <div className="welcome-view">
       <header>
         <IconButton label="打开侧栏" className="mobile-menu" onClick={onMenu}>
-          <span>☰</span>
+          <Menu size={21} />
         </IconButton>
         <span>
           <Home size={16} />
           你的起点
         </span>
-        <span>WELCOME TO TEAMIE</span>
       </header>
       <div className="welcome-content">
         <div className="welcome-illustration">
-          <span className="welcome-orbit" />
           <span className="welcome-bubble">
             <MessagesSquareIcon />
           </span>
-          <span className="welcome-small-bubble">
-            <Check size={20} />
-          </span>
-          <span className="welcome-star">✳</span>
         </div>
-        <span className="eyebrow">A NEW CHAPTER, TOGETHER.</span>
-        <h1>
-          你好，{userName}
-          <span>
-            。<br />
-            好团队，从这里开始。
-          </span>
-        </h1>
+        <h1>你好，{userName}</h1>
         <p>
-          一个工作空间，把伙伴、话题和好点子放在一起。
+          创建一个团队，开始协作。
           <br />
-          给团队起个名字，开启你们的第一段对话。
+          已有团队邀请？打开邀请链接即可加入。
         </p>
         <Button onClick={onCreate}>
-          创建我的工作空间
           <Plus size={18} />
+          创建工作空间
         </Button>
-        <div className="welcome-steps">
-          <span>
-            <i>01</i>创建一个空间
-          </span>
-          <span className="step-line" />
-          <span>
-            <i>02</i>邀请你的伙伴
-          </span>
-          <span className="step-line" />
-          <span>
-            <i>03</i>一起聊，接着做
-          </span>
-        </div>
-        <div className="welcome-tip">
-          <CircleHelp size={16} />
-          <span>已经收到工作空间邀请？直接打开邀请链接，即可加入伙伴们。</span>
-        </div>
       </div>
-      <footer>你们的下一件好事，值得一个好开始。</footer>
     </div>
   );
 }

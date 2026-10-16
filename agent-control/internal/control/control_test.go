@@ -130,7 +130,7 @@ func contains(ids []string, id string) bool {
 func ptr[T any](v T) *T { return &v }
 func flags(t *testing.T, path string, enabled bool) {
 	t.Helper()
-	b, _ := json.Marshal(map[string]any{"revision": "test", "flags": map[string]bool{"agents.enabled": enabled, "agents.create": true, "agents.update": true, "agents.delete": true, "agents.discover": true}})
+	b, _ := json.Marshal(map[string]any{"revision": "test", "flags": map[string]bool{"agents.enabled": enabled, "agents.create": true, "agents.update": true, "agents.delete": true, "agents.discover": true, "agents.runtime.v3": true, "agents.tasks.execute": true}})
 	if e := os.WriteFile(path, b, 0600); e != nil {
 		t.Fatal(e)
 	}

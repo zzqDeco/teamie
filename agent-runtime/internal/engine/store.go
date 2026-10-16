@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -37,11 +38,18 @@ type Input struct {
 	Body           string `json:"body"`
 	Seq            int64  `json:"seq"`
 	CreatedAt      string `json:"createdAt"`
+	Kind           string `json:"kind,omitempty"`
+	TaskID         string `json:"taskId,omitempty"`
+	NotificationID string `json:"notificationId,omitempty"`
+	Status         string `json:"status,omitempty"`
 }
 type Run struct {
-	ID, Attempt, AgentID string
-	Inputs               []Input
-	Step                 atomic.Int64
+	ID, Attempt, AgentID        string
+	Inputs                      []Input
+	Step                        atomic.Int64
+	Revision, Generation        int64
+	ContextHead, AcceptanceHead int64
+	Front                       *frontSlot
 }
 
 func executionID(run *Run) string { return run.ID + ":" + run.Attempt }
@@ -93,7 +101,7 @@ func Open(ctx context.Context, url string) (*Store, error) {
 	}
 	defer tx.Rollback(ctx)
 	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(704205)"); err == nil {
-		_, err = tx.Exec(ctx, schemaSQL)
+		_, err = tx.Exec(ctx, schemaSQL+schemaV2SQL)
 	}
 	if err == nil {
 		err = tx.Commit(ctx)
@@ -177,7 +185,7 @@ func (s *Store) Ingest(ctx context.Context, l *Lease, cursor string, inputs []In
 	return tx.Commit(ctx)
 }
 func (s *Store) Pending(ctx context.Context, l *Lease) ([]Input, error) {
-	rows, err := s.DB.Query(ctx, `SELECT i.payload FROM runtime_inputs i LEFT JOIN runtime_runs r ON i.run_id=r.id WHERE i.agent_id=$1 AND i.state IN ('pending','processing') AND (r.id IS NULL OR r.next_attempt<=now()) ORDER BY i.event_id LIMIT 4`, l.AgentID)
+	rows, err := s.DB.Query(ctx, `SELECT i.payload FROM runtime_inputs i LEFT JOIN runtime_runs r ON i.run_id=r.id WHERE i.agent_id=$1 AND i.state IN ('pending','processing') AND (r.id IS NULL OR (r.next_attempt<=now() AND r.state<>'waiting_input')) ORDER BY i.delivery_seq LIMIT 32`, l.AgentID)
 	if err != nil {
 		return nil, err
 	}
@@ -230,7 +238,7 @@ func (s *Store) StartRun(ctx context.Context, l *Lease, inputs []Input) (*Run, e
 	if err == nil {
 		r.ID = existing
 		var b []byte
-		err = tx.QueryRow(ctx, `UPDATE runtime_runs SET state='running',attempt_id=$2,attempts=attempts+1 WHERE id=$1 AND state IN ('running','interrupted','waiting_configuration','retry') RETURNING input_json`, r.ID, r.Attempt).Scan(&b)
+		err = tx.QueryRow(ctx, `UPDATE runtime_runs SET state='running',attempt_id=$2,attempts=attempts+1 WHERE id=$1 AND state IN ('running','interrupted','waiting_configuration','retry','waiting_input') RETURNING input_json,context_head,acceptance_head`, r.ID, r.Attempt).Scan(&b, &r.ContextHead, &r.AcceptanceHead)
 		if err != nil {
 			return nil, err
 		}
@@ -247,7 +255,11 @@ func (s *Store) StartRun(ctx context.Context, l *Lease, inputs []Input) (*Run, e
 			ids[i] = in.EventID
 		}
 		key := strings.Join(ids, ",")
-		_, err = tx.Exec(ctx, `INSERT INTO runtime_runs(id,agent_id,input_key,input_json,attempt_id) VALUES($1,$2,$3,$4,$5)`, r.ID, l.AgentID, key, b, r.Attempt)
+		err = tx.QueryRow(ctx, `SELECT (SELECT COALESCE(max(seq),0) FROM runtime_session_events WHERE session_id=$1),(SELECT COALESCE(max(seq),0) FROM runtime_session_acceptances WHERE agent_id=$2)`, "agent:"+l.AgentID, l.AgentID).Scan(&r.ContextHead, &r.AcceptanceHead)
+		if err != nil {
+			return nil, err
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO runtime_runs(id,agent_id,input_key,input_json,attempt_id,context_head,acceptance_head) VALUES($1,$2,$3,$4,$5,$6,$7)`, r.ID, l.AgentID, key, b, r.Attempt, r.ContextHead, r.AcceptanceHead)
 		if err != nil {
 			return nil, err
 		}
@@ -273,10 +285,15 @@ func (s *Store) FinishRun(ctx context.Context, l *Lease, r *Run, state, safeErro
 	if e = checkLease(ctx, tx, l); e != nil {
 		return e
 	}
+	if state == "completed" {
+		if e = acceptSessionAttempt(ctx, tx, l.AgentID, r.ID); e != nil {
+			return e
+		}
+	}
 	if retry {
-		_, e = tx.Exec(ctx, `UPDATE runtime_runs SET state=$2,safe_error=$3,next_attempt=now()+interval '15 seconds' WHERE id=$1`, r.ID, state, safeError)
+		_, e = tx.Exec(ctx, `UPDATE runtime_runs SET state=$2,safe_error=$3,updated_at=now(),next_attempt=now()+interval '15 seconds' WHERE id=$1`, r.ID, state, safeError)
 	} else {
-		_, e = tx.Exec(ctx, `UPDATE runtime_runs SET state=$2,safe_error=$3,committed_attempt=CASE WHEN $2='completed' THEN attempt_id ELSE NULL END,finished_at=now() WHERE id=$1`, r.ID, state, safeError)
+		_, e = tx.Exec(ctx, `UPDATE runtime_runs SET state=$2,safe_error=$3,updated_at=now(),committed_attempt=CASE WHEN $2='completed' THEN attempt_id ELSE NULL END,finished_at=now() WHERE id=$1`, r.ID, state, safeError)
 		if e == nil {
 			_, e = tx.Exec(ctx, `UPDATE runtime_inputs SET state=$2 WHERE agent_id=$1 AND run_id=$3`, l.AgentID, map[bool]string{true: "done", false: "failed"}[state == "completed"], r.ID)
 		}
@@ -284,12 +301,20 @@ func (s *Store) FinishRun(ctx context.Context, l *Lease, r *Run, state, safeErro
 	if e != nil {
 		return e
 	}
+	_, e = tx.Exec(ctx, `INSERT INTO runtime_public_events(agent_id,type,run_id,status,error_code) VALUES($1,'run.status',$2,$3,NULLIF($4,''))`, l.AgentID, r.ID, state, safeError)
+	if e != nil {
+		return e
+	}
 	return tx.Commit(ctx)
 }
 
 type SessionStore struct {
-	Store *Store
-	Lease *Lease
+	Store    *Store
+	Lease    *Lease
+	mu       sync.Mutex
+	run      *Run
+	targets  []string
+	Revision int64
 }
 
 func (s *SessionStore) AppendEvents(ctx context.Context, sessionID string, events []*adk.SessionEvent[*schema.Message]) error {
@@ -357,9 +382,11 @@ func (s *SessionStore) LoadEvents(ctx context.Context, sessionID string, req *ad
 	if req.Reverse {
 		after = 1<<63 - 1
 	}
-	visible := `(e.attempt_id=$2 OR (r.state='completed' AND e.attempt_id=r.committed_attempt))`
+	visible := `(e.attempt_id=$2 OR (e.run_id=RUN AND e.attempt_id=ANY(r.context_attempts)) OR EXISTS(SELECT 1 FROM runtime_session_acceptances acceptance WHERE acceptance.attempt_id=e.attempt_id AND acceptance.seq<=ACCEPT))`
+	afterVisible := strings.NewReplacer("RUN", "$5", "ACCEPT", "$6").Replace(visible)
+	pageVisible := strings.NewReplacer("RUN", "$7", "ACCEPT", "$8").Replace(visible)
 	if req.After != "" {
-		e = s.Store.DB.QueryRow(ctx, `SELECT e.seq FROM runtime_session_events e JOIN runtime_runs r ON r.id=e.run_id WHERE e.session_id=$1 AND `+visible+` AND e.event_id=$3`, sessionID, r.Attempt, req.After).Scan(&after)
+		e = s.Store.DB.QueryRow(ctx, `SELECT e.seq FROM runtime_session_events e JOIN runtime_runs r ON r.id=e.run_id WHERE e.session_id=$1 AND `+afterVisible+` AND e.event_id=$3 AND (e.run_id=$5 OR e.seq<=$4)`, sessionID, r.Attempt, req.After, r.ContextHead, r.ID, r.AcceptanceHead).Scan(&after)
 		if errors.Is(e, pgx.ErrNoRows) {
 			return nil, adk.ErrEventIDOutOfRange
 		}
@@ -379,7 +406,7 @@ func (s *SessionStore) LoadEvents(ctx context.Context, sessionID string, req *ad
 	if req.Reverse {
 		order, comparison = "DESC", "<"
 	}
-	rows, e := s.Store.DB.Query(ctx, `SELECT e.payload FROM runtime_session_events e JOIN runtime_runs r ON r.id=e.run_id WHERE e.session_id=$1 AND `+visible+` AND e.seq `+comparison+` $3 AND (cardinality($4::text[])=0 OR e.kind=ANY($4)) ORDER BY e.seq `+order+` LIMIT $5`, sessionID, r.Attempt, after, kinds, limit)
+	rows, e := s.Store.DB.Query(ctx, `SELECT e.payload FROM runtime_session_events e JOIN runtime_runs r ON r.id=e.run_id WHERE e.session_id=$1 AND `+pageVisible+` AND (e.run_id=$7 OR e.seq<=$6) AND e.seq `+comparison+` $3 AND (cardinality($4::text[])=0 OR e.kind=ANY($4)) ORDER BY e.seq `+order+` LIMIT $5`, sessionID, r.Attempt, after, kinds, limit, r.ContextHead, r.ID, r.AcceptanceHead)
 	if e != nil {
 		return nil, e
 	}
@@ -428,7 +455,7 @@ func (s *SessionStore) Set(ctx context.Context, id string, b []byte) error {
 	if e = checkLease(ctx, tx, s.Lease); e != nil {
 		return e
 	}
-	_, e = tx.Exec(ctx, `INSERT INTO runtime_checkpoints(checkpoint_id,payload) VALUES($1,$2) ON CONFLICT(checkpoint_id) DO UPDATE SET payload=EXCLUDED.payload,updated_at=now()`, id, b)
+	_, e = tx.Exec(ctx, `INSERT INTO runtime_checkpoints(checkpoint_id,payload,metadata) VALUES($1,$2,$3) ON CONFLICT(checkpoint_id) DO UPDATE SET payload=EXCLUDED.payload,metadata=EXCLUDED.metadata,updated_at=now()`, id, b, s.metadata())
 	if e != nil {
 		return e
 	}
@@ -505,9 +532,15 @@ func (s *Store) ToolIntent(ctx context.Context, l *Lease, r *Run, id, name strin
 	if e = checkLease(ctx, tx, l); e != nil {
 		return nil, e
 	}
-	_, e = tx.Exec(ctx, `INSERT INTO runtime_tool_calls(run_id,call_id,name,request_hash) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, r.ID, id, name, hash)
+	tag, e := tx.Exec(ctx, `INSERT INTO runtime_tool_calls(run_id,call_id,name,request_hash) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, r.ID, id, name, hash)
 	if e != nil {
 		return nil, e
+	}
+	if tag.RowsAffected() == 1 {
+		_, e = tx.Exec(ctx, `INSERT INTO runtime_public_events(agent_id,type,run_id,tool_name,status) VALUES($1,'tool.status',$2,$3,'running')`, l.AgentID, r.ID, strings.TrimPrefix(name, "native:"))
+		if e != nil {
+			return nil, e
+		}
 	}
 	var old, oldName string
 	var b []byte
@@ -532,9 +565,15 @@ func (s *Store) ToolResult(ctx context.Context, l *Lease, r *Run, id string, b [
 	if e = checkLease(ctx, tx, l); e != nil {
 		return e
 	}
-	_, e = tx.Exec(ctx, `UPDATE runtime_tool_calls SET result=$3 WHERE run_id=$1 AND call_id=$2 AND result IS NULL`, r.ID, id, b)
+	tag, e := tx.Exec(ctx, `UPDATE runtime_tool_calls SET result=$3 WHERE run_id=$1 AND call_id=$2 AND result IS NULL`, r.ID, id, b)
 	if e != nil {
 		return e
+	}
+	if tag.RowsAffected() == 1 {
+		_, e = tx.Exec(ctx, `INSERT INTO runtime_public_events(agent_id,type,run_id,tool_name,status) SELECT $1,'tool.status',run_id,regexp_replace(name,'^native:',''),'completed' FROM runtime_tool_calls WHERE run_id=$2 AND call_id=$3`, l.AgentID, r.ID, id)
+		if e != nil {
+			return e
+		}
 	}
 	return tx.Commit(ctx)
 }

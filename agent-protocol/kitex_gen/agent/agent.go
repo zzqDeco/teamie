@@ -467,9 +467,10 @@ var fieldIDToName_PingRequest = map[int16]string{
 }
 
 type PingResponse struct {
-	Ready      bool  `thrift:"ready,1,required" frugal:"1,required,bool" json:"ready"`
-	Configured *bool `thrift:"configured,2,optional" frugal:"2,optional,bool" json:"configured,omitempty"`
-	Enabled    *bool `thrift:"enabled,3,optional" frugal:"3,optional,bool" json:"enabled,omitempty"`
+	Ready               bool   `thrift:"ready,1,required" frugal:"1,required,bool" json:"ready"`
+	Configured          *bool  `thrift:"configured,2,optional" frugal:"2,optional,bool" json:"configured,omitempty"`
+	Enabled             *bool  `thrift:"enabled,3,optional" frugal:"3,optional,bool" json:"enabled,omitempty"`
+	ContextWindowTokens *int64 `thrift:"contextWindowTokens,4,optional" frugal:"4,optional,i64" json:"contextWindowTokens,omitempty"`
 }
 
 func NewPingResponse() *PingResponse {
@@ -500,6 +501,15 @@ func (p *PingResponse) GetEnabled() (v bool) {
 	}
 	return *p.Enabled
 }
+
+var PingResponse_ContextWindowTokens_DEFAULT int64
+
+func (p *PingResponse) GetContextWindowTokens() (v int64) {
+	if !p.IsSetContextWindowTokens() {
+		return PingResponse_ContextWindowTokens_DEFAULT
+	}
+	return *p.ContextWindowTokens
+}
 func (p *PingResponse) SetReady(val bool) {
 	p.Ready = val
 }
@@ -509,6 +519,9 @@ func (p *PingResponse) SetConfigured(val *bool) {
 func (p *PingResponse) SetEnabled(val *bool) {
 	p.Enabled = val
 }
+func (p *PingResponse) SetContextWindowTokens(val *int64) {
+	p.ContextWindowTokens = val
+}
 
 func (p *PingResponse) IsSetConfigured() bool {
 	return p.Configured != nil
@@ -516,6 +529,10 @@ func (p *PingResponse) IsSetConfigured() bool {
 
 func (p *PingResponse) IsSetEnabled() bool {
 	return p.Enabled != nil
+}
+
+func (p *PingResponse) IsSetContextWindowTokens() bool {
+	return p.ContextWindowTokens != nil
 }
 
 func (p *PingResponse) String() string {
@@ -529,6 +546,209 @@ var fieldIDToName_PingResponse = map[int16]string{
 	1: "ready",
 	2: "configured",
 	3: "enabled",
+	4: "contextWindowTokens",
+}
+
+type RuntimeRequest struct {
+	ServiceToken string  `thrift:"serviceToken,1,required" frugal:"1,required,string" json:"serviceToken"`
+	AgentId      string  `thrift:"agentId,2,required" frugal:"2,required,string" json:"agentId"`
+	OwnerId      string  `thrift:"ownerId,3,required" frugal:"3,required,string" json:"ownerId"`
+	ResourceId   *string `thrift:"resourceId,4,optional" frugal:"4,optional,string" json:"resourceId,omitempty"`
+	Cursor       *string `thrift:"cursor,5,optional" frugal:"5,optional,string" json:"cursor,omitempty"`
+	Limit        *int32  `thrift:"limit,6,optional" frugal:"6,optional,i32" json:"limit,omitempty"`
+}
+
+func NewRuntimeRequest() *RuntimeRequest {
+	return &RuntimeRequest{}
+}
+
+func (p *RuntimeRequest) InitDefault() {
+}
+
+func (p *RuntimeRequest) GetServiceToken() (v string) {
+	return p.ServiceToken
+}
+
+func (p *RuntimeRequest) GetAgentId() (v string) {
+	return p.AgentId
+}
+
+func (p *RuntimeRequest) GetOwnerId() (v string) {
+	return p.OwnerId
+}
+
+var RuntimeRequest_ResourceId_DEFAULT string
+
+func (p *RuntimeRequest) GetResourceId() (v string) {
+	if !p.IsSetResourceId() {
+		return RuntimeRequest_ResourceId_DEFAULT
+	}
+	return *p.ResourceId
+}
+
+var RuntimeRequest_Cursor_DEFAULT string
+
+func (p *RuntimeRequest) GetCursor() (v string) {
+	if !p.IsSetCursor() {
+		return RuntimeRequest_Cursor_DEFAULT
+	}
+	return *p.Cursor
+}
+
+var RuntimeRequest_Limit_DEFAULT int32
+
+func (p *RuntimeRequest) GetLimit() (v int32) {
+	if !p.IsSetLimit() {
+		return RuntimeRequest_Limit_DEFAULT
+	}
+	return *p.Limit
+}
+func (p *RuntimeRequest) SetServiceToken(val string) {
+	p.ServiceToken = val
+}
+func (p *RuntimeRequest) SetAgentId(val string) {
+	p.AgentId = val
+}
+func (p *RuntimeRequest) SetOwnerId(val string) {
+	p.OwnerId = val
+}
+func (p *RuntimeRequest) SetResourceId(val *string) {
+	p.ResourceId = val
+}
+func (p *RuntimeRequest) SetCursor(val *string) {
+	p.Cursor = val
+}
+func (p *RuntimeRequest) SetLimit(val *int32) {
+	p.Limit = val
+}
+
+func (p *RuntimeRequest) IsSetResourceId() bool {
+	return p.ResourceId != nil
+}
+
+func (p *RuntimeRequest) IsSetCursor() bool {
+	return p.Cursor != nil
+}
+
+func (p *RuntimeRequest) IsSetLimit() bool {
+	return p.Limit != nil
+}
+
+func (p *RuntimeRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("RuntimeRequest(%+v)", *p)
+}
+
+var fieldIDToName_RuntimeRequest = map[int16]string{
+	1: "serviceToken",
+	2: "agentId",
+	3: "ownerId",
+	4: "resourceId",
+	5: "cursor",
+	6: "limit",
+}
+
+type RuntimeResponse struct {
+	Ok           bool    `thrift:"ok,1,required" frugal:"1,required,bool" json:"ok"`
+	DataJson     *string `thrift:"dataJson,2,optional" frugal:"2,optional,string" json:"dataJson,omitempty"`
+	ErrorCode    *string `thrift:"errorCode,3,optional" frugal:"3,optional,string" json:"errorCode,omitempty"`
+	ErrorMessage *string `thrift:"errorMessage,4,optional" frugal:"4,optional,string" json:"errorMessage,omitempty"`
+	StatusCode   *int32  `thrift:"statusCode,5,optional" frugal:"5,optional,i32" json:"statusCode,omitempty"`
+}
+
+func NewRuntimeResponse() *RuntimeResponse {
+	return &RuntimeResponse{}
+}
+
+func (p *RuntimeResponse) InitDefault() {
+}
+
+func (p *RuntimeResponse) GetOk() (v bool) {
+	return p.Ok
+}
+
+var RuntimeResponse_DataJson_DEFAULT string
+
+func (p *RuntimeResponse) GetDataJson() (v string) {
+	if !p.IsSetDataJson() {
+		return RuntimeResponse_DataJson_DEFAULT
+	}
+	return *p.DataJson
+}
+
+var RuntimeResponse_ErrorCode_DEFAULT string
+
+func (p *RuntimeResponse) GetErrorCode() (v string) {
+	if !p.IsSetErrorCode() {
+		return RuntimeResponse_ErrorCode_DEFAULT
+	}
+	return *p.ErrorCode
+}
+
+var RuntimeResponse_ErrorMessage_DEFAULT string
+
+func (p *RuntimeResponse) GetErrorMessage() (v string) {
+	if !p.IsSetErrorMessage() {
+		return RuntimeResponse_ErrorMessage_DEFAULT
+	}
+	return *p.ErrorMessage
+}
+
+var RuntimeResponse_StatusCode_DEFAULT int32
+
+func (p *RuntimeResponse) GetStatusCode() (v int32) {
+	if !p.IsSetStatusCode() {
+		return RuntimeResponse_StatusCode_DEFAULT
+	}
+	return *p.StatusCode
+}
+func (p *RuntimeResponse) SetOk(val bool) {
+	p.Ok = val
+}
+func (p *RuntimeResponse) SetDataJson(val *string) {
+	p.DataJson = val
+}
+func (p *RuntimeResponse) SetErrorCode(val *string) {
+	p.ErrorCode = val
+}
+func (p *RuntimeResponse) SetErrorMessage(val *string) {
+	p.ErrorMessage = val
+}
+func (p *RuntimeResponse) SetStatusCode(val *int32) {
+	p.StatusCode = val
+}
+
+func (p *RuntimeResponse) IsSetDataJson() bool {
+	return p.DataJson != nil
+}
+
+func (p *RuntimeResponse) IsSetErrorCode() bool {
+	return p.ErrorCode != nil
+}
+
+func (p *RuntimeResponse) IsSetErrorMessage() bool {
+	return p.ErrorMessage != nil
+}
+
+func (p *RuntimeResponse) IsSetStatusCode() bool {
+	return p.StatusCode != nil
+}
+
+func (p *RuntimeResponse) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("RuntimeResponse(%+v)", *p)
+}
+
+var fieldIDToName_RuntimeResponse = map[int16]string{
+	1: "ok",
+	2: "dataJson",
+	3: "errorCode",
+	4: "errorMessage",
+	5: "statusCode",
 }
 
 type GatewayChatRequest struct {
@@ -899,6 +1119,502 @@ var fieldIDToName_SandboxExecResponse = map[int16]string{
 	7: "errorMessage",
 }
 
+type SandboxStartRequest struct {
+	ServiceToken   string `thrift:"serviceToken,1,required" frugal:"1,required,string" json:"serviceToken"`
+	AgentId        string `thrift:"agentId,2,required" frugal:"2,required,string" json:"agentId"`
+	RunId          string `thrift:"runId,3,required" frugal:"3,required,string" json:"runId"`
+	TaskId         string `thrift:"taskId,4,required" frugal:"4,required,string" json:"taskId"`
+	Command        string `thrift:"command,5,required" frugal:"5,required,string" json:"command"`
+	TimeoutSeconds *int32 `thrift:"timeoutSeconds,6,optional" frugal:"6,optional,i32" json:"timeoutSeconds,omitempty"`
+}
+
+func NewSandboxStartRequest() *SandboxStartRequest {
+	return &SandboxStartRequest{}
+}
+
+func (p *SandboxStartRequest) InitDefault() {
+}
+
+func (p *SandboxStartRequest) GetServiceToken() (v string) {
+	return p.ServiceToken
+}
+
+func (p *SandboxStartRequest) GetAgentId() (v string) {
+	return p.AgentId
+}
+
+func (p *SandboxStartRequest) GetRunId() (v string) {
+	return p.RunId
+}
+
+func (p *SandboxStartRequest) GetTaskId() (v string) {
+	return p.TaskId
+}
+
+func (p *SandboxStartRequest) GetCommand() (v string) {
+	return p.Command
+}
+
+var SandboxStartRequest_TimeoutSeconds_DEFAULT int32
+
+func (p *SandboxStartRequest) GetTimeoutSeconds() (v int32) {
+	if !p.IsSetTimeoutSeconds() {
+		return SandboxStartRequest_TimeoutSeconds_DEFAULT
+	}
+	return *p.TimeoutSeconds
+}
+func (p *SandboxStartRequest) SetServiceToken(val string) {
+	p.ServiceToken = val
+}
+func (p *SandboxStartRequest) SetAgentId(val string) {
+	p.AgentId = val
+}
+func (p *SandboxStartRequest) SetRunId(val string) {
+	p.RunId = val
+}
+func (p *SandboxStartRequest) SetTaskId(val string) {
+	p.TaskId = val
+}
+func (p *SandboxStartRequest) SetCommand(val string) {
+	p.Command = val
+}
+func (p *SandboxStartRequest) SetTimeoutSeconds(val *int32) {
+	p.TimeoutSeconds = val
+}
+
+func (p *SandboxStartRequest) IsSetTimeoutSeconds() bool {
+	return p.TimeoutSeconds != nil
+}
+
+func (p *SandboxStartRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SandboxStartRequest(%+v)", *p)
+}
+
+var fieldIDToName_SandboxStartRequest = map[int16]string{
+	1: "serviceToken",
+	2: "agentId",
+	3: "runId",
+	4: "taskId",
+	5: "command",
+	6: "timeoutSeconds",
+}
+
+type SandboxTaskRequest struct {
+	ServiceToken string `thrift:"serviceToken,1,required" frugal:"1,required,string" json:"serviceToken"`
+	AgentId      string `thrift:"agentId,2,required" frugal:"2,required,string" json:"agentId"`
+	TaskId       string `thrift:"taskId,3,required" frugal:"3,required,string" json:"taskId"`
+	Offset       *int64 `thrift:"offset,4,optional" frugal:"4,optional,i64" json:"offset,omitempty"`
+	Limit        *int32 `thrift:"limit,5,optional" frugal:"5,optional,i32" json:"limit,omitempty"`
+}
+
+func NewSandboxTaskRequest() *SandboxTaskRequest {
+	return &SandboxTaskRequest{}
+}
+
+func (p *SandboxTaskRequest) InitDefault() {
+}
+
+func (p *SandboxTaskRequest) GetServiceToken() (v string) {
+	return p.ServiceToken
+}
+
+func (p *SandboxTaskRequest) GetAgentId() (v string) {
+	return p.AgentId
+}
+
+func (p *SandboxTaskRequest) GetTaskId() (v string) {
+	return p.TaskId
+}
+
+var SandboxTaskRequest_Offset_DEFAULT int64
+
+func (p *SandboxTaskRequest) GetOffset() (v int64) {
+	if !p.IsSetOffset() {
+		return SandboxTaskRequest_Offset_DEFAULT
+	}
+	return *p.Offset
+}
+
+var SandboxTaskRequest_Limit_DEFAULT int32
+
+func (p *SandboxTaskRequest) GetLimit() (v int32) {
+	if !p.IsSetLimit() {
+		return SandboxTaskRequest_Limit_DEFAULT
+	}
+	return *p.Limit
+}
+func (p *SandboxTaskRequest) SetServiceToken(val string) {
+	p.ServiceToken = val
+}
+func (p *SandboxTaskRequest) SetAgentId(val string) {
+	p.AgentId = val
+}
+func (p *SandboxTaskRequest) SetTaskId(val string) {
+	p.TaskId = val
+}
+func (p *SandboxTaskRequest) SetOffset(val *int64) {
+	p.Offset = val
+}
+func (p *SandboxTaskRequest) SetLimit(val *int32) {
+	p.Limit = val
+}
+
+func (p *SandboxTaskRequest) IsSetOffset() bool {
+	return p.Offset != nil
+}
+
+func (p *SandboxTaskRequest) IsSetLimit() bool {
+	return p.Limit != nil
+}
+
+func (p *SandboxTaskRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SandboxTaskRequest(%+v)", *p)
+}
+
+var fieldIDToName_SandboxTaskRequest = map[int16]string{
+	1: "serviceToken",
+	2: "agentId",
+	3: "taskId",
+	4: "offset",
+	5: "limit",
+}
+
+type SandboxTaskResponse struct {
+	Ok           bool    `thrift:"ok,1,required" frugal:"1,required,bool" json:"ok"`
+	TaskId       string  `thrift:"taskId,2,required" frugal:"2,required,string" json:"taskId"`
+	State        string  `thrift:"state,3,required" frugal:"3,required,string" json:"state"`
+	ExitCode     *int32  `thrift:"exitCode,4,optional" frugal:"4,optional,i32" json:"exitCode,omitempty"`
+	Stdout       *string `thrift:"stdout,5,optional" frugal:"5,optional,string" json:"stdout,omitempty"`
+	Stderr       *string `thrift:"stderr,6,optional" frugal:"6,optional,string" json:"stderr,omitempty"`
+	Truncated    *bool   `thrift:"truncated,7,optional" frugal:"7,optional,bool" json:"truncated,omitempty"`
+	NextOffset   *int64  `thrift:"nextOffset,8,optional" frugal:"8,optional,i64" json:"nextOffset,omitempty"`
+	ErrorCode    *string `thrift:"errorCode,9,optional" frugal:"9,optional,string" json:"errorCode,omitempty"`
+	ErrorMessage *string `thrift:"errorMessage,10,optional" frugal:"10,optional,string" json:"errorMessage,omitempty"`
+}
+
+func NewSandboxTaskResponse() *SandboxTaskResponse {
+	return &SandboxTaskResponse{}
+}
+
+func (p *SandboxTaskResponse) InitDefault() {
+}
+
+func (p *SandboxTaskResponse) GetOk() (v bool) {
+	return p.Ok
+}
+
+func (p *SandboxTaskResponse) GetTaskId() (v string) {
+	return p.TaskId
+}
+
+func (p *SandboxTaskResponse) GetState() (v string) {
+	return p.State
+}
+
+var SandboxTaskResponse_ExitCode_DEFAULT int32
+
+func (p *SandboxTaskResponse) GetExitCode() (v int32) {
+	if !p.IsSetExitCode() {
+		return SandboxTaskResponse_ExitCode_DEFAULT
+	}
+	return *p.ExitCode
+}
+
+var SandboxTaskResponse_Stdout_DEFAULT string
+
+func (p *SandboxTaskResponse) GetStdout() (v string) {
+	if !p.IsSetStdout() {
+		return SandboxTaskResponse_Stdout_DEFAULT
+	}
+	return *p.Stdout
+}
+
+var SandboxTaskResponse_Stderr_DEFAULT string
+
+func (p *SandboxTaskResponse) GetStderr() (v string) {
+	if !p.IsSetStderr() {
+		return SandboxTaskResponse_Stderr_DEFAULT
+	}
+	return *p.Stderr
+}
+
+var SandboxTaskResponse_Truncated_DEFAULT bool
+
+func (p *SandboxTaskResponse) GetTruncated() (v bool) {
+	if !p.IsSetTruncated() {
+		return SandboxTaskResponse_Truncated_DEFAULT
+	}
+	return *p.Truncated
+}
+
+var SandboxTaskResponse_NextOffset_DEFAULT int64
+
+func (p *SandboxTaskResponse) GetNextOffset() (v int64) {
+	if !p.IsSetNextOffset() {
+		return SandboxTaskResponse_NextOffset_DEFAULT
+	}
+	return *p.NextOffset
+}
+
+var SandboxTaskResponse_ErrorCode_DEFAULT string
+
+func (p *SandboxTaskResponse) GetErrorCode() (v string) {
+	if !p.IsSetErrorCode() {
+		return SandboxTaskResponse_ErrorCode_DEFAULT
+	}
+	return *p.ErrorCode
+}
+
+var SandboxTaskResponse_ErrorMessage_DEFAULT string
+
+func (p *SandboxTaskResponse) GetErrorMessage() (v string) {
+	if !p.IsSetErrorMessage() {
+		return SandboxTaskResponse_ErrorMessage_DEFAULT
+	}
+	return *p.ErrorMessage
+}
+func (p *SandboxTaskResponse) SetOk(val bool) {
+	p.Ok = val
+}
+func (p *SandboxTaskResponse) SetTaskId(val string) {
+	p.TaskId = val
+}
+func (p *SandboxTaskResponse) SetState(val string) {
+	p.State = val
+}
+func (p *SandboxTaskResponse) SetExitCode(val *int32) {
+	p.ExitCode = val
+}
+func (p *SandboxTaskResponse) SetStdout(val *string) {
+	p.Stdout = val
+}
+func (p *SandboxTaskResponse) SetStderr(val *string) {
+	p.Stderr = val
+}
+func (p *SandboxTaskResponse) SetTruncated(val *bool) {
+	p.Truncated = val
+}
+func (p *SandboxTaskResponse) SetNextOffset(val *int64) {
+	p.NextOffset = val
+}
+func (p *SandboxTaskResponse) SetErrorCode(val *string) {
+	p.ErrorCode = val
+}
+func (p *SandboxTaskResponse) SetErrorMessage(val *string) {
+	p.ErrorMessage = val
+}
+
+func (p *SandboxTaskResponse) IsSetExitCode() bool {
+	return p.ExitCode != nil
+}
+
+func (p *SandboxTaskResponse) IsSetStdout() bool {
+	return p.Stdout != nil
+}
+
+func (p *SandboxTaskResponse) IsSetStderr() bool {
+	return p.Stderr != nil
+}
+
+func (p *SandboxTaskResponse) IsSetTruncated() bool {
+	return p.Truncated != nil
+}
+
+func (p *SandboxTaskResponse) IsSetNextOffset() bool {
+	return p.NextOffset != nil
+}
+
+func (p *SandboxTaskResponse) IsSetErrorCode() bool {
+	return p.ErrorCode != nil
+}
+
+func (p *SandboxTaskResponse) IsSetErrorMessage() bool {
+	return p.ErrorMessage != nil
+}
+
+func (p *SandboxTaskResponse) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SandboxTaskResponse(%+v)", *p)
+}
+
+var fieldIDToName_SandboxTaskResponse = map[int16]string{
+	1:  "ok",
+	2:  "taskId",
+	3:  "state",
+	4:  "exitCode",
+	5:  "stdout",
+	6:  "stderr",
+	7:  "truncated",
+	8:  "nextOffset",
+	9:  "errorCode",
+	10: "errorMessage",
+}
+
+type SandboxWorkspaceRequest struct {
+	ServiceToken string  `thrift:"serviceToken,1,required" frugal:"1,required,string" json:"serviceToken"`
+	AgentId      string  `thrift:"agentId,2,required" frugal:"2,required,string" json:"agentId"`
+	Operation    string  `thrift:"operation,3,required" frugal:"3,required,string" json:"operation"`
+	ArgsJson     string  `thrift:"argsJson,4,required" frugal:"4,required,string" json:"argsJson"`
+	RequestId    *string `thrift:"requestId,5,optional" frugal:"5,optional,string" json:"requestId,omitempty"`
+}
+
+func NewSandboxWorkspaceRequest() *SandboxWorkspaceRequest {
+	return &SandboxWorkspaceRequest{}
+}
+
+func (p *SandboxWorkspaceRequest) InitDefault() {
+}
+
+func (p *SandboxWorkspaceRequest) GetServiceToken() (v string) {
+	return p.ServiceToken
+}
+
+func (p *SandboxWorkspaceRequest) GetAgentId() (v string) {
+	return p.AgentId
+}
+
+func (p *SandboxWorkspaceRequest) GetOperation() (v string) {
+	return p.Operation
+}
+
+func (p *SandboxWorkspaceRequest) GetArgsJson() (v string) {
+	return p.ArgsJson
+}
+
+var SandboxWorkspaceRequest_RequestId_DEFAULT string
+
+func (p *SandboxWorkspaceRequest) GetRequestId() (v string) {
+	if !p.IsSetRequestId() {
+		return SandboxWorkspaceRequest_RequestId_DEFAULT
+	}
+	return *p.RequestId
+}
+func (p *SandboxWorkspaceRequest) SetServiceToken(val string) {
+	p.ServiceToken = val
+}
+func (p *SandboxWorkspaceRequest) SetAgentId(val string) {
+	p.AgentId = val
+}
+func (p *SandboxWorkspaceRequest) SetOperation(val string) {
+	p.Operation = val
+}
+func (p *SandboxWorkspaceRequest) SetArgsJson(val string) {
+	p.ArgsJson = val
+}
+func (p *SandboxWorkspaceRequest) SetRequestId(val *string) {
+	p.RequestId = val
+}
+
+func (p *SandboxWorkspaceRequest) IsSetRequestId() bool {
+	return p.RequestId != nil
+}
+
+func (p *SandboxWorkspaceRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SandboxWorkspaceRequest(%+v)", *p)
+}
+
+var fieldIDToName_SandboxWorkspaceRequest = map[int16]string{
+	1: "serviceToken",
+	2: "agentId",
+	3: "operation",
+	4: "argsJson",
+	5: "requestId",
+}
+
+type SandboxWorkspaceResponse struct {
+	Ok           bool    `thrift:"ok,1,required" frugal:"1,required,bool" json:"ok"`
+	DataJson     *string `thrift:"dataJson,2,optional" frugal:"2,optional,string" json:"dataJson,omitempty"`
+	ErrorCode    *string `thrift:"errorCode,3,optional" frugal:"3,optional,string" json:"errorCode,omitempty"`
+	ErrorMessage *string `thrift:"errorMessage,4,optional" frugal:"4,optional,string" json:"errorMessage,omitempty"`
+}
+
+func NewSandboxWorkspaceResponse() *SandboxWorkspaceResponse {
+	return &SandboxWorkspaceResponse{}
+}
+
+func (p *SandboxWorkspaceResponse) InitDefault() {
+}
+
+func (p *SandboxWorkspaceResponse) GetOk() (v bool) {
+	return p.Ok
+}
+
+var SandboxWorkspaceResponse_DataJson_DEFAULT string
+
+func (p *SandboxWorkspaceResponse) GetDataJson() (v string) {
+	if !p.IsSetDataJson() {
+		return SandboxWorkspaceResponse_DataJson_DEFAULT
+	}
+	return *p.DataJson
+}
+
+var SandboxWorkspaceResponse_ErrorCode_DEFAULT string
+
+func (p *SandboxWorkspaceResponse) GetErrorCode() (v string) {
+	if !p.IsSetErrorCode() {
+		return SandboxWorkspaceResponse_ErrorCode_DEFAULT
+	}
+	return *p.ErrorCode
+}
+
+var SandboxWorkspaceResponse_ErrorMessage_DEFAULT string
+
+func (p *SandboxWorkspaceResponse) GetErrorMessage() (v string) {
+	if !p.IsSetErrorMessage() {
+		return SandboxWorkspaceResponse_ErrorMessage_DEFAULT
+	}
+	return *p.ErrorMessage
+}
+func (p *SandboxWorkspaceResponse) SetOk(val bool) {
+	p.Ok = val
+}
+func (p *SandboxWorkspaceResponse) SetDataJson(val *string) {
+	p.DataJson = val
+}
+func (p *SandboxWorkspaceResponse) SetErrorCode(val *string) {
+	p.ErrorCode = val
+}
+func (p *SandboxWorkspaceResponse) SetErrorMessage(val *string) {
+	p.ErrorMessage = val
+}
+
+func (p *SandboxWorkspaceResponse) IsSetDataJson() bool {
+	return p.DataJson != nil
+}
+
+func (p *SandboxWorkspaceResponse) IsSetErrorCode() bool {
+	return p.ErrorCode != nil
+}
+
+func (p *SandboxWorkspaceResponse) IsSetErrorMessage() bool {
+	return p.ErrorMessage != nil
+}
+
+func (p *SandboxWorkspaceResponse) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SandboxWorkspaceResponse(%+v)", *p)
+}
+
+var fieldIDToName_SandboxWorkspaceResponse = map[int16]string{
+	1: "ok",
+	2: "dataJson",
+	3: "errorCode",
+	4: "errorMessage",
+}
+
 type AgentControlService interface {
 	ListAgents(ctx context.Context, request *AgentListRequest) (r *AgentListResponse, err error)
 
@@ -1213,6 +1929,710 @@ var fieldIDToName_AgentControlServicePingResult = map[int16]string{
 	0: "success",
 }
 
+type AgentRuntimeService interface {
+	State(ctx context.Context, request *RuntimeRequest) (r *RuntimeResponse, err error)
+
+	Runs(ctx context.Context, request *RuntimeRequest) (r *RuntimeResponse, err error)
+
+	Run(ctx context.Context, request *RuntimeRequest) (r *RuntimeResponse, err error)
+
+	Tasks(ctx context.Context, request *RuntimeRequest) (r *RuntimeResponse, err error)
+
+	Task(ctx context.Context, request *RuntimeRequest) (r *RuntimeResponse, err error)
+
+	Events(ctx context.Context, request *RuntimeRequest) (r *RuntimeResponse, err error)
+
+	CancelRun(ctx context.Context, request *RuntimeRequest) (r *RuntimeResponse, err error)
+
+	CancelTask(ctx context.Context, request *RuntimeRequest) (r *RuntimeResponse, err error)
+
+	RetryRun(ctx context.Context, request *RuntimeRequest) (r *RuntimeResponse, err error)
+}
+
+type AgentRuntimeServiceStateArgs struct {
+	Request *RuntimeRequest `thrift:"request,1" frugal:"1,default,RuntimeRequest" json:"request"`
+}
+
+func NewAgentRuntimeServiceStateArgs() *AgentRuntimeServiceStateArgs {
+	return &AgentRuntimeServiceStateArgs{}
+}
+
+func (p *AgentRuntimeServiceStateArgs) InitDefault() {
+}
+
+var AgentRuntimeServiceStateArgs_Request_DEFAULT *RuntimeRequest
+
+func (p *AgentRuntimeServiceStateArgs) GetRequest() (v *RuntimeRequest) {
+	if !p.IsSetRequest() {
+		return AgentRuntimeServiceStateArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *AgentRuntimeServiceStateArgs) SetRequest(val *RuntimeRequest) {
+	p.Request = val
+}
+
+func (p *AgentRuntimeServiceStateArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *AgentRuntimeServiceStateArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AgentRuntimeServiceStateArgs(%+v)", *p)
+}
+
+var fieldIDToName_AgentRuntimeServiceStateArgs = map[int16]string{
+	1: "request",
+}
+
+type AgentRuntimeServiceStateResult struct {
+	Success *RuntimeResponse `thrift:"success,0,optional" frugal:"0,optional,RuntimeResponse" json:"success,omitempty"`
+}
+
+func NewAgentRuntimeServiceStateResult() *AgentRuntimeServiceStateResult {
+	return &AgentRuntimeServiceStateResult{}
+}
+
+func (p *AgentRuntimeServiceStateResult) InitDefault() {
+}
+
+var AgentRuntimeServiceStateResult_Success_DEFAULT *RuntimeResponse
+
+func (p *AgentRuntimeServiceStateResult) GetSuccess() (v *RuntimeResponse) {
+	if !p.IsSetSuccess() {
+		return AgentRuntimeServiceStateResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *AgentRuntimeServiceStateResult) SetSuccess(x interface{}) {
+	p.Success = x.(*RuntimeResponse)
+}
+
+func (p *AgentRuntimeServiceStateResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *AgentRuntimeServiceStateResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AgentRuntimeServiceStateResult(%+v)", *p)
+}
+
+var fieldIDToName_AgentRuntimeServiceStateResult = map[int16]string{
+	0: "success",
+}
+
+type AgentRuntimeServiceRunsArgs struct {
+	Request *RuntimeRequest `thrift:"request,1" frugal:"1,default,RuntimeRequest" json:"request"`
+}
+
+func NewAgentRuntimeServiceRunsArgs() *AgentRuntimeServiceRunsArgs {
+	return &AgentRuntimeServiceRunsArgs{}
+}
+
+func (p *AgentRuntimeServiceRunsArgs) InitDefault() {
+}
+
+var AgentRuntimeServiceRunsArgs_Request_DEFAULT *RuntimeRequest
+
+func (p *AgentRuntimeServiceRunsArgs) GetRequest() (v *RuntimeRequest) {
+	if !p.IsSetRequest() {
+		return AgentRuntimeServiceRunsArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *AgentRuntimeServiceRunsArgs) SetRequest(val *RuntimeRequest) {
+	p.Request = val
+}
+
+func (p *AgentRuntimeServiceRunsArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *AgentRuntimeServiceRunsArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AgentRuntimeServiceRunsArgs(%+v)", *p)
+}
+
+var fieldIDToName_AgentRuntimeServiceRunsArgs = map[int16]string{
+	1: "request",
+}
+
+type AgentRuntimeServiceRunsResult struct {
+	Success *RuntimeResponse `thrift:"success,0,optional" frugal:"0,optional,RuntimeResponse" json:"success,omitempty"`
+}
+
+func NewAgentRuntimeServiceRunsResult() *AgentRuntimeServiceRunsResult {
+	return &AgentRuntimeServiceRunsResult{}
+}
+
+func (p *AgentRuntimeServiceRunsResult) InitDefault() {
+}
+
+var AgentRuntimeServiceRunsResult_Success_DEFAULT *RuntimeResponse
+
+func (p *AgentRuntimeServiceRunsResult) GetSuccess() (v *RuntimeResponse) {
+	if !p.IsSetSuccess() {
+		return AgentRuntimeServiceRunsResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *AgentRuntimeServiceRunsResult) SetSuccess(x interface{}) {
+	p.Success = x.(*RuntimeResponse)
+}
+
+func (p *AgentRuntimeServiceRunsResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *AgentRuntimeServiceRunsResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AgentRuntimeServiceRunsResult(%+v)", *p)
+}
+
+var fieldIDToName_AgentRuntimeServiceRunsResult = map[int16]string{
+	0: "success",
+}
+
+type AgentRuntimeServiceRunArgs struct {
+	Request *RuntimeRequest `thrift:"request,1" frugal:"1,default,RuntimeRequest" json:"request"`
+}
+
+func NewAgentRuntimeServiceRunArgs() *AgentRuntimeServiceRunArgs {
+	return &AgentRuntimeServiceRunArgs{}
+}
+
+func (p *AgentRuntimeServiceRunArgs) InitDefault() {
+}
+
+var AgentRuntimeServiceRunArgs_Request_DEFAULT *RuntimeRequest
+
+func (p *AgentRuntimeServiceRunArgs) GetRequest() (v *RuntimeRequest) {
+	if !p.IsSetRequest() {
+		return AgentRuntimeServiceRunArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *AgentRuntimeServiceRunArgs) SetRequest(val *RuntimeRequest) {
+	p.Request = val
+}
+
+func (p *AgentRuntimeServiceRunArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *AgentRuntimeServiceRunArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AgentRuntimeServiceRunArgs(%+v)", *p)
+}
+
+var fieldIDToName_AgentRuntimeServiceRunArgs = map[int16]string{
+	1: "request",
+}
+
+type AgentRuntimeServiceRunResult struct {
+	Success *RuntimeResponse `thrift:"success,0,optional" frugal:"0,optional,RuntimeResponse" json:"success,omitempty"`
+}
+
+func NewAgentRuntimeServiceRunResult() *AgentRuntimeServiceRunResult {
+	return &AgentRuntimeServiceRunResult{}
+}
+
+func (p *AgentRuntimeServiceRunResult) InitDefault() {
+}
+
+var AgentRuntimeServiceRunResult_Success_DEFAULT *RuntimeResponse
+
+func (p *AgentRuntimeServiceRunResult) GetSuccess() (v *RuntimeResponse) {
+	if !p.IsSetSuccess() {
+		return AgentRuntimeServiceRunResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *AgentRuntimeServiceRunResult) SetSuccess(x interface{}) {
+	p.Success = x.(*RuntimeResponse)
+}
+
+func (p *AgentRuntimeServiceRunResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *AgentRuntimeServiceRunResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AgentRuntimeServiceRunResult(%+v)", *p)
+}
+
+var fieldIDToName_AgentRuntimeServiceRunResult = map[int16]string{
+	0: "success",
+}
+
+type AgentRuntimeServiceTasksArgs struct {
+	Request *RuntimeRequest `thrift:"request,1" frugal:"1,default,RuntimeRequest" json:"request"`
+}
+
+func NewAgentRuntimeServiceTasksArgs() *AgentRuntimeServiceTasksArgs {
+	return &AgentRuntimeServiceTasksArgs{}
+}
+
+func (p *AgentRuntimeServiceTasksArgs) InitDefault() {
+}
+
+var AgentRuntimeServiceTasksArgs_Request_DEFAULT *RuntimeRequest
+
+func (p *AgentRuntimeServiceTasksArgs) GetRequest() (v *RuntimeRequest) {
+	if !p.IsSetRequest() {
+		return AgentRuntimeServiceTasksArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *AgentRuntimeServiceTasksArgs) SetRequest(val *RuntimeRequest) {
+	p.Request = val
+}
+
+func (p *AgentRuntimeServiceTasksArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *AgentRuntimeServiceTasksArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AgentRuntimeServiceTasksArgs(%+v)", *p)
+}
+
+var fieldIDToName_AgentRuntimeServiceTasksArgs = map[int16]string{
+	1: "request",
+}
+
+type AgentRuntimeServiceTasksResult struct {
+	Success *RuntimeResponse `thrift:"success,0,optional" frugal:"0,optional,RuntimeResponse" json:"success,omitempty"`
+}
+
+func NewAgentRuntimeServiceTasksResult() *AgentRuntimeServiceTasksResult {
+	return &AgentRuntimeServiceTasksResult{}
+}
+
+func (p *AgentRuntimeServiceTasksResult) InitDefault() {
+}
+
+var AgentRuntimeServiceTasksResult_Success_DEFAULT *RuntimeResponse
+
+func (p *AgentRuntimeServiceTasksResult) GetSuccess() (v *RuntimeResponse) {
+	if !p.IsSetSuccess() {
+		return AgentRuntimeServiceTasksResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *AgentRuntimeServiceTasksResult) SetSuccess(x interface{}) {
+	p.Success = x.(*RuntimeResponse)
+}
+
+func (p *AgentRuntimeServiceTasksResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *AgentRuntimeServiceTasksResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AgentRuntimeServiceTasksResult(%+v)", *p)
+}
+
+var fieldIDToName_AgentRuntimeServiceTasksResult = map[int16]string{
+	0: "success",
+}
+
+type AgentRuntimeServiceTaskArgs struct {
+	Request *RuntimeRequest `thrift:"request,1" frugal:"1,default,RuntimeRequest" json:"request"`
+}
+
+func NewAgentRuntimeServiceTaskArgs() *AgentRuntimeServiceTaskArgs {
+	return &AgentRuntimeServiceTaskArgs{}
+}
+
+func (p *AgentRuntimeServiceTaskArgs) InitDefault() {
+}
+
+var AgentRuntimeServiceTaskArgs_Request_DEFAULT *RuntimeRequest
+
+func (p *AgentRuntimeServiceTaskArgs) GetRequest() (v *RuntimeRequest) {
+	if !p.IsSetRequest() {
+		return AgentRuntimeServiceTaskArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *AgentRuntimeServiceTaskArgs) SetRequest(val *RuntimeRequest) {
+	p.Request = val
+}
+
+func (p *AgentRuntimeServiceTaskArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *AgentRuntimeServiceTaskArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AgentRuntimeServiceTaskArgs(%+v)", *p)
+}
+
+var fieldIDToName_AgentRuntimeServiceTaskArgs = map[int16]string{
+	1: "request",
+}
+
+type AgentRuntimeServiceTaskResult struct {
+	Success *RuntimeResponse `thrift:"success,0,optional" frugal:"0,optional,RuntimeResponse" json:"success,omitempty"`
+}
+
+func NewAgentRuntimeServiceTaskResult() *AgentRuntimeServiceTaskResult {
+	return &AgentRuntimeServiceTaskResult{}
+}
+
+func (p *AgentRuntimeServiceTaskResult) InitDefault() {
+}
+
+var AgentRuntimeServiceTaskResult_Success_DEFAULT *RuntimeResponse
+
+func (p *AgentRuntimeServiceTaskResult) GetSuccess() (v *RuntimeResponse) {
+	if !p.IsSetSuccess() {
+		return AgentRuntimeServiceTaskResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *AgentRuntimeServiceTaskResult) SetSuccess(x interface{}) {
+	p.Success = x.(*RuntimeResponse)
+}
+
+func (p *AgentRuntimeServiceTaskResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *AgentRuntimeServiceTaskResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AgentRuntimeServiceTaskResult(%+v)", *p)
+}
+
+var fieldIDToName_AgentRuntimeServiceTaskResult = map[int16]string{
+	0: "success",
+}
+
+type AgentRuntimeServiceEventsArgs struct {
+	Request *RuntimeRequest `thrift:"request,1" frugal:"1,default,RuntimeRequest" json:"request"`
+}
+
+func NewAgentRuntimeServiceEventsArgs() *AgentRuntimeServiceEventsArgs {
+	return &AgentRuntimeServiceEventsArgs{}
+}
+
+func (p *AgentRuntimeServiceEventsArgs) InitDefault() {
+}
+
+var AgentRuntimeServiceEventsArgs_Request_DEFAULT *RuntimeRequest
+
+func (p *AgentRuntimeServiceEventsArgs) GetRequest() (v *RuntimeRequest) {
+	if !p.IsSetRequest() {
+		return AgentRuntimeServiceEventsArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *AgentRuntimeServiceEventsArgs) SetRequest(val *RuntimeRequest) {
+	p.Request = val
+}
+
+func (p *AgentRuntimeServiceEventsArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *AgentRuntimeServiceEventsArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AgentRuntimeServiceEventsArgs(%+v)", *p)
+}
+
+var fieldIDToName_AgentRuntimeServiceEventsArgs = map[int16]string{
+	1: "request",
+}
+
+type AgentRuntimeServiceEventsResult struct {
+	Success *RuntimeResponse `thrift:"success,0,optional" frugal:"0,optional,RuntimeResponse" json:"success,omitempty"`
+}
+
+func NewAgentRuntimeServiceEventsResult() *AgentRuntimeServiceEventsResult {
+	return &AgentRuntimeServiceEventsResult{}
+}
+
+func (p *AgentRuntimeServiceEventsResult) InitDefault() {
+}
+
+var AgentRuntimeServiceEventsResult_Success_DEFAULT *RuntimeResponse
+
+func (p *AgentRuntimeServiceEventsResult) GetSuccess() (v *RuntimeResponse) {
+	if !p.IsSetSuccess() {
+		return AgentRuntimeServiceEventsResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *AgentRuntimeServiceEventsResult) SetSuccess(x interface{}) {
+	p.Success = x.(*RuntimeResponse)
+}
+
+func (p *AgentRuntimeServiceEventsResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *AgentRuntimeServiceEventsResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AgentRuntimeServiceEventsResult(%+v)", *p)
+}
+
+var fieldIDToName_AgentRuntimeServiceEventsResult = map[int16]string{
+	0: "success",
+}
+
+type AgentRuntimeServiceCancelRunArgs struct {
+	Request *RuntimeRequest `thrift:"request,1" frugal:"1,default,RuntimeRequest" json:"request"`
+}
+
+func NewAgentRuntimeServiceCancelRunArgs() *AgentRuntimeServiceCancelRunArgs {
+	return &AgentRuntimeServiceCancelRunArgs{}
+}
+
+func (p *AgentRuntimeServiceCancelRunArgs) InitDefault() {
+}
+
+var AgentRuntimeServiceCancelRunArgs_Request_DEFAULT *RuntimeRequest
+
+func (p *AgentRuntimeServiceCancelRunArgs) GetRequest() (v *RuntimeRequest) {
+	if !p.IsSetRequest() {
+		return AgentRuntimeServiceCancelRunArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *AgentRuntimeServiceCancelRunArgs) SetRequest(val *RuntimeRequest) {
+	p.Request = val
+}
+
+func (p *AgentRuntimeServiceCancelRunArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *AgentRuntimeServiceCancelRunArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AgentRuntimeServiceCancelRunArgs(%+v)", *p)
+}
+
+var fieldIDToName_AgentRuntimeServiceCancelRunArgs = map[int16]string{
+	1: "request",
+}
+
+type AgentRuntimeServiceCancelRunResult struct {
+	Success *RuntimeResponse `thrift:"success,0,optional" frugal:"0,optional,RuntimeResponse" json:"success,omitempty"`
+}
+
+func NewAgentRuntimeServiceCancelRunResult() *AgentRuntimeServiceCancelRunResult {
+	return &AgentRuntimeServiceCancelRunResult{}
+}
+
+func (p *AgentRuntimeServiceCancelRunResult) InitDefault() {
+}
+
+var AgentRuntimeServiceCancelRunResult_Success_DEFAULT *RuntimeResponse
+
+func (p *AgentRuntimeServiceCancelRunResult) GetSuccess() (v *RuntimeResponse) {
+	if !p.IsSetSuccess() {
+		return AgentRuntimeServiceCancelRunResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *AgentRuntimeServiceCancelRunResult) SetSuccess(x interface{}) {
+	p.Success = x.(*RuntimeResponse)
+}
+
+func (p *AgentRuntimeServiceCancelRunResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *AgentRuntimeServiceCancelRunResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AgentRuntimeServiceCancelRunResult(%+v)", *p)
+}
+
+var fieldIDToName_AgentRuntimeServiceCancelRunResult = map[int16]string{
+	0: "success",
+}
+
+type AgentRuntimeServiceCancelTaskArgs struct {
+	Request *RuntimeRequest `thrift:"request,1" frugal:"1,default,RuntimeRequest" json:"request"`
+}
+
+func NewAgentRuntimeServiceCancelTaskArgs() *AgentRuntimeServiceCancelTaskArgs {
+	return &AgentRuntimeServiceCancelTaskArgs{}
+}
+
+func (p *AgentRuntimeServiceCancelTaskArgs) InitDefault() {
+}
+
+var AgentRuntimeServiceCancelTaskArgs_Request_DEFAULT *RuntimeRequest
+
+func (p *AgentRuntimeServiceCancelTaskArgs) GetRequest() (v *RuntimeRequest) {
+	if !p.IsSetRequest() {
+		return AgentRuntimeServiceCancelTaskArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *AgentRuntimeServiceCancelTaskArgs) SetRequest(val *RuntimeRequest) {
+	p.Request = val
+}
+
+func (p *AgentRuntimeServiceCancelTaskArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *AgentRuntimeServiceCancelTaskArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AgentRuntimeServiceCancelTaskArgs(%+v)", *p)
+}
+
+var fieldIDToName_AgentRuntimeServiceCancelTaskArgs = map[int16]string{
+	1: "request",
+}
+
+type AgentRuntimeServiceCancelTaskResult struct {
+	Success *RuntimeResponse `thrift:"success,0,optional" frugal:"0,optional,RuntimeResponse" json:"success,omitempty"`
+}
+
+func NewAgentRuntimeServiceCancelTaskResult() *AgentRuntimeServiceCancelTaskResult {
+	return &AgentRuntimeServiceCancelTaskResult{}
+}
+
+func (p *AgentRuntimeServiceCancelTaskResult) InitDefault() {
+}
+
+var AgentRuntimeServiceCancelTaskResult_Success_DEFAULT *RuntimeResponse
+
+func (p *AgentRuntimeServiceCancelTaskResult) GetSuccess() (v *RuntimeResponse) {
+	if !p.IsSetSuccess() {
+		return AgentRuntimeServiceCancelTaskResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *AgentRuntimeServiceCancelTaskResult) SetSuccess(x interface{}) {
+	p.Success = x.(*RuntimeResponse)
+}
+
+func (p *AgentRuntimeServiceCancelTaskResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *AgentRuntimeServiceCancelTaskResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AgentRuntimeServiceCancelTaskResult(%+v)", *p)
+}
+
+var fieldIDToName_AgentRuntimeServiceCancelTaskResult = map[int16]string{
+	0: "success",
+}
+
+type AgentRuntimeServiceRetryRunArgs struct {
+	Request *RuntimeRequest `thrift:"request,1" frugal:"1,default,RuntimeRequest" json:"request"`
+}
+
+func NewAgentRuntimeServiceRetryRunArgs() *AgentRuntimeServiceRetryRunArgs {
+	return &AgentRuntimeServiceRetryRunArgs{}
+}
+
+func (p *AgentRuntimeServiceRetryRunArgs) InitDefault() {
+}
+
+var AgentRuntimeServiceRetryRunArgs_Request_DEFAULT *RuntimeRequest
+
+func (p *AgentRuntimeServiceRetryRunArgs) GetRequest() (v *RuntimeRequest) {
+	if !p.IsSetRequest() {
+		return AgentRuntimeServiceRetryRunArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *AgentRuntimeServiceRetryRunArgs) SetRequest(val *RuntimeRequest) {
+	p.Request = val
+}
+
+func (p *AgentRuntimeServiceRetryRunArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *AgentRuntimeServiceRetryRunArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AgentRuntimeServiceRetryRunArgs(%+v)", *p)
+}
+
+var fieldIDToName_AgentRuntimeServiceRetryRunArgs = map[int16]string{
+	1: "request",
+}
+
+type AgentRuntimeServiceRetryRunResult struct {
+	Success *RuntimeResponse `thrift:"success,0,optional" frugal:"0,optional,RuntimeResponse" json:"success,omitempty"`
+}
+
+func NewAgentRuntimeServiceRetryRunResult() *AgentRuntimeServiceRetryRunResult {
+	return &AgentRuntimeServiceRetryRunResult{}
+}
+
+func (p *AgentRuntimeServiceRetryRunResult) InitDefault() {
+}
+
+var AgentRuntimeServiceRetryRunResult_Success_DEFAULT *RuntimeResponse
+
+func (p *AgentRuntimeServiceRetryRunResult) GetSuccess() (v *RuntimeResponse) {
+	if !p.IsSetSuccess() {
+		return AgentRuntimeServiceRetryRunResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *AgentRuntimeServiceRetryRunResult) SetSuccess(x interface{}) {
+	p.Success = x.(*RuntimeResponse)
+}
+
+func (p *AgentRuntimeServiceRetryRunResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *AgentRuntimeServiceRetryRunResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AgentRuntimeServiceRetryRunResult(%+v)", *p)
+}
+
+var fieldIDToName_AgentRuntimeServiceRetryRunResult = map[int16]string{
+	0: "success",
+}
+
 type ModelGatewayService interface {
 	Chat(ctx context.Context, request *GatewayChatRequest) (r *GatewayChatResponse, err error)
 
@@ -1455,6 +2875,16 @@ type SandboxService interface {
 	Cancel(ctx context.Context, request *CancelRequest) (r *Ack, err error)
 
 	Ping(ctx context.Context, request *PingRequest) (r *PingResponse, err error)
+
+	Start(ctx context.Context, request *SandboxStartRequest) (r *SandboxTaskResponse, err error)
+
+	Get(ctx context.Context, request *SandboxTaskRequest) (r *SandboxTaskResponse, err error)
+
+	ReadOutput(ctx context.Context, request *SandboxTaskRequest) (r *SandboxTaskResponse, err error)
+
+	CancelTask(ctx context.Context, request *SandboxTaskRequest) (r *SandboxTaskResponse, err error)
+
+	Workspace(ctx context.Context, request *SandboxWorkspaceRequest) (r *SandboxWorkspaceResponse, err error)
 }
 
 type SandboxServiceExecArgs struct {
@@ -1682,5 +3112,385 @@ func (p *SandboxServicePingResult) String() string {
 }
 
 var fieldIDToName_SandboxServicePingResult = map[int16]string{
+	0: "success",
+}
+
+type SandboxServiceStartArgs struct {
+	Request *SandboxStartRequest `thrift:"request,1" frugal:"1,default,SandboxStartRequest" json:"request"`
+}
+
+func NewSandboxServiceStartArgs() *SandboxServiceStartArgs {
+	return &SandboxServiceStartArgs{}
+}
+
+func (p *SandboxServiceStartArgs) InitDefault() {
+}
+
+var SandboxServiceStartArgs_Request_DEFAULT *SandboxStartRequest
+
+func (p *SandboxServiceStartArgs) GetRequest() (v *SandboxStartRequest) {
+	if !p.IsSetRequest() {
+		return SandboxServiceStartArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *SandboxServiceStartArgs) SetRequest(val *SandboxStartRequest) {
+	p.Request = val
+}
+
+func (p *SandboxServiceStartArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *SandboxServiceStartArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SandboxServiceStartArgs(%+v)", *p)
+}
+
+var fieldIDToName_SandboxServiceStartArgs = map[int16]string{
+	1: "request",
+}
+
+type SandboxServiceStartResult struct {
+	Success *SandboxTaskResponse `thrift:"success,0,optional" frugal:"0,optional,SandboxTaskResponse" json:"success,omitempty"`
+}
+
+func NewSandboxServiceStartResult() *SandboxServiceStartResult {
+	return &SandboxServiceStartResult{}
+}
+
+func (p *SandboxServiceStartResult) InitDefault() {
+}
+
+var SandboxServiceStartResult_Success_DEFAULT *SandboxTaskResponse
+
+func (p *SandboxServiceStartResult) GetSuccess() (v *SandboxTaskResponse) {
+	if !p.IsSetSuccess() {
+		return SandboxServiceStartResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *SandboxServiceStartResult) SetSuccess(x interface{}) {
+	p.Success = x.(*SandboxTaskResponse)
+}
+
+func (p *SandboxServiceStartResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *SandboxServiceStartResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SandboxServiceStartResult(%+v)", *p)
+}
+
+var fieldIDToName_SandboxServiceStartResult = map[int16]string{
+	0: "success",
+}
+
+type SandboxServiceGetArgs struct {
+	Request *SandboxTaskRequest `thrift:"request,1" frugal:"1,default,SandboxTaskRequest" json:"request"`
+}
+
+func NewSandboxServiceGetArgs() *SandboxServiceGetArgs {
+	return &SandboxServiceGetArgs{}
+}
+
+func (p *SandboxServiceGetArgs) InitDefault() {
+}
+
+var SandboxServiceGetArgs_Request_DEFAULT *SandboxTaskRequest
+
+func (p *SandboxServiceGetArgs) GetRequest() (v *SandboxTaskRequest) {
+	if !p.IsSetRequest() {
+		return SandboxServiceGetArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *SandboxServiceGetArgs) SetRequest(val *SandboxTaskRequest) {
+	p.Request = val
+}
+
+func (p *SandboxServiceGetArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *SandboxServiceGetArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SandboxServiceGetArgs(%+v)", *p)
+}
+
+var fieldIDToName_SandboxServiceGetArgs = map[int16]string{
+	1: "request",
+}
+
+type SandboxServiceGetResult struct {
+	Success *SandboxTaskResponse `thrift:"success,0,optional" frugal:"0,optional,SandboxTaskResponse" json:"success,omitempty"`
+}
+
+func NewSandboxServiceGetResult() *SandboxServiceGetResult {
+	return &SandboxServiceGetResult{}
+}
+
+func (p *SandboxServiceGetResult) InitDefault() {
+}
+
+var SandboxServiceGetResult_Success_DEFAULT *SandboxTaskResponse
+
+func (p *SandboxServiceGetResult) GetSuccess() (v *SandboxTaskResponse) {
+	if !p.IsSetSuccess() {
+		return SandboxServiceGetResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *SandboxServiceGetResult) SetSuccess(x interface{}) {
+	p.Success = x.(*SandboxTaskResponse)
+}
+
+func (p *SandboxServiceGetResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *SandboxServiceGetResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SandboxServiceGetResult(%+v)", *p)
+}
+
+var fieldIDToName_SandboxServiceGetResult = map[int16]string{
+	0: "success",
+}
+
+type SandboxServiceReadOutputArgs struct {
+	Request *SandboxTaskRequest `thrift:"request,1" frugal:"1,default,SandboxTaskRequest" json:"request"`
+}
+
+func NewSandboxServiceReadOutputArgs() *SandboxServiceReadOutputArgs {
+	return &SandboxServiceReadOutputArgs{}
+}
+
+func (p *SandboxServiceReadOutputArgs) InitDefault() {
+}
+
+var SandboxServiceReadOutputArgs_Request_DEFAULT *SandboxTaskRequest
+
+func (p *SandboxServiceReadOutputArgs) GetRequest() (v *SandboxTaskRequest) {
+	if !p.IsSetRequest() {
+		return SandboxServiceReadOutputArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *SandboxServiceReadOutputArgs) SetRequest(val *SandboxTaskRequest) {
+	p.Request = val
+}
+
+func (p *SandboxServiceReadOutputArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *SandboxServiceReadOutputArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SandboxServiceReadOutputArgs(%+v)", *p)
+}
+
+var fieldIDToName_SandboxServiceReadOutputArgs = map[int16]string{
+	1: "request",
+}
+
+type SandboxServiceReadOutputResult struct {
+	Success *SandboxTaskResponse `thrift:"success,0,optional" frugal:"0,optional,SandboxTaskResponse" json:"success,omitempty"`
+}
+
+func NewSandboxServiceReadOutputResult() *SandboxServiceReadOutputResult {
+	return &SandboxServiceReadOutputResult{}
+}
+
+func (p *SandboxServiceReadOutputResult) InitDefault() {
+}
+
+var SandboxServiceReadOutputResult_Success_DEFAULT *SandboxTaskResponse
+
+func (p *SandboxServiceReadOutputResult) GetSuccess() (v *SandboxTaskResponse) {
+	if !p.IsSetSuccess() {
+		return SandboxServiceReadOutputResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *SandboxServiceReadOutputResult) SetSuccess(x interface{}) {
+	p.Success = x.(*SandboxTaskResponse)
+}
+
+func (p *SandboxServiceReadOutputResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *SandboxServiceReadOutputResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SandboxServiceReadOutputResult(%+v)", *p)
+}
+
+var fieldIDToName_SandboxServiceReadOutputResult = map[int16]string{
+	0: "success",
+}
+
+type SandboxServiceCancelTaskArgs struct {
+	Request *SandboxTaskRequest `thrift:"request,1" frugal:"1,default,SandboxTaskRequest" json:"request"`
+}
+
+func NewSandboxServiceCancelTaskArgs() *SandboxServiceCancelTaskArgs {
+	return &SandboxServiceCancelTaskArgs{}
+}
+
+func (p *SandboxServiceCancelTaskArgs) InitDefault() {
+}
+
+var SandboxServiceCancelTaskArgs_Request_DEFAULT *SandboxTaskRequest
+
+func (p *SandboxServiceCancelTaskArgs) GetRequest() (v *SandboxTaskRequest) {
+	if !p.IsSetRequest() {
+		return SandboxServiceCancelTaskArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *SandboxServiceCancelTaskArgs) SetRequest(val *SandboxTaskRequest) {
+	p.Request = val
+}
+
+func (p *SandboxServiceCancelTaskArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *SandboxServiceCancelTaskArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SandboxServiceCancelTaskArgs(%+v)", *p)
+}
+
+var fieldIDToName_SandboxServiceCancelTaskArgs = map[int16]string{
+	1: "request",
+}
+
+type SandboxServiceCancelTaskResult struct {
+	Success *SandboxTaskResponse `thrift:"success,0,optional" frugal:"0,optional,SandboxTaskResponse" json:"success,omitempty"`
+}
+
+func NewSandboxServiceCancelTaskResult() *SandboxServiceCancelTaskResult {
+	return &SandboxServiceCancelTaskResult{}
+}
+
+func (p *SandboxServiceCancelTaskResult) InitDefault() {
+}
+
+var SandboxServiceCancelTaskResult_Success_DEFAULT *SandboxTaskResponse
+
+func (p *SandboxServiceCancelTaskResult) GetSuccess() (v *SandboxTaskResponse) {
+	if !p.IsSetSuccess() {
+		return SandboxServiceCancelTaskResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *SandboxServiceCancelTaskResult) SetSuccess(x interface{}) {
+	p.Success = x.(*SandboxTaskResponse)
+}
+
+func (p *SandboxServiceCancelTaskResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *SandboxServiceCancelTaskResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SandboxServiceCancelTaskResult(%+v)", *p)
+}
+
+var fieldIDToName_SandboxServiceCancelTaskResult = map[int16]string{
+	0: "success",
+}
+
+type SandboxServiceWorkspaceArgs struct {
+	Request *SandboxWorkspaceRequest `thrift:"request,1" frugal:"1,default,SandboxWorkspaceRequest" json:"request"`
+}
+
+func NewSandboxServiceWorkspaceArgs() *SandboxServiceWorkspaceArgs {
+	return &SandboxServiceWorkspaceArgs{}
+}
+
+func (p *SandboxServiceWorkspaceArgs) InitDefault() {
+}
+
+var SandboxServiceWorkspaceArgs_Request_DEFAULT *SandboxWorkspaceRequest
+
+func (p *SandboxServiceWorkspaceArgs) GetRequest() (v *SandboxWorkspaceRequest) {
+	if !p.IsSetRequest() {
+		return SandboxServiceWorkspaceArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *SandboxServiceWorkspaceArgs) SetRequest(val *SandboxWorkspaceRequest) {
+	p.Request = val
+}
+
+func (p *SandboxServiceWorkspaceArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *SandboxServiceWorkspaceArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SandboxServiceWorkspaceArgs(%+v)", *p)
+}
+
+var fieldIDToName_SandboxServiceWorkspaceArgs = map[int16]string{
+	1: "request",
+}
+
+type SandboxServiceWorkspaceResult struct {
+	Success *SandboxWorkspaceResponse `thrift:"success,0,optional" frugal:"0,optional,SandboxWorkspaceResponse" json:"success,omitempty"`
+}
+
+func NewSandboxServiceWorkspaceResult() *SandboxServiceWorkspaceResult {
+	return &SandboxServiceWorkspaceResult{}
+}
+
+func (p *SandboxServiceWorkspaceResult) InitDefault() {
+}
+
+var SandboxServiceWorkspaceResult_Success_DEFAULT *SandboxWorkspaceResponse
+
+func (p *SandboxServiceWorkspaceResult) GetSuccess() (v *SandboxWorkspaceResponse) {
+	if !p.IsSetSuccess() {
+		return SandboxServiceWorkspaceResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *SandboxServiceWorkspaceResult) SetSuccess(x interface{}) {
+	p.Success = x.(*SandboxWorkspaceResponse)
+}
+
+func (p *SandboxServiceWorkspaceResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *SandboxServiceWorkspaceResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SandboxServiceWorkspaceResult(%+v)", *p)
+}
+
+var fieldIDToName_SandboxServiceWorkspaceResult = map[int16]string{
 	0: "success",
 }

@@ -94,10 +94,20 @@ export function modelGatewayInput(value: GatewayFormValue): ModelGatewayInput {
     throw new Error("服务地址不得包含密钥、认证信息或查询参数。");
   if (value.clearApiKey && key)
     throw new Error("清除密钥和填写新密钥不能同时进行。");
+  if (
+    value.contextWindowTokens !== undefined &&
+    (!Number.isInteger(value.contextWindowTokens) ||
+      value.contextWindowTokens < 4096 ||
+      value.contextWindowTokens > 2000000)
+  )
+    throw new Error("上下文窗口需为 4096 至 2000000 的整数。");
   return {
     baseUrl,
     model: value.model.trim(),
     enabled: value.enabled,
+    ...(value.contextWindowTokens === undefined
+      ? {}
+      : { contextWindowTokens: value.contextWindowTokens }),
     ...(key ? { apiKey: key } : {}),
     ...(value.clearApiKey ? { clearApiKey: true } : {}),
   };

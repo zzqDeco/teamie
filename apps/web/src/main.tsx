@@ -16,6 +16,7 @@ import { Landing, Login, Join } from "./public";
 import { Shell } from "./shell";
 import { Button, Loading, Logo, Notice } from "./ui";
 import "./styles.css";
+import "./layout.css";
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: true } },
 });

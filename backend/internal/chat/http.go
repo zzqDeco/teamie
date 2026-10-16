@@ -171,7 +171,11 @@ func (h *Handler) Routes() http.Handler {
 		if e != nil {
 			return e
 		}
-		ms, more, e := h.Store.Messages(r.Context(), s.User.ID, r.PathValue("id"), before, int(limit))
+		around, e := queryInt(r, "aroundSeq", 0, 0, 1<<62)
+		if e != nil {
+			return e
+		}
+		ms, more, e := h.Store.MessageHistory(r.Context(), s.User.ID, r.PathValue("id"), before, around, r.URL.Query().Get("q"), int(limit))
 		if e != nil {
 			return e
 		}

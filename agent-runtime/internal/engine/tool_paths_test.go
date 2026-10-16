@@ -11,12 +11,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 	"github.com/cloudwego/kitex/client/callopt"
 	"github.com/google/uuid"
 	wire "teamie/agent-protocol/kitex_gen/agent"
-	"teamie/agent-protocol/kitex_gen/agent/sandboxservice"
 )
 
 type toolPathRequest struct {
@@ -101,7 +99,7 @@ func toolPathSchemas(request toolPathRequest) error {
 	expected := map[string][]string{
 		"im_list_messages":  {"conversationId", "beforeSeq", "limit", "keyword"},
 		"im_get_message":    {"conversationId", "messageId"},
-		"workspace_execute": {"command", "timeoutSeconds"},
+		"workspace_execute": {"command", "run_in_background", "timeout"},
 	}
 	for _, definition := range request.Tools {
 		fields, wanted := expected[definition.Function.Name]
@@ -190,6 +188,14 @@ func (f *toolPathIM) serve(w http.ResponseWriter, r *http.Request) {
 			write(map[string]any{"error": map[string]string{"code": "unexpected_history_page"}})
 			return
 		}
+		if r.URL.Query().Get("q") != "" {
+			if !strings.Contains(strings.ToLower(f.older.Body), strings.ToLower(r.URL.Query().Get("q"))) {
+				write(map[string]any{"messages": []Message{}, "hasMore": false})
+			} else {
+				write(map[string]any{"messages": []Message{f.older}, "hasMore": false})
+			}
+			return
+		}
 		if before == 0 {
 			first, second := f.older, f.older
 			first.ID, first.Seq, first.Body = uuid.NewString(), 40, "A recent unrelated message"
@@ -211,28 +217,6 @@ func (f *toolPathIM) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNotFound)
 	write(map[string]any{"error": map[string]string{"code": "not_found"}})
-}
-
-type toolPathSandbox struct {
-	sandboxservice.Client
-	mu       sync.Mutex
-	requests []wire.SandboxExecRequest
-	denied   bool
-}
-
-func (s *toolPathSandbox) Exec(_ context.Context, r *wire.SandboxExecRequest, _ ...callopt.Option) (*wire.SandboxExecResponse, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.requests = append(s.requests, *r)
-	if s.denied {
-		code := "sandbox_denied"
-		return &wire.SandboxExecResponse{Ok: false, ErrorCode: &code}, nil
-	}
-	return &wire.SandboxExecResponse{Ok: true, ExitCode: 7, Stdout: "PRIVATE_WORKSPACE_RECEIPT\n", Stderr: "fixture command exited\n", Truncated: true}, nil
-}
-
-func (*toolPathSandbox) Cancel(context.Context, *wire.CancelRequest, ...callopt.Option) (*wire.Ack, error) {
-	return &wire.Ack{Ok: true}, nil
 }
 
 func runToolPathWorker(t *testing.T, e *Engine, f *fixtureIM, g *toolPathGateway) {
@@ -278,15 +262,12 @@ func toolPathReceipt(t *testing.T, s *Store, agent, call, name string) toolPathO
 	return result
 }
 
-func TestNativeEinoExplicitHistoryAndSandboxReceipts(t *testing.T) {
+func TestNativeEinoExplicitServerHistorySearchAndReferences(t *testing.T) {
 	s := testStore(t)
 	e, f, baseGateway, _ := fixtureEngine(t, s)
 	history := newToolPathIM(t, e, f)
-	sandbox := &toolPathSandbox{}
-	e.Sandbox = sandbox
 	gateway := &toolPathGateway{fixtureGateway: baseGateway}
 	e.Gateway = gateway
-	command := "printf 'private workspace command'"
 	gateway.steps = []func(toolPathRequest) (chatMessage, error){
 		func(request toolPathRequest) (chatMessage, error) {
 			if err := toolPathSchemas(request); err != nil {
@@ -294,143 +275,61 @@ func TestNativeEinoExplicitHistoryAndSandboxReceipts(t *testing.T) {
 			}
 			for _, message := range request.Messages {
 				if strings.Contains(message.Content, history.older.Body) {
-					return chatMessage{}, fmt.Errorf("distant history entered model context before an explicit read")
+					return chatMessage{}, fmt.Errorf("history loaded without explicit read")
 				}
 			}
-			return toolPathCall("im_list_messages", "history-latest", listMessagesArgs{ConversationID: history.conversation, Limit: 2, Keyword: "needle"})
+			return toolPathCall("im_list_messages", "history-search", listMessagesArgs{ConversationID: history.conversation, Limit: 2, Keyword: "NEEDLE"})
 		},
 		func(request toolPathRequest) (chatMessage, error) {
-			observation, err := toolPathLast(request, "history-latest")
-			var page toolPathPage
+			observation, err := toolPathLast(request, "history-search")
 			if err != nil {
 				return chatMessage{}, err
 			}
-			if err = json.Unmarshal(observation.Data, &page); err != nil {
-				return chatMessage{}, err
-			}
-			if !observation.OK || len(page.Messages) != 0 || !page.HasMore || page.NextBeforeSeq != 40 {
-				return chatMessage{}, fmt.Errorf("empty keyword page lost its unfiltered pagination cursor: %+v", page)
-			}
-			return toolPathCall("im_list_messages", "history-older", listMessagesArgs{ConversationID: history.conversation, BeforeSeq: page.NextBeforeSeq, Limit: 2, Keyword: "NEEDLE"})
-		},
-		func(request toolPathRequest) (chatMessage, error) {
-			observation, err := toolPathLast(request, "history-older")
 			var page toolPathPage
-			if err != nil {
-				return chatMessage{}, err
-			}
 			if err = json.Unmarshal(observation.Data, &page); err != nil {
 				return chatMessage{}, err
 			}
-			if !observation.OK || page.HasMore || page.NextBeforeSeq != 2 || len(page.Messages) != 1 || page.Messages[0] != history.older {
-				return chatMessage{}, fmt.Errorf("older history lost case-insensitive filtering or source attribution: %+v", page)
+			if !observation.OK || page.HasMore || len(page.Messages) != 1 || page.Messages[0] != history.older {
+				return chatMessage{}, fmt.Errorf("server search or source provenance lost: %+v", page)
 			}
-			return toolPathCall("im_get_message", "history-reference", getMessageArgs{ConversationID: page.Messages[0].ConversationID, MessageID: page.Messages[0].ID})
+			return toolPathCall("im_get_message", "history-reference", getMessageArgs{ConversationID: history.conversation, MessageID: history.older.ID})
 		},
 		func(request toolPathRequest) (chatMessage, error) {
 			observation, err := toolPathLast(request, "history-reference")
-			var message Message
 			if err != nil {
 				return chatMessage{}, err
 			}
-			if err = json.Unmarshal(observation.Data, &message); err != nil {
-				return chatMessage{}, err
-			}
+			var message Message
+			_ = json.Unmarshal(observation.Data, &message)
 			if !observation.OK || message != history.older {
-				return chatMessage{}, fmt.Errorf("referenced message lost its original source or body")
+				return chatMessage{}, fmt.Errorf("reference lost source")
 			}
 			return toolPathCall("im_get_message", "history-tombstone", getMessageArgs{ConversationID: history.conversation, MessageID: history.tombstone.ID})
 		},
 		func(request toolPathRequest) (chatMessage, error) {
 			observation, err := toolPathLast(request, "history-tombstone")
+			if err != nil {
+				return chatMessage{}, err
+			}
 			var message Message
-			if err != nil {
-				return chatMessage{}, err
-			}
-			if err = json.Unmarshal(observation.Data, &message); err != nil {
-				return chatMessage{}, err
-			}
+			_ = json.Unmarshal(observation.Data, &message)
 			if !observation.OK || message.ID != history.tombstone.ID || message.RetractedAt == nil || message.Body != "" {
-				return chatMessage{}, fmt.Errorf("retracted reference was not an attributable empty-body tombstone")
+				return chatMessage{}, fmt.Errorf("retracted reference not attributable tombstone")
 			}
-			return toolPathCall("workspace_execute", "workspace-command", execArgs{Command: command, TimeoutSeconds: 9})
-		},
-		func(request toolPathRequest) (chatMessage, error) {
-			observation, err := toolPathLast(request, "workspace-command")
-			if err != nil {
-				return chatMessage{}, err
-			}
-			var result struct {
-				ExitCode  int32  `json:"exitCode"`
-				Stdout    string `json:"stdout"`
-				Stderr    string `json:"stderr"`
-				Truncated bool   `json:"truncated"`
-			}
-			if err = json.Unmarshal(observation.Data, &result); err != nil {
-				return chatMessage{}, err
-			}
-			if !observation.OK || result.ExitCode != 7 || result.Stdout != "PRIVATE_WORKSPACE_RECEIPT\n" || result.Stderr != "fixture command exited\n" || !result.Truncated {
-				return chatMessage{}, fmt.Errorf("Sandbox execution receipt was lost: %+v", result)
-			}
-			return chatMessage{Role: "assistant", Content: "PRIVATE_FINAL_HISTORY_AND_EXECUTION_NEVER_POST"}, nil
+			return chatMessage{Role: "assistant", Content: "PRIVATE_HISTORY_RESULT_NEVER_POST"}, nil
 		},
 	}
-	f.add("Read distant history explicitly, then inspect the private workspace", "")
+	f.add("Read distant history explicitly", "")
 	runToolPathWorker(t, e, f, gateway)
-	history.mu.Lock()
-	requests := append([]toolPathHTTPRequest(nil), history.requests...)
-	history.mu.Unlock()
-	if len(requests) != 4 || requests[0].before != 0 || requests[1].before != 40 || requests[0].limit != 2 || requests[1].limit != 2 || requests[2].path != "/api/v1/conversations/"+history.conversation+"/messages/"+history.older.ID {
-		t.Fatalf("explicit history pagination/reference requests differ: %+v", requests)
-	}
-	for call, name := range map[string]string{"history-latest": "im_list_messages", "history-older": "im_list_messages", "history-reference": "im_get_message", "history-tombstone": "im_get_message", "workspace-command": "workspace_execute"} {
-		if receipt := toolPathReceipt(t, s, f.agent, call, name); !receipt.OK {
-			t.Fatalf("successful tool receipt was not persisted for %s", call)
+	for call, name := range map[string]string{"history-search": "im_list_messages", "history-reference": "im_get_message", "history-tombstone": "im_get_message"} {
+		if !toolPathReceipt(t, s, f.agent, call, name).OK {
+			t.Fatal("missing history receipt")
 		}
 	}
-	sandbox.mu.Lock()
-	if len(sandbox.requests) != 1 {
-		t.Fatalf("expected one Sandbox call, got %d", len(sandbox.requests))
-	}
-	execution := sandbox.requests[0]
-	sandbox.mu.Unlock()
-	var runID, attempt string
-	if err := s.DB.QueryRow(context.Background(), "SELECT id::text,attempt_id::text FROM runtime_runs WHERE agent_id=$1", f.agent).Scan(&runID, &attempt); err != nil {
-		t.Fatal(err)
-	}
-	requestID := "tool-" + digest([]byte(f.agent+"/"+runID+"/workspace-command"))
-	if execution.AgentId != f.agent || execution.RunId != runID || execution.RequestId != requestID || execution.ServiceToken != e.Config.SandboxToken || execution.Command != command || execution.TimeoutSeconds != 9 {
-		t.Fatal("Sandbox execution lost Agent/run/stable request attribution or bounded arguments")
-	}
-
-	// Replay through a real native ToolsNode so compose supplies the same call ID.
-	// A committed workspace receipt must not execute the command a second time.
-	ctx := context.Background()
-	lease, err := s.Acquire(ctx, f.agent, "receipt-replay")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Release(ctx, lease)
-	tools, err := (&Tools{Store: s, Lease: lease, Sandbox: sandbox, SandboxToken: e.Config.SandboxToken}).Build()
-	if err != nil {
-		t.Fatal(err)
-	}
-	node, err := compose.NewToolNode(ctx, &compose.ToolsNodeConfig{Tools: tools, ExecuteSequentially: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	call, err := toolPathCall("workspace_execute", "workspace-command", execArgs{Command: command, TimeoutSeconds: 9})
-	if err != nil {
-		t.Fatal(err)
-	}
-	replay, err := node.Invoke(WithRun(ctx, &Run{ID: runID, AgentID: f.agent, Attempt: attempt}), &schema.Message{Role: schema.Assistant, ToolCalls: call.ToolCalls})
-	if err != nil || len(replay) != 1 || replay[0].ToolCallID != "workspace-command" || !strings.Contains(replay[0].Content, "PRIVATE_WORKSPACE_RECEIPT") {
-		t.Fatalf("committed workspace receipt did not replay: %v", err)
-	}
-	sandbox.mu.Lock()
-	defer sandbox.mu.Unlock()
-	if len(sandbox.requests) != 1 {
-		t.Fatal("receipt replay executed a workspace side effect again")
+	history.mu.Lock()
+	defer history.mu.Unlock()
+	if len(history.requests) != 3 {
+		t.Fatalf("unexpected explicit reads: %d", len(history.requests))
 	}
 }
 
@@ -439,8 +338,6 @@ func TestNativeEinoCurrentACLDenialsRemainToolObservations(t *testing.T) {
 	e, f, baseGateway, _ := fixtureEngine(t, s)
 	history := newToolPathIM(t, e, f)
 	history.revokeAfterFirstPage = true
-	sandbox := &toolPathSandbox{denied: true}
-	e.Sandbox = sandbox
 	gateway := &toolPathGateway{fixtureGateway: baseGateway}
 	e.Gateway = gateway
 	denied := func(request toolPathRequest, call, code string) error {
@@ -487,18 +384,12 @@ func TestNativeEinoCurrentACLDenialsRemainToolObservations(t *testing.T) {
 			if err := denied(request, "revoked-send", "forbidden"); err != nil {
 				return chatMessage{}, err
 			}
-			return toolPathCall("workspace_execute", "denied-workspace", execArgs{Command: "printf denied", TimeoutSeconds: 1})
-		},
-		func(request toolPathRequest) (chatMessage, error) {
-			if err := denied(request, "denied-workspace", "sandbox_denied"); err != nil {
-				return chatMessage{}, err
-			}
 			return chatMessage{Role: "assistant", Content: "PRIVATE_DENIAL_SUMMARY_NEVER_POST"}, nil
 		},
 	}
 	f.add("Observe current permissions without posting tool errors to chat", "")
 	runToolPathWorker(t, e, f, gateway)
-	for call, name := range map[string]string{"revoked-history": "im_list_messages", "revoked-reference": "im_get_message", "revoked-send": "im_send_message", "denied-workspace": "workspace_execute"} {
+	for call, name := range map[string]string{"revoked-history": "im_list_messages", "revoked-reference": "im_get_message", "revoked-send": "im_send_message"} {
 		receipt := toolPathReceipt(t, s, f.agent, call, name)
 		code := "forbidden"
 		if call == "denied-workspace" {

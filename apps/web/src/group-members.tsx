@@ -33,7 +33,7 @@ export function ParticipantIdentity({ member }: { member: Member }) {
           {member.kind === "agent"
             ? member.ownerName
               ? `由 ${member.ownerName} 创建`
-              : "Agent · 所有者信息暂不可用"
+              : "Agent"
             : member.role === "owner"
               ? "空间所有者"
               : "团队成员"}
@@ -90,7 +90,7 @@ export function GroupMembersDialog({
   return (
     <Modal
       title="小组成员"
-      subtitle="人和 Agent 使用同一份成员名单与访问权限。移出小组后，将无法继续访问该对话。"
+      subtitle="移出后，成员将无法访问此对话。"
       onClose={onClose}
     >
       <Notice>{error}</Notice>
@@ -142,7 +142,7 @@ export function GroupMembersDialog({
               </div>
             ))
           ) : (
-            <div className="mini-empty">团队里可加入的伙伴都在这里了。</div>
+            <div className="mini-empty">暂无可添加成员。</div>
           )}
         </div>
       )}
@@ -201,7 +201,7 @@ export function AddAgentToGroupDialog({
   return (
     <Modal
       title={`将 ${agent.name} 添加到小组`}
-      subtitle="选择你有权管理的小组，Agent 将按该小组的成员权限参与对话。"
+      subtitle="选择一个你管理的小组。"
       onClose={onClose}
     >
       <div className="adding-agent-summary">
@@ -239,14 +239,12 @@ export function AddAgentToGroupDialog({
             );
           })
         ) : (
-          <div className="mini-empty">
-            还没有可管理的小组。创建一个新小组，把伙伴聚在一起。
-          </div>
+          <div className="mini-empty">暂无可管理的小组。</div>
         )}
       </div>
       <button className="create-agent-group-link" onClick={onCreateGroup}>
         <Plus size={14} />
-        创建一个包含此 Agent 的新小组
+        创建新小组
       </button>
       <div className="modal-actions">
         <Button className="secondary" onClick={onClose}>

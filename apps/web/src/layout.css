@@ -1,0 +1,1929 @@
+/* Product layout, shared by pointer and touch interfaces. */
+:root {
+  --muted: #77717f;
+}
+html,
+body,
+#root {
+  min-width: 0;
+  min-height: 100%;
+}
+body {
+  overflow-x: hidden;
+}
+input,
+textarea,
+select {
+  min-width: 0;
+}
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+input:disabled,
+textarea:disabled {
+  opacity: 0.65;
+}
+.notice {
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.field-help {
+  color: #77717f;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.optional {
+  color: #817986;
+  font-size: 12px;
+}
+.button {
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+.button:active {
+  transform: none;
+}
+.icon-button {
+  min-width: 36px;
+  min-height: 36px;
+  color: #81738f;
+}
+.public-header {
+  max-width: 1440px;
+  width: 100%;
+  margin: 0 auto;
+  flex-shrink: 0;
+}
+.public-header nav {
+  gap: 24px;
+}
+.public-header nav > a:first-child {
+  display: inline-flex;
+}
+.landing {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+.landing > main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+.hero {
+  min-height: 0;
+  width: 100%;
+  padding-top: 64px;
+  padding-bottom: 96px;
+  gap: 52px;
+}
+.hero-copy {
+  min-width: 0;
+  padding-top: 0;
+}
+.hero h1 {
+  font-size: clamp(34px, 4.5vw, 64px);
+  line-height: 1.5;
+  letter-spacing: -1.6px;
+  margin-top: 15px;
+}
+.hero-copy > p {
+  font-size: 16px;
+  color: #77717f;
+  margin-top: 22px;
+}
+.hero-actions {
+  flex-wrap: wrap;
+  gap: 24px;
+  margin-top: 30px;
+}
+.landing-register {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--purple-dark);
+}
+.landing-features {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 42px;
+  color: #77717f;
+  font-size: 12px;
+}
+.landing-features > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.hero-visual {
+  min-width: 0;
+  padding: 16px 0;
+  margin: 0;
+}
+.demo-window {
+  transform: none;
+  min-height: 0;
+}
+.demo-body {
+  min-height: 330px;
+}
+.demo-sidebar {
+  width: 142px;
+  flex-shrink: 0;
+}
+.demo-chat {
+  flex: 1;
+  min-width: 0;
+  padding: 0 18px 16px;
+}
+.demo-title .brand {
+  font-size: 20px;
+}
+.demo-message p {
+  overflow-wrap: anywhere;
+  line-height: 1.75;
+}
+.demo-message > div {
+  min-width: 0;
+}
+.demo-message .avatar {
+  width: 30px;
+  height: 30px;
+  font-size: 12px;
+  border-radius: 9px;
+}
+.demo-message b {
+  font-size: 11px;
+}
+.demo-message p {
+  font-size: 11px;
+}
+.demo-agent-label {
+  color: #7463d4;
+}
+.demo-input {
+  gap: 10px;
+  font-size: 10px;
+  margin-top: 18px;
+}
+.demo-input > svg {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.demo-label {
+  font-size: 10px;
+}
+.public-footer {
+  padding-top: 22px;
+  padding-bottom: 22px;
+  width: 100%;
+  min-height: 78px;
+}
+.public-footer > small {
+  margin-left: auto;
+  font-size: 12px;
+}
+.auth-story {
+  justify-content: space-between;
+}
+.auth-story > div {
+  margin: auto 0;
+  padding: 64px 0;
+}
+.auth-story h1 {
+  font-size: clamp(42px, 5vw, 68px);
+  line-height: 1.5;
+}
+.auth-story p {
+  font-size: 16px;
+  margin-top: 20px;
+}
+.auth-content {
+  min-width: 0;
+  padding-top: 80px;
+  padding-bottom: 64px;
+}
+.auth-mobile-brand {
+  display: none;
+}
+.auth-form {
+  width: min(100%, 380px);
+  margin: auto;
+}
+.auth-form h2 {
+  font-size: 28px;
+  letter-spacing: -0.5px;
+}
+.auth-form label {
+  font-size: 13px;
+  color: #5e5668;
+}
+.auth-form input {
+  font-size: 15px;
+  min-height: 46px;
+}
+.auth-form .field-help {
+  font-size: 12px;
+}
+.auth-form .button {
+  font-size: 14px;
+  min-height: 46px;
+}
+.auth-form .optional {
+  float: right;
+}
+.auth-tabs > button {
+  min-height: 46px;
+  font-size: 14px;
+}
+.auth-content > .back-link {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+}
+.join-card {
+  max-width: 460px;
+  width: calc(100% - 32px);
+  margin-top: 48px;
+  padding: 36px;
+}
+.join-card > p {
+  font-size: 14px;
+  color: #77717f;
+}
+.join-card h1 {
+  overflow-wrap: anywhere;
+}
+.invite-identity > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.invite-identity small {
+  font-size: 12px;
+}
+.app-shell {
+  height: var(--app-height, 100dvh);
+  min-height: 0;
+}
+.app-navigation {
+  display: flex;
+  flex-shrink: 0;
+  min-height: 0;
+}
+.workspace-rail,
+.navigation-sidebar {
+  min-height: 0;
+}
+.workspace-rail {
+  padding-top: max(16px, env(safe-area-inset-top));
+}
+.workspace-buttons {
+  overflow: auto;
+  min-height: 0;
+  scrollbar-width: none;
+}
+.navigation-sidebar {
+  width: 244px;
+}
+.workspace-header {
+  height: 66px;
+  min-height: 66px;
+  padding-top: 0;
+}
+.workspace-title {
+  min-width: 0;
+  padding: 0;
+}
+.app-shell .workspace-title > b {
+  font-size: 15px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.workspace-title > b > svg {
+  margin-left: auto;
+}
+.space-popover {
+  max-height: min(70dvh, 520px);
+  overflow: auto;
+}
+.space-popover > button,
+.space-popover > a {
+  min-height: 40px;
+  font-size: 13px;
+}
+.workspace-menu-item {
+  justify-content: space-between;
+}
+.workspace-menu-item > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-scroll {
+  min-height: 0;
+  padding-top: 8px;
+  overscroll-behavior: contain;
+}
+.agent-sidebar-links {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+  margin-bottom: 15px;
+}
+.agent-sidebar-links > a {
+  min-height: 38px;
+  font-size: 13px;
+  color: #84738f;
+}
+.app-shell .nav-section-title > span {
+  font-size: 12px;
+  color: #8b7c98;
+}
+.app-shell .conversation-link {
+  min-height: 38px;
+  font-size: 14px;
+  color: #7a688a;
+}
+.app-shell .conversation-link.active {
+  color: #6b55b3;
+}
+.app-shell .sidebar-empty {
+  font-size: 12px;
+  padding: 10px 13px;
+  color: #9b8da6;
+}
+.app-shell .sidebar-new-chat {
+  min-height: 38px;
+  font-size: 13px;
+  color: #897398;
+}
+.sidebar-invite-button {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid #e2d9eb;
+  border-radius: 8px;
+  margin: 0 14px 12px;
+  min-height: 38px;
+  color: #78658e;
+  font-size: 13px;
+}
+.sidebar-invite-button:hover {
+  background: #eee7f6;
+}
+.app-shell .connection-status {
+  font-size: 11px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  color: #84738f;
+}
+.user-panel {
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+.app-shell .user-profile b {
+  font-size: 13px;
+  color: #786584;
+}
+.app-shell .user-profile small {
+  font-size: 11px;
+  color: #83758e;
+}
+.app-main {
+  min-height: 0;
+}
+.conversation-header {
+  height: 66px;
+  padding: 0 24px;
+}
+.app-shell .conversation-header h1 {
+  font-size: 16px;
+}
+.app-shell .conversation-header > div > span {
+  font-size: 11px;
+  color: #8b7c98;
+  margin-top: 3px;
+}
+.conversation-header-actions {
+  flex-shrink: 0;
+}
+.conversation-header-actions > .icon-button {
+  width: 38px;
+  height: 38px;
+}
+.conversation-start {
+  padding: 44px 28px;
+}
+.app-shell .conversation-start h2 {
+  font-size: 24px;
+}
+.app-shell .conversation-start p {
+  font-size: 14px;
+  color: #81738f;
+}
+.message-scroll {
+  scrollbar-gutter: stable;
+}
+.app-shell .message-text {
+  font-size: 15px;
+  line-height: 1.65;
+  color: #4d4358;
+  overflow-wrap: anywhere;
+}
+.app-shell .message-meta b {
+  font-size: 13px;
+}
+.app-shell .message-meta time {
+  font-size: 11px;
+  color: #9686a1;
+}
+.message-meta {
+  flex-wrap: wrap;
+}
+.message-more-button {
+  display: none;
+}
+.message:focus-within {
+  background: #fcfaff;
+}
+.app-shell .message-actions .icon-button {
+  min-width: 32px;
+  min-height: 32px;
+}
+.app-shell .message-reply {
+  font-size: 12px;
+}
+.app-shell .message-meta > .agent-badge > small {
+  font-size: 10px;
+}
+.composer-area {
+  padding: 12px 24px max(12px, env(safe-area-inset-bottom));
+}
+.composer {
+  display: flex;
+  align-items: flex-end;
+}
+.app-shell .composer > textarea {
+  flex: 1;
+  width: 0;
+  font-size: 15px;
+  line-height: 1.65;
+  padding: 13px 14px;
+  min-height: 50px;
+  max-height: min(180px, calc(var(--app-height, 100dvh) * 0.3));
+}
+.app-shell .composer > textarea::placeholder {
+  font-size: 14px;
+}
+.composer-tools {
+  flex-shrink: 0;
+  padding: 6px;
+  height: auto;
+  gap: 6px;
+  align-self: flex-end;
+}
+.send-button {
+  width: 38px;
+  height: 38px;
+}
+.character-count {
+  font-size: 11px;
+}
+.app-shell .composer-footer {
+  padding-top: 6px;
+  font-size: 11px;
+  min-height: 20px;
+  color: #9c8aa8;
+}
+.reply-preview {
+  flex-shrink: 0;
+}
+.members-pane {
+  min-height: 0;
+  width: 264px;
+}
+.members-pane > header {
+  height: 66px;
+  flex-shrink: 0;
+}
+.members-description {
+  padding: 22px 18px;
+}
+.member-cover {
+  display: none;
+}
+.app-shell .members-description h3 {
+  font-size: 16px;
+  margin-top: 0;
+}
+.app-shell .members-list-label {
+  font-size: 12px;
+  color: #84738f;
+}
+.members-list {
+  min-height: 0;
+  overscroll-behavior: contain;
+}
+.app-shell .member-row b {
+  font-size: 13px;
+  color: #786584;
+}
+.app-shell .member-row > div > span {
+  font-size: 11px;
+  color: #83758e;
+}
+.app-shell .member-row b > small {
+  font-size: 10px;
+}
+.member-row > .remove-member {
+  opacity: 1;
+}
+.members-shade {
+  position: fixed;
+  inset: 0;
+  z-index: 19;
+  background: #30203c45;
+}
+.settings-header {
+  height: 66px;
+  min-height: 66px;
+  padding: 0 28px;
+  gap: 10px;
+}
+.app-shell .settings-header > a {
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.settings-header > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agents-view,
+.admin-view,
+.settings-view {
+  min-height: 0;
+  overscroll-behavior: contain;
+  padding: 30px;
+}
+.agents-heading h1,
+.admin-heading h1,
+.settings-view > h1 {
+  font-size: 26px;
+}
+.agents-heading p,
+.admin-heading > div > p {
+  color: #81738f;
+  font-size: 13px;
+}
+.agents-heading > .button,
+.agent-detail-actions > .button {
+  min-height: 40px;
+  font-size: 13px;
+}
+.agents-heading {
+  margin-bottom: 24px;
+}
+.agent-card-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 248px), 1fr));
+  gap: 16px;
+  margin-top: 20px;
+}
+.agent-card {
+  padding: 22px;
+  min-width: 0;
+}
+.agent-card h2 {
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+.agent-card > p {
+  font-size: 13px;
+  line-height: 1.7;
+}
+.agent-card-bottom {
+  font-size: 11px;
+}
+.agent-status {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.agent-badge {
+  font-size: 11px;
+}
+.agent-badge > small {
+  font-size: 11px;
+}
+.agent-workspace-chips > span {
+  max-width: 100%;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agents-empty {
+  min-height: 280px;
+  gap: 16px;
+}
+.agents-empty > h2 {
+  font-size: 22px;
+}
+.agents-empty > p {
+  font-size: 14px;
+  color: #81738f;
+}
+.agent-detail-heading {
+  flex-wrap: wrap;
+  gap: 18px;
+}
+.agent-detail-heading h1 {
+  overflow-wrap: anywhere;
+  font-size: 26px;
+}
+.agent-detail-heading p {
+  font-size: 14px;
+}
+.agent-detail-actions {
+  margin-left: auto;
+}
+.agent-back {
+  min-height: 36px;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+.agent-profile-section,
+.agent-owner-card {
+  padding: 20px;
+}
+.agent-profile-section h2 {
+  font-size: 15px;
+}
+.agent-owner-card > div > b {
+  font-size: 14px;
+}
+.agent-owner-card > div > span {
+  font-size: 12px;
+}
+.agent-delete-section h3 {
+  font-size: 14px;
+}
+.agent-delete-section p {
+  font-size: 13px;
+}
+.agent-profile-section > header > button {
+  min-height: 36px;
+  font-size: 13px;
+}
+.agent-configuration-notice {
+  margin-bottom: 20px;
+  padding: 16px;
+}
+.agent-configuration-notice > div > b {
+  font-size: 14px;
+}
+.agent-configuration-notice p,
+.agent-configuration-notice button {
+  font-size: 13px;
+}
+.gateway-configuration-form > label,
+.modal label {
+  font-size: 13px;
+}
+.gateway-configuration-form input:not([type="checkbox"]),
+.modal input,
+.modal textarea {
+  font-size: 15px;
+  min-height: 44px;
+}
+.gateway-saved-state {
+  margin-top: 22px;
+  padding: 18px;
+}
+.gateway-saved-state b {
+  font-size: 14px;
+}
+.gateway-saved-state p,
+.gateway-test-panel p {
+  font-size: 13px;
+}
+.gateway-test-panel h3 {
+  font-size: 14px;
+}
+.gateway-advanced {
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+  margin-top: 20px;
+}
+.gateway-advanced > summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: #81738f;
+  min-height: 36px;
+}
+.gateway-advanced > label {
+  display: block;
+  margin-top: 10px;
+  font-size: 13px;
+}
+.admin-generate {
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.admin-generate p {
+  font-size: 13px;
+}
+.admin-generate h2,
+.admin-invite-history h2 {
+  font-size: 16px;
+}
+.admin-table-wrap {
+  overflow: auto;
+}
+.admin-invites-table {
+  min-width: 450px;
+}
+.admin-invites-table td {
+  font-size: 13px;
+}
+.admin-invites-table th,
+.admin-invites-table td > small {
+  font-size: 11px;
+}
+.created-invite {
+  padding: 20px;
+}
+.created-invite > p,
+.created-invite label {
+  font-size: 13px;
+}
+.copy-input {
+  min-width: 0;
+}
+.copy-input > input {
+  min-width: 0;
+  width: 0;
+}
+.admin-footnote {
+  font-size: 12px;
+}
+.admin-empty p {
+  font-size: 13px;
+}
+.settings-view {
+  max-width: 800px;
+}
+.profile-banner {
+  height: 54px;
+}
+.modal-backdrop {
+  padding: 24px;
+}
+.modal {
+  width: 480px;
+  max-height: calc(var(--app-height, 100dvh) - 48px);
+  overscroll-behavior: contain;
+  padding: 28px;
+}
+.modal-heading {
+  padding-right: 28px;
+}
+.modal-heading h2 {
+  font-size: 22px;
+}
+.modal-heading p {
+  font-size: 13px;
+}
+.modal-close {
+  min-width: 36px;
+  min-height: 36px;
+}
+.modal label {
+  line-height: 1.6;
+}
+.modal .field-help,
+.agent-visibility > p,
+.agent-visibility > small,
+.agent-enabled-switch small {
+  font-size: 12px;
+}
+.agent-visibility legend,
+.agent-enabled-switch b {
+  font-size: 14px;
+}
+.visibility-option {
+  min-height: 48px;
+}
+.visibility-option > span {
+  overflow-wrap: anywhere;
+}
+.member-option {
+  min-height: 60px;
+}
+.participant-identity > b {
+  font-size: 14px;
+}
+.participant-identity > small {
+  font-size: 12px;
+}
+.group-member-remove {
+  min-width: 40px;
+  min-height: 40px;
+}
+.agent-group-option {
+  min-height: 60px;
+  font-size: 14px;
+}
+.agent-group-option small {
+  font-size: 12px;
+}
+.modal-actions > .button {
+  min-height: 42px;
+  font-size: 13px;
+}
+.form-note {
+  font-size: 12px;
+}
+@media (max-width: 1250px) {
+  .members-pane {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: auto;
+    height: var(--app-height, 100dvh);
+    z-index: 20;
+    width: min(340px, 88vw);
+  }
+}
+@media (max-width: 1000px) and (min-width: 781px) {
+  .navigation-sidebar {
+    width: 220px;
+  }
+  .hero {
+    padding-left: 32px;
+    padding-right: 32px;
+    gap: 24px;
+  }
+  .hero h1 {
+    font-size: 40px;
+  }
+  .demo-sidebar {
+    width: 108px;
+  }
+  .demo-chat {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  .landing-features {
+    gap: 12px;
+  }
+}
+@media (max-width: 780px) {
+  .button,
+  .button.small-button {
+    min-height: 44px;
+    font-size: 14px;
+  }
+  .icon-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .public-header {
+    height: 76px;
+    padding: max(12px, env(safe-area-inset-top)) 20px 12px;
+  }
+  .public-header nav {
+    gap: 18px;
+    font-size: 13px;
+  }
+  .public-header nav .button {
+    font-size: 13px;
+    min-height: 40px;
+    padding: 10px 12px;
+  }
+  .public-header .brand {
+    font-size: 25px;
+  }
+  .landing > main {
+    align-items: flex-start;
+  }
+  .hero {
+    max-width: 600px;
+    padding: 32px 24px 48px;
+    gap: 40px;
+  }
+  .hero h1 {
+    font-size: clamp(32px, 8vw, 46px);
+    margin: 12px 0 18px;
+    letter-spacing: -1px;
+  }
+  .hero-copy > p {
+    font-size: 14px;
+    margin-top: 0;
+    line-height: 1.9;
+  }
+  .hero-actions {
+    margin-top: 25px;
+    gap: 18px;
+  }
+  .hero-actions > .button {
+    font-size: 14px;
+  }
+  .landing-features {
+    font-size: 12px;
+    gap: 14px;
+    margin-top: 30px;
+  }
+  .hero-visual {
+    width: 100%;
+    padding: 0;
+    margin: 0;
+  }
+  .visual-grid {
+    inset: -15px -8px;
+  }
+  .demo-title {
+    height: 50px;
+  }
+  .demo-body {
+    min-height: 300px;
+  }
+  .demo-sidebar {
+    display: none;
+  }
+  .demo-chat {
+    padding: 0 16px 16px;
+  }
+  .demo-chat-heading {
+    font-size: 12px;
+    height: 46px;
+  }
+  .demo-message {
+    margin-top: 16px;
+    gap: 10px;
+  }
+  .demo-message p {
+    font-size: 12px;
+  }
+  .demo-message b {
+    font-size: 12px;
+  }
+  .demo-message small {
+    font-size: 10px;
+  }
+  .demo-input {
+    font-size: 11px;
+  }
+  .public-footer {
+    padding: 20px 24px max(20px, env(safe-area-inset-bottom));
+  }
+  .public-footer > small {
+    font-size: 11px;
+  }
+  .auth-page {
+    min-height: 100dvh;
+    display: block;
+  }
+  .auth-story {
+    display: none;
+  }
+  .auth-content {
+    min-height: 100dvh;
+    padding: 84px 24px max(36px, env(safe-area-inset-bottom));
+    display: block;
+  }
+  .auth-content > .back-link {
+    position: absolute;
+    top: max(22px, env(safe-area-inset-top));
+    right: 24px;
+    font-size: 13px;
+    min-height: 36px;
+  }
+  .auth-mobile-brand {
+    display: inline-flex;
+    margin-bottom: 32px;
+  }
+  .auth-form {
+    width: min(100%, 400px);
+  }
+  .auth-form h2 {
+    font-size: 27px;
+  }
+  .auth-form input {
+    font-size: 16px;
+    min-height: 48px;
+  }
+  .auth-form .button {
+    min-height: 48px;
+  }
+  .auth-form label,
+  .auth-tabs > button {
+    font-size: 14px;
+  }
+  .auth-form .field-help {
+    font-size: 12px;
+  }
+  .join-card {
+    padding: 30px 22px;
+    margin-top: 28px;
+  }
+  .join-card .button {
+    font-size: 14px;
+  }
+  .join-card > p {
+    font-size: 14px;
+  }
+  .join-card h1 {
+    font-size: 24px;
+  }
+  .invite-expiry {
+    font-size: 12px;
+  }
+  .app-shell {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+  }
+  .app-navigation {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: min(352px, 100%);
+    height: 100%;
+    z-index: 32;
+    display: none;
+    background: #f7f3fb;
+  }
+  .sidebar-open .app-navigation {
+    display: flex;
+  }
+  .app-navigation .workspace-rail {
+    position: static;
+    flex: 0 0 64px;
+    width: 64px;
+    height: 100%;
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+  .app-navigation .navigation-sidebar {
+    position: relative;
+    left: auto;
+    top: auto;
+    bottom: auto;
+    flex: 1;
+    min-width: 0;
+    width: 0;
+    height: 100%;
+    box-shadow: none;
+  }
+  .workspace-rail .rail-settings,
+  .workspace-rail .rail-add {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .workspace-button {
+    width: 44px;
+    height: 44px;
+  }
+  .workspace-header {
+    padding-left: 16px;
+    padding-right: 8px;
+    min-height: 64px;
+    height: 64px;
+    padding-top: env(safe-area-inset-top);
+  }
+  .workspace-title > b {
+    gap: 8px;
+  }
+  .mobile-close {
+    display: inline-flex;
+    margin-left: 4px;
+  }
+  .app-shell .conversation-link {
+    min-height: 44px;
+  }
+  .agent-sidebar-links > a,
+  .app-shell .sidebar-new-chat {
+    min-height: 44px;
+  }
+  .nav-section-title {
+    min-height: 40px;
+  }
+  .sidebar-shade {
+    position: absolute;
+    z-index: 31;
+  }
+  .mobile-menu {
+    display: inline-flex;
+  }
+  .conversation-header {
+    height: 64px;
+    min-height: 64px;
+    padding: env(safe-area-inset-top) 10px 0 6px;
+    gap: 8px;
+  }
+  .conversation-symbol {
+    width: 30px;
+    height: 30px;
+  }
+  .app-shell .conversation-header h1 {
+    font-size: 16px;
+  }
+  .app-shell .conversation-header > div > span {
+    font-size: 11px;
+  }
+  .conversation-header-actions {
+    margin-left: auto;
+  }
+  .conversation-header-actions > .icon-button {
+    width: 44px;
+    height: 44px;
+  }
+  .conversation-header-actions svg {
+    width: 20px;
+  }
+  .conversation-header .conversation-symbol {
+    display: none;
+  }
+  .conversation-start {
+    padding: 40px 22px;
+  }
+  .app-shell .conversation-start h2 {
+    font-size: 23px;
+  }
+  .app-shell .conversation-start p {
+    font-size: 14px;
+  }
+  .message {
+    padding: 12px 48px 12px 14px;
+    gap: 10px;
+  }
+  .message.compact {
+    padding-top: 4px;
+    padding-bottom: 8px;
+  }
+  .app-shell .message-text {
+    font-size: 15px;
+  }
+  .app-shell .message-meta b {
+    font-size: 13px;
+  }
+  .app-shell .message-meta time {
+    font-size: 10px;
+  }
+  .message-more-button {
+    display: inline-flex;
+    position: absolute;
+    top: 2px;
+    right: 0;
+    min-width: 44px;
+    min-height: 44px;
+    opacity: 0.7;
+  }
+  .message.compact .message-more-button {
+    top: -5px;
+  }
+  .message .message-actions,
+  .message.compact .message-actions {
+    display: none;
+    opacity: 1;
+    pointer-events: auto;
+    flex-direction: row;
+    position: absolute;
+    right: 8px;
+    top: 38px;
+    border: 1px solid #e7dfed;
+    border-radius: 8px;
+    background: #fff;
+    padding: 2px;
+    box-shadow: 0 4px 18px #39204a18;
+    z-index: 8;
+  }
+  .message.actions-open .message-actions {
+    display: flex;
+  }
+  .app-shell .message-actions .icon-button {
+    width: 44px;
+    height: 44px;
+  }
+  .message-actions .icon-button > svg {
+    width: 18px;
+    height: 18px;
+  }
+  .message-meta > .agent-badge {
+    font-size: 10px;
+  }
+  .message-meta > .agent-badge > small {
+    display: none;
+  }
+  .message-reply > span {
+    max-width: none;
+    min-width: 0;
+  }
+  .app-shell .date-divider {
+    font-size: 11px;
+    margin: 20px 16px;
+  }
+  .composer-area {
+    padding: 8px 12px max(10px, env(safe-area-inset-bottom));
+  }
+  .app-shell .composer > textarea {
+    font-size: 16px;
+    min-height: 50px;
+    max-height: min(140px, calc(var(--app-height, 100dvh) * 0.28));
+    padding: 12px;
+  }
+  .app-shell .composer > textarea::placeholder {
+    font-size: 14px;
+  }
+  .composer-tools {
+    padding: 4px;
+    height: auto;
+  }
+  .send-button {
+    width: 44px;
+    height: 44px;
+  }
+  .app-shell .composer-footer {
+    min-height: 0;
+    padding-top: 0;
+    font-size: 11px;
+  }
+  .composer-footer > span:first-child:not(:empty) {
+    padding-top: 7px;
+  }
+  .app-shell .composer-footer > span:last-child {
+    display: none;
+  }
+  .reply-preview {
+    font-size: 13px;
+  }
+  .app-shell .reply-preview > div > span {
+    font-size: 12px;
+  }
+  .jump-latest {
+    font-size: 12px;
+    min-height: 40px;
+    bottom: 92px;
+  }
+  .sync-banner {
+    padding: 8px 14px;
+    font-size: 12px;
+  }
+  .sync-banner button {
+    font-size: 12px;
+    min-height: 32px;
+  }
+  .members-pane > header {
+    min-height: 64px;
+    height: 64px;
+    padding-top: env(safe-area-inset-top);
+  }
+  .app-shell .members-pane > header,
+  .app-shell .members-pane > header b {
+    font-size: 14px;
+  }
+  .app-shell .member-row {
+    min-height: 60px;
+  }
+  .app-shell .member-row b {
+    font-size: 14px;
+  }
+  .app-shell .member-row > div > span {
+    font-size: 12px;
+  }
+  .members-invite {
+    min-height: 44px;
+  }
+  .settings-header {
+    height: 64px;
+    min-height: 64px;
+    padding: env(safe-area-inset-top) 14px 0 6px;
+    font-size: 14px;
+  }
+  .settings-header > a {
+    min-height: 44px;
+  }
+  .settings-header > a > svg {
+    display: none;
+  }
+  .app-shell .settings-header > a {
+    font-size: 13px;
+    white-space: nowrap;
+  }
+  .settings-header > svg {
+    display: none;
+  }
+  .agents-view,
+  .admin-view,
+  .settings-view {
+    padding: 24px 18px max(28px, env(safe-area-inset-bottom));
+  }
+  .agents-heading {
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  .agents-heading h1,
+  .admin-heading h1,
+  .settings-view > h1 {
+    font-size: 24px;
+  }
+  .agents-heading > .button {
+    min-height: 44px;
+    font-size: 13px;
+  }
+  .agent-card-grid {
+    grid-template-columns: 1fr;
+  }
+  .agent-card {
+    padding: 20px;
+  }
+  .agent-card h2 {
+    font-size: 19px;
+  }
+  .agent-card > p {
+    font-size: 14px;
+  }
+  .agent-card-bottom {
+    font-size: 12px;
+    gap: 10px;
+  }
+  .agent-card-bottom > span:last-child {
+    white-space: nowrap;
+  }
+  .agent-detail-heading {
+    gap: 14px;
+  }
+  .agent-detail-heading > .avatar {
+    width: 56px;
+    height: 56px;
+    border-radius: 17px;
+  }
+  .agent-detail-heading > div:not(.agent-detail-actions) {
+    flex-basis: calc(100% - 70px);
+  }
+  .agent-detail-heading h1 {
+    font-size: 24px;
+    margin-top: 5px;
+  }
+  .agent-detail-heading p {
+    font-size: 13px;
+  }
+  .agent-detail-actions {
+    margin-left: 0;
+    width: 100%;
+  }
+  .agent-detail-actions > .button {
+    min-height: 44px;
+    font-size: 13px;
+  }
+  .agent-profile-section,
+  .agent-owner-card {
+    padding: 17px;
+  }
+  .agent-profile-section > header > button {
+    font-size: 12px;
+  }
+  .agent-delete-section {
+    gap: 14px;
+  }
+  .agent-delete-section p {
+    font-size: 12px;
+  }
+  .agent-configuration-notice > div > b {
+    font-size: 14px;
+  }
+  .agent-configuration-notice p,
+  .agent-configuration-notice button {
+    font-size: 13px;
+  }
+  .agent-conversation-waiting {
+    padding: 9px 14px;
+    font-size: 12px;
+  }
+  .admin-heading {
+    gap: 10px;
+  }
+  .admin-heading-icon {
+    display: none;
+  }
+  .admin-heading > div > p {
+    font-size: 13px;
+  }
+  .platform-role-badge {
+    font-size: 10px;
+  }
+  .admin-section-nav {
+    padding: 0 18px;
+    gap: 24px;
+    overflow-x: auto;
+  }
+  .admin-section-nav > a {
+    font-size: 13px;
+    min-height: 44px;
+    white-space: nowrap;
+  }
+  .admin-generate {
+    margin-top: 24px;
+  }
+  .admin-generate .button {
+    width: 100%;
+  }
+  .admin-generate p {
+    font-size: 12px;
+  }
+  .created-invite {
+    padding: 16px;
+  }
+  .created-invite-heading {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .created-invite-heading small {
+    font-size: 11px;
+  }
+  .created-invite-footer {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .created-invite-footer > button {
+    min-height: 44px;
+    font-size: 13px;
+  }
+  .admin-invite-history > header {
+    padding: 18px 14px;
+  }
+  .admin-invite-history > header > div > span {
+    font-size: 11px;
+  }
+  .gateway-configuration-form input:not([type="checkbox"]) {
+    font-size: 16px;
+  }
+  .gateway-configuration-form > label {
+    font-size: 14px;
+  }
+  .gateway-configuration-form .field-help {
+    font-size: 12px;
+  }
+  .gateway-saved-state b {
+    font-size: 14px;
+  }
+  .gateway-saved-state p {
+    font-size: 13px;
+  }
+  .gateway-test-panel {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .gateway-test-panel h3 {
+    font-size: 14px;
+  }
+  .gateway-test-panel p {
+    font-size: 12px;
+  }
+  .gateway-test-panel > .button {
+    font-size: 14px;
+  }
+  .welcome-view {
+    min-height: 0;
+    overflow: auto;
+  }
+  .welcome-view > header {
+    height: 64px;
+    min-height: 64px;
+    padding: 0 14px 0 6px;
+  }
+  .welcome-view > header > span {
+    font-size: 14px;
+  }
+  .welcome-content {
+    padding: 40px 24px;
+  }
+  .welcome-content h1 {
+    font-size: 27px;
+    overflow-wrap: anywhere;
+  }
+  .app-shell .welcome-content > p {
+    font-size: 14px;
+    margin-top: 16px;
+  }
+  .app-shell .welcome-content > .button {
+    font-size: 14px;
+    margin-top: 24px;
+  }
+  .modal-backdrop {
+    padding: max(12px, env(safe-area-inset-top)) 12px
+      max(12px, env(safe-area-inset-bottom));
+    align-items: center;
+  }
+  .modal {
+    padding: 26px 20px 20px;
+    max-height: calc(
+      var(--app-height, 100dvh) - 24px - env(safe-area-inset-top) -
+        env(safe-area-inset-bottom)
+    );
+    border-radius: 14px;
+  }
+  .modal-heading h2 {
+    font-size: 21px;
+  }
+  .modal-heading p {
+    font-size: 13px;
+  }
+  .modal input,
+  .modal textarea {
+    font-size: 16px;
+  }
+  .modal label {
+    font-size: 14px;
+  }
+  .modal .field-help,
+  .agent-visibility > p,
+  .agent-visibility > small,
+  .agent-enabled-switch small {
+    font-size: 12px;
+  }
+  .modal-actions {
+    gap: 10px;
+  }
+  .modal-actions > .button {
+    min-height: 44px;
+    flex: 1;
+    min-width: 0;
+    padding: 12px;
+    font-size: 14px;
+  }
+  .agent-enabled-switch {
+    gap: 12px;
+  }
+  .agent-enabled-switch > span {
+    min-width: 0;
+  }
+  .agent-enabled-switch small {
+    line-height: 1.6;
+  }
+  .participant-identity {
+    min-width: 0;
+  }
+  .participant-identity > b {
+    font-size: 14px;
+    flex-wrap: wrap;
+  }
+  .participant-identity > small {
+    font-size: 12px;
+  }
+  .group-member-row > .button {
+    font-size: 13px;
+  }
+  .agent-group-option {
+    font-size: 14px;
+  }
+  .agent-group-option small {
+    font-size: 12px;
+  }
+  .settings-form input {
+    font-size: 16px;
+  }
+  .app-shell .settings-form .field-help {
+    font-size: 12px;
+  }
+  .app-shell .session-setting h3 {
+    font-size: 14px;
+  }
+  .app-shell .session-setting p {
+    font-size: 12px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+.agent-activity {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  margin: 24px 0;
+}
+.agent-activity > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+}
+.agent-activity h2 {
+  font-size: 16px;
+}
+.activity-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 0 20px 18px;
+  font-size: 12px;
+  color: #81738f;
+}
+.activity-summary b {
+  font-weight: 600;
+  color: #5b4e68;
+  margin-left: 3px;
+}
+.activity-summary-error {
+  color: #a76f4c;
+}
+.activity-tabs {
+  display: flex;
+  gap: 22px;
+  border-top: 1px solid #f3eef6;
+  border-bottom: 1px solid var(--border);
+  padding: 0 20px;
+}
+.activity-tabs > button {
+  min-height: 44px;
+  font-size: 13px;
+  color: #8b7c98;
+  border-bottom: 2px solid transparent;
+  padding: 0 2px;
+}
+.activity-tabs > button.active {
+  color: var(--purple-dark);
+  border-color: var(--purple);
+}
+.activity-row {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  padding: 17px 20px;
+  border-bottom: 1px solid #f3eef6;
+}
+.activity-row:last-child {
+  border-bottom: 0;
+}
+.activity-status {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  font-size: 11px;
+  color: #8b7c98;
+  min-width: 75px;
+  padding-top: 3px;
+  white-space: nowrap;
+}
+.activity-status.running {
+  color: #7463d4;
+}
+.activity-status.completed,
+.activity-status.succeeded {
+  color: #668748;
+}
+.activity-status.failed,
+.activity-status.error,
+.activity-status.interrupted {
+  color: #bd6b71;
+}
+.activity-item-main {
+  min-width: 0;
+  flex: 1;
+}
+.activity-item-main > b {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.6;
+  display: block;
+  overflow-wrap: anywhere;
+}
+.activity-item-main > span {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 5px;
+  font-size: 11px;
+  color: #9b8da6;
+}
+.activity-item-main > small {
+  display: block;
+  color: #a76f4c;
+  margin-top: 6px;
+  font-size: 12px;
+}
+.activity-item-id {
+  font-variant-numeric: tabular-nums;
+}
+.activity-item-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+}
+.activity-item-actions .button {
+  min-height: 34px;
+  font-size: 12px;
+  padding: 8px 10px;
+  gap: 5px;
+}
+.activity-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 38px 20px;
+  font-size: 13px;
+  color: #8b7c98;
+}
+.agent-activity > .notice {
+  margin: 0 18px 16px;
+}
+.activity-empty .notice {
+  margin: 0;
+}
+.activity-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border);
+}
+@media (max-width: 780px) {
+  .agent-activity {
+    margin: 22px 0;
+  }
+  .agent-activity > header {
+    padding: 12px 16px;
+  }
+  .activity-summary {
+    padding: 0 16px 16px;
+    gap: 10px;
+  }
+  .activity-tabs {
+    padding: 0 16px;
+  }
+  .activity-tabs > button {
+    font-size: 14px;
+  }
+  .activity-row {
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    padding: 16px;
+    position: relative;
+  }
+  .activity-status {
+    font-size: 12px;
+    width: 100%;
+    padding: 0;
+  }
+  .activity-item-main > b {
+    font-size: 14px;
+  }
+  .activity-item-main > span {
+    font-size: 12px;
+    gap: 10px;
+  }
+  .activity-item-actions .button {
+    min-height: 44px;
+    font-size: 13px;
+  }
+  .activity-item-id {
+    display: none;
+  }
+  .activity-pagination {
+    padding: 12px;
+  }
+  .activity-pagination .button {
+    font-size: 13px;
+    padding: 10px;
+  }
+}
+
+@media (max-width: 780px) {
+  .group-member-remove,
+  .gateway-advanced > summary {
+    min-height: 44px;
+  }
+  .group-member-remove {
+    min-width: 44px;
+  }
+}
+
+.modal label,
+.gateway-configuration-form > label {
+  color: #756581;
+}
+.modal input,
+.modal textarea,
+.gateway-configuration-form input,
+.auth-form input {
+  color: #514659;
+}
+.modal input::placeholder,
+.modal textarea::placeholder,
+.auth-form input::placeholder {
+  color: #918697;
+}
+.agent-visibility legend,
+.agent-enabled-switch b {
+  color: #756581;
+}
+.visibility-option > span {
+  color: #756581;
+}
+.agent-visibility > p,
+.agent-visibility > small,
+.agent-enabled-switch small {
+  color: #81738f;
+}
+
+.admin-footnote {
+  color: #8b7b96;
+}
+@media (max-width: 780px) {
+  .admin-table-wrap {
+    overflow: visible;
+  }
+  .admin-invites-table {
+    display: block;
+    width: 100%;
+    min-width: 0;
+  }
+  .admin-invites-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .admin-invites-table tbody {
+    display: block;
+  }
+  .admin-invites-table tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 14px;
+    padding: 18px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .admin-invites-table tr:last-child {
+    border-bottom: 0;
+  }
+  .admin-invites-table td {
+    display: block;
+    padding: 0;
+    border: 0;
+    min-width: 0;
+    color: #7e6b8e;
+  }
+  .admin-invites-table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    color: #8b7b96;
+    font-size: 11px;
+    margin-bottom: 6px;
+  }
+  .admin-invites-table td:nth-child(1) {
+    grid-area: 1 / 1;
+  }
+  .admin-invites-table td:nth-child(2) {
+    grid-area: 2 / 1;
+  }
+  .admin-invites-table td:nth-child(3) {
+    grid-area: 1 / 2;
+  }
+  .admin-invites-table td:nth-child(4) {
+    grid-area: 2 / 2;
+    align-self: end;
+  }
+  .admin-invites-table td > small {
+    color: #8b7b96;
+  }
+  .revoke-invite {
+    min-height: 44px;
+    font-size: 13px;
+  }
+}
+
+.agent-configuration-notice.can-configure > div {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.agent-configuration-notice.can-configure button {
+  margin-top: 0;
+  min-height: 36px;
+}

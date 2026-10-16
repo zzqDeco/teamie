@@ -27,6 +27,8 @@ export SANDBOX_RUNTIME_TOKEN=ci-only-sandbox-runtime-credential
 export GATEWAY_MASTER_KEY=abababababababababababababababababababababababababababababababab
 export IDENTITY_RPC_ADDR="127.0.0.1:$((rpc_base+1))" CHAT_RPC_ADDR="127.0.0.1:$((rpc_base+2))"
 export AGENT_CONTROL_RPC_ADDR="127.0.0.1:$((rpc_base+4))" GATEWAY_RPC_ADDR="127.0.0.1:$((rpc_base+6))" SANDBOX_RPC_ADDR="127.0.0.1:$((rpc_base+7))"
+export AGENT_RUNTIME_RPC_ADDR="127.0.0.1:$((rpc_base+5))"
+export GATEWAY_STREAM_URL="http://127.0.0.1:$((http_base+6))/internal/v1/chat/stream"
 export IM_API_URL="http://127.0.0.1:$((http_base+2))"
 if [[ ${TEAMIE_AGENT_SKIP_SANDBOX:-0} != 1 ]]; then
   : "${SANDBOX_TEST_RUNNER_IMAGE:?disposable CI runner image ID required}"
@@ -64,7 +66,7 @@ else
   launch sandbox 7 unused env RPC_ADDR=":$((rpc_base+7))"
   offsets+=(7)
 fi
-launch agent-runtime 5 agent_runtime env
+launch agent-runtime 5 agent_runtime env RPC_ADDR=":$((rpc_base+5))"
 for offset in "${offsets[@]}"; do
   port=$((http_base+offset))
   ready=0

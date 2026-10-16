@@ -22,6 +22,7 @@ const ManagedLabel = "io.teamie.sandbox"
 
 type Job struct {
 	Name, Image, Workspace, AgentHash, Command string
+	TaskHash                                   string
 	Timeout                                    int
 }
 type Result struct {
@@ -113,7 +114,7 @@ func (d *Docker) remove(ctx context.Context, id string) error {
 	return e
 }
 func containerConfig(j Job) map[string]any {
-	return map[string]any{"Image": j.Image, "User": "10001:10001", "WorkingDir": "/workspace", "Cmd": []string{"/bin/sh", "-c", j.Command}, "Env": []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=/workspace", "PYTHONDONTWRITEBYTECODE=1", "PYTHONUNBUFFERED=1"}, "AttachStdout": true, "AttachStderr": true, "Tty": false, "OpenStdin": false, "Labels": map[string]string{ManagedLabel: "true", "io.teamie.agent": j.AgentHash}, "StopTimeout": 1, "HostConfig": map[string]any{"NetworkMode": "none", "ReadonlyRootfs": true, "CapDrop": []string{"ALL"}, "SecurityOpt": []string{"no-new-privileges:true"}, "Memory": MemoryLimit, "MemorySwap": MemoryLimit, "NanoCpus": 500000000, "PidsLimit": 32, "OomKillDisable": false, "Init": true, "AutoRemove": false, "Binds": []string{j.Workspace + ":/workspace:rw,rprivate"}, "Tmpfs": map[string]string{"/tmp": "rw,noexec,nosuid,nodev,size=16m,mode=1777"}, "Ulimits": []map[string]any{{"Name": "nofile", "Soft": 128, "Hard": 128}, {"Name": "fsize", "Soft": 8 * 1024 * 1024, "Hard": 8 * 1024 * 1024}}, "LogConfig": map[string]any{"Type": "json-file", "Config": map[string]string{"max-size": "128k", "max-file": "1"}}}}
+	return map[string]any{"Image": j.Image, "User": "10001:10001", "WorkingDir": "/workspace", "Cmd": []string{"/bin/sh", "-c", j.Command}, "Env": []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=/workspace", "PYTHONDONTWRITEBYTECODE=1", "PYTHONUNBUFFERED=1"}, "AttachStdout": true, "AttachStderr": true, "Tty": false, "OpenStdin": false, "Labels": map[string]string{ManagedLabel: "true", "io.teamie.agent": j.AgentHash, "io.teamie.task": j.TaskHash}, "StopTimeout": 1, "HostConfig": map[string]any{"NetworkMode": "none", "ReadonlyRootfs": true, "CapDrop": []string{"ALL"}, "SecurityOpt": []string{"no-new-privileges:true"}, "Memory": MemoryLimit, "MemorySwap": MemoryLimit, "NanoCpus": 500000000, "PidsLimit": 32, "OomKillDisable": false, "Init": true, "AutoRemove": false, "Binds": []string{j.Workspace + ":/workspace:rw,rprivate"}, "Tmpfs": map[string]string{"/tmp": "rw,noexec,nosuid,nodev,size=16m,mode=1777"}, "Ulimits": []map[string]any{{"Name": "nofile", "Soft": 128, "Hard": 128}, {"Name": "fsize", "Soft": 8 * 1024 * 1024, "Hard": 8 * 1024 * 1024}}, "LogConfig": map[string]any{"Type": "json-file", "Config": map[string]string{"max-size": "128k", "max-file": "1"}}}}
 }
 func (d *Docker) Run(ctx context.Context, j Job) (result Result, err error) {
 	res, e := d.request(ctx, "POST", "/containers/create?name="+url.QueryEscape(j.Name), containerConfig(j))

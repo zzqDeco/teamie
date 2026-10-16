@@ -8,7 +8,6 @@ import {
   Copy,
   Hash,
   Link as LinkIcon,
-  Plus,
   Users,
 } from "lucide-react";
 import { api } from "@teamie/api-client";
@@ -70,17 +69,11 @@ export function WorkspaceDialog({
     participants.some((member) => member.userId === id),
   );
   const titles: Record<DialogKind, [string, string]> = {
-    workspace: [
-      "给团队一个新空间",
-      "从一个名字开始。我们会为你创建第一个 general 频道。",
-    ],
-    channel: [
-      "新建一个频道",
-      "给一个项目、一个话题，或一个好点子，留出专属的位置。",
-    ],
-    direct: ["开始一段私聊", "选择一位工作空间里的伙伴，直接聊聊。"],
-    group: ["把伙伴聚在一起", "选择成员，开启一段小组对话。"],
-    invite: ["好伙伴，一起进来", "创建一个邀请链接，把团队伙伴带到这里。"],
+    workspace: ["创建工作空间", ""],
+    channel: ["创建频道", "空间内所有成员都可访问。"],
+    direct: ["发起私信", ""],
+    group: ["创建小组", ""],
+    invite: ["邀请成员", "仅已注册用户可通过此链接加入。"],
   };
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -133,14 +126,6 @@ export function WorkspaceDialog({
         <Notice>{error}</Notice>
         {kind === "workspace" && (
           <>
-            <div className="workspace-preview">
-              <span>
-                <Plus size={29} />
-              </span>
-              <div>
-                你的下一个好团队<small>一个小空间，无限可能</small>
-              </div>
-            </div>
             <label>
               工作空间名称
               <input
@@ -153,7 +138,7 @@ export function WorkspaceDialog({
             </label>
             <div className="form-note">
               <Hash size={17} />
-              <span>general 频道将自动创建，所有成员都能在这里交流。</span>
+              <span>自动创建 general 频道。</span>
             </div>
           </>
         )}
@@ -223,8 +208,7 @@ export function WorkspaceDialog({
               !agentsQuery.isLoading &&
               participants.length === 0 && (
                 <div className="mini-empty">
-                  还没有可选的伙伴。可以邀请团队成员，或让 Agent
-                  在这个空间内可见。
+                  暂无可选成员。请先邀请成员加入团队。
                 </div>
               )}
           </div>
@@ -334,14 +318,9 @@ export function ProfileSettings() {
   }
   return (
     <div className="settings-view">
-      <div className="eyebrow">MAKE YOURSELF AT HOME</div>
       <h1>个人设置</h1>
-      <p className="muted">让团队认识你，也让这里更像你。</p>
       <div className="profile-card">
-        <div className="profile-banner">
-          <span>✳</span>
-          <span>nice to meet you.</span>
-        </div>
+        <div className="profile-banner"></div>
         <div className="profile-content">
           <Avatar name={user!.displayName} seed={user!.id} size="large" />
           <h2>{user!.displayName}</h2>
@@ -356,9 +335,7 @@ export function ProfileSettings() {
       <form className="settings-form" onSubmit={save}>
         <h3>基本信息</h3>
         <Notice>{error}</Notice>
-        <Notice kind="success">
-          {saved ? "个人资料已保存。新的名字会在之后的消息里使用。" : ""}
-        </Notice>
+        <Notice kind="success">{saved ? "资料已保存。" : ""}</Notice>
         <label>
           显示名称
           <input

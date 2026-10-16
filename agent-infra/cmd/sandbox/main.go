@@ -23,10 +23,10 @@ func main() {
 	}
 	defer service.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	e = engine.Cleanup(ctx)
+	e = service.Recover(ctx)
 	cancel()
 	if e != nil {
-		log.Fatal("sandbox startup cleanup failed")
+		log.Fatal("sandbox durable task recovery failed")
 	}
 	addr, e := net.ResolveTCPAddr("tcp", api.Env("RPC_ADDR", ":8887"))
 	if e != nil {

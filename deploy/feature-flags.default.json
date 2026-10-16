@@ -1,5 +1,5 @@
 {
-  "revision": "agents-v1",
+  "revision": "agents-v2",
   "flags": {
     "auth.public_signup": false,
     "im.dm.create": true,
@@ -16,6 +16,8 @@
     "agents.create": true,
     "agents.update": true,
     "agents.delete": true,
-    "agents.discover": true
+    "agents.discover": true,
+    "agents.runtime.v3": true,
+    "agents.tasks.execute": true
   }
 }

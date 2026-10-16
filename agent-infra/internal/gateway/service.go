@@ -33,7 +33,7 @@ func (s *Service) Ping(ctx context.Context, r *agent.PingRequest) (*agent.PingRe
 	}
 	c, e := s.Store.Load(ctx)
 	configured, enabled := c.Configured(), c.Enabled
-	return &agent.PingResponse{Ready: e == nil, Configured: &configured, Enabled: &enabled}, nil
+	return &agent.PingResponse{Ready: e == nil, Configured: &configured, Enabled: &enabled, ContextWindowTokens: ptr(c.ContextWindow())}, nil
 }
 func ptr[T any](v T) *T { return &v }
 func failed(e error) *agent.GatewayChatResponse {
@@ -131,6 +131,7 @@ func (s *Service) CancelRun(id, run string) {
 func (s *Service) Routes(auth api.AdminAuth) http.Handler {
 	m := http.NewServeMux()
 	api.Operations(m, s.Store.Ready)
+	m.HandleFunc("POST /internal/v1/chat/stream", s.streamHTTP)
 	wrap := func(fn func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			u, e := auth.Require(r)
@@ -151,11 +152,12 @@ func (s *Service) Routes(auth api.AdminAuth) http.Handler {
 	}))
 	m.HandleFunc("PUT /api/v1/admin/model-gateway", wrap(func(w http.ResponseWriter, r *http.Request, _ string) {
 		var in struct {
-			BaseURL string  `json:"baseUrl"`
-			Model   string  `json:"model"`
-			APIKey  *string `json:"apiKey"`
-			Enabled bool    `json:"enabled"`
-			Clear   bool    `json:"clearApiKey"`
+			BaseURL             string  `json:"baseUrl"`
+			Model               string  `json:"model"`
+			APIKey              *string `json:"apiKey"`
+			Enabled             bool    `json:"enabled"`
+			Clear               bool    `json:"clearApiKey"`
+			ContextWindowTokens *int64  `json:"contextWindowTokens"`
 		}
 		if e := api.Decode(w, r, &in); e != nil {
 			api.Fail(w, e)
@@ -167,13 +169,21 @@ func (s *Service) Routes(auth api.AdminAuth) http.Handler {
 			api.Fail(w, api.Err(400, "invalid_request", "Invalid model configuration"))
 			return
 		}
+		if in.ContextWindowTokens != nil && (*in.ContextWindowTokens < 4096 || *in.ContextWindowTokens > 2000000) {
+			api.Fail(w, api.Err(400, "invalid_request", "Context window must be between 4096 and 2000000 tokens"))
+			return
+		}
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 		if e := ValidateEndpoint(ctx, in.BaseURL); e != nil {
 			api.Fail(w, e)
 			return
 		}
-		c, e := s.Store.Save(ctx, Config{BaseURL: in.BaseURL, Model: in.Model, Enabled: in.Enabled}, in.APIKey, in.Clear, s.Cipher)
+		c := Config{BaseURL: in.BaseURL, Model: in.Model, Enabled: in.Enabled}
+		if in.ContextWindowTokens != nil {
+			c.ContextWindowTokens = *in.ContextWindowTokens
+		}
+		c, e := s.Store.Save(ctx, c, in.APIKey, in.Clear, s.Cipher)
 		if e != nil {
 			api.Fail(w, e)
 			return

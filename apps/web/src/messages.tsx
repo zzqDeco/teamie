@@ -2,13 +2,14 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
 import {
   ArrowDown,
+  ArrowLeft,
   ArrowUp,
-  Check,
   CornerUpLeft,
   Hash,
   KeyRound,
   LoaderCircle,
   MessageCircle,
+  MoreHorizontal,
   Pencil,
   RefreshCw,
   SendHorizontal,
@@ -45,12 +46,14 @@ export function ConversationView({
   members,
   agents = [],
   onMembers,
+  membersOpen,
   onMenu,
 }: {
   conversation: Conversation;
   members: Member[];
   agents?: Agent[];
   onMembers: () => void;
+  membersOpen: boolean;
   onMenu: () => void;
 }) {
   const { user } = useAuth();
@@ -64,6 +67,7 @@ export function ConversationView({
       agent.enabled &&
       agent.runtimeState === "waiting_configuration",
   );
+  const [actionMessageId, setActionMessageId] = useState("");
   const [loading, setLoading] = useState(true),
     [hasMore, setHasMore] = useState(false),
     [loadingOlder, setLoadingOlder] = useState(false),
@@ -109,6 +113,21 @@ export function ConversationView({
     document.addEventListener("visibilitychange", change);
     return () => document.removeEventListener("visibilitychange", change);
   }, []);
+  useEffect(() => {
+    const input = inputRef.current;
+    if (!input) return;
+    input.style.height = "auto";
+    input.style.height = `${input.scrollHeight}px`;
+  }, [body]);
+  useEffect(() => {
+    const scroll = scrollRef.current;
+    if (!scroll || !atBottom) return;
+    const observer = new ResizeObserver(() => {
+      scroll.scrollTop = scroll.scrollHeight;
+    });
+    observer.observe(scroll);
+    return () => observer.disconnect();
+  }, [atBottom]);
   const latest = messages.filter((m) => !m.status).at(-1)?.seq || 0;
   const tailId = messages.at(-1)?.id;
   useEffect(() => {
@@ -199,6 +218,7 @@ export function ConversationView({
   }
   function keyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (
+      !window.matchMedia("(pointer: coarse)").matches &&
       event.key === "Enter" &&
       !event.shiftKey &&
       !event.nativeEvent.isComposing
@@ -250,14 +270,19 @@ export function ConversationView({
     (m) => !m.status && m.seq > conversation.readSeq,
   )?.id;
   return (
-    <section className="conversation-view">
+    <section
+      className="conversation-view"
+      onKeyDown={(event) => {
+        if (event.key === "Escape") setActionMessageId("");
+      }}
+    >
       <header className="conversation-header">
         <IconButton
-          label="打开频道列表"
+          label="打开对话列表"
           className="mobile-menu"
           onClick={onMenu}
         >
-          <span className="hamburger">☰</span>
+          <ArrowLeft size={21} />
         </IconButton>
         <span className="conversation-symbol">
           {conversation.type === "channel" ? (
@@ -272,14 +297,18 @@ export function ConversationView({
           <h1>{name}</h1>
           <span>
             {conversation.type === "channel"
-              ? "想法在这里碰头，好事从这里开始"
+              ? "团队频道"
               : conversation.type === "direct"
-                ? "你们的专属对话"
-                : "一个小组，一起向前"}
+                ? "私信"
+                : "小组对话"}
           </span>
         </div>
         <div className="conversation-header-actions">
-          <IconButton label="查看会话成员" onClick={onMembers}>
+          <IconButton
+            label="查看会话成员"
+            onClick={onMembers}
+            aria-expanded={membersOpen}
+          >
             <Users size={19} />
           </IconButton>
         </div>
@@ -288,8 +317,7 @@ export function ConversationView({
         <div className="agent-conversation-waiting" role="status">
           <KeyRound size={14} />
           <span>
-            {waitingAgents.map((agent) => agent.name).join("、")}{" "}
-            正在等待管理员配置模型，暂时不会生成回复。对话消息会正常保存。
+            {waitingAgents.map((agent) => agent.name).join("、")} 等待模型配置
           </span>
         </div>
       )}
@@ -308,28 +336,25 @@ export function ConversationView({
           setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
         }}
       >
-        <div className="conversation-start">
-          <span
-            className={`conversation-start-icon ${conversation.type === "channel" ? "" : "mint"}`}
-          >
-            {conversation.type === "channel" ? (
-              <Hash size={34} />
-            ) : (
-              <MessageCircle size={32} />
-            )}
-          </span>
-          <span className="eyebrow">THIS IS WHERE IT BEGINS</span>
-          <h2>
-            {conversation.type === "channel"
-              ? `欢迎来到 # ${name}`
-              : `你好，${name}`}
-          </h2>
-          <p>
-            {conversation.type === "channel"
-              ? "这里是这个频道的起点。说声你好，让对话自然发生。"
-              : "把想法说出来，让好事情一起发生。"}
-          </p>
-        </div>
+        {!loading && !messages.length && !error && (
+          <div className="conversation-start">
+            <span
+              className={`conversation-start-icon ${conversation.type === "channel" ? "" : "mint"}`}
+            >
+              {conversation.type === "channel" ? (
+                <Hash size={34} />
+              ) : (
+                <MessageCircle size={32} />
+              )}
+            </span>
+            <h2>
+              {conversation.type === "channel"
+                ? `欢迎来到 # ${name}`
+                : `你好，${name}`}
+            </h2>
+            <p>还没有消息，打个招呼吧。</p>
+          </div>
+        )}
         {hasMore && (
           <button
             className="load-earlier"
@@ -347,7 +372,7 @@ export function ConversationView({
         {loading && (
           <div className="message-loading">
             <LoaderCircle size={17} className="spin" />
-            正在接上你们的对话…
+            加载消息…
           </div>
         )}
         {error && (
@@ -387,7 +412,7 @@ export function ConversationView({
               )}
               <article
                 id={`message-${message.id}`}
-                className={`message ${compact ? "compact" : ""} ${message.status || ""} ${message.retractedAt ? "retracted" : ""}`}
+                className={`message ${compact ? "compact" : ""} ${message.status || ""} ${message.retractedAt ? "retracted" : ""} ${actionMessageId === message.id ? "actions-open" : ""}`}
               >
                 <div className="message-avatar">
                   {!compact ? (
@@ -519,43 +544,60 @@ export function ConversationView({
                 {!message.retractedAt &&
                   !message.status &&
                   editing?.id !== message.id && (
-                    <div className="message-actions">
+                    <Fragment>
                       <IconButton
-                        label={`回复 ${message.senderName}`}
-                        onClick={() => {
-                          setReply(message);
-                          inputRef.current?.focus();
-                        }}
+                        label={`消息操作：${message.senderName}`}
+                        className="message-more-button"
+                        aria-expanded={actionMessageId === message.id}
+                        onClick={() =>
+                          setActionMessageId(
+                            actionMessageId === message.id ? "" : message.id,
+                          )
+                        }
                       >
-                        <CornerUpLeft size={15} />
+                        <MoreHorizontal size={18} />
                       </IconButton>
-                      {message.senderId === user!.id &&
-                        data?.capabilities["im.message.edit"] && (
-                          <IconButton
-                            label="编辑消息"
-                            onClick={() => {
-                              setEditing(message);
-                              setEditBody(message.body);
-                              setActionError("");
-                            }}
-                          >
-                            <Pencil size={14} />
-                          </IconButton>
-                        )}
-                      {message.senderId === user!.id &&
-                        data?.capabilities["im.message.retract"] && (
-                          <IconButton
-                            label="撤回消息"
-                            className="danger-hover"
-                            onClick={() => {
-                              setRetracting(message);
-                              setActionError("");
-                            }}
-                          >
-                            <Trash2 size={14} />
-                          </IconButton>
-                        )}
-                    </div>
+                      <div className="message-actions">
+                        <IconButton
+                          label={`回复 ${message.senderName}`}
+                          onClick={() => {
+                            setActionMessageId("");
+                            setReply(message);
+                            inputRef.current?.focus();
+                          }}
+                        >
+                          <CornerUpLeft size={15} />
+                        </IconButton>
+                        {message.senderId === user!.id &&
+                          data?.capabilities["im.message.edit"] && (
+                            <IconButton
+                              label="编辑消息"
+                              onClick={() => {
+                                setActionMessageId("");
+                                setEditing(message);
+                                setEditBody(message.body);
+                                setActionError("");
+                              }}
+                            >
+                              <Pencil size={14} />
+                            </IconButton>
+                          )}
+                        {message.senderId === user!.id &&
+                          data?.capabilities["im.message.retract"] && (
+                            <IconButton
+                              label="撤回消息"
+                              className="danger-hover"
+                              onClick={() => {
+                                setActionMessageId("");
+                                setRetracting(message);
+                                setActionError("");
+                              }}
+                            >
+                              <Trash2 size={14} />
+                            </IconButton>
+                          )}
+                      </div>
+                    </Fragment>
                   )}
               </article>
             </Fragment>
@@ -616,7 +658,6 @@ export function ConversationView({
             aria-label="消息内容"
           />
           <div className="composer-tools">
-            <span className="composer-hint">一句你好，就是协作的开始。</span>
             {body.length > 7600 && (
               <span className="character-count">{body.length}/8000</span>
             )}
@@ -625,7 +666,7 @@ export function ConversationView({
               type="submit"
               disabled={!body.trim()}
               aria-label="发送消息"
-              title="发送消息 (Enter)"
+              title="发送消息"
             >
               <SendHorizontal size={18} />
             </button>
@@ -633,16 +674,9 @@ export function ConversationView({
         </form>
         <div className="composer-footer">
           <span>
-            {otherTyping.length ? (
-              `${otherTyping.map((x) => x.displayName).join("、")} 正在输入…`
-            ) : (
-              <>
-                <span className="tiny-lock">
-                  <Check size={11} />
-                </span>
-                只在当前对话中分享
-              </>
-            )}
+            {otherTyping.length
+              ? `${otherTyping.map((x) => x.displayName).join("、")} 正在输入…`
+              : ""}
           </span>
           <span>
             <kbd>Enter</kbd> 发送 · <kbd>Shift + Enter</kbd> 换行

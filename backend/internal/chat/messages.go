@@ -48,6 +48,16 @@ func (s *Store) Message(ctx context.Context, user, conversation, id string) (Mes
 	return m, notFound(e)
 }
 func (s *Store) Messages(ctx context.Context, user, conversation string, before int64, limit int) ([]Message, bool, error) {
+	return s.MessageHistory(ctx, user, conversation, before, 0, "", limit)
+}
+
+// MessageHistory searches the full authorized conversation before applying the
+// page limit. Around uses immutable message sequence numbers for local context.
+func (s *Store) MessageHistory(ctx context.Context, user, conversation string, before, around int64, query string, limit int) ([]Message, bool, error) {
+	query = strings.TrimSpace(query)
+	if before < 0 || around < 0 || before > 0 && around > 0 || limit < 1 || limit > 100 || len([]rune(query)) > 200 {
+		return nil, false, api.Err(400, "invalid_query", "Invalid history query")
+	}
 	tx, e := s.DB.Begin(ctx)
 	if e != nil {
 		return nil, false, e
@@ -63,7 +73,7 @@ func (s *Store) Messages(ctx context.Context, user, conversation string, before 
 	if _, e = conversationAccess(ctx, tx, conversation, user); e != nil {
 		return nil, false, e
 	}
-	rows, e := tx.Query(ctx, "SELECT "+messageColumns+" FROM messages WHERE conversation_id=$1 AND ($2::bigint=0 OR seq<$2) ORDER BY seq DESC LIMIT $3", conversation, before, limit+1)
+	rows, e := tx.Query(ctx, "SELECT "+messageColumns+" FROM messages WHERE conversation_id=$1 AND ($2::bigint=0 OR seq<$2) AND ($3::text='' OR (retracted_at IS NULL AND strpos(lower(body),lower($3))>0)) AND ($4::bigint=0 OR seq BETWEEN GREATEST(1,$4-($5::bigint/2)) AND $4+(($5::bigint-1)/2)) ORDER BY seq DESC LIMIT $6", conversation, before, query, around, limit, limit+1)
 	if e != nil {
 		return nil, false, e
 	}

@@ -17,6 +17,9 @@ rollout() {
   "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 postgres redis || return
   if [[ $("${COMPOSE[@]}" config --services) == *llm-gateway* ]]; then
     "${COMPOSE[@]}" exec -T postgres env TEAMIE_VERIFY_DB_CREDENTIALS=1 bash -s < "${COMPOSE_RECIPE}/deploy/postgres/01-databases.sh" || return
+    # Do not let an old Session writer call newly migrated/replaced dependencies.
+    # Async children remain owned by Docker and their Sandbox receipts survive.
+    "${COMPOSE[@]}" stop --timeout 30 agent-runtime || return
   fi
   "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 identity || return
   "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 chat || return
