@@ -4,9 +4,21 @@ There is one deployed environment, **production**. Hosted CI uses disposable Pos
 
 ## Repository setup
 
-Enable Actions with read/write package publishing, and allow the repository's `GITHUB_TOKEN` to read all twelve repository-linked private GHCR packages. Release jobs build `teamie-identity`, `teamie-chat`, `teamie-realtime`, `teamie-web`, `teamie-agent-control`, `teamie-agent-runtime`, `teamie-llm-gateway`, `teamie-sandbox`, and `teamie-sandbox-runner`; hosted runners also mirror Caddy, PostgreSQL 17, and Redis 7.4 to `teamie-caddy`, `teamie-postgres`, and `teamie-redis`. The production host therefore only contacts GHCR when pulling images. Every manifest records the resolved digest, including infrastructure images. Infrastructure patch tags are resolved anew when creating a release; no mutable tag is used by Compose.
+Release jobs build `teamie-identity`, `teamie-chat`, `teamie-realtime`, `teamie-web`, `teamie-agent-control`, `teamie-agent-runtime`, `teamie-llm-gateway`, `teamie-sandbox`, and `teamie-sandbox-runner` in private Alibaba Cloud Container Registry (ACR) repositories. Hosted runners also mirror Caddy, PostgreSQL 17, and Redis 7.4 to `teamie-caddy`, `teamie-postgres`, and `teamie-redis` in the same namespace. Production pulls all twelve images from ACR. Every manifest records the resolved digest, including infrastructure images. Infrastructure patch tags are resolved anew when creating a release; no mutable tag is used by Compose.
 
-Create the GitHub Environment named `production`. Permit release branches `release/v*` and `main` (the latter is needed only for manual rollback). Store these four secrets in it:
+Use an existing ACR instance, preferably in the ECS region (`cn-shenzhen` for the current host), and create these twelve private repositories in one namespace. Configure these repository Actions variables before creating a new release branch:
+
+| Variable | Value |
+| --- | --- |
+| `ACR_REGISTRY_PUBLIC_HOST` | Public ACR hostname, without scheme or path |
+| `ACR_REGISTRY_PULL_HOST` | The same hostname, or its corresponding VPC hostname after verifying ECS access |
+| `ACR_NAMESPACE` | Namespace containing the twelve `teamie-*` repositories |
+
+Actions builds and pushes through the public endpoint. The manifest records the production pull endpoint with the same namespace, repository and digest; public and VPC addresses must identify the same instance and region. The workflow validates this pair before sending any registry credential. Image publishing and production pulls each use concurrency four. Enterprise VPC access requires an existing VPC binding and DNS configuration; choosing a VPC hostname alone does not establish connectivity. Personal Edition has shared-resource quotas and no SLA; the operator chooses the existing instance or approves any paid Enterprise instance separately.
+
+Store a dedicated publisher's `ACR_PUSH_USERNAME` and `ACR_PUSH_PASSWORD` as repository Actions secrets. Grant it access only to the Teamie namespace/repositories. New ACR publishing does not use `GITHUB_TOKEN` package-write permission. Keep historical GHCR packages readable with `GITHUB_TOKEN` for compatible manual rollback; no archived image reference is rewritten.
+
+Create the GitHub Environment named `production`. Permit release branches `release/v*` and `main` (the latter is needed only for manual rollback). Store these secrets in it:
 
 | Secret | Value |
 | --- | --- |
@@ -14,8 +26,10 @@ Create the GitHub Environment named `production`. Permit release branches `relea
 | `PRODUCTION_SSH_USER` | `teamie-deploy` |
 | `PRODUCTION_SSH_KEY` | Dedicated SSH private key |
 | `PRODUCTION_SSH_KNOWN_HOSTS` | Host key pinned after verification through a trusted channel |
+| `ACR_PULL_USERNAME` | Dedicated identity with read access to the Teamie repositories |
+| `ACR_PULL_PASSWORD` | Its ACR registry credential, not an Alibaba Cloud account password or AccessKey |
 
-Do not populate known_hosts from an unverified network scan during deployment. No persistent Actions runner or long-lived GHCR pull token is needed. The production job sends its short-lived `GITHUB_TOKEN` through SSH stdin; the host logs in with `--password-stdin`, pulls all digests using a private temporary `DOCKER_CONFIG`, and removes it before starting services. If a GitHub plan cannot create Environments, the same four repository secrets can be used after removing only the workflow `environment` binding; retain the single serialized production job and manual branch guard.
+Do not populate known_hosts from an unverified network scan during deployment. No persistent Actions runner is needed. The production job sends registry credentials through SSH stdin; the host selects the correct provider only after validating the retained manifest, logs in with `--password-stdin`, pulls all digests using a private temporary `DOCKER_CONFIG`, and removes it before starting services. Registry credentials are neither application environment variables nor release-bundle contents. Manual rollback receives a separate short-lived `GITHUB_TOKEN` for historical GHCR manifests; ACR credentials are never sent to GHCR. If a GitHub plan cannot create Environments, equivalent repository secrets can be used after removing only the workflow `environment` binding; retain the single serialized production job and manual branch guard.
 
 Configure server-side rules to prohibit updates, deletion and force-push of `release/v*`, prohibit tag updates/deletion for `v*`, and require passing CI plus review for `main` where the account plan supports these rules. The current private GitHub Free repository does **not** have effective server-side branch/tag protection: the attempted API configuration was denied by plan restrictions. The release workflow rejects non-creation pushes and checks archive SHA before deployment and publication, but an owner with repository write access can still mutate Git refs. This workflow guard is not server-enforced immutability. Never enable automatic release-branch deletion.
 
@@ -39,7 +53,7 @@ Total resident service memory caps are 1,280 MiB: Caddy 64, web 32, Identity 96,
 
 1. Merge reviewed work into `main`; require all current-SHA CI checks: web lint/build, backend authorization/persistence tests and vet/build, disposable full HTTP/WebSocket acceptance, Linux container builds, and delivery validation.
 2. Fetch `main`, check the exact SHA and create `release/vX.Y.Z` at that SHA. Push the branch once. Keep it forever.
-3. `Release production` accepts only a newly created semantic-version branch whose SHA exactly equals current `main`. It reruns CI, builds nine application/execution images and mirrors three infrastructure images with unique build tags, then writes `release-manifest.json`. The manifest identifies source ref/SHA/version, database schema versions/storage major, default flag revision/hash, and twelve immutable GHCR image digests, including the execution runner.
+3. `Release production` accepts only a newly created semantic-version branch whose SHA exactly equals current `main`. It reruns CI, builds nine application/execution images and mirrors three infrastructure images to ACR with unique build tags, then writes `release-manifest.json`. The manifest identifies source ref/SHA/version, database schema versions/storage major, default flag revision/hash, the ACR endpoint/namespace contract, and twelve immutable image digests, including the execution runner. Historical manifests without ACR metadata retain their original GHCR contract.
 4. Immediately before SSH, the job re-queries `main` and the archive ref. GitHub concurrency serializes production deploy/rollback jobs, and a host `flock` serializes migrations, rollout and the final state change. The host rejects stale manifests, version downgrades, incompatible schema changes and same-version image/source replacement. A high-water version remains after rollback so a delayed release cannot undo a newer deployment.
 5. Before replacing an existing deployment, make a local logical backup. Pull all images first. Start PostgreSQL/Redis, provision any missing owned databases without modifying existing data, stop the old Agent Runtime writer, then Identity (its migration), Chat (its migration), Realtime/web, Agent Control/Gateway/Sandbox, Agent Runtime and Caddy; each readiness check must pass before proceeding. Verify every running container uses its exact manifest image and each Go service reports its expected version/SHA. Verify public HTTPS and the unauthenticated auth route. Only then atomically switch `/srv/teamie/current` to a complete deployment record and preserve `/srv/teamie/previous`.
 6. Only after the deployment job succeeds does the publication job create the permanent tag and GitHub Release with the manifest attached. Failed builds/rollouts do not create a release tag. The publication job re-checks the release archive's SHA. A failed compatible rollout attempts to restore the previous container images; an incompatible migration is never reversed automatically.
@@ -51,6 +65,8 @@ Single-host service replacement can briefly interrupt connections; the client mu
 ## Rollback
 
 Run `Roll back production images` through `workflow_dispatch` **on `main`**, supplying a previously successfully deployed `vX.Y.Z` and the full SHA currently reported by production. The production Environment and the same concurrency lock apply. A changed current SHA aborts the operation. The host selects a retained successful manifest; arbitrary uploaded rollback images are not accepted.
+
+The job uploads the reviewed current delivery helpers to a fresh host directory so it can authenticate either ACR or legacy GHCR. It keeps the active deployment's Compose recipe and selects the target manifest only from successful history. It does not edit archived recipes, branches, tags or historical image references.
 
 Rollback changes container images and the active release manifest. It preserves the current deployment recipe, production configuration, flags and database contents. It requires identical schema versions, PostgreSQL storage major and default flag contract. Forward migrations are never undone, and no database backup is automatically restored. If schemas differ, ship a new compatible forward release or prepare a separate, reviewed recovery procedure. The previous record is retained for inspection; rollback never deletes or rewrites a release branch/tag.
 
@@ -86,4 +102,6 @@ Database backups cover Gateway/Agent data after v0.2 activation. Sandbox workspa
 - [Docker official Debian installation](https://docs.docker.com/engine/install/debian/)
 - [Compose startup/health dependencies](https://docs.docker.com/compose/how-tos/startup-order/)
 - [Caddy ACME issuer and profiles](https://caddyserver.com/docs/caddyfile/directives/tls)
-- [GitHub container publishing](https://docs.github.com/en/actions/tutorials/publish-packages/publish-docker-images)
+- [ACR Personal Edition push and pull](https://help.aliyun.com/zh/acr/user-guide/use-a-container-registry-personal-edition-instance-to-push-and-pull-images)
+- [ACR public and VPC endpoint formats](https://help.aliyun.com/zh/acr/user-guide/individual-edition-instance-independent-domain-name-capacity-limit)
+- [ACR Enterprise VPC access](https://help.aliyun.com/zh/acr/user-guide/configure-access-over-vpcs)

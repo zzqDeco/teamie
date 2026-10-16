@@ -34,8 +34,10 @@ jobs:
         env:
           ROLLBACK_VERSION: ${{ inputs.version }}
           EXPECTED_CURRENT_SHA: ${{ inputs.expected_current_sha }}
-          GHCR_USER: ${{ github.actor }}
-          GHCR_TOKEN: ${{ github.token }}
+          REGISTRY_USERNAME: ${{ secrets.ACR_PULL_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.ACR_PULL_PASSWORD }}
+          LEGACY_GHCR_USER: ${{ github.actor }}
+          LEGACY_GHCR_TOKEN: ${{ github.token }}
           PRODUCTION_SSH_HOST: ${{ secrets.PRODUCTION_SSH_HOST }}
           PRODUCTION_SSH_USER: ${{ secrets.PRODUCTION_SSH_USER }}
           PRODUCTION_SSH_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}

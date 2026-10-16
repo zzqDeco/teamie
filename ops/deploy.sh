@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# apply BUNDLE_DIR GHCR_USER, or rollback vX.Y.Z EXPECTED_CURRENT_SHA GHCR_USER.
-# The short-lived registry token is read from stdin, never an argument or env file.
+# apply BUNDLE_DIR, or rollback vX.Y.Z EXPECTED_CURRENT_SHA.
+# Provider-keyed registry credentials arrive as JSON on stdin, never in arguments.
 set -euo pipefail
 umask 077
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
@@ -17,24 +17,21 @@ if [[ -f $current/release-manifest.json ]]; then
   checks+=(--current "$current/release-manifest.json")
 fi
 if [[ $mode == apply ]]; then
-  [[ $# -eq 3 ]] || exit 1
+  [[ $# -eq 2 ]] || exit 1
   recipe=$(realpath "$2")
   [[ $recipe == "$TEAMIE_ROOT/releases/"* ]] || { echo 'Release recipe must be an uploaded host bundle.' >&2; exit 1; }
   manifest="$recipe/release-manifest.json"
-  registry_user=$3
   [[ ! -f $TEAMIE_ROOT/state/highwater.json ]] || checks+=(--highwater "$TEAMIE_ROOT/state/highwater.json")
 else
-  [[ $# -eq 4 && $2 =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ && $3 =~ ^[0-9a-f]{40}$ ]] || exit 1
+  [[ $# -eq 3 && $2 =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ && $3 =~ ^[0-9a-f]{40}$ ]] || exit 1
   [[ -f $current/release-manifest.json ]] || { echo 'No current deployment to roll back.' >&2; exit 1; }
   active_sha=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["source"]["sha"])' "$current/release-manifest.json")
   [[ $active_sha == "$3" ]] || { echo 'Current production SHA changed; re-check before rolling back.' >&2; exit 1; }
   recipe=$(realpath "$current/recipe")
   # Only manifests from successful deployments are eligible, never arbitrary input.
   manifest="$TEAMIE_ROOT/state/history/$2.json"
-  registry_user=$4
   checks+=(--rollback)
 fi
-[[ $registry_user =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]] || exit 1
 python3 "$manifest_tool" check "$manifest" "${checks[@]}"
 [[ $(stat -c '%u' "$HOST_ENV") == "$(id -u)" ]] || { echo 'production.env must belong to the delivery user.' >&2; exit 1; }
 scratch=$(mktemp -d "$TEAMIE_ROOT/state/deploy-XXXXXX")
@@ -43,7 +40,7 @@ python3 "$manifest_tool" env "$manifest" > "$scratch/images.env"
 compose_for "$recipe" "$scratch/images.env"
 # Render secrets only to this private temporary file, never to action logs.
 "${COMPOSE[@]}" config --format json > "$scratch/compose.json"
-origin=$(python3 "$manifest_tool" config "$scratch/compose.json" "$HOST_ENV")
+origin=$(python3 "$manifest_tool" config "$scratch/compose.json" "$HOST_ENV" --manifest "$manifest")
 tls_mode=$(python3 - "$scratch/compose.json" <<'PY'
 import ipaddress,json,pathlib,sys
 from urllib.parse import urlsplit
@@ -65,11 +62,12 @@ PY
 )
 export DOCKER_CONFIG="$scratch/docker"
 mkdir "$DOCKER_CONFIG"
-IFS= read -r registry_token
-[[ -n $registry_token ]] || { echo 'Registry token was not supplied on stdin.' >&2; exit 1; }
-printf '%s' "$registry_token" | docker login ghcr.io --username "$registry_user" --password-stdin >/dev/null
-unset registry_token
-"${COMPOSE[@]}" pull --quiet
+# Registry host and credential provider come only from the validated target.
+# Authentication failures are redacted; credentials never enter a host env file.
+python3 "$manifest_tool" registry-login "$manifest"
+# Personal ACR uses shared resources; keep image pulls below its documented
+# recommendation of ten concurrent pulls without changing daemon-wide settings.
+COMPOSE_PARALLEL_LIMIT=4 "${COMPOSE[@]}" pull --quiet
 runner_image=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["images"].get("sandbox-runner",""))' "$manifest")
 if [[ -n $runner_image ]]; then docker pull --quiet "$runner_image" >/dev/null; fi
 # Already-pulled immutable digests do not require persisted registry credentials.

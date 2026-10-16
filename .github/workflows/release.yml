@@ -9,6 +9,9 @@ permissions:
 
 env:
   PYTHONDONTWRITEBYTECODE: "1"
+  ACR_REGISTRY_PUBLIC_HOST: ${{ vars.ACR_REGISTRY_PUBLIC_HOST }}
+  ACR_REGISTRY_PULL_HOST: ${{ vars.ACR_REGISTRY_PULL_HOST }}
+  ACR_NAMESPACE: ${{ vars.ACR_NAMESPACE }}
 
 jobs:
   validate:
@@ -41,6 +44,12 @@ jobs:
             echo 'This release tag already exists and must never be rewritten.' >&2; exit 1
           fi
           printf 'version=%s\nsha=%s\n' "$version" "$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+      - name: Check ACR endpoint configuration
+        run: |
+          python3 ops/manifest.py registry-check \
+            --registry-public-host "$ACR_REGISTRY_PUBLIC_HOST" \
+            --registry-pull-host "$ACR_REGISTRY_PULL_HOST" \
+            --registry-namespace "$ACR_NAMESPACE"
 
   verify:
     needs: validate
@@ -54,7 +63,6 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-      packages: write
     strategy:
       fail-fast: false
       max-parallel: 4
@@ -76,20 +84,28 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
+      - name: Validate ACR registry and namespace
+        run: |
+          python3 ops/manifest.py registry-check \
+            --registry-public-host "$ACR_REGISTRY_PUBLIC_HOST" \
+            --registry-pull-host "$ACR_REGISTRY_PULL_HOST" \
+            --registry-namespace "$ACR_NAMESPACE"
       - name: Set unique image repository/tag
         id: image
         env:
-          REPOSITORY: ${{ github.repository }}
           SERVICE: ${{ matrix.service }}
         run: |
-          image="ghcr.io/${REPOSITORY,,}-$SERVICE"
-          printf 'repository=%s\ntag=%s:build-%s-%s\n' "$image" "$image" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          image="$ACR_REGISTRY_PUBLIC_HOST/$ACR_NAMESPACE/teamie-$SERVICE"
+          pull_image="$ACR_REGISTRY_PULL_HOST/$ACR_NAMESPACE/teamie-$SERVICE"
+          printf 'repository=%s\npull_repository=%s\ntag=%s:build-%s-%s\n' \
+            "$image" "$pull_image" "$image" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Log in to ACR for image publishing
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ vars.ACR_REGISTRY_PUBLIC_HOST }}
+          username: ${{ secrets.ACR_PUSH_USERNAME }}
+          password: ${{ secrets.ACR_PUSH_PASSWORD }}
       - name: Build application image
         if: matrix.upstream == ''
         id: app
@@ -110,7 +126,7 @@ jobs:
             org.opencontainers.image.version=${{ needs.validate.outputs.version }}
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
-      - name: Mirror infrastructure image to reachable GHCR
+      - name: Mirror infrastructure image to ACR
         if: matrix.upstream != ''
         id: mirror
         env:
@@ -120,7 +136,7 @@ jobs:
           SOURCE_REPOSITORY: ${{ github.repository }}
         run: |
           docker pull --platform linux/amd64 "$UPSTREAM"
-          # Retain upstream filesystem while explicitly linking the private package to this repo.
+          # Retain the upstream filesystem and record the platform source repository.
           printf 'FROM %s\n' "$UPSTREAM" | docker build --platform linux/amd64 \
             --label "org.opencontainers.image.source=https://github.com/$SOURCE_REPOSITORY" \
             --tag "$IMAGE_TAG" --file - .
@@ -130,7 +146,7 @@ jobs:
       - name: Write immutable image artifact
         env:
           SERVICE: ${{ matrix.service }}
-          IMAGE_REPOSITORY: ${{ steps.image.outputs.repository }}
+          IMAGE_REPOSITORY: ${{ steps.image.outputs.pull_repository }}
           IMAGE_DIGEST: ${{ steps.app.outputs.digest || steps.mirror.outputs.digest }}
         run: |
           python3 - <<'PY'
@@ -168,7 +184,10 @@ jobs:
         run: |
           python3 ops/manifest.py create --repository "$REPOSITORY" --version "$RELEASE_VERSION" \
             --sha "$RELEASE_SHA" --main-sha "$RELEASE_SHA" --digests .runtime/digests \
-            --flags deploy/feature-flags.default.json > release-manifest.json
+            --flags deploy/feature-flags.default.json \
+            --registry-public-host "$ACR_REGISTRY_PUBLIC_HOST" \
+            --registry-pull-host "$ACR_REGISTRY_PULL_HOST" \
+            --registry-namespace "$ACR_NAMESPACE" > release-manifest.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-manifest
@@ -185,7 +204,6 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: read
-      packages: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -208,8 +226,8 @@ jobs:
         env:
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}
           RELEASE_SHA: ${{ needs.validate.outputs.sha }}
-          GHCR_USER: ${{ github.actor }}
-          GHCR_TOKEN: ${{ github.token }}
+          REGISTRY_USERNAME: ${{ secrets.ACR_PULL_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.ACR_PULL_PASSWORD }}
           PRODUCTION_SSH_HOST: ${{ secrets.PRODUCTION_SSH_HOST }}
           PRODUCTION_SSH_USER: ${{ secrets.PRODUCTION_SSH_USER }}
           PRODUCTION_SSH_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}
