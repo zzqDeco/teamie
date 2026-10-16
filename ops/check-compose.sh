@@ -63,3 +63,27 @@ for mutate in (
     except ValueError:pass
     else:raise AssertionError('unsafe Agent production configuration accepted')
 PY
+
+# Render the ACR production endpoint through the real Compose interpolation and
+# bind every service plus the execution runner to its selected release manifest.
+mkdir "$scratch/acr-digests"
+python3 - "$scratch/acr-digests" "$scratch/acr-images.env" <<'PY'
+import importlib.util,json,pathlib,sys
+spec=importlib.util.spec_from_file_location('manifest','ops/manifest.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+prefix='crpi-teamie-vpc.cn-shenzhen.personal.cr.aliyuncs.com/teamie/teamie-'
+images={name:prefix+name+'@sha256:'+'0'*64 for name in m.SERVICES}
+for name,image in images.items():
+    (pathlib.Path(sys.argv[1])/(name+'.json')).write_text(json.dumps({'service':name,'image':image}))
+pathlib.Path(sys.argv[2]).write_text(''.join(name.upper().replace('-','_')+'_IMAGE='+image+'\n' for name,image in images.items()))
+PY
+python3 ops/manifest.py create --repository zzqDeco/teamie --version v9.0.0 \
+  --sha 1111111111111111111111111111111111111111 \
+  --main-sha 1111111111111111111111111111111111111111 \
+  --digests "$scratch/acr-digests" --flags deploy/feature-flags.default.json \
+  --registry-public-host crpi-teamie.cn-shenzhen.personal.cr.aliyuncs.com \
+  --registry-pull-host crpi-teamie-vpc.cn-shenzhen.personal.cr.aliyuncs.com \
+  --registry-namespace teamie > "$scratch/acr-manifest.json"
+docker compose --file deploy/compose.production.yaml --env-file "$scratch/production.env" \
+  --env-file "$scratch/acr-images.env" config --format json > "$scratch/acr-compose.json"
+python3 ops/manifest.py config "$scratch/acr-compose.json" "$scratch/production.env" \
+  --manifest "$scratch/acr-manifest.json" >/dev/null

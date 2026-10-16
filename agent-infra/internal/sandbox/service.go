@@ -20,7 +20,35 @@ import (
 	"teamie/agent-protocol/kitex_gen/agent"
 )
 
-var imagePattern = regexp.MustCompile(`^(ghcr\.io/zzqdeco/teamie-sandbox-runner@)?sha256:[0-9a-f]{64}$`)
+const (
+	acrRegionPattern    = `[a-z]{2}(?:-[a-z0-9]+)+`
+	acrInstancePattern  = `[a-z0-9](?:[a-z0-9-]*[a-z0-9])?`
+	acrNamespacePattern = `[a-z0-9]+(?:[._-][a-z0-9]+)*`
+	acrRegistryPattern  = `(?:registry(?:-vpc)?\.` + acrRegionPattern + `\.aliyuncs\.com|crpi-[a-z0-9]+(?:-vpc)?\.` + acrRegionPattern + `\.personal\.cr\.aliyuncs\.com|` + acrInstancePattern + `-registry(?:-vpc)?\.` + acrRegionPattern + `\.cr\.aliyuncs\.com)`
+)
+
+var imagePattern = regexp.MustCompile(`^(?:ghcr\.io/zzqdeco/teamie-sandbox-runner@|` + acrRegistryPattern + `/` + acrNamespacePattern + `/teamie-sandbox-runner@)?sha256:[0-9a-f]{64}$`)
+
+func validRunnerImage(image string) bool {
+	if !imagePattern.MatchString(image) {
+		return false
+	}
+	// Bare IDs support the disposable CI launcher; GHCR digests preserve existing
+	// release recovery. ACR names remain one namespace and a valid DNS hostname.
+	if strings.HasPrefix(image, "sha256:") || strings.HasPrefix(image, "ghcr.io/") {
+		return true
+	}
+	parts := strings.SplitN(image, "/", 3)
+	if len(parts[1]) > 63 {
+		return false
+	}
+	for _, label := range strings.Split(parts[0], ".") {
+		if len(label) > 63 {
+			return false
+		}
+	}
+	return true
+}
 
 type Receipt struct {
 	Fingerprint string    `json:"fingerprint"`
@@ -45,7 +73,7 @@ type Service struct {
 }
 
 func New(engine Engine, token, image, workspace, state string) (*Service, error) {
-	if !imagePattern.MatchString(image) {
+	if !validRunnerImage(image) {
 		return nil, errors.New("SANDBOX_RUNNER_IMAGE must be an immutable platform image digest")
 	}
 	for _, pair := range [][2]string{{workspace, state}, {state, workspace}} {
