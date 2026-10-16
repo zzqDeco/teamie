@@ -19,6 +19,9 @@ export default defineConfig({
         target: process.env.REALTIME_HTTP_ORIGIN || "http://localhost:8083",
         ws: true,
       },
+      "^/api/v1/conversations/[^/]+/typing(?:[/?]|$)": {
+        target: process.env.REALTIME_HTTP_ORIGIN || "http://localhost:8083",
+      },
       "/api/v1/agents": {
         target: process.env.CONTROLPLANE_HTTP_ORIGIN || "http://localhost:8084",
       },

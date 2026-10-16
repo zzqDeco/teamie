@@ -27,7 +27,7 @@ import (
 	"teamie/backend/kitex_gen/im/identityservice"
 )
 
-type Config struct{ ControlAddr, GatewayAddr, SandboxAddr, IdentityAddr, IMURL, ControlToken, GatewayToken, SandboxToken, IMToken, FlagsFile, GatewayStreamURL string }
+type Config struct{ ControlAddr, GatewayAddr, SandboxAddr, IdentityAddr, IMURL, IMRealtimeURL, ControlToken, GatewayToken, SandboxToken, IMToken, FlagsFile, GatewayStreamURL string }
 type Engine struct {
 	Store    *Store
 	Config   Config
@@ -214,6 +214,22 @@ func (g *turnGuard) finish() {
 	}
 	g.run = nil
 }
+func (g *turnGuard) onFinish(run *Run, cleanup func()) {
+	g.mu.Lock()
+	if g.run != run || g.cancel == nil {
+		g.mu.Unlock()
+		cleanup()
+		return
+	}
+	release := g.release
+	g.release = func() {
+		if release != nil {
+			release()
+		}
+		cleanup()
+	}
+	g.mu.Unlock()
+}
 func (g *turnGuard) current() *Run { g.mu.Lock(); defer g.mu.Unlock(); return g.run }
 func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lease) {
 	ctx, cancelWorker := context.WithCancel(ctx)
@@ -253,7 +269,9 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 	}
 	var contextWindow atomic.Int64
 	contextWindow.Store(16384)
-	imc := &IM{BaseURL: e.Config.IMURL, ServiceKey: e.Config.IMToken, AgentID: def.Id, Identity: e.Identity}
+	// Typing and normal IM calls share credentials: issuance rotates the
+	// principal's single token and must never create competing token caches.
+	imc := &IM{BaseURL: e.Config.IMURL, RealtimeURL: e.Config.IMRealtimeURL, ServiceKey: e.Config.IMToken, AgentID: def.Id, Identity: e.Identity}
 	gatewayModel := &GatewayModel{Client: e.Gateway, Token: e.Config.GatewayToken, OwnerID: def.OwnerId, AgentID: def.Id, Store: e.Store, Lease: lease, Authorize: authorize, StreamURL: e.Config.GatewayStreamURL, ContextWindow: func() int { return int(contextWindow.Load()) }}
 	tools, err := (&Tools{Store: e.Store, Lease: lease, IM: imc, Sandbox: e.Sandbox, SandboxToken: e.Config.SandboxToken, Authorize: authorize}).BuildIM()
 	if err != nil {
@@ -425,6 +443,17 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		if err = run.Front.acquire(runctx); err != nil {
 			guard.finish()
 			return nil, nil, nil, err
+		}
+		if e.Config.IMRealtimeURL != "" {
+			guard.onFinish(run, beginTyping(runctx, run.Inputs, imc.Typing, func(ctx context.Context) error {
+				if !runtimeFlag(e.Config.FlagsFile, "agents.runtime.v3") {
+					return &ModelError{Code: "runtime_disabled", Retry: true}
+				}
+				if err := authorize(ctx); err != nil {
+					return err
+				}
+				return e.Store.CheckLease(ctx, lease)
+			}, nil))
 		}
 		consumed := map[string]bool{}
 		for _, in := range run.Inputs {

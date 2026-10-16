@@ -206,6 +206,7 @@ services:
       IDENTITY_RPC_ADDR: identity:8881
       CHAT_RPC_ADDR: chat:8882
       IM_API_URL: http://chat:8082
+      IM_REALTIME_URL: http://realtime:8083
       APP_ORIGIN: ${APP_ORIGIN:?HTTPS origin required}
       AGENT_RUNTIME_TOKEN: ${AGENT_RUNTIME_TOKEN:?runtime control credential required}
       IM_PRINCIPAL_RUNTIME_TOKEN: ${IM_PRINCIPAL_RUNTIME_TOKEN:?principal runtime credential required}

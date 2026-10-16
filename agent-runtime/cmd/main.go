@@ -41,7 +41,7 @@ func main() {
 		log.Fatal("runtime database initialization failed")
 	}
 	defer store.DB.Close()
-	runtime, err := engine.New(store, engine.Config{ControlAddr: env("AGENT_CONTROL_RPC_ADDR", "agent-control:8884"), GatewayAddr: env("GATEWAY_RPC_ADDR", "llm-gateway:8886"), SandboxAddr: env("SANDBOX_RPC_ADDR", "sandbox:8887"), IdentityAddr: env("IDENTITY_RPC_ADDR", "identity:8881"), IMURL: env("IM_API_URL", "http://chat:8082"), ControlToken: os.Getenv("AGENT_RUNTIME_TOKEN"), GatewayToken: os.Getenv("GATEWAY_RUNTIME_TOKEN"), SandboxToken: os.Getenv("SANDBOX_RUNTIME_TOKEN"), IMToken: os.Getenv("IM_PRINCIPAL_RUNTIME_TOKEN"), FlagsFile: os.Getenv("FEATURE_FLAGS_FILE"), GatewayStreamURL: env("GATEWAY_STREAM_URL", "http://llm-gateway:8086/internal/v1/chat/stream")})
+	runtime, err := engine.New(store, engine.Config{ControlAddr: env("AGENT_CONTROL_RPC_ADDR", "agent-control:8884"), GatewayAddr: env("GATEWAY_RPC_ADDR", "llm-gateway:8886"), SandboxAddr: env("SANDBOX_RPC_ADDR", "sandbox:8887"), IdentityAddr: env("IDENTITY_RPC_ADDR", "identity:8881"), IMURL: env("IM_API_URL", "http://chat:8082"), IMRealtimeURL: env("IM_REALTIME_URL", "http://realtime:8083"), ControlToken: os.Getenv("AGENT_RUNTIME_TOKEN"), GatewayToken: os.Getenv("GATEWAY_RUNTIME_TOKEN"), SandboxToken: os.Getenv("SANDBOX_RUNTIME_TOKEN"), IMToken: os.Getenv("IM_PRINCIPAL_RUNTIME_TOKEN"), FlagsFile: os.Getenv("FEATURE_FLAGS_FILE"), GatewayStreamURL: env("GATEWAY_STREAM_URL", "http://llm-gateway:8086/internal/v1/chat/stream")})
 	if err != nil {
 		log.Fatal("runtime client initialization failed")
 	}

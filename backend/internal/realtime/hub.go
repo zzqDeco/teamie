@@ -58,6 +58,8 @@ type Hub struct {
 	RevalidationInterval time.Duration
 	mu                   sync.Mutex
 	peers                map[*peer]struct{}
+	typingMu             sync.Mutex
+	typingGates          map[string]*typingGate
 }
 
 func (h *Hub) Routes() http.Handler {
@@ -71,6 +73,7 @@ func (h *Hub) Routes() http.Handler {
 		return h.Chat.Ping(ctx)
 	})
 	m.HandleFunc("GET /api/v1/ws", h.connect)
+	m.HandleFunc("POST /api/v1/conversations/{id}/typing", api.Auth(h.Identity, h.Origin, h.typing))
 	return m
 }
 func (h *Hub) connect(w http.ResponseWriter, r *http.Request) {
@@ -114,7 +117,6 @@ func (h *Hub) connect(w http.ResponseWriter, r *http.Request) {
 	conn.SetReadLimit(4096)
 	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 	conn.SetPongHandler(func(string) error { return conn.SetReadDeadline(time.Now().Add(60 * time.Second)) })
-	lastTyping := time.Time{}
 	for {
 		var input struct {
 			Type           string `json:"type"`
@@ -124,28 +126,16 @@ func (h *Hub) connect(w http.ResponseWriter, r *http.Request) {
 		if e = conn.ReadJSON(&input); e != nil {
 			return
 		}
-		if input.Type != "typing" || input.ConversationID == "" || time.Since(lastTyping) < 300*time.Millisecond || !h.Flags.Load().Flags["im.typing.publish"] {
+		if input.Type != "typing" || input.ConversationID == "" || !h.Flags.Load().Flags["im.typing.publish"] {
 			continue
 		}
-		lastTyping = time.Now()
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		current, e := h.Identity.Validate(ctx, p.token)
 		if e != nil {
 			cancel()
 			return
 		}
-		access, e := h.Chat.CheckAccess(ctx, p.user, input.ConversationID)
-		if e != nil || !access.Allowed || !access.TypingEnabled {
-			cancel()
-			continue
-		}
-		hint := Hint{Type: "typing", UserIDs: access.MemberIds, ConversationID: input.ConversationID, UserID: p.user, DisplayName: current.User.DisplayName, IsTyping: input.IsTyping}
-		b, _ := json.Marshal(hint)
-		if h.Redis != nil {
-			_ = h.Redis.Publish(ctx, chat.HintChannel, b).Err()
-		} else {
-			h.deliver(ctx, hint)
-		}
+		_ = h.publishTyping(ctx, current.User, input.ConversationID, input.IsTyping)
 		cancel()
 	}
 }
@@ -198,6 +188,14 @@ func (h *Hub) write(p *peer) {
 	}
 }
 func (h *Hub) deliver(ctx context.Context, hint Hint) {
+	if hint.Type == "typing" {
+		// Redis is only a wakeup/signal transport. Recheck the sender as well as
+		// recipients so a queued hint cannot survive membership revocation.
+		access, err := h.Chat.CheckAccess(ctx, hint.UserID, hint.ConversationID)
+		if err != nil || access == nil || !access.Allowed || !access.TypingEnabled {
+			return
+		}
+	}
 	set := map[string]bool{}
 	for _, id := range hint.UserIDs {
 		set[id] = true
@@ -216,7 +214,7 @@ func (h *Hub) deliver(ctx context.Context, hint Hint) {
 				continue
 			}
 			access, e := h.Chat.CheckAccess(ctx, p.user, hint.ConversationID)
-			if e != nil || !access.Allowed || !access.TypingEnabled {
+			if e != nil || access == nil || !access.Allowed || !access.TypingEnabled {
 				continue
 			}
 			if _, e = h.Identity.Validate(ctx, p.token); e != nil {

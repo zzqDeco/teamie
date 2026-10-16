@@ -88,6 +88,18 @@ func TestWebSocketOriginTypingAuthorizationAndRevocation(t *testing.T) {
 	if e := bob.ReadJSON(&typing); e != nil || typing.Type != "typing" || typing.UserID != "alice" || typing.DisplayName != "Alice" || len(typing.UserIDs) != 0 {
 		t.Fatal("typing did not derive authorized sender", e, typing)
 	}
+	if e := alice.WriteJSON(map[string]any{"type": "typing", "conversationId": "conversation", "isTyping": false}); e != nil {
+		t.Fatal(e)
+	}
+	if e := bob.ReadJSON(&typing); e != nil || typing.IsTyping {
+		t.Fatal("immediate typing stop was throttled", e, typing)
+	}
+	if e := alice.WriteJSON(map[string]any{"type": "typing", "conversationId": "conversation", "isTyping": true}); e != nil {
+		t.Fatal(e)
+	}
+	if e := bob.ReadJSON(&typing); e != nil || !typing.IsTyping {
+		t.Fatal("new typing after stop was throttled", e, typing)
+	}
 	// Existing sockets stop accepting typing once their current session is revoked.
 	identity.mu.Lock()
 	delete(identity.sessions, aliceToken)
