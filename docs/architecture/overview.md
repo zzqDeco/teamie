@@ -16,10 +16,11 @@ flowchart LR
   RT -->|Kitex| Chat
   CP -->|Generic principal RPC| Identity
   CP -->|Generic membership RPC| Chat
+  CP -->|Owner operations / event metadata RPC| Runtime
   Runtime[Eino runtime] -->|Definitions / safe status RPC| CP
   Runtime -->|Own participant HTTP| Chat
   Runtime -->|Scoped token RPC| Identity
-  Runtime -->|Model RPC| Gateway
+  Runtime -->|Model RPC / private stream HTTP| Gateway
   Runtime -->|Execution RPC| Sandbox[Sandbox service]
   Sandbox --> Child[Isolated execution child]
   Identity --> IDB[(Identity DB)]
@@ -64,21 +65,21 @@ Agent visibility creates ordinary membership selected from its human owner's cur
 
 `agent-control`, `agent-runtime`, `agent-infra` and `agent-protocol` are independent Go modules outside IM. Runtime pins **Eino v0.10.0-alpha.35**. Eino provides composition, Session and TurnLoop; Teamie's storage and worker code provide distributed leases, durable cursors, retry fencing and tool receipts.
 
-Each Agent has one durable global Session `agent:<id>`. Fresh message bodies plus sender/workspace/conversation/message/event IDs enter the input envelope. Bounded source-aware compaction preserves context references, while old IM history remains available through explicit tools. All sends/replies use an explicit destination tool; ordinary model output and operational errors are never automatically sent to IM.
+Each Agent has one durable global Session `agent:<id>`, with a single writer and serial native TurnLoop. Fresh message bodies plus sender/workspace/conversation/message/event IDs enter the input envelope even while an earlier input batch is active; Eino consumes new input at its native safe points. Bounded source-aware summarization preserves context references, while old IM history is queried through explicit tools. All sends/replies use an explicit destination tool; ordinary model output and operational errors are never automatically sent to IM.
 
 Desired definition state is persisted before provisioning; Identity is disabled while CP reconciles membership/configuration, then enabled only for the applied revision. Tokens rotate/expire and are revoked on disable/delete/revision. Runtime definitions and tool/model preflight checks stop stale work. Inbox persistence and IM cursor advancement commit together. Stable sends and known tool results replay without duplicate public messages; unknown execution effects are not silently rerun.
 
-The initial runtime process has **one global turn slot** and a durable lease per Agent. This limits concurrent model work for the initial host. It is not a multi-host throughput guarantee. Sandbox workspaces persist independently of short-lived execution children. Children receive fixed platform mounts/resource policy and no network, host socket or service/provider credentials.
+The initial runtime process has **one global foreground model slot** and a durable lease per Agent. Native background tasks release that slot while waiting for Sandbox execution; the Agent's Session writer stays serial. Eino background-task Manager, PostgreSQL TaskStore/events and notification outbox recover task completion into the Agent inbox. Workers, attempts and fencing are internal implementation details, not additional architecture services. Owner APIs expose only operational run/task/event metadata and cancellation/retry. This is not a multi-host throughput guarantee. Sandbox workspaces persist independently of execution children. Children receive fixed platform mounts/resource policy and no network, host socket or service/provider credentials.
 
 Production starts with an unconfigured model gateway at the user's request. Healthy readiness does not imply a configured model or real-provider acceptance. Agents wait with durable inputs until a platform admin configures/enables the gateway. CI uses explicit protocol fixtures; live provider verification remains a separate gate.
 
 ## Flags, infrastructure and release
 
-Versioned backend flag files carry a revision. Effective capabilities intersect implemented behavior and enabled keys; the backend independently checks authorization. Agent capabilities are false when absent from an older v1 file. Disabled write features keep persisted profiles/history readable. Attachments, reactions, threads and general IM search remain unavailable.
+Versioned backend flag files carry a revision. Effective capabilities intersect implemented behavior and enabled keys; the backend independently checks authorization. Agent capabilities are false when absent from an older file. `agents-v2` adds `agents.runtime.v3` and `agents.tasks.execute` for new work/submissions; reads and cancellation remain available when writes are disabled. Conversation history supports authorized text queries and sequence context. Attachments, reactions, threads and a global search interface remain unavailable.
 
 One Debian x86_64 host runs the Compose services. The release contains twelve immutable GHCR images: web, Identity, Chat, Realtime, Control Plane, runtime, gateway, Sandbox, execution-runner, Caddy, PostgreSQL and Redis. Execution-runner is an on-demand child image. Hosted CI builds images; the production host pulls digest-pinned artifacts. Persistent volumes preserve databases, workspaces, receipts, certificates and backups.
 
-Only `production` is deployed; disposable CI databases do not constitute a second environment. `main` is the ongoing trunk. Published `release/vx.x.x` branches/tags are immutable permanent archives; fixes require a new version. Forward migrations preserve existing accounts/messages. Identity/Chat schema 2 adopt unchanged published v1 migrations; Control Plane/runtime/gateway each begin at schema 1. Cross-schema image rollback is rejected; verify a pre-upgrade backup/restore path before migration.
+Only `production` is deployed; disposable CI databases do not constitute a second environment. `main` is the ongoing trunk. Published `release/vx.x.x` branches/tags are immutable permanent archives; fixes require a new version. Forward migrations preserve existing accounts/messages. The v0.3 schema vector is Identity 2, Chat 2, Control Plane 1, Runtime 2, Gateway 2. Cross-schema image rollback is rejected; verify a pre-upgrade backup/restore path before migration.
 
 The public IP uses the configured Let's Encrypt ACME `shortlived` issuer and `TLS_SERVER_NAME`/`default_sni` for non-SNI clients. Public trusted HTTPS and renewal are separate acceptance gates. Internal-CA or disabled-verification checks do not establish public trust.
 

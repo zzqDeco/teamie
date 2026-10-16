@@ -11,7 +11,7 @@ pg=(docker exec -i "$POSTGRES_CONTAINER_ID")
   bash -s < deploy/postgres/01-databases.sh
 for suffix in identity chat agent_control agent_runtime gateway; do
   version=1
-  if [[ $suffix == identity || $suffix == chat ]]; then version=2; fi
+  if [[ $suffix == identity || $suffix == chat || $suffix == agent_runtime || $suffix == gateway ]]; then version=2; fi
   # Use a known fixture table so the restore asserts data, schema and binary values.
   "${pg[@]}" psql -U postgres -d "teamie_$suffix" -v ON_ERROR_STOP=1 -v ledger="${suffix}_schema_migrations" -v version="$version" <<'SQL'
 CREATE TABLE :"ledger"(version INTEGER PRIMARY KEY);

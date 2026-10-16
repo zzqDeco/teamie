@@ -88,6 +88,34 @@ class ManifestTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(Path(counter).read_text(), "x")
 
+    def test_agent_writer_quiesces_before_dependency_migrations(self):
+        for stop_fails in (False, True):
+            with self.subTest(stop_fails=stop_fails), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                sql = root / "deploy/postgres/01-databases.sh"
+                sql.parent.mkdir(parents=True)
+                sql.touch()
+                probe = root / "probe.sh"
+                probe.write_text('''#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$CALLS"
+if [[ $* == 'config --services' ]]; then echo llm-gateway; fi
+if [[ $* == 'stop --timeout 30 agent-runtime' && $STOP_FAILS == 1 ]]; then exit 1; fi
+''')
+                calls = root / "calls"
+                result = subprocess.run(["bash", "-c", 'source "$COMMON"; COMPOSE=(bash "$PROBE"); COMPOSE_RECIPE=$RECIPE; rollout'],
+                                        env={**os.environ, "COMMON": str(Path(__file__).with_name("common.sh")),
+                                             "PROBE": str(probe), "RECIPE": str(root), "CALLS": str(calls),
+                                             "STOP_FAILS": str(int(stop_fails))}, capture_output=True)
+                operations = calls.read_text().splitlines()
+                stop = operations.index("stop --timeout 30 agent-runtime")
+                identity = "up -d --no-deps --wait --wait-timeout 180 identity"
+                if stop_fails:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertNotIn(identity, operations)
+                else:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertLess(stop, operations.index(identity))
+
 
 class AgentManifestTest(unittest.TestCase):
     def modern(self):

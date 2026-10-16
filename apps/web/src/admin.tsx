@@ -149,7 +149,6 @@ export function PlatformInvitations() {
     <div className="admin-view">
       <div className="admin-heading">
         <div>
-          <div className="eyebrow">WELCOME THE NEXT TEAMMATE</div>
           <h1>
             注册邀请{" "}
             <span className="platform-role-badge">
@@ -157,27 +156,17 @@ export function PlatformInvitations() {
               平台管理员
             </span>
           </h1>
-          <p>每个邀请码只欢迎一位新伙伴，生成后七天内有效。</p>
+          <p>一次性邀请码，7 天内有效。</p>
         </div>
         <span className="admin-heading-icon">
           <KeyRound size={27} />
         </span>
       </div>
-      <div className="admin-policy">
-        <ShieldCheck size={18} />
-        <div>
-          <b>让每一个账户，都来自一次邀请。</b>
-          <p>
-            一次性注册邀请码用于创建 Teamie
-            账户。加入工作空间还需要该空间的邀请；平台管理员同样遵循工作空间成员权限。
-          </p>
-        </div>
-      </div>
       <Notice>{!revoking ? error : ""}</Notice>
       <div className="admin-generate">
         <div>
-          <h2>邀请一位新伙伴</h2>
-          <p>邀请码仅在生成时显示，请复制并妥善保存。</p>
+          <h2>创建注册邀请</h2>
+          <p>邀请码仅显示一次。</p>
         </div>
         <Button
           onClick={generate}
@@ -185,7 +174,7 @@ export function PlatformInvitations() {
           disabled={!!created || query.isLoading || denied}
         >
           <Plus size={16} />
-          生成一次性邀请码
+          生成邀请码
         </Button>
       </div>
       {created && (
@@ -197,9 +186,7 @@ export function PlatformInvitations() {
             </span>
             <small>仅显示一次 · 请及时保存</small>
           </div>
-          <p>
-            每个邀请码仅能注册一个账户。关闭此卡片或离开页面后，无法再次查看原始邀请码。
-          </p>
+          <p>离开此页面后无法查看原始邀请码，请先复制保存。</p>
           <label>
             一次性注册邀请码
             <div className="copy-input">
@@ -255,7 +242,7 @@ export function PlatformInvitations() {
                 setCopied("");
               }}
             >
-              我已保存，关闭此提示
+              已保存，关闭
               <ChevronRight size={13} />
             </button>
           </div>
@@ -302,8 +289,8 @@ export function PlatformInvitations() {
             <span>
               <UserPlus size={27} />
             </span>
-            <h3>下一位伙伴，等你邀请。</h3>
-            <p>生成一个一次性邀请码，向新伙伴发出邀请。</p>
+            <h3>暂无邀请码</h3>
+            <p>点击上方按钮创建注册邀请。</p>
           </div>
         ) : (
           <div className="admin-table-wrap">
@@ -329,13 +316,13 @@ export function PlatformInvitations() {
                     const status = registrationInviteStatus(invite, now);
                     return (
                       <tr key={invite.id}>
-                        <td>
+                        <td data-label="创建时间">
                           <span>{formatDate(invite.createdAt)}</span>
                           <small title={invite.id}>
                             #{invite.id.slice(-8)}
                           </small>
                         </td>
-                        <td>
+                        <td data-label="有效期至">
                           <span>{formatDate(invite.expiresAt)}</span>
                           {invite.usedAt && (
                             <small>使用于 {formatDate(invite.usedAt)}</small>

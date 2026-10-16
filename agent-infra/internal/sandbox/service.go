@@ -36,6 +36,12 @@ type Service struct {
 	active                                 map[string]context.CancelFunc
 	lock                                   *os.File
 	canceled                               map[string]time.Time
+	taskMu                                 sync.Mutex
+	tasks                                  map[string]*taskReceipt
+	observers                              map[string]context.CancelFunc
+	taskWG                                 sync.WaitGroup
+	closed                                 bool
+	fileMu                                 sync.Mutex
 }
 
 func New(engine Engine, token, image, workspace, state string) (*Service, error) {
@@ -63,6 +69,23 @@ func New(engine Engine, token, image, workspace, state string) (*Service, error)
 			return nil, e
 		}
 	}
+	// Compare physical roots as well: aliases in ancestor directories must not
+	// put trusted receipts inside the child-accessible workspace mount.
+	var resolveErr error
+	workspace, resolveErr = filepath.EvalSymlinks(workspace)
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
+	state, resolveErr = filepath.EvalSymlinks(state)
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
+	for _, pair := range [][2]string{{workspace, state}, {state, workspace}} {
+		rel, e := filepath.Rel(pair[0], pair[1])
+		if e != nil || rel == "." || rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+			return nil, errors.New("workspace and receipt roots must be physically disjoint")
+		}
+	}
 	lock, e := os.OpenFile(filepath.Join(state, "supervisor.lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if e != nil {
 		return nil, e
@@ -71,9 +94,16 @@ func New(engine Engine, token, image, workspace, state string) (*Service, error)
 		lock.Close()
 		return nil, errors.New("another sandbox supervisor owns this state")
 	}
-	return &Service{Engine: engine, Token: token, Image: image, WorkspaceRoot: workspace, StateRoot: state, slots: make(chan struct{}, 1), active: make(map[string]context.CancelFunc), canceled: make(map[string]time.Time), lock: lock}, nil
+	return &Service{Engine: engine, Token: token, Image: image, WorkspaceRoot: workspace, StateRoot: state, slots: make(chan struct{}, 1), active: make(map[string]context.CancelFunc), canceled: make(map[string]time.Time), lock: lock, tasks: make(map[string]*taskReceipt), observers: make(map[string]context.CancelFunc)}, nil
 }
 func (s *Service) Close() {
+	s.taskMu.Lock()
+	s.closed = true
+	for _, cancel := range s.observers {
+		cancel()
+	}
+	s.taskMu.Unlock()
+	s.taskWG.Wait() // Close detaches observers; durable container children continue.
 	s.mu.Lock()
 	for _, cancel := range s.active {
 		cancel()
@@ -108,7 +138,8 @@ func failure(code string) *agent.SandboxExecResponse {
 func (s *Service) receiptPath(agentID, requestID string) string {
 	return filepath.Join(s.StateRoot, digest(agentID+"\x00"+requestID)+".json")
 }
-func writeReceipt(path string, r Receipt) error {
+func writeReceipt(path string, r Receipt) error { return writeAtomicJSON(path, r) }
+func writeAtomicJSON(path string, r any) error {
 	b, e := json.Marshal(r)
 	if e != nil {
 		return e

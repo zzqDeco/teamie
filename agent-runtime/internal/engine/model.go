@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"net/http"
 	"strings"
 
 	"github.com/cloudwego/eino/adk"
@@ -26,6 +27,9 @@ func (e *ModelError) Error() string { return "model gateway: " + e.Code }
 type GatewayModel struct {
 	Client                  modelgatewayservice.Client
 	Token, OwnerID, AgentID string
+	StreamURL               string
+	ContextWindow           func() int
+	HTTP                    *http.Client
 	Store                   *Store
 	Lease                   *Lease
 	Tools                   []*schema.ToolInfo
@@ -139,7 +143,11 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.Message,
 	if e = m.Store.CheckLease(ctx, m.Lease); e != nil {
 		return nil, e
 	}
+	if e = run.Front.acquire(ctx); e != nil {
+		return nil, e
+	}
 	opts := model.GetCommonOptions(&model.Options{Tools: m.Tools}, options...)
+	m.capOutput(opts)
 	request, e := chatRequest(messages, opts.Tools, opts)
 	if e != nil {
 		return nil, e
@@ -162,7 +170,7 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.Message,
 		return nil, &ModelError{Code: "gateway_unavailable", Retry: true}
 	}
 	if !response.Ok {
-		code := response.GetErrorCode()
+		code := safeGatewayCode(response.GetErrorCode())
 		if code == "" {
 			code = "gateway_error"
 		}
@@ -180,13 +188,6 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.Message,
 		return nil, e
 	}
 	return result, nil
-}
-func (m *GatewayModel) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
-	r, e := m.Generate(ctx, input, opts...)
-	if e != nil {
-		return nil, e
-	}
-	return schema.StreamReaderFromArray([]*schema.Message{r}), nil
 }
 func SafeError(err error) string {
 	var m *ModelError
@@ -236,3 +237,23 @@ func retryError(err error) bool {
 }
 
 var _ model.ToolCallingChatModel = (*GatewayModel)(nil)
+
+func (m *GatewayModel) capOutput(opts *model.Options) {
+	if m.ContextWindow == nil {
+		return
+	}
+	limit := m.ContextWindow() / 4
+	if limit < 256 {
+		limit = 256
+	}
+	if limit > 4096 {
+		limit = 4096
+	}
+	if opts.MaxTokens == nil {
+		if limit < 2048 {
+			opts.MaxTokens = &limit
+		}
+	} else if *opts.MaxTokens > limit {
+		opts.MaxTokens = &limit
+	}
+}

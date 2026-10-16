@@ -177,6 +177,7 @@ services:
       COOKIE_SECURE: "true"
       AGENT_RUNTIME_TOKEN: ${AGENT_RUNTIME_TOKEN:?runtime control credential required}
       IM_PRINCIPAL_CONTROL_TOKEN: ${IM_PRINCIPAL_CONTROL_TOKEN:?principal control credential required}
+      AGENT_RUNTIME_RPC_ADDR: agent-runtime:8885
       FEATURE_FLAGS_FILE: /etc/teamie/feature-flags.json
       GOMEMLIMIT: 40MiB
       GOMAXPROCS: "1"
@@ -200,6 +201,7 @@ services:
     memswap_limit: 128m
     environment:
       HTTP_ADDR: :8085
+      RPC_ADDR: :8885
       DATABASE_URL: ${AGENT_RUNTIME_DATABASE_URL:?agent runtime database required}
       AGENT_CONTROL_RPC_ADDR: agent-control:8884
       IDENTITY_RPC_ADDR: identity:8881
@@ -209,6 +211,7 @@ services:
       AGENT_RUNTIME_TOKEN: ${AGENT_RUNTIME_TOKEN:?runtime control credential required}
       IM_PRINCIPAL_RUNTIME_TOKEN: ${IM_PRINCIPAL_RUNTIME_TOKEN:?principal runtime credential required}
       GATEWAY_RPC_ADDR: llm-gateway:8886
+      GATEWAY_STREAM_URL: http://llm-gateway:8086/internal/v1/chat/stream
       GATEWAY_RUNTIME_TOKEN: ${GATEWAY_RUNTIME_TOKEN:?gateway runtime credential required}
       SANDBOX_RPC_ADDR: sandbox:8887
       SANDBOX_RUNTIME_TOKEN: ${SANDBOX_RUNTIME_TOKEN:?sandbox runtime credential required}

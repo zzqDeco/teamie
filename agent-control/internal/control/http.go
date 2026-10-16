@@ -11,8 +11,9 @@ import (
 )
 
 type Handler struct {
-	Store  *Store
-	Origin string
+	Store   *Store
+	Origin  string
+	Runtime RuntimeAccess
 }
 type handler func(http.ResponseWriter, *http.Request, *im.User) error
 
@@ -75,6 +76,7 @@ func (h *Handler) one(w http.ResponseWriter, r *http.Request, a Agent, status in
 }
 func (h *Handler) Routes() http.Handler {
 	m := http.NewServeMux()
+	h.runtimeRoutes(m)
 	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { write(w, 200, map[string]string{"status": "ok"}) })
 	m.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
 		if h.Store.DB.Ping(r.Context()) != nil || h.Store.IM.Ping(r.Context()) != nil {

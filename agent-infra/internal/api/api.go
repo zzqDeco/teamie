@@ -78,7 +78,7 @@ func Operations(m *http.ServeMux, ready func(context.Context) error) {
 	})
 }
 func Serve(addr string, handler http.Handler) {
-	h := server.Default(server.WithHostPorts(addr), server.WithMaxRequestBodySize(262144), server.WithReadTimeout(15*time.Second), server.WithWriteTimeout(65*time.Second))
+	h := server.Default(server.WithHostPorts(addr), server.WithMaxRequestBodySize(528384), server.WithReadTimeout(15*time.Second), server.WithWriteTimeout(6*time.Minute), server.WithSenseClientDisconnection(true))
 	h.Any("/*path", adaptor.HertzHandler(handler))
 	h.Spin()
 }

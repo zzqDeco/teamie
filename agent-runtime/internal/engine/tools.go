@@ -17,7 +17,6 @@ import (
 	"github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/compose"
 	"github.com/google/uuid"
-	wire "teamie/agent-protocol/kitex_gen/agent"
 	"teamie/agent-protocol/kitex_gen/agent/sandboxservice"
 	"teamie/backend/kitex_gen/im"
 	"teamie/backend/kitex_gen/im/identityservice"
@@ -240,7 +239,8 @@ type listMessagesArgs struct {
 	ConversationID string `json:"conversationId" jsonschema:"required,description=Explicit destination conversation ID"`
 	BeforeSeq      int64  `json:"beforeSeq,omitempty" jsonschema:"description=Exclusive older-page cursor; zero starts at latest"`
 	Limit          int    `json:"limit,omitempty" jsonschema:"description=Page size 1 to 50"`
-	Keyword        string `json:"keyword,omitempty" jsonschema:"description=Optional text filter within this page; page further to search older history"`
+	Keyword        string `json:"keyword,omitempty" jsonschema:"description=Optional case-insensitive literal server search across history before pagination"`
+	AroundSeq      int64  `json:"aroundSeq,omitempty" jsonschema:"description=Sequence neighborhood; cannot combine with beforeSeq"`
 }
 type getMessageArgs struct {
 	ConversationID string `json:"conversationId" jsonschema:"required"`
@@ -251,12 +251,8 @@ type sendArgs struct {
 	Body           string `json:"body" jsonschema:"required,description=Public message text"`
 	ReplyToID      string `json:"replyToId,omitempty" jsonschema:"description=Optional message in the same conversation to reply to"`
 }
-type execArgs struct {
-	Command        string `json:"command" jsonschema:"required,description=Shell command in persistent private workspace; python3 available; no network or host access"`
-	TimeoutSeconds int32  `json:"timeoutSeconds,omitempty" jsonschema:"description=Time limit 1 to 60 seconds; default 30"`
-}
 
-func (t *Tools) Build() ([]tool.BaseTool, error) {
+func (t *Tools) BuildIM() ([]tool.BaseTool, error) {
 	a, e := utils.InferTool("im_list_conversations", "List the conversations currently accessible to your own IM identity. This never adds membership.", func(ctx context.Context, args *listConversationsArgs) (*Observation, error) {
 		return t.execute(ctx, "im_list_conversations", args, func(ctx context.Context, _ string) (*Observation, error) {
 			if args.WorkspaceID != "" && !validUUID(args.WorkspaceID) {
@@ -281,7 +277,7 @@ func (t *Tools) Build() ([]tool.BaseTool, error) {
 	}
 	b, e := utils.InferTool("im_list_messages", "Read or search an older page of history under your normal IM membership. Use nextBeforeSeq to continue. Messages include source and sender IDs.", func(ctx context.Context, args *listMessagesArgs) (*Observation, error) {
 		return t.execute(ctx, "im_list_messages", args, func(ctx context.Context, _ string) (*Observation, error) {
-			if !validUUID(args.ConversationID) || args.BeforeSeq < 0 || args.Limit < 0 || args.Limit > 50 || len(args.Keyword) > 256 {
+			if !validUUID(args.ConversationID) || args.BeforeSeq < 0 || args.Limit < 0 || args.Limit > 50 || len([]rune(args.Keyword)) > 200 || args.AroundSeq < 0 || args.AroundSeq > 0 && args.BeforeSeq > 0 {
 				return &Observation{Error: "invalid_arguments"}, nil
 			}
 			limit := args.Limit
@@ -289,6 +285,13 @@ func (t *Tools) Build() ([]tool.BaseTool, error) {
 				limit = 20
 			}
 			q := url.Values{"limit": {strconv.Itoa(limit)}, "beforeSeq": {strconv.FormatInt(args.BeforeSeq, 10)}}
+			if args.Keyword != "" {
+				q.Set("q", args.Keyword)
+			}
+			if args.AroundSeq > 0 {
+				q.Del("beforeSeq")
+				q.Set("aroundSeq", strconv.FormatInt(args.AroundSeq, 10))
+			}
 			var page struct {
 				Messages []Message `json:"messages"`
 				HasMore  bool      `json:"hasMore"`
@@ -296,7 +299,7 @@ func (t *Tools) Build() ([]tool.BaseTool, error) {
 			if e := t.IM.Call(ctx, http.MethodGet, "/api/v1/conversations/"+args.ConversationID+"/messages?"+q.Encode(), nil, &page); e != nil {
 				return observeError(e), nil
 			}
-			out, cursor, more := historyPage(page.Messages, page.HasMore, args.Keyword)
+			out, cursor, more := historyPage(page.Messages, page.HasMore, "")
 			return &Observation{OK: true, Data: map[string]any{"messages": out, "hasMore": more, "nextBeforeSeq": cursor}}, nil
 
 		})
@@ -341,26 +344,7 @@ func (t *Tools) Build() ([]tool.BaseTool, error) {
 	if e != nil {
 		return nil, e
 	}
-	f, e := utils.InferTool("workspace_execute", "Execute shell/Python work in your persistent Agent workspace through the isolated Sandbox service. Files persist per Agent. No network; limits apply. Inspect an interrupted execution before choosing a new action.", func(ctx context.Context, args *execArgs) (*Observation, error) {
-		return t.execute(ctx, "workspace_execute", args, func(ctx context.Context, id string) (*Observation, error) {
-			if strings.TrimSpace(args.Command) == "" || len(args.Command) > 16384 || args.TimeoutSeconds < 0 || args.TimeoutSeconds > 60 {
-				return &Observation{Error: "invalid_arguments"}, nil
-			}
-			run, _ := CurrentRun(ctx)
-			r, e := t.Sandbox.Exec(ctx, &wire.SandboxExecRequest{ServiceToken: t.SandboxToken, AgentId: run.AgentID, RunId: run.ID, ExecutionId: ptrExecutionID(run), RequestId: id, Command: args.Command, TimeoutSeconds: args.TimeoutSeconds})
-			if e != nil {
-				return nil, &ModelError{Code: "sandbox_unavailable", Retry: true}
-			}
-			if r.GetErrorCode() == "sandbox_busy" {
-				return nil, &ModelError{Code: "sandbox_busy", Retry: true}
-			}
-			return &Observation{OK: r.Ok, Error: r.GetErrorCode(), Data: map[string]any{"exitCode": r.ExitCode, "stdout": r.Stdout, "stderr": r.Stderr, "truncated": r.Truncated}}, nil
-		})
-	})
-	if e != nil {
-		return nil, e
-	}
-	return []tool.BaseTool{a, b, c, d, f}, nil
+	return []tool.BaseTool{a, b, c, d}, nil
 }
 
 // Bound observations while retaining a correct older-page cursor. Examine newest
@@ -387,5 +371,3 @@ func historyPage(messages []Message, hasMore bool, keyword string) ([]Message, i
 	}
 	return out, cursor, hasMore || examined < len(messages)
 }
-
-func ptrExecutionID(run *Run) *string { id := executionID(run); return &id }

@@ -101,9 +101,6 @@ export function ModelGatewaySettings() {
     <div className="admin-view gateway-view">
       <div className="admin-heading">
         <div>
-          <div className="eyebrow">
-            ONE CONNECTION. A TEAM OF POSSIBILITIES.
-          </div>
           <h1>
             模型网关{" "}
             <span className="platform-role-badge">
@@ -111,7 +108,7 @@ export function ModelGatewaySettings() {
               平台管理员
             </span>
           </h1>
-          <p>配置一个 OpenAI 兼容模型服务，让 Agent 准备好接收新消息。</p>
+          <p>所有 Agent 共用的模型连接。</p>
         </div>
         <span className="admin-heading-icon">
           <KeyRound size={27} />
@@ -142,21 +139,19 @@ export function ModelGatewaySettings() {
             <div>
               <b>
                 {query.data.status === "unconfigured"
-                  ? "等待管理员填写配置"
+                  ? "尚未配置"
                   : query.data.status === "disabled"
                     ? "模型网关已停用"
-                    : "模型连接配置已保存"}
+                    : "配置已保存"}
               </b>
               <p>
                 {query.data.status === "ready"
-                  ? "配置已具备运行所需字段。可手动测试已保存的连接，确认服务可用。"
-                  : "Agent 暂时不会调用模型或生成回复。保存并启用有效配置后，才会开始处理新消息。"}
+                  ? "连接尚需测试验证。"
+                  : "保存并启用后，Agent 才能调用模型。"}
               </p>
             </div>
           </div>
-          <Notice kind="success">
-            {saved ? "配置已保存。密钥不会在页面或后续读取中回显。" : ""}
-          </Notice>
+          <Notice kind="success">{saved ? "配置已保存。" : ""}</Notice>
           <Notice kind={test?.ok ? "success" : "info"}>
             {test
               ? test.ok
@@ -174,9 +169,7 @@ export function ModelGatewaySettings() {
           <div className="gateway-test-panel">
             <div>
               <h3>测试已保存的配置</h3>
-              <p>
-                测试会向已保存的模型服务发送一次请求，可能产生调用费用。表单中尚未保存的内容不会用于测试。
-              </p>
+              <p>使用已保存的配置发送 1 次模型请求，可能产生费用。</p>
             </div>
             <Button
               className="secondary"
@@ -186,18 +179,11 @@ export function ModelGatewaySettings() {
               }
               onClick={() => void testConnection()}
             >
-              发送 1 次模型请求测试
+              测试连接
             </Button>
           </div>
         </>
       )}
-      <div className="gateway-boundary-note">
-        <ShieldCheck size={15} />
-        <p>
-          普通用户只管理 Agent
-          的名称、简介、可见团队和启停状态。模型与密钥配置仅在此处由平台管理员维护。
-        </p>
-      </div>
     </div>
   );
 }

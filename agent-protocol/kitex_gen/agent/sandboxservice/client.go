@@ -14,6 +14,11 @@ type Client interface {
 	Exec(ctx context.Context, request *agent.SandboxExecRequest, callOptions ...callopt.Option) (r *agent.SandboxExecResponse, err error)
 	Cancel(ctx context.Context, request *agent.CancelRequest, callOptions ...callopt.Option) (r *agent.Ack, err error)
 	Ping(ctx context.Context, request *agent.PingRequest, callOptions ...callopt.Option) (r *agent.PingResponse, err error)
+	Start(ctx context.Context, request *agent.SandboxStartRequest, callOptions ...callopt.Option) (r *agent.SandboxTaskResponse, err error)
+	Get(ctx context.Context, request *agent.SandboxTaskRequest, callOptions ...callopt.Option) (r *agent.SandboxTaskResponse, err error)
+	ReadOutput(ctx context.Context, request *agent.SandboxTaskRequest, callOptions ...callopt.Option) (r *agent.SandboxTaskResponse, err error)
+	CancelTask(ctx context.Context, request *agent.SandboxTaskRequest, callOptions ...callopt.Option) (r *agent.SandboxTaskResponse, err error)
+	Workspace(ctx context.Context, request *agent.SandboxWorkspaceRequest, callOptions ...callopt.Option) (r *agent.SandboxWorkspaceResponse, err error)
 }
 
 // NewClient creates a client for the service defined in IDL.
@@ -58,4 +63,29 @@ func (p *kSandboxServiceClient) Cancel(ctx context.Context, request *agent.Cance
 func (p *kSandboxServiceClient) Ping(ctx context.Context, request *agent.PingRequest, callOptions ...callopt.Option) (r *agent.PingResponse, err error) {
 	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
 	return p.kClient.Ping(ctx, request)
+}
+
+func (p *kSandboxServiceClient) Start(ctx context.Context, request *agent.SandboxStartRequest, callOptions ...callopt.Option) (r *agent.SandboxTaskResponse, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.Start(ctx, request)
+}
+
+func (p *kSandboxServiceClient) Get(ctx context.Context, request *agent.SandboxTaskRequest, callOptions ...callopt.Option) (r *agent.SandboxTaskResponse, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.Get(ctx, request)
+}
+
+func (p *kSandboxServiceClient) ReadOutput(ctx context.Context, request *agent.SandboxTaskRequest, callOptions ...callopt.Option) (r *agent.SandboxTaskResponse, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.ReadOutput(ctx, request)
+}
+
+func (p *kSandboxServiceClient) CancelTask(ctx context.Context, request *agent.SandboxTaskRequest, callOptions ...callopt.Option) (r *agent.SandboxTaskResponse, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.CancelTask(ctx, request)
+}
+
+func (p *kSandboxServiceClient) Workspace(ctx context.Context, request *agent.SandboxWorkspaceRequest, callOptions ...callopt.Option) (r *agent.SandboxWorkspaceResponse, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.Workspace(ctx, request)
 }

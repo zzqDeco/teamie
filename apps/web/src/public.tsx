@@ -8,18 +8,15 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import {
+  ArrowLeft,
   ArrowRight,
+  Bot,
   Check,
-  CheckCheck,
   ChevronRight,
   Hash,
-  LockKeyhole,
-  MessageCircle,
   MessagesSquare,
-  ShieldCheck,
-  Sparkles,
+  SendHorizontal,
   Users,
-  Zap,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@teamie/api-client";
@@ -35,73 +32,66 @@ export function Landing() {
       <main>
         <section className="hero">
           <div className="hero-copy">
-            <div className="eyebrow">
-              <span className="tiny-dot" /> 为默契的团队，留一个空间
-            </div>
             <h1>
-              好想法，
-              <br />从<span className="hand-underline">聊在一起</span>开始
+              团队与 Agent，
+              <br />
+              聊在<span className="hand-underline">一起</span>
               <span className="purple">。</span>
             </h1>
-            <p>
-              少一点信息散落，多一点心有灵犀。
-              <br />
-              让团队、对话和灵感，在 Teamie 自然相遇。
-            </p>
+            <p>频道、私聊与小组，让协作自然发生。</p>
             <div className="hero-actions">
-              <Link
-                to={user ? "/app" : "/login?mode=register"}
-                className="button"
-              >
-                {user ? "回到工作空间" : "开启团队新对话"}
+              <Link to={user ? "/app" : "/login"} className="button">
+                {user ? "进入工作空间" : "登录 Teamie"}
                 <ArrowRight size={18} />
               </Link>
-              <span>一个空间，一起向前。</span>
+              {!user && (
+                <Link className="landing-register" to="/login?mode=register">
+                  凭邀请码注册 <ChevronRight size={16} />
+                </Link>
+              )}
             </div>
-            <div className="hero-footnote">
-              <span className="mini-avatars">
-                <Avatar name="林" />
-                <Avatar name="周" />
-                <Avatar name="陈" />
+            <div className="landing-features" aria-label="Teamie 功能">
+              <span>
+                <Hash size={16} />
+                团队频道
               </span>
-              <span>为每一位认真协作的伙伴而造</span>
+              <span>
+                <MessagesSquare size={16} />
+                私信与小组
+              </span>
+              <span>
+                <Bot size={16} />
+                Agent 协作
+              </span>
             </div>
           </div>
           <div className="hero-visual" aria-label="Teamie 团队沟通界面示意">
             <div className="visual-grid" />
-            <span className="orbit-caption">
-              GOOD THINGS
-              <br />
-              HAPPEN TOGETHER.
-            </span>
             <div className="demo-window">
               <div className="demo-title">
                 <Logo />
-                <span>
-                  <span className="tiny-dot" /> 团队空间
-                </span>
+                <span>团队空间</span>
               </div>
               <div className="demo-body">
                 <div className="demo-sidebar">
-                  <span className="demo-workspace">
-                    灵感工作室 <span>⌄</span>
-                  </span>
-                  <small>团队频道</small>
+                  <span className="demo-workspace">设计小组</span>
+                  <small>频道</small>
                   <span className="demo-channel selected">
-                    <Hash size={15} /> general
+                    <Hash size={15} />
+                    general
                   </span>
                   <span className="demo-channel">
-                    <Hash size={15} /> 一起做点什么
-                  </span>
-                  <span className="demo-channel">
-                    <Hash size={15} /> 灵感随手记
+                    <Hash size={15} />
+                    产品讨论
                   </span>
                   <small>私信</small>
                   <span className="demo-channel">
-                    <Avatar name="林" size="small" /> 林小满
+                    <Avatar name="林" size="small" />
+                    林小满
                   </span>
                   <span className="demo-channel">
-                    <Avatar name="周" size="small" /> 周一
+                    <Bot size={17} />
+                    产品伙伴
                   </span>
                 </div>
                 <div className="demo-chat">
@@ -116,7 +106,7 @@ export function Landing() {
                       <b>
                         林小满 <small>10:24</small>
                       </b>
-                      <p>新的一天，有什么好点子？ ☀️</p>
+                      <p>大家看一下新版首页。</p>
                     </div>
                   </div>
                   <div className="demo-message">
@@ -125,107 +115,33 @@ export function Landing() {
                       <b>
                         周一 <small>10:25</small>
                       </b>
-                      <p>把我们的想法，变成下一件好事。</p>
-                      <span className="idea-card">
-                        <Sparkles size={18} />
-                        <span>
-                          从一句「要不，我们试试？」开始
-                          <small>让灵感在对话里生长</small>
-                        </span>
-                      </span>
+                      <p>导航简洁了，手机上也很好用。</p>
                     </div>
                   </div>
                   <div className="demo-message">
-                    <Avatar name="陈" />
+                    <span className="avatar agent-avatar">
+                      <Bot size={20} />
+                    </span>
                     <div>
                       <b>
-                        陈可 <small>10:26</small>
+                        产品伙伴{" "}
+                        <small className="demo-agent-label">Agent</small>
                       </b>
-                      <p>一起！已经开始期待了 🙌</p>
+                      <p>讨论要点已整理好，接着一起推进。</p>
                     </div>
                   </div>
                   <div className="demo-input">
-                    发送消息到 # general <span>↵</span>
+                    发送消息到 # general <SendHorizontal size={15} />
                   </div>
                 </div>
               </div>
-              <div className="demo-label">
-                界面示意 · 真实协作，从你的团队开始
-              </div>
+              <div className="demo-label">界面示意</div>
             </div>
-            <div className="floating-note">
-              <span className="floating-icon">
-                <CheckCheck size={22} />
-              </span>
-              <span>
-                想法，接住了。<small>每一条对话，都有回响</small>
-              </span>
-              <span className="note-spark">✧</span>
-            </div>
-            <span className="hero-asterisk">✳</span>
           </div>
-        </section>
-        <section className="values" id="why">
-          <div className="section-intro">
-            <span className="eyebrow">LESS FRICTION. MORE CONNECTION.</span>
-            <h2>留给协作的，应该是专注。</h2>
-            <p>把沟通安排妥当，好让你们去做重要的事。</p>
-          </div>
-          <div className="value-grid">
-            <article>
-              <div className="value-icon lilac">
-                <Hash size={24} />
-              </div>
-              <h3>对的讨论，在对的地方</h3>
-              <p>
-                用频道组织团队话题，让每个项目的上下文清晰可见，随时接着聊。
-              </p>
-              <span>
-                频道与工作空间 <ArrowRight size={15} />
-              </span>
-            </article>
-            <article>
-              <div className="value-icon mint">
-                <MessagesSquare size={24} />
-              </div>
-              <h3>一句私聊，一群默契</h3>
-              <p>
-                从一对一沟通到小组讨论，自然切换。让每个想法，都能找到合适的人。
-              </p>
-              <span>
-                私信与小组对话 <ArrowRight size={15} />
-              </span>
-            </article>
-            <article>
-              <div className="value-icon peach">
-                <Zap size={24} />
-              </div>
-              <h3>暂时离开，也能接上</h3>
-              <p>
-                消息妥善保存，未读清楚呈现。再次回来时，重要对话依然在这里。
-              </p>
-              <span>
-                可靠消息与未读同步 <ArrowRight size={15} />
-              </span>
-            </article>
-          </div>
-        </section>
-        <section className="landing-cta">
-          <div>
-            <span className="eyebrow">
-              A LITTLE SPACE. A LOT OF POSSIBILITIES.
-            </span>
-            <h2>下一件好事，一起开始。</h2>
-          </div>
-          <Link to={user ? "/app" : "/login?mode=register"} className="button">
-            进入 Teamie <ArrowRight size={17} />
-          </Link>
-          <span className="cta-decoration">✳</span>
         </section>
       </main>
       <footer className="public-footer">
         <Logo />
-        <span>在一起，做成事。</span>
         <small>© {new Date().getFullYear()} Teamie</small>
       </footer>
     </div>
@@ -252,13 +168,21 @@ export function Login() {
       : "/app";
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
+  function changeMode(mode: string) {
+    setError("");
+    setParams({
+      ...(params.get("next") ? { next } : {}),
+      ...(inviteCode ? { inviteCode } : {}),
+      mode,
+    });
+  }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
     setError("");
     const data = new FormData(event.currentTarget);
     if (register && !String(data.get("inviteCode") || "").trim()) {
-      setError("请填写管理员提供的注册邀请码。每个邀请码仅限注册一个账户。");
+      setError("请填写注册邀请码。");
       setBusy(false);
       return;
     }
@@ -286,86 +210,55 @@ export function Login() {
   return (
     <div className="auth-page">
       <div className="auth-story">
-        <Link to="/">
+        <Link to="/" aria-label="Teamie 首页">
           <Logo />
         </Link>
         <div>
-          <span className="eyebrow">YOUR PEOPLE. YOUR SPACE.</span>
           <h1>
-            欢迎来到
+            在一起，
             <br />
-            你们的<span>下一站。</span>
+            做成事<span>。</span>
           </h1>
-          <p>
-            一点灵感，一些默契，
-            <br />
-            和一群想把事情做好的人。
-          </p>
-          <div className="auth-art">
-            <div className="art-circle" />
-            <span className="art-bubble first">
-              <MessageCircle size={35} />
-              <span>很高兴，和你在一起。</span>
-            </span>
-            <span className="art-bubble second">
-              <span>一起做点好事</span>
-              <span>✳</span>
-            </span>
-            <span className="art-star">✧</span>
-          </div>
+          <p>你的团队，你们的空间。</p>
         </div>
         <span className="story-bottom">
-          在一起，做成事。 <span>TEAMIE © {new Date().getFullYear()}</span>
+          TEAMIE © {new Date().getFullYear()}
         </span>
       </div>
-      <div className="auth-content">
+      <main className="auth-content">
         <Link to="/" className="back-link">
-          返回首页 <ChevronRight size={15} />
+          <ArrowLeft size={16} />
+          首页
         </Link>
         <div className="auth-form">
-          <span className="auth-kicker">LET'S GET TOGETHER</span>
-          <h2>{register ? "认识一下，新伙伴。" : "回来啦，老朋友。"}</h2>
-          <p>
-            {register
-              ? "创建你的账户，加入下一场好对话。"
-              : "登录 Teamie，继续你们的好点子。"}
-          </p>
-          <div className="auth-tabs">
+          <Link to="/" className="auth-mobile-brand" aria-label="Teamie 首页">
+            <Logo />
+          </Link>
+          <h2>{register ? "受邀注册" : "登录 Teamie"}</h2>
+          <div className="auth-tabs" aria-label="账户入口">
             <button
               className={!register ? "active" : ""}
-              onClick={() => {
-                setError("");
-                setParams({
-                  ...(params.get("next") ? { next } : {}),
-                  ...(inviteCode ? { inviteCode } : {}),
-                  mode: "login",
-                });
-              }}
+              aria-pressed={!register}
+              onClick={() => changeMode("login")}
             >
               登录
             </button>
             <button
               className={register ? "active" : ""}
-              onClick={() => {
-                setError("");
-                setParams({
-                  ...(params.get("next") ? { next } : {}),
-                  ...(inviteCode ? { inviteCode } : {}),
-                  mode: "register",
-                });
-              }}
+              aria-pressed={register}
+              onClick={() => changeMode("register")}
             >
-              创建账户
+              受邀注册
             </button>
           </div>
           {register && registration.data?.bootstrapRequired && (
             <Notice kind="info">
-              首次初始化：第一个成功注册的账户将成为平台管理员。请使用部署管理员提供的初始化邀请码；首个账户创建后，该邀请码立即失效。
+              首次注册将创建平台管理员，请使用初始化邀请码。
             </Notice>
           )}
           {register && registration.isError && (
             <Notice kind="info">
-              暂时无法确认初始化状态。注册始终需要有效邀请码，请使用管理员提供的邀请后重试。
+              暂时无法读取注册状态，请使用有效邀请码重试。
             </Notice>
           )}
           <form
@@ -375,13 +268,14 @@ export function Login() {
             <Notice>{error}</Notice>
             {register && (
               <label>
-                怎么称呼你
+                显示名称
                 <input
                   name="displayName"
                   autoComplete="nickname"
-                  placeholder="团队里的名字"
+                  placeholder="你的名字"
                   maxLength={80}
                   required
+                  disabled={busy}
                 />
               </label>
             )}
@@ -391,8 +285,11 @@ export function Login() {
                 type="email"
                 name="email"
                 autoComplete="email"
+                inputMode="email"
+                autoCapitalize="none"
                 placeholder="you@team.com"
                 required
+                disabled={busy}
               />
             </label>
             <label>
@@ -401,43 +298,42 @@ export function Login() {
                 type="password"
                 name="password"
                 autoComplete={register ? "new-password" : "current-password"}
-                placeholder={register ? "至少 12 个字符" : "输入你的密码"}
+                placeholder={register ? "至少 12 个字符" : "输入密码"}
                 minLength={register ? 12 : undefined}
                 required
+                disabled={busy}
               />
             </label>
             {register && (
               <label>
                 {registration.data?.bootstrapRequired
                   ? "初始化邀请码"
-                  : "一次性注册邀请码"}{" "}
-                <span className="optional">必填 · 由管理员提供</span>
+                  : "注册邀请码"}
+                <span className="optional">由管理员提供</span>
                 <input
                   name="inviteCode"
                   autoComplete="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
                   defaultValue={inviteCode}
-                  placeholder="输入管理员提供的注册邀请码"
+                  placeholder="输入邀请码"
                   required
+                  disabled={busy}
                 />
                 <small className="field-help">
                   {registration.data?.bootstrapRequired
-                    ? "初始化邀请码只用于创建第一个管理员账户。"
-                    : "每个邀请码仅能注册一个账户，生成后七天内有效。此邀请码与工作空间邀请链接不同。"}
+                    ? "仅用于创建第一个管理员账户。"
+                    : "每个邀请码仅可使用一次，7 天内有效。"}
                 </small>
               </label>
             )}
             <Button type="submit" busy={busy} className="full-width">
-              {register ? "创建账户，加入 Teamie" : "登录 Teamie"}
+              {register ? "创建账户" : "登录"}
               <ArrowRight size={17} />
             </Button>
           </form>
-          <div className="auth-security">
-            <LockKeyhole size={13} />
-            <span>你的对话，只属于你和你的团队。</span>
-          </div>
         </div>
-        <div className="auth-bottom">一切好的协作，从一句「你好」开始。</div>
-      </div>
+      </main>
     </div>
   );
 }
@@ -477,37 +373,24 @@ export function Join() {
       <main className="join-card">
         <div className="invitation-icon">
           <Users size={34} />
-          <span>✧</span>
         </div>
-        <span className="eyebrow">BETTER TOGETHER</span>
         <h1>
           {query.data
             ? `加入「${query.data.workspace.name}」`
-            : query.isLoading
+            : query.isLoading || loading
               ? "正在打开邀请…"
-              : "这份邀请暂时无法打开"}
+              : "邀请已失效"}
         </h1>
         <p>
           {query.data
-            ? "有人为你留了一个位置。加入工作空间，和伙伴们接着聊。"
-            : query.isLoading
-              ? "马上就好。"
-              : "邀请可能已过期或已被撤销，请联系工作空间管理员获取新的邀请。"}
+            ? "接受邀请后，即可参与团队对话。"
+            : query.isLoading || loading
+              ? "正在加载…"
+              : "请联系团队管理员获取新邀请。"}
         </p>
         <Notice>{error}</Notice>
         {query.data && (
           <>
-            <div className="invite-benefits">
-              <span>
-                <Hash size={17} /> 团队频道
-              </span>
-              <span>
-                <MessageCircle size={17} /> 直接对话
-              </span>
-              <span>
-                <ShieldCheck size={17} /> 受邀访问
-              </span>
-            </div>
             {user ? (
               <>
                 <div className="invite-identity">
@@ -523,7 +406,7 @@ export function Join() {
                   onClick={accept}
                   className="full-width"
                 >
-                  接受邀请，进入工作空间
+                  接受邀请
                   <ArrowRight size={17} />
                 </Button>
               </>
@@ -537,21 +420,16 @@ export function Join() {
               </Link>
             )}
             <small className="invite-expiry">
-              邀请有效期至{" "}
-              {new Date(query.data.expiresAt).toLocaleString("zh-CN")}
+              有效期至 {new Date(query.data.expiresAt).toLocaleString("zh-CN")}
             </small>
           </>
         )}
-        {!query.data && !query.isLoading && (
+        {!query.data && !query.isLoading && !loading && (
           <Link to="/" className="button secondary">
             返回首页
           </Link>
         )}
       </main>
-      <div className="join-bottom">
-        <Logo />
-        <span>为每一次相遇，留一个空间。</span>
-      </div>
     </div>
   );
 }

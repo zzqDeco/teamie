@@ -225,7 +225,7 @@ def main() -> None:
     fake_key = "acceptance-not-a-provider-key-" + secrets.token_hex(16)
     # A public literal avoids local proxy fake-IP DNS answers. This address is
     # never requested: configuration remains disabled and /test is not called.
-    settings = {"baseUrl": "https://1.1.1.1/v1", "model": "acceptance-never-call", "apiKey": fake_key, "enabled": False}
+    settings = {"baseUrl": "https://1.1.1.1/v1", "model": "acceptance-never-call", "apiKey": fake_key, "enabled": False, "contextWindowTokens": 32768}
     admin.call("PUT", gateway_path, settings, status=403, csrf=False)
     admin.call("PUT", gateway_path, settings, status=403, origin="https://untrusted.example.invalid")
     saved = admin.call("PUT", gateway_path, settings)
@@ -236,6 +236,7 @@ def main() -> None:
     preserved = admin.call("PUT", gateway_path, {"baseUrl": settings["baseUrl"], "model": settings["model"], "enabled": False})
     secret_redacted(preserved, fake_key)
     require(preserved["config"]["hasApiKey"], "Omitting a key must preserve it")
+    require(preserved["config"].get("contextWindowTokens") == 32768, "Omitting model capacity must preserve administrator configuration")
     cleared = admin.call("PUT", gateway_path, {"baseUrl": settings["baseUrl"], "model": settings["model"], "enabled": False, "clearApiKey": True})
     secret_redacted(cleared, fake_key)
     require(cleared["status"] == "unconfigured" and not cleared["config"]["hasApiKey"] and not cleared["config"]["configured"], "Explicit removal returns to unconfigured state")
@@ -294,16 +295,39 @@ def main() -> None:
         waiting = wait_until("Agent runtime reports waiting_configuration", lambda: (record if (record := owner.call("GET", f"/api/v1/agents/{aid}")["agent"]).get("runtimeState") == "waiting_configuration" else None))
         require(waiting["sessionId"] == "agent:" + aid, "Multiple conversations must retain one global Agent Session")
         print("PASS durable new inputs remain in one Agent Session while model is unconfigured", flush=True)
+        runtime_path = f"/api/v1/agents/{aid}"
+        for endpoint in ("/runtime", "/runs", "/tasks", "/events?cursor=0"):
+            Client().call("GET", runtime_path + endpoint, status=401)
+            for foreign in (admin, peer, outsider):
+                foreign.call("GET", runtime_path + endpoint, status=(403, 404))
+            metadata = owner.call("GET", runtime_path + endpoint)
+            serialized = json.dumps(metadata)
+            require(inbound["body"] not in serialized and grouped_input["body"] not in serialized, "Runtime metadata cannot expose source message bodies")
+            require(not any(key in serialized for key in ('"checkpoint"', '"prompt"', '"stdout"', '"serviceToken"', '"attempt"', '"fence"')), "Runtime API must not expose execution internals or raw tool output")
+        state = wait_until("Both source inputs are durably queued", lambda: (item if (item := owner.call("GET", runtime_path + "/runtime")).get("pendingInputs", 0) >= 2 else None))
+        require(state["sessionId"] == "agent:" + aid, "Runtime state uses the single Agent Session")
+        owner.call("POST", runtime_path + "/runs/missing/cancel", {}, status=403, csrf=False)
+        owner.call("GET", runtime_path + "/events?cursor=-1", status=400)
+        owner.call("GET", runtime_path + "/events?limit=101", status=400)
+        print("PASS owner-only runtime metadata, durable input count, cursor validation and CSRF (no provider call)", flush=True)
     else:
         print("SKIP runtime waiting assertion: TEAMIE_AGENT_WAIT_RUNTIME=0 explicitly selects control-plane-only diagnostics", flush=True)
     dm_messages = owner.call("GET", f"/api/v1/conversations/{dm['id']}/messages")["messages"]
     group_messages = peer.call("GET", f"/api/v1/conversations/{group['id']}/messages")["messages"]
     require(any(message["id"] == inbound["id"] for message in dm_messages) and any(message["id"] == grouped_input["id"] for message in group_messages), "Human inputs remain durable while unconfigured")
     require(not any(message["senderId"] == aid for message in dm_messages + group_messages), "Unconfigured Agent must not fabricate or auto-publish operational output")
+    searched = owner.call("GET", f"/api/v1/conversations/{dm['id']}/messages?q=unconfigured-model")["messages"]
+    require(any(message["id"] == inbound["id"] for message in searched), "History query searches authorized content on the server")
+    nearby = owner.call("GET", f"/api/v1/conversations/{dm['id']}/messages?aroundSeq={inbound['seq']}&limit=5")["messages"]
+    require(any(message["id"] == inbound["id"] for message in nearby), "Referenced-message context is available through ordinary history")
+    outsider.call("GET", f"/api/v1/conversations/{dm['id']}/messages?q=unconfigured-model", status=(403, 404))
     print("PASS Agent DM/private-group membership and no fabricated unconfigured responses", flush=True)
 
     disabled = owner.call("PATCH", f"/api/v1/agents/{aid}", {"enabled": False})["agent"]
     require(not disabled["enabled"] and owner.call("GET", f"/api/v1/agents/{aid}")["agent"]["id"] == aid, "Disable preserves the owned profile")
+    if WAIT_RUNTIME:
+        for endpoint in ("/runtime", "/runs", "/tasks", "/events?cursor=0"):
+            owner.call("GET", f"/api/v1/agents/{aid}" + endpoint)
     require(any(message["id"] == inbound["id"] for message in owner.call("GET", f"/api/v1/conversations/{dm['id']}/messages")["messages"]), "Disabled Agent does not hide persisted conversation history")
     owner.call("DELETE", f"/api/v1/agents/{aid}", status=204)
     require(not visible_agent(peer, wid, aid), "Deleted Agent is absent from workspace discovery")

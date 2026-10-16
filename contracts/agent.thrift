@@ -36,12 +36,41 @@ struct PingResponse {
   1: required bool ready
   2: optional bool configured
   3: optional bool enabled
+  4: optional i64 contextWindowTokens
 }
 service AgentControlService {
   AgentListResponse ListAgents(1: AgentListRequest request)
   AgentResponse GetAgent(1: AgentRequest request)
   Ack ReportRuntime(1: RuntimeReport request)
   PingResponse Ping(1: PingRequest request)
+}
+
+// Runtime internals remain opaque to IM and Control Plane persistence.
+struct RuntimeRequest {
+  1: required string serviceToken
+  2: required string agentId
+  3: required string ownerId
+  4: optional string resourceId
+  5: optional string cursor
+  6: optional i32 limit
+}
+struct RuntimeResponse {
+  1: required bool ok
+  2: optional string dataJson
+  3: optional string errorCode
+  4: optional string errorMessage
+  5: optional i32 statusCode
+}
+service AgentRuntimeService {
+  RuntimeResponse State(1: RuntimeRequest request)
+  RuntimeResponse Runs(1: RuntimeRequest request)
+  RuntimeResponse Run(1: RuntimeRequest request)
+  RuntimeResponse Tasks(1: RuntimeRequest request)
+  RuntimeResponse Task(1: RuntimeRequest request)
+  RuntimeResponse Events(1: RuntimeRequest request)
+  RuntimeResponse CancelRun(1: RuntimeRequest request)
+  RuntimeResponse CancelTask(1: RuntimeRequest request)
+  RuntimeResponse RetryRun(1: RuntimeRequest request)
 }
 
 struct GatewayChatRequest {
@@ -84,8 +113,55 @@ struct SandboxExecResponse {
   6: optional string errorCode
   7: optional string errorMessage
 }
+// A task ID is a durable logical command identity; transport retries never rerun it.
+struct SandboxStartRequest {
+  1: required string serviceToken
+  2: required string agentId
+  3: required string runId
+  4: required string taskId
+  5: required string command
+  // Zero/omitted has no command deadline. RPC timeouts never stop the command.
+  6: optional i32 timeoutSeconds
+}
+struct SandboxTaskRequest {
+  1: required string serviceToken
+  2: required string agentId
+  3: required string taskId
+  4: optional i64 offset
+  5: optional i32 limit
+}
+struct SandboxTaskResponse {
+  1: required bool ok
+  2: required string taskId
+  3: required string state
+  4: optional i32 exitCode
+  5: optional string stdout
+  6: optional string stderr
+  7: optional bool truncated
+  8: optional i64 nextOffset
+  9: optional string errorCode
+  10: optional string errorMessage
+}
+struct SandboxWorkspaceRequest {
+  1: required string serviceToken
+  2: required string agentId
+  3: required string operation
+  4: required string argsJson
+  5: optional string requestId
+}
+struct SandboxWorkspaceResponse {
+  1: required bool ok
+  2: optional string dataJson
+  3: optional string errorCode
+  4: optional string errorMessage
+}
 service SandboxService {
   SandboxExecResponse Exec(1: SandboxExecRequest request)
   Ack Cancel(1: CancelRequest request)
   PingResponse Ping(1: PingRequest request)
+  SandboxTaskResponse Start(1: SandboxStartRequest request)
+  SandboxTaskResponse Get(1: SandboxTaskRequest request)
+  SandboxTaskResponse ReadOutput(1: SandboxTaskRequest request)
+  SandboxTaskResponse CancelTask(1: SandboxTaskRequest request)
+  SandboxWorkspaceResponse Workspace(1: SandboxWorkspaceRequest request)
 }

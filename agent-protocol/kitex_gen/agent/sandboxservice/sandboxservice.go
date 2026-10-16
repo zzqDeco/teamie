@@ -34,6 +34,41 @@ var serviceMethods = map[string]kitex.MethodInfo{
 		false,
 		kitex.WithStreamingMode(kitex.StreamingNone),
 	),
+	"Start": kitex.NewMethodInfo(
+		startHandler,
+		newSandboxServiceStartArgs,
+		newSandboxServiceStartResult,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
+	"Get": kitex.NewMethodInfo(
+		getHandler,
+		newSandboxServiceGetArgs,
+		newSandboxServiceGetResult,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
+	"ReadOutput": kitex.NewMethodInfo(
+		readOutputHandler,
+		newSandboxServiceReadOutputArgs,
+		newSandboxServiceReadOutputResult,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
+	"CancelTask": kitex.NewMethodInfo(
+		cancelTaskHandler,
+		newSandboxServiceCancelTaskArgs,
+		newSandboxServiceCancelTaskResult,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
+	"Workspace": kitex.NewMethodInfo(
+		workspaceHandler,
+		newSandboxServiceWorkspaceArgs,
+		newSandboxServiceWorkspaceResult,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
 }
 
 var (
@@ -154,6 +189,96 @@ func newSandboxServicePingResult() interface{} {
 	return agent.NewSandboxServicePingResult()
 }
 
+func startHandler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*agent.SandboxServiceStartArgs)
+	realResult := result.(*agent.SandboxServiceStartResult)
+	success, err := handler.(agent.SandboxService).Start(ctx, realArg.Request)
+	if err != nil {
+		return err
+	}
+	realResult.Success = success
+	return nil
+}
+func newSandboxServiceStartArgs() interface{} {
+	return agent.NewSandboxServiceStartArgs()
+}
+
+func newSandboxServiceStartResult() interface{} {
+	return agent.NewSandboxServiceStartResult()
+}
+
+func getHandler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*agent.SandboxServiceGetArgs)
+	realResult := result.(*agent.SandboxServiceGetResult)
+	success, err := handler.(agent.SandboxService).Get(ctx, realArg.Request)
+	if err != nil {
+		return err
+	}
+	realResult.Success = success
+	return nil
+}
+func newSandboxServiceGetArgs() interface{} {
+	return agent.NewSandboxServiceGetArgs()
+}
+
+func newSandboxServiceGetResult() interface{} {
+	return agent.NewSandboxServiceGetResult()
+}
+
+func readOutputHandler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*agent.SandboxServiceReadOutputArgs)
+	realResult := result.(*agent.SandboxServiceReadOutputResult)
+	success, err := handler.(agent.SandboxService).ReadOutput(ctx, realArg.Request)
+	if err != nil {
+		return err
+	}
+	realResult.Success = success
+	return nil
+}
+func newSandboxServiceReadOutputArgs() interface{} {
+	return agent.NewSandboxServiceReadOutputArgs()
+}
+
+func newSandboxServiceReadOutputResult() interface{} {
+	return agent.NewSandboxServiceReadOutputResult()
+}
+
+func cancelTaskHandler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*agent.SandboxServiceCancelTaskArgs)
+	realResult := result.(*agent.SandboxServiceCancelTaskResult)
+	success, err := handler.(agent.SandboxService).CancelTask(ctx, realArg.Request)
+	if err != nil {
+		return err
+	}
+	realResult.Success = success
+	return nil
+}
+func newSandboxServiceCancelTaskArgs() interface{} {
+	return agent.NewSandboxServiceCancelTaskArgs()
+}
+
+func newSandboxServiceCancelTaskResult() interface{} {
+	return agent.NewSandboxServiceCancelTaskResult()
+}
+
+func workspaceHandler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*agent.SandboxServiceWorkspaceArgs)
+	realResult := result.(*agent.SandboxServiceWorkspaceResult)
+	success, err := handler.(agent.SandboxService).Workspace(ctx, realArg.Request)
+	if err != nil {
+		return err
+	}
+	realResult.Success = success
+	return nil
+}
+func newSandboxServiceWorkspaceArgs() interface{} {
+	return agent.NewSandboxServiceWorkspaceArgs()
+}
+
+func newSandboxServiceWorkspaceResult() interface{} {
+	return agent.NewSandboxServiceWorkspaceResult()
+}
+
 type kClient struct {
 	c client.Client
 }
@@ -189,6 +314,56 @@ func (p *kClient) Ping(ctx context.Context, request *agent.PingRequest) (r *agen
 	_args.Request = request
 	var _result agent.SandboxServicePingResult
 	if err = p.c.Call(ctx, "Ping", &_args, &_result); err != nil {
+		return
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) Start(ctx context.Context, request *agent.SandboxStartRequest) (r *agent.SandboxTaskResponse, err error) {
+	var _args agent.SandboxServiceStartArgs
+	_args.Request = request
+	var _result agent.SandboxServiceStartResult
+	if err = p.c.Call(ctx, "Start", &_args, &_result); err != nil {
+		return
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) Get(ctx context.Context, request *agent.SandboxTaskRequest) (r *agent.SandboxTaskResponse, err error) {
+	var _args agent.SandboxServiceGetArgs
+	_args.Request = request
+	var _result agent.SandboxServiceGetResult
+	if err = p.c.Call(ctx, "Get", &_args, &_result); err != nil {
+		return
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) ReadOutput(ctx context.Context, request *agent.SandboxTaskRequest) (r *agent.SandboxTaskResponse, err error) {
+	var _args agent.SandboxServiceReadOutputArgs
+	_args.Request = request
+	var _result agent.SandboxServiceReadOutputResult
+	if err = p.c.Call(ctx, "ReadOutput", &_args, &_result); err != nil {
+		return
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) CancelTask(ctx context.Context, request *agent.SandboxTaskRequest) (r *agent.SandboxTaskResponse, err error) {
+	var _args agent.SandboxServiceCancelTaskArgs
+	_args.Request = request
+	var _result agent.SandboxServiceCancelTaskResult
+	if err = p.c.Call(ctx, "CancelTask", &_args, &_result); err != nil {
+		return
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) Workspace(ctx context.Context, request *agent.SandboxWorkspaceRequest) (r *agent.SandboxWorkspaceResponse, err error) {
+	var _args agent.SandboxServiceWorkspaceArgs
+	_args.Request = request
+	var _result agent.SandboxServiceWorkspaceResult
+	if err = p.c.Call(ctx, "Workspace", &_args, &_result); err != nil {
 		return
 	}
 	return _result.GetSuccess(), nil

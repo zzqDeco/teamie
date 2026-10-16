@@ -10,8 +10,6 @@ import {
   LoaderCircle,
   LockKeyhole,
   Play,
-  ShieldCheck,
-  Sparkles,
 } from "lucide-react";
 import type { Workspace } from "@teamie/api-client";
 import { Button, Notice } from "./ui";
@@ -66,12 +64,9 @@ export function WorkspaceVisibilityFields({
     <fieldset className="agent-visibility" disabled={disabled}>
       <legend>
         <Eye size={15} />
-        可见工作空间
+        可见团队
       </legend>
-      <p>
-        选择你已加入的工作空间。空间内的伙伴可发现这个
-        Agent，并邀请它参与私聊或小组对话。
-      </p>
+      <p>选择的团队成员可以发现此 Agent。</p>
       {workspaces.length ? (
         <div className="visibility-options">
           {workspaces.map((workspace) => (
@@ -102,14 +97,11 @@ export function WorkspaceVisibilityFields({
           ))}
         </div>
       ) : (
-        <div className="visibility-empty">
-          你还没有加入工作空间。先创建或加入一个空间，再设置 Agent 的可见范围。
-        </div>
+        <div className="visibility-empty">加入团队后，可在这里选择。</div>
       )}
       <small>
         <LockKeyhole size={12} />
-        选中团队后，Agent
-        按普通成员权限访问空间频道；私聊和小组仍需加入具体对话。
+        可访问所选团队的频道；私信和小组需要加入对话。
       </small>
     </fieldset>
   );
@@ -123,7 +115,7 @@ export type AgentDisplayStatus =
   | "failed"
   | "pending";
 export const agentStatusLabels: Record<AgentDisplayStatus, string> = {
-  waiting_configuration: "等待管理员配置",
+  waiting_configuration: "待配置模型",
   idle: "等待新消息",
   running: "正在处理",
   disabled: "已停用",
@@ -157,36 +149,22 @@ export function WaitingForConfiguration({
   onConfigure?: () => void;
 }) {
   return (
-    <div className="agent-configuration-notice" role="status">
+    <div
+      className={`agent-configuration-notice ${admin ? "can-configure" : ""}`}
+      role="status"
+    >
       <span>
         <KeyRound size={20} />
       </span>
       <div>
-        <b>Agent 正在等待管理员配置模型</b>
-        <p>
-          消息对话可以正常使用。模型连接配置完成后，Agent
-          才能处理新的消息；当前不会生成模型回复。
-        </p>
+        <b>模型尚未配置</b>
+        {!admin && <p>请联系平台管理员配置模型。</p>}
         {admin && onConfigure && (
           <button onClick={onConfigure}>
-            前往模型网关配置 <span>↗</span>
+            配置模型 <span>↗</span>
           </button>
         )}
       </div>
-    </div>
-  );
-}
-export function AgentPrinciples() {
-  return (
-    <div className="agent-principles">
-      <span>
-        <Sparkles size={15} />
-        一个 Agent，一段持续会话
-      </span>
-      <p>
-        同一个 Agent
-        会延续工作上下文。后台处理状态在这里展示，只有发出的聊天消息才会出现在对话中。
-      </p>
     </div>
   );
 }
@@ -196,6 +174,7 @@ export type GatewayFormValue = {
   apiKey: string;
   enabled: boolean;
   clearApiKey?: boolean;
+  contextWindowTokens?: number;
 };
 export function GatewayConfigurationFields({
   initial,
@@ -216,7 +195,10 @@ export function GatewayConfigurationFields({
     [model, setModel] = useState(initial.model),
     [apiKey, setApiKey] = useState(""),
     [enabled, setEnabled] = useState(initial.enabled),
-    [clearApiKey, setClearApiKey] = useState(false);
+    [clearApiKey, setClearApiKey] = useState(false),
+    [contextWindowTokens, setContextWindowTokens] = useState(
+      initial.contextWindowTokens ?? 16384,
+    );
   async function submit(event: FormEvent) {
     event.preventDefault();
     try {
@@ -225,6 +207,7 @@ export function GatewayConfigurationFields({
         model: model.trim(),
         apiKey,
         enabled,
+        contextWindowTokens,
         ...(clearApiKey ? { clearApiKey: true } : {}),
       });
     } finally {
@@ -238,10 +221,6 @@ export function GatewayConfigurationFields({
       autoComplete="off"
     >
       <Notice>{error}</Notice>
-      <div className="gateway-admin-only">
-        <ShieldCheck size={17} />
-        <span>此配置由平台管理员管理，所有 Agent 使用同一个模型网关。</span>
-      </div>
       <label>
         OpenAI 兼容服务地址
         <input
@@ -253,10 +232,7 @@ export function GatewayConfigurationFields({
           autoComplete="off"
           required
         />
-        <small className="field-help">
-          填写 API
-          基础地址；密钥单独保存在下方，不要放入地址、查询参数或用户名密码中。
-        </small>
+        <small className="field-help">API 基础地址，通常以 /v1 结尾。</small>
       </label>
       <label>
         模型名称
@@ -289,9 +265,7 @@ export function GatewayConfigurationFields({
           required={!initial.hasApiKey && enabled && !clearApiKey}
           disabled={clearApiKey || busy}
         />
-        <small className="field-help">
-          密钥仅用于本次保存，不会回显，也不会写入浏览器本地存储。
-        </small>
+        <small className="field-help">密钥保存后不再显示。</small>
       </label>
       {initial.hasApiKey && (
         <label className="gateway-clear-key">
@@ -317,10 +291,30 @@ export function GatewayConfigurationFields({
         />
         <span>
           <b>启用模型网关</b>
-          <small>关闭时，Agent 保留对话记录并等待管理员重新启用。</small>
+          <small>关闭后，Agent 暂停调用模型。</small>
         </span>
         <i />
       </label>
+      <details className="gateway-advanced">
+        <summary>高级设置</summary>
+        <label>
+          上下文窗口（Token）
+          <input
+            type="number"
+            name="gatewayContextWindow"
+            min={4096}
+            max={2000000}
+            step={1}
+            value={contextWindowTokens}
+            onChange={(event) =>
+              setContextWindowTokens(Number(event.target.value))
+            }
+            required
+            disabled={busy}
+          />
+          <small className="field-help">按服务支持的上下文长度填写。</small>
+        </label>
+      </details>
       <div className="gateway-form-actions">
         {onTest && (
           <Button

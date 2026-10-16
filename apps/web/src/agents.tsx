@@ -6,7 +6,6 @@ import {
   ArrowLeft,
   ArrowRight,
   Bot,
-  CalendarDays,
   CirclePause,
   Eye,
   Hash,
@@ -15,7 +14,6 @@ import {
   Pencil,
   Play,
   Plus,
-  RefreshCw,
   Trash2,
   Users,
 } from "lucide-react";
@@ -27,7 +25,6 @@ import { chatStore } from "./store";
 import {
   AgentAvatar,
   AgentBadge,
-  AgentPrinciples,
   AgentStatus,
   WaitingForConfiguration,
   WorkspaceVisibilityFields,
@@ -39,7 +36,8 @@ import {
   displayAgentState,
   snapshotAgentProfile,
 } from "./agent-management";
-import { Avatar, Button, Modal, Notice } from "./ui";
+import { Button, Modal, Notice } from "./ui";
+import { AgentActivity } from "./agent-activity";
 import { AddAgentToGroupDialog } from "./group-members";
 import { WorkspaceDialog } from "./dialogs";
 const queryRetry = (count: number, error: Error) =>
@@ -71,7 +69,7 @@ function WorkspaceChips({
       ) : (
         <span className="private-agent-chip">
           <Eye size={11} />
-          仅自己管理 · 尚未对团队可见
+          未选择团队
         </span>
       )}
     </div>
@@ -148,18 +146,10 @@ function AgentProfileDialog({
   }
   return (
     <Modal
-      title={initialAgent ? "编辑 Agent 资料" : "认识你的新 Agent"}
-      subtitle="给它一个名字，选择哪些团队可以发现它。你始终是它的所有者。"
+      title={initialAgent ? "编辑 Agent 资料" : "创建 Agent"}
       onClose={onClose}
     >
       <form onSubmit={submit}>
-        <div className="agent-form-intro">
-          <AgentAvatar size="large" />
-          <div>
-            <b>{name.trim() || "你的下一位伙伴"}</b>
-            <AgentBadge ownerName={user!.displayName} />
-          </div>
-        </div>
         <Notice>{error}</Notice>
         <label>
           Agent 名称
@@ -173,17 +163,14 @@ function AgentProfileDialog({
           />
         </label>
         <label>
-          简介 <span className="optional">选填 · 公开资料</span>
+          简介 <span className="optional">选填</span>
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             maxLength={1000}
             rows={3}
-            placeholder="用一句话介绍这个 Agent，方便伙伴认识它。"
+            placeholder="简单介绍它的职责"
           />
-          <small className="field-help">
-            将作为公开资料展示给可见团队的伙伴。
-          </small>
         </label>
         <WorkspaceVisibilityFields
           workspaces={workspaces}
@@ -199,7 +186,7 @@ function AgentProfileDialog({
           />
           <span>
             <b>启用 Agent</b>
-            <small>启用后，在模型可用时处理它参与的对话中的新消息。</small>
+            <small>处理已加入对话中的新消息</small>
           </span>
           <i />
         </label>
@@ -237,11 +224,9 @@ export function MyAgents() {
     <div className="agents-view">
       <div className="agents-heading">
         <div>
-          <div className="eyebrow">YOUR AGENTS. YOUR TEAMMATES.</div>
           <h1>
             我的 Agent <span>{agents.length}</span>
           </h1>
-          <p>由你创建，由你管理。让合适的 Agent 出现在合适的团队。</p>
         </div>
         {canCreate && (
           <Button onClick={() => setCreating(true)}>
@@ -258,11 +243,10 @@ export function MyAgents() {
           onConfigure={() => navigate("/app/admin/gateway")}
         />
       )}
-      <AgentPrinciples />
       {query.isLoading ? (
         <div className="agents-empty">
           <LoaderCircle size={24} className="spin" />
-          <p>正在寻找你的 Agent…</p>
+          <p>加载 Agent…</p>
         </div>
       ) : query.error ? (
         <div className="agents-empty">
@@ -287,10 +271,7 @@ export function MyAgents() {
               </div>
               <h2>{agent.name}</h2>
               <AgentBadge ownerName={agent.ownerName} />
-              <p>
-                {agent.description ||
-                  "还没有填写简介，给伙伴一个认识它的机会。"}
-              </p>
+              {agent.description && <p>{agent.description}</p>}
               <WorkspaceChips
                 ids={agent.workspaceIds}
                 workspaces={data?.workspaces || []}
@@ -313,21 +294,15 @@ export function MyAgents() {
           <span className="agents-empty-icon">
             <Bot size={34} />
           </span>
-          <h2>下一位伙伴，由你来创造。</h2>
-          <p>
-            起一个名字，选择可见的团队。
-            <br />
-            Agent 会以清楚标记的身份，参与你允许它加入的对话。
-          </p>
+          <h2>还没有 Agent</h2>
+          <p>创建 Agent，让它加入你的团队。</p>
           {canCreate ? (
             <Button onClick={() => setCreating(true)}>
               <Plus size={16} />
-              创建我的第一个 Agent
+              创建 Agent
             </Button>
           ) : (
-            <Notice kind="info">
-              当前暂未开放创建 Agent。已有 Agent 与聊天记录仍然保留。
-            </Notice>
+            <Notice kind="info">当前无法创建 Agent。</Notice>
           )}
         </div>
       )}
@@ -428,7 +403,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
           <Bot size={38} />
         </span>
         <h2>这个 Agent 暂时无法管理</h2>
-        <p>只有创建者可以管理 Agent。平台管理员同样遵循所有者权限。</p>
+        <p>请使用所有者账户访问。</p>
         <Link className="button" to="/app/agents">
           回到我的 Agent
         </Link>
@@ -445,7 +420,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         <div>
           <AgentBadge ownerName={agent.ownerName} />
           <h1>{agent.name}</h1>
-          <p>{agent.description || "还没有填写简介"}</p>
+          {agent.description && <p>{agent.description}</p>}
         </div>
         <div className="agent-detail-actions">
           {editable && (
@@ -473,55 +448,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
           onConfigure={() => navigate("/app/admin/gateway")}
         />
       )}
-      <section className="agent-session-panel">
-        <header>
-          <div>
-            <h2>持续会话</h2>
-            <p>同一个 Agent，接得上每一次对话。</p>
-          </div>
-          <AgentStatus
-            status={displayAgentState(agent.runtimeState, agent.enabled)}
-          />
-        </header>
-        <div className="agent-session-grid">
-          <div>
-            <span>
-              <Bot size={13} />
-              会话
-            </span>
-            <code title={agent.sessionId}>{agent.sessionId || "正在准备"}</code>
-          </div>
-          <div>
-            <span>
-              <CalendarDays size={13} />
-              最近活跃
-            </span>
-            <b>
-              {agent.lastActiveAt
-                ? formatDate(agent.lastActiveAt)
-                : "尚未开始处理消息"}
-            </b>
-          </div>
-          <div>
-            <span>
-              <RefreshCw size={13} />
-              资料版本
-            </span>
-            <b>v{agent.revision}</b>
-          </div>
-        </div>
-        {agent.runtimeState === "error" && (
-          <Notice kind="info">
-            {agent.lastError ||
-              "最近一次处理未完成。请检查模型连接状态，或稍后再发送新消息。"}
-          </Notice>
-        )}
-        {!agent.enabled && (
-          <p className="agent-session-note">
-            Agent 已停止接收新的处理任务。资料和已有聊天记录仍然保留。
-          </p>
-        )}
-      </section>
+      <AgentActivity agent={agent} controlsAllowed={editable} />
       <section className="agent-profile-section">
         <header>
           <h2>团队可见范围</h2>
@@ -531,28 +458,16 @@ export function AgentDetail({ agentId }: { agentId: string }) {
             </button>
           )}
         </header>
-        <p>
-          在选中的团队中，Agent
-          按普通成员权限访问空间频道；私聊与小组仍按各自成员名单授权。
-        </p>
         <WorkspaceChips
           ids={agent.workspaceIds}
           workspaces={data?.workspaces || []}
         />
       </section>
-      <div className="agent-owner-card">
-        <Avatar name={agent.ownerName} seed={agent.ownerId} />
-        <div>
-          <b>{agent.ownerName}</b>
-          <span>Agent 所有者 · 只有你可以编辑、启停或删除</span>
-        </div>
-      </div>
-      <AgentPrinciples />
       {deletable && (
         <div className="agent-delete-section">
           <div>
             <h3>删除 Agent</h3>
-            <p>删除后不再接收新消息，已有聊天消息保留其身份标记。</p>
+            <p>删除后停止工作，保留已有消息。</p>
           </div>
           <Button
             className="secondary danger-text"
@@ -639,14 +554,12 @@ export function WorkspaceAgents({ workspace }: { workspace: Workspace }) {
     <div className="agents-view agent-directory">
       <div className="agents-heading">
         <div>
-          <div className="eyebrow">FIND THE RIGHT TEAMMATE</div>
           <h1>发现 Agent</h1>
           <p>
             <span className="directory-workspace">
               <Hash size={13} />
               {workspace.name}
             </span>{" "}
-            可见的 Agent，清楚知道由谁创建。
           </p>
         </div>
         <Link to="/app/agents" className="button secondary">
@@ -655,13 +568,11 @@ export function WorkspaceAgents({ workspace }: { workspace: Workspace }) {
       </div>
       <Notice>{error}</Notice>
       {!canDiscover ? (
-        <Notice kind="info">
-          当前未开放新的 Agent 发现。已保存的对话与 Agent 消息仍然可见。
-        </Notice>
+        <Notice kind="info">当前无法发现新的 Agent。</Notice>
       ) : query.isLoading ? (
         <div className="agents-empty">
           <LoaderCircle className="spin" size={24} />
-          <p>正在加载团队里的 Agent…</p>
+          <p>加载 Agent…</p>
         </div>
       ) : query.error ? (
         <div className="agents-empty">
@@ -690,9 +601,7 @@ export function WorkspaceAgents({ workspace }: { workspace: Workspace }) {
                 </div>
                 <h2>{agent.name}</h2>
                 <AgentBadge ownerName={agent.ownerName} />
-                <p>
-                  {agent.description || "一位随时准备参与团队协作的 Agent。"}
-                </p>
+                {agent.description && <p>{agent.description}</p>}
                 <div className="directory-agent-actions">
                   {data?.capabilities["im.dm.create"] && (
                     <Button
@@ -732,12 +641,8 @@ export function WorkspaceAgents({ workspace }: { workspace: Workspace }) {
           <span className="agents-empty-icon">
             <Bot size={34} />
           </span>
-          <h2>团队的下一位 Agent，还在路上。</h2>
-          <p>
-            你可以创建自己的 Agent，并让它在这个空间内被发现。
-            <br />
-            也可以请已有 Agent 的所有者调整可见范围。
-          </p>
+          <h2>团队暂无 Agent</h2>
+          <p>创建 Agent，或请所有者将它加入当前团队。</p>
           {data?.capabilities["agents.enabled"] &&
             data.capabilities["agents.create"] && (
               <Button onClick={() => setCreating(true)}>
@@ -747,13 +652,6 @@ export function WorkspaceAgents({ workspace }: { workspace: Workspace }) {
             )}
         </div>
       )}
-      <div className="directory-group-tip">
-        <Users size={17} />
-        <span>
-          创建小组时，可在同一份成员列表中选择人和 Agent。Agent
-          始终保留身份与创建者标记。
-        </span>
-      </div>
       {creating && (
         <AgentProfileDialog
           workspaces={data?.workspaces || []}

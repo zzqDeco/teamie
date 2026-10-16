@@ -177,9 +177,9 @@ describe("Agent ownership and visible teams", () => {
     );
     expect(displayAgentState("running", false)).toBe("disabled");
     const html = renderToStaticMarkup(<WaitingForConfiguration />);
-    expect(html).toContain("等待管理员配置模型");
-    expect(html).toContain("当前不会生成模型回复");
-    expect(html).not.toContain("前往模型网关配置");
+    expect(html).toContain("模型尚未配置");
+    expect(html).toContain("请联系平台管理员配置模型");
+    expect(html).not.toContain("<button");
   });
 });
 describe("write-only gateway credentials", () => {

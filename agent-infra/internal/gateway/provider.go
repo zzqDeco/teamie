@@ -103,7 +103,8 @@ func NewHTTPClient() *http.Client {
 	}}
 	return &http.Client{Transport: tr, Timeout: 50 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }
-func normalizeRequest(raw, model string) ([]byte, error) {
+func normalizeRequest(raw, model string) ([]byte, error) { return normalizeMode(raw, model, false) }
+func normalizeMode(raw, model string, streaming bool) ([]byte, error) {
 	if len(raw) > MaxRequestBytes {
 		return nil, api.Err(413, "request_too_large", "Model request is too large")
 	}
@@ -111,7 +112,7 @@ func normalizeRequest(raw, model string) ([]byte, error) {
 	if json.Unmarshal([]byte(raw), &m) != nil || m == nil {
 		return nil, api.Err(400, "invalid_request", "Invalid chat completion JSON")
 	}
-	allowed := map[string]bool{"messages": true, "model": true, "stream": true, "tools": true, "tool_choice": true, "parallel_tool_calls": true, "temperature": true, "top_p": true, "max_tokens": true, "max_completion_tokens": true, "stop": true, "response_format": true, "seed": true, "frequency_penalty": true, "presence_penalty": true, "n": true}
+	allowed := map[string]bool{"messages": true, "model": true, "stream": true, "stream_options": true, "tools": true, "tool_choice": true, "parallel_tool_calls": true, "temperature": true, "top_p": true, "max_tokens": true, "max_completion_tokens": true, "stop": true, "response_format": true, "seed": true, "frequency_penalty": true, "presence_penalty": true, "n": true}
 	for k := range m {
 		if !allowed[k] {
 			return nil, api.Err(400, "invalid_request", "Unsupported chat completion option")
@@ -131,7 +132,7 @@ func normalizeRequest(raw, model string) ([]byte, error) {
 		}
 	}
 	var stream bool
-	if b, ok := m["stream"]; ok && (json.Unmarshal(b, &stream) != nil || stream) {
+	if b, ok := m["stream"]; ok && (json.Unmarshal(b, &stream) != nil || stream && !streaming) {
 		return nil, api.Err(400, "stream_unsupported", "Use non-streaming chat completions")
 	}
 	var tools []json.RawMessage
@@ -157,6 +158,11 @@ func normalizeRequest(raw, model string) ([]byte, error) {
 	m["model"], _ = json.Marshal(model)
 	m["n"] = json.RawMessage("1")
 	m["stream"] = json.RawMessage("false")
+	delete(m, "stream_options")
+	if streaming {
+		m["stream"] = json.RawMessage("true")
+		m["stream_options"] = json.RawMessage(`{"include_usage":true}`)
+	}
 	return json.Marshal(m)
 }
 
@@ -200,7 +206,16 @@ func (p Provider) Chat(ctx context.Context, c Config, key, raw string) (string, 
 	}
 	body, e := io.ReadAll(io.LimitReader(res.Body, MaxResponseBytes+1))
 	if e != nil || len(body) > MaxResponseBytes {
+		if ctx.Err() != nil {
+			return "", 0, 0, api.Err(499, "canceled", "Model request canceled")
+		}
 		return "", 0, 0, api.Err(502, "invalid_upstream_response", "Provider response exceeded limits")
+	}
+	var upstream struct {
+		Error json.RawMessage `json:"error"`
+	}
+	if json.Unmarshal(body, &upstream) == nil && len(upstream.Error) > 0 && string(upstream.Error) != "null" {
+		return "", 0, 0, api.Err(502, "upstream_in_stream_error", "Provider reported a model error in its response")
 	}
 	var result struct {
 		Object  string `json:"object"`
@@ -217,8 +232,8 @@ func (p Provider) Chat(ctx context.Context, c Config, key, raw string) (string, 
 	if json.Unmarshal(body, &result) != nil || result.Object != "chat.completion" || len(result.Choices) != 1 || result.Choices[0].Message.Role != "assistant" || result.Usage.PromptTokens < 0 || result.Usage.CompletionTokens < 0 {
 		return "", 0, 0, api.Err(502, "invalid_upstream_response", "Invalid chat completion response")
 	}
-	if bytes.Contains(body, []byte(key)) {
-		return "", 0, 0, api.Err(502, "invalid_upstream_response", "Provider returned a credential in its response")
+	if e := guardSingleResponse(string(body), key); e != nil {
+		return "", 0, 0, e
 	}
 	return string(body), result.Usage.PromptTokens, result.Usage.CompletionTokens, nil
 }

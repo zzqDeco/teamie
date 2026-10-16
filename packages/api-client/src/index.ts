@@ -55,6 +55,51 @@ export type AgentRuntimeState =
   | "disabled"
   | "error"
   | "provisioning";
+export type AgentRun = {
+  id: string;
+  status: string;
+  inputCount: number;
+  createdAt: string;
+  updatedAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  errorCode?: string;
+};
+export type AgentTask = {
+  id: string;
+  runId?: string;
+  kind: string;
+  description: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+  finishedAt?: string;
+  exitCode?: number;
+};
+export type AgentRuntime = {
+  state: string;
+  sessionId: string;
+  activeRunId?: string;
+  pendingInputs: number;
+  runningTasks: number;
+  lastActiveAt?: string;
+  lastError?: string;
+};
+export type AgentRuntimeEvent = {
+  id: string;
+  type: string;
+  runId?: string;
+  taskId?: string;
+  toolName?: string;
+  status?: string;
+  createdAt: string;
+  errorCode?: string;
+};
+export type AgentEventPage = {
+  events: AgentRuntimeEvent[];
+  cursor: string;
+  hasMore: boolean;
+};
 export type Agent = {
   id: string;
   principalId: string;
@@ -86,6 +131,7 @@ export type ModelGatewayConfig = {
   enabled: boolean;
   configured: boolean;
   updatedAt: string;
+  contextWindowTokens?: number;
 };
 export type ModelGateway = {
   config: ModelGatewayConfig;
@@ -97,6 +143,7 @@ export type ModelGatewayInput = {
   apiKey?: string;
   enabled: boolean;
   clearApiKey?: boolean;
+  contextWindowTokens?: number;
 };
 function publicModelGateway(value: ModelGateway): ModelGateway {
   // Project only public metadata even if a server accidentally adds a secret field.
@@ -108,6 +155,9 @@ function publicModelGateway(value: ModelGateway): ModelGateway {
       enabled: value.config.enabled,
       configured: value.config.configured,
       updatedAt: value.config.updatedAt,
+      ...(value.config.contextWindowTokens === undefined
+        ? {}
+        : { contextWindowTokens: value.config.contextWindowTokens }),
     },
     status: value.status,
   };
@@ -235,6 +285,36 @@ export class TeamieClient {
     this.request<void>(`/agents/${part(id)}`, { method: "DELETE" });
   workspaceAgents = (id: string) =>
     this.request<{ agents: Agent[] }>(`/workspaces/${part(id)}/agents`);
+  agentRuntime = (id: string) =>
+    this.request<AgentRuntime>(`/agents/${part(id)}/runtime`);
+  agentRuns = (id: string, cursor?: string) =>
+    this.request<{ runs: AgentRun[]; cursor?: string }>(
+      `/agents/${part(id)}/runs?limit=30${cursor ? `&cursor=${part(cursor)}` : ""}`,
+    );
+  agentRun = (id: string, runId: string) =>
+    this.request<{ run: AgentRun }>(`/agents/${part(id)}/runs/${part(runId)}`);
+  agentTasks = (id: string, cursor?: string) =>
+    this.request<{ tasks: AgentTask[]; cursor?: string }>(
+      `/agents/${part(id)}/tasks?limit=30${cursor ? `&cursor=${part(cursor)}` : ""}`,
+    );
+  agentTask = (id: string, taskId: string) =>
+    this.request<{ task: AgentTask }>(`/agents/${part(id)}/tasks/${part(taskId)}`);
+  agentEvents = (id: string, cursor = "0") =>
+    this.request<AgentEventPage>(`/agents/${part(id)}/events?cursor=${part(cursor)}&limit=100`);
+  agentEventsURL = (id: string, cursor = "0") =>
+    `/api/v1/agents/${part(id)}/events/stream?cursor=${part(cursor)}`;
+  cancelAgentRun = (id: string, runId: string) =>
+    this.request<{ ok: boolean }>(`/agents/${part(id)}/runs/${part(runId)}/cancel`, {
+      method: "POST", body: JSON.stringify({}),
+    });
+  cancelAgentTask = (id: string, taskId: string) =>
+    this.request<{ ok: boolean }>(`/agents/${part(id)}/tasks/${part(taskId)}/cancel`, {
+      method: "POST", body: JSON.stringify({}),
+    });
+  retryAgentRun = (id: string, runId: string) =>
+    this.request<{ ok: boolean }>(`/agents/${part(id)}/runs/${part(runId)}/retry`, {
+      method: "POST", body: JSON.stringify({}),
+    });
   modelGateway = async () =>
     publicModelGateway(
       await this.request<ModelGateway>("/admin/model-gateway"),

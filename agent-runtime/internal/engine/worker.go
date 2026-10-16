@@ -6,8 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cloudwego/eino/adk"
@@ -24,7 +27,7 @@ import (
 	"teamie/backend/kitex_gen/im/identityservice"
 )
 
-type Config struct{ ControlAddr, GatewayAddr, SandboxAddr, IdentityAddr, IMURL, ControlToken, GatewayToken, SandboxToken, IMToken string }
+type Config struct{ ControlAddr, GatewayAddr, SandboxAddr, IdentityAddr, IMURL, ControlToken, GatewayToken, SandboxToken, IMToken, FlagsFile, GatewayStreamURL string }
 type Engine struct {
 	Store    *Store
 	Config   Config
@@ -37,6 +40,9 @@ type Engine struct {
 }
 
 func New(store *Store, c Config) (*Engine, error) {
+	if c.GatewayStreamURL == "" {
+		c.GatewayStreamURL = "http://llm-gateway:8086/internal/v1/chat/stream"
+	}
 	opts := func(addr string, timeout time.Duration) []client.Option {
 		return []client.Option{client.WithHostPorts(addr), client.WithRPCTimeout(timeout), client.WithConnectTimeout(time.Second)}
 	}
@@ -72,6 +78,8 @@ func (e *Engine) Ready(ctx context.Context) error {
 	return nil
 }
 func (e *Engine) report(ctx context.Context, id, state, code string, active bool) {
+	code = publicErrorCodeOptional(code)
+	_, _ = e.Store.DB.Exec(ctx, `UPDATE runtime_agents SET state=$3,last_error=$4,last_active_at=CASE WHEN $5 THEN now() ELSE last_active_at END WHERE agent_id=$1 AND lease_owner=$2 AND lease_until>now()`, id, e.owner, state, publicErrorCodeOptional(code), active)
 	r := &wire.RuntimeReport{ServiceToken: e.Config.ControlToken, AgentId: id, RuntimeState: state, SessionId: "agent:" + id}
 	if code != "" {
 		r.LastError = &code
@@ -139,6 +147,9 @@ func (e *Engine) Run(ctx context.Context) {
 		}
 		for _, d := range r.Agents {
 			if !d.Enabled || d.DeletedAt != nil {
+				pc, c := context.WithTimeout(ctx, 3*time.Second)
+				e.cancelAgentTasks(pc, d.Id)
+				c()
 				continue
 			}
 			if _, exists := workers[d.Id]; exists {
@@ -204,20 +215,20 @@ func (g *turnGuard) finish() {
 	g.run = nil
 }
 func (g *turnGuard) current() *Run { g.mu.Lock(); defer g.mu.Unlock(); return g.run }
-func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, l *Lease) {
+func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lease) {
 	ctx, cancelWorker := context.WithCancel(ctx)
 	defer cancelWorker()
 	go func() {
-		timer := time.NewTicker(10 * time.Second)
-		defer timer.Stop()
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-timer.C:
-				renew, done := context.WithTimeout(ctx, 4*time.Second)
-				err := e.Store.Renew(renew, l)
-				done()
+			case <-ticker.C:
+				pc, c := context.WithTimeout(ctx, 4*time.Second)
+				err := e.Store.Renew(pc, lease)
+				c()
 				if err != nil {
 					cancelWorker()
 					return
@@ -226,168 +237,257 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, l *Lease) 
 		}
 	}()
 	authorize := func(ctx context.Context) error {
-		r, err := e.Control.GetAgent(ctx, &wire.AgentRequest{ServiceToken: e.Config.ControlToken, AgentId: def.Id})
+		pc, c := context.WithTimeout(ctx, 4*time.Second)
+		defer c()
+		r, err := e.Control.GetAgent(pc, &wire.AgentRequest{ServiceToken: e.Config.ControlToken, AgentId: def.Id})
 		if err != nil {
 			return &ModelError{Code: "control_unavailable", Retry: true}
 		}
 		if r.Agent == nil || !r.Agent.Enabled || r.Agent.DeletedAt != nil || r.Agent.Revision != def.Revision {
 			return &ModelError{Code: "principal_disabled", Retry: true}
 		}
+		if run, runErr := CurrentRun(ctx); runErr == nil && e.Store.runCanceled(ctx, run.ID) {
+			return &ModelError{Code: "run_cancelled", Retry: false}
+		}
 		return nil
 	}
-
+	var contextWindow atomic.Int64
+	contextWindow.Store(16384)
 	imc := &IM{BaseURL: e.Config.IMURL, ServiceKey: e.Config.IMToken, AgentID: def.Id, Identity: e.Identity}
-	model := &GatewayModel{Client: e.Gateway, Token: e.Config.GatewayToken, OwnerID: def.OwnerId, AgentID: def.Id, Store: e.Store, Lease: l, Authorize: authorize}
-	tools, err := (&Tools{Store: e.Store, Lease: l, IM: imc, Sandbox: e.Sandbox, SandboxToken: e.Config.SandboxToken, Authorize: authorize}).Build()
+	model := &GatewayModel{Client: e.Gateway, Token: e.Config.GatewayToken, OwnerID: def.OwnerId, AgentID: def.Id, Store: e.Store, Lease: lease, Authorize: authorize, StreamURL: e.Config.GatewayStreamURL, ContextWindow: func() int { return int(contextWindow.Load()) }}
+	tools, err := (&Tools{Store: e.Store, Lease: lease, IM: imc, Sandbox: e.Sandbox, SandboxToken: e.Config.SandboxToken, Authorize: authorize}).BuildIM()
 	if err != nil {
 		e.report(ctx, def.Id, "error", "tool_failed", false)
 		return
 	}
-	makeAgent := func(ctx context.Context) (adk.Agent, error) {
-		summary, err := summarization.New(ctx, &summarization.Config{Model: model, Trigger: &summarization.TriggerCondition{ContextTokens: 12000, ContextMessages: 32}, UserInstruction: "Maintain one continuous Agent session. Summarize decisions, unfinished work, workspace files, and exact workspace/conversation/message/sender source IDs. Keep private cross-conversation facts tied to their source. Never invent IDs or merge participants. Older detail can be retrieved with IM tools.", Finalize: finalizeSummary})
-		if err != nil {
-			return nil, err
-		}
-		agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{Name: "teamie_agent", Description: "A user-owned Teamie participant", Instruction: instruction(def), Model: model, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: tools, ExecuteSequentially: true}}, MaxIterations: 12, Handlers: []adk.ChatModelAgentMiddleware{summary}})
-		if err != nil {
-			return nil, err
-		}
-		return agent, nil
+	tasks, err := e.tasks(ctx, def, lease, authorize)
+	if err != nil {
+		e.report(ctx, def.Id, "error", "tool_failed", false)
+		return
 	}
-
-	session := &SessionStore{Store: e.Store, Lease: l}
+	go tasks.dispatch(ctx)
+	defer func() {
+		pc, c := context.WithTimeout(context.Background(), 12*time.Second)
+		defer c()
+		if authorize(pc) != nil {
+			e.cancelAgentTasks(pc, def.Id)
+		}
+		_ = tasks.manager.Close(pc)
+	}()
+	session := &SessionStore{Store: e.Store, Lease: lease, Revision: def.Revision}
 	guard := &turnGuard{}
 	var loop *adk.TurnLoop[Input, *schema.Message]
 	var loopDone chan *adk.TurnLoopExitState[Input, *schema.Message]
 	var loopCancel context.CancelFunc
-	queued := map[string]bool{}
+	generation := int64(0)
+	queued := map[string]int64{}
 	var qmu sync.Mutex
-	clearQueue := func() { qmu.Lock(); queued = map[string]bool{}; qmu.Unlock() }
+	clearQueue := func() { qmu.Lock(); queued = map[string]int64{}; qmu.Unlock() }
 	stop := func() {
 		if loop == nil {
 			return
 		}
 		loop.Stop(adk.WithImmediate())
-		if r := guard.current(); r != nil {
-			e.cancelRun(def.Id, r)
+		if run := guard.current(); run != nil {
+			e.cancelRun(def.Id, run)
 		}
-		loopCancel()
 		<-loopDone
+		loopCancel()
 		guard.finish()
 		loop = nil
 		clearQueue()
 	}
 	defer stop()
-	makeInput := func(ctx context.Context, _ *adk.TurnLoop[Input, *schema.Message], items []Input) (*adk.GenInputResult[Input, *schema.Message], error) {
-		select {
-		case e.slots <- struct{}{}:
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-		release := func() { <-e.slots }
-		owned := true
-		defer func() {
-			if owned {
-				release()
-			}
-		}()
-		pending, err := e.Store.Pending(ctx, l)
+	makeAgent := func(ctx context.Context) (adk.Agent, error) {
+		trigger := summaryTrigger(int(contextWindow.Load()))
+		summary, err := summarization.New(ctx, &summarization.Config{Model: model, Trigger: &summarization.TriggerCondition{ContextTokens: trigger, ContextMessages: 32}, UserInstruction: "Maintain one continuous Agent session. Summarize decisions, unfinished work, workspace files, and exact workspace/conversation/message/sender source IDs. Keep private cross-conversation facts tied to their source. Never invent IDs or merge participants. Older detail can be retrieved with IM tools.", Finalize: finalizeSummary})
 		if err != nil {
 			return nil, err
 		}
+		handlers := append([]adk.ChatModelAgentMiddleware{summary}, tasks.handlers...)
+		return adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{Name: "teamie_agent", Description: "A user-owned Teamie participant", Instruction: instruction(def), Model: model, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: tools, ExecuteSequentially: true}}, MaxIterations: math.MaxInt, Handlers: handlers})
+	}
+	validate := func(ctx context.Context, inputs []Input) ([]Input, error) {
 		valid := []Input{}
-		for _, in := range pending {
-			m, err := imc.Message(ctx, in.ConversationID, in.MessageID)
+		for _, in := range inputs {
+			if in.Kind == "task.notification" {
+				valid = append(valid, in)
+				continue
+			}
+			message, err := imc.Message(ctx, in.ConversationID, in.MessageID)
 			if err != nil {
-				var ae *APIError
-				if errors.As(err, &ae) && (ae.Status == 403 || ae.Status == 404) {
-					_ = e.Store.Skip(ctx, l, in.EventID)
+				var api *APIError
+				if errors.As(err, &api) && (api.Status == 403 || api.Status == 404) {
+					if err = e.Store.Skip(ctx, lease, in.EventID); err != nil {
+						return nil, err
+					}
 					continue
 				}
 				return nil, err
 			}
-			if m.RetractedAt != nil || m.Body == "" {
-				_ = e.Store.Skip(ctx, l, in.EventID)
+			if message.RetractedAt != nil || message.Body == "" {
+				if err = e.Store.Skip(ctx, lease, in.EventID); err != nil {
+					return nil, err
+				}
 				continue
 			}
-			in.Body = m.Body
+			in.Body = message.Body
 			valid = append(valid, in)
 		}
-		if len(valid) == 0 {
-			return nil, errors.New("no_pending_inputs")
+		return valid, nil
+	}
+	prepare := func(ctx context.Context, items []Input, resume *checkpointMetadata) (*Run, context.Context, []Input, error) {
+		if err := authorize(ctx); err != nil {
+			return nil, nil, nil, err
 		}
-		run, err := e.Store.StartRun(ctx, l, valid)
+		if !runtimeFlag(e.Config.FlagsFile, "agents.runtime.v3") {
+			return nil, nil, nil, &ModelError{Code: "runtime_disabled", Retry: true}
+		}
+		// Deduplicate checkpoint and fresh delivery copies without changing order.
+		unique := []Input{}
+		seen := map[string]bool{}
+		for _, in := range items {
+			if !seen[in.EventID] {
+				seen[in.EventID] = true
+				unique = append(unique, in)
+			}
+		}
+		if len(unique) == 0 {
+			pending, err := e.Store.Pending(ctx, lease)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			unique = pending
+		}
+		eligible, err := e.Store.eligibleInputs(ctx, lease, unique)
 		if err != nil {
-			return nil, err
+			return nil, nil, nil, err
 		}
-		consumed := map[string]bool{}
+		batch, extra := boundedInputBatch(eligible)
+		valid, err := validate(ctx, batch)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if len(valid) == 0 {
+			return nil, nil, nil, errors.New("no_pending_inputs")
+		}
+		run, err := e.Store.StartRun(ctx, lease, valid)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 		invalid := []string{}
 		for _, in := range run.Inputs {
-			consumed[in.EventID] = true
+			if in.Kind == "task.notification" {
+				continue
+			}
 			m, readErr := imc.Message(ctx, in.ConversationID, in.MessageID)
 			if readErr != nil {
-				var ae *APIError
-				if errors.As(readErr, &ae) && (ae.Status == 403 || ae.Status == 404) {
+				var api *APIError
+				if errors.As(readErr, &api) && (api.Status == 403 || api.Status == 404) {
 					invalid = append(invalid, in.EventID)
 					continue
 				}
-				// StartRun has already committed: a temporary read failure must
-				// preserve this immutable batch for deterministic replay.
-				if err = e.Store.FinishRun(ctx, l, run, "retry", "im_unavailable", true); err != nil {
-					return nil, err
-				}
-				return nil, &ModelError{Code: "im_unavailable", Retry: true}
+				_ = e.Store.FinishRun(ctx, lease, run, "retry", "im_unavailable", true)
+				return nil, nil, nil, &ModelError{Code: "im_unavailable", Retry: true}
 			}
 			if m.RetractedAt != nil || m.Body != in.Body {
 				invalid = append(invalid, in.EventID)
 			}
 		}
 		if len(invalid) > 0 {
-			if err = e.Store.InvalidateRun(ctx, l, run, invalid); err != nil {
-				return nil, err
+			if err = e.Store.InvalidateRun(ctx, lease, run, invalid); err != nil {
+				return nil, nil, nil, err
 			}
-			return nil, errors.New("source_unavailable")
+			return nil, nil, nil, errors.New("source_unavailable")
 		}
-
-		remaining := []Input{}
-		for _, in := range items {
+		if resume != nil && !resumeCompatible(resume, def.Revision, run.ID) {
+			resume = nil
+		}
+		if err = e.Store.configureRun(ctx, lease, run, def.Revision, generation, resume); err != nil {
+			return nil, nil, nil, err
+		}
+		run.Front = &frontSlot{slots: e.slots}
+		runctx, cancel := context.WithCancel(WithRun(ctx, run))
+		guard.set(run, cancel, run.releaseFront)
+		qmu.Lock()
+		for _, in := range run.Inputs {
+			queued[in.EventID] = generation
+		}
+		qmu.Unlock()
+		session.bind(run, nil)
+		if err = run.Front.acquire(runctx); err != nil {
+			guard.finish()
+			return nil, nil, nil, err
+		}
+		consumed := map[string]bool{}
+		for _, in := range run.Inputs {
+			consumed[in.EventID] = true
+		}
+		remaining := append([]Input{}, extra...)
+		for _, in := range batch {
 			if !consumed[in.EventID] {
 				remaining = append(remaining, in)
 			}
 		}
-		runctx, cancel := context.WithTimeout(WithRun(ctx, run), 3*time.Minute)
-		guard.set(run, cancel, release)
-		owned = false
 		e.report(runctx, def.Id, "running", "", true)
-		messages := make([]*schema.Message, 0, len(run.Inputs))
-		for _, in := range run.Inputs {
-			b, _ := json.Marshal(in)
-			messages = append(messages, &schema.Message{Role: schema.User, Content: "TEAMIE_NEW_MESSAGE " + string(b)})
+		return run, runctx, remaining, nil
+	}
+	makeInput := func(ctx context.Context, _ *adk.TurnLoop[Input, *schema.Message], items []Input) (*adk.GenInputResult[Input, *schema.Message], error) {
+		run, runctx, remaining, err := prepare(ctx, items, nil)
+		if err != nil {
+			return nil, err
 		}
-		return &adk.GenInputResult[Input, *schema.Message]{RunCtx: runctx, Input: &adk.AgentInput{Messages: messages, EnableStreaming: false}, Consumed: run.Inputs, Remaining: remaining}, nil
+		return &adk.GenInputResult[Input, *schema.Message]{RunCtx: runctx, Input: &adk.AgentInput{Messages: inputMessages(run.Inputs), EnableStreaming: e.Config.GatewayStreamURL != ""}, Consumed: run.Inputs, Remaining: remaining}, nil
 	}
 	start := func() {
+		generation++
 		lc, cancel := context.WithCancel(ctx)
 		loopCancel = cancel
 		loopDone = make(chan *adk.TurnLoopExitState[Input, *schema.Message], 1)
-		loop = adk.NewTurnLoop(adk.TurnLoopConfig[Input, *schema.Message]{GenInput: makeInput, GenResume: func(ctx context.Context, l *adk.TurnLoop[Input, *schema.Message], _, _, _ []Input) (*adk.GenResumeResult[Input, *schema.Message], error) {
-			r, err := makeInput(ctx, l, nil)
+		loop = adk.NewTurnLoop(adk.TurnLoopConfig[Input, *schema.Message]{GenInput: makeInput, GenResume: func(ctx context.Context, active *adk.TurnLoop[Input, *schema.Message], interrupted, unhandled, newItems []Input) (*adk.GenResumeResult[Input, *schema.Message], error) {
+			metadata, _ := e.Store.ResumeMetadata(ctx, "turnloop:"+def.Id)
+			all := append(append(append([]Input{}, interrupted...), unhandled...), newItems...)
+			run, runctx, remaining, err := prepare(ctx, all, metadata)
 			if err != nil {
 				return nil, err
 			}
-			return &adk.GenResumeResult[Input, *schema.Message]{RunCtx: r.RunCtx, Decision: adk.TurnLoopResumeDecisionStartNewTurn, Input: r.Input, Consumed: r.Consumed}, nil
+			if resumeCompatible(metadata, def.Revision, run.ID) {
+				targets := map[string]any{}
+				for _, id := range metadata.Targets {
+					targets[id] = nil
+				}
+				return &adk.GenResumeResult[Input, *schema.Message]{RunCtx: runctx, Decision: adk.TurnLoopResumeDecisionResume, ResumeParams: &adk.ResumeParams{Targets: targets}, Consumed: run.Inputs, Remaining: remaining}, nil
+			}
+			return &adk.GenResumeResult[Input, *schema.Message]{RunCtx: runctx, Decision: adk.TurnLoopResumeDecisionStartNewTurn, Input: &adk.AgentInput{Messages: inputMessages(run.Inputs), EnableStreaming: e.Config.GatewayStreamURL != ""}, Consumed: run.Inputs, Remaining: remaining}, nil
 		}, PrepareAgent: func(ctx context.Context, _ *adk.TurnLoop[Input, *schema.Message], _ []Input) (adk.Agent, error) {
 			return makeAgent(ctx)
-		}, OnAgentEvents: func(ctx context.Context, _ *adk.TurnContext[Input, *schema.Message], events *adk.AsyncIterator[*adk.AgentEvent]) error {
+		}, OnAgentEvents: func(ctx context.Context, tc *adk.TurnContext[Input, *schema.Message], events *adk.AsyncIterator[*adk.AgentEvent]) error {
 			defer guard.finish()
 			var failure error
+			var businessTargets []string
 			for {
 				event, ok := events.Next()
 				if !ok {
 					break
 				}
-				if event != nil && event.Err != nil && failure == nil {
+				if event == nil {
+					continue
+				}
+				if event.Err != nil && failure == nil {
 					failure = event.Err
+				}
+				if event.Output != nil && event.Output.MessageOutput != nil && event.Output.MessageOutput.IsStreaming {
+					_, err := event.Output.MessageOutput.GetMessage()
+					if err != nil && failure == nil {
+						failure = err
+					}
+				}
+				if event.Action != nil && event.Action.Interrupted != nil {
+					for _, v := range event.Action.Interrupted.InterruptContexts {
+						if v != nil {
+							businessTargets = append(businessTargets, v.ID)
+						}
+					}
 				}
 			}
 			run, err := CurrentRun(ctx)
@@ -397,8 +497,33 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, l *Lease) 
 			if failure == nil && ctx.Err() != nil {
 				failure = ctx.Err()
 			}
-			commit, done := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			commit, done := detachedPersistence(ctx)
 			defer done()
+			targets := targetsFromError(failure)
+			if len(businessTargets) > 0 {
+				targets = businessTargets
+			}
+			session.bind(run, targets)
+			select {
+			case <-tc.Preempted:
+				if err = e.Store.preemptRun(commit, lease, run); err != nil {
+					return err
+				}
+				qmu.Lock()
+				for _, in := range run.Inputs {
+					delete(queued, in.EventID)
+				}
+				qmu.Unlock()
+				return nil
+			default:
+			}
+			if len(businessTargets) > 0 {
+				if err = e.Store.FinishRun(commit, lease, run, "waiting_input", "", true); err != nil {
+					return err
+				}
+				e.report(commit, def.Id, "idle", "", true)
+				return nil
+			}
 			if failure != nil {
 				e.cancelRun(def.Id, run)
 				state := "failed"
@@ -406,7 +531,11 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, l *Lease) 
 				if retry {
 					state = "retry"
 				}
-				if err = e.Store.FinishRun(commit, l, run, state, SafeError(failure), retry); err != nil {
+				if e.Store.runCanceled(commit, run.ID) {
+					state = "canceled"
+					retry = false
+				}
+				if err = e.Store.FinishRun(commit, lease, run, state, SafeError(failure), retry); err != nil {
 					return err
 				}
 				e.report(commit, def.Id, "error", SafeError(failure), true)
@@ -416,7 +545,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, l *Lease) 
 				}
 				return failure
 			}
-			if err = e.Store.FinishRun(commit, l, run, "completed", "", false); err != nil {
+			if err = e.Store.FinishRun(commit, lease, run, "completed", "", false); err != nil {
 				return err
 			}
 			qmu.Lock()
@@ -427,6 +556,15 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, l *Lease) 
 			e.report(commit, def.Id, "idle", "", true)
 			return nil
 		}, Store: session, CheckpointID: "turnloop:" + def.Id, SessionID: "agent:" + def.Id, SessionStore: session})
+		// Push before Run so restored checkpoints can see newly accepted resume intent.
+		pending, _ := e.Store.Pending(ctx, lease)
+		qmu.Lock()
+		for _, in := range pending {
+			if ok, _ := loop.Push(in); ok {
+				queued[in.EventID] = generation
+			}
+		}
+		qmu.Unlock()
 		loop.Run(lc)
 		go func(active *adk.TurnLoop[Input, *schema.Message], done chan *adk.TurnLoopExitState[Input, *schema.Message]) {
 			done <- active.Wait()
@@ -437,12 +575,15 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, l *Lease) 
 	lastState := ""
 	lastReport := time.Time{}
 	tick := func() bool {
-		if err := e.ingest(ctx, imc, l); err != nil {
+		if err := e.ingest(ctx, imc, lease); err != nil {
 			if errors.Is(err, ErrLeaseLost) {
 				return false
 			}
 			e.report(ctx, def.Id, "error", "im_unavailable", false)
 			return true
+		}
+		if err := tasks.notifications(ctx, lease); errors.Is(err, ErrLeaseLost) {
+			return false
 		}
 		if loop != nil {
 			select {
@@ -457,14 +598,26 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, l *Lease) 
 			default:
 			}
 		}
-		pc, cancel := context.WithTimeout(ctx, 3*time.Second)
+		if run := guard.current(); run != nil && e.Store.runCanceled(ctx, run.ID) {
+			pc, c := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			e.cancelRunTasks(pc, def.Id, run.ID)
+			c()
+			stop()
+		}
+		if !runtimeFlag(e.Config.FlagsFile, "agents.runtime.v3") {
+			stop()
+			e.report(ctx, def.Id, "idle", "runtime_disabled", false)
+			return true
+		}
+		pc, c := context.WithTimeout(ctx, 3*time.Second)
 		ping, err := e.Gateway.Ping(pc, &wire.PingRequest{ServiceToken: &e.Config.GatewayToken})
-		cancel()
+		c()
 		ready := err == nil && ping.Ready && ping.GetConfigured() && ping.GetEnabled()
+		if ready && ping.ContextWindowTokens != nil && ping.GetContextWindowTokens() >= 4096 {
+			contextWindow.Store(ping.GetContextWindowTokens())
+		}
 		if !ready {
-			if loop != nil {
-				stop()
-			}
+			stop()
 			state, code := "waiting_configuration", "model_unconfigured"
 			if err != nil {
 				state, code = "error", "gateway_unavailable"
@@ -480,22 +633,54 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, l *Lease) 
 			e.report(ctx, def.Id, "idle", "", false)
 			lastState = "idle"
 		}
-		pending, err := e.Store.Pending(ctx, l)
+		pending, err := e.Store.FreshPending(ctx, lease)
 		if err != nil {
 			return true
 		}
-		if len(pending) > 0 && loop == nil {
-			start()
+		if loop == nil {
+			recoverable, err := e.Store.Pending(ctx, lease)
+			if err != nil {
+				return true
+			}
+			if len(recoverable) > 0 || len(pending) > 0 {
+				start()
+			}
 		}
+
 		if loop != nil {
 			qmu.Lock()
 			for _, in := range pending {
-				if !queued[in.EventID] {
-					queued[in.EventID] = true
-					loop.Push(in)
+				if queued[in.EventID] == generation {
+					continue
+				}
+				ok, _ := loop.Push(in, adk.WithPushStrategy(func(_ context.Context, tc *adk.TurnContext[Input, *schema.Message]) []adk.PushOption[Input, *schema.Message] {
+					if relevantInput(in, tc) {
+						return []adk.PushOption[Input, *schema.Message]{adk.WithPreempt[Input, *schema.Message](adk.AnySafePoint)}
+					}
+					return nil
+				}))
+				if ok {
+					queued[in.EventID] = generation
 				}
 			}
 			qmu.Unlock()
+		}
+		if loop != nil {
+			// A live loop may be idle while an older run's backoff expires or an
+			// owner requests retry. Processing inputs need their own delivery path.
+			due, dueErr := e.Store.Pending(ctx, lease)
+			if dueErr == nil {
+				qmu.Lock()
+				for _, in := range due {
+					if queued[in.EventID] == generation {
+						continue
+					}
+					if ok, _ := loop.Push(in); ok {
+						queued[in.EventID] = generation
+					}
+				}
+				qmu.Unlock()
+			}
 		}
 		return true
 	}
@@ -565,7 +750,51 @@ func finalizeSummary(_ context.Context, original []*schema.Message, summary *sch
 	if summary == nil || summary.Content == "" || len(summary.Content) > 32768 || len(summary.ToolCalls) > 0 {
 		return nil, errors.New("invalid_context_summary")
 	}
-	out := []*schema.Message{{Role: schema.User, Content: "TEAMIE_SESSION_SUMMARY (source-scoped memory; verify current access using tools):\n" + summary.Content}}
+	sources := []map[string]any{}
+	seen := map[string]bool{}
+	appendSource := func(source map[string]any) {
+		id, _ := source["eventId"].(string)
+		if id == "" || seen[id] {
+			return
+		}
+		seen[id] = true
+		clean := map[string]any{}
+		for _, key := range []string{"eventId", "workspaceId", "conversationId", "messageId", "senderId", "senderKind"} {
+			if value, ok := source[key].(string); ok {
+				clean[key] = value
+			}
+		}
+		sources = append(sources, clean)
+	}
+	for _, message := range original {
+		if message == nil {
+			continue
+		}
+		if strings.HasPrefix(message.Content, "TEAMIE_SESSION_SUMMARY ") {
+			if index := strings.LastIndex(message.Content, "\nTEAMIE_SOURCE_REFERENCES "); index >= 0 {
+				var previous []map[string]any
+				if json.Unmarshal([]byte(message.Content[index+len("\nTEAMIE_SOURCE_REFERENCES "):]), &previous) == nil {
+					for _, source := range previous {
+						appendSource(source)
+					}
+				}
+			}
+		}
+		if !strings.HasPrefix(message.Content, "TEAMIE_NEW_MESSAGE ") {
+			continue
+		}
+		var in Input
+		if json.Unmarshal([]byte(strings.TrimPrefix(message.Content, "TEAMIE_NEW_MESSAGE ")), &in) == nil {
+			appendSource(map[string]any{"eventId": in.EventID, "workspaceId": in.WorkspaceID, "conversationId": in.ConversationID, "messageId": in.MessageID, "senderId": in.SenderID, "senderKind": in.SenderKind})
+		}
+	}
+	// Full provenance remains in durable inbox/session audit; the working
+	// context keeps a bounded recent reference index through repeated compaction.
+	if len(sources) > 32 {
+		sources = sources[len(sources)-32:]
+	}
+	provenance, _ := json.Marshal(sources)
+	out := []*schema.Message{{Role: schema.User, Content: "TEAMIE_SESSION_SUMMARY (source-scoped memory; verify current access using tools):\n" + summary.Content + "\nTEAMIE_SOURCE_REFERENCES " + string(provenance)}}
 	start := len(original)
 	for i := len(original) - 1; i >= 0; i-- {
 		if original[i] != nil && original[i].Role == schema.User && len(original)-i <= 12 {
@@ -577,4 +806,30 @@ func finalizeSummary(_ context.Context, original []*schema.Message, summary *sch
 		out = append(out, original[start:]...)
 	}
 	return out, nil
+}
+
+// The transport byte ceiling and configured model window are independent.
+// Large-context providers retain a conservative platform trigger so a single
+// summary request still fits the gateway's bounded transport.
+func summaryTrigger(window int) int {
+	if window < 4096 {
+		window = 16384
+	}
+	trigger := window * 3 / 4
+	if trigger > 12000 {
+		trigger = 12000
+	}
+	return trigger
+}
+func boundedInputBatch(inputs []Input) ([]Input, []Input) {
+	n, total := 0, 0
+	for _, in := range inputs {
+		b, _ := json.Marshal(in)
+		if n > 0 && (total+len(b) > 48<<10 || n >= 32) {
+			break
+		}
+		total += len(b)
+		n++
+	}
+	return inputs[:n], inputs[n:]
 }

@@ -48,5 +48,9 @@ func main() {
 		}
 	}()
 	go store.Run(ctx)
-	control.Serve(env("HTTP_ADDR", ":8084"), (&control.Handler{Store: store, Origin: origin}).Routes())
+	runtime, e := control.NewRuntime(env("AGENT_RUNTIME_RPC_ADDR", "agent-runtime:8885"))
+	if e != nil {
+		log.Fatal(e)
+	}
+	control.Serve(env("HTTP_ADDR", ":8084"), (&control.Handler{Store: store, Origin: origin, Runtime: runtime}).Routes())
 }

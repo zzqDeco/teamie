@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef } from "react";
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { ButtonHTMLAttributes, ReactNode, RefObject } from "react";
 import { LoaderCircle, X } from "lucide-react";
 import { Link } from "react-router-dom";
 export function Logo({ compact = false }: { compact?: boolean }) {
@@ -102,6 +102,50 @@ export function Loading({ label = "正在加载你的空间…" }: { label?: str
     </div>
   );
 }
+export function useOverlayFocus(
+  ref: RefObject<HTMLElement | null>,
+  active: boolean,
+  onClose: () => void,
+) {
+  useEffect(() => {
+    if (!active) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const node = ref.current;
+    if (!node) return;
+    const focusables = () =>
+      Array.from(
+        node.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], [tabindex="0"]',
+        ),
+      ).filter((element) => element.getClientRects().length > 0);
+    (focusables()[0] || node).focus({ preventScroll: true });
+    function handle(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      }
+      if (event.key !== "Tab") return;
+      const elements = focusables();
+      const first = elements[0],
+        last = elements.at(-1);
+      if (!first) {
+        event.preventDefault();
+        node?.focus();
+      } else if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+    document.addEventListener("keydown", handle);
+    return () => {
+      document.removeEventListener("keydown", handle);
+      if (previous?.isConnected) previous.focus({ preventScroll: true });
+    };
+  }, [active, onClose, ref]);
+}
 export function Modal({
   title,
   subtitle,
@@ -115,39 +159,8 @@ export function Modal({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
-  useEffect(() => {
-    const previous = document.activeElement as HTMLElement;
-    const node = ref.current;
-    const focusables = () =>
-      Array.from(
-        node?.querySelectorAll<HTMLElement>(
-          'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], [tabindex="0"]',
-        ) || [],
-      );
-    (
-      node?.querySelector<HTMLElement>("input, textarea") || focusables()[0]
-    )?.focus();
-    const handle = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-      if (event.key === "Tab") {
-        const elements = focusables();
-        const first = elements[0],
-          last = elements[elements.length - 1];
-        if (event.shiftKey && document.activeElement === first) {
-          event.preventDefault();
-          last?.focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
-          event.preventDefault();
-          first?.focus();
-        }
-      }
-    };
-    document.addEventListener("keydown", handle);
-    return () => {
-      document.removeEventListener("keydown", handle);
-      previous?.focus();
-    };
-  }, [onClose]);
+  const subtitleId = useId();
+  useOverlayFocus(ref, true, onClose);
   return (
     <div
       className="modal-backdrop"
@@ -161,13 +174,15 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        aria-describedby={subtitle ? subtitleId : undefined}
+        tabIndex={-1}
       >
         <IconButton label="关闭弹窗" className="modal-close" onClick={onClose}>
           <X size={19} />
         </IconButton>
         <div className="modal-heading">
           <h2 id={titleId}>{title}</h2>
-          {subtitle && <p>{subtitle}</p>}
+          {subtitle && <p id={subtitleId}>{subtitle}</p>}
         </div>
         {children}
       </div>
@@ -181,10 +196,9 @@ export function PublicHeader() {
         <Logo />
       </Link>
       <nav>
-        <a href="/#why">为什么选择 Teamie</a>
         <Link to="/login">登录</Link>
         <Link className="button small-button" to="/login?mode=register">
-          加入 Teamie <span aria-hidden="true">↗</span>
+          受邀注册
         </Link>
       </nav>
     </header>
