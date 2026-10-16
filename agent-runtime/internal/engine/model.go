@@ -231,6 +231,29 @@ func modelRequestHash(raw []byte) string {
 }
 
 func (m *GatewayModel) cachedModel(ctx context.Context, run *Run, step int, hash string, messages []*schema.AgenticMessage, opts *model.Options, streaming bool) ([]byte, error) {
+	b, err := m.exactCachedModel(ctx, run, step, hash, messages, opts, streaming)
+	if !errors.Is(err, ErrReplayConflict) {
+		return b, err
+	}
+	candidates, err := m.Store.observedToolReplayInputs(ctx, run, messages)
+	if err != nil {
+		return nil, err
+	}
+	for _, candidate := range candidates {
+		options := *opts
+		request, err := agenticRequest(candidate, &options, streaming)
+		if err != nil {
+			return nil, err
+		}
+		b, err = m.exactCachedModel(ctx, run, step, modelRequestHash(request), candidate, &options, streaming)
+		if !errors.Is(err, ErrReplayConflict) {
+			return b, err
+		}
+	}
+	return nil, ErrReplayConflict
+}
+
+func (m *GatewayModel) exactCachedModel(ctx context.Context, run *Run, step int, hash string, messages []*schema.AgenticMessage, opts *model.Options, streaming bool) ([]byte, error) {
 	b, err := m.Store.CachedModel(ctx, run, step, hash)
 	if !errors.Is(err, ErrReplayConflict) {
 		return b, err

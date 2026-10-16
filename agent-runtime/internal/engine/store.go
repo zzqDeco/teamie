@@ -46,6 +46,7 @@ type Input struct {
 	Status         string       `json:"status,omitempty"`
 }
 type Run struct {
+	toolProfile                 string
 	ID, Attempt, AgentID        string
 	Inputs                      []Input
 	Step                        atomic.Int64

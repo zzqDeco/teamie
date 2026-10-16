@@ -152,5 +152,5 @@ func (t *Tools) attachmentTool() (tool.BaseTool, error) {
 			backend := &SandboxBackend{Client: t.Sandbox, Token: t.SandboxToken, AgentID: t.IM.AgentID, Authorize: t.Authorize, Store: t.Store, Lease: t.Lease}
 			return backend.importAttachment(ctx, id, args.Path, content, descriptor.SHA256)
 		})
-	})
+	}, utils.WithMarshalOutput(marshalObservation))
 }

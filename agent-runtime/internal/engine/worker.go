@@ -324,19 +324,31 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 	}
 	defer stop()
 	makeAgent := func(ctx context.Context) (adk.TypedAgent[*schema.AgenticMessage], error) {
+		run, err := CurrentRun(ctx)
+		if err != nil {
+			return nil, err
+		}
+		activeTools, err := toolsForRun(ctx, tools, run)
+		if err != nil {
+			return nil, err
+		}
 		trigger := summaryTrigger(int(contextWindow.Load()))
+		finalize := finalizeSummary
+		if run.toolProfile == v034ToolProfile {
+			finalize = finalizeV034Summary
+		}
 		summary, err := summarization.NewTyped(ctx, &summarization.TypedConfig[*schema.AgenticMessage]{
 			Model:           gatewayModel,
 			ModelOptions:    []model.Option{model.WithAgenticToolChoice(&schema.AgenticToolChoice{Type: schema.ToolChoiceForbidden})},
 			Trigger:         &summarization.TriggerCondition{ContextTokens: trigger, ContextMessages: 32},
 			UserInstruction: summaryInstruction,
-			Finalize:        finalizeSummary,
+			Finalize:        finalize,
 		})
 		if err != nil {
 			return nil, err
 		}
 		handlers := append([]adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]{summary}, tasks.handlers...)
-		return adk.NewTypedChatModelAgent(ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{Name: "teamie_agent", Description: "A user-owned Teamie participant", Instruction: instruction(def), Model: gatewayModel, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: tools, ExecuteSequentially: true}}, MaxIterations: math.MaxInt, Handlers: handlers})
+		return adk.NewTypedChatModelAgent(ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{Name: "teamie_agent", Description: "A user-owned Teamie participant", Instruction: instruction(def), Model: gatewayModel, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: activeTools, ExecuteSequentially: true}}, MaxIterations: math.MaxInt, Handlers: handlers})
 	}
 	validate := func(ctx context.Context, inputs []Input) ([]Input, error) {
 		valid := []Input{}
@@ -433,7 +445,11 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 			}
 			return nil, nil, nil, errors.New("source_unavailable")
 		}
-		if resume != nil && !resumeCompatible(resume, def.Revision, run.ID) {
+		run.toolProfile, err = e.Store.runToolProfile(ctx, run.ID)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if resume != nil && !resumeCompatibleForRun(resume, def.Revision, run) {
 			resume = nil
 		}
 		if err = e.Store.configureRun(ctx, lease, run, def.Revision, generation, resume); err != nil {
@@ -495,7 +511,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 			if err != nil {
 				return nil, err
 			}
-			if resumeCompatible(metadata, def.Revision, run.ID) {
+			if resumeCompatibleForRun(metadata, def.Revision, run) {
 				targets := map[string]any{}
 				for _, id := range metadata.Targets {
 					targets[id] = nil
@@ -787,7 +803,17 @@ func (e *Engine) ingest(ctx context.Context, imc *IM, l *Lease) error {
 	}
 	return e.Store.Ingest(ctx, l, page.Cursor, inputs)
 }
-func finalizeSummary(_ context.Context, original []*schema.AgenticMessage, summary *schema.AgenticMessage) ([]*schema.AgenticMessage, error) {
+func finalizeSummary(ctx context.Context, original []*schema.AgenticMessage, summary *schema.AgenticMessage) ([]*schema.AgenticMessage, error) {
+	return finalizeSummaryWithSourceFormat(ctx, original, summary, false)
+}
+
+// Only runs pinned to the v0.3.4 tool profile use the pre-attachment source
+// representation. Native-only runs must keep their v0.3.5 request bytes.
+func finalizeV034Summary(ctx context.Context, original []*schema.AgenticMessage, summary *schema.AgenticMessage) ([]*schema.AgenticMessage, error) {
+	return finalizeSummaryWithSourceFormat(ctx, original, summary, true)
+}
+
+func finalizeSummaryWithSourceFormat(_ context.Context, original []*schema.AgenticMessage, summary *schema.AgenticMessage, omitEmptyAttachmentIDs bool) ([]*schema.AgenticMessage, error) {
 	if summary == nil || agenticText(summary) == "" || len(agenticText(summary)) > 32768 || hasToolCalls(summary) {
 		return nil, errors.New("invalid_context_summary")
 	}
@@ -807,21 +833,32 @@ func finalizeSummary(_ context.Context, original []*schema.AgenticMessage, summa
 		}
 		// Retain bounded attachment references through repeated compaction;
 		// metadata/content can be retrieved explicitly from the source message.
+		retained := []string{}
 		switch ids := source["attachmentIds"].(type) {
 		case []string:
-			if len(ids) <= 8 {
-				clean["attachmentIds"] = ids
+			if !omitEmptyAttachmentIDs {
+				// Preserve native-only v0.3.5 receipts, including their empty
+				// arrays and original fresh-source representation.
+				if len(ids) <= 8 {
+					clean["attachmentIds"] = ids
+				}
+				break
+			}
+			for _, id := range ids {
+				if validUUID(id) && len(retained) < 8 {
+					retained = append(retained, id)
+				}
 			}
 		case []any:
-			retained := []string{}
 			for _, value := range ids {
 				if id, ok := value.(string); ok && validUUID(id) && len(retained) < 8 {
 					retained = append(retained, id)
 				}
 			}
-			if len(retained) > 0 {
-				clean["attachmentIds"] = retained
-			}
+		}
+		// The v0.3.4 format and parsed previous summaries omit empty references.
+		if len(retained) > 0 {
+			clean["attachmentIds"] = retained
 		}
 		sources = append(sources, clean)
 	}
@@ -844,11 +881,15 @@ func finalizeSummary(_ context.Context, original []*schema.AgenticMessage, summa
 		}
 		var in Input
 		if json.Unmarshal([]byte(strings.TrimPrefix(agenticText(message), "TEAMIE_NEW_MESSAGE ")), &in) == nil {
+			source := map[string]any{"eventId": in.EventID, "workspaceId": in.WorkspaceID, "conversationId": in.ConversationID, "messageId": in.MessageID, "replyToId": in.ReplyToID, "senderId": in.SenderID, "senderKind": in.SenderKind}
 			attachmentIDs := []string{}
 			for _, a := range in.Attachments {
 				attachmentIDs = append(attachmentIDs, a.ID)
 			}
-			appendSource(map[string]any{"eventId": in.EventID, "workspaceId": in.WorkspaceID, "conversationId": in.ConversationID, "messageId": in.MessageID, "replyToId": in.ReplyToID, "senderId": in.SenderID, "senderKind": in.SenderKind, "attachmentIds": attachmentIDs})
+			if !omitEmptyAttachmentIDs || len(attachmentIDs) > 0 {
+				source["attachmentIds"] = attachmentIDs
+			}
+			appendSource(source)
 		}
 	}
 	// Full provenance remains in durable inbox/session audit; the working

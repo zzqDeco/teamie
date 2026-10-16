@@ -14,6 +14,7 @@ import (
 const nativeRuntimeVersion = "eino-v0.10.0-alpha.35/teamie-v4-agentic"
 
 type checkpointMetadata struct {
+	ToolProfile    string
 	Version        string
 	Revision       int64
 	RunID, Attempt string
@@ -45,6 +46,7 @@ func (s *SessionStore[M]) metadata() []byte {
 	defer s.mu.Unlock()
 	m := checkpointMetadata{Version: nativeRuntimeVersion, Revision: s.Revision, Targets: append([]string{}, s.targets...)}
 	if s.run != nil {
+		m.ToolProfile = s.run.toolProfile
 		m.RunID = s.run.ID
 		m.Attempt = s.run.Attempt
 		m.ModelStep = s.run.Step.Load()
