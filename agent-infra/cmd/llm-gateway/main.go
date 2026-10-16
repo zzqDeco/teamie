@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	hertzserver "github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/kitex/server"
 	"log"
 	"net"
@@ -56,5 +57,5 @@ func main() {
 			cancel()
 		}
 	}()
-	api.Serve(api.Env("HTTP_ADDR", ":8086"), service.Routes(auth))
+	api.Serve(api.Env("HTTP_ADDR", ":8086"), service.Routes(auth), hertzserver.WithWriteTimeout(0))
 }

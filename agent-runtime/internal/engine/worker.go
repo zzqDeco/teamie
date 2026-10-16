@@ -51,7 +51,9 @@ func New(store *Store, c Config) (*Engine, error) {
 	if e != nil {
 		return nil, e
 	}
-	gw, e := modelgatewayservice.NewClient("teamie.model-gateway", opts(c.GatewayAddr, 75*time.Second)...)
+	// Kitex v0.16.4 uses RPCTimeout(0) for both an unbounded unary wait and
+	// an unset transport read deadline. The turn still supplies cancellation.
+	gw, e := modelgatewayservice.NewClient("teamie.model-gateway", opts(c.GatewayAddr, 0)...)
 	if e != nil {
 		return nil, e
 	}

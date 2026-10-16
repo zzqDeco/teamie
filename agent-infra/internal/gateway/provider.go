@@ -77,12 +77,14 @@ func ValidateEndpoint(ctx context.Context, raw string) error {
 // redirect, or second unchecked DNS lookup may carry the provider credential.
 func NewHTTPClient() *http.Client {
 	dialer := &net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}
-	tr := &http.Transport{Proxy: nil, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}, MaxIdleConns: 2, MaxIdleConnsPerHost: 1, IdleConnTimeout: 30 * time.Second, TLSHandshakeTimeout: 5 * time.Second, ResponseHeaderTimeout: 45 * time.Second, MaxResponseHeaderBytes: 32768, DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+	tr := &http.Transport{Proxy: nil, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}, MaxIdleConns: 2, MaxIdleConnsPerHost: 1, IdleConnTimeout: 30 * time.Second, TLSHandshakeTimeout: 5 * time.Second, MaxResponseHeaderBytes: 32768, DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 		host, port, e := net.SplitHostPort(address)
 		if e != nil {
 			return nil, errors.New("invalid provider address")
 		}
-		ips, e := net.DefaultResolver.LookupIPAddr(ctx, host)
+		resolveCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		ips, e := net.DefaultResolver.LookupIPAddr(resolveCtx, host)
+		cancel()
 		if e != nil || len(ips) == 0 {
 			return nil, errors.New("provider resolution failed")
 		}
@@ -99,7 +101,9 @@ func NewHTTPClient() *http.Client {
 		}
 		return nil, errors.New("provider connection failed")
 	}}
-	return &http.Client{Transport: tr, Timeout: 50 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	// Header arrival and body reads include provider inference. Only the caller
+	// context bounds that work; DNS, connection and TLS setup remain bounded.
+	return &http.Client{Transport: tr, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }
 func normalizeRequest(raw, model string) ([]byte, error) { return normalizeMode(raw, model, false) }
 func normalizeMode(raw, model string, streaming bool) ([]byte, error) {

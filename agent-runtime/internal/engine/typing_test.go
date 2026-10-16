@@ -247,7 +247,7 @@ func (g *typingGatewayFixture) Chat(ctx context.Context, _ *wire.GatewayChatRequ
 		return &wire.GatewayChatResponse{Ok: false, ErrorCode: &code}, nil
 	}
 	raw := `{"choices":[{"message":{"role":"assistant","content":"PRIVATE_INPUT_RESULT"},"finish_reason":"stop"}]}`
-	return &wire.GatewayChatResponse{Ok: true, ResponseJson: &raw}, nil
+	return &wire.GatewayChatResponse{Ok: true, ResponseJson: modelFixtureResponse(raw)}, nil
 }
 
 type typingControlFixture struct {

@@ -75,7 +75,7 @@ func (s *Service) call(ctx context.Context, owner, id, session, run, raw string)
 	if e != nil {
 		return failed(api.Err(503, "credential_unavailable", "Saved model credential could not be decrypted"))
 	}
-	ctx, cancel := context.WithTimeout(ctx, 50*time.Second)
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	index := id + "/" + run
 	s.mu.Lock()

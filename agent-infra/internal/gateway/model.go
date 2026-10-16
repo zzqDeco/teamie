@@ -98,9 +98,9 @@ func (p Provider) nativeModel(ctx context.Context, c Config, key, raw string, st
 		client = NewHTTPClient()
 	}
 	httpClient := *client
-	if streaming {
-		httpClient.Timeout = 0
-	}
+	// Both generation modes follow the owning turn's cancellation, including
+	// while waiting for the provider's first response headers.
+	httpClient.Timeout = 0
 	transport := httpClient.Transport
 	if transport == nil {
 		transport = http.DefaultTransport

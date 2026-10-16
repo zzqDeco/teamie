@@ -14,6 +14,7 @@ import (
 
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/adaptor"
+	"github.com/cloudwego/hertz/pkg/common/config"
 	"github.com/cloudwego/kitex/client"
 	"github.com/cloudwego/kitex/client/callopt"
 	"teamie/backend/kitex_gen/im"
@@ -77,10 +78,15 @@ func Operations(m *http.ServeMux, ready func(context.Context) error) {
 		Write(w, 200, map[string]string{"version": BuildVersion, "sha": BuildSHA})
 	})
 }
-func Serve(addr string, handler http.Handler) {
-	h := server.Default(server.WithHostPorts(addr), server.WithMaxRequestBodySize(528384), server.WithReadTimeout(15*time.Second), server.WithWriteTimeout(6*time.Minute), server.WithSenseClientDisconnection(true))
+func Serve(addr string, handler http.Handler, options ...config.Option) {
+	newServer(addr, handler, options...).Spin()
+}
+
+func newServer(addr string, handler http.Handler, options ...config.Option) *server.Hertz {
+	defaults := []config.Option{server.WithHostPorts(addr), server.WithMaxRequestBodySize(528384), server.WithReadTimeout(15 * time.Second), server.WithWriteTimeout(6 * time.Minute), server.WithSenseClientDisconnection(true)}
+	h := server.Default(append(defaults, options...)...)
 	h.Any("/*path", adaptor.HertzHandler(handler))
-	h.Spin()
+	return h
 }
 
 type SessionValidator interface {

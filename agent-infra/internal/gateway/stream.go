@@ -95,7 +95,7 @@ func (s *Service) streamHTTP(w http.ResponseWriter, r *http.Request) {
 		terminal(api.Err(503, "credential_unavailable", "Saved model credential could not be decrypted"))
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 	index := in.AgentID + "/" + in.RunID
 	s.mu.Lock()

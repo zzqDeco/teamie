@@ -57,7 +57,7 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 		return nil, &ModelError{Code: "gateway_stream_unavailable", Retry: true}
 	}
 	body, _ := json.Marshal(map[string]string{"ownerId": m.OwnerID, "agentId": m.AgentID, "sessionId": "agent:" + m.AgentID, "runId": executionID(run), "requestJson": string(request)})
-	requestCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	requestCtx, cancel := context.WithCancel(ctx)
 	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, m.StreamURL, bytes.NewReader(body))
 	if err != nil {
 		cancel()
@@ -173,7 +173,7 @@ func safeGatewayCode(code string) string {
 	return "gateway_error"
 }
 
-var gatewayStreamHTTP = &http.Client{Transport: &http.Transport{DialContext: (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext, ResponseHeaderTimeout: 15 * time.Second, IdleConnTimeout: 30 * time.Second, TLSHandshakeTimeout: 10 * time.Second, MaxIdleConns: 8, MaxIdleConnsPerHost: 2}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+var gatewayStreamHTTP = &http.Client{Transport: &http.Transport{DialContext: (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext, IdleConnTimeout: 30 * time.Second, TLSHandshakeTimeout: 10 * time.Second, MaxIdleConns: 8, MaxIdleConnsPerHost: 2}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
 // Eino .35's Pipe has no Close hook. A private pulse source makes consumer Close
 // observable even while the HTTP producer is waiting on a silent upstream. No
