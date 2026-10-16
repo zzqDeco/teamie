@@ -18,6 +18,8 @@ Actions builds and pushes through the public endpoint. The manifest records the 
 
 Store a dedicated publisher's `ACR_PUSH_USERNAME` and `ACR_PUSH_PASSWORD` as repository Actions secrets. Grant it access only to the Teamie namespace/repositories. New ACR publishing does not use `GITHUB_TOKEN` package-write permission. Keep historical GHCR packages readable with `GITHUB_TOKEN` for compatible manual rollback; no archived image reference is rewritten.
 
+Application images retain minimal BuildKit provenance using the image exporter's `oci-artifact=false` compatibility format. Personal ACR rejects the newer OCI artifact descriptor (`application/vnd.oci.empty.v1+json`). Buildx is pinned to v0.36.1, with `BUILDX_NO_DEFAULT_OCI_ARTIFACT=1` also applying the compatible default to infrastructure mirror builds. This preserves provenance and immutable image digests without requiring a paid registry tier. See [Docker attestation storage](https://docs.docker.com/build/metadata/attestations/attestation-storage/) and [Buildx build variables](https://docs.docker.com/build/building/variables/).
+
 Create the GitHub Environment named `production`. Permit release branches `release/v*` and `main` (the latter is needed only for manual rollback). Store these secrets in it:
 
 | Secret | Value |
