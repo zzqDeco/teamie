@@ -209,7 +209,7 @@ func streamChunk(b []byte) (*schema.Message, error) {
 }
 func safeGatewayCode(code string) string {
 	switch code {
-	case "model_unconfigured", "model_disabled", "gateway_unavailable", "upstream_timeout", "upstream_error", "invalid_request", "request_too_large", "upstream_response_limit", "invalid_upstream_response", "run_cancelled":
+	case "model_unconfigured", "model_disabled", "gateway_unavailable", "upstream_unavailable", "upstream_timeout", "upstream_error", "invalid_request", "request_too_large", "upstream_response_limit", "invalid_upstream_response", "run_cancelled":
 		return code
 	}
 	return "gateway_error"
