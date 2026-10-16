@@ -284,6 +284,14 @@ textarea:disabled {
 }
 .workspace-rail {
   padding-top: max(16px, env(safe-area-inset-top));
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+.workspace-rail .rail-settings {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  flex-shrink: 0;
 }
 .workspace-buttons {
   overflow: auto;
@@ -296,52 +304,26 @@ textarea:disabled {
 .workspace-header {
   height: 66px;
   min-height: 66px;
-  padding-top: 0;
+  padding: 0 10px 0 19px;
+  gap: 4px;
 }
 .workspace-title {
+  flex: 1;
   min-width: 0;
+  width: auto;
   padding: 0;
 }
 .app-shell .workspace-title > b {
+  display: block;
   font-size: 15px;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.workspace-title > b > svg {
-  margin-left: auto;
-}
-.space-popover {
-  max-height: min(70dvh, 520px);
-  overflow: auto;
-}
-.space-popover > button,
-.space-popover > a {
-  min-height: 40px;
-  font-size: 13px;
-}
-.workspace-menu-item {
-  justify-content: space-between;
-}
-.workspace-menu-item > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .sidebar-scroll {
   min-height: 0;
   padding-top: 8px;
   overscroll-behavior: contain;
-}
-.workspace-navigation {
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 12px;
-  margin-bottom: 15px;
-}
-.workspace-navigation > a {
-  min-height: 38px;
-  font-size: 13px;
-  color: #84738f;
 }
 .app-shell .nav-section-title > span {
   font-size: 12px;
@@ -359,44 +341,6 @@ textarea:disabled {
   font-size: 12px;
   padding: 10px 13px;
   color: #9b8da6;
-}
-.app-shell .sidebar-new-chat {
-  min-height: 38px;
-  font-size: 13px;
-  color: #897398;
-}
-.sidebar-invite-button {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border: 1px solid #e2d9eb;
-  border-radius: 8px;
-  margin: 0 14px 12px;
-  min-height: 38px;
-  color: #78658e;
-  font-size: 13px;
-}
-.sidebar-invite-button:hover {
-  background: #eee7f6;
-}
-.app-shell .connection-status {
-  font-size: 11px;
-  padding-top: 6px;
-  padding-bottom: 6px;
-  color: #84738f;
-}
-.user-panel {
-  padding-bottom: max(12px, env(safe-area-inset-bottom));
-}
-.app-shell .user-profile b {
-  font-size: 13px;
-  color: #786584;
-}
-.app-shell .user-profile small {
-  font-size: 11px;
-  color: #83758e;
 }
 .app-main {
   min-height: 0;
@@ -1058,6 +1002,7 @@ textarea:disabled {
   }
   .app-navigation .workspace-rail {
     position: static;
+    z-index: auto;
     flex: 0 0 64px;
     width: 64px;
     height: 100%;
@@ -1066,6 +1011,7 @@ textarea:disabled {
   }
   .app-navigation .navigation-sidebar {
     position: relative;
+    z-index: auto;
     left: auto;
     top: auto;
     bottom: auto;
@@ -1075,7 +1021,6 @@ textarea:disabled {
     height: 100%;
     box-shadow: none;
   }
-  .workspace-rail .rail-settings,
   .workspace-rail .rail-add {
     min-width: 44px;
     min-height: 44px;
@@ -1091,18 +1036,11 @@ textarea:disabled {
     height: 64px;
     padding-top: env(safe-area-inset-top);
   }
-  .workspace-title > b {
-    gap: 8px;
-  }
   .mobile-close {
     display: inline-flex;
-    margin-left: 4px;
+    margin-left: 0;
   }
   .app-shell .conversation-link {
-    min-height: 44px;
-  }
-  .workspace-navigation > a,
-  .app-shell .sidebar-new-chat {
     min-height: 44px;
   }
   .nav-section-title {
@@ -1700,35 +1638,87 @@ textarea:disabled {
 }
 
 /* Account navigation and a shared directory for every IM participant. */
+.conversation-actions {
+  position: relative;
+  flex-shrink: 0;
+}
+.conversation-actions-trigger {
+  width: 44px;
+  height: 44px;
+  color: #84738f;
+}
+.conversation-actions-trigger:hover,
+.conversation-actions-trigger[aria-expanded="true"] {
+  background: #eee7f6;
+}
+.conversation-actions-menu {
+  position: absolute;
+  z-index: 38;
+  top: calc(100% + 4px);
+  right: 0;
+  width: 180px;
+  padding: 6px;
+  border: 1px solid #e3daec;
+  border-radius: 11px;
+  background: white;
+  box-shadow: 0 8px 28px #49395b1c;
+}
 .account-panel {
   position: relative;
-  padding: 8px 10px max(8px, env(safe-area-inset-bottom));
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
 }
 .account-trigger {
-  min-height: 48px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  height: 44px;
   width: 100%;
-  padding: 6px;
-  border-radius: 9px;
-  text-align: left;
+  padding: 4px;
+  border-radius: 13px;
 }
 .account-trigger:hover,
 .account-trigger[aria-expanded="true"] {
   background: #e9e1f2;
 }
-.account-trigger > .account-identity {
-  flex: 1;
-  min-width: 0;
+.account-trigger > .avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  font-size: 14px;
 }
-.account-trigger > svg {
-  color: #84738f;
-  flex-shrink: 0;
+.rail-connection-status {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  display: flex;
+  padding: 2px;
+  border-radius: 50%;
+  background: #ece8f3;
+}
+.rail-connection-status .status-dot {
+  width: 7px;
+  height: 7px;
+  background: #bca4cf;
+}
+.rail-connection-status.connected .status-dot {
+  background: #95ac7b;
+}
+.rail-connection-status.offline .status-dot {
+  background: #c49161;
 }
 .account-menu {
   position: absolute;
   z-index: 38;
-  left: 10px;
-  right: 10px;
-  bottom: calc(100% - 2px);
+  left: calc(100% + 8px);
+  bottom: 0;
+  width: 188px;
+  max-width: calc(100vw - 80px);
+  max-height: min(70dvh, 240px);
+  overflow: auto;
   padding: 6px;
   border: 1px solid #e3daec;
   border-radius: 11px;
@@ -1736,7 +1726,8 @@ textarea:disabled {
   box-shadow: 0 8px 28px #49395b1c;
 }
 .account-menu > a,
-.account-menu > button {
+.account-menu > button,
+.conversation-actions-menu > button {
   display: flex;
   align-items: center;
   gap: 11px;
@@ -1749,7 +1740,8 @@ textarea:disabled {
   text-align: left;
 }
 .account-menu > a:hover,
-.account-menu > button:hover {
+.account-menu > button:hover,
+.conversation-actions-menu > button:hover {
   background: #f5f0fa;
 }
 .account-menu > button {
@@ -1758,22 +1750,13 @@ textarea:disabled {
 }
 .account-trigger:focus-visible,
 .account-menu > :focus-visible,
-.workspace-navigation > a:focus-visible,
+.conversation-actions-trigger:focus-visible,
+.conversation-actions-menu > :focus-visible,
+.rail-agents:focus-visible,
 .member-directory-actions > :focus-visible,
 .platform-management-link:focus-visible {
   outline: 2px solid var(--purple);
   outline-offset: 2px;
-}
-.workspace-navigation > a {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 44px;
-  padding: 10px 12px;
-  border-radius: 7px;
-}
-.workspace-navigation > a > span {
-  flex: 1;
 }
 .members-view {
   flex: 1;

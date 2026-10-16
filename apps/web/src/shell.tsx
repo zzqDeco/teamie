@@ -10,21 +10,17 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   Bot,
-  Check,
   ChevronDown,
-  ChevronRight,
   Hash,
   Home,
   Menu,
   KeyRound,
   LoaderCircle,
-  MessageSquarePlus,
   Plus,
   Settings,
   ShieldCheck,
   UserPlus,
   Users,
-  WifiOff,
   X,
 } from "lucide-react";
 import { api } from "@teamie/api-client";
@@ -36,6 +32,7 @@ import { PlatformInvitations } from "./admin";
 import { ModelGatewaySettings } from "./model-gateway";
 import { AgentDetail, MyAgents } from "./agents";
 import { AccountMenu } from "./account-menu";
+import { ConversationActions } from "./conversation-actions";
 import { WorkspaceMembers } from "./members";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
 import { GroupMembersDialog } from "./group-members";
@@ -137,8 +134,8 @@ export function Shell() {
     agentMatch = useMatch("/app/agents/:agentId"),
     location = useLocation(),
     navigate = useNavigate();
+  const sidebarFocus = useRef({ open: false, pathname: location.pathname });
   const [dialog, setDialog] = useState<DialogKind | null>(null),
-    [spaceMenu, setSpaceMenu] = useState(false),
     [sidebar, setSidebar] = useState(false),
     [details, setDetails] = useState(false),
     [managingGroup, setManagingGroup] = useState(false),
@@ -201,12 +198,30 @@ export function Shell() {
     closeGroupManager = useCallback(() => setManagingGroup(false), []);
   useEffect(() => {
     setSidebar(false);
-    setSpaceMenu(false);
     setManagingGroup(false);
   }, [location.pathname]);
   const closeSidebar = useCallback(() => setSidebar(false), []);
   const closeDetails = useCallback(() => setDetails(false), []);
   useOverlayFocus(navigationRef, mobile && sidebar && !dialog, closeSidebar);
+  useEffect(() => {
+    const previous = sidebarFocus.current;
+    sidebarFocus.current = { open: sidebar, pathname: location.pathname };
+    if (
+      sidebar ||
+      !mobile ||
+      dialog ||
+      (!previous.open && previous.pathname === location.pathname)
+    ) return;
+    const focused = document.activeElement;
+    if (
+      focused === document.body ||
+      navigationRef.current?.contains(focused)
+    ) {
+      navigationRef.current?.parentElement
+        ?.querySelector<HTMLElement>(".app-main .mobile-menu")
+        ?.focus({ preventScroll: true });
+    }
+  }, [sidebar, mobile, dialog, location.pathname]);
   useOverlayFocus(
     membersRef,
     overlayMembers &&
@@ -235,6 +250,18 @@ export function Shell() {
     };
   }, []);
   const caps = chat.data?.capabilities || {};
+  const connectionLabel =
+    chat.connection === "connected"
+      ? "消息已连接"
+      : chat.connection === "connecting"
+        ? "正在连接…"
+        : chat.connection === "offline"
+          ? "网络已断开"
+          : "正在重新连接…";
+  function openDialog(kind: DialogKind) {
+    setSidebar(false);
+    setDialog(kind);
+  }
   async function remove() {
     if (!workspace || !removing) return;
     setBusy(true);
@@ -279,7 +306,6 @@ export function Shell() {
       );
     if (first) navigate(route(first));
     setSidebar(false);
-    setSpaceMenu(false);
   }
   if (chat.loading && !chat.data) return <Loading />;
   if (legacyDirectoryMatch)
@@ -355,25 +381,45 @@ export function Shell() {
           <IconButton
             label="创建工作空间"
             className="rail-add"
-            onClick={() => setDialog("workspace")}
+            onClick={() => openDialog("workspace")}
           >
             <Plus size={23} />
           </IconButton>
           <span className="rail-spacer" />
+          <Link
+            to="/app/agents"
+            className={`rail-settings rail-agents ${isAgentsPage ? "selected" : ""}`}
+            title="个人 Agent"
+            aria-label="个人 Agent"
+            aria-current={isAgentsPage ? "page" : undefined}
+            onClick={closeSidebar}
+          >
+            <Bot size={22} aria-hidden="true" />
+          </Link>
+          <AccountMenu
+            user={user!}
+            busy={busy}
+            active={!mobile || sidebar}
+            connection={chat.connection}
+            connectionLabel={connectionLabel}
+            onSignOut={() => void signOut()}
+            onNavigate={closeSidebar}
+          />
         </aside>
         <aside className="navigation-sidebar">
           <div className="workspace-header">
-            <button
-              className="workspace-title"
-              onClick={() => setSpaceMenu(!spaceMenu)}
-              aria-expanded={spaceMenu}
-              aria-label={`切换团队：${workspace?.name || "我的 Teamie"}`}
-            >
-              <b>
-                {workspace?.name || "我的 Teamie"}
-                <ChevronDown size={17} />
-              </b>
-            </button>
+            <div className="workspace-title" title={workspace?.name}>
+              <b>{workspace?.name || "我的 Teamie"}</b>
+            </div>
+            {workspace && (caps["im.dm.create"] || caps["im.group.create"]) && (
+              <ConversationActions
+                key={workspace.id}
+                active={(!mobile || sidebar) && !dialog}
+                canDirect={!!caps["im.dm.create"]}
+                canGroup={!!caps["im.group.create"]}
+                onSelect={openDialog}
+              />
+            )}
             <IconButton
               className="mobile-close"
               label="关闭频道列表"
@@ -381,67 +427,8 @@ export function Shell() {
             >
               <X size={18} />
             </IconButton>
-            {spaceMenu && (
-              <>
-                <button
-                  className="popover-dismiss"
-                  aria-label="关闭菜单"
-                  onClick={() => setSpaceMenu(false)}
-                />
-                <div className="space-popover">
-                  <span>切换团队</span>
-                  {chat.data?.workspaces.map((space) => (
-                    <button
-                      key={space.id}
-                      className="workspace-menu-item"
-                      onClick={() => {
-                        selectWorkspace(space);
-                        setSpaceMenu(false);
-                      }}
-                    >
-                      <span>{space.name}</span>
-                      {space.id === workspace?.id && <Check size={14} />}
-                    </button>
-                  ))}
-                  {workspace && owner && (
-                    <button
-                      onClick={() => {
-                        setDialog("invite");
-                        setSpaceMenu(false);
-                      }}
-                    >
-                      <UserPlus size={16} />
-                      邀请伙伴
-                    </button>
-                  )}
-                  <button
-                    onClick={() => {
-                      setDialog("workspace");
-                      setSpaceMenu(false);
-                    }}
-                  >
-                    <Plus size={16} />
-                    创建工作空间
-                  </button>
-                </div>
-              </>
-            )}
           </div>
           <div className="sidebar-scroll">
-            {workspace && (
-              <nav className="workspace-navigation" aria-label="团队">
-                <Link
-                  to={`/app/w/${workspace.id}/members`}
-                  className={isDirectoryPage ? "active" : ""}
-                  aria-current={isDirectoryPage ? "page" : undefined}
-                  onClick={() => setSidebar(false)}
-                >
-                  <Users size={17} />
-                  <span>成员</span>
-                  <ChevronRight size={14} />
-                </Link>
-              </nav>
-            )}
             <div className="nav-section">
               <div className="nav-section-title">
                 <span>
@@ -450,7 +437,7 @@ export function Shell() {
                 {workspace && owner && caps["im.channel.create"] && (
                   <IconButton
                     label="创建频道"
-                    onClick={() => setDialog("channel")}
+                    onClick={() => openDialog("channel")}
                   >
                     <Plus size={15} />
                   </IconButton>
@@ -476,17 +463,6 @@ export function Shell() {
                 <span>
                   <ChevronDown size={12} /> 私信与小组
                 </span>
-                {workspace &&
-                  (caps["im.dm.create"] || caps["im.group.create"]) && (
-                    <IconButton
-                      label="开始新对话"
-                      onClick={() =>
-                        setDialog(caps["im.dm.create"] ? "direct" : "group")
-                      }
-                    >
-                      <Plus size={15} />
-                    </IconButton>
-                  )}
               </div>
               {direct.map((c) => (
                 <ConversationItem
@@ -502,52 +478,8 @@ export function Shell() {
                   {workspace ? "暂无对话" : "暂无对话"}
                 </div>
               )}
-              {workspace && caps["im.dm.create"] && (
-                <button
-                  className="sidebar-new-chat"
-                  onClick={() => setDialog("direct")}
-                >
-                  <MessageSquarePlus size={15} />
-                  发起私聊
-                </button>
-              )}
-              {workspace && caps["im.group.create"] && (
-                <button
-                  className="sidebar-new-chat"
-                  onClick={() => setDialog("group")}
-                >
-                  <Users size={15} />
-                  创建小组
-                </button>
-              )}
             </div>
           </div>
-          {workspace && owner && (
-            <button
-              className="sidebar-invite-button"
-              onClick={() => setDialog("invite")}
-            >
-              <UserPlus size={16} />
-              邀请成员
-            </button>
-          )}
-          <div className={`connection-status ${chat.connection}`}>
-            <span className="status-dot" />
-            {chat.connection === "connected"
-              ? "消息已连接"
-              : chat.connection === "connecting"
-                ? "正在连接…"
-                : chat.connection === "offline"
-                  ? "网络已断开"
-                  : "正在重新连接…"}
-            {chat.connection === "offline" && <WifiOff size={12} />}
-          </div>
-          <AccountMenu
-            user={user!}
-            busy={busy}
-            onSignOut={() => void signOut()}
-            onNavigate={() => setSidebar(false)}
-          />
         </aside>
       </div>
       {sidebar && mobile && (
@@ -680,7 +612,7 @@ export function Shell() {
           />
         ) : chat.data?.workspaces.length === 0 ? (
           <Welcome
-            onCreate={() => setDialog("workspace")}
+            onCreate={() => openDialog("workspace")}
             userName={user!.displayName}
             onMenu={() => setSidebar(true)}
           />
