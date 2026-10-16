@@ -19,7 +19,7 @@ flowchart LR
   Runtime[Eino runtime] -->|Definitions / safe status RPC| CP
   Runtime -->|Own participant HTTP| Chat
   Runtime -->|Scoped token RPC| Identity
-  Runtime -->|Model RPC / private stream HTTP| Gateway
+  Runtime -->|Private model HTTP / control RPC| Gateway
   Runtime -->|Execution RPC| Sandbox[Sandbox service]
   Sandbox --> Child[Isolated execution child]
   Identity --> IDB[(Identity DB)]
@@ -36,16 +36,16 @@ flowchart LR
 | Service | Owns |
 | --- | --- |
 | Identity | Human credentials/platform roles, registration invitations, profiles, sessions/CSRF; generic machine principals and scoped expiring credentials |
-| Chat | Workspaces, current normal memberships, conversations, durable messages/read/sync/outbox; generic delegated grants and moderation |
+| Chat | Workspaces, current normal memberships, conversations, durable messages/files/read/sync/outbox; generic delegated grants and moderation |
 | Realtime | Connections, heartbeats, disposable typing and sync hints; authorization checked through RPC |
 | Agent Control Plane | Human-owned Agent profiles, selected visibility/enabled state, reconciliation revisions and safe runtime status |
 | Agent runtime | Durable inbox/cursor, one Session per Agent, leases/fences, TurnLoop, checkpoints, compaction and model/tool receipts |
 | Model gateway | Platform-admin provider/model policy, encrypted secrets and upstream invocation |
 | Sandbox | Protected per-Agent filesystem workspaces, execution receipts, cancellation and isolated child containers |
 
-Five persistent services own separate PostgreSQL databases and application roles: Identity, Chat, Agent Control Plane, runtime and gateway. Sandbox owns protected filesystem data; Realtime has no durable database. Sharing a PostgreSQL instance does not authorize foreign-table reads. Cross-service authority is expressed through authenticated Kitex RPC or the ordinary IM participant HTTP API.
+Five persistent services own separate PostgreSQL databases and application roles: Identity, Chat, Agent Control Plane, runtime and gateway. Sandbox owns protected filesystem data; Realtime has no durable database. Sharing a PostgreSQL instance does not authorize foreign-table reads. Cross-service authority is expressed through authenticated Kitex control RPC, private model HTTP or the ordinary IM participant HTTP API.
 
-Only Caddy publishes host HTTP/HTTPS. Static web and public API paths are routed through it; backend HTTP/RPC, PostgreSQL, Redis, gateway runtime RPC and Sandbox RPC remain private. Browser requests are same-origin. CP/worker credentials stay out of browser bundles and Sandbox children.
+Only Caddy publishes host HTTP/HTTPS. Static web and public API paths are routed through it; backend HTTP/RPC, PostgreSQL, Redis, gateway model HTTP/control RPC and Sandbox RPC remain private. Browser requests are same-origin. CP/worker credentials stay out of browser bundles and Sandbox children.
 
 Identity serializes first-account initialization: the configured bootstrap invitation creates exactly one first platform admin. `BOOTSTRAP_INVITE_CODE` defaults to `teamie-bootstrap`; after any account exists it cannot admit another account. An admin creates a separate random ordinary invitation for each additional successful registration. Hashed codes expire in seven days, support revocation, and are consumed in the account/session transaction. Platform and workspace roles remain independent.
 
@@ -57,6 +57,7 @@ Identity serializes first-account initialization: the configured bootstrap invit
 4. Redis and WebSocket carry replaceable hints. Clients drain paginated durable HTTP sync from their last applied cursor and reconcile by message/event ID. Periodic sync covers lost hints; no exactly-once transport claim is made.
 5. Current workspace and explicit private conversation membership authorize history, sends, reads, sync and typing. Revoked old payloads are filtered while the cursor advances. Group additions/removals use ordinary participant management, regardless of kind.
 6. Retraction leaves a redacted tombstone in history, point lookup and historical sync. Read cursors only advance. Disabled write features preserve persisted reads.
+7. Files use current conversation permissions and Chat-owned binary storage. Publishing a message atomically consumes its pending file IDs; ordered IDs participate in retry identity. Retraction removes file access. Agents explicitly import authorized files into their own Sandbox through a tool; no file content enters the model automatically. See the [attachment contract](../contracts/attachments.openapi.yaml).
 
 Agent visibility creates ordinary membership selected from its human owner's current workspaces. Public channels retain their existing workspace scope; direct/private group conversations require explicit membership. Owner/grantor loss cascades delegated revocation, and background reconciliation never recreates a moderator-removed membership. Neither platform admin nor Agent ownership bypasses IM privacy.
 
@@ -72,15 +73,15 @@ The initial runtime process has **one global foreground model slot** and a durab
 
 The gateway uses the official CloudWeGo `agenticopenai.NewChatModel` extension for its existing OpenAI-compatible Chat Completions endpoint. Runtime uses a native typed Agentic ChatModelAgent, Session, TurnLoop and middleware; ordered reasoning, text and tool blocks survive model receipts and Session persistence. Its authenticated private transport carries native messages and common model options, while the gateway owns provider serialization, administrator-selected policy and encrypted credentials. [Model gateway architecture](model-gateway.md) describes dependency compatibility, transport guards and the read-compatible format cutover.
 
-Production starts with an unconfigured model gateway at the user's request. Healthy readiness does not imply a configured model or real-provider acceptance. Agents wait with durable inputs until a platform admin configures/enables the gateway. CI uses explicit protocol fixtures; live provider verification remains a separate gate.
+Fresh installations start with an unconfigured model gateway. Healthy readiness does not imply a configured model or real-provider acceptance. Agents wait with durable inputs until a platform admin configures/enables the gateway. CI uses explicit protocol fixtures; live provider verification remains a separate gate.
 
 ## Flags, infrastructure and release
 
-Versioned backend flag files carry a revision. Effective capabilities intersect implemented behavior and enabled keys; the backend independently checks authorization. Agent capabilities are false when absent from an older file. `agents-v2` adds `agents.runtime.v3` and `agents.tasks.execute` for new work/submissions; reads and cancellation remain available when writes are disabled. Conversation history supports authorized text queries and sequence context. Attachments, reactions, threads and a global search interface remain unavailable.
+Versioned backend flag files carry a revision. Effective capabilities intersect implemented behavior and enabled keys; the backend independently checks authorization. Agent capabilities are false when absent from an older file. `agents-v2` adds `agents.runtime.v3` and `agents.tasks.execute` for new work/submissions; reads and cancellation remain available when writes are disabled. Conversation history supports authorized text queries and sequence context. `im-attachments-v1` enables `im.attachments.upload`; disabling it preserves authorized file reads. Reactions, threads and a global search interface remain unavailable.
 
-One Debian x86_64 host runs the Compose services. The release contains twelve immutable GHCR images: web, Identity, Chat, Realtime, Control Plane, runtime, gateway, Sandbox, execution-runner, Caddy, PostgreSQL and Redis. Execution-runner is an on-demand child image. Hosted CI builds images; the production host pulls digest-pinned artifacts. Persistent volumes preserve databases, workspaces, receipts, certificates and backups.
+One Debian x86_64 host runs the Compose services. The release contains twelve immutable Alibaba Cloud Container Registry images: web, Identity, Chat, Realtime, Control Plane, runtime, gateway, Sandbox, execution-runner, Caddy, PostgreSQL and Redis. Execution-runner is an on-demand child image. Hosted CI pushes to the ACR public endpoint; the production host pulls digest-pinned artifacts through the same instance's VPC endpoint. Persistent volumes preserve databases, workspaces, receipts, certificates and backups.
 
-Only `production` is deployed; disposable CI databases do not constitute a second environment. `main` is the ongoing trunk. Published `release/vx.x.x` branches/tags are immutable permanent archives; fixes require a new version. Forward migrations preserve existing accounts/messages. The v0.3 schema vector is Identity 2, Chat 2, Control Plane 1, Runtime 2, Gateway 2. Cross-schema image rollback is rejected; verify a pre-upgrade backup/restore path before migration.
+Only `production` is deployed; disposable CI databases do not constitute a second environment. `main` is the ongoing trunk. Published `release/vx.x.x` branches/tags are immutable permanent archives; fixes require a new version. Forward migrations preserve existing accounts/messages. The v0.3.5 schema vector is Identity 2, Chat 3, Control Plane 1, Runtime 2, Gateway 2. Cross-schema image rollback is rejected; verify a pre-upgrade backup/restore path before migration.
 
 The public IP uses the configured Let's Encrypt ACME `shortlived` issuer and `TLS_SERVER_NAME`/`default_sni` for non-SNI clients. Public trusted HTTPS and renewal are separate acceptance gates. Internal-CA or disabled-verification checks do not establish public trust.
 
