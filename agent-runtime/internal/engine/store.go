@@ -36,6 +36,7 @@ type Input struct {
 	SenderName     string `json:"senderName"`
 	SenderKind     string `json:"senderKind"`
 	Body           string `json:"body"`
+	ReplyToID      string `json:"replyToId,omitempty"`
 	Seq            int64  `json:"seq"`
 	CreatedAt      string `json:"createdAt"`
 	Kind           string `json:"kind,omitempty"`
