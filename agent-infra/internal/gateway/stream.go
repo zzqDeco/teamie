@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"teamie/agent-infra/internal/api"
@@ -33,23 +31,8 @@ func streamError(ctx context.Context, fallback string) error {
 }
 
 func (s *Service) streamHTTP(w http.ResponseWriter, r *http.Request) {
-	if !api.EqualSecret(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), s.Token) || !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
-		api.Fail(w, api.Err(401, "unauthorized", "Invalid service credential"))
-		return
-	}
-	var in struct {
-		OwnerID     string `json:"ownerId"`
-		AgentID     string `json:"agentId"`
-		SessionID   string `json:"sessionId"`
-		RunID       string `json:"runId"`
-		RequestJSON string `json:"requestJson"`
-	}
-	// The OpenAI request is itself a JSON string and may double in size when encoded.
-	r.Body = http.MaxBytesReader(w, r.Body, MaxRequestBytes*2+4096)
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if dec.Decode(&in) != nil || dec.Decode(new(any)) != io.EOF || !validID(in.OwnerID) || !validID(in.AgentID) || !validID(in.SessionID) || !validID(in.RunID) {
-		api.Fail(w, api.Err(400, "invalid_request", "Invalid stream request"))
+	in, ok := s.decodeHTTPCall(w, r)
+	if !ok {
 		return
 	}
 	w.Header().Set("Content-Type", "application/x-ndjson")

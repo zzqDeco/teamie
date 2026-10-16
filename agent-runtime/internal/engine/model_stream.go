@@ -16,6 +16,7 @@ import (
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 	"github.com/jackc/pgx/v5"
+	"teamie/agent-protocol/modeltransport"
 )
 
 func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessage, options ...model.Option) (*schema.StreamReader[*schema.AgenticMessage], error) {
@@ -56,7 +57,7 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 	if m.StreamURL == "" {
 		return nil, &ModelError{Code: "gateway_stream_unavailable", Retry: true}
 	}
-	body, _ := json.Marshal(map[string]string{"ownerId": m.OwnerID, "agentId": m.AgentID, "sessionId": "agent:" + m.AgentID, "runId": executionID(run), "requestJson": string(request)})
+	body, _ := json.Marshal(modeltransport.CallRequest{OwnerID: m.OwnerID, AgentID: m.AgentID, SessionID: "agent:" + m.AgentID, RunID: executionID(run), RequestJSON: string(request)})
 	requestCtx, cancel := context.WithCancel(ctx)
 	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, m.StreamURL, bytes.NewReader(body))
 	if err != nil {
@@ -173,7 +174,7 @@ func safeGatewayCode(code string) string {
 	return "gateway_error"
 }
 
-var gatewayStreamHTTP = &http.Client{Transport: &http.Transport{DialContext: (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext, IdleConnTimeout: 30 * time.Second, TLSHandshakeTimeout: 10 * time.Second, MaxIdleConns: 8, MaxIdleConnsPerHost: 2}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+var gatewayStreamHTTP = &http.Client{Transport: &http.Transport{Proxy: nil, DialContext: (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext, IdleConnTimeout: 30 * time.Second, TLSHandshakeTimeout: 10 * time.Second, MaxIdleConns: 8, MaxIdleConnsPerHost: 2}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
 // Eino .35's Pipe has no Close hook. A private pulse source makes consumer Close
 // observable even while the HTTP producer is waiting on a silent upstream. No
