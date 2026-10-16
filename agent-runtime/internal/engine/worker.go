@@ -787,7 +787,17 @@ func (e *Engine) ingest(ctx context.Context, imc *IM, l *Lease) error {
 	}
 	return e.Store.Ingest(ctx, l, page.Cursor, inputs)
 }
-func finalizeSummary(_ context.Context, original []*schema.AgenticMessage, summary *schema.AgenticMessage) ([]*schema.AgenticMessage, error) {
+func finalizeSummary(ctx context.Context, original []*schema.AgenticMessage, summary *schema.AgenticMessage) ([]*schema.AgenticMessage, error) {
+	return finalizeSummaryWithSourceFormat(ctx, original, summary, false)
+}
+
+// Only runs pinned to the v0.3.4 tool profile use the pre-attachment source
+// representation. Native-only runs must keep their v0.3.5 request bytes.
+func finalizeV034Summary(ctx context.Context, original []*schema.AgenticMessage, summary *schema.AgenticMessage) ([]*schema.AgenticMessage, error) {
+	return finalizeSummaryWithSourceFormat(ctx, original, summary, true)
+}
+
+func finalizeSummaryWithSourceFormat(_ context.Context, original []*schema.AgenticMessage, summary *schema.AgenticMessage, omitEmptyAttachmentIDs bool) ([]*schema.AgenticMessage, error) {
 	if summary == nil || agenticText(summary) == "" || len(agenticText(summary)) > 32768 || hasToolCalls(summary) {
 		return nil, errors.New("invalid_context_summary")
 	}
@@ -807,21 +817,32 @@ func finalizeSummary(_ context.Context, original []*schema.AgenticMessage, summa
 		}
 		// Retain bounded attachment references through repeated compaction;
 		// metadata/content can be retrieved explicitly from the source message.
+		retained := []string{}
 		switch ids := source["attachmentIds"].(type) {
 		case []string:
-			if len(ids) <= 8 {
-				clean["attachmentIds"] = ids
+			if !omitEmptyAttachmentIDs {
+				// Preserve native-only v0.3.5 receipts, including their empty
+				// arrays and original fresh-source representation.
+				if len(ids) <= 8 {
+					clean["attachmentIds"] = ids
+				}
+				break
+			}
+			for _, id := range ids {
+				if validUUID(id) && len(retained) < 8 {
+					retained = append(retained, id)
+				}
 			}
 		case []any:
-			retained := []string{}
 			for _, value := range ids {
 				if id, ok := value.(string); ok && validUUID(id) && len(retained) < 8 {
 					retained = append(retained, id)
 				}
 			}
-			if len(retained) > 0 {
-				clean["attachmentIds"] = retained
-			}
+		}
+		// The v0.3.4 format and parsed previous summaries omit empty references.
+		if len(retained) > 0 {
+			clean["attachmentIds"] = retained
 		}
 		sources = append(sources, clean)
 	}
@@ -844,11 +865,15 @@ func finalizeSummary(_ context.Context, original []*schema.AgenticMessage, summa
 		}
 		var in Input
 		if json.Unmarshal([]byte(strings.TrimPrefix(agenticText(message), "TEAMIE_NEW_MESSAGE ")), &in) == nil {
+			source := map[string]any{"eventId": in.EventID, "workspaceId": in.WorkspaceID, "conversationId": in.ConversationID, "messageId": in.MessageID, "replyToId": in.ReplyToID, "senderId": in.SenderID, "senderKind": in.SenderKind}
 			attachmentIDs := []string{}
 			for _, a := range in.Attachments {
 				attachmentIDs = append(attachmentIDs, a.ID)
 			}
-			appendSource(map[string]any{"eventId": in.EventID, "workspaceId": in.WorkspaceID, "conversationId": in.ConversationID, "messageId": in.MessageID, "replyToId": in.ReplyToID, "senderId": in.SenderID, "senderKind": in.SenderKind, "attachmentIds": attachmentIDs})
+			if !omitEmptyAttachmentIDs || len(attachmentIDs) > 0 {
+				source["attachmentIds"] = attachmentIDs
+			}
+			appendSource(source)
 		}
 	}
 	// Full provenance remains in durable inbox/session audit; the working
