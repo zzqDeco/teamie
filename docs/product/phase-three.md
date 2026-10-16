@@ -10,14 +10,14 @@ The v0.3 contract keeps a single writer for each Agent's global Session and one 
 - IM history search applies the query before pagination and supports context around a sequence number. All reads and sends use ordinary current IM authorization.
 - Long-running work is tracked through native background tasks. Sandbox execution and persisted output survive a disconnected runtime transport when the actual execution remains recoverable. Unknown outcomes never automatically rerun shell effects.
 - Completion notifications are durably routed back into the input queue so an Agent can continue after the human leaves. Ordinary assistant text stays private; only explicit IM tools publish messages.
-- Owners can inspect metadata-only runs, tasks and live activity, and request cancellation/retry through current human authentication and CSRF checks. Ownership grants no access to foreign conversation content.
+- Owners manage basic profiles, selected teams and enabled configuration. Since v0.3.2, runs, tasks, live activity and operational controls remain private, and former browser runtime routes return 404 for owners and administrators alike.
 - UI copy is concise. Mobile navigation, dialogs and composer sizing are functional at narrow widths; desktop retains the IM workspace/conversation/message layout.
 
 ## Feature and deployment contract
 
 Default flag revision is `agents-v2`. `agents.runtime.v3` controls new runtime work; `agents.tasks.execute` controls new task submission. Turning a write flag off cannot hide existing records or disable the ability to stop already-running work. Only production is deployed; disposable local/CI fixtures are verification processes.
 
-The runtime exposes authenticated Kitex RPC on private port 8885. Agent Control proxies owner HTTP routes and SSE; IM does not depend on runtime availability. Gateway adds an authenticated private model stream endpoint on existing port 8086. Runtime and Gateway migrations advance to schema 2, preserving existing data. The schema vector is `2/2/1/2/2` for Identity/Chat/Control/Runtime/Gateway.
+The runtime exposes authenticated Kitex RPC on private port 8885 for internal service functionality. Agent Control does not proxy browser runtime routes or SSE; IM does not depend on runtime availability. Gateway adds an authenticated private model stream endpoint on existing port 8086. Runtime and Gateway migrations advance to schema 2, preserving existing data. The schema vector is `2/2/1/2/2` for Identity/Chat/Control/Runtime/Gateway.
 
 Release uses exact checked main, a new permanent `release/v0.3.0` branch and tag. Existing release branches/tags remain immutable. Database migrations are forward-only; an image-only rollback to v0.2 is incompatible with the new schema vector.
 
