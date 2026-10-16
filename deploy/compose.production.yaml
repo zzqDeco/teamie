@@ -1,0 +1,213 @@
+name: teamie
+
+x-app: &app
+  restart: unless-stopped
+  init: true
+  read_only: true
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  tmpfs: ["/tmp:size=16m,mode=1777"]
+  networks: [private]
+  pids_limit: 128
+  logging: &logging
+    driver: json-file
+    options: {max-size: 10m, max-file: "3"}
+
+services:
+  caddy:
+    image: ${CADDY_IMAGE:?manifest image required}
+    restart: unless-stopped
+    read_only: true
+    mem_limit: 64m
+    memswap_limit: 64m
+    pids_limit: 64
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?HTTPS site address required}
+      GOMEMLIMIT: 48MiB
+    ports: ["80:80", "443:443", "443:443/udp"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${TLS_CONFIG_FILE:-/srv/teamie/tls/issuer.caddy}:/etc/caddy/issuer.caddy:ro
+      - ${TLS_CERT_DIR:-/srv/teamie/tls/certs}:/run/tls:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    tmpfs: ["/tmp:size=8m,mode=1777"]
+    networks: [edge, private]
+    logging: *logging
+    depends_on:
+      identity: {condition: service_healthy}
+      chat: {condition: service_healthy}
+      realtime: {condition: service_healthy}
+      web: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8080/healthz]
+      interval: 15s
+      timeout: 3s
+      retries: 6
+      start_period: 20s
+
+  web:
+    image: ${WEB_IMAGE:?manifest image required}
+    restart: unless-stopped
+    read_only: true
+    mem_limit: 32m
+    memswap_limit: 32m
+    pids_limit: 64
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, NET_BIND_SERVICE]
+    tmpfs:
+      - /var/cache/nginx:size=8m,mode=0755
+      - /var/run:size=1m,mode=0755
+      - /tmp:size=8m,mode=1777
+    networks: [private]
+    logging: *logging
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1/healthz]
+      interval: 15s
+      timeout: 3s
+      retries: 6
+
+  identity:
+    <<: *app
+    image: ${IDENTITY_IMAGE:?manifest image required}
+    mem_limit: 96m
+    memswap_limit: 96m
+    environment:
+      HTTP_ADDR: :8081
+      RPC_ADDR: :8881
+      DATABASE_URL: ${IDENTITY_DATABASE_URL:?identity database required}
+      REDIS_ADDR: redis:6379
+      APP_ORIGIN: ${APP_ORIGIN:?HTTPS origin required}
+      COOKIE_SECURE: "true"
+      REGISTRATION_CODE: ${REGISTRATION_CODE:?registration code required}
+      FEATURE_FLAGS_FILE: /etc/teamie/feature-flags.json
+      GOMEMLIMIT: 72MiB
+      GOMAXPROCS: "1"
+    volumes:
+      - ${FEATURE_FLAGS_PATH:-/srv/teamie/config/feature-flags.json}:/etc/teamie/feature-flags.json:ro
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8081/readyz]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
+
+  chat:
+    <<: *app
+    image: ${CHAT_IMAGE:?manifest image required}
+    mem_limit: 192m
+    memswap_limit: 192m
+    environment:
+      HTTP_ADDR: :8082
+      RPC_ADDR: :8882
+      IDENTITY_RPC_ADDR: identity:8881
+      DATABASE_URL: ${CHAT_DATABASE_URL:?chat database required}
+      REDIS_ADDR: redis:6379
+      APP_ORIGIN: ${APP_ORIGIN:?HTTPS origin required}
+      COOKIE_SECURE: "true"
+      FEATURE_FLAGS_FILE: /etc/teamie/feature-flags.json
+      GOMEMLIMIT: 144MiB
+      GOMAXPROCS: "1"
+    volumes:
+      - ${FEATURE_FLAGS_PATH:-/srv/teamie/config/feature-flags.json}:/etc/teamie/feature-flags.json:ro
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      identity: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8082/readyz]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
+
+  realtime:
+    <<: *app
+    image: ${REALTIME_IMAGE:?manifest image required}
+    mem_limit: 128m
+    memswap_limit: 128m
+    environment:
+      HTTP_ADDR: :8083
+      IDENTITY_RPC_ADDR: identity:8881
+      CHAT_RPC_ADDR: chat:8882
+      REDIS_ADDR: redis:6379
+      APP_ORIGIN: ${APP_ORIGIN:?HTTPS origin required}
+      COOKIE_SECURE: "true"
+      FEATURE_FLAGS_FILE: /etc/teamie/feature-flags.json
+      GOMEMLIMIT: 96MiB
+      GOMAXPROCS: "1"
+    volumes:
+      - ${FEATURE_FLAGS_PATH:-/srv/teamie/config/feature-flags.json}:/etc/teamie/feature-flags.json:ro
+    depends_on:
+      identity: {condition: service_healthy}
+      chat: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8083/readyz]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
+
+  postgres:
+    image: ${POSTGRES_IMAGE:?manifest image required}
+    restart: unless-stopped
+    mem_limit: 384m
+    memswap_limit: 384m
+    shm_size: 64m
+    pids_limit: 128
+    security_opt: [no-new-privileges:true]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?database admin password required}
+      POSTGRES_IDENTITY_PASSWORD: ${POSTGRES_IDENTITY_PASSWORD:?identity password required}
+      POSTGRES_CHAT_PASSWORD: ${POSTGRES_CHAT_PASSWORD:?chat password required}
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    command: [postgres, -c, shared_buffers=64MB, -c, work_mem=2MB, -c, maintenance_work_mem=32MB, -c, max_connections=40]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/01-databases.sh:/docker-entrypoint-initdb.d/01-databases.sh:ro
+    networks: [private]
+    logging: *logging
+    healthcheck:
+      test: [CMD, pg_isready, -h, 127.0.0.1, -U, postgres, -d, postgres]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
+
+  redis:
+    image: ${REDIS_IMAGE:?manifest image required}
+    restart: unless-stopped
+    read_only: true
+    mem_limit: 64m
+    memswap_limit: 64m
+    pids_limit: 32
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    user: redis
+    command: [redis-server, --save, "", --appendonly, "no", --maxmemory, 40mb, --maxmemory-policy, allkeys-lru]
+    tmpfs: ["/data:size=1m,mode=1777"]
+    networks: [private]
+    logging: *logging
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+networks:
+  edge: {}
+  private: {internal: true}
+volumes:
+  postgres_data: {}
+  caddy_data: {}
+  caddy_config: {}

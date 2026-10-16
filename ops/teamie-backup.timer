@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily Teamie local PostgreSQL backup
+
+[Timer]
+OnCalendar=*-*-* 18:15:00 UTC
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target

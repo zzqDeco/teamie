@@ -14,4 +14,6 @@ secrets/
 .runtime/
 .cache/
 backend/bin/
+__pycache__/
+*.pyc
 release-manifest.json

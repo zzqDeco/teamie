@@ -1,0 +1,70 @@
+# Production delivery
+
+There is one deployed environment, **production**. Hosted CI uses disposable PostgreSQL/Redis containers and local service processes; it does not create another deployment. `main` is the only branch for ongoing work. Every `release/vMAJOR.MINOR.PATCH` branch and `vMAJOR.MINOR.PATCH` tag is a permanent archive: never append commits, force-push, rename, reuse, or delete it. A correction requires a new version cut from checked `main`.
+
+## Repository setup
+
+Enable Actions with read/write package publishing, and allow the repository's `GITHUB_TOKEN` to read all seven repository-linked private GHCR packages. Release jobs build `teamie-identity`, `teamie-chat`, `teamie-realtime`, and `teamie-web`; hosted runners also mirror Caddy, PostgreSQL 17, and Redis 7.4 to `teamie-caddy`, `teamie-postgres`, and `teamie-redis`. The production host therefore only contacts GHCR when pulling images. Every manifest records the resolved digest, including infrastructure images. Infrastructure patch tags are resolved anew when creating a release; no mutable tag is used by Compose.
+
+Create the GitHub Environment named `production`. Permit release branches `release/v*` and `main` (the latter is needed only for manual rollback). Store these four secrets in it:
+
+| Secret | Value |
+| --- | --- |
+| `PRODUCTION_SSH_HOST` | Production IP/hostname |
+| `PRODUCTION_SSH_USER` | `teamie-deploy` |
+| `PRODUCTION_SSH_KEY` | Dedicated SSH private key |
+| `PRODUCTION_SSH_KNOWN_HOSTS` | Host key pinned after verification through a trusted channel |
+
+Do not populate known_hosts from an unverified network scan during deployment. No persistent Actions runner or long-lived GHCR pull token is needed. The production job sends its short-lived `GITHUB_TOKEN` through SSH stdin; the host logs in with `--password-stdin`, pulls all digests using a private temporary `DOCKER_CONFIG`, and removes it before starting services. If a GitHub plan cannot create Environments, the same four repository secrets can be used after removing only the workflow `environment` binding; retain the single serialized production job and manual branch guard.
+
+Configure server-side rules to prohibit updates, deletion and force-push of `release/v*`, prohibit tag updates/deletion for `v*`, and require passing CI plus review for `main` where the account plan supports these rules. The current private GitHub Free repository does **not** have effective server-side branch/tag protection: the attempted API configuration was denied by plan restrictions. The release workflow rejects non-creation pushes and checks archive SHA before deployment and publication, but an owner with repository write access can still mutate Git refs. This workflow guard is not server-enforced immutability. Never enable automatic release-branch deletion.
+
+## Host provisioning
+
+The operator runs `ops/bootstrap.sh` as root on Debian 13 x86_64. It installs Docker Engine/Compose from Docker's official signed APT repository and creates the dedicated delivery user and private directories. It preserves existing authorized keys and refuses conflicting unofficial container packages. Add only the delivery **public** key to `/home/teamie-deploy/.ssh/authorized_keys`; restrict that entry with `restrict` (no port forwarding, agent forwarding, X11 forwarding or PTY). Docker group membership gives host-level control and is reserved for this delivery account. Only SSH and Caddy's TCP 80/443 and optional UDP 443 should be allowed through the cloud security group. PostgreSQL, Redis, RPC and application ports remain on the private container network.
+
+Create `/srv/teamie/config/production.env` from `deploy/production.env.example`, owned by `teamie-deploy`, mode `0600`. Supply four independent random URL-safe values for the PostgreSQL admin, the Identity role, the Chat role and the deployment registration code. The corresponding service URLs must use exactly `teamie_identity` and `teamie_chat` database/role names; do not use the administrator role in an application. Initialization creates both databases only on a new volume. Changing the environment later does not rotate an existing database password; rotate the role and its protected URL together in a reviewed operation.
+
+Set `SITE_ADDRESS` and `APP_ORIGIN` to the same HTTPS origin without a trailing slash, initially `https://PUBLIC_IP`. Production Compose always sets `COOKIE_SECURE=true`. The deployment registration code is separate from per-workspace invitation codes. User passwords must be 12 characters or more and at most 72 UTF-8 bytes with the current bcrypt implementation.
+
+Copy `deploy/feature-flags.default.json` to `/srv/teamie/config/feature-flags.json` (mode `0644` so non-root service users can read the bind mount). Backend capabilities are the intersection of implementation, flag and permission. Persisted messages and conversations remain readable when a write flag is disabled. To change flags, update this host file atomically, change its `revision`, and restart Identity, Chat and Realtime using the current protected Compose/image configuration. Audit the change without copying secrets to logs. Flags are not stored in images; every successful deployment records the actual runtime flag hash and revision in its private deployment record.
+
+For the public IP, copy `deploy/tls/acme-ip.caddy` to `/srv/teamie/tls/issuer.caddy` (mode `0644`). It explicitly selects the Let's Encrypt production ACME issuer with the `shortlived` profile, avoiding Caddy's locally trusted IP default and persisting renewal state in the Caddy data volume. Both 80 and 443 must be externally reachable for validation. Caddy renews these short-lived certificates automatically; monitor certificate expiry and renewals. A deployment is not successful until ordinary certificate-verifying curl reaches the public origin. No `--insecure` option or HTTP production cookie fallback is used.
+
+Alternatively, install an externally renewed public certificate/key under `/srv/teamie/tls/certs/` (private key mode `0600`), and use `deploy/tls/certificate-files.caddy` as the host issuer snippet. Its certificate SAN must cover the public address. Restart Caddy after externally managed renewal. Never commit or bundle keys/certificates or a completed production environment file.
+
+Total container memory caps are 960 MiB: Caddy 64, web 32, Identity 96, Chat 192, Realtime 128, PostgreSQL 384, Redis 64. This leaves space for Debian, Docker and filesystem cache on the 2 GiB host. Redis is disposable, has a 40 MiB key limit and no persistence. PostgreSQL data and Caddy ACME state use named persistent volumes. Logs rotate at 10 MiB × 3 per service. Do not run `docker compose down --volumes` or indiscriminate volume/image pruning on production.
+
+## Release sequence
+
+1. Merge reviewed work into `main`; require all current-SHA CI checks: web lint/build, backend authorization/persistence tests and vet/build, disposable full HTTP/WebSocket acceptance, Linux container builds, and delivery validation.
+2. Fetch `main`, check the exact SHA and create `release/vX.Y.Z` at that SHA. Push the branch once. Keep it forever.
+3. `Release production` accepts only a newly created semantic-version branch whose SHA exactly equals current `main`. It reruns CI, builds four app images and mirrors three infrastructure images with unique build tags, then writes `release-manifest.json`. The manifest identifies source ref/SHA/version, database schema versions/storage major, default flag revision/hash, and seven immutable GHCR image digests.
+4. Immediately before SSH, the job re-queries `main` and the archive ref. GitHub concurrency serializes production deploy/rollback jobs, and a host `flock` serializes migrations, rollout and the final state change. The host rejects stale manifests, version downgrades, incompatible schema changes and same-version image/source replacement. A high-water version remains after rollback so a delayed release cannot undo a newer deployment.
+5. Before replacing an existing deployment, make a local logical backup. Pull all images first. Start PostgreSQL/Redis, then Identity (its migration), Chat (its migration), Realtime/web and Caddy; each readiness check must pass before proceeding. Verify every running container uses its exact manifest image and each Go service reports its expected version/SHA. Verify public HTTPS and the unauthenticated auth route. Only then atomically switch `/srv/teamie/current` to a complete deployment record and preserve `/srv/teamie/previous`.
+6. Only after the deployment job succeeds does the publication job create the permanent tag and GitHub Release with the manifest attached. Failed builds/rollouts do not create a release tag. The publication job re-checks the release archive's SHA. A failed compatible rollout attempts to restore the previous container images; an incompatible migration is never reversed automatically.
+
+`/srv/teamie/current/release-manifest.json` identifies the running release. Its `deployment.json` records operation, time and the actual runtime flag identity. `recipe` points to the immutable uploaded deployment files; `images.env` contains only digest references. Successful manifests remain under `/srv/teamie/state/history/`, and the highest deployed forward version is retained in `state/highwater.json`. Uploaded archives contain only `deploy/`, `ops/` and the non-secret manifest. They never contain host environment files, databases, runtime state or SSH keys.
+
+Single-host service replacement can briefly interrupt connections; the client must reconnect and run durable sync. Passing build or readiness gates does not by itself prove end-user behavior. The production acceptance run remains a separate check of registration/login, invitations, authorization, idempotence, message order and reconnect behavior.
+
+## Rollback
+
+Run `Roll back production images` through `workflow_dispatch` **on `main`**, supplying a previously successfully deployed `vX.Y.Z` and the full SHA currently reported by production. The production Environment and the same concurrency lock apply. A changed current SHA aborts the operation. The host selects a retained successful manifest; arbitrary uploaded rollback images are not accepted.
+
+Rollback changes container images and the active release manifest. It preserves the current deployment recipe, production configuration, flags and database contents. It requires identical schema versions, PostgreSQL storage major and default flag contract. Forward migrations are never undone, and no database backup is automatically restored. If schemas differ, ship a new compatible forward release or prepare a separate, reviewed recovery procedure. The previous record is retained for inspection; rollback never deletes or rewrites a release branch/tag.
+
+## Backup and recovery
+
+`ops/backup.sh` takes custom-format logical dumps of the two owned databases, verifies each archive can be listed, saves the active release/deployment metadata and writes SHA-256 checksums. Each database has its own consistent snapshot; they are not a single cross-database transaction snapshot. Backups are mode `0600` in private directories, with seven days retained. A failed dump is removed and never advertised as a completed backup. Listing an archive is a structural check, not a restore drill.
+
+After the first successful release, the root operator may install `ops/teamie-backup.service` and `.timer` under `/etc/systemd/system/`, run `systemctl daemon-reload`, and enable/start `teamie-backup.timer`. It runs once daily at 18:15 UTC (02:15 Asia/Shanghai) with up to five minutes of jitter. Verify the unit user if a custom delivery username was used. Backups take a shared deployment lock, preventing a release from changing database containers during a dump. Every replacement deployment also takes a backup under the exclusive release lock.
+
+These are **local backups on the same 40 GiB disk**, not disaster recovery against host or disk loss. Off-host encrypted copies, storage monitoring and tested restore procedures remain operator work. For recovery, stop application writes, preserve the current data and manifest, validate backup checksums, restore to new private databases/volumes with matching roles, run explicit integrity/authorization checks and only then switch traffic. Never restore over a running database as part of an image rollback.
+
+## References
+
+- [Docker official Debian installation](https://docs.docker.com/engine/install/debian/)
+- [Compose startup/health dependencies](https://docs.docker.com/compose/how-tos/startup-order/)
+- [Caddy ACME issuer and profiles](https://caddyserver.com/docs/caddyfile/directives/tls)
+- [GitHub container publishing](https://docs.github.com/en/actions/tutorials/publish-packages/publish-docker-images)

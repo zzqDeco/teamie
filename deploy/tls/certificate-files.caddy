@@ -1,0 +1,3 @@
+# Provision certificates on the host; private keys never belong in Git.
+# The certificate SAN must cover SITE_ADDRESS. Renew externally and restart Caddy.
+tls /run/tls/fullchain.pem /run/tls/privkey.pem

@@ -1,0 +1,11 @@
+[Unit]
+Description=Teamie local PostgreSQL logical backup
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=teamie-deploy
+Group=teamie-deploy
+UMask=0077
+ExecStart=/srv/teamie/current/recipe/ops/backup.sh

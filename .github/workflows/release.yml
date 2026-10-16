@@ -1,0 +1,242 @@
+name: Release production
+
+on:
+  push:
+    branches: ["release/v*"]
+
+permissions:
+  contents: read
+
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      sha: ${{ steps.check.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require new semantic release branch from current main
+        id: check
+        env:
+          CREATED: ${{ github.event.created }}
+          FORCED: ${{ github.event.forced }}
+          REF_NAME: ${{ github.ref_name }}
+          SOURCE_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          [[ "$CREATED" == true && "$FORCED" == false ]] || { echo 'Published release branches are permanent archives; use a new version.' >&2; exit 1; }
+          [[ "$REF_NAME" =~ ^release/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || exit 1
+          version=${REF_NAME#release/}
+          main_sha=$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq .object.sha)
+          [[ "$SOURCE_SHA" == "$main_sha" ]] || { echo 'Release source must exactly match current main.' >&2; exit 1; }
+          if gh api "repos/$GH_REPO/git/ref/tags/$version" >/dev/null 2>&1; then
+            echo 'This release tag already exists and must never be rewritten.' >&2; exit 1
+          fi
+          printf 'version=%s\nsha=%s\n' "$version" "$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+
+  verify:
+    needs: validate
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  images:
+    needs: [validate, verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include:
+          - {service: identity, dockerfile: backend/Dockerfile, upstream: ""}
+          - {service: chat, dockerfile: backend/Dockerfile, upstream: ""}
+          - {service: realtime, dockerfile: backend/Dockerfile, upstream: ""}
+          - {service: web, dockerfile: apps/web/Dockerfile, upstream: ""}
+          - {service: caddy, dockerfile: "", upstream: "caddy:2.11.7-alpine"}
+          - {service: postgres, dockerfile: "", upstream: "postgres:17-alpine"}
+          - {service: redis, dockerfile: "", upstream: "redis:7.4-alpine"}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Set unique image repository/tag
+        id: image
+        env:
+          REPOSITORY: ${{ github.repository }}
+          SERVICE: ${{ matrix.service }}
+        run: |
+          image="ghcr.io/${REPOSITORY,,}-$SERVICE"
+          printf 'repository=%s\ntag=%s:build-%s-%s\n' "$image" "$image" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+      - name: Build application image
+        if: matrix.upstream == ''
+        id: app
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.image.outputs.tag }}
+          build-args: |
+            SERVICE=${{ matrix.service }}
+            VERSION=${{ needs.validate.outputs.version }}
+            COMMIT_SHA=${{ needs.validate.outputs.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ needs.validate.outputs.sha }}
+            org.opencontainers.image.version=${{ needs.validate.outputs.version }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+      - name: Mirror infrastructure image to reachable GHCR
+        if: matrix.upstream != ''
+        id: mirror
+        env:
+          UPSTREAM: ${{ matrix.upstream }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+          IMAGE_REPOSITORY: ${{ steps.image.outputs.repository }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
+        run: |
+          docker pull --platform linux/amd64 "$UPSTREAM"
+          # Retain upstream filesystem while explicitly linking the private package to this repo.
+          printf 'FROM %s\n' "$UPSTREAM" | docker build --platform linux/amd64 \
+            --label "org.opencontainers.image.source=https://github.com/$SOURCE_REPOSITORY" \
+            --tag "$IMAGE_TAG" --file - .
+          docker push "$IMAGE_TAG"
+          digest=$(docker image inspect "$IMAGE_TAG" --format '{{json .RepoDigests}}' | python3 -c 'import json,sys; prefix=sys.argv[1]+"@"; print(next(x.split("@",1)[1] for x in json.load(sys.stdin) if x.startswith(prefix)))' "$IMAGE_REPOSITORY")
+          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+      - name: Write immutable image artifact
+        env:
+          SERVICE: ${{ matrix.service }}
+          IMAGE_REPOSITORY: ${{ steps.image.outputs.repository }}
+          IMAGE_DIGEST: ${{ steps.app.outputs.digest || steps.mirror.outputs.digest }}
+        run: |
+          python3 - <<'PY'
+          import json,os,re
+          digest=os.environ['IMAGE_DIGEST']
+          assert re.fullmatch(r'sha256:[0-9a-f]{64}',digest)
+          service=os.environ['SERVICE']
+          with open(service+'.json','w') as output:
+              json.dump({'service':service,'image':os.environ['IMAGE_REPOSITORY']+'@'+digest},output)
+          PY
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: digest-${{ matrix.service }}
+          path: ${{ matrix.service }}.json
+          retention-days: 30
+
+  manifest:
+    needs: [validate, images]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: digest-*
+          merge-multiple: true
+          path: .runtime/digests
+      - name: Generate release manifest
+        env:
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 ops/manifest.py create --repository "$REPOSITORY" --version "$RELEASE_VERSION" \
+            --sha "$RELEASE_SHA" --main-sha "$RELEASE_SHA" --digests .runtime/digests \
+            --flags deploy/feature-flags.default.json > release-manifest.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-manifest
+          path: release-manifest.json
+          retention-days: 90
+
+  deploy:
+    needs: [validate, manifest]
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 25
+    concurrency:
+      group: teamie-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-manifest
+      - name: Recheck current main and immutable archive immediately before deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+        run: |
+          main_sha=$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq .object.sha)
+          branch_sha=$(gh api "repos/$GH_REPO/git/ref/heads/release/$RELEASE_VERSION" --jq .object.sha)
+          [[ "$main_sha" == "$RELEASE_SHA" && "$branch_sha" == "$RELEASE_SHA" ]] || { echo 'Release source changed while images were building; create a new release from checked main.' >&2; exit 1; }
+      - name: Deploy immutable images over pinned-host SSH
+        run: bash ops/ci-deploy.sh apply
+        env:
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
+          PRODUCTION_SSH_HOST: ${{ secrets.PRODUCTION_SSH_HOST }}
+          PRODUCTION_SSH_USER: ${{ secrets.PRODUCTION_SSH_USER }}
+          PRODUCTION_SSH_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}
+          PRODUCTION_SSH_KNOWN_HOSTS: ${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
+
+  publish:
+    needs: [validate, deploy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-manifest
+      - name: Create permanent release tag and GitHub release only after deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          RELEASE_SHA: ${{ needs.validate.outputs.sha }}
+        run: |
+          branch_sha=$(gh api "repos/$GH_REPO/git/ref/heads/release/$RELEASE_VERSION" --jq .object.sha)
+          [[ "$branch_sha" == "$RELEASE_SHA" ]] || { echo 'Release archive moved during deployment.' >&2; exit 1; }
+          if gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_VERSION" >/dev/null 2>&1; then
+            tag_sha=$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_VERSION" --jq .object.sha)
+            [[ "$tag_sha" == "$RELEASE_SHA" ]] || exit 1
+          else
+            gh api --method POST "repos/$GH_REPO/git/refs" -f "ref=refs/tags/$RELEASE_VERSION" -f "sha=$RELEASE_SHA" >/dev/null
+          fi
+          gh release create "$RELEASE_VERSION" release-manifest.json --verify-tag \
+            --title "$RELEASE_VERSION" --generate-notes

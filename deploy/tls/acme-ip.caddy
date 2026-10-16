@@ -1,0 +1,9 @@
+# Public IP certificates require the shortlived ACME profile.
+# Explicit issuer prevents the default locally trusted IP certificate policy.
+tls {
+	issuer acme {
+		dir https://acme-v02.api.letsencrypt.org/directory
+		test_dir https://acme-v02.api.letsencrypt.org/directory
+		profile shortlived
+	}
+}
