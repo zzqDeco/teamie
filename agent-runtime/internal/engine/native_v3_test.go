@@ -434,6 +434,14 @@ func TestInputArrivesWhileModelRunsBeyondProcessingPage(t *testing.T) {
 }
 
 func TestNativeTargetedResumeUsesCompatibleCheckpoint(t *testing.T) {
+	for _, delayedDelete := range []bool{false, true} {
+		t.Run(map[bool]string{false: "normal", true: "delayed_checkpoint_delete"}[delayedDelete], func(t *testing.T) {
+			testNativeTargetedResumeUsesCompatibleCheckpoint(t, delayedDelete)
+		})
+	}
+}
+
+func testNativeTargetedResumeUsesCompatibleCheckpoint(t *testing.T, delayedDelete bool) {
 	s := testStore(t)
 	e, f, base, _ := fixtureEngine(t, s)
 	gateway := &blockingGatewayFixture{fixtureGateway: base, first: make(chan struct{}), release: make(chan struct{})}
@@ -469,6 +477,25 @@ func TestNativeTargetedResumeUsesCompatibleCheckpoint(t *testing.T) {
 	if metadata.Version != nativeRuntimeVersion || metadata.Revision != 1 || metadata.RunID == "" || metadata.ModelStep < 1 {
 		t.Fatalf("incomplete native recovery provenance: %+v", metadata)
 	}
+	var deleteBlocker int
+	releaseDelete := func() {}
+	if delayedDelete {
+		// Hold only the consumed checkpoint row. Resume can read it, but its
+		// eventual DELETE must wait until this independent transaction commits.
+		gate, err := s.DB.Begin(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer gate.Rollback(context.Background())
+		if err = gate.QueryRow(context.Background(), `SELECT pg_backend_pid() FROM runtime_checkpoints WHERE checkpoint_id=$1 FOR UPDATE`, "turnloop:"+f.agent).Scan(&deleteBlocker); err != nil {
+			t.Fatal(err)
+		}
+		releaseDelete = func() {
+			if err := gate.Commit(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	if _, err := s.DB.Exec(context.Background(), `UPDATE runtime_runs SET next_attempt=now()`); err != nil {
 		t.Fatal(err)
 	}
@@ -476,9 +503,20 @@ func TestNativeTargetedResumeUsesCompatibleCheckpoint(t *testing.T) {
 	waitFor(t, func() bool {
 		return count(t, s, `SELECT count(*) FROM runtime_runs WHERE state='completed' AND cardinality(context_attempts)>0`) == 1
 	})
-	if s.checkpointExists(context.Background(), "turnloop:"+f.agent) {
-		t.Fatal("successful native resume retained consumed checkpoint")
+	if delayedDelete {
+		waitFor(t, func() bool {
+			return count(t, s, `SELECT count(*) FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid)) AND query LIKE 'DELETE FROM runtime_checkpoints%'`, deleteBlocker) == 1
+		})
+		if count(t, s, `SELECT count(*) FROM runtime_checkpoints WHERE checkpoint_id=$1`, "turnloop:"+f.agent) != 1 {
+			t.Fatal("fixture did not hold the consumed checkpoint after run completion")
+		}
 	}
+	releaseDelete()
+	// Eino .35 deletes a consumed checkpoint after OnAgentEvents returns;
+	// FinishRun(completed) inside that callback commits before this DELETE.
+	waitFor(t, func() bool {
+		return count(t, s, `SELECT count(*) FROM runtime_checkpoints WHERE checkpoint_id=$1`, "turnloop:"+f.agent) == 0
+	})
 }
 
 func TestSummaryUsesModelWindowAndBoundedTransport(t *testing.T) {
