@@ -1,13 +1,15 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Check,
   CheckCheck,
+  ChevronRight,
   Copy,
   Hash,
   Link as LinkIcon,
+  ShieldCheck,
   Users,
 } from "lucide-react";
 import { api } from "@teamie/api-client";
@@ -18,8 +20,13 @@ import { chatStore } from "./store";
 import { Avatar, Button, Modal, Notice } from "./ui";
 import { enrichParticipants } from "./participants";
 import { ParticipantIdentity } from "./group-members";
+import { canConfigureModelGateway } from "./agent-management";
 export type DialogKind =
-  "workspace" | "channel" | "direct" | "group" | "invite";
+  | "workspace"
+  | "channel"
+  | "direct"
+  | "group"
+  | "invite";
 export function WorkspaceDialog({
   kind,
   workspace,
@@ -318,7 +325,7 @@ export function ProfileSettings() {
   }
   return (
     <div className="settings-view">
-      <h1>个人设置</h1>
+      <h1>账号设置</h1>
       <div className="profile-card">
         <div className="profile-banner"></div>
         <div className="profile-content">
@@ -361,6 +368,16 @@ export function ProfileSettings() {
           保存更改
         </Button>
       </form>
+      {canConfigureModelGateway(user) && (
+        <Link to="/app/admin" className="platform-management-link">
+          <ShieldCheck size={19} aria-hidden="true" />
+          <span>
+            <b>平台管理</b>
+            <small>注册邀请与模型网关</small>
+          </span>
+          <ChevronRight size={17} aria-hidden="true" />
+        </Link>
+      )}
       <div className="session-setting">
         <div>
           <h3>当前登录</h3>

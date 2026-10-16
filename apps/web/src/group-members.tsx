@@ -2,12 +2,7 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Check, LoaderCircle, Plus, UserMinus, Users } from "lucide-react";
 import { api } from "@teamie/api-client";
-import type {
-  Agent,
-  Conversation,
-  Member,
-  Workspace,
-} from "@teamie/api-client";
+import type { Conversation, Member, Workspace } from "@teamie/api-client";
 import { useAuth } from "./auth";
 import { errorText, useChat, useChatState } from "./chat";
 import { chatStore } from "./store";
@@ -24,7 +19,9 @@ export function ParticipantIdentity({ member }: { member: Member }) {
       )}
       <span className="participant-identity">
         <b>
-          {member.displayName}
+          <span className="participant-name" title={member.displayName}>
+            {member.displayName}
+          </span>
           {member.kind === "agent" && (
             <AgentBadge compact ownerName={member.ownerName} />
           )}
@@ -154,19 +151,19 @@ export function GroupMembersDialog({
     </Modal>
   );
 }
-export function AddAgentToGroupDialog({
-  agent,
+export function AddParticipantToGroupDialog({
+  member,
   workspace,
   onClose,
   onCreateGroup,
 }: {
-  agent: Agent;
+  member: Participant;
   workspace: Workspace;
   onClose: () => void;
   onCreateGroup: () => void;
 }) {
   const { user } = useAuth();
-  const { refresh } = useChat();
+  const { data, refresh } = useChat();
   const snapshot = useChatState();
   const [selected, setSelected] = useState(""),
     [busy, setBusy] = useState(false),
@@ -178,15 +175,21 @@ export function AddAgentToGroupDialog({
       c.canManageMembers &&
       c.memberIds.includes(user!.id),
   );
+  const selectedGroup = groups.find(
+    (group) =>
+      group.id === selected && !group.memberIds.includes(member.userId),
+  );
+  const addAllowed =
+    !!data?.capabilities["im.group.create"] && member.selectable !== false;
   async function add() {
-    if (!selected) return;
+    if (!selectedGroup || !addAllowed) return;
     setBusy(true);
     setError("");
     const generation = chatStore.generation;
     try {
       const result = await api.addConversationMember(
-        selected,
-        agent.principalId,
+        selectedGroup.id,
+        member.userId,
       );
       if (generation !== chatStore.generation) return;
       chatStore.addConversation(result.conversation);
@@ -200,27 +203,23 @@ export function AddAgentToGroupDialog({
   }
   return (
     <Modal
-      title={`将 ${agent.name} 添加到小组`}
+      title={`将 ${member.displayName} 添加到小组`}
       subtitle="选择一个你管理的小组。"
       onClose={onClose}
     >
       <div className="adding-agent-summary">
-        <AgentAvatar />
-        <div>
-          <b>{agent.name}</b>
-          <AgentBadge ownerName={agent.ownerName} />
-        </div>
+        <ParticipantIdentity member={member} />
       </div>
       <Notice>{error}</Notice>
       <div className="agent-group-options">
         {groups.length ? (
           groups.map((group) => {
-            const already = group.memberIds.includes(agent.principalId);
+            const already = group.memberIds.includes(member.userId);
             return (
               <button
                 className={`agent-group-option ${selected === group.id ? "selected" : ""}`}
                 key={group.id}
-                disabled={already || busy}
+                disabled={already || busy || !addAllowed}
                 onClick={() => setSelected(group.id)}
               >
                 <span className="group-avatar">
@@ -230,7 +229,7 @@ export function AddAgentToGroupDialog({
                   {group.name || "小组对话"}
                   <small>
                     {already
-                      ? "Agent 已在小组中"
+                      ? "已在小组中"
                       : `${group.memberIds.length} 位成员`}
                   </small>
                 </span>
@@ -242,7 +241,11 @@ export function AddAgentToGroupDialog({
           <div className="mini-empty">暂无可管理的小组。</div>
         )}
       </div>
-      <button className="create-agent-group-link" onClick={onCreateGroup}>
+      <button
+        className="create-agent-group-link"
+        disabled={!addAllowed || busy}
+        onClick={onCreateGroup}
+      >
         <Plus size={14} />
         创建新小组
       </button>
@@ -250,7 +253,11 @@ export function AddAgentToGroupDialog({
         <Button className="secondary" onClick={onClose}>
           取消
         </Button>
-        <Button busy={busy} disabled={!selected} onClick={() => void add()}>
+        <Button
+          busy={busy}
+          disabled={!selectedGroup || !addAllowed}
+          onClick={() => void add()}
+        >
           添加到小组
         </Button>
       </div>

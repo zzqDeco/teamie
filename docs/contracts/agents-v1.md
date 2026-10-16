@@ -26,7 +26,7 @@ All endpoints require a human cookie session. Writes require the existing CSRF a
 - `DELETE /api/v1/agents/:id` -> 204 owner only. Tombstone definition, revoke credentials/membership and cancel work; preserve attributable IM message history.
 - `GET /api/v1/workspaces/:id/agents` -> `{agents:[Agent]}` discovery only for current members, selected visibility and actual Agent membership. Do not expose secrets or runtime internals.
 
-Public capabilities: `agents.enabled`, `agents.create`, `agents.update`, `agents.delete`, `agents.discover`. Existing `im.dm.create` and `im.group.create` govern conversations. Disabled write features preserve persisted profiles/history. Frontend routes: `/app/agents`, `/app/agents/:id`, `/app/w/:workspaceId/agents`.
+Public capabilities: `agents.enabled`, `agents.create`, `agents.update`, `agents.delete`, `agents.discover`. Existing `im.dm.create` and `im.group.create` govern conversations. Disabled write features preserve persisted profiles/history. Personal Agent management and runtime activity use `/app/agents` and `/app/agents/:id`, reached from the account menu. The workspace member directory at `/app/w/:workspaceId/members` lists humans and visible Agents together with an Agent badge and uses the ordinary IM conversation/member APIs. `/app/w/:workspaceId/agents` redirects to this directory. Turning discovery off preserves persisted Agent members and conversations, but does not admit new Agent selections. The account settings page exposes platform management only to human platform administrators; administrator pages are absent from the main navigation.
 
 ## Administrator model gateway HTTP
 

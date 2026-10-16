@@ -5644,7 +5644,7 @@ label > .copy-input {
 .rail-agents {
   margin-bottom: 8px;
 }
-.agent-sidebar-links {
+.workspace-navigation {
   margin: 0 5px 18px;
   padding-bottom: 14px;
   border-bottom: 1px solid #eae1f2;
@@ -5652,7 +5652,7 @@ label > .copy-input {
   flex-direction: column;
   gap: 3px;
 }
-.agent-sidebar-links > a {
+.workspace-navigation > a {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -5661,14 +5661,14 @@ label > .copy-input {
   border-radius: 6px;
   padding: 9px 7px;
 }
-.agent-sidebar-links > a > span {
+.workspace-navigation > a > span {
   flex: 1;
 }
-.agent-sidebar-links > a > svg {
+.workspace-navigation > a > svg {
   color: #b79dcc;
 }
-.agent-sidebar-links > a:hover,
-.agent-sidebar-links > a.active {
+.workspace-navigation > a:hover,
+.workspace-navigation > a.active {
   background: #eee6f8;
   color: #9477ad;
 }
