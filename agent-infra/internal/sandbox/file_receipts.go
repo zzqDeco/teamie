@@ -121,7 +121,7 @@ func (s *Service) mutateWorkspace(r *agent.SandboxWorkspaceRequest, in workspace
 			e = nil
 		}
 		if e == nil {
-			dir, openErr := root.Open(path.Dir(name))
+			dir, openErr := openWorkspaceDirectory(root, path.Dir(name))
 			if openErr != nil {
 				e = openErr
 			} else {

@@ -11,7 +11,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -23,11 +22,20 @@ import (
 const MaxWorkspaceBytes int64 = 64 * 1024 * 1024
 const MaxWorkspaceFiles = 4096
 
+// WalkDir must also use nonblocking directory opens. os.Root.FS().ReadDir uses
+// Root.Open, which can otherwise block if a child replaces a directory by a FIFO
+// between reading its DirEntry and descending into it.
+type workspaceDirectories struct{ root *os.Root }
+
+func (d workspaceDirectories) Open(name string) (fs.File, error) {
+	return openWorkspaceDirectory(d.root, name)
+}
+
 // Includes files produced by execution children; symlinks are never followed.
 func workspaceCapacity(root *os.Root, name string, replacementBytes int64) bool {
 	var total int64
 	entries := 0
-	e := fs.WalkDir(root.FS(), ".", func(current string, entry fs.DirEntry, walkErr error) error {
+	e := fs.WalkDir(workspaceDirectories{root}, ".", func(current string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -80,36 +88,9 @@ func binaryHash(root *os.Root, name string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func importParent(root *os.Root, parent string) error {
-	current := ""
-	if parent == "." {
-		return nil
-	}
-	for _, part := range strings.Split(parent, "/") {
-		current = path.Join(current, part)
-		if e := root.Mkdir(current, 0777); e != nil && !os.IsExist(e) {
-			return e
-		}
-		info, e := root.Lstat(current)
-		if e != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return errors.New("invalid parent")
-		}
-		f, e := root.Open(current)
-		if e != nil {
-			return e
-		}
-		e = f.Chmod(0777)
-		f.Close()
-		if e != nil {
-			return e
-		}
-	}
-	return nil
-}
-
 func atomicBinaryImport(root *os.Root, name string, content []byte) error {
 	parent := path.Dir(name)
-	if e := importParent(root, parent); e != nil {
+	if e := ensureWorkspaceParents(root, parent); e != nil {
 		return e
 	}
 	tmp := path.Join(parent, ".teamie-import-"+digest(time.Now().UTC().String() + name)[:24])
@@ -138,7 +119,7 @@ func atomicBinaryImport(root *os.Root, name string, content []byte) error {
 	if e = root.Remove(tmp); e != nil {
 		return e
 	}
-	dir, e := root.Open(parent)
+	dir, e := openWorkspaceDirectory(root, parent)
 	if e != nil {
 		return e
 	}
@@ -216,7 +197,7 @@ func (s *Service) ImportFile(ctx context.Context, r *agent.SandboxImportRequest)
 	}
 	// Reject existing parent symlinks before durable intent, so normal invalid
 	// destinations remain a defined failure and do not poison a retry receipt.
-	if e = importParent(root, path.Dir(name)); e != nil {
+	if e = ensureWorkspaceParents(root, path.Dir(name)); e != nil {
 		return workspaceError("invalid_path"), nil
 	}
 	data := workspaceResult(map[string]any{"path": virtual(name), "bytes": len(r.Content), "sha256": contentHash})

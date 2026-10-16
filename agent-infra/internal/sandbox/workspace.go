@@ -114,18 +114,45 @@ func regularRead(root *os.Root, name string) ([]byte, error) {
 	}
 	return b, e
 }
-func atomicWorkspaceWrite(root *os.Root, name, content string) error {
-	if name == "." || len(content) > maxFileBytes {
-		return errors.New("file_too_large")
+
+// O_DIRECTORY and O_NONBLOCK prevent a concurrently substituted FIFO from
+// blocking a service operation while it holds the file mutation lock. Root may
+// resolve confined symlinks even with O_NOFOLLOW, so also match the opened fd to
+// the directory inode validated by Lstat before using it for chmod or fsync.
+func openWorkspaceDirectory(root *os.Root, name string) (*os.File, error) {
+	before, e := root.Lstat(name)
+	if e != nil {
+		return nil, e
 	}
-	parent := path.Dir(name)
-	if e := root.MkdirAll(parent, 0777); e != nil {
-		return e
+	if !before.IsDir() || before.Mode()&os.ModeSymlink != 0 {
+		return nil, errors.New("not a directory")
 	}
-	// Chmod through an opened descriptor: a concurrently changed symlink cannot
-	// redirect a privileged path-based chmod outside the confined directory.
-	for p := parent; p != "."; p = path.Dir(p) {
-		f, e := root.Open(p)
+	f, e := root.OpenFile(name, os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if e != nil {
+		return nil, e
+	}
+	info, e := f.Stat()
+	if e != nil || !info.IsDir() || !os.SameFile(before, info) {
+		f.Close()
+		if e == nil {
+			e = errors.New("not a directory")
+		}
+		return nil, e
+	}
+	return f, nil
+}
+
+func ensureWorkspaceParents(root *os.Root, parent string) error {
+	current := ""
+	if parent == "." {
+		return nil
+	}
+	for _, part := range strings.Split(parent, "/") {
+		current = path.Join(current, part)
+		if e := root.Mkdir(current, 0777); e != nil && !os.IsExist(e) {
+			return e
+		}
+		f, e := openWorkspaceDirectory(root, current)
 		if e != nil {
 			return e
 		}
@@ -134,6 +161,17 @@ func atomicWorkspaceWrite(root *os.Root, name, content string) error {
 		if e != nil {
 			return e
 		}
+	}
+	return nil
+}
+
+func atomicWorkspaceWrite(root *os.Root, name, content string) error {
+	if name == "." || len(content) > maxFileBytes {
+		return errors.New("file_too_large")
+	}
+	parent := path.Dir(name)
+	if e := ensureWorkspaceParents(root, parent); e != nil {
+		return e
 	}
 	if info, e := root.Lstat(name); e == nil && !info.Mode().IsRegular() {
 		return errors.New("not a regular file")
@@ -158,7 +196,7 @@ func atomicWorkspaceWrite(root *os.Root, name, content string) error {
 		e = root.Rename(nameTmp, name)
 	}
 	if e == nil {
-		dir, openErr := root.Open(parent)
+		dir, openErr := openWorkspaceDirectory(root, parent)
 		if openErr != nil {
 			return openErr
 		}
