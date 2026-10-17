@@ -14,6 +14,7 @@ import {
   Hash,
   Home,
   Menu,
+  MessageCircle,
   KeyRound,
   LoaderCircle,
   Plus,
@@ -38,6 +39,7 @@ import { WorkspaceMembers } from "./members";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
 import { GroupMembersDialog } from "./group-members";
 import { enrichParticipants } from "./participants";
+import type { Participant } from "./participants";
 import { chatStore } from "./store";
 import type { DialogKind } from "./dialogs";
 import { ConversationView, conversationName } from "./messages";
@@ -136,6 +138,9 @@ export function Shell() {
     location = useLocation(),
     navigate = useNavigate();
   const sidebarFocus = useRef({ open: false, pathname: location.pathname });
+  const lastConversationByWorkspace = useRef<Record<string, string>>({});
+  const lastChatRoute = useRef<string>("");
+  const [lastChatPath, setLastChatPath] = useState("");
   const [dialog, setDialog] = useState<DialogKind | null>(null),
     [sidebar, setSidebar] = useState(false),
     [details, setDetails] = useState(false),
@@ -159,6 +164,19 @@ export function Shell() {
   const conversation = match?.params.conversationId
     ? snapshot.conversations[match.params.conversationId]
     : undefined;
+  useEffect(() => {
+    lastConversationByWorkspace.current = {};
+    lastChatRoute.current = "";
+    setLastChatPath("");
+  }, [user?.id]);
+  useEffect(() => {
+    if (conversation && workspace && conversation.workspaceId === workspace.id) {
+      const nextRoute = route(conversation);
+      lastConversationByWorkspace.current[workspace.id] = conversation.id;
+      lastChatRoute.current = nextRoute;
+      setLastChatPath(nextRoute);
+    }
+  }, [conversation, workspace]);
   const conversations = Object.values(snapshot.conversations).filter(
     (c) => c.workspaceId === workspace?.id,
   );
@@ -185,11 +203,11 @@ export function Shell() {
   const workspaceAgents = discoveryAllowed
     ? workspaceAgentsQuery.data?.agents || []
     : [];
-  const members = enrichParticipants(
+  const members: Participant[] = enrichParticipants(
     membersQuery.data?.members || [],
     workspaceAgents,
   );
-  const visibleMembers =
+  const visibleMembers: Participant[] =
     conversation && conversation.type !== "channel"
       ? members.filter((m) => conversation.memberIds.includes(m.userId))
       : members;
@@ -250,6 +268,26 @@ export function Shell() {
     };
   }, []);
   const caps = chat.data?.capabilities || {};
+  const isSettings = ["/app/settings", "/app/profile"].includes(
+    location.pathname,
+  );
+  const isAdminPage = location.pathname === "/app/admin";
+  const isGatewayPage = location.pathname === "/app/admin/gateway";
+  const isUsersPage = location.pathname === "/app/admin/users";
+  const isAgentsPage = location.pathname === "/app/agents" || !!agentMatch;
+  const isDirectoryPage = !!directoryMatch;
+  const isManagement =
+    isSettings ||
+    isAdminPage ||
+    isGatewayPage ||
+    isUsersPage ||
+    isAgentsPage ||
+    isDirectoryPage;
+  const backChatRoute = Object.values(snapshot.conversations).some(
+    (c) => route(c) === lastChatPath,
+  )
+    ? lastChatPath
+    : "/app";
   const connectionLabel =
     chat.connection === "connected"
       ? "消息已连接"
@@ -261,6 +299,29 @@ export function Shell() {
   function openDialog(kind: DialogKind) {
     setSidebar(false);
     setDialog(kind);
+  }
+  async function startDirect(member: Participant) {
+    if (!workspace || member.selectable === false || !caps["im.dm.create"])
+      return;
+    setBusy(true);
+    setError("");
+    const generation = chatStore.generation;
+    try {
+      const result = await api.createConversation(workspace.id, {
+        type: "direct",
+        memberIds: [member.userId],
+      });
+      if (generation !== chatStore.generation) return;
+      chatStore.addConversation(result.conversation);
+      await chat.refresh();
+      if (generation !== chatStore.generation) return;
+      if (overlayMembers) setDetails(false);
+      navigate(route(result.conversation));
+    } catch (e) {
+      if (generation === chatStore.generation) setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
   }
   async function remove() {
     if (!workspace || !removing) return;
@@ -298,7 +359,14 @@ export function Shell() {
     }
   }
   function selectWorkspace(space: Workspace) {
+    const rememberedId = lastConversationByWorkspace.current[space.id];
+    const remembered = rememberedId
+      ? snapshot.conversations[rememberedId]
+      : undefined;
     const first =
+      (remembered && remembered.workspaceId === space.id
+        ? remembered
+        : undefined) ||
       Object.values(snapshot.conversations).find(
         (c) => c.workspaceId === space.id && c.type === "channel",
       ) ||
@@ -306,6 +374,8 @@ export function Shell() {
         (c) => c.workspaceId === space.id,
       );
     if (first) navigate(route(first));
+    else if (isManagement || workspace?.id !== space.id)
+      navigate(`/app/w/${space.id}/members`);
     setSidebar(false);
   }
   if (chat.loading && !chat.data) return <Loading />;
@@ -334,21 +404,6 @@ export function Shell() {
     conversations.length
   )
     return <Navigate to={route(channels[0] || conversations[0])} replace />;
-  const isSettings = ["/app/settings", "/app/profile"].includes(
-    location.pathname,
-  );
-  const isAdminPage = location.pathname === "/app/admin";
-  const isGatewayPage = location.pathname === "/app/admin/gateway";
-  const isUsersPage = location.pathname === "/app/admin/users";
-  const isAgentsPage = location.pathname === "/app/agents" || !!agentMatch;
-  const isDirectoryPage = !!directoryMatch;
-  const isManagement =
-    isSettings ||
-    isAdminPage ||
-    isGatewayPage ||
-    isUsersPage ||
-    isAgentsPage ||
-    isDirectoryPage;
   return (
     <div
       className={`app-shell ${sidebar ? "sidebar-open" : ""} ${details ? "details-open" : ""}`}
@@ -534,7 +589,7 @@ export function Shell() {
                         ? "成员"
                         : "账号设置"}
               </span>
-              <Link to="/app">
+              <Link to={backChatRoute}>
                 <ArrowLeft size={15} />
                 <span>对话</span>
               </Link>
@@ -736,6 +791,18 @@ export function Shell() {
                   {member.role === "owner" && (
                     <ShieldCheck size={14} className="owner-shield" />
                   )}
+                  {member.userId !== user!.id &&
+                    caps["im.dm.create"] &&
+                    member.selectable !== false && (
+                      <IconButton
+                        className="member-dm"
+                        label={`与 ${member.displayName} 发起私聊`}
+                        disabled={busy}
+                        onClick={() => void startDirect(member)}
+                      >
+                        <MessageCircle size={14} />
+                      </IconButton>
+                    )}
                   {((conversation?.type === "group" &&
                     conversation.canManageMembers) ||
                     (conversation?.type === "channel" &&
@@ -757,6 +824,14 @@ export function Shell() {
                 </div>
               ))}
             </div>
+            <Link
+              className="members-directory-link"
+              to={`/app/w/${workspace.id}/members`}
+              onClick={closeDetails}
+            >
+              <Users size={16} />
+              查看全部成员
+            </Link>
             {conversation?.type === "group" &&
               conversation.canManageMembers && (
                 <button

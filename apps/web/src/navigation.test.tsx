@@ -782,4 +782,104 @@ describe("member and account navigation", () => {
     expect(find("[data-location]").textContent).toBe("/app/w/team/members");
     expect(find('[aria-label="团队成员"]').textContent).toContain("设计伙伴");
   });
+
+  it("remembers the last visited conversation across management pages and workspace switches", async () => {
+    const secondWorkspace: Workspace = {
+      id: "design",
+      name: "设计空间",
+      createdBy: owner.id,
+      createdAt: owner.createdAt,
+    };
+    const emptyWorkspace: Workspace = {
+      id: "empty",
+      name: "空工作空间",
+      createdBy: owner.id,
+      createdAt: owner.createdAt,
+    };
+    const designChannel: Conversation = {
+      ...channel,
+      id: "design-general",
+      workspaceId: secondWorkspace.id,
+      name: "design-general",
+    };
+    bootstrap.workspaces = [workspace, secondWorkspace, emptyWorkspace];
+    bootstrap.conversations = [channel, group, designChannel];
+    chatStore.replaceConversations(bootstrap.conversations);
+    await mount("/app/w/team/c/group");
+    await click(".rail-agents");
+    expect(find("[data-location]").textContent).toBe("/app/agents");
+    expect(find(".settings-header a").getAttribute("href")).toBe(
+      "/app/w/team/c/group",
+    );
+    await click(".settings-header a");
+    expect(find("[data-location]").textContent).toBe("/app/w/team/c/group");
+    await click(".account-trigger");
+    await click('.account-menu a[href="/app/settings"]');
+    expect(find("[data-location]").textContent).toBe("/app/settings");
+    await click(".settings-header a");
+    expect(find("[data-location]").textContent).toBe("/app/w/team/c/group");
+    await click(`[aria-label="打开工作空间 ${secondWorkspace.name}"]`);
+    expect(find("[data-location]").textContent).toBe(
+      "/app/w/design/c/design-general",
+    );
+    await click(`[aria-label="打开工作空间 ${workspace.name}"]`);
+    expect(find("[data-location]").textContent).toBe("/app/w/team/c/group");
+    await click(`[aria-label="打开工作空间 ${emptyWorkspace.name}"]`);
+    expect(find("[data-location]").textContent).toBe("/app/w/empty/members");
+  });
+
+  it("opens the member directory and starts direct messages from the conversation members pane", async () => {
+    const disabledAgent: Agent = {
+      ...agent,
+      id: "disabled-agent",
+      principalId: "disabled-agent",
+      name: "停用伙伴",
+      enabled: false,
+    };
+    vi.mocked(api.workspaceAgents).mockResolvedValue({
+      agents: [agent, disabledAgent],
+    });
+    const create = vi.spyOn(api, "createConversation").mockResolvedValue({
+      conversation: {
+        ...channel,
+        id: "dm-agent",
+        type: "direct",
+        memberIds: [owner.id, agent.id],
+      },
+    });
+    await mount("/app/w/team/c/general");
+    await click('[aria-label="查看会话成员"]');
+    const pane = find(".members-pane");
+    expect(pane.querySelector(".members-directory-link")?.getAttribute("href")).toBe(
+      "/app/w/team/members",
+    );
+    expect(
+      pane.querySelector('[aria-label="与 停用伙伴 发起私聊"]'),
+    ).toBeNull();
+    await click('.members-pane [aria-label="与 产品伙伴 发起私聊"]');
+    expect(create).toHaveBeenCalledWith(workspace.id, {
+      type: "direct",
+      memberIds: [agent.id],
+    });
+    expect(find("[data-location]").textContent).toBe("/app/w/team/c/dm-agent");
+    expect(container.querySelector(".members-pane")).toBeNull();
+    await click('[aria-label="查看会话成员"]');
+    await click(".members-directory-link");
+    expect(find("[data-location]").textContent).toBe("/app/w/team/members");
+    expect(container.querySelector(".members-pane")).toBeNull();
+  });
+
+  it("navigates to the workspace member directory from interactive chips in AgentDetail", async () => {
+    await mount(`/app/agents/${agent.id}`);
+    const chip = find(
+      `.agent-workspace-chips a[aria-label="查看 ${workspace.name} 成员目录"]`,
+    );
+    expect(chip.getAttribute("href")).toBe(`/app/w/${workspace.id}/members`);
+    await click(
+      `.agent-workspace-chips a[aria-label="查看 ${workspace.name} 成员目录"]`,
+    );
+    expect(find("[data-location]").textContent).toBe(
+      `/app/w/${workspace.id}/members`,
+    );
+  });
 });
