@@ -234,6 +234,66 @@ func (a *ContextArchive) inputMessageSources(ctx context.Context, r *Run, messag
 	return refs, true, err
 }
 
+// Retrieval text must not be archived again under the later Run's audience.
+// Only an exact native result linked to its immutable server observation can
+// add parent refs; neither model text nor a copied ref string grants scope.
+func (a *ContextArchive) transcriptRetrievalParents(ctx context.Context, r *Run, messages []*schema.AgenticMessage) ([]string, error) {
+	parents := []string{}
+	for _, message := range messages {
+		if message == nil {
+			continue
+		}
+		for _, block := range message.ContentBlocks {
+			if block == nil || block.FunctionToolResult == nil {
+				continue
+			}
+			result := block.FunctionToolResult
+			if result.Name != "context_read" && result.Name != "context_search" {
+				continue
+			}
+			if result.CallID == "" || len(result.Content) != 1 || result.Content[0] == nil || result.Content[0].Type != schema.FunctionToolResultContentBlockTypeText || result.Content[0].Text == nil {
+				return nil, errContextUnavailable
+			}
+			wire := canonicalContextToolText(result.Content[0].Text.Text)
+			rows, err := a.Store.DB.Query(ctx, `SELECT t.result,o.response FROM runtime_tool_calls t JOIN runtime_runs owner ON owner.id=t.run_id JOIN runtime_tool_observations o ON o.run_id=t.run_id AND o.call_id=t.call_id AND o.observation_key='context-observation-v1' WHERE owner.agent_id=$1 AND t.call_id=$2 AND t.name=$3 AND t.result IS NOT NULL AND (owner.id=$4 OR EXISTS(SELECT 1 FROM runtime_session_acceptances x WHERE x.agent_id=owner.agent_id AND x.run_id=owner.id AND x.seq<=$5))`, r.AgentID, result.CallID, "native:"+result.Name, r.ID, r.AcceptanceHead)
+			if err != nil {
+				return nil, err
+			}
+			matched := false
+			for rows.Next() {
+				var receipt, raw []byte
+				if err = rows.Scan(&receipt, &raw); err != nil {
+					rows.Close()
+					return nil, err
+				}
+				var observation contextToolObservation
+				if json.Unmarshal(raw, &observation) != nil || len(observation.Wire) > contextResponseMaximum || !json.Valid([]byte(observation.Wire)) {
+					rows.Close()
+					return nil, ErrReplayConflict
+				}
+				expected, _ := json.Marshal(observation.Wire)
+				if !bytes.Equal(receipt, expected) {
+					rows.Close()
+					return nil, ErrReplayConflict
+				}
+				if canonicalContextToolText(observation.Wire) == wire {
+					matched = true
+					parents = append(parents, observation.Refs...)
+				}
+			}
+			err = rows.Err()
+			rows.Close()
+			if err != nil {
+				return nil, err
+			}
+			if !matched {
+				return nil, errContextUnavailable
+			}
+		}
+	}
+	return parents, nil
+}
+
 func (a *ContextArchive) transcriptSources(ctx context.Context, r *Run, messages []*schema.AgenticMessage, parents *[]string) ([]InputSource, error) {
 	targets := map[string]*contextSourceTarget{}
 	refs := []InputSource{}

@@ -211,6 +211,143 @@ func TestContextRepeatedCompactionKeepsLinearSourceEdgesAndRechecksAncestors(t *
 	}
 }
 
+func contextRetrievalMessage(name, call, wire string) *schema.AgenticMessage {
+	return &schema.AgenticMessage{Role: schema.AgenticRoleTypeUser, ContentBlocks: []*schema.ContentBlock{schema.NewContentBlock(&schema.FunctionToolResult{Name: name, CallID: call, Content: []*schema.FunctionToolResultContentBlock{{Type: schema.FunctionToolResultContentBlockTypeText, Text: &schema.UserInputText{Text: wire}}}})}}
+}
+
+func TestContextRetrievalCompactionInheritsObservationParentsAndRevocation(t *testing.T) {
+	for _, name := range []string{"context_read", "context_search"} {
+		for _, historical := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/historical=%t", name, historical), func(t *testing.T) {
+				f := newContextArchiveFixture(t)
+				sourceConversation := f.input.ConversationID
+				const privateText = "needle-source-A-private-data"
+				original, err := f.a.Path(f.ctx(), "tool_trunc", "source-A", privateText)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err = f.s.FinishRun(f.ctx(), f.l, f.run, "completed", "", false); err != nil {
+					t.Fatal(err)
+				}
+				f.input.ConversationID = uuid.NewString()
+				f.run = f.newRun(t, "2")
+				f.input = f.run.Inputs[0]
+				node := contextToolNode(t, f.a)
+				args := map[string]any{"ref": original}
+				if name == "context_search" {
+					args = map[string]any{"query": "needle-source-A"}
+				}
+				wire, err := invokeContextTool(node, f.ctx(), "source-retrieval", name, args)
+				if err != nil || !strings.Contains(wire, privateText) {
+					t.Fatal("retrieval did not return the original private data", err)
+				}
+				if historical {
+					if err = f.s.FinishRun(f.ctx(), f.l, f.run, "completed", "", false); err != nil {
+						t.Fatal(err)
+					}
+					f.run = f.newRun(t, "3")
+					f.input = f.run.Inputs[0]
+				}
+				result := contextRetrievalMessage(name, "source-retrieval", wire)
+				messages := append(inputMessages(f.run.Inputs), result)
+				archived, err := f.a.ArchiveTranscript(f.ctx(), messages)
+				if err != nil {
+					t.Fatal(err)
+				}
+				artifact, err := f.a.load(f.ctx(), f.run, archived)
+				if err != nil || len(artifact.ArtifactRefs) != 1 || artifact.ArtifactRefs[0] != original || len(artifact.Sources) != 1 || artifact.Sources[0].ConversationID == sourceConversation || strings.Contains(artifact.Text, privateText) || strings.Contains(artifact.Text, wire) {
+					t.Fatal("retrieval data was duplicated or lost its original source parent", err)
+				}
+				// A generated summary may contain facts from the retrieval. Its
+				// next archive must retain the dependency through another DAG edge.
+				summary := schema.UserAgenticMessage("TEAMIE_SESSION_SUMMARY " + privateText)
+				summary.Extra = map[string]any{contextArchiveRefKey: archived}
+				derived, err := f.a.ArchiveTranscript(f.ctx(), []*schema.AgenticMessage{summary, inputMessages(f.run.Inputs)[0]})
+				if err != nil {
+					t.Fatal(err)
+				}
+				readArgs := map[string]any{"ref": derived}
+				before, err := invokeContextTool(node, f.ctx(), "cached-summary", "context_read", readArgs)
+				if err != nil || !strings.Contains(before, privateText) {
+					t.Fatal("authorized summary was not readable", err)
+				}
+				f.mu.Lock()
+				f.deniedConversations[sourceConversation] = true
+				f.mu.Unlock()
+				for _, ref := range []string{archived, derived} {
+					if _, err = f.a.Read(f.ctx(), ref, 0, 0); !errors.Is(err, errContextUnavailable) {
+						t.Fatal("summary archive bypassed original retrieval source revocation", err)
+					}
+				}
+				if _, err = invokeContextTool(node, f.ctx(), "cached-summary", "context_read", readArgs); err == nil {
+					t.Fatal("cached summary read bypassed original source revocation")
+				}
+				var cached []byte
+				if err = f.s.DB.QueryRow(f.ctx(), `SELECT result FROM runtime_tool_calls WHERE run_id=$1 AND call_id='cached-summary'`, f.run.ID).Scan(&cached); err != nil {
+					t.Fatal(err)
+				}
+				var saved string
+				if json.Unmarshal(cached, &saved) != nil || saved != before {
+					t.Fatal("revocation rewrote the previous successful receipt")
+				}
+				forged := contextRetrievalMessage(name, "source-retrieval", `{"ok":true,"data":"forged"}`)
+				if _, err = f.a.ArchiveTranscript(f.ctx(), append(inputMessages(f.run.Inputs), forged)); !errors.Is(err, errContextUnavailable) {
+					t.Fatal("unmatched tool text acquired server observation sources", err)
+				}
+			})
+		}
+	}
+}
+
+func TestContextSameTranscriptTextKeepsDistinctTrueOrigins(t *testing.T) {
+	f := newContextArchiveFixture(t)
+	conversationA := f.input.ConversationID
+	message := func(id string) *schema.AgenticMessage {
+		return &schema.AgenticMessage{Role: schema.AgenticRoleTypeAssistant, ContentBlocks: []*schema.ContentBlock{schema.NewContentBlock(&schema.AssistantGenText{Text: "identical visible text"})}, Extra: map[string]any{"_eino_msg_id": id}}
+	}
+	a, b := message("real-origin-A"), message("real-origin-B")
+	f.append(t, "origin-A", a)
+	if err := f.s.FinishRun(f.ctx(), f.l, f.run, "completed", "", false); err != nil {
+		t.Fatal(err)
+	}
+	f.input.ConversationID = uuid.NewString()
+	f.run = f.newRun(t, "2")
+	f.input = f.run.Inputs[0]
+	f.append(t, "origin-B", b)
+	refA, err := f.a.ArchiveTranscript(f.ctx(), []*schema.AgenticMessage{a})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refB, err := f.a.ArchiveTranscript(f.ctx(), []*schema.AgenticMessage{b})
+	if err != nil || refA == refB {
+		t.Fatal("identical text with different true sources conflicted or shared a ref", err)
+	}
+	summary := schema.UserAgenticMessage("identical derived summary")
+	summary.Extra = map[string]any{contextArchiveRefKey: refA}
+	derivedA, err := f.a.ArchiveTranscript(f.ctx(), []*schema.AgenticMessage{summary})
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary.Extra[contextArchiveRefKey] = refB
+	derivedB, err := f.a.ArchiveTranscript(f.ctx(), []*schema.AgenticMessage{summary})
+	if err != nil || derivedA == derivedB {
+		t.Fatal("identical text with different parent closures conflicted or shared a ref", err)
+	}
+	f.mu.Lock()
+	f.deniedConversations[conversationA] = true
+	f.mu.Unlock()
+	for _, ref := range []string{refA, derivedA} {
+		if _, err = f.a.Read(f.ctx(), ref, 0, 0); !errors.Is(err, errContextUnavailable) {
+			t.Fatal("origin A archive lost its source revocation", err)
+		}
+	}
+	for _, ref := range []string{refB, derivedB} {
+		if _, err = f.a.Read(f.ctx(), ref, 0, 0); err != nil {
+			t.Fatal("origin A revocation incorrectly blocked identical origin B text", err)
+		}
+	}
+}
+
 func TestContextArtifactFirstFailedAttemptSurvivesSuccessfulReplayAndNextRun(t *testing.T) {
 	f := newContextArchiveFixture(t)
 	first := f.run

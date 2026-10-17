@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -82,12 +84,25 @@ func (a *ContextArchive) ArchiveTranscript(ctx context.Context, messages []*sche
 	if err != nil {
 		return "", err
 	}
-	parents := []string{}
+	// Retrieval results are deliberately absent from the text projection. Their
+	// server-owned observations still carry the source closure of any private
+	// data used to produce the next summary.
+	parents, err := a.transcriptRetrievalParents(ctx, r, messages)
+	if err != nil {
+		return "", err
+	}
 	refs, err := a.transcriptSources(ctx, r, messages, &parents)
 	if err != nil {
 		return "", err
 	}
-	return a.put(ctx, r, contextArtifact{RunID: r.ID, Attempt: r.Attempt, Key: "prefix/" + digest(content), Kind: "transcript", Text: string(content), Sources: refs, ArtifactRefs: parents})
+	sort.Strings(parents)
+	parents = slices.Compact(parents)
+	identity, _ := json.Marshal(struct {
+		ContentHash string        `json:"contentHash"`
+		Sources     []InputSource `json:"sources"`
+		Parents     []string      `json:"parents"`
+	}{digest(content), refs, parents})
+	return a.put(ctx, r, contextArtifact{RunID: r.ID, Attempt: r.Attempt, Key: "prefix/" + digest(identity), Kind: "transcript", Text: string(content), Sources: refs, ArtifactRefs: parents})
 }
 
 type contextArchiveEvent struct {
