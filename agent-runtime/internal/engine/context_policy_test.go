@@ -65,7 +65,7 @@ func TestNewContextCheckpointRequiresExactPolicyAndBudget(t *testing.T) {
 	}
 	run := &Run{ID: uuid.NewString(), Attempt: uuid.NewString(), Revision: 1, toolProfile: currentToolProfile, ContextProfile: contextProfileV1, ContextBudget: budget}
 	store := &SessionStore[*schema.AgenticMessage]{Revision: 1}
-	store.bind(run, nil)
+	store.bind(run, []string{"model-node"})
 	var metadata checkpointMetadata
 	if err = json.Unmarshal(store.metadata(), &metadata); err != nil || !resumeCompatibleForRun(&metadata, 1, run) {
 		t.Fatal("new checkpoint failed its own policy check", metadata, err)
