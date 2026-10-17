@@ -98,9 +98,12 @@ func TestContextMigrationBackfillsLegacyWithoutChangingItsTape(t *testing.T) {
 	if err := s.SaveModel(ctx, lease, run, 1, "legacy-request-hash", response); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.FinishRun(ctx, lease, run, "completed", "", false); err != nil {
+		t.Fatal(err)
+	}
 	// Recreate the exact absence of schema-3 columns/tables around persisted
 	// schema-2 Run/input/tape data, then execute the real forward DDL.
-	if _, err := s.DB.Exec(ctx, `ALTER TABLE runtime_runs DROP COLUMN context_profile; ALTER TABLE runtime_runs DROP COLUMN context_budget; DROP TABLE runtime_context_artifacts; DROP TABLE runtime_context_recoveries; DELETE FROM agent_runtime_schema_migrations WHERE version=3;`); err != nil {
+	if _, err := s.DB.Exec(ctx, `ALTER TABLE runtime_runs DROP COLUMN context_profile; ALTER TABLE runtime_runs DROP COLUMN context_budget; ALTER TABLE runtime_session_acceptances DROP COLUMN run_id; DROP TABLE runtime_context_artifacts; DROP TABLE runtime_context_recoveries; DELETE FROM agent_runtime_schema_migrations WHERE version=3;`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.DB.Exec(ctx, schemaSQL+schemaV2SQL+schemaV3SQL+contextArchiveSchemaSQL+contextRecoverySchemaSQL); err != nil {
@@ -114,5 +117,9 @@ func TestContextMigrationBackfillsLegacyWithoutChangingItsTape(t *testing.T) {
 	cached, err := s.CachedModel(ctx, run, 1, "legacy-request-hash")
 	if err != nil || string(cached) != string(response) || count(t, s, `SELECT count(*) FROM runtime_inputs`) != 1 {
 		t.Fatal("migration rewrote the existing tape or input", err)
+	}
+	var acceptedRun string
+	if err := s.DB.QueryRow(ctx, `SELECT run_id::text FROM runtime_session_acceptances WHERE attempt_id=$1`, run.Attempt).Scan(&acceptedRun); err != nil || acceptedRun != run.ID {
+		t.Fatal("migration lost logical Run acceptance history", acceptedRun, err)
 	}
 }
