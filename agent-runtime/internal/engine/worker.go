@@ -335,6 +335,12 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 				return nil, err
 			}
 		}
+		if mentionsForRun(run) {
+			availableTools, err = (&Tools{Store: e.Store, Lease: lease, IM: imc, Sandbox: e.Sandbox, SandboxToken: e.Config.SandboxToken, Authorize: authorize}).BuildIMWithMentions(fileDeliveryForRun(run))
+			if err != nil {
+				return nil, err
+			}
+		}
 		activeTools, err := toolsForRun(ctx, availableTools, run)
 		if err != nil {
 			return nil, err
@@ -363,6 +369,9 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 			instruction := contextV1Instruction(def)
 			if budget.FileDelivery {
 				instruction += fileDeliveryGuidance
+			}
+			if budget.StructuredMentions {
+				instruction += mentionGuidance
 			}
 			return adk.NewTypedChatModelAgent(ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{Name: "teamie_agent", Description: "A user-owned Teamie participant", Instruction: instruction, Model: gatewayModel, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: activeTools, ExecuteSequentially: true}}, MaxIterations: math.MaxInt, Handlers: handlers, ModelRetryConfig: pipeline.RetryConfig()})
 		}
@@ -415,6 +424,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 			}
 			in.Body = message.Body
 			in.Attachments = message.Attachments
+			in.Mentions = message.Mentions
 			in.ReplyToID = message.ReplyToID
 			valid = append(valid, in)
 		}
@@ -461,7 +471,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		// their persisted selection even when the flag or gateway changes.
 		if e.Config.FlagsFile != "" && runtimeFlag(e.Config.FlagsFile, "agents.context.v1") {
 			profile = contextProfileV1
-			budget, err = newContextBudgetWithFiles(int(contextWindow.Load()), runtimeFlag(e.Config.FlagsFile, "agents.files.deliver.v1"))
+			budget, err = newContextBudgetWithFiles(int(contextWindow.Load()), runtimeFlag(e.Config.FlagsFile, "agents.files.deliver.v1"), runtimeFlag(e.Config.FlagsFile, "agents.mentions.v1"))
 			if err != nil {
 				return nil, nil, nil, err
 			}
@@ -849,7 +859,7 @@ func (e *Engine) ingest(ctx context.Context, imc *IM, l *Lease) error {
 				}
 			}
 		}
-		inputs = append(inputs, Input{EventID: event.ID, WorkspaceID: ws, ConversationID: event.ConversationID, MessageID: m.ID, SenderID: m.SenderID, SenderName: m.SenderName, SenderKind: m.SenderKind, Body: m.Body, Attachments: m.Attachments, ReplyToID: m.ReplyToID, Seq: m.Seq, CreatedAt: m.CreatedAt})
+		inputs = append(inputs, Input{EventID: event.ID, WorkspaceID: ws, ConversationID: event.ConversationID, MessageID: m.ID, SenderID: m.SenderID, SenderName: m.SenderName, SenderKind: m.SenderKind, Body: m.Body, Attachments: m.Attachments, Mentions: m.Mentions, ReplyToID: m.ReplyToID, Seq: m.Seq, CreatedAt: m.CreatedAt})
 	}
 	return e.Store.Ingest(ctx, l, page.Cursor, inputs)
 }

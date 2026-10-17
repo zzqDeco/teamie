@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"teamie/backend/pkg/imtext"
 )
 
 var ErrLeaseLost = errors.New("runtime lease lost")
@@ -28,25 +29,26 @@ type Lease struct {
 	Fence          int64
 }
 type Input struct {
-	EventID        string        `json:"eventId"`
-	WorkspaceID    string        `json:"workspaceId"`
-	ConversationID string        `json:"conversationId"`
-	MessageID      string        `json:"messageId"`
-	SenderID       string        `json:"senderId"`
-	SenderName     string        `json:"senderName"`
-	SenderKind     string        `json:"senderKind"`
-	Body           string        `json:"body"`
-	Attachments    []Attachment  `json:"attachments,omitempty"`
-	ReplyToID      string        `json:"replyToId,omitempty"`
-	Seq            int64         `json:"seq"`
-	CreatedAt      string        `json:"createdAt"`
-	Kind           string        `json:"kind,omitempty"`
-	TaskID         string        `json:"taskId,omitempty"`
-	NotificationID string        `json:"notificationId,omitempty"`
-	Status         string        `json:"status,omitempty"`
-	ParentRunID    string        `json:"parentRunId,omitempty"`
-	SourceRefs     []InputSource `json:"sourceRefs,omitempty"`
-	SourceOverflow bool          `json:"sourceOverflow,omitempty"`
+	EventID        string           `json:"eventId"`
+	WorkspaceID    string           `json:"workspaceId"`
+	ConversationID string           `json:"conversationId"`
+	MessageID      string           `json:"messageId"`
+	SenderID       string           `json:"senderId"`
+	SenderName     string           `json:"senderName"`
+	SenderKind     string           `json:"senderKind"`
+	Body           string           `json:"body"`
+	Attachments    []Attachment     `json:"attachments,omitempty"`
+	Mentions       []imtext.Mention `json:"mentions,omitempty"`
+	ReplyToID      string           `json:"replyToId,omitempty"`
+	Seq            int64            `json:"seq"`
+	CreatedAt      string           `json:"createdAt"`
+	Kind           string           `json:"kind,omitempty"`
+	TaskID         string           `json:"taskId,omitempty"`
+	NotificationID string           `json:"notificationId,omitempty"`
+	Status         string           `json:"status,omitempty"`
+	ParentRunID    string           `json:"parentRunId,omitempty"`
+	SourceRefs     []InputSource    `json:"sourceRefs,omitempty"`
+	SourceOverflow bool             `json:"sourceOverflow,omitempty"`
 }
 type Run struct {
 	toolProfile                 string

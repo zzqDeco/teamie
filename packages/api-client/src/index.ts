@@ -163,6 +163,7 @@ export const defaultAttachmentLimits: AttachmentLimits = {
   maxFileBytes: 4 * 1024 * 1024,
   maxFilesPerMessage: 8,
 };
+export type Mention = { userId: string; start: number; end: number };
 export type Message = {
   id: string;
   conversationId: string;
@@ -177,6 +178,7 @@ export type Message = {
   editedAt?: string;
   retractedAt?: string;
   attachments?: Attachment[];
+  mentions?: Mention[];
 };
 export type Bootstrap = {
   user: User;
@@ -467,6 +469,10 @@ export class TeamieClient {
     this.#request<MessagePage>(
       `/conversations/${part(id)}/messages?limit=50${beforeSeq ? `&beforeSeq=${beforeSeq}` : ""}`,
     );
+  message = (conversationId: string, id: string) =>
+    this.#request<{ message: Message }>(`/conversations/${part(conversationId)}/messages/${part(id)}`);
+  messagesAround = (id: string, seq: number) =>
+    this.#request<MessagePage>(`/conversations/${part(id)}/messages?limit=50&aroundSeq=${seq}`);
   send = (
     id: string,
     data: {
@@ -474,6 +480,7 @@ export class TeamieClient {
       body: string;
       replyToId?: string;
       attachmentIds?: string[];
+      mentions?: Mention[];
     },
   ) =>
     this.#request<{ message: Message }>(`/conversations/${part(id)}/messages`, {
@@ -503,10 +510,10 @@ export class TeamieClient {
       {},
       "blob",
     );
-  edit = (conversationId: string, id: string, body: string) =>
+  edit = (conversationId: string, id: string, body: string, mentions?: Mention[]) =>
     this.#request<{ message: Message }>(
       `/conversations/${part(conversationId)}/messages/${part(id)}`,
-      { method: "PATCH", body: JSON.stringify({ body }) },
+      { method: "PATCH", body: JSON.stringify({ body, ...(mentions?.length ? { mentions } : {}) }) },
     );
   retract = (conversationId: string, id: string) =>
     this.#request<{ message: Message }>(

@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"teamie/backend/internal/api"
 	"teamie/backend/pkg/imlimits"
+	"teamie/backend/pkg/imtext"
 )
 
 type Handler struct {
@@ -194,15 +195,16 @@ func (h *Handler) Routes() http.Handler {
 	})
 	auth("POST /api/v1/conversations/{id}/messages", func(w http.ResponseWriter, r *http.Request, s api.Session) error {
 		var in struct {
-			ClientMessageID string   `json:"clientMessageId"`
-			Body            string   `json:"body"`
-			ReplyToID       *string  `json:"replyToId"`
-			AttachmentIDs   []string `json:"attachmentIds"`
+			ClientMessageID string           `json:"clientMessageId"`
+			Body            string           `json:"body"`
+			ReplyToID       *string          `json:"replyToId"`
+			AttachmentIDs   []string         `json:"attachmentIds"`
+			Mentions        []imtext.Mention `json:"mentions"`
 		}
 		if e := api.Decode(w, r, &in); e != nil {
 			return e
 		}
-		msg, created, e := h.Store.SendWithAttachments(r.Context(), s.User, r.PathValue("id"), in.ClientMessageID, in.Body, in.ReplyToID, in.AttachmentIDs)
+		msg, created, e := h.Store.SendAnnotated(r.Context(), s.User, r.PathValue("id"), in.ClientMessageID, in.Body, in.ReplyToID, in.AttachmentIDs, in.Mentions)
 		if e != nil {
 			return e
 		}
@@ -216,14 +218,15 @@ func (h *Handler) Routes() http.Handler {
 	change := func(retract bool) api.AuthedHandler {
 		return func(w http.ResponseWriter, r *http.Request, s api.Session) error {
 			var in struct {
-				Body string `json:"body"`
+				Body     string           `json:"body"`
+				Mentions []imtext.Mention `json:"mentions"`
 			}
 			if !retract {
 				if e := api.Decode(w, r, &in); e != nil {
 					return e
 				}
 			}
-			msg, e := h.Store.ChangeMessage(r.Context(), s.User.ID, r.PathValue("id"), r.PathValue("messageId"), in.Body, retract)
+			msg, e := h.Store.ChangeAnnotatedMessage(r.Context(), s.User.ID, r.PathValue("id"), r.PathValue("messageId"), in.Body, retract, in.Mentions)
 			if e != nil {
 				return e
 			}

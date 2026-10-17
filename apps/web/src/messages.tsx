@@ -1,4 +1,11 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import type { FormEvent, KeyboardEvent } from "react";
 import {
   ArrowDown,
@@ -24,10 +31,16 @@ import {
   useAttachmentDraft,
 } from "./attachments";
 import { api } from "@teamie/api-client";
-import type { Conversation, Member, Message } from "@teamie/api-client";
+import type {
+  Conversation,
+  Member,
+  Message,
+  Mention,
+} from "@teamie/api-client";
 import { useAuth } from "./auth";
 import { errorText, sendMessage, useChat, useChatState } from "./chat";
-import { chatStore } from "./store";
+import { chatStore, reconcileMessages } from "./store";
+import { MentionInput, MentionText, trimMentionDraft } from "./mentions";
 import type { LocalMessage } from "./store";
 import { Avatar, Button, date, IconButton, Modal, Notice, time } from "./ui";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
@@ -70,7 +83,23 @@ export function ConversationView({
   const attachmentBlocked =
     attachments.blocked || (attachments.files.length > 0 && !uploadsEnabled);
   const snapshot = useChatState();
-  const messages = snapshot.messages[conversation.id] || [];
+  const allMessages = snapshot.messages[conversation.id] || [];
+  const [located, setLocated] = useState<LocalMessage[] | null>(null);
+  const messages = located
+    ? reconcileMessages(
+        located,
+        allMessages.filter((m) => located.some((l) => l.id === m.id)),
+      )
+    : allMessages;
+  const [highlightId, setHighlightId] = useState("");
+  const [locating, setLocating] = useState(false);
+  const navigation = useRef(0);
+  const [mentions, setMentions] = useState<Mention[]>([]);
+  const [editMentions, setEditMentions] = useState<Mention[]>([]);
+  const mentionMembers = members.filter((member) =>
+    conversation.memberIds.includes(member.userId),
+  );
+  const mentionsEnabled = !!data?.capabilities["im.message.mentions"];
   const name = conversationName(conversation, user!.id, members);
   const [actionMessageId, setActionMessageId] = useState("");
   const [loading, setLoading] = useState(true),
@@ -92,21 +121,91 @@ export function ConversationView({
     lastRead = useRef(conversation.readSeq),
     lastTyping = useRef(0);
   const generation = chatStore.generation;
+  useEffect(
+    () => () => {
+      navigation.current++;
+    },
+    [conversation.id],
+  );
   const fetchLatest = useCallback(async () => {
     const token = chatStore.generation;
+    const operation = ++navigation.current;
+    setLocated(null);
+    setHighlightId("");
+    setLocating(false);
+    setLoadingOlder(false);
+    initialScroll.current = true;
+    setAtBottom(true);
     setLoading(true);
     setError("");
     try {
       const page = await api.messages(conversation.id);
-      if (token !== chatStore.generation) return;
+      if (token !== chatStore.generation || operation !== navigation.current)
+        return;
       chatStore.merge(page.messages);
       setHasMore(page.hasMore);
     } catch (e) {
-      if (token === chatStore.generation) setError(errorText(e));
+      if (token === chatStore.generation && operation === navigation.current)
+        setError(errorText(e));
     } finally {
-      if (token === chatStore.generation) setLoading(false);
+      if (token === chatStore.generation && operation === navigation.current)
+        setLoading(false);
     }
   }, [conversation.id]);
+  const focusMessage = useCallback((id: string) => {
+    const target = document.getElementById(`message-${id}`);
+    if (!target || !scrollRef.current?.contains(target)) return;
+    target.scrollIntoView({
+      block: "center",
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "instant"
+        : "smooth",
+    });
+    target.focus({ preventScroll: true });
+  }, []);
+  useLayoutEffect(() => {
+    if (highlightId) focusMessage(highlightId);
+  }, [highlightId, located, focusMessage]);
+  async function locate(id: string) {
+    const token = chatStore.generation;
+    const operation = ++navigation.current;
+    const current = () =>
+      token === chatStore.generation && operation === navigation.current;
+    setAtBottom(false);
+    setLoading(false);
+    setLoadingOlder(false);
+    setLocating(false);
+    initialScroll.current = false;
+    setError("");
+    if (messages.some((m) => m.id === id)) {
+      setHighlightId(id);
+      focusMessage(id);
+      return;
+    }
+    setLocating(true);
+    try {
+      const target = await api.message(conversation.id, id);
+      if (!current()) return;
+      const page = await api.messagesAround(
+        conversation.id,
+        target.message.seq,
+      );
+      if (!current()) return;
+      const context = reconcileMessages(page.messages, [target.message]);
+      setLocated(context);
+      setHasMore((context[0]?.seq || 1) > 1);
+      setHighlightId(id);
+    } catch (e) {
+      if (current())
+        setError(
+          e instanceof Error && "status" in e && e.status === 404
+            ? "原消息已不可访问"
+            : errorText(e),
+        );
+    } finally {
+      if (current()) setLocating(false);
+    }
+  }
   useEffect(() => {
     void fetchLatest();
     return () => {
@@ -178,28 +277,41 @@ export function ConversationView({
     const first = messages.find((m) => !m.status)?.seq;
     if (!first) return;
     const token = chatStore.generation;
+    const operation = navigation.current;
     const height = scrollRef.current?.scrollHeight || 0;
     setLoadingOlder(true);
     setError("");
     try {
       const page = await api.messages(conversation.id, first);
-      if (token !== chatStore.generation) return;
-      chatStore.merge(page.messages);
+      if (token !== chatStore.generation || operation !== navigation.current)
+        return;
+      if (located)
+        setLocated((old) =>
+          old ? reconcileMessages(old, page.messages) : old,
+        );
+      else chatStore.merge(page.messages);
       setHasMore(page.hasMore);
       requestAnimationFrame(() => {
-        if (scrollRef.current)
+        if (
+          token === chatStore.generation &&
+          operation === navigation.current &&
+          scrollRef.current
+        )
           scrollRef.current.scrollTop +=
             scrollRef.current.scrollHeight - height;
       });
     } catch (e) {
-      if (token === chatStore.generation) setError(errorText(e));
+      if (token === chatStore.generation && operation === navigation.current)
+        setError(errorText(e));
     } finally {
-      if (token === chatStore.generation) setLoadingOlder(false);
+      if (token === chatStore.generation && operation === navigation.current)
+        setLoadingOlder(false);
     }
   }
   function submit(event?: FormEvent) {
     event?.preventDefault();
-    const text = body.trim();
+    const draft = trimMentionDraft(body, mentions);
+    const text = draft.body;
     if (
       (!text && !attachments.ready) ||
       text.length > 8000 ||
@@ -213,6 +325,7 @@ export function ConversationView({
       clientMessageId,
       conversationId: conversation.id,
       body: text,
+      ...(draft.mentions.length ? { mentions: draft.mentions } : {}),
       ...(files.length ? { attachments: files } : {}),
       senderId: user!.id,
       senderName: user!.displayName,
@@ -223,6 +336,8 @@ export function ConversationView({
     };
     void sendMessage(message, chatStore.generation);
     setBody("");
+    setMentions([]);
+    if (located) void fetchLatest();
     setReply(null);
     setAtBottom(true);
     sendTyping(conversation.id, false);
@@ -246,10 +361,12 @@ export function ConversationView({
     setActionBusy(true);
     setActionError("");
     try {
+      const draft = trimMentionDraft(editBody, editMentions);
       const result = await api.edit(
         conversation.id,
         editing.id,
-        editBody.trim(),
+        draft.body,
+        draft.mentions,
       );
       if (token !== chatStore.generation) return;
       chatStore.merge([result.message]);
@@ -332,12 +449,20 @@ export function ConversationView({
           <button onClick={sync}>立即重试</button>
         </div>
       )}
+      {(located || locating) && (
+        <div className="located-banner" role="status">
+          <span>{locating ? "正在定位消息…" : "消息上下文"}</span>
+          <button onClick={() => void fetchLatest()}>返回最新消息</button>
+        </div>
+      )}
       <div
         className="message-scroll"
         ref={scrollRef}
         onScroll={(event) => {
           const el = event.currentTarget;
-          setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
+          setAtBottom(
+            !located && el.scrollHeight - el.scrollTop - el.clientHeight < 80,
+          );
         }}
       >
         {!loading && !messages.length && !error && (
@@ -416,7 +541,8 @@ export function ConversationView({
               )}
               <article
                 id={`message-${message.id}`}
-                className={`message ${compact ? "compact" : ""} ${message.status || ""} ${message.retractedAt ? "retracted" : ""} ${actionMessageId === message.id ? "actions-open" : ""}`}
+                tabIndex={-1}
+                className={`message ${highlightId === message.id ? "located" : ""} ${compact ? "compact" : ""} ${message.status || ""} ${message.retractedAt ? "retracted" : ""} ${actionMessageId === message.id ? "actions-open" : ""}`}
               >
                 <div className="message-avatar">
                   {!compact ? (
@@ -456,22 +582,7 @@ export function ConversationView({
                   {message.replyToId && (
                     <button
                       className="message-reply"
-                      onClick={() => {
-                        const targetElement = document.getElementById(
-                          `message-${message.replyToId}`,
-                        );
-                        targetElement?.scrollIntoView({
-                          block: "center",
-                          behavior: "smooth",
-                        });
-                        targetElement?.animate(
-                          [
-                            { background: "#eee9ff" },
-                            { background: "transparent" },
-                          ],
-                          { duration: 1600 },
-                        );
-                      }}
+                      onClick={() => void locate(message.replyToId!)}
                     >
                       <CornerUpLeft size={13} />
                       <b>{target?.senderName || "较早的消息"}</b>
@@ -487,11 +598,16 @@ export function ConversationView({
                   )}
                   {editing?.id === message.id ? (
                     <form className="edit-message" onSubmit={edit}>
-                      <textarea
+                      <MentionInput
                         autoFocus
                         value={editBody}
-                        onChange={(e) => setEditBody(e.target.value)}
-                        maxLength={8000}
+                        mentions={editMentions}
+                        onChange={(value, mentions) => {
+                          setEditBody(value);
+                          setEditMentions(mentions);
+                        }}
+                        members={mentionMembers}
+                        enabled={mentionsEnabled}
                         required={!editing.attachments?.length}
                         aria-label="编辑消息内容"
                         onKeyDown={(e) => {
@@ -522,7 +638,15 @@ export function ConversationView({
                     </form>
                   ) : (
                     <p className="message-text">
-                      {message.retractedAt ? "这条消息已撤回" : message.body}
+                      {message.retractedAt ? (
+                        "这条消息已撤回"
+                      ) : (
+                        <MentionText
+                          body={message.body}
+                          mentions={message.mentions}
+                          userId={user!.id}
+                        />
+                      )}
                       {message.editedAt && !message.retractedAt && (
                         <span className="edited-label">（已编辑）</span>
                       )}
@@ -591,6 +715,7 @@ export function ConversationView({
                                 setActionMessageId("");
                                 setEditing(message);
                                 setEditBody(message.body);
+                                setEditMentions(message.mentions || []);
                                 setActionError("");
                               }}
                             >
@@ -620,10 +745,14 @@ export function ConversationView({
         })}
         <div className="message-end" />
       </div>
-      {!atBottom && (
+      {!atBottom && !located && !locating && (
         <button
           className="jump-latest"
           onClick={() => {
+            if (located) {
+              void fetchLatest();
+              return;
+            }
             setAtBottom(true);
             scrollRef.current?.scrollTo({
               top: scrollRef.current.scrollHeight,
@@ -667,13 +796,19 @@ export function ConversationView({
           className={`composer ${reply ? "with-reply" : ""}`}
           onSubmit={submit}
         >
-          <textarea
-            ref={inputRef}
+          <MentionInput
+            inputRef={inputRef}
             value={body}
-            onChange={(e) => {
-              setBody(e.target.value);
+            mentions={mentions}
+            onChange={(value, mentions) => {
+              setBody(value);
+              setMentions(mentions);
+            }}
+            members={mentionMembers}
+            enabled={mentionsEnabled}
+            onTyping={(value) => {
               if (Date.now() - lastTyping.current > 1500) {
-                sendTyping(conversation.id, !!e.target.value);
+                sendTyping(conversation.id, !!value);
                 lastTyping.current = Date.now();
               }
             }}
@@ -683,8 +818,6 @@ export function ConversationView({
                 ? `发送消息到 # ${name}`
                 : `发送消息给 ${name}`
             }
-            maxLength={8000}
-            rows={1}
             aria-label="消息内容"
           />
           <div className="composer-tools">

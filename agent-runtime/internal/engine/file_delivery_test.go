@@ -65,9 +65,9 @@ type deliveryHTTPFixture struct {
 	posts                        int
 }
 
-func newDeliveryFixture(t *testing.T) (*contextArchiveFixture, *deliveryHTTPFixture) {
+func newDeliveryFixture(t *testing.T, mentions ...bool) (*contextArchiveFixture, *deliveryHTTPFixture) {
 	t.Helper()
-	budget, err := newContextBudgetWithFiles(16384, true)
+	budget, err := newContextBudgetWithFiles(16384, true, mentions...)
 	if err != nil {
 		t.Fatal(err)
 	}

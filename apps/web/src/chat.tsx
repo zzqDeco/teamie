@@ -338,6 +338,7 @@ export async function sendMessage(message: Message, generation: number) {
       clientMessageId: message.clientMessageId,
       body: message.body,
       replyToId: message.replyToId,
+      ...(message.mentions?.length ? { mentions: message.mentions } : {}),
       ...(message.attachments?.length
         ? { attachmentIds: message.attachments.map((a) => a.id) }
         : {}),
