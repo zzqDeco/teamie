@@ -250,6 +250,7 @@ describe("ordinary participant typing in IM", () => {
       body: "需要回复的消息",
       createdAt: user.createdAt,
     };
+    vi.spyOn(api, "message").mockResolvedValue({ message: sourceMessage });
     vi.spyOn(api, "messages").mockImplementation(async (id) => ({
       messages: id === conversation.id ? [sourceMessage] : [],
       hasMore: false,

@@ -172,9 +172,38 @@ describe("ID-only composer replies", () => {
     expect(preview()?.textContent).toContain("正在加载原消息");
     const signal = vi.mocked(api.message).mock.lastCall![2]!;
     await act(async () => { chatStore.merge([{ ...source, body: "SYNC_EDIT", editedAt: "2026-10-17T00:01:00Z" }]); });
-    expect(signal.aborted).toBe(true);
+    expect(signal.aborted).toBe(false);
     await act(async () => { pending.resolve({ message: source }); });
     expect(preview()?.textContent).toContain("SYNC_EDIT");
+    expect(preview()?.textContent).not.toContain(source.body);
+  });
+
+  it.each(["retracted", "edited"])("keeps a newer %s single-message version when an older latest page arrives afterward", async (change) => {
+    await selectContextReply();
+    await show(otherConversation);
+    const pendingLatest = deferred<{ messages: Message[]; hasMore: boolean }>();
+    vi.mocked(api.messages).mockImplementation((id) => id === conversation.id
+      ? pendingLatest.promise
+      : Promise.resolve({ messages: [], hasMore: false }));
+    const updated = change === "retracted"
+      ? { ...source, body: "", retractedAt: "2026-10-17T00:01:00Z" }
+      : { ...source, body: "LATEST_REPLY_EDIT", editedAt: "2026-10-17T00:01:00Z" };
+    vi.mocked(api.message).mockResolvedValue({ message: updated });
+    await show();
+    expect(preview()?.textContent).toContain(change === "retracted" ? "消息已撤回" : updated.body);
+    await act(async () => { pendingLatest.resolve({ messages: [source], hasMore: false }); });
+    // Effects have now settled; an ordinary composer render must retain the
+    // accepted newer version after the older page becomes available.
+    await type("Unsent draft after latest load");
+    expect(preview()?.textContent).toContain(change === "retracted" ? "消息已撤回" : updated.body);
+    expect(preview()?.textContent).not.toContain(source.body);
+    const reads = vi.mocked(api.message).mock.calls.length;
+    activeUser = { ...user, displayName: "Updated profile" };
+    bootstrap = { ...bootstrap, user: activeUser };
+    await show();
+    await type("Unsent draft after profile refresh");
+    expect(api.message).toHaveBeenCalledTimes(reads);
+    expect(preview()?.textContent).toContain(change === "retracted" ? "消息已撤回" : updated.body);
     expect(preview()?.textContent).not.toContain(source.body);
   });
 

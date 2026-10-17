@@ -198,8 +198,9 @@ export function ConversationView({
     lastRead = useRef(conversation.readSeq),
     lastTyping = useRef(0);
   const generation = chatStore.generation;
+  const userId = user!.id;
   const canReadConversation =
-    snapshot.userId === user!.id && !!snapshot.conversations[conversation.id];
+    snapshot.userId === userId && !!snapshot.conversations[conversation.id];
   const cachedReply = reconcileMessages(
     [],
     [...allMessages, ...(located || [])].filter(
@@ -207,7 +208,6 @@ export function ConversationView({
         message.conversationId === conversation.id && message.id === replyToId,
     ),
   )[0];
-  const hasCachedReply = !!cachedReply;
   const replyKey = JSON.stringify([
     generation,
     conversation.id,
@@ -233,12 +233,14 @@ export function ConversationView({
       )[0]
     : undefined;
   useEffect(() => {
-    if (!canReadConversation || !replyToId || hasCachedReply) return;
+    if (!canReadConversation || !replyToId) return;
+    // One read belongs to the selected reply's lifetime. A cache arrival or a
+    // same-account profile refresh must not discard an accepted newer version.
     const controller = new AbortController();
     const current = () =>
       !controller.signal.aborted &&
       generation === chatStore.generation &&
-      chatStore.getSnapshot().userId === user!.id &&
+      chatStore.getSnapshot().userId === userId &&
       !!chatStore.getSnapshot().conversations[conversation.id] &&
       readComposerDraft(conversation.id).replyToId === replyToId;
     void api
@@ -267,10 +269,9 @@ export function ConversationView({
     canReadConversation,
     conversation.id,
     generation,
-    hasCachedReply,
     replyKey,
     replyToId,
-    user,
+    userId,
   ]);
   useEffect(
     () => () => {
