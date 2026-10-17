@@ -36,6 +36,12 @@ func (h *Handler) auth(next handler) http.HandlerFunc {
 			fail(w, errAPI(403, "forbidden", "A human browser session is required"))
 			return
 		}
+		if r.Method == "GET" || r.Method == "HEAD" {
+			if provided := r.Header.Get("X-CSRF-Token"); provided != "" && subtle.ConstantTimeCompare([]byte(csrf), []byte(provided)) != 1 {
+				fail(w, errAPI(401, "session_changed", "Browser session changed"))
+				return
+			}
+		}
 		if r.Method != "GET" && r.Method != "HEAD" {
 			origin := r.Header.Get("Origin")
 			if origin != "" && origin != h.Origin || origin == "" && r.Header.Get("Sec-Fetch-Site") == "cross-site" {

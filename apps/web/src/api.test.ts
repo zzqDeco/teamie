@@ -5,6 +5,47 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe("account-bound transport", () => {
+  it("binds protected reads to the browser nonce while leaving session discovery unbound", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response("{}"));
+    vi.stubGlobal("fetch", fetch);
+    const client = new TeamieClient();
+    client.csrfToken = "browser-account";
+    await client.bootstrap();
+    fetch.mockResolvedValue(new Response("{}"));
+    await client.session();
+    expect(fetch.mock.calls[0][1].headers.get("X-CSRF-Token")).toBe("browser-account");
+    expect(fetch.mock.calls[1][1].headers.has("X-CSRF-Token")).toBe(false);
+  });
+  it.each([[401, "session_changed"], [403, "csrf_failed"], [403, "invalid_csrf"]])(
+    "reconciles a cookie/session mismatch without clearing it as an ordinary denial: %s %s",
+    async (status, code) => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({ error: { code, message: "session changed" } }),
+        { status: status as number },
+      )));
+      const client = new TeamieClient();
+      client.csrfToken = "browser-account";
+      client.onSessionChanged = vi.fn();
+      client.onUnauthorized = vi.fn();
+      client.onForbidden = vi.fn();
+      await expect(client.messages("c1")).rejects.toMatchObject({ status, code });
+      expect(client.onSessionChanged).toHaveBeenCalledOnce();
+      expect(client.onUnauthorized).not.toHaveBeenCalled();
+      expect(client.onForbidden).not.toHaveBeenCalled();
+    },
+  );
+  it("discards an old protected success even when the session changes during body decoding", async () => {
+    let finish!: (value: unknown) => void;
+    const json = vi.fn(() => new Promise((resolve) => { finish = resolve; }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, json }));
+    const client = new TeamieClient();
+    client.csrfToken = "previous-account";
+    const pending = client.bootstrap();
+    await vi.waitFor(() => expect(json).toHaveBeenCalledOnce());
+    client.csrfToken = "current-account";
+    finish({ conversations: [{ id: "previous-private-conversation" }] });
+    await expect(pending).rejects.toMatchObject({ status: 409, code: "stale_session" });
+  });
   it("changes the password using the authenticated CSRF-protected endpoint and handles an empty 204", async () => {
     const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetch);

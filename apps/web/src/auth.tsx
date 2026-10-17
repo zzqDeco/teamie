@@ -24,6 +24,7 @@ type Auth = {
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   resetPassword: (token: string, newPassword: string, accountId: string) => Promise<void>;
   captureSession: () => { subject: string | null; isCurrent: () => boolean };
+  reconcileSession: () => void;
   retry: () => void;
 };
 const AuthContext = createContext<Auth | null>(null);
@@ -73,11 +74,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         requestSubject === subject.current,
     };
   }, []);
+  const reconcileSession = useCallback(() => {
+    // Set-Cookie is applied before an auth promise settles, even when its form
+    // unmounted. Discard account-bound state before discovering that cookie.
+    reset();
+    setLoading(true);
+    setAttempt((n) => n + 1);
+  }, [reset]);
   useEffect(() => {
     let active = true;
     const requestGeneration = generation.current;
     const isCurrent = () => active && requestGeneration === generation.current;
     api.onUnauthorized = reset;
+    api.onSessionChanged = reconcileSession;
     setLoading(true);
     setError("");
     api
@@ -95,8 +104,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       active = false;
       if (api.onUnauthorized === reset) api.onUnauthorized = undefined;
+      if (api.onSessionChanged === reconcileSession) api.onSessionChanged = undefined;
     };
-  }, [attempt, reset, setSession]);
+  }, [attempt, reconcileSession, reset, setSession]);
   const logout = async () => {
     const requestGeneration = generation.current;
     const requestSubject = subject.current;
@@ -149,6 +159,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         changePassword,
         resetPassword,
         captureSession,
+        reconcileSession,
         retry: () => setAttempt((n) => n + 1),
       }}
     >

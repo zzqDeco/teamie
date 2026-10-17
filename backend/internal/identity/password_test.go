@@ -102,6 +102,7 @@ func TestPasswordChangeRevokesSessionsAndRejectsStaleLogin(t *testing.T) {
 		t.Fatal("password hash not replaced with required cost", err)
 	}
 	passwordError(t, s.ChangePassword(ctx, ss.User.ID, token, "different-test-password", "third-test-password"), 401, "unauthenticated")
+	passwordError(t, s.ChangePassword(ctx, ss.User.ID, token, "different-test-password", "short"), 401, "unauthenticated")
 }
 
 func TestPasswordChangeIsAtomicAndBoundToCurrentHumanSession(t *testing.T) {
@@ -242,6 +243,15 @@ func TestPasswordHTTPOriginCSRFValidationAndSessionRevocation(t *testing.T) {
 }
 
 func TestDelayedPasswordResponsePreservesNewerLoginCookie(t *testing.T) {
+	testDelayedSessionRevocation(t, "/api/v1/auth/password", `{"currentPassword":"initial-test-password","newPassword":"different-test-password"}`)
+}
+
+func TestDelayedLogoutResponsePreservesNewerLoginCookie(t *testing.T) {
+	testDelayedSessionRevocation(t, "/api/v1/auth/logout", `{}`)
+}
+
+func testDelayedSessionRevocation(t *testing.T, path, body string) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	s, ss, token := passwordStore(t)
@@ -258,7 +268,7 @@ func TestDelayedPasswordResponsePreservesNewerLoginCookie(t *testing.T) {
 	h := &Handler{Store: s}
 	var routes http.Handler
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/auth/password" {
+		if r.URL.Path != path {
 			routes.ServeHTTP(w, r)
 			return
 		}
@@ -304,11 +314,13 @@ func TestDelayedPasswordResponsePreservesNewerLoginCookie(t *testing.T) {
 	}
 	passwordResult := make(chan error, 1)
 	go func() {
-		response, err := post("/api/v1/auth/password", `{"currentPassword":"initial-test-password","newPassword":"different-test-password"}`, ss.CSRFToken)
+		response, err := post(path, body, ss.CSRFToken)
 		if err == nil {
 			response.Body.Close()
 			if response.StatusCode != 204 {
-				err = errors.New("password change did not succeed: " + response.Status)
+				err = errors.New("session revocation did not succeed: " + response.Status)
+			} else if len(response.Cookies()) != 0 {
+				err = errors.New("delayed response rewrote the shared login cookie")
 			}
 		}
 		passwordResult <- err
@@ -318,7 +330,7 @@ func TestDelayedPasswordResponsePreservesNewerLoginCookie(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	// Another account signs in while the earlier password response is delayed.
+	// Another tab signs in while the earlier revocation response is delayed.
 	response, err := post("/api/v1/auth/login", `{"email":"later-login@example.invalid","password":"other-test-password"}`, "")
 	if err != nil {
 		t.Fatal(err)
@@ -349,9 +361,9 @@ func TestDelayedPasswordResponsePreservesNewerLoginCookie(t *testing.T) {
 	defer response.Body.Close()
 	var current api.Session
 	if err = json.NewDecoder(response.Body).Decode(&current); err != nil || response.StatusCode != 200 || current.User.ID != other.User.ID {
-		t.Fatal("delayed password response removed the newer session cookie", response.StatusCode, err)
+		t.Fatal("delayed revocation response removed the newer session cookie", response.StatusCode, err)
 	}
 	if _, err = s.Validate(ctx, token); err == nil {
-		t.Fatal("old account session survived change")
+		t.Fatal("old account session survived revocation")
 	}
 }

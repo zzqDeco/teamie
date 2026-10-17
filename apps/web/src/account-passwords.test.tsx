@@ -535,7 +535,7 @@ describe("account changes with pending requests", () => {
   });
 
   it.each([false, true])(
-    "ignores a completed auth request from a form unmounted by an account change (register=%s)",
+    "reconciles the cookie written by a completed auth request after its form unmounted (register=%s)",
     async (register) => {
       const authentication = deferred<Session>();
       if (register) vi.mocked(api.register).mockReturnValue(authentication.promise);
@@ -551,9 +551,16 @@ describe("account changes with pending requests", () => {
       expect(container.querySelector(".auth-form")).toBeNull();
       await settle(() => { void activeAuth.logout(); });
       expect(api.csrfToken).toBe("");
+      // A browser applies this old auth response's Set-Cookie before the
+      // promise settles. The next session lookup must reflect that cookie.
+      vi.mocked(api.session).mockResolvedValue(session);
+      client.setQueryData(["account-data", nextSession.user.id], "private data");
       await settle(() => authentication.resolve(session));
-      expect(find("[data-account]").textContent).toBe("signed-out");
-      expect(api.csrfToken).toBe("");
+      await settle();
+      expect(find("[data-account]").textContent).toBe(session.user.id);
+      expect(api.csrfToken).toBe(session.csrfToken);
+      expect(client.getQueryData(["account-data", nextSession.user.id])).toBeUndefined();
+      expect(api.session).toHaveBeenCalledTimes(2);
     },
   );
 });

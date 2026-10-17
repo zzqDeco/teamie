@@ -52,6 +52,12 @@ func Auth(identity Identity, origin string, next AuthedHandler) http.HandlerFunc
 			Fail(w, err)
 			return
 		}
+		if !Mutating(r) && !s.ServicePrincipal && r.URL.Path != "/api/v1/auth/session" {
+			if token := r.Header.Get("X-CSRF-Token"); token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(s.CSRFToken)) != 1 {
+				Fail(w, Err(401, "session_changed", "Browser session changed"))
+				return
+			}
+		}
 		if Mutating(r) && !s.ServicePrincipal {
 			if err = CheckOrigin(r, origin); err != nil {
 				Fail(w, err)

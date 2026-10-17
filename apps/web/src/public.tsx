@@ -150,7 +150,7 @@ export function Landing() {
 }
 
 export function Login() {
-  const { user, loading, setSession } = useAuth();
+  const { user, loading, setSession, reconcileSession } = useAuth();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const register = params.get("mode") === "register";
@@ -229,7 +229,10 @@ export function Login() {
             inviteCode: String(data.get("inviteCode") || "").trim(),
           })
         : await api.login(String(data.get("email")).trim(), password);
-      if (!active.current || sessionToken !== api.csrfToken) return;
+      if (!active.current || sessionToken !== api.csrfToken) {
+        reconcileSession();
+        return;
+      }
       form.reset();
       setSession(session);
       navigate(next, { replace: true });

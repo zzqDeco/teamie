@@ -37,6 +37,42 @@ const storage = (): StorageLike => {
   };
 };
 describe("durable message reconciliation", () => {
+  it.each(["sync", "local"])("rejects an older bootstrap after a %s conversation creation without losing messages or cursor", (kind) => {
+    const store = new ChatStore();
+    store.begin("u1");
+    store.replaceConversations([conversation]);
+    const observed = { generation: store.generation, conversationVersion: store.conversationVersion };
+    const created = { ...conversation, id: "new-conversation" };
+    if (kind === "local") store.addConversation(created);
+    store.apply({
+      events: [
+        ...(kind === "sync" ? [{ id: "7", type: "conversation.created" as const, conversation: created, createdAt: created.updatedAt }] : []),
+        { id: "8", type: "message.created" as const, message: message({ conversationId: created.id }), createdAt: created.updatedAt },
+      ],
+      cursor: "8", hasMore: false,
+    });
+    expect(store.replaceConversations([conversation], observed)).toBe(false);
+    expect(store.getSnapshot().conversations[created.id]).toBeDefined();
+    expect(store.getSnapshot().messages[created.id]).toHaveLength(1);
+    expect(store.getSnapshot().cursor).toBe("8");
+  });
+  it("accepts a bootstrap across ordinary message/read arrivals while preserving newer sequence numbers", () => {
+    const store = new ChatStore();
+    store.begin("u1");
+    store.replaceConversations([conversation]);
+    const observed = { generation: store.generation, conversationVersion: store.conversationVersion };
+    store.apply({ events: [
+      { id: "7", type: "message.created", message: message({ seq: 5 }), createdAt: conversation.updatedAt },
+      { id: "8", type: "read.updated", conversationId: conversation.id, readSeq: 4, createdAt: conversation.updatedAt },
+    ], cursor: "8", hasMore: false });
+    expect(store.replaceConversations([conversation], observed)).toBe(true);
+    expect(store.getSnapshot().conversations.c1).toMatchObject({ lastSeq: 5, readSeq: 4 });
+    expect(store.getSnapshot().messages.c1).toHaveLength(1);
+    expect(store.getSnapshot().cursor).toBe("8");
+    store.revoke();
+    expect(store.replaceConversations([conversation], observed)).toBe(false);
+    expect(store.getSnapshot().conversations).toEqual({});
+  });
   it("deduplicates optimistic send, HTTP acknowledgement, and duplicate sync delivery using sender + client id", () => {
     const pending = message({
       id: "local:request-1",

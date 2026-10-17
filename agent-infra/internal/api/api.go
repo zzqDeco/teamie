@@ -113,6 +113,11 @@ func (a AdminAuth) Require(r *http.Request) (*im.User, error) {
 	if s == nil || !s.Valid || s.User == nil {
 		return nil, Err(401, "unauthorized", "Authentication required")
 	}
+	if r.Method == "GET" || r.Method == "HEAD" {
+		if provided := r.Header.Get("X-CSRF-Token"); provided != "" && (s.CsrfToken == nil || !EqualSecret(provided, *s.CsrfToken)) {
+			return nil, Err(401, "session_changed", "Browser session changed")
+		}
+	}
 	if s.User.Kind != "human" || s.User.PlatformRole != "admin" {
 		return nil, Err(403, "forbidden", "Administrator access required")
 	}
