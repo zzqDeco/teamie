@@ -269,6 +269,12 @@ func (t *Tools) execute(ctx context.Context, name string, args any, fn func(cont
 		if e = json.Unmarshal(cached, &out); e != nil {
 			return nil, e
 		}
+		if name == "im_get_attachment" && out.OK {
+			archive := &ContextArchive{Store: t.Store, Lease: t.Lease, IM: t.IM, Authorize: t.Authorize}
+			if e = archive.captureWorkspaceSources(ctx, run, callID, name, payload); e != nil {
+				return nil, e
+			}
+		}
 		out.raw, e = t.Store.replayToolWire(ctx, run, callID, name, cached)
 		if e != nil {
 			return nil, e

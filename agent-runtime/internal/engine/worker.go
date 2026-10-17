@@ -285,7 +285,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		e.report(ctx, def.Id, "error", "tool_failed", false)
 		return
 	}
-	tasks, err := e.tasks(ctx, def, lease, authorize)
+	tasks, err := e.tasks(ctx, def, lease, imc, authorize)
 	if err != nil {
 		e.report(ctx, def.Id, "error", "tool_failed", false)
 		return
