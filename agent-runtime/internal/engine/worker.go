@@ -348,7 +348,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 			}
 			activeTools = append(activeTools, contextTools...)
 			activeTools = append(activeTools, pageTool)
-			pipeline, err := NewContextPipeline(ctx, ContextPipelineConfig{Model: gatewayModel, Budget: budget, Backend: archive, ArchivePath: archive.Path, ArchiveTranscript: archive.ArchiveTranscript})
+			pipeline, err := NewContextPipeline(ctx, ContextPipelineConfig{Model: gatewayModel, Budget: budget, Backend: archive, ArchivePath: archive.Path, ArchiveToolPath: archive.ArchiveToolPath, ArchiveTranscript: archive.ArchiveTranscript})
 			if err != nil {
 				return nil, err
 			}

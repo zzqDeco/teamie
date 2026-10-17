@@ -34,6 +34,15 @@ type contextArchiveFixture struct {
 	checks              atomic.Int64
 }
 
+func archiveContextBudget(t *testing.T) json.RawMessage {
+	t.Helper()
+	budget, err := NewContextBudgetSnapshot(16384)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return budget
+}
+
 func newContextArchiveFixture(t *testing.T) *contextArchiveFixture {
 	t.Helper()
 	s := testStore(t)
@@ -52,7 +61,7 @@ func newContextArchiveFixture(t *testing.T) *contextArchiveFixture {
 	if err = s.Ingest(context.Background(), f.l, "1", []Input{f.input}); err != nil {
 		t.Fatal(err)
 	}
-	f.run, err = s.StartRunWithContextPolicy(context.Background(), f.l, []Input{f.input}, contextProfileV1, json.RawMessage(`{}`))
+	f.run, err = s.StartRunWithContextPolicy(context.Background(), f.l, []Input{f.input}, contextProfileV1, archiveContextBudget(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +121,7 @@ func (f *contextArchiveFixture) newRun(t *testing.T, event string) *Run {
 	if err := f.s.Ingest(context.Background(), f.l, event, []Input{input}); err != nil {
 		t.Fatal(err)
 	}
-	run, err := f.s.StartRunWithContextPolicy(context.Background(), f.l, []Input{input}, contextProfileV1, json.RawMessage(`{}`))
+	run, err := f.s.StartRunWithContextPolicy(context.Background(), f.l, []Input{input}, contextProfileV1, archiveContextBudget(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +259,7 @@ func TestContextToolsReplayAcrossAttemptsAndRecheckCachedACL(t *testing.T) {
 		t.Fatal("replayed search mixed in late history", err)
 	}
 	oldRun := f.run
-	f.run, err = f.s.StartRunWithContextPolicy(context.Background(), f.l, []Input{f.input}, contextProfileV1, json.RawMessage(`{}`))
+	f.run, err = f.s.StartRunWithContextPolicy(context.Background(), f.l, []Input{f.input}, contextProfileV1, archiveContextBudget(t))
 	if err != nil || oldRun.ID != f.run.ID || oldRun.Attempt == f.run.Attempt {
 		t.Fatal("fixture did not restart the same logical Run", err)
 	}
@@ -374,7 +383,7 @@ func TestContextArchiveAgentLeaseAndSourceLineageIsolation(t *testing.T) {
 	if err = f.s.Ingest(context.Background(), f.l, "2", []Input{notification}); err != nil {
 		t.Fatal(err)
 	}
-	f.run, err = f.s.StartRunWithContextPolicy(context.Background(), f.l, []Input{notification}, contextProfileV1, json.RawMessage(`{}`))
+	f.run, err = f.s.StartRunWithContextPolicy(context.Background(), f.l, []Input{notification}, contextProfileV1, archiveContextBudget(t))
 	if err != nil {
 		t.Fatal(err)
 	}
