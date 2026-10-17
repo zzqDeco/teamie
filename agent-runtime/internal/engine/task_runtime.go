@@ -111,7 +111,7 @@ func (e *Engine) tasks(ctx context.Context, def *wire.AgentDefinition, l *Lease,
 	if err != nil {
 		return nil, err
 	}
-	backend := &SandboxBackend{Client: e.Sandbox, Token: e.Config.SandboxToken, AgentID: def.Id, Authorize: authorize, Store: e.Store, Lease: l}
+	backend := &SandboxBackend{Client: e.Sandbox, Token: e.Config.SandboxToken, AgentID: def.Id, Authorize: authorize, Store: e.Store, Lease: l, ProgressiveForRun: func(r *Run) bool { return contextProfile(r) == contextProfileV1 }}
 	timeout := 1000
 	filesystem, err := fsmiddleware.NewTyped[*schema.AgenticMessage](ctx, &fsmiddleware.MiddlewareConfig{Backend: backend, ExecuteToolConfig: &fsmiddleware.ExecuteToolConfig{ToolConfig: fsmiddleware.ToolConfig{Name: "workspace_execute"}}, Background: &fsmiddleware.BackgroundConfig{NotificationSessionID: func(context.Context) (string, error) { return "agent:" + def.Id, nil }, Recoverable: &fsmiddleware.RecoverableBackgroundConfig{Shell: backend, Manager: manager, Executors: executors, ToolRegistry: registry, ForegroundTimeoutMs: &timeout, ShouldAutoBackground: func(context.Context, *bg.ForegroundCandidate) bool { return true }}}})
 	if err != nil {

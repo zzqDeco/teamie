@@ -3,6 +3,8 @@ package engine
 import (
 	"encoding/json"
 	"errors"
+
+	"github.com/cloudwego/eino/adk"
 )
 
 const contextProfileLegacy = "teamie-context-v037"
@@ -13,6 +15,11 @@ func contextProfile(run *Run) string {
 		return contextProfileLegacy
 	}
 	return run.ContextProfile
+}
+
+func modelRetryObservation(err error) bool {
+	var retry *adk.WillRetryError
+	return errors.As(err, &retry)
 }
 
 func canonicalContextPolicy(profile string, raw json.RawMessage) (string, json.RawMessage, error) {

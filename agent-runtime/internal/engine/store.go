@@ -109,7 +109,7 @@ func Open(ctx context.Context, url string) (*Store, error) {
 	}
 	defer tx.Rollback(ctx)
 	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(704205)"); err == nil {
-		_, err = tx.Exec(ctx, schemaSQL+schemaV2SQL+schemaV3SQL)
+		_, err = tx.Exec(ctx, schemaSQL+schemaV2SQL+schemaV3SQL+contextArchiveSchemaSQL+contextRecoverySchemaSQL)
 	}
 	if err == nil {
 		err = tx.Commit(ctx)
@@ -525,6 +525,13 @@ func (s *Store) SaveModel(ctx context.Context, l *Lease, r *Run, step int, hash 
 	defer tx.Rollback(ctx)
 	if e = checkLease(ctx, tx, l); e != nil {
 		return e
+	}
+	var rejected bool
+	if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM runtime_context_recoveries WHERE run_id=$1 AND model_step=$2)`, r.ID, step).Scan(&rejected); e != nil {
+		return e
+	}
+	if rejected {
+		return ErrReplayConflict
 	}
 	tag, e := tx.Exec(ctx, `INSERT INTO runtime_model_calls(run_id,step,request_hash,response) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, r.ID, step, hash, b)
 	if e != nil {

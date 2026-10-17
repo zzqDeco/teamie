@@ -155,6 +155,21 @@ class AgentManifestTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             manifest.check_transition(previous,current,rollback=True)
 
+    def test_context_schema_preserves_v037_archive_and_rejects_image_rollback(self):
+        previous=self.modern()
+        previous["version"]="v0.3.7"
+        previous["source"]["ref"]="refs/heads/release/v0.3.7"
+        previous["schema"]={"identity":3,"chat":3,"agent_control":1,"agent_runtime":2,"gateway":2}
+        current=copy.deepcopy(previous)
+        current["version"]="v0.3.8"
+        current["source"]["ref"]="refs/heads/release/v0.3.8"
+        current["schema"]=dict(manifest.SCHEMA_V2)
+        self.assertEqual(current["schema"]["agent_runtime"],3)
+        manifest.validate(previous)
+        manifest.check_transition(current,previous,previous)
+        with self.assertRaises(ValueError):
+            manifest.check_transition(previous,current,rollback=True)
+
 
 class ProductionConfigTest(unittest.TestCase):
     def setUp(self):

@@ -1,5 +1,5 @@
 {
-  "revision": "password-reset-v1",
+  "revision": "context-engineering-v1",
   "flags": {
     "auth.public_signup": false,
     "auth.password_reset": true,
@@ -19,6 +19,7 @@
     "agents.delete": true,
     "agents.discover": true,
     "agents.runtime.v3": true,
+    "agents.context.v1": true,
     "agents.tasks.execute": true
   }
 }
