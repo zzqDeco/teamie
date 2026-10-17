@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -29,6 +30,8 @@ type contextArchiveFixture struct {
 	input               Input
 	mu                  sync.Mutex
 	messages            map[string]Message
+	conversations       map[string]Conversation
+	attachmentContent   map[string][]byte
 	deniedConversations map[string]bool
 	denied              atomic.Bool
 	checks              atomic.Int64
@@ -49,7 +52,7 @@ func newContextArchiveFixture(t *testing.T) *contextArchiveFixture {
 	if _, err := s.DB.Exec(context.Background(), contextArchiveSchemaSQL); err != nil {
 		t.Fatal(err)
 	}
-	f := &contextArchiveFixture{s: s, messages: map[string]Message{}, deniedConversations: map[string]bool{}}
+	f := &contextArchiveFixture{s: s, messages: map[string]Message{}, conversations: map[string]Conversation{}, attachmentContent: map[string][]byte{}, deniedConversations: map[string]bool{}}
 	agent := uuid.NewString()
 	var err error
 	f.l, err = s.Acquire(context.Background(), agent, "context-archive-test")
@@ -73,18 +76,65 @@ func newContextArchiveFixture(t *testing.T) *contextArchiveFixture {
 			return
 		}
 		parts := strings.Split(request.URL.Path, "/")
-		if request.Method != http.MethodGet || len(parts) != 7 || parts[3] != "conversations" || parts[5] != "messages" {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if request.Method == http.MethodGet && request.URL.Path == "/api/v1/bootstrap" {
+			conversations := []Conversation{}
+			for _, conversation := range f.conversations {
+				if !f.deniedConversations[conversation.ID] {
+					conversations = append(conversations, conversation)
+				}
+			}
+			sort.Slice(conversations, func(i, j int) bool { return conversations[i].ID < conversations[j].ID })
+			_ = json.NewEncoder(w).Encode(map[string]any{"conversations": conversations})
+			return
+		}
+		if len(parts) < 6 || parts[3] != "conversations" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		f.mu.Lock()
-		message, exists := f.messages[parts[6]]
-		denied := f.deniedConversations[parts[4]]
-		f.mu.Unlock()
-		if denied {
+		if f.deniedConversations[parts[4]] {
 			w.WriteHeader(http.StatusForbidden)
 			return
 		}
+		if request.Method == http.MethodGet && len(parts) == 6 && parts[5] == "messages" {
+			messages := []Message{}
+			for _, message := range f.messages {
+				if message.ConversationID == parts[4] {
+					messages = append(messages, message)
+				}
+			}
+			sort.Slice(messages, func(i, j int) bool { return messages[i].Seq < messages[j].Seq })
+			_ = json.NewEncoder(w).Encode(map[string]any{"messages": messages, "hasMore": false})
+			return
+		}
+		if request.Method == http.MethodPost && len(parts) == 6 && parts[5] == "messages" {
+			var body struct {
+				Body string `json:"body"`
+			}
+			if json.NewDecoder(request.Body).Decode(&body) != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			message := Message{ID: uuid.NewString(), ConversationID: parts[4], SenderID: f.l.AgentID, SenderKind: "agent", Body: body.Body}
+			f.messages[message.ID] = message
+			_ = json.NewEncoder(w).Encode(map[string]any{"message": message})
+			return
+		}
+		if request.Method == http.MethodGet && len(parts) == 8 && parts[5] == "attachments" && parts[7] == "content" {
+			content, exists := f.attachmentContent[parts[6]]
+			if !exists {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			_, _ = w.Write(content)
+			return
+		}
+		if request.Method != http.MethodGet || len(parts) != 7 || parts[5] != "messages" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		message, exists := f.messages[parts[6]]
 		if !exists || message.ConversationID != parts[4] {
 			w.WriteHeader(http.StatusNotFound)
 			return
@@ -99,7 +149,8 @@ func newContextArchiveFixture(t *testing.T) *contextArchiveFixture {
 
 func (f *contextArchiveFixture) addMessage(input Input) {
 	f.mu.Lock()
-	f.messages[input.MessageID] = Message{ID: input.MessageID, ConversationID: input.ConversationID, SenderID: input.SenderID, Body: input.Body}
+	f.messages[input.MessageID] = Message{ID: input.MessageID, ConversationID: input.ConversationID, SenderID: input.SenderID, SenderKind: input.SenderKind, Body: input.Body, Attachments: input.Attachments}
+	f.conversations[input.ConversationID] = Conversation{ID: input.ConversationID, WorkspaceID: input.WorkspaceID, Name: "fixture conversation"}
 	f.mu.Unlock()
 }
 

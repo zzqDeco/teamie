@@ -148,7 +148,11 @@ func canonicalContextSources(refs []InputSource) ([]InputSource, error) {
 	byKey := make(map[string]InputSource, len(refs))
 	for _, ref := range refs {
 		if !validUUID(ref.ConversationID) || !validUUID(ref.MessageID) || ref.WorkspaceID != "" && !validUUID(ref.WorkspaceID) || ref.SenderID != "" && !validUUID(ref.SenderID) {
-			return nil, errContextUnavailable
+			// A conversation-only source represents metadata from a committed
+			// im_list_conversations response, never a fabricated message ID.
+			if !validUUID(ref.ConversationID) || ref.MessageID != "" || ref.EventID != "" || ref.ReplyToID != "" || ref.SenderID != "" || ref.SenderKind != "" || len(ref.AttachmentIDs) != 0 || ref.WorkspaceID != "" && !validUUID(ref.WorkspaceID) {
+				return nil, errContextUnavailable
+			}
 		}
 		ref.AttachmentIDs = append([]string(nil), ref.AttachmentIDs...)
 		for _, id := range ref.AttachmentIDs {
@@ -156,13 +160,28 @@ func canonicalContextSources(refs []InputSource) ([]InputSource, error) {
 				return nil, errContextUnavailable
 			}
 		}
+		sort.Strings(ref.AttachmentIDs)
+		ref.AttachmentIDs = slices.Compact(ref.AttachmentIDs)
 		key := ref.EventID + "/" + ref.ConversationID + "/" + ref.MessageID
 		if old, exists := byKey[key]; exists {
-			x, _ := json.Marshal(old)
-			y, _ := json.Marshal(ref)
-			if !bytes.Equal(x, y) {
-				return nil, ErrReplayConflict
+			// Different authenticated tools can know different parts of the
+			// same source. Fill missing fields without accepting two conflicting
+			// known identities, and retain every observed attachment reference.
+			for _, pair := range []struct {
+				old *string
+				new string
+			}{{&old.WorkspaceID, ref.WorkspaceID}, {&old.SenderID, ref.SenderID}, {&old.SenderKind, ref.SenderKind}, {&old.ReplyToID, ref.ReplyToID}} {
+				if pair.new != "" {
+					if *pair.old != "" && *pair.old != pair.new {
+						return nil, ErrReplayConflict
+					}
+					*pair.old = pair.new
+				}
 			}
+			old.AttachmentIDs = append(old.AttachmentIDs, ref.AttachmentIDs...)
+			sort.Strings(old.AttachmentIDs)
+			old.AttachmentIDs = slices.Compact(old.AttachmentIDs)
+			ref = old
 		}
 		byKey[key] = ref
 	}
@@ -247,34 +266,43 @@ func (a *ContextArchive) runSources(ctx context.Context, runID string) ([]InputS
 	return refs, err
 }
 
-func (a *ContextArchive) sourcesThrough(ctx context.Context, r *Run, eventHead int64) ([]InputSource, error) {
+func (a *ContextArchive) sourcesThrough(ctx context.Context, r *Run, eventHead int64) ([]InputSource, []string, error) {
 	rows, err := a.Store.DB.Query(ctx, `SELECT DISTINCT e.run_id::text FROM runtime_session_events e JOIN runtime_runs r ON r.id=e.run_id WHERE e.session_id=$1 AND `+contextEventVisibility+` AND e.seq<=$6`, "agent:"+r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead, eventHead)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	ids := []string{}
 	for rows.Next() {
 		var id string
 		if err = rows.Scan(&id); err != nil {
 			rows.Close()
-			return nil, err
+			return nil, nil, err
 		}
 		ids = append(ids, id)
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	refs := []InputSource{}
+	refs, parents := []InputSource{}, []string{}
 	for _, id := range ids {
 		sources, e := a.runSources(ctx, id)
 		if e != nil {
-			return nil, e
+			return nil, nil, e
 		}
 		refs = append(refs, sources...)
+		// Legacy summaries have no immutable archive marker. Resolve their
+		// actual fixed prefix once, including explicit reads, then cache it.
+		actual, inherited, e := a.causalRunReadSources(ctx, r, id, eventHead)
+		if e != nil {
+			return nil, nil, e
+		}
+		refs = append(refs, actual...)
+		parents = append(parents, inherited...)
 	}
-	return canonicalContextSources(refs)
+	refs, err = boundedContextSources(refs)
+	return refs, parents, err
 }
 
 // Path commits before returning a reference. Reduction subsequently calls Write,
@@ -314,7 +342,7 @@ func (a *ContextArchive) put(ctx context.Context, r *Run, artifact contextArtifa
 	if !contextKind(artifact.Kind) || artifact.Key == "" || len(artifact.Key) > 4096 || len(artifact.Text) > contextArtifactMaximum || !utf8.ValidString(artifact.Text) {
 		return "", errContextArguments
 	}
-	refs, err := canonicalContextSources(artifact.Sources)
+	refs, err := boundedContextSources(artifact.Sources)
 	if err != nil {
 		return "", err
 	}
@@ -453,7 +481,29 @@ func (a *ContextArchive) authorizeSources(ctx context.Context, refs []InputSourc
 	if a.IM == nil {
 		return errContextUnavailable
 	}
+	var conversations map[string]Conversation
 	for _, ref := range refs {
+		if ref.MessageID == "" {
+			if conversations == nil {
+				bootstrap, err := a.IM.Bootstrap(ctx)
+				if err != nil {
+					var api *APIError
+					if errors.As(err, &api) && api.Status >= 400 && api.Status < 500 {
+						return errContextUnavailable
+					}
+					return err
+				}
+				conversations = map[string]Conversation{}
+				for _, conversation := range bootstrap.Conversations {
+					conversations[conversation.ID] = conversation
+				}
+			}
+			current, exists := conversations[ref.ConversationID]
+			if !exists || ref.WorkspaceID != "" && current.WorkspaceID != ref.WorkspaceID {
+				return errContextUnavailable
+			}
+			continue
+		}
 		message, err := a.IM.Message(ctx, ref.ConversationID, ref.MessageID)
 		if err != nil {
 			var api *APIError
@@ -464,6 +514,18 @@ func (a *ContextArchive) authorizeSources(ctx context.Context, refs []InputSourc
 		}
 		if message == nil || message.ID != ref.MessageID || message.ConversationID != ref.ConversationID || message.RetractedAt != nil || ref.SenderID != "" && message.SenderID != ref.SenderID {
 			return errContextUnavailable
+		}
+		for _, id := range ref.AttachmentIDs {
+			linked := false
+			for _, attachment := range message.Attachments {
+				if attachment.ID == id {
+					linked = true
+					break
+				}
+			}
+			if !linked {
+				return errContextUnavailable
+			}
 		}
 	}
 	return nil

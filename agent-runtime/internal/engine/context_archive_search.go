@@ -133,7 +133,7 @@ func (a *ContextArchive) eventPage(ctx context.Context, r *Run, after, head int6
 	return out, rows.Err()
 }
 
-func (a *ContextArchive) eventArtifact(ctx context.Context, item contextArchiveEvent) (*contextArtifact, error) {
+func (a *ContextArchive) eventArtifact(ctx context.Context, r *Run, item contextArchiveEvent) (*contextArtifact, error) {
 	// Original message events remain durable across messages_replaced. Re-index
 	// those originals rather than copying every old message on each compaction.
 	message := item.event.Message
@@ -148,7 +148,7 @@ func (a *ContextArchive) eventArtifact(ctx context.Context, item contextArchiveE
 	if projection == nil {
 		return nil, nil
 	}
-	refs, err := a.runSources(ctx, item.runID)
+	refs, parents, err := a.causalMessageSources(ctx, r, item, message)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +169,7 @@ func (a *ContextArchive) eventArtifact(ctx context.Context, item contextArchiveE
 	if err != nil {
 		return nil, err
 	}
-	return &contextArtifact{RunID: item.runID, Attempt: item.attempt, Key: "event/" + item.id, Kind: "transcript", Text: string(text), Sources: refs, EventSeq: item.seq}, nil
+	return &contextArtifact{RunID: item.runID, Attempt: item.attempt, Key: "event/" + item.id, Kind: "transcript", Text: string(text), Sources: refs, ArtifactRefs: parents, EventSeq: item.seq}, nil
 }
 
 func contextExcerpt(text, query string) string {
@@ -302,14 +302,23 @@ func (a *ContextArchive) Search(ctx context.Context, query, rawCursor string, li
 		}
 		for _, item := range events {
 			cursor.After = item.seq
-			artifact, e := a.eventArtifact(ctx, item)
+			artifact, e := a.eventArtifact(ctx, r, item)
 			if e != nil {
+				if errors.Is(e, errContextUnavailable) {
+					continue
+				}
 				return nil, e
 			}
 			if artifact == nil || !strings.Contains(strings.ToLower(artifact.Text), strings.ToLower(query)) {
 				continue
 			}
 			if e = a.authorizeSources(ctx, artifact.Sources); e != nil {
+				if errors.Is(e, errContextUnavailable) {
+					continue
+				}
+				return nil, e
+			}
+			if e = a.validateRefs(ctx, r, artifact.ArtifactRefs); e != nil {
 				if errors.Is(e, errContextUnavailable) {
 					continue
 				}

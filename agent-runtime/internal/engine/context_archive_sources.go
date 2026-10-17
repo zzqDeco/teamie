@@ -101,7 +101,11 @@ func (a *ContextArchive) toolSources(ctx context.Context, r *Run, detail *reduct
 	if err != nil {
 		return nil, err
 	}
-	ids := []string{}
+	type candidate struct {
+		id, name string
+		raw      []byte
+	}
+	matches := []candidate{}
 	for rows.Next() {
 		var id, receiptName string
 		var result []byte
@@ -110,7 +114,7 @@ func (a *ContextArchive) toolSources(ctx context.Context, r *Run, detail *reduct
 			return nil, err
 		}
 		if contextReceiptMatchesTool(result, receiptName, detail) {
-			ids = append(ids, id)
+			matches = append(matches, candidate{id, receiptName, result})
 		}
 	}
 	err = rows.Err()
@@ -118,18 +122,30 @@ func (a *ContextArchive) toolSources(ctx context.Context, r *Run, detail *reduct
 	if err != nil {
 		return nil, err
 	}
-	if len(ids) == 0 {
+	if len(matches) == 0 {
 		return nil, errContextUnavailable
 	}
 	refs := []InputSource{}
-	for _, id := range ids {
-		sources, e := a.runSources(ctx, id)
+	for _, match := range matches {
+		sources, e := a.runSources(ctx, match.id)
 		if e != nil {
 			return nil, e
 		}
 		refs = append(refs, sources...)
+		if contextIMTool(name) {
+			// IM owns its typed receipt. A generic native envelope alone cannot
+			// supply authenticated message provenance.
+			if match.name != name {
+				return nil, errContextUnavailable
+			}
+			actual, err := a.imReceiptSources(ctx, match.id, call, name, match.raw)
+			if err != nil {
+				return nil, err
+			}
+			refs = append(refs, actual...)
+		}
 	}
-	return canonicalContextSources(refs)
+	return boundedContextSources(refs)
 }
 
 // ArchiveToolPath binds only actual receipt candidates for this native tool
@@ -178,6 +194,7 @@ type contextSourceTarget struct {
 	message       *schema.AgenticMessage
 	refs          []InputSource
 	updateRefs    []InputSource
+	parents       []string
 	found         bool
 }
 
@@ -320,6 +337,12 @@ func (a *ContextArchive) transcriptSources(ctx context.Context, r *Run, messages
 			refs = append(refs, inputRefs...)
 			continue
 		}
+		if actual, found, err := a.imMessageSources(ctx, r, message, ""); err != nil {
+			return nil, err
+		} else if found {
+			refs = append(refs, actual...)
+			continue
+		}
 		hash, id := digest(projection), contextNativeMessageID(message)
 		key := contextSourceTargetKey(id, hash)
 		targets[key] = &contextSourceTarget{id: id, key: key, hash: hash, text: projection, message: message}
@@ -336,25 +359,27 @@ func (a *ContextArchive) transcriptSources(ctx context.Context, r *Run, messages
 	for _, target := range targets {
 		keys = append(keys, "message:"+digest([]byte(target.key)))
 	}
-	rows, err := a.Store.DB.Query(ctx, `SELECT a.artifact_key,a.sources FROM runtime_context_artifacts a JOIN runtime_runs r ON r.id=a.run_id WHERE a.agent_id=$1 AND `+contextArtifactVisibility+` AND a.kind='message' AND a.artifact_key=ANY($6::text[])`, r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead, keys)
+	rows, err := a.Store.DB.Query(ctx, `SELECT a.artifact_key,a.sources,a.source_artifact_refs FROM runtime_context_artifacts a JOIN runtime_runs r ON r.id=a.run_id WHERE a.agent_id=$1 AND `+contextArtifactVisibility+` AND a.kind='message' AND a.artifact_key=ANY($6::text[])`, r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead, keys)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var key string
-		var sources []byte
-		if err = rows.Scan(&key, &sources); err != nil {
+		var sources, inherited []byte
+		if err = rows.Scan(&key, &sources, &inherited); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		for _, target := range targets {
 			if key == "message:"+digest([]byte(target.key)) {
 				var found []InputSource
-				if json.Unmarshal(sources, &found) != nil {
+				var parentRefs []string
+				if json.Unmarshal(sources, &found) != nil || json.Unmarshal(inherited, &parentRefs) != nil {
 					rows.Close()
 					return nil, ErrReplayConflict
 				}
 				target.refs, target.found = append(target.refs, found...), true
+				target.parents = append(target.parents, parentRefs...)
 			}
 		}
 	}
@@ -435,9 +460,13 @@ func (a *ContextArchive) transcriptSources(ctx context.Context, r *Run, messages
 								continue
 							}
 						} else if candidate.Role == schema.AgenticRoleTypeUser && strings.HasPrefix(agenticText(candidate), "TEAMIE_SESSION_SUMMARY ") {
-							found, err = a.sourcesThrough(ctx, r, item.seq)
+							var inherited []string
+							found, inherited, err = a.sourcesThrough(ctx, r, item.seq)
+							target.parents = append(target.parents, inherited...)
 						} else {
-							found, err = a.runSources(ctx, item.runID)
+							var inherited []string
+							found, inherited, err = a.causalMessageSources(ctx, r, item, candidate)
+							target.parents = append(target.parents, inherited...)
 						}
 						if err != nil {
 							return nil, err
@@ -468,16 +497,17 @@ func (a *ContextArchive) transcriptSources(ctx context.Context, r *Run, messages
 			return nil, err
 		}
 		if !target.found {
-			if _, err = a.put(ctx, r, contextArtifact{RunID: r.ID, Attempt: r.Attempt, Key: target.key, Kind: "message", ToolName: "context_source_index", Text: string(target.text), Sources: sources}); err != nil {
+			if _, err = a.put(ctx, r, contextArtifact{RunID: r.ID, Attempt: r.Attempt, Key: target.key, Kind: "message", ToolName: "context_source_index", Text: string(target.text), Sources: sources, ArtifactRefs: target.parents}); err != nil {
 				return nil, err
 			}
 		}
 		refs = append(refs, sources...)
+		*parents = append(*parents, target.parents...)
 	}
 	if len(refs) == 0 && len(*parents) == 0 {
 		return nil, errors.New("context source closure is empty")
 	}
-	return canonicalContextSources(refs)
+	return boundedContextSources(refs)
 }
 
 // Ordinary tool adapters may drop ToolOutputPart.Extra. A native persisted
