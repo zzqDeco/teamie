@@ -277,6 +277,9 @@ func modelRequestHash(raw []byte) string {
 }
 
 func (m *GatewayModel) cachedModel(ctx context.Context, run *Run, step int, hash string, messages []*schema.AgenticMessage, opts *model.Options, streaming bool) ([]byte, error) {
+	if contextProfile(run) == contextProfileV1 {
+		return m.Store.CachedModel(ctx, run, step, hash)
+	}
 	b, err := m.exactCachedModel(ctx, run, step, hash, messages, opts, streaming)
 	if !errors.Is(err, ErrReplayConflict) {
 		return b, err
