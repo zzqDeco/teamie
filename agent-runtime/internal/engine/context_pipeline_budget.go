@@ -31,6 +31,7 @@ type ContextBudgetSnapshot struct {
 	TransportTargetBytes int    `json:"transportTargetBytes"`
 	TailTokenLimit       int    `json:"tailTokenLimit"`
 	ToolResultByteLimit  int    `json:"toolResultByteLimit"`
+	FileDelivery         bool   `json:"fileDelivery,omitempty"`
 }
 
 func makeContextBudgetSnapshot(window int) (ContextBudgetSnapshot, error) {
@@ -49,10 +50,15 @@ func makeContextBudgetSnapshot(window int) (ContextBudgetSnapshot, error) {
 }
 
 func NewContextBudgetSnapshot(window int) (json.RawMessage, error) {
+	return newContextBudgetWithFiles(window, false)
+}
+
+func newContextBudgetWithFiles(window int, fileDelivery bool) (json.RawMessage, error) {
 	budget, err := makeContextBudgetSnapshot(window)
 	if err != nil {
 		return nil, err
 	}
+	budget.FileDelivery = fileDelivery
 	return json.Marshal(budget)
 }
 
@@ -64,6 +70,7 @@ func ParseContextBudgetSnapshot(raw json.RawMessage) (ContextBudgetSnapshot, err
 		return budget, errors.New("invalid context budget snapshot")
 	}
 	expected, err := makeContextBudgetSnapshot(budget.ContextWindowTokens)
+	expected.FileDelivery = budget.FileDelivery
 	if err != nil || budget != expected {
 		return budget, errors.New("unsupported context budget snapshot")
 	}

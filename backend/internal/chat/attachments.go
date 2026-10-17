@@ -9,10 +9,7 @@ import (
 	"mime"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"teamie/backend/internal/api"
@@ -33,13 +30,8 @@ func acquireAttachmentTransfer() (func(), error) {
 }
 
 func validateFilename(name string) error {
-	if name == "" || name == "." || name == ".." || !utf8.ValidString(name) || len([]rune(name)) > 180 || len(name) > 512 || strings.TrimSpace(name) != name || strings.ContainsAny(name, "/\\") {
+	if !imlimits.ValidFilename(name) {
 		return api.Err(400, "invalid_filename", "Use a filename of 1 to 180 characters without path separators")
-	}
-	for _, r := range name {
-		if unicode.IsControl(r) || unicode.In(r, unicode.Cf) {
-			return api.Err(400, "invalid_filename", "Filename contains an unsupported control character")
-		}
 	}
 	return nil
 }
@@ -59,45 +51,75 @@ func validateAttachmentIDs(ids []string) error {
 }
 
 func (s *Store) UploadAttachment(ctx context.Context, user, conversation, filename string, content []byte) (Attachment, error) {
+	a, _, err := s.UploadAttachmentWithKey(ctx, user, conversation, filename, content, "")
+	return a, err
+}
+
+func (s *Store) UploadAttachmentWithKey(ctx context.Context, user, conversation, filename string, content []byte, key string) (Attachment, bool, error) {
 	var a Attachment
-	if e := s.requireFlag("im.attachments.upload"); e != nil {
-		return a, e
+	if key != "" && !validUploadKey(key) {
+		return a, false, api.Err(400, "invalid_upload_key", "Use an upload key of 1 to 128 ASCII letters, digits, dot, colon, underscore or hyphen")
 	}
 	if e := validateFilename(filename); e != nil {
-		return a, e
+		return a, false, e
 	}
 	if len(content) == 0 || len(content) > imlimits.AttachmentBytes {
-		return a, api.Err(413, "attachment_too_large", "Files must contain 1 byte to 4 MiB")
+		return a, false, api.Err(413, "attachment_too_large", "Files must contain 1 byte to 4 MiB")
 	}
 	tx, e := s.DB.Begin(ctx)
 	if e != nil {
-		return a, e
+		return a, false, e
 	}
 	defer tx.Rollback(ctx)
 	// A sender-wide lock makes the pending quota atomic across conversations.
 	if _, e = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1,704104))", user); e != nil {
-		return a, e
+		return a, false, e
 	}
 	if _, e = lockConversation(ctx, tx, conversation, user); e != nil {
-		return a, e
+		return a, false, e
+	}
+	h := sha256.Sum256(content)
+	contentHash := hex.EncodeToString(h[:])
+	fingerprint := api.Hash(conversation + "\x00" + filename + "\x00" + contentHash)
+	if key != "" {
+		old, lookupErr := findAttachmentUpload(ctx, tx, user, key)
+		if lookupErr == nil {
+			if old.conversation != conversation || old.fingerprint != fingerprint {
+				return a, false, api.Err(409, "upload_conflict", "This upload key was already used for a different file")
+			}
+			if !old.available {
+				return a, false, api.Err(410, "attachment_upload_unavailable", "This upload was removed or expired; use a new upload key")
+			}
+			return old.attachment, false, tx.Commit(ctx)
+		}
+		if !errors.Is(lookupErr, pgx.ErrNoRows) {
+			return a, false, lookupErr
+		}
+	}
+	if e = s.requireFlag("im.attachments.upload"); e != nil {
+		return a, false, e
 	}
 	if _, e = tx.Exec(ctx, "DELETE FROM attachments WHERE uploader_id=$1 AND message_id IS NULL AND expires_at<=now()", user); e != nil {
-		return a, e
+		return a, false, e
 	}
 	var pending int
 	if e = tx.QueryRow(ctx, "SELECT count(*) FROM attachments WHERE uploader_id=$1 AND message_id IS NULL", user).Scan(&pending); e != nil {
-		return a, e
+		return a, false, e
 	}
 	if pending >= imlimits.PendingAttachmentsPerSender {
-		return a, api.Err(429, "attachment_capacity", "Remove pending files or wait for them to expire")
+		return a, false, api.Err(429, "attachment_capacity", "Remove pending files or wait for them to expire")
 	}
-	h := sha256.Sum256(content)
-	a = Attachment{ID: api.ID(), Filename: filename, MediaType: http.DetectContentType(content), SizeBytes: len(content), SHA256: hex.EncodeToString(h[:])}
+	a = Attachment{ID: api.ID(), Filename: filename, MediaType: http.DetectContentType(content), SizeBytes: len(content), SHA256: contentHash}
 	_, e = tx.Exec(ctx, "INSERT INTO attachments(id,conversation_id,uploader_id,filename,media_type,size_bytes,sha256,content) VALUES($1,$2,$3,$4,$5,$6,$7,$8)", a.ID, conversation, user, a.Filename, a.MediaType, a.SizeBytes, a.SHA256, content)
 	if e != nil {
-		return a, e
+		return a, false, e
 	}
-	return a, tx.Commit(ctx)
+	if key != "" {
+		if _, e = tx.Exec(ctx, "INSERT INTO attachment_uploads(uploader_id,upload_key,conversation_id,fingerprint,attachment_id) VALUES($1,$2,$3,$4,$5)", user, key, conversation, fingerprint, a.ID); e != nil {
+			return a, false, e
+		}
+	}
+	return a, true, tx.Commit(ctx)
 }
 
 // Runs independently of writes, including when uploads are disabled. Linked
@@ -184,8 +206,13 @@ func (s *Store) DownloadAttachment(ctx context.Context, user, conversation, id s
 
 func (h *Handler) attachmentRoutes(auth func(string, api.AuthedHandler)) {
 	auth("POST /api/v1/conversations/{id}/attachments", func(w http.ResponseWriter, r *http.Request, session api.Session) error {
-		if e := h.Store.requireFlag("im.attachments.upload"); e != nil {
-			return e
+		key := r.Header.Get("Idempotency-Key")
+		if key == "" {
+			if e := h.Store.requireFlag("im.attachments.upload"); e != nil {
+				return e
+			}
+		} else if !validUploadKey(key) {
+			return api.Err(400, "invalid_upload_key", "Invalid upload key")
 		}
 		if _, e := conversationAccess(r.Context(), h.Store.DB, r.PathValue("id"), session.User.ID); e != nil {
 			return e
@@ -218,11 +245,23 @@ func (h *Handler) attachmentRoutes(auth func(string, api.AuthedHandler)) {
 		if _, e = reader.NextPart(); e != io.EOF {
 			return api.Err(400, "invalid_upload", "Only one file per upload is supported")
 		}
-		a, e := h.Store.UploadAttachment(r.Context(), session.User.ID, r.PathValue("id"), filename, content)
+		a, first, e := h.Store.UploadAttachmentWithKey(r.Context(), session.User.ID, r.PathValue("id"), filename, content, key)
 		if e != nil {
 			return e
 		}
-		api.Write(w, 201, map[string]any{"attachment": a})
+		status := 200
+		if first {
+			status = 201
+		}
+		api.Write(w, status, map[string]any{"attachment": a})
+		return nil
+	})
+	auth("GET /api/v1/conversations/{id}/attachment-uploads/{uploadKey}", func(w http.ResponseWriter, r *http.Request, session api.Session) error {
+		a, err := h.Store.LookupAttachmentUpload(r.Context(), session.User.ID, r.PathValue("id"), r.PathValue("uploadKey"))
+		if err != nil {
+			return err
+		}
+		api.Write(w, 200, map[string]any{"attachment": a})
 		return nil
 	})
 	auth("DELETE /api/v1/conversations/{id}/attachments/{attachmentId}", func(w http.ResponseWriter, r *http.Request, session api.Session) error {

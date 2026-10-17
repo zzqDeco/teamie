@@ -1,5 +1,5 @@
 {
-  "revision": "context-engineering-v1",
+  "revision": "agent-file-delivery-v1",
   "flags": {
     "auth.public_signup": false,
     "auth.password_reset": true,
@@ -20,6 +20,7 @@
     "agents.discover": true,
     "agents.runtime.v3": true,
     "agents.context.v1": true,
+    "agents.files.deliver.v1": true,
     "agents.tasks.execute": true
   }
 }

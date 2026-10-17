@@ -47,7 +47,7 @@ func archiveContextBudget(t *testing.T) json.RawMessage {
 	return budget
 }
 
-func newContextArchiveFixture(t *testing.T) *contextArchiveFixture {
+func newContextArchiveFixture(t *testing.T, budgets ...json.RawMessage) *contextArchiveFixture {
 	t.Helper()
 	s := testStore(t)
 	if _, err := s.DB.Exec(context.Background(), contextArchiveSchemaSQL); err != nil {
@@ -65,7 +65,11 @@ func newContextArchiveFixture(t *testing.T) *contextArchiveFixture {
 	if err = s.Ingest(context.Background(), f.l, "1", []Input{f.input}); err != nil {
 		t.Fatal(err)
 	}
-	f.run, err = s.StartRunWithContextPolicy(context.Background(), f.l, []Input{f.input}, contextProfileV1, archiveContextBudget(t))
+	budget := archiveContextBudget(t)
+	if len(budgets) > 0 {
+		budget = budgets[0]
+	}
+	f.run, err = s.StartRunWithContextPolicy(context.Background(), f.l, []Input{f.input}, contextProfileV1, budget)
 	if err != nil {
 		t.Fatal(err)
 	}

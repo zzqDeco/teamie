@@ -178,6 +178,19 @@ struct SandboxImportRequest {
   6: required binary content
   7: required string sha256
 }
+// A bounded binary read, not execution or a model observation. Runtime alone
+// transfers these bytes to ordinary IM upload APIs under its own principal.
+struct SandboxExportRequest {
+  1: required string serviceToken
+  2: required string agentId
+  3: required string path
+}
+struct SandboxExportResponse {
+  1: required bool ok
+  2: optional binary content
+  3: optional string sha256
+  4: optional string errorCode
+}
 service SandboxService {
   SandboxExecResponse Exec(1: SandboxExecRequest request)
   Ack Cancel(1: CancelRequest request)
@@ -188,4 +201,5 @@ service SandboxService {
   SandboxTaskResponse CancelTask(1: SandboxTaskRequest request)
   SandboxWorkspaceResponse Workspace(1: SandboxWorkspaceRequest request)
   SandboxWorkspaceResponse ImportFile(1: SandboxImportRequest request)
+  SandboxExportResponse ExportFile(1: SandboxExportRequest request)
 }

@@ -18,7 +18,7 @@ import {
   validateFile,
 } from "./attachments";
 import { ChatStore, reconcileMessages } from "./store";
-import type { Message } from "@teamie/api-client";
+import type { Message, SyncPage } from "@teamie/api-client";
 
 const descriptor: Attachment = {
   id: "file-1",
@@ -60,6 +60,7 @@ afterEach(async () => {
   root = undefined;
   host?.remove();
   vi.restoreAllMocks();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -164,6 +165,73 @@ describe("conversation file drafts", () => {
 });
 
 describe("file rendering and transport", () => {
+  it("receives an Agent file-only result once across sync/reconnect and downloads the original bytes", async () => {
+    vi.useFakeTimers();
+    const attachment = { ...descriptor, filename: "result.bin" };
+    const message: Message = {
+      id: "agent-result",
+      conversationId: "source",
+      senderId: "agent",
+      senderName: "Researcher",
+      senderKind: "agent",
+      clientMessageId: "stable-result",
+      body: "",
+      seq: 1,
+      createdAt: "2026-10-17T00:00:00Z",
+      attachments: [attachment],
+    };
+    const storage = new Map<string, string>();
+    const cache = {
+      getItem: (key: string) => storage.get(key) || null,
+      setItem: (key: string, value: string) => void storage.set(key, value),
+      removeItem: (key: string) => void storage.delete(key),
+    };
+    const page: SyncPage = {
+      events: [{ id: "1", type: "message.created", conversationId: "source", message, createdAt: message.createdAt }],
+      cursor: "1",
+      hasMore: false,
+    };
+    const store = new ChatStore(cache);
+    store.begin("recipient");
+    store.apply(page);
+    store.apply(page);
+    const resumed = new ChatStore(cache);
+    resumed.begin("recipient");
+    resumed.merge([message]);
+    expect(resumed.getSnapshot().messages.source).toHaveLength(1);
+    const result = resumed.getSnapshot().messages.source[0];
+    expect(result.senderKind).toBe("agent");
+    expect(result.attachments).toEqual([attachment]);
+
+    const blob = new Blob([new Uint8Array([0, 255, 128])]);
+    const download = vi.spyOn(api, "attachmentContent").mockResolvedValue(blob);
+    const create = vi.fn(() => "blob:agent-result");
+    const revoke = vi.fn();
+    vi.stubGlobal("URL", class extends URL {
+      static createObjectURL = create;
+      static revokeObjectURL = revoke;
+    });
+    const clicks: { href: string; filename: string }[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      clicks.push({ href: this.href, filename: this.download });
+    });
+    host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(<MessageAttachments conversationId={result.conversationId} attachments={result.attachments!} />);
+    });
+    const buttons = host.querySelectorAll("button");
+    expect(buttons).toHaveLength(1);
+    await act(async () => buttons[0].click());
+    expect(download).toHaveBeenCalledExactlyOnceWith("source", attachment.id);
+    expect(create).toHaveBeenCalledExactlyOnceWith(blob);
+    expect(clicks).toEqual([{ href: "blob:agent-result", filename: "result.bin" }]);
+    expect(host.textContent).toContain("result.bin");
+    expect(host.textContent).not.toMatch(/workspace|session|tool|sha256|base64/i);
+    await act(async () => vi.advanceTimersByTime(1000));
+    expect(revoke).toHaveBeenCalledExactlyOnceWith("blob:agent-result");
+  });
   it("renders file names as escaped text with a download action and no untrusted HTML or URL", () => {
     const html = renderToStaticMarkup(
       <MessageAttachments conversationId="source" attachments={[descriptor]} />,

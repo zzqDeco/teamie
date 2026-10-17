@@ -12,9 +12,12 @@ paths:
       - $ref: '#/components/parameters/ConversationId'
     post:
       operationId: uploadAttachment
-      description: Upload exactly one file. Requires enabled write flag and normal CSRF/Origin for browser writes. Unlinked uploads expire in 24 hours.
+      description: Upload exactly one file. New uploads require the enabled write flag; matching committed retries remain readable when disabled. Normal CSRF/Origin apply to browser writes. Unlinked uploads expire in 24 hours. An optional uploader-scoped Idempotency-Key binds the destination, filename and original bytes atomically, including after linkage. Removed or expired keys cannot be reused.
       parameters:
         - $ref: '#/components/parameters/CSRF'
+        - name: Idempotency-Key
+          in: header
+          schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9._:-]+$'}
       requestBody:
         required: true
         content:
@@ -29,6 +32,8 @@ paths:
                   format: binary
                   description: Non-empty file, maximum 4194304 binary bytes. Filename is validated; MIME is server-sniffed.
       responses:
+        '200':
+          $ref: '#/components/responses/Attachment'
         '201':
           description: Private pending file descriptor
           content:
@@ -45,9 +50,35 @@ paths:
           $ref: '#/components/responses/Failure'
         '404':
           $ref: '#/components/responses/Failure'
+        '409':
+          description: upload_conflict - the key already identifies different bytes, filename or destination
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '410':
+          $ref: '#/components/responses/Failure'
         '413':
           $ref: '#/components/responses/Failure'
         '429':
+          $ref: '#/components/responses/Failure'
+  /api/v1/conversations/{id}/attachment-uploads/{uploadKey}:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+      - name: uploadKey
+        in: path
+        required: true
+        schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9._:-]+$'}
+    get:
+      operationId: lookupOwnAttachmentUpload
+      description: Recover only the current uploader's descriptor under current conversation ACLs, including linked uploads and disabled write flags. Returns no bytes, upload key, uploader or runtime details. An authorized unknown key returns attachment_upload_not_found; denied membership uses the normal not_found response. Removed, expired or retracted uploads return attachment_upload_unavailable and never create another file.
+      responses:
+        '200':
+          $ref: '#/components/responses/Attachment'
+        '400':
+          $ref: '#/components/responses/Failure'
+        '404':
+          $ref: '#/components/responses/Failure'
+        '410':
           $ref: '#/components/responses/Failure'
   /api/v1/conversations/{id}/attachments/{attachmentId}:
     parameters:
@@ -187,6 +218,15 @@ components:
             code: {type: string}
             message: {type: string}
   responses:
+    Attachment:
+      description: Current uploader's committed file descriptor
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [attachment]
+            properties:
+              attachment: {$ref: '#/components/schemas/Attachment'}
     Failure:
       description: Defined authentication, ACL, validation, conflict or capacity error
       content:

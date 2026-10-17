@@ -17,7 +17,7 @@ const contextIMArgumentsKey = "context-im-arguments-v1"
 
 func contextIMTool(name string) bool {
 	switch name {
-	case "im_get_message", "im_list_messages", "im_list_conversations", "im_send_message", "im_get_attachment":
+	case "im_get_message", "im_list_messages", "im_list_conversations", "im_send_message", "im_get_attachment", "im_upload_file":
 		return true
 	}
 	return false
@@ -141,6 +141,12 @@ func (a *ContextArchive) imReceiptSources(ctx context.Context, runID, call, name
 			return nil, errContextUnavailable
 		}
 		refs = append(refs, InputSource{ConversationID: source.ConversationID, MessageID: source.MessageID, AttachmentIDs: []string{source.AttachmentID}})
+	case "im_upload_file":
+		actual, err := a.uploadedFileSources(ctx, runID, call)
+		if err != nil {
+			return nil, err
+		}
+		refs = append(refs, actual...)
 	}
 	return canonicalContextSources(refs)
 }

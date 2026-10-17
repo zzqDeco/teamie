@@ -96,25 +96,37 @@ func (imc *IM) Call(ctx context.Context, method, path string, body any, out any)
 }
 
 func (imc *IM) callAt(ctx context.Context, baseURL, method, path string, body any, out any) error {
-	token, e := imc.credential(ctx)
-	if e != nil {
-		return e
-	}
 	var data []byte
+	var e error
 	if body != nil {
 		data, e = json.Marshal(body)
 		if e != nil {
 			return e
 		}
 	}
-	req, e := http.NewRequestWithContext(ctx, method, strings.TrimRight(baseURL, "/")+path, bytes.NewReader(data))
+	contentType := ""
+	if body != nil {
+		contentType = "application/json"
+	}
+	return imc.request(ctx, baseURL, method, path, bytes.NewReader(data), contentType, nil, out)
+}
+
+func (imc *IM) request(ctx context.Context, baseURL, method, path string, body io.Reader, contentType string, headers map[string]string, out any) error {
+	token, e := imc.credential(ctx)
+	if e != nil {
+		return e
+	}
+	req, e := http.NewRequestWithContext(ctx, method, strings.TrimRight(baseURL, "/")+path, body)
 	if e != nil {
 		return e
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("X-Teamie-Service-Key", imc.ServiceKey)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	for name, value := range headers {
+		req.Header.Set(name, value)
 	}
 	client := imc.HTTP
 	if client == nil {
@@ -264,6 +276,17 @@ func (t *Tools) execute(ctx context.Context, name string, args any, fn func(cont
 	if e = t.recordContextIMArguments(ctx, run, callID, name, payload); e != nil {
 		return nil, e
 	}
+	fileSend := false
+	if name == "im_send_message" && fileDeliveryForRun(run) {
+		var args fileMessageArgs
+		fileSend = json.Unmarshal(payload, &args) == nil && len(args.AttachmentIDs) > 0
+	}
+	if name == "im_upload_file" || fileSend {
+		archive := &ContextArchive{Store: t.Store, Lease: t.Lease, IM: t.IM, Authorize: t.Authorize}
+		if e = archive.captureWorkspaceSources(ctx, run, callID, name, payload); e != nil {
+			return nil, e
+		}
+	}
 	if cached != nil {
 		var out Observation
 		if e = json.Unmarshal(cached, &out); e != nil {
@@ -275,13 +298,34 @@ func (t *Tools) execute(ctx context.Context, name string, args any, fn func(cont
 				return nil, e
 			}
 		}
+		if name == "im_upload_file" && out.OK {
+			var args uploadFileArgs
+			if json.Unmarshal(payload, &args) != nil {
+				return nil, ErrReplayConflict
+			}
+			if _, e = t.IM.uploadedFile(ctx, args.ConversationID, toolRequestID(run, callID)); e != nil {
+				return nil, e
+			}
+		}
+		if fileSend && out.OK {
+			var receipt struct {
+				Data Message `json:"data"`
+			}
+			if e = json.Unmarshal(cached, &receipt); e != nil {
+				return nil, e
+			}
+			archive := &ContextArchive{Store: t.Store, Lease: t.Lease, IM: t.IM, Authorize: t.Authorize}
+			if e = archive.authorizeSources(ctx, []InputSource{contextMessageSource(receipt.Data)}); e != nil {
+				return nil, e
+			}
+		}
 		out.raw, e = t.Store.replayToolWire(ctx, run, callID, name, cached)
 		if e != nil {
 			return nil, e
 		}
 		return &out, nil
 	}
-	out, e := fn(ctx, "tool-"+digest([]byte(run.AgentID+"/"+run.ID+"/"+callID)))
+	out, e := fn(ctx, toolRequestID(run, callID))
 	if e != nil {
 		return nil, e
 	}
@@ -320,6 +364,14 @@ type sendArgs struct {
 }
 
 func (t *Tools) BuildIM() ([]tool.BaseTool, error) {
+	return t.buildIM(false)
+}
+
+func (t *Tools) BuildIMWithFiles() ([]tool.BaseTool, error) {
+	return t.buildIM(true)
+}
+
+func (t *Tools) buildIM(files bool) ([]tool.BaseTool, error) {
 	a, e := utils.InferTool("im_list_conversations", "List conversations currently accessible to your own IM identity, including type and memberIds. Resolve uncertain destinations or conversation type here; this never adds membership or authorizes disclosure of private material from another conversation.", func(ctx context.Context, args *listConversationsArgs) (*Observation, error) {
 		return t.execute(ctx, "im_list_conversations", args, func(ctx context.Context, _ string) (*Observation, error) {
 			if args.WorkspaceID != "" && !validUUID(args.WorkspaceID) {
@@ -411,11 +463,25 @@ func (t *Tools) BuildIM() ([]tool.BaseTool, error) {
 	if e != nil {
 		return nil, e
 	}
+	if files {
+		d, e = t.fileMessageTool()
+		if e != nil {
+			return nil, e
+		}
+	}
 	attachment, e := t.attachmentTool()
 	if e != nil {
 		return nil, e
 	}
-	return []tool.BaseTool{a, b, c, d, attachment}, nil
+	items := []tool.BaseTool{a, b, c, d, attachment}
+	if files {
+		upload, err := t.uploadFileTool()
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, upload)
+	}
+	return items, nil
 }
 
 // Bound observations while retaining a correct older-page cursor. Examine newest
