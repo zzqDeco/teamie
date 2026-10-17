@@ -5,6 +5,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
 import {
@@ -62,6 +63,63 @@ export function conversationName(
       .join("、") || "私聊"
   );
 }
+type ComposerDraft = {
+  body: string;
+  mentions: Mention[];
+  replyToId: string;
+};
+const emptyComposerDraft: ComposerDraft = {
+  body: "",
+  mentions: [],
+  replyToId: "",
+};
+let draftGeneration = chatStore.generation;
+// Drafts retain reply identity, never a copied IM body, and disappear with
+// their account or conversation access.
+const composerDrafts = new Map<string, ComposerDraft>();
+const draftListeners = new Set<() => void>();
+const notifyDrafts = () => draftListeners.forEach((listener) => listener());
+const subscribeDrafts = (listener: () => void) => {
+  draftListeners.add(listener);
+  return () => {
+    draftListeners.delete(listener);
+  };
+};
+export function clearComposerDrafts() {
+  draftGeneration = chatStore.generation;
+  composerDrafts.clear();
+  notifyDrafts();
+}
+chatStore.subscribe(() => {
+  if (draftGeneration !== chatStore.generation) {
+    clearComposerDrafts();
+    return;
+  }
+  const allowed = chatStore.getSnapshot().conversations;
+  let changed = false;
+  for (const id of composerDrafts.keys()) {
+    if (!allowed[id]) changed = composerDrafts.delete(id) || changed;
+  }
+  if (changed) notifyDrafts();
+});
+function readComposerDraft(conversationId: string): ComposerDraft {
+  return composerDrafts.get(conversationId) || emptyComposerDraft;
+}
+function writeComposerDraft(conversationId: string, draft: ComposerDraft) {
+  if (
+    !chatStore.getSnapshot().conversations[conversationId] ||
+    (!draft.body && draft.mentions.length === 0 && !draft.replyToId)
+  ) {
+    composerDrafts.delete(conversationId);
+  } else {
+    composerDrafts.set(conversationId, {
+      body: draft.body,
+      mentions: [...draft.mentions],
+      replyToId: draft.replyToId,
+    });
+  }
+  notifyDrafts();
+}
 export function ConversationView({
   conversation,
   members,
@@ -106,7 +164,16 @@ export function ConversationView({
     generation: number;
     operation: number;
   } | null>(null);
-  const [mentions, setMentions] = useState<Mention[]>([]);
+  const { body, mentions, replyToId } = useSyncExternalStore(
+    subscribeDrafts,
+    useCallback(() => readComposerDraft(conversation.id), [conversation.id]),
+  );
+  function updateComposerDraft(patch: Partial<ComposerDraft>) {
+    writeComposerDraft(conversation.id, {
+      ...readComposerDraft(conversation.id),
+      ...patch,
+    });
+  }
   const [editMentions, setEditMentions] = useState<Mention[]>([]);
   const mentionMembers = members.filter((member) =>
     conversation.memberIds.includes(member.userId),
@@ -118,9 +185,7 @@ export function ConversationView({
     [hasMore, setHasMore] = useState(false),
     [loadingOlder, setLoadingOlder] = useState(false),
     [error, setError] = useState("");
-  const [body, setBody] = useState(""),
-    [reply, setReply] = useState<Message | null>(null),
-    [editing, setEditing] = useState<Message | null>(null),
+  const [editing, setEditing] = useState<Message | null>(null),
     [editBody, setEditBody] = useState("");
   const [retracting, setRetracting] = useState<Message | null>(null),
     [actionBusy, setActionBusy] = useState(false),
@@ -133,6 +198,81 @@ export function ConversationView({
     lastRead = useRef(conversation.readSeq),
     lastTyping = useRef(0);
   const generation = chatStore.generation;
+  const userId = user!.id;
+  const canReadConversation =
+    snapshot.userId === userId && !!snapshot.conversations[conversation.id];
+  const cachedReply = reconcileMessages(
+    [],
+    [...allMessages, ...(located || [])].filter(
+      (message) =>
+        message.conversationId === conversation.id && message.id === replyToId,
+    ),
+  )[0];
+  const replyKey = JSON.stringify([
+    generation,
+    conversation.id,
+    initialMessageId,
+    replyToId,
+  ]);
+  const [resolvedComposerReply, setResolvedComposerReply] = useState<{
+    key: string;
+    signal: AbortSignal;
+    message?: Message;
+    error?: string;
+  } | null>(null);
+  const resolvedReply =
+    resolvedComposerReply?.key === replyKey && !resolvedComposerReply.signal.aborted
+      ? resolvedComposerReply
+      : null;
+  // Reply-only reads stay local; current sync versions always win over an
+  // older context or a delayed single-message response.
+  const reply = canReadConversation && replyToId
+    ? reconcileMessages(
+        resolvedReply?.message ? [resolvedReply.message] : [],
+        cachedReply ? [cachedReply] : [],
+      )[0]
+    : undefined;
+  useEffect(() => {
+    if (!canReadConversation || !replyToId) return;
+    // One read belongs to the selected reply's lifetime. A cache arrival or a
+    // same-account profile refresh must not discard an accepted newer version.
+    const controller = new AbortController();
+    const current = () =>
+      !controller.signal.aborted &&
+      generation === chatStore.generation &&
+      chatStore.getSnapshot().userId === userId &&
+      !!chatStore.getSnapshot().conversations[conversation.id] &&
+      readComposerDraft(conversation.id).replyToId === replyToId;
+    void api
+      .message(conversation.id, replyToId, controller.signal)
+      .then(({ message }) => {
+        if (current())
+          setResolvedComposerReply({ key: replyKey, signal: controller.signal, message });
+      })
+      .catch((error: unknown) => {
+        if (!current()) return;
+        if (error instanceof Error && "status" in error && error.status === 404) {
+          writeComposerDraft(conversation.id, {
+            ...readComposerDraft(conversation.id),
+            replyToId: "",
+          });
+          return;
+        }
+        setResolvedComposerReply({
+          key: replyKey,
+          signal: controller.signal,
+          error: "原消息暂时无法加载",
+        });
+      });
+    return () => controller.abort();
+  }, [
+    canReadConversation,
+    conversation.id,
+    generation,
+    replyKey,
+    replyToId,
+    userId,
+  ]);
   useEffect(
     () => () => {
       navigation.current++;
@@ -296,6 +436,7 @@ export function ConversationView({
     if (initialMessageId) void loadContext(initialMessageId, true);
     else void fetchLatest();
     return () => {
+      lastTyping.current = 0;
       sendTyping(conversation.id, false);
     };
   }, [fetchLatest, loadContext, initialMessageId, sendTyping, conversation.id]);
@@ -421,14 +562,17 @@ export function ConversationView({
       senderKind: user!.kind,
       seq: Number.MAX_SAFE_INTEGER,
       createdAt: new Date().toISOString(),
-      ...(reply ? { replyToId: reply.id } : {}),
+      ...(replyToId ? { replyToId } : {}),
     };
     void sendMessage(message, chatStore.generation);
-    setBody("");
-    setMentions([]);
+    writeComposerDraft(conversation.id, {
+      body: "",
+      mentions: [],
+      replyToId: "",
+    });
     if (located) void fetchLatest();
-    setReply(null);
     setAtBottom(true);
+    lastTyping.current = 0;
     sendTyping(conversation.id, false);
     inputRef.current?.focus();
   }
@@ -816,7 +960,7 @@ export function ConversationView({
                           label={`回复 ${message.senderName}`}
                           onClick={() => {
                             setActionMessageId("");
-                            setReply(message);
+                            updateComposerDraft({ replyToId: message.id });
                             inputRef.current?.focus();
                           }}
                         >
@@ -891,24 +1035,29 @@ export function ConversationView({
           onRemove={attachments.remove}
           onRetry={attachments.retry}
         />
-        {reply && (
+        {replyToId && (
           <div className="reply-preview">
             <CornerUpLeft size={15} />
             <div>
-              回复 <b>{reply.senderName}</b>
+              回复 <b>{reply?.senderName || "原消息"}</b>
               <span>
-                {reply.retractedAt
+                {reply?.retractedAt
                   ? "消息已撤回"
-                  : reply.body || `${reply.attachments?.length || 0} 个文件`}
+                  : reply
+                    ? reply.body || `${reply.attachments?.length || 0} 个文件`
+                    : resolvedReply?.error || "正在加载原消息…"}
               </span>
             </div>
-            <IconButton label="取消回复" onClick={() => setReply(null)}>
+            <IconButton
+              label="取消回复"
+              onClick={() => updateComposerDraft({ replyToId: "" })}
+            >
               <X size={16} />
             </IconButton>
           </div>
         )}
         <form
-          className={`composer ${reply ? "with-reply" : ""}`}
+          className={`composer ${replyToId ? "with-reply" : ""}`}
           onSubmit={submit}
         >
           <MentionInput
@@ -916,14 +1065,20 @@ export function ConversationView({
             value={body}
             mentions={mentions}
             onChange={(value, mentions) => {
-              setBody(value);
-              setMentions(mentions);
+              updateComposerDraft({ body: value, mentions });
             }}
             members={mentionMembers}
             enabled={mentionsEnabled}
             onTyping={(value) => {
+              if (!value) {
+                if (lastTyping.current > 0) {
+                  lastTyping.current = 0;
+                  sendTyping(conversation.id, false);
+                }
+                return;
+              }
               if (Date.now() - lastTyping.current > 1500) {
-                sendTyping(conversation.id, !!value);
+                sendTyping(conversation.id, true);
                 lastTyping.current = Date.now();
               }
             }}

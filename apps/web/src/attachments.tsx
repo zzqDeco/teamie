@@ -14,6 +14,7 @@ import "./attachments.css";
 
 export type DraftFile = {
   id: string;
+  uploadKey: string;
   file: File;
   state: "uploading" | "ready" | "failed";
   attachment?: Attachment;
@@ -90,6 +91,7 @@ export function useAttachmentDraft(
         conversationId,
         file.file,
         controller.signal,
+        file.uploadKey,
       );
       if (!active.current || !current.current.some((f) => f.id === file.id)) {
         void api
@@ -137,6 +139,7 @@ export function useAttachmentDraft(
       }
       const draft: DraftFile = {
         id: crypto.randomUUID(),
+        uploadKey: crypto.randomUUID(),
         file,
         state: "uploading",
       };

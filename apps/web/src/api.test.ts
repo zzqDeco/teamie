@@ -5,6 +5,18 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe("account-bound transport", () => {
+  it("cancels ordinary single-message reads with the caller's account binding", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: {} })));
+    vi.stubGlobal("fetch", fetch);
+    const client = new TeamieClient(); client.csrfToken = "current-account";
+    const controller = new AbortController();
+    await client.message("conversation/id", "message/id", controller.signal);
+    const [url, options] = fetch.mock.calls[0];
+    expect(url).toBe("/api/v1/conversations/conversation%2Fid/messages/message%2Fid");
+    expect(options.headers.get("X-CSRF-Token")).toBe("current-account");
+    expect(options.signal).toBe(controller.signal);
+    expect(options.cache).toBe("no-store");
+  });
   it("binds attention pages to the current account and encodes only paging/filter options", async () => {
     const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: [], unreadCount: 0 })));
     vi.stubGlobal("fetch", fetch);
@@ -29,6 +41,55 @@ describe("account-bound transport", () => {
     expect(Object.fromEntries(params)).toEqual({ limit: "50", q: "10%_ & 报告", content: "files", beforeSeq: "65" });
     expect(options.headers.get("X-CSRF-Token")).toBe("current-account");
     expect(options.credentials).toBe("same-origin"); expect(options.cache).toBe("no-store"); expect(options.signal).toBe(controller.signal);
+  });
+  it("sends Idempotency-Key on attachment uploads and queries attachment-uploads recovery with CSRF", async () => {
+    const attachment = {
+      id: "att-1",
+      filename: "report.pdf",
+      mediaType: "application/pdf",
+      sizeBytes: 4,
+      sha256: "a".repeat(64),
+    };
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ attachment }), { status: 201 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ attachment }), { status: 200 }),
+      );
+    vi.stubGlobal("fetch", fetch);
+    const client = new TeamieClient();
+    client.csrfToken = "current-account";
+    const controller = new AbortController();
+    await client.uploadAttachment(
+      "conversation/id",
+      new File(["data"], "report.pdf"),
+      controller.signal,
+      "upload-key:1",
+    );
+    expect(fetch.mock.calls[0][0]).toBe(
+      "/api/v1/conversations/conversation%2Fid/attachments",
+    );
+    expect(fetch.mock.calls[0][1].headers.get("Idempotency-Key")).toBe(
+      "upload-key:1",
+    );
+    expect(fetch.mock.calls[0][1].headers.get("X-CSRF-Token")).toBe(
+      "current-account",
+    );
+    expect(fetch.mock.calls[0][1].signal).toBe(controller.signal);
+
+    const recovered = await client.attachmentUpload(
+      "conversation/id",
+      "upload-key:1",
+    );
+    expect(recovered).toEqual({ attachment });
+    expect(fetch.mock.calls[1][0]).toBe(
+      "/api/v1/conversations/conversation%2Fid/attachment-uploads/upload-key%3A1",
+    );
+    expect(fetch.mock.calls[1][1].headers.get("X-CSRF-Token")).toBe(
+      "current-account",
+    );
   });
   it("binds protected reads to the browser nonce while leaving session discovery unbound", async () => {
     const fetch = vi.fn().mockResolvedValue(new Response("{}"));
