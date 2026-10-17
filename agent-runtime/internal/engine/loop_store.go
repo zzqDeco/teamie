@@ -14,12 +14,14 @@ import (
 const nativeRuntimeVersion = "eino-v0.10.0-alpha.35/teamie-v4-agentic"
 
 type checkpointMetadata struct {
-	ToolProfile    string
-	Version        string
-	Revision       int64
-	RunID, Attempt string
-	ModelStep      int64
-	Targets        []string
+	ToolProfile       string
+	ContextProfile    string `json:",omitempty"`
+	ContextBudgetHash string `json:",omitempty"`
+	Version           string
+	Revision          int64
+	RunID, Attempt    string
+	ModelStep         int64
+	Targets           []string
 }
 
 func (s *Store) ResumeMetadata(ctx context.Context, id string) (*checkpointMetadata, error) {
@@ -47,6 +49,13 @@ func (s *SessionStore[M]) metadata() []byte {
 	m := checkpointMetadata{Version: nativeRuntimeVersion, Revision: s.Revision, Targets: append([]string{}, s.targets...)}
 	if s.run != nil {
 		m.ToolProfile = s.run.toolProfile
+		if contextProfile(s.run) == contextProfileV1 {
+			m.ContextProfile = s.run.ContextProfile
+			_, budget, err := canonicalContextPolicy(s.run.ContextProfile, s.run.ContextBudget)
+			if err == nil {
+				m.ContextBudgetHash = digest(budget)
+			}
+		}
 		m.RunID = s.run.ID
 		m.Attempt = s.run.Attempt
 		m.ModelStep = s.run.Step.Load()
