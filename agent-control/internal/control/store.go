@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"slices"
 	"strings"
 	"time"
 )
@@ -188,7 +189,7 @@ func (s *Store) Update(ctx context.Context, owner, id string, in Changes) (Agent
 	if in.Description != nil {
 		a.Description = *in.Description
 	}
-	if in.WorkspaceIDs != nil {
+	if in.WorkspaceIDs != nil && !slices.Equal(normalized(a.WorkspaceIDs), *in.WorkspaceIDs) {
 		a.WorkspaceIDs = *in.WorkspaceIDs
 		a.MembershipRevision++
 	}

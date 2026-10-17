@@ -226,6 +226,50 @@ afterEach(async () => {
 });
 
 describe("member and account navigation", () => {
+  it("keeps independent Agent discovery, edits and deletion usable with runtime admission disabled", async () => {
+    bootstrap.capabilities["agents.enabled"] = false;
+    vi.mocked(api.agent).mockResolvedValue({ agent: { ...agent, enabled: false } });
+    await mount();
+    expect(api.workspaceAgents).toHaveBeenCalledWith(workspace.id);
+    expect(find('[aria-label="团队成员"]').textContent).toContain(agent.name);
+    await click('[aria-label="管理 产品伙伴"]');
+    await settle();
+    expect(find(".agent-detail-actions").textContent).toContain("编辑资料");
+    const enable = Array.from(find(".agent-detail-actions").querySelectorAll("button"))
+      .find((button) => button.textContent?.trim() === "启用")!;
+    expect(enable.disabled).toBe(true);
+    expect(find(".agent-delete-section button")).toBeTruthy();
+    await click(".agent-detail-actions button:first-child");
+    expect(find<HTMLInputElement>('.agent-enabled-switch input').disabled).toBe(true);
+    await input('.modal input[placeholder="例如：产品伙伴"]', "新的名字");
+    const update = vi.spyOn(api, "updateAgent").mockResolvedValue({ agent: { ...agent, name: "新的名字", enabled: false } });
+    await settle(() => find<HTMLFormElement>(".modal form").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    expect(update).toHaveBeenCalledWith(agent.id, { name: "新的名字" });
+  });
+
+  it.each([1, 49])("creates a group with %s selected partners and prevents a 51st total member", async (count) => {
+    const members: Member[] = [persistedMembers[0], ...Array.from({ length: 50 }, (_, index) => ({
+      userId: `person-${index}`, displayName: `伙伴 ${index}`, kind: "human" as const, role: "member" as const,
+    }))];
+    vi.mocked(api.members).mockResolvedValue({ members });
+    vi.mocked(api.workspaceAgents).mockResolvedValue({ agents: [] });
+    const create = vi.spyOn(api, "createConversation").mockResolvedValue({ conversation: group });
+    await mount("/app/w/team/c/general");
+    await click(".conversation-actions-trigger");
+    await click(".conversation-actions-menu button:last-child");
+    for (let index = 0; index < count; index++) await click(`.member-option:nth-of-type(${index + 1})`);
+    expect(find<HTMLButtonElement>('.modal button[type="submit"]').disabled).toBe(false);
+    if (count === 49) {
+      expect(find<HTMLButtonElement>('.member-option:nth-of-type(50)').disabled).toBe(true);
+      await click('.member-option:nth-of-type(1)');
+      expect(find<HTMLButtonElement>('.member-option:nth-of-type(50)').disabled).toBe(false);
+      await click('.member-option:nth-of-type(1)');
+    }
+    await settle(() => find<HTMLFormElement>(".modal form").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    expect(create).toHaveBeenCalledOnce();
+    expect(create.mock.calls[0][1].type).toBe("group");
+    expect([...(create.mock.calls[0][1].memberIds || [])].sort()).toEqual(members.slice(1, count + 1).map((member) => member.userId).sort());
+  });
   it("places personal navigation in the rail and keeps member/admin management out of the sidebar", async () => {
     activeUser.platformRole = "admin";
     await mount();

@@ -175,8 +175,7 @@ export function Shell() {
     refetchInterval: 60_000,
   });
   const discoveryAllowed =
-    !!chat.data?.capabilities["agents.enabled"] &&
-    !!chat.data.capabilities["agents.discover"];
+    !!chat.data?.capabilities["agents.discover"];
   const workspaceAgentsQuery = useQuery({
     queryKey: ["workspaceAgents", user!.id, workspace?.id],
     queryFn: () => api.workspaceAgents(workspace!.id),
