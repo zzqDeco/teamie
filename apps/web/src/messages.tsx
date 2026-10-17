@@ -120,6 +120,13 @@ function writeComposerDraft(conversationId: string, draft: ComposerDraft) {
   }
   notifyDrafts();
 }
+function extendHistoryBoundary(beforeSeq: number, messages: LocalMessage[]) {
+  const sequences = new Set(
+    messages.filter((message) => !message.status).map((message) => message.seq),
+  );
+  while (beforeSeq > 1 && sequences.has(beforeSeq - 1)) beforeSeq--;
+  return beforeSeq;
+}
 export function ConversationView({
   conversation,
   members,
@@ -161,6 +168,7 @@ export function ConversationView({
   const [searchOpen, setSearchOpen] = useState(false);
   const closeSearch = useCallback(() => setSearchOpen(false), []);
   const navigation = useRef(0);
+  const historyBefore = useRef<{ seq: number; generation: number } | null>(null);
   const acknowledgement = useRef<{
     id: string;
     seq: number;
@@ -294,6 +302,8 @@ export function ConversationView({
       chatStore.getSnapshot().messages[conversation.id] || []
     ).some((m) => !m.status);
     acknowledgement.current = null;
+    historyBefore.current = null;
+    setHasMore(false);
     setLocated(null);
     setHighlightId("");
     setLocating(false);
@@ -306,6 +316,9 @@ export function ConversationView({
       const page = await api.messages(conversation.id);
       if (token !== chatStore.generation || operation !== navigation.current)
         return;
+      historyBefore.current = page.messages[0]
+        ? { seq: page.messages[0].seq, generation: token }
+        : null;
       chatStore.merge(page.messages);
       setHasMore(page.hasMore);
     } catch (e) {
@@ -401,6 +414,8 @@ export function ConversationView({
       setLoadingOlder(false);
       setLocating(true);
       acknowledgement.current = null;
+      historyBefore.current = null;
+      setHasMore(false);
       initialScroll.current = false;
       setError("");
       try {
@@ -440,7 +455,10 @@ export function ConversationView({
             operation,
           };
         setLocated(context);
-        setHasMore((context[0]?.seq || 1) > 1);
+        historyBefore.current = context[0]
+          ? { seq: context[0].seq, generation: token }
+          : null;
+        setHasMore((historyBefore.current?.seq ?? 1) > 1);
         setHighlightId(id);
       } catch (e) {
         if (current())
@@ -545,8 +563,12 @@ export function ConversationView({
     generation,
   ]);
   async function older() {
-    const first = messages.find((m) => !m.status)?.seq;
-    if (!first) return;
+    const boundary = historyBefore.current;
+    if (!boundary || boundary.generation !== chatStore.generation || loadingOlder)
+      return;
+    // Sync can insert an isolated old edit into a trimmed cache. Only visible,
+    // contiguous history can extend the boundary of a completed history page.
+    const first = extendHistoryBoundary(boundary.seq, messages);
     const token = chatStore.generation;
     const operation = navigation.current;
     const height = scrollRef.current?.scrollHeight || 0;
@@ -556,6 +578,9 @@ export function ConversationView({
       const page = await api.messages(conversation.id, first);
       if (token !== chatStore.generation || operation !== navigation.current)
         return;
+      historyBefore.current = page.messages[0]
+        ? { seq: page.messages[0].seq, generation: token }
+        : null;
       if (located)
         setLocated((old) =>
           old ? reconcileMessages(old, page.messages) : old,
