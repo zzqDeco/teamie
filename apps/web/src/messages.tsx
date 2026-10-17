@@ -334,6 +334,8 @@ export function ConversationView({
   }, []);
   useLayoutEffect(() => {
     if (highlightId) focusMessage(highlightId);
+  }, [highlightId, located, focusMessage, visible, membersOpen]);
+  useLayoutEffect(() => {
     const pending = acknowledgement.current;
     if (
       !visible ||
@@ -383,7 +385,6 @@ export function ConversationView({
   }, [
     highlightId,
     located,
-    focusMessage,
     visible,
     conversation.id,
     membersOpen,

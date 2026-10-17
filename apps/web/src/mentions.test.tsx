@@ -321,6 +321,44 @@ describe("reply navigation", () => {
       "消息已撤回",
     );
   });
+  it("keeps composer focus while replying in located context across renders and typing", async () => {
+    vi.mocked(api.messages).mockResolvedValue({
+      messages: [reply],
+      hasMore: true,
+    });
+    vi.spyOn(api, "message").mockResolvedValue({ message: original });
+    vi.spyOn(api, "messagesAround").mockResolvedValue({
+      messages: [original],
+      hasMore: false,
+    });
+    await render(view());
+    await act(async () =>
+      host.querySelector<HTMLButtonElement>(".message-reply")!.click(),
+    );
+    expect(document.activeElement?.id).toBe(`message-${original.id}`);
+    await act(async () =>
+      host.querySelector<HTMLButtonElement>('[aria-label="回复 助手"]')!.click(),
+    );
+    const input = host.querySelector("textarea")!;
+    expect(host.querySelector(".reply-preview")?.textContent).toContain("原始任务");
+    expect(document.activeElement).toBe(input);
+    await render(view());
+    expect(document.activeElement).toBe(input);
+    await type("回");
+    expect(document.activeElement).toBe(input);
+    await type("回复");
+    expect(input.value).toBe("回复");
+    expect(document.activeElement).toBe(input);
+    await act(async () =>
+      chatStore.merge([
+        { ...original, body: "更新的原始任务", editedAt: "2026-10-17T00:01:00Z" },
+      ]),
+    );
+    expect(host.querySelector(".reply-preview")?.textContent).toContain(
+      "更新的原始任务",
+    );
+    expect(document.activeElement).toBe(input);
+  });
   it("renders cached conversation messages immediately without a loading flash while refreshing in the background", async () => {
     chatStore.merge([reply]);
     let resolveLatest!: (value: {
@@ -396,6 +434,32 @@ describe("reply navigation", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+  it("waits for an inert source context to become interactive before focusing or acknowledging it", async () => {
+    vi.mocked(api.read).mockResolvedValue({ readSeq: original.seq });
+    vi.spyOn(api, "message").mockResolvedValue({ message: original });
+    vi.spyOn(api, "messagesAround").mockResolvedValue({
+      messages: [original],
+      hasMore: false,
+    });
+    const sourceView = (blocked: boolean) => (
+      <div inert={blocked}>
+        <ConversationView
+          conversation={{ ...conversation, readSeq: 0 }}
+          members={members}
+          onMembers={vi.fn()}
+          membersOpen={blocked}
+          onMenu={vi.fn()}
+          initialMessageId={original.id}
+        />
+      </div>
+    );
+    await render(sourceView(true));
+    expect(api.read).not.toHaveBeenCalled();
+    expect(document.activeElement?.id).not.toBe(`message-${original.id}`);
+    await render(sourceView(false));
+    expect(document.activeElement?.id).toBe(`message-${original.id}`);
+    expect(api.read).toHaveBeenCalledExactlyOnceWith("group", original.seq);
   });
   it.each(["context", "sync"])(
     "does not acknowledge or retain stale reply text when %s retracts a delayed attention source",
