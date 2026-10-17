@@ -40,6 +40,22 @@ func (h *Handler) Routes() http.Handler {
 		}))
 	}
 	h.attachmentRoutes(auth)
+	auth("GET /api/v1/attention", func(w http.ResponseWriter, r *http.Request, s api.Session) error {
+		limit, err := queryInt(r, "limit", 50, 1, 100)
+		if err != nil {
+			return err
+		}
+		unread := r.URL.Query().Get("unreadOnly")
+		if unread != "" && unread != "true" && unread != "false" {
+			return api.Err(400, "invalid_query", "Invalid unread filter")
+		}
+		page, err := h.Store.Attention(r.Context(), s.User.ID, r.URL.Query().Get("cursor"), int(limit), unread == "true")
+		if err != nil {
+			return err
+		}
+		api.Write(w, 200, page)
+		return nil
+	})
 	auth("GET /api/v1/bootstrap", func(w http.ResponseWriter, r *http.Request, s api.Session) error {
 		ws, e := h.Store.Workspaces(r.Context(), s.User.ID)
 		if e != nil {

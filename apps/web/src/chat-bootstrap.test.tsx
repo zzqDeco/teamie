@@ -133,6 +133,17 @@ afterEach(async () => {
 });
 
 describe("ChatProvider bootstrap ordering", () => {
+  it("refreshes attention projections after durable remote reads and message changes", async () => {
+    await mount();
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    vi.mocked(api.sync).mockResolvedValueOnce({ events: [{ id: "1", type: "read.updated", conversationId: first.id, readSeq: 1, createdAt: first.updatedAt }], cursor: "1", hasMore: false });
+    await settle(() => sync());
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["attention", auth.user.id] });
+    invalidate.mockClear();
+    vi.mocked(api.sync).mockResolvedValueOnce({ events: [{ id: "2", type: "message.retracted", conversationId: first.id, message: { ...message, conversationId: first.id, body: "", retractedAt: first.updatedAt }, createdAt: first.updatedAt }], cursor: "2", hasMore: false });
+    await settle(() => sync());
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["attention", auth.user.id] });
+  });
   it("does not reapply an accepted membership snapshot after newer sync and a profile change", async () => {
     await mount();
     vi.mocked(api.sync).mockResolvedValueOnce(membershipPage());
