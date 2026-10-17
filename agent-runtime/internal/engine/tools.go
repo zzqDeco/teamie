@@ -261,6 +261,9 @@ func (t *Tools) execute(ctx context.Context, name string, args any, fn func(cont
 	if e != nil {
 		return nil, e
 	}
+	if e = t.recordContextIMArguments(ctx, run, callID, name, payload); e != nil {
+		return nil, e
+	}
 	if cached != nil {
 		var out Observation
 		if e = json.Unmarshal(cached, &out); e != nil {
