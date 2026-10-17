@@ -149,7 +149,11 @@ func (p *ContextPipeline) archiveUnit(ctx context.Context, unit []*schema.Agenti
 			break
 		}
 	}
-	out := schema.UserAgenticMessage(contextReadNotice(ref) + "\nQuoted data preview:\n" + preview + "\nTEAMIE_SOURCE_REFERENCES " + string(raw))
+	noticeText := contextReadNotice(ref) + "\nQuoted data preview:\n" + preview
+	if p.cfg.Budget.Version < 3 {
+		noticeText += "\nTEAMIE_SOURCE_REFERENCES " + string(raw)
+	}
+	out := schema.UserAgenticMessage(noticeText)
 	request := false
 	for _, message := range unit {
 		if isContextRequest(message) {
@@ -168,6 +172,9 @@ func (p *ContextPipeline) fitTail(ctx context.Context, fixed, tail []*schema.Age
 }
 
 func (p *ContextPipeline) fitTailTo(ctx context.Context, fixed, tail []*schema.AgenticMessage, tools []*schema.ToolInfo, target int) ([]*schema.AgenticMessage, error) {
+	if p.cfg.Budget.Version >= 3 {
+		return p.fitCurrentInputs(ctx, fixed, tail, tools, target)
+	}
 	fits := func(m ContextMeasurement) bool { return p.cfg.Budget.fits(m) && m.EstimatedTokens <= target }
 	out := append(append([]*schema.AgenticMessage{}, fixed...), tail...)
 	m, err := measureContext(out, tools, p.cfg.Budget.OutputReserveTokens, false)

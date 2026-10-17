@@ -272,7 +272,7 @@ func testContextNativeTurnLoopRecovery(t *testing.T, summaryOverflow bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	input := []*schema.AgenticMessage{schema.UserAgenticMessage(strings.Repeat("old user data ", 500)), assistantText(strings.Repeat("old completed work ", 400)), schema.UserAgenticMessage("current explicit request")}
+	input := append([]*schema.AgenticMessage{schema.UserAgenticMessage(strings.Repeat("old user data ", 500)), assistantText(strings.Repeat("old completed work ", 400))}, inputMessages(run.Inputs)...)
 	session := &SessionStore[*schema.AgenticMessage]{Store: s, Lease: lease}
 	completed := make(chan error, 1)
 	loop := adk.NewTurnLoop(adk.TurnLoopConfig[Input, *schema.AgenticMessage]{
