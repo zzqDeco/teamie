@@ -444,6 +444,15 @@ func (s *Service) outputPage(ctx context.Context, r *agent.SandboxWorkspaceReque
 	// Base64 is always available for an exact binary-safe reference; UTF-8 text
 	// is convenience data only and never replaces the canonical stored bytes.
 	data := map[string]any{"pageVersion": 1, "taskId": in.TaskID, "byteOffset": offset, "nextOffset": out.GetNextOffset(), "stdoutBase64": base64.StdEncoding.EncodeToString([]byte(out.GetStdout())), "stderrBase64": base64.StdEncoding.EncodeToString([]byte(out.GetStderr())), "state": out.State, "hasMore": out.GetHasMore(), "truncated": out.GetTruncated(), "outputBytes": out.GetOutputBytes(), "outputLimitBytes": out.GetOutputLimitBytes(), "outputStatus": out.GetOutputStatus(), "outputSha256": out.GetOutputSha256()}
+	if out.OutputExpiresAt != nil {
+		data["outputExpiresAt"] = out.GetOutputExpiresAt()
+	}
+	if out.OutputRetentionSeconds != nil {
+		data["outputRetentionSeconds"] = out.GetOutputRetentionSeconds()
+	}
+	if out.OutputAvailability != nil {
+		data["outputAvailability"] = out.GetOutputAvailability()
+	}
 	s.taskMu.Lock()
 	receipt, loadErr := s.loadTaskLocked(r.AgentId, in.TaskID)
 	var segments []outputSegment
@@ -452,6 +461,9 @@ func (s *Service) outputPage(ctx context.Context, r *agent.SandboxWorkspaceReque
 	}
 	s.taskMu.Unlock()
 	if loadErr != nil {
+		if errors.Is(loadErr, errOutputExpired) {
+			return workspaceError("output_expired")
+		}
 		return workspaceError("execution_unknown")
 	}
 	data["segments"] = segments

@@ -389,6 +389,15 @@ func (r *sandboxRun) Wait(ctx context.Context) (*bgtool.Outcome, error) {
 				data["outputStatus"] = v.GetOutputStatus()
 				data["hasMore"] = v.GetHasMore()
 				data["outputSha256"] = v.GetOutputSha256()
+				if v.OutputExpiresAt != nil {
+					data["outputExpiresAt"] = v.GetOutputExpiresAt()
+				}
+				if v.OutputRetentionSeconds != nil {
+					data["outputRetentionSeconds"] = v.GetOutputRetentionSeconds()
+				}
+				if v.OutputAvailability != nil {
+					data["outputAvailability"] = v.GetOutputAvailability()
+				}
 				data["resume"] = map[string]any{"operation": "output", "taskId": r.id, "byteOffset": int64(0)}
 			}
 			b, _ := json.Marshal(data)
