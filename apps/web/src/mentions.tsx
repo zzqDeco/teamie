@@ -117,6 +117,7 @@ export function MentionInput({
   const ownRef = useRef<HTMLTextAreaElement>(null);
   const ref = inputRef || ownRef;
   const id = useId();
+  const listRef = useRef<HTMLDivElement>(null);
   const [caret, setCaret] = useState(0);
   const [composing, setComposing] = useState(false);
   const [dismissed, setDismissed] = useState("");
@@ -143,6 +144,9 @@ export function MentionInput({
     selection.signature === signature
       ? Math.min(selection.index, candidates.length - 1)
       : 0;
+  useLayoutEffect(() => {
+    listRef.current?.children.item(selected)?.scrollIntoView({ block: "nearest" });
+  }, [signature, selected, candidates.length]);
   useLayoutEffect(() => {
     if (pendingCaret.current !== null && ref.current) {
       ref.current.focus();
@@ -225,6 +229,7 @@ export function MentionInput({
       {candidates.length > 0 && (
         <div
           className="mention-options"
+          ref={listRef}
           id={id}
           role="listbox"
           aria-label="提及成员"
