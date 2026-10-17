@@ -178,7 +178,17 @@ func (h *Handler) Routes() http.Handler {
 		if e != nil {
 			return e
 		}
-		ms, more, e := h.Store.MessageHistory(r.Context(), s.User.ID, r.PathValue("id"), before, around, r.URL.Query().Get("q"), int(limit))
+		content := r.URL.Query().Get("content")
+		if content != "" && content != "files" || content == "files" && around != 0 {
+			return api.Err(400, "invalid_query", "File search cannot be combined with a context cursor")
+		}
+		var ms []Message
+		var more bool
+		if content == "files" {
+			ms, more, e = h.Store.FileHistory(r.Context(), s.User.ID, r.PathValue("id"), before, r.URL.Query().Get("q"), int(limit))
+		} else {
+			ms, more, e = h.Store.MessageHistory(r.Context(), s.User.ID, r.PathValue("id"), before, around, r.URL.Query().Get("q"), int(limit))
+		}
 		if e != nil {
 			return e
 		}

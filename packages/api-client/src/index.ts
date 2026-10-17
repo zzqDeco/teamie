@@ -469,6 +469,17 @@ export class TeamieClient {
     this.#request<MessagePage>(
       `/conversations/${part(id)}/messages?limit=50${beforeSeq ? `&beforeSeq=${beforeSeq}` : ""}`,
     );
+  searchMessages = (
+    id: string,
+    options: { q?: string; content?: "files"; beforeSeq?: number },
+    signal?: AbortSignal,
+  ) => {
+    const params = new URLSearchParams({ limit: "50" });
+    if (options.q) params.set("q", options.q);
+    if (options.content) params.set("content", options.content);
+    if (options.beforeSeq !== undefined) params.set("beforeSeq", String(options.beforeSeq));
+    return this.#request<MessagePage>(`/conversations/${part(id)}/messages?${params}`, { signal });
+  };
   message = (conversationId: string, id: string) =>
     this.#request<{ message: Message }>(`/conversations/${part(conversationId)}/messages/${part(id)}`);
   messagesAround = (id: string, seq: number) =>
