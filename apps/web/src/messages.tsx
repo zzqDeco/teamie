@@ -62,6 +62,42 @@ export function conversationName(
       .join("、") || "私聊"
   );
 }
+type ComposerDraft = {
+  body: string;
+  mentions: Mention[];
+  reply: Message | null;
+};
+let draftGeneration = -1;
+const composerDrafts = new Map<string, ComposerDraft>();
+export function clearComposerDrafts() {
+  draftGeneration = chatStore.generation;
+  composerDrafts.clear();
+}
+function readComposerDraft(conversationId: string): ComposerDraft {
+  if (draftGeneration !== chatStore.generation) {
+    draftGeneration = chatStore.generation;
+    composerDrafts.clear();
+  }
+  const draft = composerDrafts.get(conversationId);
+  return draft
+    ? { body: draft.body, mentions: [...draft.mentions], reply: draft.reply }
+    : { body: "", mentions: [], reply: null };
+}
+function writeComposerDraft(conversationId: string, draft: ComposerDraft) {
+  if (draftGeneration !== chatStore.generation) {
+    draftGeneration = chatStore.generation;
+    composerDrafts.clear();
+  }
+  if (!draft.body && draft.mentions.length === 0 && !draft.reply) {
+    composerDrafts.delete(conversationId);
+  } else {
+    composerDrafts.set(conversationId, {
+      body: draft.body,
+      mentions: [...draft.mentions],
+      reply: draft.reply,
+    });
+  }
+}
 export function ConversationView({
   conversation,
   members,
@@ -98,7 +134,9 @@ export function ConversationView({
   const [searchOpen, setSearchOpen] = useState(false);
   const closeSearch = useCallback(() => setSearchOpen(false), []);
   const navigation = useRef(0);
-  const [mentions, setMentions] = useState<Mention[]>([]);
+  const [mentions, setMentions] = useState<Mention[]>(
+    () => readComposerDraft(conversation.id).mentions,
+  );
   const [editMentions, setEditMentions] = useState<Mention[]>([]);
   const mentionMembers = members.filter((member) =>
     conversation.memberIds.includes(member.userId),
@@ -110,8 +148,12 @@ export function ConversationView({
     [hasMore, setHasMore] = useState(false),
     [loadingOlder, setLoadingOlder] = useState(false),
     [error, setError] = useState("");
-  const [body, setBody] = useState(""),
-    [reply, setReply] = useState<Message | null>(null),
+  const [body, setBody] = useState(
+      () => readComposerDraft(conversation.id).body,
+    ),
+    [reply, setReply] = useState<Message | null>(
+      () => readComposerDraft(conversation.id).reply,
+    ),
     [editing, setEditing] = useState<Message | null>(null),
     [editBody, setEditBody] = useState("");
   const [retracting, setRetracting] = useState<Message | null>(null),
@@ -125,6 +167,20 @@ export function ConversationView({
     lastRead = useRef(conversation.readSeq),
     lastTyping = useRef(0);
   const generation = chatStore.generation;
+  const draftScope = useRef(`${generation}:${conversation.id}`);
+  useEffect(() => {
+    if (draftScope.current !== `${generation}:${conversation.id}`) return;
+    writeComposerDraft(conversation.id, { body, mentions, reply });
+  }, [generation, conversation.id, body, mentions, reply]);
+  useEffect(() => {
+    const nextScope = `${generation}:${conversation.id}`;
+    if (draftScope.current === nextScope) return;
+    draftScope.current = nextScope;
+    const saved = readComposerDraft(conversation.id);
+    setBody(saved.body);
+    setMentions(saved.mentions);
+    setReply(saved.reply);
+  }, [generation, conversation.id]);
   useEffect(
     () => () => {
       navigation.current++;
@@ -213,6 +269,7 @@ export function ConversationView({
   useEffect(() => {
     void fetchLatest();
     return () => {
+      lastTyping.current = 0;
       sendTyping(conversation.id, false);
     };
   }, [fetchLatest, sendTyping, conversation.id]);
@@ -341,11 +398,17 @@ export function ConversationView({
       ...(reply ? { replyToId: reply.id } : {}),
     };
     void sendMessage(message, chatStore.generation);
+    writeComposerDraft(conversation.id, {
+      body: "",
+      mentions: [],
+      reply: null,
+    });
     setBody("");
     setMentions([]);
     if (located) void fetchLatest();
     setReply(null);
     setAtBottom(true);
+    lastTyping.current = 0;
     sendTyping(conversation.id, false);
     inputRef.current?.focus();
   }
@@ -839,8 +902,15 @@ export function ConversationView({
             members={mentionMembers}
             enabled={mentionsEnabled}
             onTyping={(value) => {
+              if (!value) {
+                if (lastTyping.current > 0) {
+                  lastTyping.current = 0;
+                  sendTyping(conversation.id, false);
+                }
+                return;
+              }
               if (Date.now() - lastTyping.current > 1500) {
-                sendTyping(conversation.id, !!value);
+                sendTyping(conversation.id, true);
                 lastTyping.current = Date.now();
               }
             }}

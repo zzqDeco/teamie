@@ -118,6 +118,8 @@ describe("conversation file drafts", () => {
     });
     expect(draft.ready).toBe(true);
     expect(upload).toHaveBeenCalledTimes(2);
+    expect(upload.mock.calls[0][3]).toBeTruthy();
+    expect(upload.mock.calls[1][3]).toBe(upload.mock.calls[0][3]);
     await act(async () => {
       draft.add(
         Array.from(
