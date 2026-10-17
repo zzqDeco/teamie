@@ -81,7 +81,7 @@ func (a *ContextArchive) legacyWorkspaceArchiveSources(ctx context.Context, r *R
  WHERE origin.agent_id=$1 AND t.created_at<=$3 AND t.name=ANY($4::text[]) AND
  (origin.id=owner.id OR EXISTS(SELECT 1 FROM runtime_session_events e
  WHERE e.session_id=$5 AND e.run_id=origin.id AND e.seq<=owner.context_head
- AND EXISTS(SELECT 1 FROM runtime_session_acceptances x WHERE x.agent_id=$1 AND x.attempt_id=e.attempt_id AND x.seq<=owner.acceptance_head))))`, r.AgentID, artifact.RunID, artifact.CreatedAt, []string{"native:read_file", "native:ls", "native:glob", "native:grep", "native:workspace_read_page", "native:workspace_execute", "native:task_output", "native:task_stop", "native:TaskCreate", "native:TaskUpdate", "native:TaskGet", "native:TaskList"}, "agent:"+r.AgentID).Scan(&touched)
+ AND EXISTS(SELECT 1 FROM runtime_session_acceptances x WHERE x.agent_id=$1 AND x.attempt_id=e.attempt_id AND x.seq<=owner.acceptance_head))))`, r.AgentID, artifact.RunID, artifact.CreatedAt, []string{"native:read_file", "native:ls", "native:glob", "native:grep", "native:workspace_read_page", "native:workspace_execute", "native:task_output", "native:task_stop", "native:TaskCreate", "native:TaskUpdate", "native:TaskGet", "native:TaskList", "workspace_execute"}, "agent:"+r.AgentID).Scan(&touched)
 	if err != nil {
 		return nil, err
 	}

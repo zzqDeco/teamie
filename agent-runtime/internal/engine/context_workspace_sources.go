@@ -69,6 +69,11 @@ func (a *ContextArchive) workspaceToolSources(ctx context.Context, r *Run, runID
 	if actualName != name || len(args) > 0 && digest(args) != hash {
 		return nil, ErrReplayConflict
 	}
+	if name == "workspace_execute" {
+		if err := a.legacyWorkspaceWriterView(ctx, r.AgentID, runID); err != nil {
+			return nil, err
+		}
+	}
 	raw, err := a.Store.readObservation(ctx, &Run{ID: runID}, call, workspaceSourcesKey)
 	if err == nil {
 		var saved workspaceSourceSnapshot
@@ -103,7 +108,7 @@ func (a *ContextArchive) workspaceToolSources(ctx context.Context, r *Run, runID
 	}
 	// Intents precede effects. Include pending/failed writers too: a missing
 	// terminal receipt cannot prove that a persistent file was not changed.
-	rows, err := a.Store.DB.Query(ctx, `SELECT t.run_id::text,t.call_id,t.name,t.request_hash,t.result,t.created_at,o.response FROM runtime_tool_calls t JOIN runtime_runs owner ON owner.id=t.run_id LEFT JOIN runtime_tool_observations o ON o.run_id=t.run_id AND o.call_id=t.call_id AND o.observation_key=$6 WHERE owner.agent_id=$1 AND t.created_at<=$2 AND t.name=ANY($3::text[]) AND (t.run_id<>$4 OR t.call_id<>$5) ORDER BY t.created_at,t.run_id,t.call_id`, r.AgentID, cutoff, []string{"native:write_file", "native:edit_file", "native:workspace_execute", "native:TaskCreate", "native:TaskUpdate", "im_get_attachment"}, runID, call, workspaceSourcesKey)
+	rows, err := a.Store.DB.Query(ctx, `SELECT t.run_id::text,t.call_id,t.name,t.request_hash,t.result,t.created_at,o.response FROM runtime_tool_calls t JOIN runtime_runs owner ON owner.id=t.run_id LEFT JOIN runtime_tool_observations o ON o.run_id=t.run_id AND o.call_id=t.call_id AND o.observation_key=$6 WHERE owner.agent_id=$1 AND t.created_at<=$2 AND t.name=ANY($3::text[]) AND (t.run_id<>$4 OR t.call_id<>$5) ORDER BY t.created_at,t.run_id,t.call_id`, r.AgentID, cutoff, []string{"native:write_file", "native:edit_file", "native:workspace_execute", "native:TaskCreate", "native:TaskUpdate", "im_get_attachment", "workspace_execute"}, runID, call, workspaceSourcesKey)
 	if err != nil {
 		return nil, err
 	}
@@ -127,6 +132,11 @@ func (a *ContextArchive) workspaceToolSources(ctx context.Context, r *Run, runID
 		return nil, err
 	}
 	for _, w := range writers {
+		if w.name == "workspace_execute" {
+			if err := a.legacyWorkspaceWriterView(ctx, r.AgentID, w.run); err != nil {
+				return nil, err
+			}
+		}
 		if len(w.snapshot) > 0 {
 			var saved workspaceSourceSnapshot
 			if json.Unmarshal(w.snapshot, &saved) != nil || saved.Version != 1 || saved.Name != w.name || saved.RequestHash != w.hash {
@@ -360,6 +370,21 @@ func (a *ContextArchive) workspaceSnapshotSources(ctx context.Context, agent, re
 		return nil, ErrReplayConflict
 	}
 	return refs, err
+}
+
+// v0.2's synchronous tool used this unprefixed receipt name and the same
+// persistent Agent workspace. Its schema did not freeze a Session head. A
+// genesis view is provable; an older Session with no saved head is not.
+func (a *ContextArchive) legacyWorkspaceWriterView(ctx context.Context, agent, run string) error {
+	var unknown bool
+	err := a.Store.DB.QueryRow(ctx, `SELECT owner.context_head=0 AND EXISTS(SELECT 1 FROM runtime_session_events e JOIN runtime_runs prior ON prior.id=e.run_id WHERE prior.agent_id=$1 AND prior.id<>owner.id AND prior.started_at<=owner.started_at) FROM runtime_runs owner WHERE owner.id=$2 AND owner.agent_id=$1`, agent, run).Scan(&unknown)
+	if err != nil {
+		return err
+	}
+	if unknown {
+		return errContextUnavailable
+	}
+	return nil
 }
 
 func (a *ContextArchive) workspaceImportSources(ctx context.Context, run, call, hash string) ([]InputSource, error) {

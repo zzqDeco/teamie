@@ -184,6 +184,9 @@ func TestContextWorkspaceImportedContentRetainsSourcesInRawArchiveAndCachedRead(
 	if err != nil {
 		t.Fatal(err)
 	}
+	summary := schema.UserAgenticMessage("TEAMIE_SESSION_SUMMARY WORKSPACE_IMPORTED_SUMMARY")
+	summary.Extra = map[string]any{contextArchiveRefKey: derivedRef}
+	f.append(t, "workspace-native-summary", summary)
 	for _, r := range []string{ref, transcript, derivedRef} {
 		if _, err = f.a.Read(f.ctx(), r, 0, 0); err != nil {
 			t.Fatal(err)
@@ -640,5 +643,82 @@ func TestContextWorkspaceOldPersistedCopiesRevalidateWithoutChangingReceipts(t *
 	var afterReceipt []byte
 	if err = f.s.DB.QueryRow(f.ctx(), `SELECT request_hash,result FROM runtime_tool_calls WHERE run_id=$1 AND call_id='old-native-read'`, f.run.ID).Scan(&afterHash, &afterReceipt); err != nil || beforeHash != afterHash || string(beforeReceipt) != string(afterReceipt) {
 		t.Fatal("source validation rewrote immutable native receipt", err)
+	}
+}
+
+func TestContextWorkspaceLegacySynchronousWriterAliasRetainsPersistentSources(t *testing.T) {
+	f := newContextArchiveFixture(t)
+	s := &contextWorkspaceFixture{files: map[string]string{}}
+	origin := f.input.ConversationID
+	legacyRun := f.run.ID
+	// v0.2 persisted this exact unprefixed typed intent before Sandbox.Exec.
+	args := []byte(`{"command":"printf LEGACY_WORKSPACE_SECRET > /workspace/old.txt"}`)
+	if _, err := f.s.ToolIntent(f.ctx(), f.l, f.run, "legacy-sync-effect", "workspace_execute", args); err != nil {
+		t.Fatal(err)
+	}
+	s.files["/workspace/old.txt"] = "LEGACY_WORKSPACE_SECRET"
+	result := []byte(`{"ok":true,"data":{"exitCode":0,"stdout":"LEGACY_WORKSPACE_SECRET","stderr":"","truncated":false}}`)
+	if err := f.s.ToolResult(f.ctx(), f.l, f.run, "legacy-sync-effect", result); err != nil {
+		t.Fatal(err)
+	}
+	f.append(t, "legacy-sync-result", contextRetrievalMessage("workspace_execute", "legacy-sync-effect", string(result)))
+	contextFinishWorkspaceRun(t, f)
+	contextNextWorkspaceRun(t, f, "2", contextAddForeignMessage(f, "reader after old synchronous command"))
+	node := contextWorkspaceNode(t, f, s)
+	readArgs := map[string]any{"file_path": "/workspace/old.txt"}
+	wire, err := invokeContextTool(node, f.ctx(), "read-legacy-shared-file", "read_file", readArgs)
+	if err != nil || !strings.Contains(wire, "LEGACY_WORKSPACE_SECRET") {
+		t.Fatal(wire, err)
+	}
+	ref, err := f.a.ArchiveToolPath(f.ctx(), "tool_trunc", contextRealIMDetail("read_file", "read-legacy-shared-file", readArgs, wire), wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := f.a.Search(f.ctx(), "LEGACY_WORKSPACE_SECRET", "", 8)
+	if err != nil || len(page.Hits) == 0 {
+		t.Fatal("provable old synchronous native history became unavailable", err)
+	}
+	f.mu.Lock()
+	f.deniedConversations[origin] = true
+	f.mu.Unlock()
+	if _, err = f.a.Read(f.ctx(), ref, 0, 0); !errors.Is(err, errContextUnavailable) {
+		t.Fatal("unprefixed writer lost persistent file origins", err)
+	}
+	if _, err = invokeContextTool(node, f.ctx(), "read-legacy-shared-file", "read_file", readArgs); err == nil {
+		t.Fatal("cached read ignored legacy synchronous writer origin")
+	}
+	page, err = f.a.Search(f.ctx(), "LEGACY_WORKSPACE_SECRET", "", 8)
+	if err != nil || len(page.Hits) != 0 {
+		t.Fatal("legacy synchronous result leaked after revocation", page, err)
+	}
+	var afterHash string
+	var afterResult []byte
+	if err = f.s.DB.QueryRow(f.ctx(), `SELECT request_hash,result FROM runtime_tool_calls WHERE run_id=$1 AND call_id='legacy-sync-effect'`, legacyRun).Scan(&afterHash, &afterResult); err != nil || afterHash != digest(args) || string(afterResult) != string(result) {
+		t.Fatal("legacy request/result bytes changed", err)
+	}
+}
+
+func TestContextWorkspaceLegacyWriterWithoutFrozenEarlierSessionIsUnavailable(t *testing.T) {
+	f := newContextArchiveFixture(t)
+	s := &contextWorkspaceFixture{files: map[string]string{}}
+	f.append(t, "earlier-legacy-session", schema.UserAgenticMessage("earlier private context"))
+	contextFinishWorkspaceRun(t, f)
+	contextNextWorkspaceRun(t, f, "2", contextAddForeignMessage(f, "old writer trigger alone is insufficient"))
+	// Match migrated v0.2 rows: no frozen Session/acceptance head was saved.
+	if _, err := f.s.DB.Exec(f.ctx(), `UPDATE runtime_runs SET context_head=0,acceptance_head=0 WHERE id=$1`, f.run.ID); err != nil {
+		t.Fatal(err)
+	}
+	args := []byte(`{"command":"printf private > /workspace/old.txt"}`)
+	if _, err := f.s.ToolIntent(f.ctx(), f.l, f.run, "legacy-unknown-view", "workspace_execute", args); err != nil {
+		t.Fatal(err)
+	}
+	s.files["/workspace/old.txt"] = "unproven earlier-context-derived bytes"
+	if err := f.s.ToolResult(f.ctx(), f.l, f.run, "legacy-unknown-view", []byte(`{"ok":true,"data":{"exitCode":0}}`)); err != nil {
+		t.Fatal(err)
+	}
+	contextFinishWorkspaceRun(t, f)
+	contextNextWorkspaceRun(t, f, "3", contextAddForeignMessage(f, "later reader"))
+	if _, err := invokeContextTool(contextWorkspaceNode(t, f, s), f.ctx(), "read-unknown-old-view", "read_file", map[string]any{"file_path": "/workspace/old.txt"}); !errors.Is(err, errContextUnavailable) {
+		t.Fatal("unknown old writer Session was treated as trigger-only provenance", err)
 	}
 }

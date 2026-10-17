@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -167,22 +168,27 @@ func (a *ContextArchive) toolMessageSources(ctx context.Context, r *Run, message
 		if !contextIMTool(receiptName) {
 			receiptName = "native:" + receiptName
 		}
-		rows, err := a.Store.DB.Query(ctx, `SELECT t.run_id::text,t.result FROM runtime_tool_calls t JOIN runtime_runs owner ON owner.id=t.run_id WHERE owner.agent_id=$1 AND t.call_id=$2 AND t.name=$3 AND t.result IS NOT NULL AND ($6='' OR owner.id::text=$6) AND (owner.id=$4 OR EXISTS(SELECT 1 FROM runtime_session_acceptances x WHERE x.agent_id=owner.agent_id AND x.run_id=owner.id AND x.seq<=$5))`, r.AgentID, result.CallID, receiptName, r.ID, r.AcceptanceHead, originRun)
+		names := []string{receiptName}
+		if result.Name == "workspace_execute" {
+			names = append(names, "workspace_execute")
+		}
+		rows, err := a.Store.DB.Query(ctx, `SELECT t.run_id::text,t.name,t.result FROM runtime_tool_calls t JOIN runtime_runs owner ON owner.id=t.run_id WHERE owner.agent_id=$1 AND t.call_id=$2 AND t.name=ANY($3::text[]) AND t.result IS NOT NULL AND ($6='' OR owner.id::text=$6) AND (owner.id=$4 OR EXISTS(SELECT 1 FROM runtime_session_acceptances x WHERE x.agent_id=owner.agent_id AND x.run_id=owner.id AND x.seq<=$5))`, r.AgentID, result.CallID, names, r.ID, r.AcceptanceHead, originRun)
 		if err != nil {
 			return nil, true, err
 		}
 		type candidate struct {
 			runID string
+			name  string
 			raw   []byte
 		}
 		matches := []candidate{}
 		for rows.Next() {
 			var item candidate
-			if err = rows.Scan(&item.runID, &item.raw); err != nil {
+			if err = rows.Scan(&item.runID, &item.name, &item.raw); err != nil {
 				rows.Close()
 				return nil, true, err
 			}
-			if contextReceiptMatchesTool(item.raw, receiptName, detail) {
+			if contextReceiptMatchesTool(item.raw, item.name, detail) {
 				matches = append(matches, item)
 			}
 		}
@@ -209,7 +215,7 @@ func (a *ContextArchive) toolMessageSources(ctx context.Context, r *Run, message
 			if contextIMTool(result.Name) {
 				actual, err = a.imReceiptSources(ctx, match.runID, result.CallID, result.Name, match.raw)
 			} else {
-				actual, err = a.workspaceToolSources(ctx, r, match.runID, result.CallID, receiptName, nil)
+				actual, err = a.workspaceToolSources(ctx, r, match.runID, result.CallID, match.name, nil)
 			}
 			if err != nil {
 				return nil, true, err
@@ -329,6 +335,35 @@ func (a *ContextArchive) causalMessageSources(ctx context.Context, r *Run, item 
 	refs, err := a.runSources(ctx, item.runID)
 	if err != nil {
 		return nil, nil, err
+	}
+	if message.Role == schema.AgenticRoleTypeUser && !hasToolResults(message) {
+		if parent, ok := message.Extra[contextArchiveRefKey].(string); ok {
+			// Only the exact persisted application summary event can supply
+			// this metadata link. A model-authored body marker grants nothing.
+			linked := false
+			messages := []*schema.AgenticMessage{item.event.Message}
+			if item.event.MessageInserted != nil {
+				messages = append(messages, item.event.MessageInserted.Message)
+			}
+			if item.event.MessagesReplaced != nil {
+				messages = append(messages, (*item.event.MessagesReplaced)...)
+			}
+			for _, actual := range messages {
+				if actual != nil && actual.Extra[contextArchiveRefKey] == parent && bytes.Equal(contextProjectionBytes(actual), contextProjectionBytes(message)) {
+					linked = true
+				}
+			}
+			if !linked {
+				return nil, nil, errContextUnavailable
+			}
+			if _, err = a.load(ctx, r, parent); err != nil {
+				return nil, nil, err
+			}
+			return refs, []string{parent}, nil
+		}
+		if strings.HasPrefix(agenticText(message), "TEAMIE_SESSION_SUMMARY ") {
+			return nil, nil, errContextUnavailable
+		}
 	}
 	if actual, found, err := a.toolMessageSources(ctx, r, message, item.runID); err != nil {
 		return nil, nil, err
