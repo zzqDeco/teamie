@@ -139,6 +139,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               void client.invalidateQueries({ queryKey: ["workspaceAgents"] });
             }
             chatStore.apply(page);
+            if (page.events.some((event) => event.type.startsWith("message.") || event.type === "read.updated" || event.type === "membership.changed"))
+              void client.invalidateQueries({ queryKey: ["attention", user!.id] });
             hasMore = page.hasMore;
           }
         } while (requested && !stopped);

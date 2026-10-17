@@ -5,6 +5,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
 import {
@@ -65,38 +66,59 @@ export function conversationName(
 type ComposerDraft = {
   body: string;
   mentions: Mention[];
-  reply: Message | null;
+  replyToId: string;
 };
-let draftGeneration = -1;
+const emptyComposerDraft: ComposerDraft = {
+  body: "",
+  mentions: [],
+  replyToId: "",
+};
+let draftGeneration = chatStore.generation;
+// Drafts retain reply identity, never a copied IM body, and disappear with
+// their account or conversation access.
 const composerDrafts = new Map<string, ComposerDraft>();
+const draftListeners = new Set<() => void>();
+const notifyDrafts = () => draftListeners.forEach((listener) => listener());
+const subscribeDrafts = (listener: () => void) => {
+  draftListeners.add(listener);
+  return () => {
+    draftListeners.delete(listener);
+  };
+};
 export function clearComposerDrafts() {
   draftGeneration = chatStore.generation;
   composerDrafts.clear();
+  notifyDrafts();
 }
-function readComposerDraft(conversationId: string): ComposerDraft {
+chatStore.subscribe(() => {
   if (draftGeneration !== chatStore.generation) {
-    draftGeneration = chatStore.generation;
-    composerDrafts.clear();
+    clearComposerDrafts();
+    return;
   }
-  const draft = composerDrafts.get(conversationId);
-  return draft
-    ? { body: draft.body, mentions: [...draft.mentions], reply: draft.reply }
-    : { body: "", mentions: [], reply: null };
+  const allowed = chatStore.getSnapshot().conversations;
+  let changed = false;
+  for (const id of composerDrafts.keys()) {
+    if (!allowed[id]) changed = composerDrafts.delete(id) || changed;
+  }
+  if (changed) notifyDrafts();
+});
+function readComposerDraft(conversationId: string): ComposerDraft {
+  return composerDrafts.get(conversationId) || emptyComposerDraft;
 }
 function writeComposerDraft(conversationId: string, draft: ComposerDraft) {
-  if (draftGeneration !== chatStore.generation) {
-    draftGeneration = chatStore.generation;
-    composerDrafts.clear();
-  }
-  if (!draft.body && draft.mentions.length === 0 && !draft.reply) {
+  if (
+    !chatStore.getSnapshot().conversations[conversationId] ||
+    (!draft.body && draft.mentions.length === 0 && !draft.replyToId)
+  ) {
     composerDrafts.delete(conversationId);
   } else {
     composerDrafts.set(conversationId, {
       body: draft.body,
       mentions: [...draft.mentions],
-      reply: draft.reply,
+      replyToId: draft.replyToId,
     });
   }
+  notifyDrafts();
 }
 export function ConversationView({
   conversation,
@@ -104,12 +126,14 @@ export function ConversationView({
   onMembers,
   membersOpen,
   onMenu,
+  initialMessageId = "",
 }: {
   conversation: Conversation;
   members: Member[];
   onMembers: () => void;
   membersOpen: boolean;
   onMenu: () => void;
+  initialMessageId?: string;
 }) {
   const { user } = useAuth();
   const { data, syncError, sync, sendTyping, typing } = useChat();
@@ -134,9 +158,22 @@ export function ConversationView({
   const [searchOpen, setSearchOpen] = useState(false);
   const closeSearch = useCallback(() => setSearchOpen(false), []);
   const navigation = useRef(0);
-  const [mentions, setMentions] = useState<Mention[]>(
-    () => readComposerDraft(conversation.id).mentions,
+  const acknowledgement = useRef<{
+    id: string;
+    seq: number;
+    generation: number;
+    operation: number;
+  } | null>(null);
+  const { body, mentions, replyToId } = useSyncExternalStore(
+    subscribeDrafts,
+    useCallback(() => readComposerDraft(conversation.id), [conversation.id]),
   );
+  function updateComposerDraft(patch: Partial<ComposerDraft>) {
+    writeComposerDraft(conversation.id, {
+      ...readComposerDraft(conversation.id),
+      ...patch,
+    });
+  }
   const [editMentions, setEditMentions] = useState<Mention[]>([]);
   const mentionMembers = members.filter((member) =>
     conversation.memberIds.includes(member.userId),
@@ -148,13 +185,7 @@ export function ConversationView({
     [hasMore, setHasMore] = useState(false),
     [loadingOlder, setLoadingOlder] = useState(false),
     [error, setError] = useState("");
-  const [body, setBody] = useState(
-      () => readComposerDraft(conversation.id).body,
-    ),
-    [reply, setReply] = useState<Message | null>(
-      () => readComposerDraft(conversation.id).reply,
-    ),
-    [editing, setEditing] = useState<Message | null>(null),
+  const [editing, setEditing] = useState<Message | null>(null),
     [editBody, setEditBody] = useState("");
   const [retracting, setRetracting] = useState<Message | null>(null),
     [actionBusy, setActionBusy] = useState(false),
@@ -167,20 +198,80 @@ export function ConversationView({
     lastRead = useRef(conversation.readSeq),
     lastTyping = useRef(0);
   const generation = chatStore.generation;
-  const draftScope = useRef(`${generation}:${conversation.id}`);
+  const canReadConversation =
+    snapshot.userId === user!.id && !!snapshot.conversations[conversation.id];
+  const cachedReply = reconcileMessages(
+    [],
+    [...allMessages, ...(located || [])].filter(
+      (message) =>
+        message.conversationId === conversation.id && message.id === replyToId,
+    ),
+  )[0];
+  const hasCachedReply = !!cachedReply;
+  const replyKey = JSON.stringify([
+    generation,
+    conversation.id,
+    initialMessageId,
+    replyToId,
+  ]);
+  const [resolvedComposerReply, setResolvedComposerReply] = useState<{
+    key: string;
+    signal: AbortSignal;
+    message?: Message;
+    error?: string;
+  } | null>(null);
+  const resolvedReply =
+    resolvedComposerReply?.key === replyKey && !resolvedComposerReply.signal.aborted
+      ? resolvedComposerReply
+      : null;
+  // Reply-only reads stay local; current sync versions always win over an
+  // older context or a delayed single-message response.
+  const reply = canReadConversation && replyToId
+    ? reconcileMessages(
+        resolvedReply?.message ? [resolvedReply.message] : [],
+        cachedReply ? [cachedReply] : [],
+      )[0]
+    : undefined;
   useEffect(() => {
-    if (draftScope.current !== `${generation}:${conversation.id}`) return;
-    writeComposerDraft(conversation.id, { body, mentions, reply });
-  }, [generation, conversation.id, body, mentions, reply]);
-  useEffect(() => {
-    const nextScope = `${generation}:${conversation.id}`;
-    if (draftScope.current === nextScope) return;
-    draftScope.current = nextScope;
-    const saved = readComposerDraft(conversation.id);
-    setBody(saved.body);
-    setMentions(saved.mentions);
-    setReply(saved.reply);
-  }, [generation, conversation.id]);
+    if (!canReadConversation || !replyToId || hasCachedReply) return;
+    const controller = new AbortController();
+    const current = () =>
+      !controller.signal.aborted &&
+      generation === chatStore.generation &&
+      chatStore.getSnapshot().userId === user!.id &&
+      !!chatStore.getSnapshot().conversations[conversation.id] &&
+      readComposerDraft(conversation.id).replyToId === replyToId;
+    void api
+      .message(conversation.id, replyToId, controller.signal)
+      .then(({ message }) => {
+        if (current())
+          setResolvedComposerReply({ key: replyKey, signal: controller.signal, message });
+      })
+      .catch((error: unknown) => {
+        if (!current()) return;
+        if (error instanceof Error && "status" in error && error.status === 404) {
+          writeComposerDraft(conversation.id, {
+            ...readComposerDraft(conversation.id),
+            replyToId: "",
+          });
+          return;
+        }
+        setResolvedComposerReply({
+          key: replyKey,
+          signal: controller.signal,
+          error: "原消息暂时无法加载",
+        });
+      });
+    return () => controller.abort();
+  }, [
+    canReadConversation,
+    conversation.id,
+    generation,
+    hasCachedReply,
+    replyKey,
+    replyToId,
+    user,
+  ]);
   useEffect(
     () => () => {
       navigation.current++;
@@ -190,6 +281,7 @@ export function ConversationView({
   const fetchLatest = useCallback(async () => {
     const token = chatStore.generation;
     const operation = ++navigation.current;
+    acknowledgement.current = null;
     setLocated(null);
     setHighlightId("");
     setLocating(false);
@@ -214,7 +306,12 @@ export function ConversationView({
   }, [conversation.id]);
   const focusMessage = useCallback((id: string) => {
     const target = document.getElementById(`message-${id}`);
-    if (!target || !scrollRef.current?.contains(target)) return;
+    if (
+      !target ||
+      !scrollRef.current?.contains(target) ||
+      target.closest("[inert]")
+    )
+      return;
     target.scrollIntoView({
       block: "center",
       behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
@@ -225,54 +322,123 @@ export function ConversationView({
   }, []);
   useLayoutEffect(() => {
     if (highlightId) focusMessage(highlightId);
-  }, [highlightId, located, focusMessage]);
+    const pending = acknowledgement.current;
+    if (
+      !visible ||
+      !pending ||
+      pending.id !== highlightId ||
+      pending.generation !== chatStore.generation ||
+      pending.operation !== navigation.current
+    )
+      return;
+    const target = document.getElementById(`message-${pending.id}`);
+    if (
+      !target ||
+      !scrollRef.current?.contains(target) ||
+      target.closest("[inert]")
+    )
+      return;
+    acknowledgement.current = null;
+    if (
+      chatStore
+        .getSnapshot()
+        .messages[
+          conversation.id
+        ]?.some((message) => message.id === pending.id && message.retractedAt)
+    )
+      return;
+    void api
+      .read(conversation.id, pending.seq)
+      .then((result) => {
+        if (
+          pending.generation === chatStore.generation &&
+          pending.operation === navigation.current
+        ) {
+          lastRead.current = Math.max(lastRead.current, result.readSeq);
+          chatStore.markRead(conversation.id, result.readSeq);
+        }
+      })
+      .catch(() => {
+        if (
+          pending.generation === chatStore.generation &&
+          pending.operation === navigation.current
+        )
+          setError("已读状态暂未同步");
+      });
+  }, [
+    highlightId,
+    located,
+    focusMessage,
+    visible,
+    conversation.id,
+    membersOpen,
+  ]);
+  const loadContext = useCallback(
+    async (id: string, readOnDisplay = false) => {
+      const token = chatStore.generation;
+      const operation = ++navigation.current;
+      const current = () =>
+        token === chatStore.generation && operation === navigation.current;
+      setAtBottom(false);
+      setLoading(false);
+      setLoadingOlder(false);
+      setLocating(true);
+      acknowledgement.current = null;
+      initialScroll.current = false;
+      setError("");
+      try {
+        const target = await api.message(conversation.id, id);
+        if (!current()) return;
+        const page = await api.messagesAround(
+          conversation.id,
+          target.message.seq,
+        );
+        if (!current()) return;
+        const context = reconcileMessages(page.messages, [target.message]);
+        if (readOnDisplay && !target.message.retractedAt)
+          acknowledgement.current = {
+            id,
+            seq: target.message.seq,
+            generation: token,
+            operation,
+          };
+        setLocated(context);
+        setHasMore((context[0]?.seq || 1) > 1);
+        setHighlightId(id);
+      } catch (e) {
+        if (current())
+          setError(
+            e instanceof Error && "status" in e && e.status === 404
+              ? "原消息已不可访问"
+              : errorText(e),
+          );
+      } finally {
+        if (current()) setLocating(false);
+      }
+    },
+    [conversation.id],
+  );
   async function locate(id: string) {
-    const token = chatStore.generation;
-    const operation = ++navigation.current;
-    const current = () =>
-      token === chatStore.generation && operation === navigation.current;
+    if (!messages.some((message) => message.id === id)) return loadContext(id);
+    navigation.current++;
+    acknowledgement.current = null;
     setAtBottom(false);
     setLoading(false);
     setLoadingOlder(false);
     setLocating(false);
     initialScroll.current = false;
     setError("");
-    if (messages.some((m) => m.id === id)) {
-      setHighlightId(id);
-      focusMessage(id);
-      return;
-    }
-    setLocating(true);
-    try {
-      const target = await api.message(conversation.id, id);
-      if (!current()) return;
-      const page = await api.messagesAround(
-        conversation.id,
-        target.message.seq,
-      );
-      if (!current()) return;
-      const context = reconcileMessages(page.messages, [target.message]);
-      setLocated(context);
-      setHasMore((context[0]?.seq || 1) > 1);
-      setHighlightId(id);
-    } catch (e) {
-      if (current())
-        setError(
-          e instanceof Error && "status" in e && e.status === 404
-            ? "原消息已不可访问"
-            : errorText(e),
-        );
-    } finally {
-      if (current()) setLocating(false);
-    }
+    setHighlightId(id);
+    focusMessage(id);
   }
   useEffect(() => {
-    void fetchLatest();
+    if (initialMessageId) void loadContext(initialMessageId, true);
+    else void fetchLatest();
     return () => {
       lastTyping.current = 0;
       sendTyping(conversation.id, false);
     };
-  }, [fetchLatest, sendTyping, conversation.id]);
+  }, [fetchLatest, loadContext, initialMessageId, sendTyping, conversation.id]);
   useEffect(() => {
     const change = () => setVisible(document.visibilityState === "visible");
     document.addEventListener("visibilitychange", change);
@@ -395,18 +561,15 @@ export function ConversationView({
       senderKind: user!.kind,
       seq: Number.MAX_SAFE_INTEGER,
       createdAt: new Date().toISOString(),
-      ...(reply ? { replyToId: reply.id } : {}),
+      ...(replyToId ? { replyToId } : {}),
     };
     void sendMessage(message, chatStore.generation);
     writeComposerDraft(conversation.id, {
       body: "",
       mentions: [],
-      reply: null,
+      replyToId: "",
     });
-    setBody("");
-    setMentions([]);
     if (located) void fetchLatest();
-    setReply(null);
     setAtBottom(true);
     lastTyping.current = 0;
     sendTyping(conversation.id, false);
@@ -796,7 +959,7 @@ export function ConversationView({
                           label={`回复 ${message.senderName}`}
                           onClick={() => {
                             setActionMessageId("");
-                            setReply(message);
+                            updateComposerDraft({ replyToId: message.id });
                             inputRef.current?.focus();
                           }}
                         >
@@ -871,24 +1034,29 @@ export function ConversationView({
           onRemove={attachments.remove}
           onRetry={attachments.retry}
         />
-        {reply && (
+        {replyToId && (
           <div className="reply-preview">
             <CornerUpLeft size={15} />
             <div>
-              回复 <b>{reply.senderName}</b>
+              回复 <b>{reply?.senderName || "原消息"}</b>
               <span>
-                {reply.retractedAt
+                {reply?.retractedAt
                   ? "消息已撤回"
-                  : reply.body || `${reply.attachments?.length || 0} 个文件`}
+                  : reply
+                    ? reply.body || `${reply.attachments?.length || 0} 个文件`
+                    : resolvedReply?.error || "正在加载原消息…"}
               </span>
             </div>
-            <IconButton label="取消回复" onClick={() => setReply(null)}>
+            <IconButton
+              label="取消回复"
+              onClick={() => updateComposerDraft({ replyToId: "" })}
+            >
               <X size={16} />
             </IconButton>
           </div>
         )}
         <form
-          className={`composer ${reply ? "with-reply" : ""}`}
+          className={`composer ${replyToId ? "with-reply" : ""}`}
           onSubmit={submit}
         >
           <MentionInput
@@ -896,8 +1064,7 @@ export function ConversationView({
             value={body}
             mentions={mentions}
             onChange={(value, mentions) => {
-              setBody(value);
-              setMentions(mentions);
+              updateComposerDraft({ body: value, mentions });
             }}
             members={mentionMembers}
             enabled={mentionsEnabled}

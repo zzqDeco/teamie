@@ -125,6 +125,7 @@ beforeEach(() => {
     syncCursor: "0",
   };
   chatStore.clear();
+  chatStore.begin(user.id);
   vi.spyOn(api, "messages").mockResolvedValue({ messages: [], hasMore: false });
   vi.spyOn(api, "sync").mockResolvedValue({
     events: [],

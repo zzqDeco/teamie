@@ -10,6 +10,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   Bot,
+  Bell,
   ChevronDown,
   Hash,
   Home,
@@ -41,6 +42,7 @@ import { enrichParticipants } from "./participants";
 import { chatStore } from "./store";
 import type { DialogKind } from "./dialogs";
 import { ConversationView, conversationName } from "./messages";
+import { AttentionInbox, useAttentionCount } from "./attention";
 import {
   Avatar,
   Button,
@@ -129,6 +131,7 @@ export function Shell() {
   const chat = useChat(),
     snapshot = useChatState();
   const client = useQueryClient();
+  const attentionCount = useAttentionCount();
   const match = useMatch("/app/w/:workspaceId/c/:conversationId"),
     directoryMatch = useMatch("/app/w/:workspaceId/members"),
     legacyDirectoryMatch = useMatch("/app/w/:workspaceId/agents"),
@@ -174,8 +177,7 @@ export function Shell() {
     enabled: !!workspace,
     refetchInterval: 60_000,
   });
-  const discoveryAllowed =
-    !!chat.data?.capabilities["agents.discover"];
+  const discoveryAllowed = !!chat.data?.capabilities["agents.discover"];
   const workspaceAgentsQuery = useQuery({
     queryKey: ["workspaceAgents", user!.id, workspace?.id],
     queryFn: () => api.workspaceAgents(workspace!.id),
@@ -199,7 +201,12 @@ export function Shell() {
   useEffect(() => {
     setSidebar(false);
     setManagingGroup(false);
-  }, [location.pathname]);
+    if (
+      location.pathname === "/app/attention" ||
+      new URLSearchParams(location.search).has("message")
+    )
+      setDetails(false);
+  }, [location.pathname, location.search]);
   const closeSidebar = useCallback(() => setSidebar(false), []);
   const closeDetails = useCallback(() => setDetails(false), []);
   useOverlayFocus(navigationRef, mobile && sidebar && !dialog, closeSidebar);
@@ -211,12 +218,10 @@ export function Shell() {
       !mobile ||
       dialog ||
       (!previous.open && previous.pathname === location.pathname)
-    ) return;
+    )
+      return;
     const focused = document.activeElement;
-    if (
-      focused === document.body ||
-      navigationRef.current?.contains(focused)
-    ) {
+    if (focused === document.body || navigationRef.current?.contains(focused)) {
       navigationRef.current?.parentElement
         ?.querySelector<HTMLElement>(".app-main .mobile-menu")
         ?.focus({ preventScroll: true });
@@ -342,6 +347,10 @@ export function Shell() {
   const isUsersPage = location.pathname === "/app/admin/users";
   const isAgentsPage = location.pathname === "/app/agents" || !!agentMatch;
   const isDirectoryPage = !!directoryMatch;
+  const isAttentionPage = location.pathname === "/app/attention";
+  const messageTarget =
+    new URLSearchParams(location.search).get("message") || "";
+  const initialMessageId = messageTarget.length <= 128 ? messageTarget : "";
   const isManagement =
     isSettings ||
     isAdminPage ||
@@ -367,6 +376,26 @@ export function Shell() {
             <Logo compact />
           </Link>
           <div className="rail-divider" />
+          <Link
+            to="/app/attention"
+            className={`rail-attention ${isAttentionPage ? "selected" : ""}`}
+            title="提及与回复"
+            aria-label="提及与回复"
+            aria-current={isAttentionPage ? "page" : undefined}
+            onClick={closeSidebar}
+          >
+            <Bell size={21} />
+            {!!attentionCount.data?.unreadCount && (
+              <span
+                className="rail-attention-count"
+                aria-label={`${attentionCount.data.unreadCount} 条未读提醒`}
+              >
+                {attentionCount.data.unreadCount > 99
+                  ? "99+"
+                  : attentionCount.data.unreadCount}
+              </span>
+            )}
+          </Link>
           <div className="workspace-buttons">
             {chat.data?.workspaces.map((space) => (
               <button
@@ -500,7 +529,9 @@ export function Shell() {
         }
       >
         {error && !removing && <Notice>{error}</Notice>}
-        {isManagement ? (
+        {isAttentionPage ? (
+          <AttentionInbox key={user!.id} onMenu={() => setSidebar(true)} />
+        ) : isManagement ? (
           <>
             <header className="settings-header">
               <IconButton
@@ -526,13 +557,13 @@ export function Shell() {
                   ? "模型网关"
                   : isUsersPage
                     ? "用户管理"
-                  : isAdminPage
-                    ? "注册邀请"
-                    : isAgentsPage
-                      ? "个人 Agent"
-                      : isDirectoryPage
-                        ? "成员"
-                        : "账号设置"}
+                    : isAdminPage
+                      ? "注册邀请"
+                      : isAgentsPage
+                        ? "个人 Agent"
+                        : isDirectoryPage
+                          ? "成员"
+                          : "账号设置"}
               </span>
               <Link to="/app">
                 <ArrowLeft size={15} />
@@ -546,7 +577,10 @@ export function Shell() {
                     <ShieldCheck size={13} />
                     注册邀请
                   </Link>
-                  <Link to="/app/admin/users" className={isUsersPage ? "active" : ""}>
+                  <Link
+                    to="/app/admin/users"
+                    className={isUsersPage ? "active" : ""}
+                  >
                     <Users size={13} />
                     用户管理
                   </Link>
@@ -611,8 +645,9 @@ export function Shell() {
           workspace &&
           conversation.workspaceId === workspace.id ? (
           <ConversationView
-            key={`${user!.id}:${conversation.id}`}
+            key={`${user!.id}:${conversation.id}:${initialMessageId}`}
             conversation={conversation}
+            initialMessageId={initialMessageId}
             members={members}
             onMembers={() => {
               setSidebar(false);
