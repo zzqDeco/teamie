@@ -70,6 +70,7 @@ type Service struct {
 	taskWG                                 sync.WaitGroup
 	closed                                 bool
 	fileMu                                 sync.Mutex
+	outputNow                              func() time.Time
 }
 
 func New(engine Engine, token, image, workspace, state string) (*Service, error) {

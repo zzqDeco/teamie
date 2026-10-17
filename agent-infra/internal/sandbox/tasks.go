@@ -40,6 +40,8 @@ type taskReceipt struct {
 	OutputAnchor       string       `json:"outputAnchor,omitempty"`
 	OutputAnchorTime   string       `json:"outputAnchorTime,omitempty"`
 	OutputGateReleased bool         `json:"outputGateReleased,omitempty"`
+	OutputExpiresAt    *time.Time   `json:"outputExpiresAt,omitempty"`
+	OutputExpiredAt    *time.Time   `json:"outputExpiredAt,omitempty"`
 	UpdatedAt          time.Time    `json:"updatedAt"`
 }
 
@@ -87,6 +89,7 @@ func taskResponse(t *taskReceipt) *agent.SandboxTaskResponse {
 		message := "Execution did not complete successfully"
 		r.ErrorMessage = &message
 	}
+	outputRetentionResponse(t, r)
 	return r
 }
 func (s *Service) saveTaskLocked(key string, t *taskReceipt) error {
@@ -171,6 +174,9 @@ func (s *Service) Start(_ context.Context, r *agent.SandboxStartRequest) (*agent
 		if old.Fingerprint != fp {
 			return taskFailure(r.TaskId, "request_conflict"), nil
 		}
+		if e = s.retainOutputLocked(key, old, false); e != nil {
+			return taskFailure(r.TaskId, "receipt_unavailable"), nil
+		}
 		return taskResponse(old), nil
 	}
 	if !os.IsNotExist(e) {
@@ -248,6 +254,9 @@ func (s *Service) Get(_ context.Context, r *agent.SandboxTaskRequest) (*agent.Sa
 	if e != nil {
 		return taskFailure(r.TaskId, "execution_unknown"), nil
 	}
+	if e = s.retainOutputLocked(taskKey(r.AgentId, r.TaskId), t, true); e != nil {
+		return taskFailure(r.TaskId, "receipt_unavailable"), nil
+	}
 	return taskResponse(t), nil
 }
 func (s *Service) ReadOutput(ctx context.Context, r *agent.SandboxTaskRequest) (*agent.SandboxTaskResponse, error) {
@@ -269,6 +278,9 @@ func (s *Service) ReadOutput(ctx context.Context, r *agent.SandboxTaskRequest) (
 	}
 	res = taskResponse(t)
 	if t.Version == 2 {
+		if t.OutputExpiredAt != nil {
+			return expiredOutputResponse(t), nil
+		}
 		if r.GetOffset() > t.OutputBytes {
 			return taskFailure(r.TaskId, "invalid_request"), nil
 		}
@@ -424,6 +436,9 @@ func (s *Service) Recover(ctx context.Context) error {
 					}
 					cancel()
 				}
+			}
+			if e = s.retainOutputLocked(key, &t, false); e != nil {
+				return e
 			}
 			continue
 		}
@@ -749,6 +764,7 @@ func (s *Service) supervise(ctx context.Context, key string, t *taskReceipt, rec
 				s.taskMu.Lock()
 				t.CleanupDone = true
 				_ = s.saveTaskLocked(key, t)
+				_ = s.retainOutputLocked(key, t, false)
 				s.taskMu.Unlock()
 			}
 			cancel()
