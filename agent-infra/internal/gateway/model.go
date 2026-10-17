@@ -242,7 +242,18 @@ func (g *providerBoundary) RoundTrip(request *http.Request) (*http.Response, err
 		return nil, api.Err(502, "upstream_unavailable", "Provider could not be reached")
 	}
 	if response.StatusCode != 200 {
+		// Read only a small error envelope; raw provider text may contain the
+		// credential and must never reach the SDK's generic error formatting.
+		body, readErr := io.ReadAll(io.LimitReader(response.Body, 16385))
 		response.Body.Close()
+		if readErr == nil && (response.StatusCode == 400 || response.StatusCode == 413) {
+			if contextErr := providerContextError(body); contextErr != nil {
+				return nil, contextErr
+			}
+			if response.StatusCode == 413 {
+				return nil, api.Err(413, "request_too_large", "Provider rejected the model request size")
+			}
+		}
 		if response.StatusCode == 429 {
 			return nil, api.Err(429, "upstream_rate_limited", "Provider rejected the request")
 		}
@@ -285,6 +296,9 @@ func guardUnary(body []byte, key string) error {
 		return api.Err(502, "invalid_upstream_response", "Invalid chat completion response")
 	}
 	if len(result.Error) > 0 && string(result.Error) != "null" {
+		if contextErr := providerContextError(body); contextErr != nil {
+			return contextErr
+		}
 		return api.Err(502, "upstream_in_stream_error", "Provider reported a model error in its response")
 	}
 	if result.Object != "chat.completion" || len(result.Choices) != 1 || result.Choices[0].Message.Role != "assistant" || result.Usage.Prompt < 0 || result.Usage.Completion < 0 {

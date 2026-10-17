@@ -42,6 +42,10 @@ func stableTaskID(run *Run, call string) string {
 type taskContextSnapshot struct {
 	AgentID, RunID, Attempt string
 	Revision                int64
+	ContextProfile          string          `json:",omitempty"`
+	ContextBudget           json.RawMessage `json:",omitempty"`
+	SourceRefs              []InputSource   `json:",omitempty"`
+	SourceOverflow          bool            `json:",omitempty"`
 }
 type taskContexts struct {
 	agentID  string
@@ -53,14 +57,28 @@ func (s taskContexts) CaptureContext(ctx context.Context) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(taskContextSnapshot{AgentID: r.AgentID, RunID: r.ID, Attempt: r.Attempt, Revision: r.Revision})
+	v := taskContextSnapshot{AgentID: r.AgentID, RunID: r.ID, Attempt: r.Attempt, Revision: r.Revision}
+	if contextProfile(r) == contextProfileV1 {
+		v.ContextProfile = r.ContextProfile
+		v.ContextBudget = r.ContextBudget
+		v.SourceRefs, v.SourceOverflow = inputSources(r.Inputs)
+	}
+	return json.Marshal(v)
 }
 func (s taskContexts) RestoreContext(ctx context.Context, b []byte) (context.Context, error) {
 	var v taskContextSnapshot
 	if json.Unmarshal(b, &v) != nil || v.AgentID != s.agentID || v.Revision != s.revision {
 		return nil, errors.New("task_configuration_changed")
 	}
-	return WithRun(ctx, &Run{ID: v.RunID, Attempt: v.Attempt, AgentID: v.AgentID, Revision: v.Revision}), nil
+	profile, budget, err := canonicalContextPolicy(v.ContextProfile, v.ContextBudget)
+	if err != nil {
+		return nil, err
+	}
+	refs := []Input{}
+	if len(v.SourceRefs) > 0 || v.SourceOverflow {
+		refs = append(refs, Input{Kind: "task.notification", ParentRunID: v.RunID, SourceRefs: v.SourceRefs, SourceOverflow: v.SourceOverflow})
+	}
+	return WithRun(ctx, &Run{ID: v.RunID, Attempt: v.Attempt, AgentID: v.AgentID, Revision: v.Revision, ContextProfile: profile, ContextBudget: budget, Inputs: refs}), nil
 }
 
 type workerTasks struct {
@@ -144,7 +162,7 @@ func (m *nativeToolReceipts) before(ctx context.Context, tc *adk.ToolContext, ar
 	return r, b, err
 }
 func (m *nativeToolReceipts) WrapInvokableToolCall(_ context.Context, next adk.InvokableToolCallEndpoint, tc *adk.ToolContext) (adk.InvokableToolCallEndpoint, error) {
-	if strings.HasPrefix(tc.Name, "im_") {
+	if privateReadTool(tc.Name) {
 		return next, nil
 	}
 	return func(ctx context.Context, args string, opts ...tool.Option) (string, error) {
@@ -169,7 +187,7 @@ func (m *nativeToolReceipts) WrapInvokableToolCall(_ context.Context, next adk.I
 	}, nil
 }
 func (m *nativeToolReceipts) WrapEnhancedInvokableToolCall(_ context.Context, next adk.EnhancedInvokableToolCallEndpoint, tc *adk.ToolContext) (adk.EnhancedInvokableToolCallEndpoint, error) {
-	if strings.HasPrefix(tc.Name, "im_") {
+	if privateReadTool(tc.Name) {
 		return next, nil
 	}
 	return func(ctx context.Context, args *schema.ToolArgument, opts ...tool.Option) (*schema.ToolResult, error) {
@@ -286,6 +304,9 @@ func (w *workerTasks) notifications(ctx context.Context, l *Lease) error {
 		var seq string
 		err = tx.QueryRow(ctx, `SELECT (90000000000000000000::numeric+nextval('runtime_notification_input_seq'))::text`).Scan(&seq)
 		in := Input{EventID: seq, Kind: "task.notification", TaskID: n.TaskID, NotificationID: n.ID, Status: string(n.Kind), CreatedAt: n.CreatedAt.UTC().Format(time.RFC3339Nano)}
+		if err == nil {
+			in.ParentRunID, in.SourceRefs, in.SourceOverflow, err = taskInputOrigin(ctx, tx, l.AgentID, n.TaskID)
+		}
 		b, _ := json.Marshal(in)
 		if err == nil {
 			_, err = tx.Exec(ctx, `INSERT INTO runtime_inputs(agent_id,event_id,payload,notification_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, l.AgentID, seq, b, n.ID)
@@ -335,7 +356,7 @@ func (e *Engine) cancelAgentTasks(ctx context.Context, id string) {
 
 // Preserve the same durable receipt boundary when native tools choose streaming.
 func (m *nativeToolReceipts) WrapStreamableToolCall(ctx context.Context, next adk.StreamableToolCallEndpoint, tc *adk.ToolContext) (adk.StreamableToolCallEndpoint, error) {
-	if strings.HasPrefix(tc.Name, "im_") {
+	if privateReadTool(tc.Name) {
 		return next, nil
 	}
 	wrapped, err := m.WrapInvokableToolCall(ctx, func(ctx context.Context, args string, opts ...tool.Option) (string, error) {
@@ -372,7 +393,7 @@ func (m *nativeToolReceipts) WrapStreamableToolCall(ctx context.Context, next ad
 	}, nil
 }
 func (m *nativeToolReceipts) WrapEnhancedStreamableToolCall(ctx context.Context, next adk.EnhancedStreamableToolCallEndpoint, tc *adk.ToolContext) (adk.EnhancedStreamableToolCallEndpoint, error) {
-	if strings.HasPrefix(tc.Name, "im_") {
+	if privateReadTool(tc.Name) {
 		return next, nil
 	}
 	wrapped, err := m.WrapEnhancedInvokableToolCall(ctx, func(ctx context.Context, args *schema.ToolArgument, opts ...tool.Option) (*schema.ToolResult, error) {
