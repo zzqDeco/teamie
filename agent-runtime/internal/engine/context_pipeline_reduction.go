@@ -151,9 +151,14 @@ func (p *ContextPipeline) clearTool(ctx context.Context, detail *reduction.ToolD
 func (p *ContextPipeline) reducer(ctx context.Context, names []string) (adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage], error) {
 	config := map[string]*reduction.ToolReductionConfig{}
 	for _, name := range names {
-		config[name] = &reduction.ToolReductionConfig{Backend: p.cfg.Backend, TruncHandler: p.truncateTool, ClearHandler: p.clearTool}
+		entry := &reduction.ToolReductionConfig{Backend: p.cfg.Backend, TruncHandler: p.truncateTool, ClearHandler: p.clearTool}
+		if name == "context_read" || name == "context_search" {
+			entry.SkipClear = true
+			entry.ClearHandler = nil
+		}
+		config[name] = entry
 	}
-	return reduction.NewTyped(ctx, &reduction.TypedConfig[*schema.AgenticMessage]{Backend: p.cfg.Backend, ReadFileToolName: "context_read", MaxLengthForTrunc: p.cfg.Budget.ToolResultByteLimit, MaxTokensForClear: int64(p.cfg.Budget.TriggerTokens), ClearRetentionSuffixLimit: 2, ClearAtLeastTokens: 1, ToolConfig: config, TokenCounter: func(_ context.Context, msgs []*schema.AgenticMessage, tools []*schema.ToolInfo) (int64, error) {
+	return reduction.NewTyped(ctx, &reduction.TypedConfig[*schema.AgenticMessage]{Backend: p.cfg.Backend, ReadFileToolName: "context_read", TruncExcludeTools: []string{"context_read", "context_search", "workspace_read_page"}, MaxLengthForTrunc: p.cfg.Budget.ToolResultByteLimit, MaxTokensForClear: int64(p.cfg.Budget.TriggerTokens), ClearRetentionSuffixLimit: 2, ClearAtLeastTokens: 1, ToolConfig: config, TokenCounter: func(_ context.Context, msgs []*schema.AgenticMessage, tools []*schema.ToolInfo) (int64, error) {
 		m, err := measureContext(msgs, tools, p.cfg.Budget.OutputReserveTokens, false)
 		if m.TransportBytes > p.cfg.Budget.TransportTargetBytes {
 			return int64(max(m.EstimatedTokens, p.cfg.Budget.TriggerTokens)), err
