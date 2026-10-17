@@ -1860,6 +1860,136 @@ var fieldIDToName_SandboxImportRequest = map[int16]string{
 	7: "sha256",
 }
 
+type SandboxExportRequest struct {
+	ServiceToken string `thrift:"serviceToken,1,required" frugal:"1,required,string" json:"serviceToken"`
+	AgentId      string `thrift:"agentId,2,required" frugal:"2,required,string" json:"agentId"`
+	Path         string `thrift:"path,3,required" frugal:"3,required,string" json:"path"`
+}
+
+func NewSandboxExportRequest() *SandboxExportRequest {
+	return &SandboxExportRequest{}
+}
+
+func (p *SandboxExportRequest) InitDefault() {
+}
+
+func (p *SandboxExportRequest) GetServiceToken() (v string) {
+	return p.ServiceToken
+}
+
+func (p *SandboxExportRequest) GetAgentId() (v string) {
+	return p.AgentId
+}
+
+func (p *SandboxExportRequest) GetPath() (v string) {
+	return p.Path
+}
+func (p *SandboxExportRequest) SetServiceToken(val string) {
+	p.ServiceToken = val
+}
+func (p *SandboxExportRequest) SetAgentId(val string) {
+	p.AgentId = val
+}
+func (p *SandboxExportRequest) SetPath(val string) {
+	p.Path = val
+}
+
+func (p *SandboxExportRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SandboxExportRequest(%+v)", *p)
+}
+
+var fieldIDToName_SandboxExportRequest = map[int16]string{
+	1: "serviceToken",
+	2: "agentId",
+	3: "path",
+}
+
+type SandboxExportResponse struct {
+	Ok        bool    `thrift:"ok,1,required" frugal:"1,required,bool" json:"ok"`
+	Content   []byte  `thrift:"content,2,optional" frugal:"2,optional,binary" json:"content,omitempty"`
+	Sha256    *string `thrift:"sha256,3,optional" frugal:"3,optional,string" json:"sha256,omitempty"`
+	ErrorCode *string `thrift:"errorCode,4,optional" frugal:"4,optional,string" json:"errorCode,omitempty"`
+}
+
+func NewSandboxExportResponse() *SandboxExportResponse {
+	return &SandboxExportResponse{}
+}
+
+func (p *SandboxExportResponse) InitDefault() {
+}
+
+func (p *SandboxExportResponse) GetOk() (v bool) {
+	return p.Ok
+}
+
+var SandboxExportResponse_Content_DEFAULT []byte
+
+func (p *SandboxExportResponse) GetContent() (v []byte) {
+	if !p.IsSetContent() {
+		return SandboxExportResponse_Content_DEFAULT
+	}
+	return p.Content
+}
+
+var SandboxExportResponse_Sha256_DEFAULT string
+
+func (p *SandboxExportResponse) GetSha256() (v string) {
+	if !p.IsSetSha256() {
+		return SandboxExportResponse_Sha256_DEFAULT
+	}
+	return *p.Sha256
+}
+
+var SandboxExportResponse_ErrorCode_DEFAULT string
+
+func (p *SandboxExportResponse) GetErrorCode() (v string) {
+	if !p.IsSetErrorCode() {
+		return SandboxExportResponse_ErrorCode_DEFAULT
+	}
+	return *p.ErrorCode
+}
+func (p *SandboxExportResponse) SetOk(val bool) {
+	p.Ok = val
+}
+func (p *SandboxExportResponse) SetContent(val []byte) {
+	p.Content = val
+}
+func (p *SandboxExportResponse) SetSha256(val *string) {
+	p.Sha256 = val
+}
+func (p *SandboxExportResponse) SetErrorCode(val *string) {
+	p.ErrorCode = val
+}
+
+func (p *SandboxExportResponse) IsSetContent() bool {
+	return p.Content != nil
+}
+
+func (p *SandboxExportResponse) IsSetSha256() bool {
+	return p.Sha256 != nil
+}
+
+func (p *SandboxExportResponse) IsSetErrorCode() bool {
+	return p.ErrorCode != nil
+}
+
+func (p *SandboxExportResponse) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SandboxExportResponse(%+v)", *p)
+}
+
+var fieldIDToName_SandboxExportResponse = map[int16]string{
+	1: "ok",
+	2: "content",
+	3: "sha256",
+	4: "errorCode",
+}
+
 type AgentControlService interface {
 	ListAgents(ctx context.Context, request *AgentListRequest) (r *AgentListResponse, err error)
 
@@ -3132,6 +3262,8 @@ type SandboxService interface {
 	Workspace(ctx context.Context, request *SandboxWorkspaceRequest) (r *SandboxWorkspaceResponse, err error)
 
 	ImportFile(ctx context.Context, request *SandboxImportRequest) (r *SandboxWorkspaceResponse, err error)
+
+	ExportFile(ctx context.Context, request *SandboxExportRequest) (r *SandboxExportResponse, err error)
 }
 
 type SandboxServiceExecArgs struct {
@@ -3815,5 +3947,81 @@ func (p *SandboxServiceImportFileResult) String() string {
 }
 
 var fieldIDToName_SandboxServiceImportFileResult = map[int16]string{
+	0: "success",
+}
+
+type SandboxServiceExportFileArgs struct {
+	Request *SandboxExportRequest `thrift:"request,1" frugal:"1,default,SandboxExportRequest" json:"request"`
+}
+
+func NewSandboxServiceExportFileArgs() *SandboxServiceExportFileArgs {
+	return &SandboxServiceExportFileArgs{}
+}
+
+func (p *SandboxServiceExportFileArgs) InitDefault() {
+}
+
+var SandboxServiceExportFileArgs_Request_DEFAULT *SandboxExportRequest
+
+func (p *SandboxServiceExportFileArgs) GetRequest() (v *SandboxExportRequest) {
+	if !p.IsSetRequest() {
+		return SandboxServiceExportFileArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *SandboxServiceExportFileArgs) SetRequest(val *SandboxExportRequest) {
+	p.Request = val
+}
+
+func (p *SandboxServiceExportFileArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *SandboxServiceExportFileArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SandboxServiceExportFileArgs(%+v)", *p)
+}
+
+var fieldIDToName_SandboxServiceExportFileArgs = map[int16]string{
+	1: "request",
+}
+
+type SandboxServiceExportFileResult struct {
+	Success *SandboxExportResponse `thrift:"success,0,optional" frugal:"0,optional,SandboxExportResponse" json:"success,omitempty"`
+}
+
+func NewSandboxServiceExportFileResult() *SandboxServiceExportFileResult {
+	return &SandboxServiceExportFileResult{}
+}
+
+func (p *SandboxServiceExportFileResult) InitDefault() {
+}
+
+var SandboxServiceExportFileResult_Success_DEFAULT *SandboxExportResponse
+
+func (p *SandboxServiceExportFileResult) GetSuccess() (v *SandboxExportResponse) {
+	if !p.IsSetSuccess() {
+		return SandboxServiceExportFileResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *SandboxServiceExportFileResult) SetSuccess(x interface{}) {
+	p.Success = x.(*SandboxExportResponse)
+}
+
+func (p *SandboxServiceExportFileResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *SandboxServiceExportFileResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SandboxServiceExportFileResult(%+v)", *p)
+}
+
+var fieldIDToName_SandboxServiceExportFileResult = map[int16]string{
 	0: "success",
 }

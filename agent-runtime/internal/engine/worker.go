@@ -328,7 +328,14 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		if err != nil {
 			return nil, err
 		}
-		activeTools, err := toolsForRun(ctx, tools, run)
+		availableTools := tools
+		if fileDeliveryForRun(run) {
+			availableTools, err = (&Tools{Store: e.Store, Lease: lease, IM: imc, Sandbox: e.Sandbox, SandboxToken: e.Config.SandboxToken, Authorize: authorize}).BuildIMWithFiles()
+			if err != nil {
+				return nil, err
+			}
+		}
+		activeTools, err := toolsForRun(ctx, availableTools, run)
 		if err != nil {
 			return nil, err
 		}
@@ -353,7 +360,11 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 				return nil, err
 			}
 			handlers := append([]adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]{pipeline}, tasks.handlers...)
-			return adk.NewTypedChatModelAgent(ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{Name: "teamie_agent", Description: "A user-owned Teamie participant", Instruction: contextV1Instruction(def), Model: gatewayModel, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: activeTools, ExecuteSequentially: true}}, MaxIterations: math.MaxInt, Handlers: handlers, ModelRetryConfig: pipeline.RetryConfig()})
+			instruction := contextV1Instruction(def)
+			if budget.FileDelivery {
+				instruction += fileDeliveryGuidance
+			}
+			return adk.NewTypedChatModelAgent(ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{Name: "teamie_agent", Description: "A user-owned Teamie participant", Instruction: instruction, Model: gatewayModel, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: activeTools, ExecuteSequentially: true}}, MaxIterations: math.MaxInt, Handlers: handlers, ModelRetryConfig: pipeline.RetryConfig()})
 		}
 		trigger := summaryTrigger(int(contextWindow.Load()))
 		finalize := finalizeSummary
@@ -450,7 +461,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		// their persisted selection even when the flag or gateway changes.
 		if e.Config.FlagsFile != "" && runtimeFlag(e.Config.FlagsFile, "agents.context.v1") {
 			profile = contextProfileV1
-			budget, err = NewContextBudgetSnapshot(int(contextWindow.Load()))
+			budget, err = newContextBudgetWithFiles(int(contextWindow.Load()), runtimeFlag(e.Config.FlagsFile, "agents.files.deliver.v1"))
 			if err != nil {
 				return nil, nil, nil, err
 			}

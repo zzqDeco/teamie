@@ -20,6 +20,7 @@ type Client interface {
 	CancelTask(ctx context.Context, request *agent.SandboxTaskRequest, callOptions ...callopt.Option) (r *agent.SandboxTaskResponse, err error)
 	Workspace(ctx context.Context, request *agent.SandboxWorkspaceRequest, callOptions ...callopt.Option) (r *agent.SandboxWorkspaceResponse, err error)
 	ImportFile(ctx context.Context, request *agent.SandboxImportRequest, callOptions ...callopt.Option) (r *agent.SandboxWorkspaceResponse, err error)
+	ExportFile(ctx context.Context, request *agent.SandboxExportRequest, callOptions ...callopt.Option) (r *agent.SandboxExportResponse, err error)
 }
 
 // NewClient creates a client for the service defined in IDL.
@@ -94,4 +95,9 @@ func (p *kSandboxServiceClient) Workspace(ctx context.Context, request *agent.Sa
 func (p *kSandboxServiceClient) ImportFile(ctx context.Context, request *agent.SandboxImportRequest, callOptions ...callopt.Option) (r *agent.SandboxWorkspaceResponse, err error) {
 	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
 	return p.kClient.ImportFile(ctx, request)
+}
+
+func (p *kSandboxServiceClient) ExportFile(ctx context.Context, request *agent.SandboxExportRequest, callOptions ...callopt.Option) (r *agent.SandboxExportResponse, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.ExportFile(ctx, request)
 }

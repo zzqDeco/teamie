@@ -38,7 +38,7 @@ func workspaceTool(name string) bool {
 		return true
 	}
 	switch strings.TrimPrefix(name, "native:") {
-	case "read_file", "ls", "glob", "grep", "workspace_read_page", "task_output", "task_stop", "TaskGet", "TaskList":
+	case "read_file", "ls", "glob", "grep", "workspace_read_page", "task_output", "task_stop", "TaskGet", "TaskList", "im_upload_file", "im_send_message":
 		return true
 	}
 	return false

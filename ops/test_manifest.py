@@ -163,8 +163,19 @@ class AgentManifestTest(unittest.TestCase):
         current=copy.deepcopy(previous)
         current["version"]="v0.3.8"
         current["source"]["ref"]="refs/heads/release/v0.3.8"
-        current["schema"]=dict(manifest.SCHEMA_V2)
+        current["schema"]={"identity":3,"chat":3,"agent_control":1,"agent_runtime":3,"gateway":2}
         self.assertEqual(current["schema"]["agent_runtime"],3)
+        manifest.validate(previous)
+        manifest.check_transition(current,previous,previous)
+        with self.assertRaises(ValueError):
+            manifest.check_transition(previous,current,rollback=True)
+
+    def test_upload_receipt_schema_preserves_context_archive_and_rejects_image_rollback(self):
+        previous=self.modern()
+        previous["schema"]={"identity":3,"chat":3,"agent_control":1,"agent_runtime":3,"gateway":2}
+        current=copy.deepcopy(previous)
+        current["schema"]=dict(manifest.SCHEMA_V2)
+        self.assertEqual(current["schema"]["chat"],4)
         manifest.validate(previous)
         manifest.check_transition(current,previous,previous)
         with self.assertRaises(ValueError):

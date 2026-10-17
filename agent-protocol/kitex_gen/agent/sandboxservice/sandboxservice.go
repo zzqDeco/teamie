@@ -76,6 +76,13 @@ var serviceMethods = map[string]kitex.MethodInfo{
 		false,
 		kitex.WithStreamingMode(kitex.StreamingNone),
 	),
+	"ExportFile": kitex.NewMethodInfo(
+		exportFileHandler,
+		newSandboxServiceExportFileArgs,
+		newSandboxServiceExportFileResult,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
 }
 
 var (
@@ -304,6 +311,24 @@ func newSandboxServiceImportFileResult() interface{} {
 	return agent.NewSandboxServiceImportFileResult()
 }
 
+func exportFileHandler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*agent.SandboxServiceExportFileArgs)
+	realResult := result.(*agent.SandboxServiceExportFileResult)
+	success, err := handler.(agent.SandboxService).ExportFile(ctx, realArg.Request)
+	if err != nil {
+		return err
+	}
+	realResult.Success = success
+	return nil
+}
+func newSandboxServiceExportFileArgs() interface{} {
+	return agent.NewSandboxServiceExportFileArgs()
+}
+
+func newSandboxServiceExportFileResult() interface{} {
+	return agent.NewSandboxServiceExportFileResult()
+}
+
 type kClient struct {
 	c client.Client
 }
@@ -399,6 +424,16 @@ func (p *kClient) ImportFile(ctx context.Context, request *agent.SandboxImportRe
 	_args.Request = request
 	var _result agent.SandboxServiceImportFileResult
 	if err = p.c.Call(ctx, "ImportFile", &_args, &_result); err != nil {
+		return
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) ExportFile(ctx context.Context, request *agent.SandboxExportRequest) (r *agent.SandboxExportResponse, err error) {
+	var _args agent.SandboxServiceExportFileArgs
+	_args.Request = request
+	var _result agent.SandboxServiceExportFileResult
+	if err = p.c.Call(ctx, "ExportFile", &_args, &_result); err != nil {
 		return
 	}
 	return _result.GetSuccess(), nil
