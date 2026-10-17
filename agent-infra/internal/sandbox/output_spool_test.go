@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -316,6 +318,113 @@ func TestDurableOutputRealGapRepeatedTextIsUnknownAndNeverRerun(t *testing.T) {
 	defer f.mu.Unlock()
 	if f.starts != 1 || f.kills != 1 {
 		t.Fatal("unknown effect rerun", f.starts, f.kills)
+	}
+}
+
+func TestDurableOutputTimestampOverlapOneByteChangeFailsWhileStillRunning(t *testing.T) {
+	f := newStampedFixture()
+	s := fixture(t, f)
+	f.service = s
+	s.Start(context.Background(), progressiveStart())
+	awaitAnchor(t, s)
+	f.output(taskName(), 1, "same")
+	awaitBytes(t, s, 4)
+	s.Close()
+	f.mu.Lock()
+	wire := f.containers[taskName()].wire
+	wire[len(wire)-1] ^= 1
+	f.mu.Unlock()
+	reopened, e := New(f, token, image, s.WorkspaceRoot, s.StateRoot)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer reopened.Close()
+	f.service = reopened
+	if e = reopened.Recover(context.Background()); e != nil {
+		t.Fatal(e)
+	}
+	result := awaitTask(t, reopened, func(r *agent.SandboxTaskResponse) bool { return r.State == "unknown" })
+	if result.GetOutputStatus() != "unknown" || result.GetStdout() != "same" {
+		t.Fatal("corrupt overlap replaced canonical output", result)
+	}
+}
+
+type cutFrameFixture struct{ *stampedFixture }
+
+func (f *cutFrameFixture) AttachTimestamped(_ context.Context, id string) (io.ReadCloser, error) {
+	f.stampMu.Lock()
+	anchor := f.anchors[id]
+	f.stampMu.Unlock()
+	var wire bytes.Buffer
+	for i, data := range []string{anchor + "\n", "part"} {
+		payload := []byte(time.Date(2026, 10, 17, 0, 0, 0, i, time.UTC).Format(time.RFC3339Nano) + " " + data)
+		var h [8]byte
+		h[0] = 1
+		size := len(payload)
+		if i == 1 {
+			size += 5
+		}
+		binary.BigEndian.PutUint32(h[4:], uint32(size))
+		wire.Write(h[:])
+		wire.Write(payload)
+	}
+	return io.NopCloser(bytes.NewReader(wire.Bytes())), nil
+}
+func TestDurableOutputCutFrameNeverClaimsComplete(t *testing.T) {
+	f := &cutFrameFixture{newStampedFixture()}
+	s := fixture(t, f)
+	f.service = s
+	s.Start(context.Background(), progressiveStart())
+	awaitAnchor(t, s)
+	f.finish(taskName(), 0)
+	result := awaitTask(t, s, func(r *agent.SandboxTaskResponse) bool { return terminalTask(r.State) })
+	if result.State != "unknown" || result.GetOutputStatus() != "unknown" || result.GetOutputBytes() != 0 {
+		t.Fatal("short transport frame appeared complete", result)
+	}
+}
+
+type earlyEOFFixture struct {
+	*stampedFixture
+	attaches atomic.Int32
+}
+
+func (f *earlyEOFFixture) AttachTimestamped(ctx context.Context, id string) (io.ReadCloser, error) {
+	if f.attaches.Add(1) > 1 {
+		return f.stampedFixture.AttachTimestamped(ctx, id)
+	}
+	f.stampMu.Lock()
+	anchor := f.anchors[id]
+	f.stampMu.Unlock()
+	payload := []byte("2026-10-17T00:00:00Z " + anchor + "\n")
+	var h [8]byte
+	h[0] = 1
+	binary.BigEndian.PutUint32(h[4:], uint32(len(payload)))
+	return io.NopCloser(bytes.NewReader(append(h[:], payload...))), nil
+}
+func TestDurableOutputLiveCleanEOFRetrievesLaterBytesByAnchoredReconnect(t *testing.T) {
+	f := &earlyEOFFixture{stampedFixture: newStampedFixture()}
+	s := fixture(t, f)
+	f.service = s
+	s.Start(context.Background(), progressiveStart())
+	awaitAnchor(t, s)
+	deadline := time.Now().Add(3 * time.Second)
+	for f.attaches.Load() < 2 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if f.attaches.Load() < 2 {
+		t.Fatal("live EOF was treated as completed output")
+	}
+	f.output(taskName(), 1, "after reconnect")
+	awaitBytes(t, s, 15)
+	f.finish(taskName(), 0)
+	result := awaitTask(t, s, completed)
+	if result.GetStdout() != "after reconnect" || result.GetOutputStatus() != "complete" {
+		t.Fatal(result)
+	}
+	f.stampMu.Lock()
+	defer f.stampMu.Unlock()
+	if f.releases != 1 {
+		t.Fatal("reconnect repeated command release")
 	}
 }
 

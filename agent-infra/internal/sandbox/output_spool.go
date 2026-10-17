@@ -462,7 +462,7 @@ func (s *Service) captureSpool(ctx context.Context, key string, t *taskReceipt, 
 		if size > 16*1024*1024 {
 			return errors.New("container output frame exceeded limits")
 		}
-		frame := io.LimitReader(stream, size)
+		frame := &io.LimitedReader{R: stream, N: size}
 		stamp := make([]byte, 0, 64)
 		for {
 			var ch [1]byte
@@ -486,9 +486,15 @@ func (s *Service) captureSpool(ctx context.Context, key string, t *taskReceipt, 
 			data := make([]byte, outputChunkBytes)
 			n, e := io.ReadFull(frame, data)
 			if e == io.EOF {
+				if frame.N != 0 {
+					return io.ErrUnexpectedEOF
+				}
 				break
 			}
 			if e != nil && e != io.ErrUnexpectedEOF {
+				return e
+			}
+			if e == io.ErrUnexpectedEOF && frame.N != 0 {
 				return e
 			}
 			data = data[:n]
@@ -514,6 +520,9 @@ func (s *Service) captureSpool(ctx context.Context, key string, t *taskReceipt, 
 			if recovering && !matched {
 				if overlap < 0 {
 					for i := range tail {
+						if record.Timestamp == tail[i].Timestamp && record.Stream == tail[i].Stream && record.Chunk == tail[i].Chunk && record.identity() != tail[i].identity() {
+							return errOutputGap
+						}
 						if record.identity() == tail[i].identity() {
 							overlap = i
 							break
@@ -550,5 +559,40 @@ func (s *Service) captureSpool(ctx context.Context, key string, t *taskReceipt, 
 				return e
 			}
 		}
+	}
+}
+
+// A clean transport EOF is not evidence that the command ended. If the daemon
+// still reports a live child, reconnect from the durable overlap before waiting
+// for its result; otherwise output written after EOF would silently disappear.
+func (s *Service) observeSpool(ctx context.Context, key string, t *taskReceipt, stream io.ReadCloser, m TimestampedEngine, id string, recovering bool) error {
+	current := stream
+	defer func() {
+		if current != nil {
+			current.Close()
+		}
+	}()
+	for {
+		if e := s.captureSpool(ctx, key, t, current, m, id, recovering); e != nil {
+			return e
+		}
+		obj, e := s.inspect(ctx, s.Engine.(ManagedEngine), id)
+		if e != nil {
+			return e
+		}
+		if !obj.State.Running {
+			return nil
+		}
+		current.Close()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+		current, e = m.AttachTimestamped(ctx, id)
+		if e != nil {
+			return e
+		}
+		recovering = true
 	}
 }

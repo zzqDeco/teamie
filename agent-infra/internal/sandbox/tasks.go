@@ -594,11 +594,12 @@ func (s *Service) supervise(ctx context.Context, key string, t *taskReceipt, rec
 	captured := make(chan capture, 1)
 	if stream != nil {
 		captureStopped := make(chan struct{})
-		defer func() { stream.Close(); <-captureStopped }()
+		captureCtx, cancelCapture := context.WithCancel(ctx)
+		defer func() { cancelCapture(); stream.Close(); <-captureStopped }()
 		go func() {
 			defer close(captureStopped)
 			if version == 2 {
-				e := s.captureSpool(ctx, key, t, stream, m.(TimestampedEngine), obj.ID, recovering)
+				e := s.observeSpool(captureCtx, key, t, stream, m.(TimestampedEngine), obj.ID, recovering)
 				if errors.Is(e, errOutputLimit) {
 					e = nil
 				}
