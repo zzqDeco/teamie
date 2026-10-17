@@ -91,7 +91,7 @@ func (a *ContextArchive) ArchiveTranscript(ctx context.Context, messages []*sche
 	if err != nil {
 		return "", err
 	}
-	reduced, err := a.imReducedParents(ctx, r, messages, "")
+	reduced, err := a.toolReducedParents(ctx, r, messages, "")
 	if err != nil {
 		return "", err
 	}
@@ -107,7 +107,7 @@ func (a *ContextArchive) ArchiveTranscript(ctx context.Context, messages []*sche
 		Sources     []InputSource `json:"sources"`
 		Parents     []string      `json:"parents"`
 	}{digest(content), refs, parents})
-	return a.put(ctx, r, contextArtifact{RunID: r.ID, Attempt: r.Attempt, Key: "prefix/" + digest(identity), Kind: "transcript", Text: string(content), Sources: refs, ArtifactRefs: parents})
+	return a.put(ctx, r, contextArtifact{RunID: r.ID, Attempt: r.Attempt, Key: "prefix/sources-v1/" + digest(identity), Kind: "transcript", Text: string(content), Sources: refs, ArtifactRefs: parents})
 }
 
 type contextArchiveEvent struct {
@@ -174,7 +174,7 @@ func (a *ContextArchive) eventArtifact(ctx context.Context, r *Run, item context
 	if err != nil {
 		return nil, err
 	}
-	return &contextArtifact{RunID: item.runID, Attempt: item.attempt, Key: "event/" + item.id, Kind: "transcript", Text: string(text), Sources: refs, ArtifactRefs: parents, EventSeq: item.seq}, nil
+	return &contextArtifact{RunID: item.runID, Attempt: item.attempt, Key: "event/sources-v1/" + item.id, Kind: "transcript", Text: string(text), Sources: refs, ArtifactRefs: parents, EventSeq: item.seq}, nil
 }
 
 func contextExcerpt(text, query string) string {

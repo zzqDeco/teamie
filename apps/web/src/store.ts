@@ -78,6 +78,7 @@ export class ChatStore {
   private listeners = new Set<() => void>();
   private storage?: StorageLike;
   generation = 0;
+  conversationVersion = 0;
   constructor(storage?: StorageLike) {
     this.storage = storage;
   }
@@ -140,6 +141,7 @@ export class ChatStore {
   }
   clear() {
     this.generation += 1;
+    this.conversationVersion += 1;
     if (this.snapshot.userId) {
       try {
         this.storage?.removeItem(storageKey(this.snapshot.userId));
@@ -152,6 +154,7 @@ export class ChatStore {
   }
   revoke() {
     this.generation += 1;
+    this.conversationVersion += 1;
     this.commit(empty(this.snapshot.userId));
   }
   merge(messages: LocalMessage[]) {
@@ -174,7 +177,13 @@ export class ChatStore {
     }
     this.commit(next);
   }
-  replaceConversations(conversations: Conversation[]) {
+  replaceConversations(
+    conversations: Conversation[],
+    observed?: { generation: number; conversationVersion: number },
+  ) {
+    if (observed && (observed.generation !== this.generation || observed.conversationVersion !== this.conversationVersion))
+      return false;
+    this.conversationVersion += 1;
     const allowed = new Set(conversations.map((c) => c.id));
     this.commit({
       ...this.snapshot,
@@ -197,8 +206,10 @@ export class ChatStore {
         }),
       ),
     });
+    return true;
   }
   addConversation(conversation: Conversation) {
+    this.conversationVersion += 1;
     this.commit({
       ...this.snapshot,
       conversations: {
@@ -218,6 +229,8 @@ export class ChatStore {
       page.events.every((event) => olderOrEqual(event.id, this.snapshot.cursor))
     )
       return;
+    if (page.events.some((event) => event.conversation || event.type === "membership.changed"))
+      this.conversationVersion += 1;
     // Entity changes and cursor are persisted together, after every event is reconciled.
     const next = {
       ...this.snapshot,

@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"teamie/backend/internal/api"
 )
@@ -198,6 +199,9 @@ func (s *Store) GroupMember(ctx context.Context, actor, conversation, target str
 	if e != nil {
 		return c, e
 	}
+	if role != "owner" && !slices.Contains(ids, actor) {
+		return c, api.Err(403, "forbidden", "Current group membership is required to manage this group")
+	}
 	if add {
 		var yes bool
 		if e = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM workspace_members WHERE workspace_id=$1 AND user_id=$2)", ws, target).Scan(&yes); e != nil {
@@ -205,6 +209,18 @@ func (s *Store) GroupMember(ctx context.Context, actor, conversation, target str
 		}
 		if !yes {
 			return c, api.Err(400, "invalid_members", "Participant must be a current workspace member")
+		}
+		var members int
+		var present bool
+		if e = tx.QueryRow(ctx, "SELECT count(*),COALESCE(bool_or(user_id=$2),false) FROM conversation_members WHERE conversation_id=$1", conversation, target).Scan(&members, &present); e != nil {
+			return c, e
+		}
+		if present {
+			c.MemberIDs, c.CanManageMembers = ids, true
+			return c, tx.Commit(ctx)
+		}
+		if members >= 50 {
+			return c, api.Err(400, "invalid_members", "Groups support at most 50 participants")
 		}
 		_, e = tx.Exec(ctx, "INSERT INTO conversation_members(conversation_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING", conversation, target)
 		ids = append(ids, target)

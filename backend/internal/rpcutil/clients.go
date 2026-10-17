@@ -42,13 +42,27 @@ func (c *Identity) Validate(ctx context.Context, token string) (api.Session, err
 	return api.Session{User: FromUser(r.User), CSRFToken: r.GetCsrfToken()}, nil
 }
 func (c *Identity) Users(ctx context.Context, ids []string) ([]api.User, error) {
-	r, e := c.Client.GetUsers(ctx, &im.UsersRequest{Ids: ids})
-	if e != nil {
-		return nil, api.Err(503, "identity_unavailable", "Identity service is temporarily unavailable")
+	// Identity bounds each request at 1,000 IDs; a workspace itself may be
+	// larger. Keep the result atomic across batches and avoid duplicate users
+	// when the caller repeats an ID across a batch boundary.
+	unique := make([]string, 0, len(ids))
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if !seen[id] {
+			seen[id] = true
+			unique = append(unique, id)
+		}
 	}
 	out := []api.User{}
-	for _, u := range r.Users {
-		out = append(out, FromUser(u))
+	for start := 0; start < len(unique); start += 1000 {
+		end := min(start+1000, len(unique))
+		r, e := c.Client.GetUsers(ctx, &im.UsersRequest{Ids: unique[start:end]})
+		if e != nil || r == nil {
+			return nil, api.Err(503, "identity_unavailable", "Identity service is temporarily unavailable")
+		}
+		for _, u := range r.Users {
+			out = append(out, FromUser(u))
+		}
 	}
 	return out, nil
 }

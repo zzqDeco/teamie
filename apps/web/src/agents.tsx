@@ -73,6 +73,7 @@ function AgentProfileDialog({
   onClose: () => void;
 }) {
   const client = useQueryClient();
+  const { data } = useChat();
   const { user } = useAuth();
   const navigate = useNavigate();
   const [initialAgent] = useState(() =>
@@ -168,6 +169,7 @@ function AgentProfileDialog({
           <input
             type="checkbox"
             checked={enabled}
+            disabled={busy || (!initialAgent?.enabled && !data?.capabilities["agents.enabled"])}
             onChange={(e) => setEnabled(e.target.checked)}
           />
           <span>
@@ -302,12 +304,9 @@ export function AgentDetail({ agentId }: { agentId: string }) {
   });
   const agent = query.data?.agent;
   const allowed = !!agent && canManageAgent(user, agent);
-  const editable =
-    !!data?.capabilities["agents.enabled"] &&
-    !!data.capabilities["agents.update"];
-  const deletable =
-    !!data?.capabilities["agents.enabled"] &&
-    !!data.capabilities["agents.delete"];
+  const editable = !!data?.capabilities["agents.update"];
+  const deletable = !!data?.capabilities["agents.delete"];
+  const canEnable = !!data?.capabilities["agents.enabled"];
   async function enable() {
     if (!agent || !allowed) return;
     setBusy(true);
@@ -402,6 +401,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
               <Button
                 className={agent.enabled ? "secondary" : ""}
                 busy={busy}
+                disabled={!agent.enabled && !canEnable}
                 onClick={() => void enable()}
               >
                 {agent.enabled ? <CirclePause size={14} /> : <Play size={14} />}{" "}

@@ -61,6 +61,13 @@ func normalizeEmail(v string) (string, error) {
 	return v, nil
 }
 func (s *Store) newSession(ctx context.Context, tx pgx.Tx, u api.User) (api.Session, string, error) {
+	// Bounded opportunistic cleanup also retires historical expired sessions.
+	// SKIP LOCKED preserves credential operations already owning a session row.
+	if _, err := tx.Exec(ctx, `DELETE FROM identity_sessions WHERE token_hash IN (
+		SELECT token_hash FROM identity_sessions WHERE expires_at<=now()
+		ORDER BY expires_at,token_hash LIMIT 1000 FOR UPDATE SKIP LOCKED)`); err != nil {
+		return api.Session{}, "", err
+	}
 	token, csrf := api.Random(32), api.Random(32)
 	_, e := tx.Exec(ctx, "INSERT INTO identity_sessions(token_hash,user_id,csrf_token,expires_at) VALUES($1,$2,$3,$4)", api.Hash(token), u.ID, csrf, time.Now().Add(7*24*time.Hour))
 	return api.Session{User: u, CSRFToken: csrf}, token, e

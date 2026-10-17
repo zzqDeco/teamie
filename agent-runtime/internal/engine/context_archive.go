@@ -10,6 +10,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/cloudwego/eino/adk/filesystem"
@@ -69,6 +70,8 @@ type contextArtifact struct {
 	Sources                                         []InputSource
 	ArtifactRefs                                    []string
 	EventSeq                                        int64
+	CreatedAt                                       time.Time
+	SourceVersion                                   int
 }
 
 type ContextReadPage struct {
@@ -419,6 +422,20 @@ func (a *ContextArchive) put(ctx context.Context, r *Run, artifact contextArtifa
 	if e != nil || hash != digest([]byte(artifact.Text)) || kind != artifact.Kind || call != artifact.ToolCallID || name != artifact.ToolName || seq != artifact.EventSeq || !bytes.Equal(oldJSON, sourceJSON) || !bytes.Equal(previousJSON, parentJSON) {
 		return "", fmt.Errorf("%w: context artifact changed", ErrReplayConflict)
 	}
+	// Version the provenance in the existing private observation journal. Keep
+	// immutable artifact/tool/model bytes unchanged and commit proof atomically.
+	version := contextSourceVersionBytes([]byte(artifact.Text), sourceJSON, parentJSON)
+	_, err = tx.Exec(ctx, `INSERT INTO runtime_tool_observations(run_id,call_id,observation_key,response) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, artifact.RunID, "context-artifact:"+key, contextSourceVersionKey, version)
+	if err != nil {
+		return "", err
+	}
+	var savedVersion []byte
+	if err = tx.QueryRow(ctx, `SELECT response FROM runtime_tool_observations WHERE run_id=$1 AND call_id=$2 AND observation_key=$3`, artifact.RunID, "context-artifact:"+key, contextSourceVersionKey).Scan(&savedVersion); err != nil {
+		return "", err
+	}
+	if !bytes.Equal(version, savedVersion) {
+		return "", ErrReplayConflict
+	}
 	if err = tx.Commit(ctx); err != nil {
 		return "", err
 	}
@@ -473,9 +490,9 @@ func (a *ContextArchive) load(ctx context.Context, r *Run, ref string) (*context
 		return nil, err
 	}
 	out := &contextArtifact{RunID: runID}
-	var raw, sources, parents []byte
+	var raw, sources, parents, version []byte
 	var hash string
-	err = a.Store.DB.QueryRow(ctx, `SELECT a.attempt_id::text,a.artifact_key,a.kind,a.tool_call_id,a.tool_name,a.content,a.content_hash,a.sources,a.source_artifact_refs,a.source_event_seq FROM runtime_context_artifacts a JOIN runtime_runs r ON r.id=a.run_id WHERE a.agent_id=$1 AND `+contextArtifactVisibility+` AND a.run_id=$6 AND a.artifact_key=$7`, r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead, runID, key).Scan(&out.Attempt, &out.Key, &out.Kind, &out.ToolCallID, &out.ToolName, &raw, &hash, &sources, &parents, &out.EventSeq)
+	err = a.Store.DB.QueryRow(ctx, `SELECT a.attempt_id::text,a.artifact_key,a.kind,a.tool_call_id,a.tool_name,a.content,a.content_hash,a.sources,a.source_artifact_refs,a.source_event_seq,a.created_at,o.response FROM runtime_context_artifacts a JOIN runtime_runs r ON r.id=a.run_id LEFT JOIN runtime_tool_observations o ON o.run_id=a.run_id AND o.call_id='context-artifact:'||a.artifact_key AND o.observation_key='context-source-version-v1' WHERE a.agent_id=$1 AND `+contextArtifactVisibility+` AND a.run_id=$6 AND a.artifact_key=$7`, r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead, runID, key).Scan(&out.Attempt, &out.Key, &out.Kind, &out.ToolCallID, &out.ToolName, &raw, &hash, &sources, &parents, &out.EventSeq, &out.CreatedAt, &version)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, errContextUnavailable
 	}
@@ -486,6 +503,18 @@ func (a *ContextArchive) load(ctx context.Context, r *Run, ref string) (*context
 		return nil, ErrReplayConflict
 	}
 	out.Text = string(raw)
+	if len(version) > 0 {
+		canonical, err := canonicalContextSources(out.Sources)
+		if err != nil {
+			return nil, err
+		}
+		sourceJSON, _ := json.Marshal(canonical)
+		parentJSON, _ := json.Marshal(out.ArtifactRefs)
+		if !bytes.Equal(version, contextSourceVersionBytes(raw, sourceJSON, parentJSON)) {
+			return nil, ErrReplayConflict
+		}
+		out.SourceVersion = 1
+	}
 	return out, nil
 }
 
@@ -563,6 +592,13 @@ func (a *ContextArchive) validateRefs(ctx context.Context, r *Run, refs []string
 		}
 		sources = append(sources, artifact.Sources...)
 		pending = append(pending, artifact.ArtifactRefs...)
+		if artifact.SourceVersion == 0 {
+			inherited, err := a.legacyWorkspaceArchiveSources(ctx, r, artifact)
+			if err != nil {
+				return err
+			}
+			sources = append(sources, inherited...)
+		}
 	}
 	canonical, err := canonicalContextSources(sources)
 	if err != nil {

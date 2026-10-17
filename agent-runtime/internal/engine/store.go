@@ -98,6 +98,7 @@ func Open(ctx context.Context, url string) (*Store, error) {
 	cfg.MinConns = 0
 	cfg.ConnConfig.ConnectTimeout = 5 * time.Second
 	cfg.ConnConfig.RuntimeParams["timezone"] = "UTC"
+	cfg.ConnConfig.RuntimeParams[runtimeWriterSchemaSetting] = fmt.Sprint(runtimeSchemaVersion)
 	db, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, err
@@ -109,12 +110,16 @@ func Open(ctx context.Context, url string) (*Store, error) {
 	}
 	defer tx.Rollback(ctx)
 	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(704205)"); err == nil {
+		err = validateRuntimeSchema(ctx, tx)
+	}
+	if err == nil {
 		_, err = tx.Exec(ctx, schemaSQL+schemaV2SQL+schemaV3SQL+contextArchiveSchemaSQL+contextRecoverySchemaSQL)
 	}
 	if err == nil {
 		err = tx.Commit(ctx)
 	}
 	if err != nil {
+		_ = tx.Rollback(ctx)
 		db.Close()
 		return nil, err
 	}

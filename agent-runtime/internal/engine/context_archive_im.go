@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -144,13 +145,13 @@ func (a *ContextArchive) imReceiptSources(ctx context.Context, runID, call, name
 	return canonicalContextSources(refs)
 }
 
-// An original native IM result can be archived without ever being truncated.
+// An original native result can be archived without ever being truncated.
 // Match its outer identity and exact committed output, then retain the real
 // returned-message scope alongside the Run's original input scope.
-func (a *ContextArchive) imMessageSources(ctx context.Context, r *Run, message *schema.AgenticMessage, originRun string) ([]InputSource, bool, error) {
+func (a *ContextArchive) toolMessageSources(ctx context.Context, r *Run, message *schema.AgenticMessage, originRun string) ([]InputSource, bool, error) {
 	refs, found := []InputSource{}, false
 	for _, block := range message.ContentBlocks {
-		if block == nil || block.FunctionToolResult == nil || !contextIMTool(block.FunctionToolResult.Name) {
+		if block == nil || block.FunctionToolResult == nil || !contextIMTool(block.FunctionToolResult.Name) && !workspaceTool(block.FunctionToolResult.Name) {
 			continue
 		}
 		found = true
@@ -163,22 +164,31 @@ func (a *ContextArchive) imMessageSources(ctx context.Context, r *Run, message *
 			parts = append(parts, schema.ToolOutputPart{Type: schema.ToolPartTypeText, Text: part.Text.Text})
 		}
 		detail := &reduction.ToolDetail{ToolResult: &schema.ToolResult{Parts: parts}}
-		rows, err := a.Store.DB.Query(ctx, `SELECT t.run_id::text,t.result FROM runtime_tool_calls t JOIN runtime_runs owner ON owner.id=t.run_id WHERE owner.agent_id=$1 AND t.call_id=$2 AND t.name=$3 AND t.result IS NOT NULL AND ($6='' OR owner.id::text=$6) AND (owner.id=$4 OR EXISTS(SELECT 1 FROM runtime_session_acceptances x WHERE x.agent_id=owner.agent_id AND x.run_id=owner.id AND x.seq<=$5))`, r.AgentID, result.CallID, result.Name, r.ID, r.AcceptanceHead, originRun)
+		receiptName := result.Name
+		if !contextIMTool(receiptName) {
+			receiptName = "native:" + receiptName
+		}
+		names := []string{receiptName}
+		if result.Name == "workspace_execute" {
+			names = append(names, "workspace_execute")
+		}
+		rows, err := a.Store.DB.Query(ctx, `SELECT t.run_id::text,t.name,t.result FROM runtime_tool_calls t JOIN runtime_runs owner ON owner.id=t.run_id WHERE owner.agent_id=$1 AND t.call_id=$2 AND t.name=ANY($3::text[]) AND t.result IS NOT NULL AND ($6='' OR owner.id::text=$6) AND (owner.id=$4 OR EXISTS(SELECT 1 FROM runtime_session_acceptances x WHERE x.agent_id=owner.agent_id AND x.run_id=owner.id AND x.seq<=$5))`, r.AgentID, result.CallID, names, r.ID, r.AcceptanceHead, originRun)
 		if err != nil {
 			return nil, true, err
 		}
 		type candidate struct {
 			runID string
+			name  string
 			raw   []byte
 		}
 		matches := []candidate{}
 		for rows.Next() {
 			var item candidate
-			if err = rows.Scan(&item.runID, &item.raw); err != nil {
+			if err = rows.Scan(&item.runID, &item.name, &item.raw); err != nil {
 				rows.Close()
 				return nil, true, err
 			}
-			if contextReceiptMatchesTool(item.raw, result.Name, detail) {
+			if contextReceiptMatchesTool(item.raw, item.name, detail) {
 				matches = append(matches, item)
 			}
 		}
@@ -188,7 +198,7 @@ func (a *ContextArchive) imMessageSources(ctx context.Context, r *Run, message *
 			return nil, true, err
 		}
 		if len(matches) == 0 {
-			parents, err := a.imReducedParents(ctx, r, []*schema.AgenticMessage{{Role: message.Role, ContentBlocks: []*schema.ContentBlock{block}}}, originRun)
+			parents, err := a.toolReducedParents(ctx, r, []*schema.AgenticMessage{{Role: message.Role, ContentBlocks: []*schema.ContentBlock{block}}}, originRun)
 			if err != nil {
 				return nil, true, err
 			}
@@ -201,7 +211,12 @@ func (a *ContextArchive) imMessageSources(ctx context.Context, r *Run, message *
 			if err != nil {
 				return nil, true, err
 			}
-			actual, err := a.imReceiptSources(ctx, match.runID, result.CallID, result.Name, match.raw)
+			var actual []InputSource
+			if contextIMTool(result.Name) {
+				actual, err = a.imReceiptSources(ctx, match.runID, result.CallID, result.Name, match.raw)
+			} else {
+				actual, err = a.workspaceToolSources(ctx, r, match.runID, result.CallID, match.name, nil)
+			}
 			if err != nil {
 				return nil, true, err
 			}
@@ -215,16 +230,16 @@ func (a *ContextArchive) imMessageSources(ctx context.Context, r *Run, message *
 
 // The native string-tool truncation hook returns its notice before the original
 // Session result is persisted. Match that exact generated view to a real
-// immutable offload AND its original committed IM receipt. A copied textual
+// immutable offload AND its original committed tool receipt. A copied textual
 // context ref alone cannot acquire a source closure.
-func (a *ContextArchive) imReducedParents(ctx context.Context, r *Run, messages []*schema.AgenticMessage, originRun string) ([]string, error) {
+func (a *ContextArchive) toolReducedParents(ctx context.Context, r *Run, messages []*schema.AgenticMessage, originRun string) ([]string, error) {
 	parents := []string{}
 	for _, message := range messages {
 		if message == nil {
 			continue
 		}
 		for _, block := range message.ContentBlocks {
-			if block == nil || block.FunctionToolResult == nil || !contextIMTool(block.FunctionToolResult.Name) {
+			if block == nil || block.FunctionToolResult == nil || !contextIMTool(block.FunctionToolResult.Name) && !workspaceTool(block.FunctionToolResult.Name) {
 				continue
 			}
 			result := block.FunctionToolResult
@@ -234,6 +249,19 @@ func (a *ContextArchive) imReducedParents(ctx context.Context, r *Run, messages 
 			text := result.Content[0].Text.Text
 			if !strings.HasPrefix(text, "Archived private context: context:v1:") {
 				continue
+			}
+			// Before workspace results had the exact-notice recognizer, native
+			// reduction updates were persisted as views. Preserve those immutable
+			// views only with an exact server event plus owning artifact identity.
+			if !contextIMTool(result.Name) {
+				legacy, err := a.workspaceUpdatedParents(ctx, r, message, result, originRun)
+				if err != nil {
+					return nil, err
+				}
+				if len(legacy) > 0 {
+					parents = append(parents, legacy...)
+					continue
+				}
 			}
 			rows, err := a.Store.DB.Query(ctx, `SELECT a.run_id::text,a.artifact_key FROM runtime_context_artifacts a JOIN runtime_runs r ON r.id=a.run_id WHERE a.agent_id=$1 AND `+contextArtifactVisibility+` AND a.kind IN ('tool_trunc','tool_clear') AND a.tool_name=$6 AND a.tool_call_id=$7 AND ($8='' OR a.run_id::text=$8)`, r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead, result.Name, result.CallID, originRun)
 			if err != nil {
@@ -308,12 +336,41 @@ func (a *ContextArchive) causalMessageSources(ctx context.Context, r *Run, item 
 	if err != nil {
 		return nil, nil, err
 	}
-	if actual, found, err := a.imMessageSources(ctx, r, message, item.runID); err != nil {
+	if message.Role == schema.AgenticRoleTypeUser && !hasToolResults(message) {
+		if parent, ok := message.Extra[contextArchiveRefKey].(string); ok {
+			// Only the exact persisted application summary event can supply
+			// this metadata link. A model-authored body marker grants nothing.
+			linked := false
+			messages := []*schema.AgenticMessage{item.event.Message}
+			if item.event.MessageInserted != nil {
+				messages = append(messages, item.event.MessageInserted.Message)
+			}
+			if item.event.MessagesReplaced != nil {
+				messages = append(messages, (*item.event.MessagesReplaced)...)
+			}
+			for _, actual := range messages {
+				if actual != nil && actual.Extra[contextArchiveRefKey] == parent && bytes.Equal(contextProjectionBytes(actual), contextProjectionBytes(message)) {
+					linked = true
+				}
+			}
+			if !linked {
+				return nil, nil, errContextUnavailable
+			}
+			if _, err = a.load(ctx, r, parent); err != nil {
+				return nil, nil, err
+			}
+			return refs, []string{parent}, nil
+		}
+		if strings.HasPrefix(agenticText(message), "TEAMIE_SESSION_SUMMARY ") {
+			return nil, nil, errContextUnavailable
+		}
+	}
+	if actual, found, err := a.toolMessageSources(ctx, r, message, item.runID); err != nil {
 		return nil, nil, err
 	} else if found {
 		refs = append(refs, actual...)
 	}
-	parents, err := a.imReducedParents(ctx, r, []*schema.AgenticMessage{message}, item.runID)
+	parents, err := a.toolReducedParents(ctx, r, []*schema.AgenticMessage{message}, item.runID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -366,7 +423,7 @@ func (a *ContextArchive) causalRunReadSources(ctx context.Context, r *Run, runID
 			return nil, nil, err
 		}
 		for _, previous := range messages {
-			actual, _, err := a.imMessageSources(ctx, r, previous, runID)
+			actual, _, err := a.toolMessageSources(ctx, r, previous, runID)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -377,7 +434,7 @@ func (a *ContextArchive) causalRunReadSources(ctx context.Context, r *Run, runID
 			return nil, nil, err
 		}
 		parents = append(parents, inherited...)
-		reduced, err := a.imReducedParents(ctx, r, messages, runID)
+		reduced, err := a.toolReducedParents(ctx, r, messages, runID)
 		if err != nil {
 			return nil, nil, err
 		}

@@ -115,7 +115,8 @@ func (h *Handler) Routes() http.Handler {
 		if e := h.Store.Logout(r.Context(), api.Token(r)); e != nil {
 			return e
 		}
-		h.cookie(w, "", -1)
+		// The revoked cookie is inert. A late logout must not overwrite a newer
+		// login's cookie shared by another tab or an overlapping request.
 		api.Write(w, 204, nil)
 		return nil
 	}))

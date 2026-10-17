@@ -61,13 +61,11 @@ export function WorkspaceDialog({
     enabled:
       !!workspace &&
       ["direct", "group"].includes(kind) &&
-      !!data?.capabilities["agents.enabled"] &&
-      !!data.capabilities["agents.discover"],
+      !!data?.capabilities["agents.discover"],
   });
   const participants = enrichParticipants(
     memberQuery.data?.members || [],
-    (data?.capabilities["agents.enabled"] &&
-    data.capabilities["agents.discover"]
+    (data?.capabilities["agents.discover"]
       ? agentsQuery.data?.agents
       : []) || [],
   ).filter(
@@ -92,6 +90,10 @@ export function WorkspaceDialog({
     ).trim();
     const generation = chatStore.generation;
     try {
+      if (kind === "group" && (eligibleSelected.length < 1 || eligibleSelected.length > 49)) {
+        setError("请选择 1 至 49 位伙伴。");
+        return;
+      }
       if (kind === "workspace") {
         const result = await api.createWorkspace(name);
         if (generation !== chatStore.generation) return;
@@ -195,6 +197,7 @@ export function WorkspaceDialog({
               <button
                 key={member.userId}
                 type="button"
+                disabled={kind === "group" && !selected.includes(member.userId) && eligibleSelected.length >= 49}
                 className={`member-option ${selected.includes(member.userId) ? "selected" : ""}`}
                 onClick={() =>
                   setSelected((old) =>
@@ -267,7 +270,7 @@ export function WorkspaceDialog({
               busy={busy}
               disabled={
                 ["direct", "group"].includes(kind) &&
-                (eligibleSelected.length < 1 ||
+                (eligibleSelected.length < 1 || (kind === "group" && eligibleSelected.length > 49) ||
                   memberQuery.isLoading ||
                   agentsQuery.isLoading)
               }

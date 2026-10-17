@@ -83,12 +83,18 @@ func (s *Service) outputUsedLocked() (int64, error) {
 	if e != nil {
 		return 0, e
 	}
+	if e = s.collectExpiredOutputLocked(entries); e != nil {
+		return 0, e
+	}
 	var total int64
 	for _, entry := range entries {
 		if !strings.HasSuffix(entry.Name(), ".output") {
 			continue
 		}
 		i, e := entry.Info()
+		if os.IsNotExist(e) {
+			continue
+		}
 		if e != nil || !i.Mode().IsRegular() || i.Mode()&os.ModeSymlink != 0 {
 			return 0, errors.New("invalid output spool")
 		}
@@ -187,6 +193,9 @@ func (s *Service) loadSpoolLocked(key string, t *taskReceipt) error {
 	if t.OutputBytes < 0 || t.OutputBytes > DurableOutputLimit || t.OutputFileBytes < 0 || t.OutputFileBytes > SharedOutputLimit || t.OutputFrames < 0 || t.OutputFrames > maxOutputFrames {
 		return errors.New("invalid output receipt")
 	}
+	if t.OutputExpiredAt != nil {
+		return s.expireOutputFileLocked(key, t)
+	}
 	f, e := s.openSpool(key, os.O_RDWR)
 	if os.IsNotExist(e) && t.OutputFileBytes == 0 {
 		return nil
@@ -240,6 +249,9 @@ func (s *Service) loadSpoolLocked(key string, t *taskReceipt) error {
 	return nil
 }
 func (s *Service) readSpoolLocked(key string, t *taskReceipt, offset int64, limit int32) (string, string, int64, error) {
+	if t.OutputExpiredAt != nil {
+		return "", "", offset, errOutputExpired
+	}
 	if offset < 0 || offset > t.OutputBytes {
 		return "", "", offset, errors.New("invalid output offset")
 	}
@@ -293,6 +305,9 @@ type outputSegment struct {
 }
 
 func (s *Service) outputSegmentsLocked(key string, t *taskReceipt, start, end int64) ([]outputSegment, error) {
+	if t.OutputExpiredAt != nil {
+		return nil, errOutputExpired
+	}
 	segments := []outputSegment{}
 	position := int64(0)
 	add := func(stream byte, data []byte) {

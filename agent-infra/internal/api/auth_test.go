@@ -30,6 +30,17 @@ func TestAdminAuthenticationAndCSRF(t *testing.T) {
 	if _, e := auth.Require(request("GET")); e != nil {
 		t.Fatal(e)
 	}
+	for _, method := range []string{"GET", "HEAD"} {
+		r := request(method)
+		r.Header.Set("X-CSRF-Token", "previous-browser-session")
+		if _, e := auth.Require(r); e == nil || !strings.Contains(e.Error(), "session_changed") {
+			t.Fatalf("changed browser session accepted: %v", e)
+		}
+		r.Header.Set("X-CSRF-Token", csrf)
+		if _, e := auth.Require(r); e != nil {
+			t.Fatal(e)
+		}
+	}
 	session.User.PlatformRole = "user"
 	if _, e := auth.Require(request("GET")); e == nil {
 		t.Fatal("member accepted")

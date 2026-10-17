@@ -150,6 +150,9 @@ func (t *Tools) attachmentTool() (tool.BaseTool, error) {
 				return nil, &ModelError{Code: "im_unavailable", Retry: true}
 			}
 			backend := &SandboxBackend{Client: t.Sandbox, Token: t.SandboxToken, AgentID: t.IM.AgentID, Authorize: t.Authorize, Store: t.Store, Lease: t.Lease}
+			if err = t.recordWorkspaceImport(ctx, args, message); err != nil {
+				return nil, err
+			}
 			return backend.importAttachment(ctx, id, args.Path, content, descriptor.SHA256)
 		})
 	}, utils.WithMarshalOutput(marshalObservation))

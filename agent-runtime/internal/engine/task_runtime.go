@@ -88,7 +88,7 @@ type workerTasks struct {
 	handlers []adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]
 }
 
-func (e *Engine) tasks(ctx context.Context, def *wire.AgentDefinition, l *Lease, authorize func(context.Context) error) (*workerTasks, error) {
+func (e *Engine) tasks(ctx context.Context, def *wire.AgentDefinition, l *Lease, imc *IM, authorize func(context.Context) error) (*workerTasks, error) {
 	store := &TaskStore{Store: e.Store, AgentID: def.Id, Lease: l, AllowSubmit: func(ctx context.Context) error {
 		if !runtimeFlag(e.Config.FlagsFile, "agents.tasks.execute") {
 			return &ModelError{Code: "task_execution_disabled"}
@@ -129,7 +129,7 @@ func (e *Engine) tasks(ctx context.Context, def *wire.AgentDefinition, l *Lease,
 	if err != nil {
 		return nil, err
 	}
-	receipts := &nativeToolReceipts{Store: e.Store, Lease: l, Tasks: store, Manager: manager, Authorize: authorize}
+	receipts := &nativeToolReceipts{Store: e.Store, Lease: l, Tasks: store, Manager: manager, IM: imc, Authorize: authorize}
 	return &workerTasks{store: store, manager: manager, backend: backend, handlers: []adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]{receipts, filesystem, control, plan}}, nil
 }
 
@@ -142,6 +142,7 @@ type nativeToolReceipts struct {
 	Lease     *Lease
 	Tasks     *TaskStore
 	Manager   *bg.Manager
+	IM        *IM
 	Authorize func(context.Context) error
 }
 
@@ -159,6 +160,10 @@ func (m *nativeToolReceipts) before(ctx context.Context, tc *adk.ToolContext, ar
 		r.releaseFront()
 	}
 	b, err := m.Store.ToolIntent(ctx, m.Lease, r, tc.CallID, "native:"+tc.Name, args)
+	if err == nil {
+		archive := &ContextArchive{Store: m.Store, Lease: m.Lease, IM: m.IM, Authorize: m.Authorize}
+		err = archive.captureWorkspaceSources(ctx, r, tc.CallID, "native:"+tc.Name, args)
+	}
 	return r, b, err
 }
 func (m *nativeToolReceipts) WrapInvokableToolCall(_ context.Context, next adk.InvokableToolCallEndpoint, tc *adk.ToolContext) (adk.InvokableToolCallEndpoint, error) {

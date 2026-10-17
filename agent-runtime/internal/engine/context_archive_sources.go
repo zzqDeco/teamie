@@ -143,6 +143,12 @@ func (a *ContextArchive) toolSources(ctx context.Context, r *Run, detail *reduct
 				return nil, err
 			}
 			refs = append(refs, actual...)
+		} else if workspaceTool(name) {
+			actual, err := a.workspaceToolSources(ctx, r, match.id, call, match.name, []byte(detail.ToolArgument.Text))
+			if err != nil {
+				return nil, err
+			}
+			refs = append(refs, actual...)
 		}
 	}
 	return canonicalContextSources(refs)
@@ -167,7 +173,7 @@ func (a *ContextArchive) ArchiveToolPath(ctx context.Context, phase string, deta
 	if err != nil {
 		return "", err
 	}
-	key := detail.ToolContext.Name + "/" + detail.ToolContext.CallID + "/" + digest([]byte(detail.ToolArgument.Text)) + "/" + digest([]byte(content))
+	key := "sources-v1/" + detail.ToolContext.Name + "/" + detail.ToolContext.CallID + "/" + digest([]byte(detail.ToolArgument.Text)) + "/" + digest([]byte(content))
 	return a.put(ctx, r, contextArtifact{RunID: r.ID, Attempt: r.Attempt, Key: key, Kind: kind, ToolName: detail.ToolContext.Name, ToolCallID: detail.ToolContext.CallID, Text: content, Sources: refs})
 }
 
@@ -198,7 +204,7 @@ type contextSourceTarget struct {
 	found         bool
 }
 
-func contextSourceTargetKey(id, hash string) string { return "origin/" + id + "/" + hash }
+func contextSourceTargetKey(id, hash string) string { return "origin/sources-v1/" + id + "/" + hash }
 
 func (a *ContextArchive) inputMessageSources(ctx context.Context, r *Run, message *schema.AgenticMessage) ([]InputSource, bool, error) {
 	if message.Role != schema.AgenticRoleTypeUser || hasToolResults(message) {
@@ -337,7 +343,7 @@ func (a *ContextArchive) transcriptSources(ctx context.Context, r *Run, messages
 			refs = append(refs, inputRefs...)
 			continue
 		}
-		if actual, found, err := a.imMessageSources(ctx, r, message, ""); err != nil {
+		if actual, found, err := a.toolMessageSources(ctx, r, message, ""); err != nil {
 			return nil, err
 		} else if found {
 			refs = append(refs, actual...)

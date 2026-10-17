@@ -148,6 +148,10 @@ struct SandboxTaskResponse {
   13: optional string outputStatus
   14: optional bool hasMore
   15: optional string outputSha256
+  // Output retention is separate from the immutable task result/receipt.
+  16: optional string outputExpiresAt
+  17: optional i64 outputRetentionSeconds
+  18: optional string outputAvailability
 }
 struct SandboxWorkspaceRequest {
   1: required string serviceToken

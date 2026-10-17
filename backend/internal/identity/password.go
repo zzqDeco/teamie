@@ -40,9 +40,6 @@ func (s *Store) loginSession(ctx context.Context, u api.User, expectedHash strin
 }
 
 func (s *Store) ChangePassword(ctx context.Context, userID, sessionToken, currentPassword, newPassword string) error {
-	if err := validatePassword(newPassword); err != nil {
-		return err
-	}
 	if len(sessionToken) != 64 {
 		return api.Err(401, "unauthenticated", "Sign in to continue")
 	}
@@ -64,6 +61,9 @@ func (s *Store) ChangePassword(ctx context.Context, userID, sessionToken, curren
 		return err
 	}
 	if err = validHumanSession(ctx, tx, userID, sessionToken); err != nil {
+		return err
+	}
+	if err = validatePassword(newPassword); err != nil {
 		return err
 	}
 	if len(currentPassword) > 72 || bcrypt.CompareHashAndPassword([]byte(hash), []byte(currentPassword)) != nil {

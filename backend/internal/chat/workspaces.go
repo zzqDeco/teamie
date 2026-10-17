@@ -238,14 +238,22 @@ func (s *Store) CreateConversation(ctx context.Context, user, ws, kind, name str
 			var existing string
 			e = tx.QueryRow(ctx, "SELECT id FROM conversations WHERE workspace_id=$1 AND pair_key=$2", ws, pair).Scan(&existing)
 			if e == nil {
+				restored := false
 				for _, id := range ids {
-					if _, e = tx.Exec(ctx, "INSERT INTO conversation_members(conversation_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING", existing, id); e != nil {
-						return c, e
+					changed, insertErr := tx.Exec(ctx, "INSERT INTO conversation_members(conversation_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING", existing, id)
+					if insertErr != nil {
+						return c, insertErr
 					}
+					restored = restored || changed.RowsAffected() > 0
 				}
 				c, e = conversationAccess(ctx, tx, existing, user)
 				if e != nil {
 					return c, e
+				}
+				if restored {
+					if e = fanout(ctx, tx, c.MemberIDs, Event{Type: "conversation.created", WorkspaceID: ws, ConversationID: c.ID, Conversation: &c}); e != nil {
+						return c, e
+					}
 				}
 				return c, tx.Commit(ctx)
 			}

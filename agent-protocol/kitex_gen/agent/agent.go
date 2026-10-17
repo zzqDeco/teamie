@@ -1304,21 +1304,24 @@ var fieldIDToName_SandboxTaskRequest = map[int16]string{
 }
 
 type SandboxTaskResponse struct {
-	Ok               bool    `thrift:"ok,1,required" frugal:"1,required,bool" json:"ok"`
-	TaskId           string  `thrift:"taskId,2,required" frugal:"2,required,string" json:"taskId"`
-	State            string  `thrift:"state,3,required" frugal:"3,required,string" json:"state"`
-	ExitCode         *int32  `thrift:"exitCode,4,optional" frugal:"4,optional,i32" json:"exitCode,omitempty"`
-	Stdout           *string `thrift:"stdout,5,optional" frugal:"5,optional,string" json:"stdout,omitempty"`
-	Stderr           *string `thrift:"stderr,6,optional" frugal:"6,optional,string" json:"stderr,omitempty"`
-	Truncated        *bool   `thrift:"truncated,7,optional" frugal:"7,optional,bool" json:"truncated,omitempty"`
-	NextOffset       *int64  `thrift:"nextOffset,8,optional" frugal:"8,optional,i64" json:"nextOffset,omitempty"`
-	ErrorCode        *string `thrift:"errorCode,9,optional" frugal:"9,optional,string" json:"errorCode,omitempty"`
-	ErrorMessage     *string `thrift:"errorMessage,10,optional" frugal:"10,optional,string" json:"errorMessage,omitempty"`
-	OutputBytes      *int64  `thrift:"outputBytes,11,optional" frugal:"11,optional,i64" json:"outputBytes,omitempty"`
-	OutputLimitBytes *int64  `thrift:"outputLimitBytes,12,optional" frugal:"12,optional,i64" json:"outputLimitBytes,omitempty"`
-	OutputStatus     *string `thrift:"outputStatus,13,optional" frugal:"13,optional,string" json:"outputStatus,omitempty"`
-	HasMore          *bool   `thrift:"hasMore,14,optional" frugal:"14,optional,bool" json:"hasMore,omitempty"`
-	OutputSha256     *string `thrift:"outputSha256,15,optional" frugal:"15,optional,string" json:"outputSha256,omitempty"`
+	Ok                     bool    `thrift:"ok,1,required" frugal:"1,required,bool" json:"ok"`
+	TaskId                 string  `thrift:"taskId,2,required" frugal:"2,required,string" json:"taskId"`
+	State                  string  `thrift:"state,3,required" frugal:"3,required,string" json:"state"`
+	ExitCode               *int32  `thrift:"exitCode,4,optional" frugal:"4,optional,i32" json:"exitCode,omitempty"`
+	Stdout                 *string `thrift:"stdout,5,optional" frugal:"5,optional,string" json:"stdout,omitempty"`
+	Stderr                 *string `thrift:"stderr,6,optional" frugal:"6,optional,string" json:"stderr,omitempty"`
+	Truncated              *bool   `thrift:"truncated,7,optional" frugal:"7,optional,bool" json:"truncated,omitempty"`
+	NextOffset             *int64  `thrift:"nextOffset,8,optional" frugal:"8,optional,i64" json:"nextOffset,omitempty"`
+	ErrorCode              *string `thrift:"errorCode,9,optional" frugal:"9,optional,string" json:"errorCode,omitempty"`
+	ErrorMessage           *string `thrift:"errorMessage,10,optional" frugal:"10,optional,string" json:"errorMessage,omitempty"`
+	OutputBytes            *int64  `thrift:"outputBytes,11,optional" frugal:"11,optional,i64" json:"outputBytes,omitempty"`
+	OutputLimitBytes       *int64  `thrift:"outputLimitBytes,12,optional" frugal:"12,optional,i64" json:"outputLimitBytes,omitempty"`
+	OutputStatus           *string `thrift:"outputStatus,13,optional" frugal:"13,optional,string" json:"outputStatus,omitempty"`
+	HasMore                *bool   `thrift:"hasMore,14,optional" frugal:"14,optional,bool" json:"hasMore,omitempty"`
+	OutputSha256           *string `thrift:"outputSha256,15,optional" frugal:"15,optional,string" json:"outputSha256,omitempty"`
+	OutputExpiresAt        *string `thrift:"outputExpiresAt,16,optional" frugal:"16,optional,string" json:"outputExpiresAt,omitempty"`
+	OutputRetentionSeconds *int64  `thrift:"outputRetentionSeconds,17,optional" frugal:"17,optional,i64" json:"outputRetentionSeconds,omitempty"`
+	OutputAvailability     *string `thrift:"outputAvailability,18,optional" frugal:"18,optional,string" json:"outputAvailability,omitempty"`
 }
 
 func NewSandboxTaskResponse() *SandboxTaskResponse {
@@ -1447,6 +1450,33 @@ func (p *SandboxTaskResponse) GetOutputSha256() (v string) {
 	}
 	return *p.OutputSha256
 }
+
+var SandboxTaskResponse_OutputExpiresAt_DEFAULT string
+
+func (p *SandboxTaskResponse) GetOutputExpiresAt() (v string) {
+	if !p.IsSetOutputExpiresAt() {
+		return SandboxTaskResponse_OutputExpiresAt_DEFAULT
+	}
+	return *p.OutputExpiresAt
+}
+
+var SandboxTaskResponse_OutputRetentionSeconds_DEFAULT int64
+
+func (p *SandboxTaskResponse) GetOutputRetentionSeconds() (v int64) {
+	if !p.IsSetOutputRetentionSeconds() {
+		return SandboxTaskResponse_OutputRetentionSeconds_DEFAULT
+	}
+	return *p.OutputRetentionSeconds
+}
+
+var SandboxTaskResponse_OutputAvailability_DEFAULT string
+
+func (p *SandboxTaskResponse) GetOutputAvailability() (v string) {
+	if !p.IsSetOutputAvailability() {
+		return SandboxTaskResponse_OutputAvailability_DEFAULT
+	}
+	return *p.OutputAvailability
+}
 func (p *SandboxTaskResponse) SetOk(val bool) {
 	p.Ok = val
 }
@@ -1491,6 +1521,15 @@ func (p *SandboxTaskResponse) SetHasMore(val *bool) {
 }
 func (p *SandboxTaskResponse) SetOutputSha256(val *string) {
 	p.OutputSha256 = val
+}
+func (p *SandboxTaskResponse) SetOutputExpiresAt(val *string) {
+	p.OutputExpiresAt = val
+}
+func (p *SandboxTaskResponse) SetOutputRetentionSeconds(val *int64) {
+	p.OutputRetentionSeconds = val
+}
+func (p *SandboxTaskResponse) SetOutputAvailability(val *string) {
+	p.OutputAvailability = val
 }
 
 func (p *SandboxTaskResponse) IsSetExitCode() bool {
@@ -1541,6 +1580,18 @@ func (p *SandboxTaskResponse) IsSetOutputSha256() bool {
 	return p.OutputSha256 != nil
 }
 
+func (p *SandboxTaskResponse) IsSetOutputExpiresAt() bool {
+	return p.OutputExpiresAt != nil
+}
+
+func (p *SandboxTaskResponse) IsSetOutputRetentionSeconds() bool {
+	return p.OutputRetentionSeconds != nil
+}
+
+func (p *SandboxTaskResponse) IsSetOutputAvailability() bool {
+	return p.OutputAvailability != nil
+}
+
 func (p *SandboxTaskResponse) String() string {
 	if p == nil {
 		return "<nil>"
@@ -1564,6 +1615,9 @@ var fieldIDToName_SandboxTaskResponse = map[int16]string{
 	13: "outputStatus",
 	14: "hasMore",
 	15: "outputSha256",
+	16: "outputExpiresAt",
+	17: "outputRetentionSeconds",
+	18: "outputAvailability",
 }
 
 type SandboxWorkspaceRequest struct {

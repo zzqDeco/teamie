@@ -30,14 +30,27 @@ type Chat = {
   >;
 };
 const ChatContext = createContext<Chat | null>(null);
+const bootstrapObservation = Symbol("bootstrapObservation");
+type ObservedBootstrap = Bootstrap & {
+  [bootstrapObservation]?: { generation: number; conversationVersion: number };
+};
+async function observedBootstrap(): Promise<ObservedBootstrap> {
+  const observed = {
+    generation: chatStore.generation,
+    conversationVersion: chatStore.conversationVersion,
+  };
+  return { ...await api.bootstrap(), [bootstrapObservation]: observed };
+}
 export const useChatState = () =>
   useSyncExternalStore(chatStore.subscribe, chatStore.getSnapshot);
 export function ChatProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, reconcileSession } = useAuth();
   const client = useQueryClient();
+  const appliedBootstrap = useRef<ObservedBootstrap | null>(null);
   const query = useQuery({
     queryKey: ["bootstrap", user!.id],
-    queryFn: api.bootstrap,
+    queryFn: observedBootstrap,
+    structuralSharing: false,
     staleTime: 30_000,
     refetchInterval: 60_000,
     retry: (count, e) =>
@@ -51,10 +64,19 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const capabilities = useRef<Record<string, boolean>>({});
   useEffect(() => {
     if (query.data) {
-      chatStore.replaceConversations(query.data.conversations);
+      if (query.data.user.id !== user!.id) {
+        reconcileSession();
+        return;
+      }
+      if (appliedBootstrap.current === query.data) return;
+      if (!chatStore.replaceConversations(query.data.conversations, query.data[bootstrapObservation])) {
+        void client.invalidateQueries({ queryKey: ["bootstrap", user!.id] });
+        return;
+      }
+      appliedBootstrap.current = query.data;
       capabilities.current = query.data.capabilities;
     }
-  }, [query.data]);
+  }, [client, query.data, reconcileSession, user]);
   useEffect(() => {
     chatStore.begin(user!.id);
     let stopped = false,
@@ -63,15 +85,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       attempt = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let ws: WebSocket | null = null;
-    const revoke = () => {
-      chatStore.revoke();
-      client.removeQueries({
-        predicate: (q) =>
-          ["members", "workspaceAgents"].includes(String(q.queryKey[0])),
-      });
-      void client.resetQueries({ queryKey: ["bootstrap"] });
+    const refreshPermissions = () => {
+      // A 403 may reject an owner-only operation or a disabled write. Fetch
+      // current permissions before pruning content that is still readable.
+      void client.invalidateQueries({ queryKey: ["bootstrap"] });
     };
-    api.onForbidden = revoke;
+    api.onForbidden = refreshPermissions;
     async function sync() {
       if (stopped) return;
       if (syncing) {
@@ -91,9 +110,21 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             if (page.hasMore && page.cursor === cursor)
               throw new Error("同步游标未前进");
             if (page.events.some((e) => e.type === "membership.changed")) {
-              const fresh = await api.bootstrap();
-              if (stopped || generation !== chatStore.generation) return;
-              chatStore.replaceConversations(fresh.conversations);
+              let fresh: ObservedBootstrap;
+              // A local creation or another accepted bootstrap can invalidate
+              // this snapshot while its response is in flight. Re-read before
+              // filtering the page or advancing its durable cursor.
+              for (;;) {
+                fresh = await observedBootstrap();
+                if (stopped || generation !== chatStore.generation) return;
+                if (fresh.user.id !== user!.id) {
+                  reconcileSession();
+                  return;
+                }
+                if (chatStore.replaceConversations(fresh.conversations, fresh[bootstrapObservation])) break;
+              }
+              appliedBootstrap.current = fresh;
+              capabilities.current = fresh.capabilities;
               const allowed = new Set(fresh.conversations.map((c) => c.id));
               page.events = page.events.filter((event) => {
                 const id =
@@ -237,12 +268,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         ws.close();
       }
       socket.current = null;
-      api.onForbidden = undefined;
+      if (api.onForbidden === refreshPermissions) api.onForbidden = undefined;
       window.removeEventListener("online", online);
       window.removeEventListener("offline", offline);
       document.removeEventListener("visibilitychange", focus);
     };
-  }, [user, client]);
+  }, [user, client, reconcileSession]);
   const sendTyping = useCallback((conversationId: string, value: boolean) => {
     if (
       capabilities.current["im.typing.publish"] &&
@@ -255,7 +286,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   return (
     <ChatContext.Provider
       value={{
-        data: query.data,
+        data: query.data?.user.id === user!.id ? query.data : undefined,
         loading: query.isLoading,
         error: query.error ? "无法加载你的工作空间，请稍后重试。" : "",
         connection,

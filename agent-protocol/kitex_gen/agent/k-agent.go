@@ -5200,6 +5200,48 @@ func (p *SandboxTaskResponse) FastRead(buf []byte) (int, error) {
 					goto SkipFieldError
 				}
 			}
+		case 16:
+			if fieldTypeId == thrift.STRING {
+				l, err = p.FastReadField16(buf[offset:])
+				offset += l
+				if err != nil {
+					goto ReadFieldError
+				}
+			} else {
+				l, err = thrift.Binary.Skip(buf[offset:], fieldTypeId)
+				offset += l
+				if err != nil {
+					goto SkipFieldError
+				}
+			}
+		case 17:
+			if fieldTypeId == thrift.I64 {
+				l, err = p.FastReadField17(buf[offset:])
+				offset += l
+				if err != nil {
+					goto ReadFieldError
+				}
+			} else {
+				l, err = thrift.Binary.Skip(buf[offset:], fieldTypeId)
+				offset += l
+				if err != nil {
+					goto SkipFieldError
+				}
+			}
+		case 18:
+			if fieldTypeId == thrift.STRING {
+				l, err = p.FastReadField18(buf[offset:])
+				offset += l
+				if err != nil {
+					goto ReadFieldError
+				}
+			} else {
+				l, err = thrift.Binary.Skip(buf[offset:], fieldTypeId)
+				offset += l
+				if err != nil {
+					goto SkipFieldError
+				}
+			}
 		default:
 			l, err = thrift.Binary.Skip(buf[offset:], fieldTypeId)
 			offset += l
@@ -5444,6 +5486,48 @@ func (p *SandboxTaskResponse) FastReadField15(buf []byte) (int, error) {
 	return offset, nil
 }
 
+func (p *SandboxTaskResponse) FastReadField16(buf []byte) (int, error) {
+	offset := 0
+
+	var _field *string
+	if v, l, err := thrift.Binary.ReadString(buf[offset:]); err != nil {
+		return offset, err
+	} else {
+		offset += l
+		_field = &v
+	}
+	p.OutputExpiresAt = _field
+	return offset, nil
+}
+
+func (p *SandboxTaskResponse) FastReadField17(buf []byte) (int, error) {
+	offset := 0
+
+	var _field *int64
+	if v, l, err := thrift.Binary.ReadI64(buf[offset:]); err != nil {
+		return offset, err
+	} else {
+		offset += l
+		_field = &v
+	}
+	p.OutputRetentionSeconds = _field
+	return offset, nil
+}
+
+func (p *SandboxTaskResponse) FastReadField18(buf []byte) (int, error) {
+	offset := 0
+
+	var _field *string
+	if v, l, err := thrift.Binary.ReadString(buf[offset:]); err != nil {
+		return offset, err
+	} else {
+		offset += l
+		_field = &v
+	}
+	p.OutputAvailability = _field
+	return offset, nil
+}
+
 func (p *SandboxTaskResponse) FastWrite(buf []byte) int {
 	return p.FastWriteNocopy(buf, nil)
 }
@@ -5458,6 +5542,7 @@ func (p *SandboxTaskResponse) FastWriteNocopy(buf []byte, w thrift.NocopyWriter)
 		offset += p.fastWriteField11(buf[offset:], w)
 		offset += p.fastWriteField12(buf[offset:], w)
 		offset += p.fastWriteField14(buf[offset:], w)
+		offset += p.fastWriteField17(buf[offset:], w)
 		offset += p.fastWriteField2(buf[offset:], w)
 		offset += p.fastWriteField3(buf[offset:], w)
 		offset += p.fastWriteField5(buf[offset:], w)
@@ -5466,6 +5551,8 @@ func (p *SandboxTaskResponse) FastWriteNocopy(buf []byte, w thrift.NocopyWriter)
 		offset += p.fastWriteField10(buf[offset:], w)
 		offset += p.fastWriteField13(buf[offset:], w)
 		offset += p.fastWriteField15(buf[offset:], w)
+		offset += p.fastWriteField16(buf[offset:], w)
+		offset += p.fastWriteField18(buf[offset:], w)
 	}
 	offset += thrift.Binary.WriteFieldStop(buf[offset:])
 	return offset
@@ -5489,6 +5576,9 @@ func (p *SandboxTaskResponse) BLength() int {
 		l += p.field13Length()
 		l += p.field14Length()
 		l += p.field15Length()
+		l += p.field16Length()
+		l += p.field17Length()
+		l += p.field18Length()
 	}
 	l += thrift.Binary.FieldStopLength()
 	return l
@@ -5623,6 +5713,33 @@ func (p *SandboxTaskResponse) fastWriteField15(buf []byte, w thrift.NocopyWriter
 	return offset
 }
 
+func (p *SandboxTaskResponse) fastWriteField16(buf []byte, w thrift.NocopyWriter) int {
+	offset := 0
+	if p.IsSetOutputExpiresAt() {
+		offset += thrift.Binary.WriteFieldBegin(buf[offset:], thrift.STRING, 16)
+		offset += thrift.Binary.WriteStringNocopy(buf[offset:], w, *p.OutputExpiresAt)
+	}
+	return offset
+}
+
+func (p *SandboxTaskResponse) fastWriteField17(buf []byte, w thrift.NocopyWriter) int {
+	offset := 0
+	if p.IsSetOutputRetentionSeconds() {
+		offset += thrift.Binary.WriteFieldBegin(buf[offset:], thrift.I64, 17)
+		offset += thrift.Binary.WriteI64(buf[offset:], *p.OutputRetentionSeconds)
+	}
+	return offset
+}
+
+func (p *SandboxTaskResponse) fastWriteField18(buf []byte, w thrift.NocopyWriter) int {
+	offset := 0
+	if p.IsSetOutputAvailability() {
+		offset += thrift.Binary.WriteFieldBegin(buf[offset:], thrift.STRING, 18)
+		offset += thrift.Binary.WriteStringNocopy(buf[offset:], w, *p.OutputAvailability)
+	}
+	return offset
+}
+
 func (p *SandboxTaskResponse) field1Length() int {
 	l := 0
 	l += thrift.Binary.FieldBeginLength()
@@ -5748,6 +5865,33 @@ func (p *SandboxTaskResponse) field15Length() int {
 	if p.IsSetOutputSha256() {
 		l += thrift.Binary.FieldBeginLength()
 		l += thrift.Binary.StringLengthNocopy(*p.OutputSha256)
+	}
+	return l
+}
+
+func (p *SandboxTaskResponse) field16Length() int {
+	l := 0
+	if p.IsSetOutputExpiresAt() {
+		l += thrift.Binary.FieldBeginLength()
+		l += thrift.Binary.StringLengthNocopy(*p.OutputExpiresAt)
+	}
+	return l
+}
+
+func (p *SandboxTaskResponse) field17Length() int {
+	l := 0
+	if p.IsSetOutputRetentionSeconds() {
+		l += thrift.Binary.FieldBeginLength()
+		l += thrift.Binary.I64Length()
+	}
+	return l
+}
+
+func (p *SandboxTaskResponse) field18Length() int {
+	l := 0
+	if p.IsSetOutputAvailability() {
+		l += thrift.Binary.FieldBeginLength()
+		l += thrift.Binary.StringLengthNocopy(*p.OutputAvailability)
 	}
 	return l
 }

@@ -224,18 +224,20 @@ export class TeamieClient {
   csrfToken = "";
   onUnauthorized?: () => void;
   onForbidden?: () => void;
+  onSessionChanged?: () => void;
   async #request<T>(
     path: string,
     options: RequestInit = {},
     responseType: "json" | "blob" = "json",
     authentication: "session" | "capability" = "session",
   ): Promise<T> {
-    const method = options.method ?? "GET";
     const sessionToken = this.csrfToken;
     const headers = new Headers(options.headers);
     if (options.body && !(options.body instanceof FormData))
       headers.set("Content-Type", "application/json");
-    if (authentication === "session" && method !== "GET" && sessionToken)
+    // Bind protected reads to the same browser session as writes. Session
+    // discovery deliberately remains unbound so a changed cookie can recover.
+    if (authentication === "session" && path !== "/auth/session" && sessionToken)
       headers.set("X-CSRF-Token", sessionToken);
     const response = await fetch(`/api/v1${path}`, {
       ...options,
@@ -245,10 +247,15 @@ export class TeamieClient {
     });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
+      const current = authentication === "session" && sessionToken === this.csrfToken;
+      const sessionChanged = data.error?.code === "session_changed" ||
+        response.status === 403 && ["csrf_failed", "invalid_csrf"].includes(data.error?.code);
+      if (current && sessionChanged) this.onSessionChanged?.();
       if (
         authentication === "session" &&
         sessionToken === this.csrfToken &&
         response.status === 401 &&
+        !sessionChanged &&
         !path.startsWith("/auth/login") &&
         !path.startsWith("/auth/register")
       )
@@ -257,7 +264,8 @@ export class TeamieClient {
         authentication === "session" &&
         sessionToken === this.csrfToken &&
         response.status === 403 &&
-        /\/(conversations|workspaces|sync)/.test(path)
+        /\/(conversations|workspaces|sync)/.test(path) &&
+        !sessionChanged
       )
         this.onForbidden?.();
       throw new ApiError(
@@ -266,9 +274,11 @@ export class TeamieClient {
         data.error?.message ?? `请求失败 (${response.status})`,
       );
     }
-    if (response.status === 204) return undefined as T;
-    if (responseType === "blob") return response.blob() as Promise<T>;
-    return response.json() as Promise<T>;
+    const value = response.status === 204 ? undefined : responseType === "blob"
+      ? await response.blob() : await response.json();
+    if (response.status !== 204 && authentication === "session" && !/^\/auth\/(?:login|register|session)$/.test(path) && sessionToken !== this.csrfToken)
+      throw new ApiError(409, "stale_session", "账号已变化，请重试。");
+    return value as T;
   }
   session = () => this.#request<Session>("/auth/session");
   registration = () => this.#request<RegistrationPolicy>("/auth/registration");
