@@ -125,6 +125,14 @@ func containerConfig(j Job) map[string]any {
 		// an ambiguous transport/crash cannot become command input.
 		config["Cmd"] = []string{"/bin/sh", "-c", `printf '%s\n' "$1"; IFS= read -r release; exec /bin/sh -c "$2" </dev/null`, "teamie-output", j.OutputAnchor, j.Command}
 		config["OpenStdin"] = true
+		// json-file replaces invalid UTF-8 bytes before the logs API can read
+		// them. The built-in local driver retains bytes in protobuf records,
+		// including daemon timestamps, within one bounded replay log.
+		// Moby jsonlogbytes.go replaces invalid UTF-8 with U+FFFD; local.go's
+		// messageToProto/protoToMessage instead copies Line bytes unchanged:
+		// https://github.com/moby/moby/blob/master/daemon/logger/jsonfilelog/jsonlog/jsonlogbytes.go
+		// https://github.com/moby/moby/blob/master/daemon/logger/local/local.go
+		config["HostConfig"].(map[string]any)["LogConfig"] = map[string]any{"Type": "local", "Config": map[string]string{"max-size": "16m", "max-file": "1", "compress": "false"}}
 	}
 	return config
 }

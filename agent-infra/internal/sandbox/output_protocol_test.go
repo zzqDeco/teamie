@@ -77,7 +77,14 @@ func TestDockerTimestampStreamAndReleaseUpgrade(t *testing.T) {
 	}
 	legacy := containerConfig(Job{Command: "untrusted", Workspace: "/workspace"})
 	paged := containerConfig(Job{Command: "untrusted", Workspace: "/workspace", OutputAnchor: "marker"})
-	if !reflect.DeepEqual(legacy["HostConfig"], paged["HostConfig"]) || paged["OpenStdin"] != true {
+	legacyHost, pagedHost := legacy["HostConfig"].(map[string]any), paged["HostConfig"].(map[string]any)
+	legacyLogs, pagedLogs := legacyHost["LogConfig"].(map[string]any), pagedHost["LogConfig"].(map[string]any)
+	if legacyLogs["Type"] != "json-file" || legacyLogs["Config"].(map[string]string)["max-size"] != "128k" || pagedLogs["Type"] != "local" || pagedLogs["Config"].(map[string]string)["max-size"] != "16m" || pagedLogs["Config"].(map[string]string)["max-file"] != "1" {
+		t.Fatal("output replay logs are not explicitly bounded")
+	}
+	delete(legacyHost, "LogConfig")
+	delete(pagedHost, "LogConfig")
+	if !reflect.DeepEqual(legacyHost, pagedHost) || paged["OpenStdin"] != true {
 		t.Fatal("output paging changed child resource/isolation controls")
 	}
 	cmd := paged["Cmd"].([]string)
