@@ -114,10 +114,15 @@ func normalizeMode(raw, model string, streaming bool) ([]byte, error) {
 	if json.Unmarshal([]byte(raw), &m) != nil || m == nil {
 		return nil, api.Err(400, "invalid_request", "Invalid chat completion JSON")
 	}
-	allowed := map[string]bool{"messages": true, "model": true, "stream": true, "stream_options": true, "tools": true, "tool_choice": true, "parallel_tool_calls": true, "temperature": true, "top_p": true, "max_tokens": true, "max_completion_tokens": true, "stop": true, "response_format": true, "seed": true, "frequency_penalty": true, "presence_penalty": true, "n": true}
+	allowed := map[string]bool{"messages": true, "model": true, "stream": true, "stream_options": true, "tools": true, "tool_choice": true, "parallel_tool_calls": true, "temperature": true, "top_p": true, "max_tokens": true, "max_completion_tokens": true, "stop": true, "response_format": true, "seed": true, "frequency_penalty": true, "presence_penalty": true, "n": true, "enable_thinking": true}
 	for k := range m {
 		if !allowed[k] {
 			return nil, api.Err(400, "invalid_request", "Unsupported chat completion option")
+		}
+	}
+	if raw, ok := m["enable_thinking"]; ok {
+		if value := strings.TrimSpace(string(raw)); value != "true" && value != "false" {
+			return nil, api.Err(400, "invalid_request", "Invalid thinking option")
 		}
 	}
 	var messages []map[string]json.RawMessage

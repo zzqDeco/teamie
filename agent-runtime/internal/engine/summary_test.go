@@ -70,6 +70,17 @@ func (f *summaryGatewayFixture) Chat(ctx context.Context, r *wire.GatewayChatReq
 	switch f.mode {
 	case "empty":
 		message.Content = ""
+	case "empty_length", "empty_length_then_empty", "empty_length_then_tool":
+		message.Content = ""
+		finish = "length"
+		if f.summaryCalls > 1 && f.mode == "empty_length_then_empty" {
+			finish = "stop"
+		}
+		if f.summaryCalls > 1 && f.mode == "empty_length_then_tool" {
+			args, _ := json.Marshal(sendArgs{ConversationID: f.conversation, Body: "SUMMARY_TOOL_MUST_NOT_RUN"})
+			message.ToolCalls = []schema.ToolCall{{ID: "summary-send", Type: "function", Function: schema.FunctionCall{Name: "im_send_message", Arguments: string(args)}}}
+			finish = "tool_calls"
+		}
 	case "tool_call":
 		args, _ := json.Marshal(sendArgs{ConversationID: f.conversation, Body: "SUMMARY_TOOL_MUST_NOT_RUN"})
 		message.ToolCalls = []schema.ToolCall{{ID: "summary-send", Type: "function", Function: schema.FunctionCall{Name: "im_send_message", Arguments: string(args)}}}
@@ -91,11 +102,15 @@ func TestNativeSummaryForbidsToolsAndKeepsOrdinaryIMTools(t *testing.T) {
 	for _, test := range []struct {
 		name, mode, state, code string
 		posts                   int
+		calls                   int
 	}{
 		{name: "text summary", state: "completed", posts: 2},
 		{name: "empty summary rejected", mode: "empty", state: "failed", code: "execution_failed", posts: 1},
 		{name: "summary tool never executes", mode: "tool_call", state: "failed", code: "execution_failed", posts: 1},
 		{name: "upstream failure retains its code", mode: "upstream_unavailable", state: "retry", code: "upstream_unavailable", posts: 1},
+		{name: "repeated empty length fails closed", mode: "empty_length", state: "failed", code: "execution_failed", posts: 1, calls: 2},
+		{name: "empty failover fails closed", mode: "empty_length_then_empty", state: "failed", code: "execution_failed", posts: 1, calls: 2},
+		{name: "failover tool never executes", mode: "empty_length_then_tool", state: "failed", code: "execution_failed", posts: 1, calls: 2},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			s := testStore(t)
@@ -132,7 +147,11 @@ func TestNativeSummaryForbidsToolsAndKeepsOrdinaryIMTools(t *testing.T) {
 			gateway.summaryMu.Lock()
 			calls, ordinaryCalls, failure := gateway.summaryCalls, gateway.normalAfterSummary, gateway.failure
 			gateway.summaryMu.Unlock()
-			if failure != nil || calls != 1 {
+			wantCalls := test.calls
+			if wantCalls == 0 {
+				wantCalls = 1
+			}
+			if failure != nil || calls != wantCalls {
 				t.Fatalf("unexpected summary protocol: calls=%d failure=%v", calls, failure)
 			}
 			imf.mu.Lock()

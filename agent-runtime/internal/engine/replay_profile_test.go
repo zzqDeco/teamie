@@ -117,6 +117,7 @@ func TestV034ToolExecutionDoesNotAcquireTheNewAttachmentTool(t *testing.T) {
 type replayFixtureStep struct {
 	summary   bool
 	message   chatMessage
+	native    *schema.AgenticMessage
 	tokens    int
 	errorCode string
 	entered   chan struct{}
@@ -165,6 +166,14 @@ func (g *replayProfileGateway) Chat(ctx context.Context, binding *wire.GatewayCh
 	}
 	if step.errorCode != "" {
 		return &wire.GatewayChatResponse{ErrorCode: &step.errorCode}, nil
+	}
+	if step.native != nil {
+		raw, err := (&schema.HumanReadableSerializer{}).Marshal(step.native)
+		if err != nil {
+			return nil, err
+		}
+		response := string(raw)
+		return &wire.GatewayChatResponse{Ok: true, ResponseJson: &response}, nil
 	}
 	response, err := json.Marshal(map[string]any{
 		"choices": []any{map[string]any{"message": step.message, "finish_reason": "stop"}},
