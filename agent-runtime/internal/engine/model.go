@@ -179,7 +179,11 @@ func (m *GatewayModel) checkContextRequest(ctx context.Context, run *Run, step i
 	if err != nil {
 		return err
 	}
-	if !budget.fits(ContextMeasurement{TransportBytes: len(request), EstimatedTokens: estimateContextTokens(request)}) {
+	measurement, err := measureContextRequest(request)
+	if err != nil {
+		return err
+	}
+	if !budget.fits(measurement) {
 		return m.gatewayFailure(ctx, run, step, hash, streaming, "request_too_large")
 	}
 	return nil

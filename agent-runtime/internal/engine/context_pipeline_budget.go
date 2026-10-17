@@ -9,10 +9,11 @@ import (
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
+	"teamie/agent-protocol/modeltransport"
 )
 
 const contextBudgetVersion = 1
-const contextCounterVersion = "teamie-wire-estimate-v1"
+const contextCounterVersion = "teamie-visible-estimate-v1"
 const contextTransportLimit = 262144
 
 // ContextBudgetSnapshot is immutable Run policy, not a wall-clock work budget.
@@ -74,9 +75,7 @@ type ContextMeasurement struct {
 	TransportBytes  int `json:"transportBytes"`
 }
 
-// Do not reuse a previous assistant's TotalTokens after rewriting its input.
-// Count the complete current wire (including tools and escapes) consistently.
-// This is a conservative, versioned estimate, not a provider tokenizer claim.
+// This is a conservative, versioned text estimate, not a provider tokenizer.
 func estimateContextTokens(text []byte) int {
 	ascii, nonASCII := 0, 0
 	for len(text) > 0 {
@@ -97,7 +96,55 @@ func measureContext(messages []*schema.AgenticMessage, tools []*schema.ToolInfo,
 	if err != nil {
 		return ContextMeasurement{}, err
 	}
-	return ContextMeasurement{EstimatedTokens: estimateContextTokens(request), TransportBytes: len(request)}, nil
+	return measureContextRequest(request)
+}
+
+// Transport capacity counts the complete lossless native wire. Token capacity
+// counts provider-visible contents and function schemas, excluding Session IDs,
+// usage, archive/ACL metadata and serializer type annotations. Previous reported
+// TotalTokens must never become a baseline after rewriting the input.
+func measureContextRequest(request []byte) (ContextMeasurement, error) {
+	var envelope modeltransport.Request
+	var messages []*schema.AgenticMessage
+	var opts model.Options
+	if json.Unmarshal(request, &envelope) != nil || (&schema.HumanReadableSerializer{}).Unmarshal(envelope.Messages, &messages) != nil || json.Unmarshal(envelope.Options, &opts) != nil {
+		return ContextMeasurement{}, errors.New("invalid context measurement input")
+	}
+	visible := make([]*schema.AgenticMessage, 0, len(messages))
+	for _, message := range messages {
+		if message == nil {
+			continue
+		}
+		copy := *message
+		copy.Extra = nil
+		copy.ResponseMeta = nil
+		visible = append(visible, &copy)
+	}
+	tools := []map[string]any{}
+	for _, info := range append(append([]*schema.ToolInfo{}, opts.Tools...), opts.DeferredTools...) {
+		if info == nil {
+			continue
+		}
+		entry := map[string]any{"name": info.Name, "description": info.Desc}
+		if info.ParamsOneOf != nil {
+			params, err := info.ParamsOneOf.ToJSONSchema()
+			if err != nil {
+				return ContextMeasurement{}, err
+			}
+			entry["parameters"] = params
+		}
+		tools = append(tools, entry)
+	}
+	raw, err := json.Marshal(struct {
+		Messages []*schema.AgenticMessage  `json:"messages"`
+		Tools    []map[string]any          `json:"tools"`
+		Stop     []string                  `json:"stop,omitempty"`
+		Choice   *schema.AgenticToolChoice `json:"toolChoice,omitempty"`
+	}{visible, tools, opts.Stop, opts.AgenticToolChoice})
+	if err != nil {
+		return ContextMeasurement{}, err
+	}
+	return ContextMeasurement{EstimatedTokens: estimateContextTokens(raw), TransportBytes: len(request)}, nil
 }
 
 func (b ContextBudgetSnapshot) fits(measurement ContextMeasurement) bool {

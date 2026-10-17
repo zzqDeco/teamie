@@ -220,6 +220,12 @@ func TestContextRecoveryStreamFirstErrorIsDurableButPartialIsTerminal(t *testing
 }
 
 func TestContextNativeTurnLoopStreamsBeforeProviderCompletionAndRecoversDurably(t *testing.T) {
+	for _, summaryOverflow := range []bool{false, true} {
+		t.Run(map[bool]string{false: "main_overflow", true: "summary_also_overflows"}[summaryOverflow], func(t *testing.T) { testContextNativeTurnLoopRecovery(t, summaryOverflow) })
+	}
+}
+
+func testContextNativeTurnLoopRecovery(t *testing.T, summaryOverflow bool) {
 	s, lease, run := contextModelRun(t)
 	ctx, cancel := context.WithCancel(WithRun(context.Background(), run))
 	defer cancel()
@@ -230,7 +236,11 @@ func TestContextNativeTurnLoopStreamsBeforeProviderCompletionAndRecoversDurably(
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
 		if r.URL.Path == modeltransport.GeneratePath {
-			summaryCalls.Add(1)
+			if summaryCalls.Add(1) == 1 && summaryOverflow {
+				code := "context_overflow"
+				_ = json.NewEncoder(w).Encode(&wire.GatewayChatResponse{Ok: false, ErrorCode: &code})
+				return
+			}
 			raw, _ := (&schema.HumanReadableSerializer{}).Marshal(assistantText("Earlier resolved work."))
 			value := string(raw)
 			_ = json.NewEncoder(w).Encode(&wire.GatewayChatResponse{Ok: true, ResponseJson: &value})
@@ -325,7 +335,11 @@ func TestContextNativeTurnLoopStreamsBeforeProviderCompletionAndRecoversDurably(
 		close(release)
 		t.Fatal("native retry buffered stream until provider completion")
 	}
-	if count(t, s, `SELECT count(*) FROM runtime_context_recoveries`) != 1 || summaryCalls.Load() == 0 {
+	expectedFailures, expectedSummaries := 1, 1
+	if summaryOverflow {
+		expectedFailures, expectedSummaries = 2, 4
+	}
+	if count(t, s, `SELECT count(*) FROM runtime_context_recoveries`) != expectedFailures || int(summaryCalls.Load()) != expectedSummaries {
 		t.Fatal("reactive branch did not persist failed step and native summary")
 	}
 	close(release)
@@ -340,7 +354,7 @@ func TestContextNativeTurnLoopStreamsBeforeProviderCompletionAndRecoversDurably(
 	loop.Stop(adk.WithImmediate())
 	cancel()
 	loop.Wait()
-	if streamCalls.Load() != 2 || count(t, s, `SELECT count(*) FROM runtime_model_calls`) != int(summaryCalls.Load())+1 {
+	if streamCalls.Load() != 2 || count(t, s, `SELECT count(*) FROM runtime_model_calls`) != expectedSummaries+2-expectedFailures {
 		t.Fatal("failed/success model step tape misaligned")
 	}
 	var mutations int
@@ -381,16 +395,17 @@ func TestContextNativeTurnLoopStreamsBeforeProviderCompletionAndRecoversDurably(
 			}
 		}
 	}
-	if streamCalls.Load() != 2 || summaryCalls.Load() != 1 {
+	if streamCalls.Load() != 2 || int(summaryCalls.Load()) != expectedSummaries {
 		t.Fatal("restart repeated an overflow, summary or accepted model request")
 	}
 	recording.mu.Lock()
 	defer recording.mu.Unlock()
-	if len(recording.requests) != 6 {
+	steps := expectedSummaries + 2
+	if len(recording.requests) != steps*2 {
 		t.Fatal("replay skipped a model step", len(recording.requests))
 	}
-	for i := 0; i < 3; i++ {
-		if modelRequestHash(recording.requests[i]) != modelRequestHash(recording.requests[i+3]) {
+	for i := 0; i < steps; i++ {
+		if modelRequestHash(recording.requests[i]) != modelRequestHash(recording.requests[i+steps]) {
 			t.Fatal("replayed model hash changed", i)
 		}
 	}

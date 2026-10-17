@@ -70,6 +70,10 @@ func (p *ContextPipeline) BeforeAgent(ctx context.Context, runCtx *adk.ChatModel
 }
 
 func (p *ContextPipeline) BeforeModelRewriteState(ctx context.Context, state *adk.TypedChatModelAgentState[*schema.AgenticMessage], mc *adk.TypedModelContext[*schema.AgenticMessage]) (context.Context, *adk.TypedChatModelAgentState[*schema.AgenticMessage], error) {
+	copyState := *state
+	copyState.ToolInfos = contextV1ToolInfos(state.ToolInfos)
+	copyState.DeferredToolInfos = contextV1ToolInfos(state.DeferredToolInfos)
+	state = &copyState
 	names := []string{}
 	for _, tool := range state.ToolInfos {
 		names = append(names, tool.Name)
