@@ -22,6 +22,8 @@ type Auth = {
   updateUser: (user: User) => void;
   logout: () => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
+  resetPassword: (token: string, newPassword: string, accountId: string) => Promise<void>;
+  captureSession: () => { subject: string | null; isCurrent: () => boolean };
   retry: () => void;
 };
 const AuthContext = createContext<Auth | null>(null);
@@ -60,6 +62,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const updateUser = useCallback((nextUser: User) => {
     if (subject.current !== nextUser.id) return;
     setUser((current) => current?.id === nextUser.id ? nextUser : current);
+  }, []);
+  const captureSession = useCallback(() => {
+    const requestGeneration = generation.current;
+    const requestSubject = subject.current;
+    return {
+      subject: requestSubject,
+      isCurrent: () =>
+        requestGeneration === generation.current &&
+        requestSubject === subject.current,
+    };
   }, []);
   useEffect(() => {
     let active = true;
@@ -114,6 +126,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       navigate("/login?passwordChanged=1", { replace: true });
     });
   };
+  const resetPassword = async (
+    token: string,
+    newPassword: string,
+    accountId: string,
+  ) => {
+    const request = captureSession();
+    await api.resetPassword(token, newPassword);
+    // The reset endpoint never writes a cookie. Only discard the captured,
+    // revoked local session; a newer login (even for this account) survives.
+    if (request.subject === accountId && request.isCurrent()) reset();
+  };
   return (
     <AuthContext.Provider
       value={{
@@ -124,6 +147,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         updateUser,
         logout,
         changePassword,
+        resetPassword,
+        captureSession,
         retry: () => setAttempt((n) => n + 1),
       }}
     >

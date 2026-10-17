@@ -22,6 +22,20 @@ export type CreatedRegistrationInvite = {
   };
   url: string;
 };
+export type PlatformUsersPage = { users: User[]; cursor?: string };
+export type PasswordResetLink = {
+  id: string;
+  createdAt: string;
+  expiresAt: string;
+};
+export type CreatedPasswordResetLink = {
+  reset: PasswordResetLink;
+  url: string;
+};
+export type PasswordResetInspection = {
+  account: Pick<User, "id" | "displayName"> & { emailMasked: string };
+  expiresAt: string;
+};
 export type Workspace = {
   id: string;
   name: string;
@@ -214,23 +228,25 @@ export class TeamieClient {
     path: string,
     options: RequestInit = {},
     responseType: "json" | "blob" = "json",
+    authentication: "session" | "capability" = "session",
   ): Promise<T> {
     const method = options.method ?? "GET";
     const sessionToken = this.csrfToken;
     const headers = new Headers(options.headers);
     if (options.body && !(options.body instanceof FormData))
       headers.set("Content-Type", "application/json");
-    if (method !== "GET" && sessionToken)
+    if (authentication === "session" && method !== "GET" && sessionToken)
       headers.set("X-CSRF-Token", sessionToken);
     const response = await fetch(`/api/v1${path}`, {
       ...options,
       headers,
-      credentials: "same-origin",
+      credentials: authentication === "session" ? "same-origin" : "omit",
       cache: "no-store",
     });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       if (
+        authentication === "session" &&
         sessionToken === this.csrfToken &&
         response.status === 401 &&
         !path.startsWith("/auth/login") &&
@@ -238,6 +254,7 @@ export class TeamieClient {
       )
         this.onUnauthorized?.();
       if (
+        authentication === "session" &&
         sessionToken === this.csrfToken &&
         response.status === 403 &&
         /\/(conversations|workspaces|sync)/.test(path)
@@ -266,6 +283,47 @@ export class TeamieClient {
     this.#request<void>(`/auth/admin/invites/${part(id)}`, {
       method: "DELETE",
     });
+  platformUsers = async (
+    options: { cursor?: string; limit?: number; q?: string } = {},
+  ): Promise<PlatformUsersPage> => {
+    const params = new URLSearchParams();
+    if (options.cursor) params.set("cursor", options.cursor);
+    if (options.limit !== undefined) params.set("limit", String(options.limit));
+    if (options.q) params.set("q", options.q);
+    const result = await this.#request<PlatformUsersPage>(
+      `/auth/admin/users${params.size ? `?${params}` : ""}`,
+    );
+    return {
+      users: result.users.map((user) => ({
+        id: user.id,
+        email: user.email,
+        displayName: user.displayName,
+        kind: user.kind,
+        platformRole: user.platformRole,
+        createdAt: user.createdAt,
+      })),
+      ...(result.cursor ? { cursor: result.cursor } : {}),
+    };
+  };
+  createPasswordResetLink = (userId: string) =>
+    this.#request<CreatedPasswordResetLink>(
+      `/auth/admin/users/${part(userId)}/password-reset-links`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+  inspectPasswordReset = (token: string) =>
+    this.#request<PasswordResetInspection>(
+      "/auth/password-reset/inspect",
+      { method: "POST", body: JSON.stringify({ token }) },
+      "json",
+      "capability",
+    );
+  resetPassword = (token: string, newPassword: string) =>
+    this.#request<void>(
+      "/auth/password-reset",
+      { method: "POST", body: JSON.stringify({ token, newPassword }) },
+      "json",
+      "capability",
+    );
   agents = async () => ({
     agents: (await this.#request<{ agents: Agent[] }>("/agents")).agents.map(
       (agent) => publicAgent(agent),

@@ -13,10 +13,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider, useAuth } from "./auth";
 import { ChatProvider } from "./chat";
 import { Landing, Login, Join } from "./public";
+import { ForgotPassword, ResetPassword } from "./password-recovery";
 import { Shell } from "./shell";
 import { Button, Loading, Logo, Notice } from "./ui";
 import "./styles.css";
 import "./layout.css";
+import "./password-recovery.css";
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: true } },
 });
@@ -47,6 +49,8 @@ function App() {
     <Routes>
       <Route path="/" element={<Landing />} />
       <Route path="/login" element={<Login />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/join/:inviteCode" element={<Join />} />
       <Route
         path="/app/*"

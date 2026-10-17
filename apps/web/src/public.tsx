@@ -366,6 +366,7 @@ export function Login() {
                 />
               </label>
             )}
+            {!register && <Link to="/forgot-password" className="forgot-password-link">忘记密码？</Link>}
             {register && (
               <label>
                 {registration.data?.bootstrapRequired
