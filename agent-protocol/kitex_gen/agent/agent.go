@@ -1126,6 +1126,7 @@ type SandboxStartRequest struct {
 	TaskId         string `thrift:"taskId,4,required" frugal:"4,required,string" json:"taskId"`
 	Command        string `thrift:"command,5,required" frugal:"5,required,string" json:"command"`
 	TimeoutSeconds *int32 `thrift:"timeoutSeconds,6,optional" frugal:"6,optional,i32" json:"timeoutSeconds,omitempty"`
+	OutputVersion  *int32 `thrift:"outputVersion,7,optional" frugal:"7,optional,i32" json:"outputVersion,omitempty"`
 }
 
 func NewSandboxStartRequest() *SandboxStartRequest {
@@ -1163,6 +1164,15 @@ func (p *SandboxStartRequest) GetTimeoutSeconds() (v int32) {
 	}
 	return *p.TimeoutSeconds
 }
+
+var SandboxStartRequest_OutputVersion_DEFAULT int32
+
+func (p *SandboxStartRequest) GetOutputVersion() (v int32) {
+	if !p.IsSetOutputVersion() {
+		return SandboxStartRequest_OutputVersion_DEFAULT
+	}
+	return *p.OutputVersion
+}
 func (p *SandboxStartRequest) SetServiceToken(val string) {
 	p.ServiceToken = val
 }
@@ -1181,9 +1191,16 @@ func (p *SandboxStartRequest) SetCommand(val string) {
 func (p *SandboxStartRequest) SetTimeoutSeconds(val *int32) {
 	p.TimeoutSeconds = val
 }
+func (p *SandboxStartRequest) SetOutputVersion(val *int32) {
+	p.OutputVersion = val
+}
 
 func (p *SandboxStartRequest) IsSetTimeoutSeconds() bool {
 	return p.TimeoutSeconds != nil
+}
+
+func (p *SandboxStartRequest) IsSetOutputVersion() bool {
+	return p.OutputVersion != nil
 }
 
 func (p *SandboxStartRequest) String() string {
@@ -1200,6 +1217,7 @@ var fieldIDToName_SandboxStartRequest = map[int16]string{
 	4: "taskId",
 	5: "command",
 	6: "timeoutSeconds",
+	7: "outputVersion",
 }
 
 type SandboxTaskRequest struct {
@@ -1286,16 +1304,21 @@ var fieldIDToName_SandboxTaskRequest = map[int16]string{
 }
 
 type SandboxTaskResponse struct {
-	Ok           bool    `thrift:"ok,1,required" frugal:"1,required,bool" json:"ok"`
-	TaskId       string  `thrift:"taskId,2,required" frugal:"2,required,string" json:"taskId"`
-	State        string  `thrift:"state,3,required" frugal:"3,required,string" json:"state"`
-	ExitCode     *int32  `thrift:"exitCode,4,optional" frugal:"4,optional,i32" json:"exitCode,omitempty"`
-	Stdout       *string `thrift:"stdout,5,optional" frugal:"5,optional,string" json:"stdout,omitempty"`
-	Stderr       *string `thrift:"stderr,6,optional" frugal:"6,optional,string" json:"stderr,omitempty"`
-	Truncated    *bool   `thrift:"truncated,7,optional" frugal:"7,optional,bool" json:"truncated,omitempty"`
-	NextOffset   *int64  `thrift:"nextOffset,8,optional" frugal:"8,optional,i64" json:"nextOffset,omitempty"`
-	ErrorCode    *string `thrift:"errorCode,9,optional" frugal:"9,optional,string" json:"errorCode,omitempty"`
-	ErrorMessage *string `thrift:"errorMessage,10,optional" frugal:"10,optional,string" json:"errorMessage,omitempty"`
+	Ok               bool    `thrift:"ok,1,required" frugal:"1,required,bool" json:"ok"`
+	TaskId           string  `thrift:"taskId,2,required" frugal:"2,required,string" json:"taskId"`
+	State            string  `thrift:"state,3,required" frugal:"3,required,string" json:"state"`
+	ExitCode         *int32  `thrift:"exitCode,4,optional" frugal:"4,optional,i32" json:"exitCode,omitempty"`
+	Stdout           *string `thrift:"stdout,5,optional" frugal:"5,optional,string" json:"stdout,omitempty"`
+	Stderr           *string `thrift:"stderr,6,optional" frugal:"6,optional,string" json:"stderr,omitempty"`
+	Truncated        *bool   `thrift:"truncated,7,optional" frugal:"7,optional,bool" json:"truncated,omitempty"`
+	NextOffset       *int64  `thrift:"nextOffset,8,optional" frugal:"8,optional,i64" json:"nextOffset,omitempty"`
+	ErrorCode        *string `thrift:"errorCode,9,optional" frugal:"9,optional,string" json:"errorCode,omitempty"`
+	ErrorMessage     *string `thrift:"errorMessage,10,optional" frugal:"10,optional,string" json:"errorMessage,omitempty"`
+	OutputBytes      *int64  `thrift:"outputBytes,11,optional" frugal:"11,optional,i64" json:"outputBytes,omitempty"`
+	OutputLimitBytes *int64  `thrift:"outputLimitBytes,12,optional" frugal:"12,optional,i64" json:"outputLimitBytes,omitempty"`
+	OutputStatus     *string `thrift:"outputStatus,13,optional" frugal:"13,optional,string" json:"outputStatus,omitempty"`
+	HasMore          *bool   `thrift:"hasMore,14,optional" frugal:"14,optional,bool" json:"hasMore,omitempty"`
+	OutputSha256     *string `thrift:"outputSha256,15,optional" frugal:"15,optional,string" json:"outputSha256,omitempty"`
 }
 
 func NewSandboxTaskResponse() *SandboxTaskResponse {
@@ -1379,6 +1402,51 @@ func (p *SandboxTaskResponse) GetErrorMessage() (v string) {
 	}
 	return *p.ErrorMessage
 }
+
+var SandboxTaskResponse_OutputBytes_DEFAULT int64
+
+func (p *SandboxTaskResponse) GetOutputBytes() (v int64) {
+	if !p.IsSetOutputBytes() {
+		return SandboxTaskResponse_OutputBytes_DEFAULT
+	}
+	return *p.OutputBytes
+}
+
+var SandboxTaskResponse_OutputLimitBytes_DEFAULT int64
+
+func (p *SandboxTaskResponse) GetOutputLimitBytes() (v int64) {
+	if !p.IsSetOutputLimitBytes() {
+		return SandboxTaskResponse_OutputLimitBytes_DEFAULT
+	}
+	return *p.OutputLimitBytes
+}
+
+var SandboxTaskResponse_OutputStatus_DEFAULT string
+
+func (p *SandboxTaskResponse) GetOutputStatus() (v string) {
+	if !p.IsSetOutputStatus() {
+		return SandboxTaskResponse_OutputStatus_DEFAULT
+	}
+	return *p.OutputStatus
+}
+
+var SandboxTaskResponse_HasMore_DEFAULT bool
+
+func (p *SandboxTaskResponse) GetHasMore() (v bool) {
+	if !p.IsSetHasMore() {
+		return SandboxTaskResponse_HasMore_DEFAULT
+	}
+	return *p.HasMore
+}
+
+var SandboxTaskResponse_OutputSha256_DEFAULT string
+
+func (p *SandboxTaskResponse) GetOutputSha256() (v string) {
+	if !p.IsSetOutputSha256() {
+		return SandboxTaskResponse_OutputSha256_DEFAULT
+	}
+	return *p.OutputSha256
+}
 func (p *SandboxTaskResponse) SetOk(val bool) {
 	p.Ok = val
 }
@@ -1409,6 +1477,21 @@ func (p *SandboxTaskResponse) SetErrorCode(val *string) {
 func (p *SandboxTaskResponse) SetErrorMessage(val *string) {
 	p.ErrorMessage = val
 }
+func (p *SandboxTaskResponse) SetOutputBytes(val *int64) {
+	p.OutputBytes = val
+}
+func (p *SandboxTaskResponse) SetOutputLimitBytes(val *int64) {
+	p.OutputLimitBytes = val
+}
+func (p *SandboxTaskResponse) SetOutputStatus(val *string) {
+	p.OutputStatus = val
+}
+func (p *SandboxTaskResponse) SetHasMore(val *bool) {
+	p.HasMore = val
+}
+func (p *SandboxTaskResponse) SetOutputSha256(val *string) {
+	p.OutputSha256 = val
+}
 
 func (p *SandboxTaskResponse) IsSetExitCode() bool {
 	return p.ExitCode != nil
@@ -1438,6 +1521,26 @@ func (p *SandboxTaskResponse) IsSetErrorMessage() bool {
 	return p.ErrorMessage != nil
 }
 
+func (p *SandboxTaskResponse) IsSetOutputBytes() bool {
+	return p.OutputBytes != nil
+}
+
+func (p *SandboxTaskResponse) IsSetOutputLimitBytes() bool {
+	return p.OutputLimitBytes != nil
+}
+
+func (p *SandboxTaskResponse) IsSetOutputStatus() bool {
+	return p.OutputStatus != nil
+}
+
+func (p *SandboxTaskResponse) IsSetHasMore() bool {
+	return p.HasMore != nil
+}
+
+func (p *SandboxTaskResponse) IsSetOutputSha256() bool {
+	return p.OutputSha256 != nil
+}
+
 func (p *SandboxTaskResponse) String() string {
 	if p == nil {
 		return "<nil>"
@@ -1456,6 +1559,11 @@ var fieldIDToName_SandboxTaskResponse = map[int16]string{
 	8:  "nextOffset",
 	9:  "errorCode",
 	10: "errorMessage",
+	11: "outputBytes",
+	12: "outputLimitBytes",
+	13: "outputStatus",
+	14: "hasMore",
+	15: "outputSha256",
 }
 
 type SandboxWorkspaceRequest struct {

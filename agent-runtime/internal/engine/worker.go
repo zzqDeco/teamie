@@ -332,6 +332,29 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		if err != nil {
 			return nil, err
 		}
+		if contextProfile(run) == contextProfileV1 {
+			budget, err := ParseContextBudgetSnapshot(run.ContextBudget)
+			if err != nil {
+				return nil, err
+			}
+			archive := &ContextArchive{Store: e.Store, Lease: lease, IM: imc, Authorize: authorize}
+			contextTools, err := archive.Tools(ctx)
+			if err != nil {
+				return nil, err
+			}
+			pageTool, err := tasks.backend.ReadPageTool()
+			if err != nil {
+				return nil, err
+			}
+			activeTools = append(activeTools, contextTools...)
+			activeTools = append(activeTools, pageTool)
+			pipeline, err := NewContextPipeline(ctx, ContextPipelineConfig{Model: gatewayModel, Budget: budget, Backend: archive, ArchivePath: archive.Path, ArchiveToolPath: archive.ArchiveToolPath, ArchiveTranscript: archive.ArchiveTranscript})
+			if err != nil {
+				return nil, err
+			}
+			handlers := append([]adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]{pipeline}, tasks.handlers...)
+			return adk.NewTypedChatModelAgent(ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{Name: "teamie_agent", Description: "A user-owned Teamie participant", Instruction: contextV1Instruction(def), Model: gatewayModel, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: activeTools, ExecuteSequentially: true}}, MaxIterations: math.MaxInt, Handlers: handlers, ModelRetryConfig: pipeline.RetryConfig()})
+		}
 		trigger := summaryTrigger(int(contextWindow.Load()))
 		finalize := finalizeSummary
 		if run.toolProfile == v034ToolProfile {
@@ -421,7 +444,18 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		if len(valid) == 0 {
 			return nil, nil, nil, errors.New("no_pending_inputs")
 		}
-		run, err := e.Store.StartRun(ctx, lease, valid)
+		profile := contextProfileLegacy
+		budget := json.RawMessage(`{}`)
+		// An explicit enabled flag admits the new policy. Existing Runs restore
+		// their persisted selection even when the flag or gateway changes.
+		if e.Config.FlagsFile != "" && runtimeFlag(e.Config.FlagsFile, "agents.context.v1") {
+			profile = contextProfileV1
+			budget, err = NewContextBudgetSnapshot(int(contextWindow.Load()))
+			if err != nil {
+				return nil, nil, nil, err
+			}
+		}
+		run, err := e.Store.StartRunWithContextPolicy(ctx, lease, valid, profile, budget)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -538,12 +572,12 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 				if event == nil {
 					continue
 				}
-				if event.Err != nil && failure == nil {
+				if event.Err != nil && failure == nil && !modelRetryObservation(event.Err) {
 					failure = event.Err
 				}
 				if event.Output != nil && event.Output.MessageOutput != nil && event.Output.MessageOutput.IsStreaming {
 					_, err := event.Output.MessageOutput.GetMessage()
-					if err != nil && failure == nil {
+					if err != nil && failure == nil && !modelRetryObservation(err) {
 						failure = err
 					}
 				}

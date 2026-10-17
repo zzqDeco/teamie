@@ -22,6 +22,12 @@ const maxFileBytes = 262144
 const maxWorkspaceEntries = 512
 
 type workspaceArgs struct {
+	PageVersion     int    `json:"pageVersion,omitempty"`
+	ByteOffset      int64  `json:"byteOffset,omitempty"`
+	MaxBytes        int    `json:"maxBytes,omitempty"`
+	Cursor          string `json:"cursor,omitempty"`
+	ExpectedVersion string `json:"expectedVersion,omitempty"`
+	TaskID          string `json:"taskId,omitempty"`
 	Path            string `json:"path"`
 	Content         string `json:"content"`
 	Old             string `json:"old"`
@@ -244,6 +250,9 @@ func (s *Service) Workspace(ctx context.Context, r *agent.SandboxWorkspaceReques
 	dec.DisallowUnknownFields()
 	if dec.Decode(&in) != nil || dec.Decode(new(any)) != io.EOF || in.Offset < 0 || in.Limit < 0 || in.Limit > 10000 || in.AfterLines < 0 || in.BeforeLines < 0 || in.AfterLines > 20 || in.BeforeLines > 20 {
 		return workspaceError("invalid_request"), nil
+	}
+	if in.PageVersion != 0 {
+		return s.workspacePage(ctx, r, in), nil
 	}
 	name, e := workspacePath(in.Path)
 	if e != nil {

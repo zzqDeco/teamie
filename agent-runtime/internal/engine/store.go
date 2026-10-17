@@ -28,25 +28,30 @@ type Lease struct {
 	Fence          int64
 }
 type Input struct {
-	EventID        string       `json:"eventId"`
-	WorkspaceID    string       `json:"workspaceId"`
-	ConversationID string       `json:"conversationId"`
-	MessageID      string       `json:"messageId"`
-	SenderID       string       `json:"senderId"`
-	SenderName     string       `json:"senderName"`
-	SenderKind     string       `json:"senderKind"`
-	Body           string       `json:"body"`
-	Attachments    []Attachment `json:"attachments,omitempty"`
-	ReplyToID      string       `json:"replyToId,omitempty"`
-	Seq            int64        `json:"seq"`
-	CreatedAt      string       `json:"createdAt"`
-	Kind           string       `json:"kind,omitempty"`
-	TaskID         string       `json:"taskId,omitempty"`
-	NotificationID string       `json:"notificationId,omitempty"`
-	Status         string       `json:"status,omitempty"`
+	EventID        string        `json:"eventId"`
+	WorkspaceID    string        `json:"workspaceId"`
+	ConversationID string        `json:"conversationId"`
+	MessageID      string        `json:"messageId"`
+	SenderID       string        `json:"senderId"`
+	SenderName     string        `json:"senderName"`
+	SenderKind     string        `json:"senderKind"`
+	Body           string        `json:"body"`
+	Attachments    []Attachment  `json:"attachments,omitempty"`
+	ReplyToID      string        `json:"replyToId,omitempty"`
+	Seq            int64         `json:"seq"`
+	CreatedAt      string        `json:"createdAt"`
+	Kind           string        `json:"kind,omitempty"`
+	TaskID         string        `json:"taskId,omitempty"`
+	NotificationID string        `json:"notificationId,omitempty"`
+	Status         string        `json:"status,omitempty"`
+	ParentRunID    string        `json:"parentRunId,omitempty"`
+	SourceRefs     []InputSource `json:"sourceRefs,omitempty"`
+	SourceOverflow bool          `json:"sourceOverflow,omitempty"`
 }
 type Run struct {
 	toolProfile                 string
+	ContextProfile              string
+	ContextBudget               json.RawMessage
 	ID, Attempt, AgentID        string
 	Inputs                      []Input
 	Step                        atomic.Int64
@@ -104,7 +109,7 @@ func Open(ctx context.Context, url string) (*Store, error) {
 	}
 	defer tx.Rollback(ctx)
 	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(704205)"); err == nil {
-		_, err = tx.Exec(ctx, schemaSQL+schemaV2SQL)
+		_, err = tx.Exec(ctx, schemaSQL+schemaV2SQL+schemaV3SQL+contextArchiveSchemaSQL+contextRecoverySchemaSQL)
 	}
 	if err == nil {
 		err = tx.Commit(ctx)
@@ -223,6 +228,12 @@ func (s *Store) Skip(ctx context.Context, l *Lease, id string) error {
 	return tx.Commit(ctx)
 }
 func (s *Store) StartRun(ctx context.Context, l *Lease, inputs []Input) (*Run, error) {
+	return s.StartRunWithContextPolicy(ctx, l, inputs, contextProfileLegacy, json.RawMessage(`{}`))
+}
+
+// Admission chooses a context policy only for a new logical Run. Recovery
+// always restores the persisted policy and budget, regardless of live flags.
+func (s *Store) StartRunWithContextPolicy(ctx context.Context, l *Lease, inputs []Input, profile string, budget json.RawMessage) (*Run, error) {
 	if len(inputs) == 0 {
 		return nil, errors.New("empty run")
 	}
@@ -241,7 +252,7 @@ func (s *Store) StartRun(ctx context.Context, l *Lease, inputs []Input) (*Run, e
 	if err == nil {
 		r.ID = existing
 		var b []byte
-		err = tx.QueryRow(ctx, `UPDATE runtime_runs SET state='running',attempt_id=$2,attempts=attempts+1 WHERE id=$1 AND state IN ('running','interrupted','waiting_configuration','retry','waiting_input') RETURNING input_json,context_head,acceptance_head`, r.ID, r.Attempt).Scan(&b, &r.ContextHead, &r.AcceptanceHead)
+		err = tx.QueryRow(ctx, `UPDATE runtime_runs SET state='running',attempt_id=$2,attempts=attempts+1 WHERE id=$1 AND state IN ('running','interrupted','waiting_configuration','retry','waiting_input') RETURNING input_json,context_head,acceptance_head,context_profile,context_budget`, r.ID, r.Attempt).Scan(&b, &r.ContextHead, &r.AcceptanceHead, &r.ContextProfile, &r.ContextBudget)
 		if err != nil {
 			return nil, err
 		}
@@ -249,6 +260,10 @@ func (s *Store) StartRun(ctx context.Context, l *Lease, inputs []Input) (*Run, e
 			return nil, err
 		}
 	} else if errors.Is(err, pgx.ErrNoRows) {
+		r.ContextProfile, r.ContextBudget, err = canonicalContextPolicy(profile, budget)
+		if err != nil {
+			return nil, err
+		}
 		b, e := json.Marshal(inputs)
 		if e != nil {
 			return nil, e
@@ -262,7 +277,7 @@ func (s *Store) StartRun(ctx context.Context, l *Lease, inputs []Input) (*Run, e
 		if err != nil {
 			return nil, err
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO runtime_runs(id,agent_id,input_key,input_json,attempt_id,context_head,acceptance_head) VALUES($1,$2,$3,$4,$5,$6,$7)`, r.ID, l.AgentID, key, b, r.Attempt, r.ContextHead, r.AcceptanceHead)
+		_, err = tx.Exec(ctx, `INSERT INTO runtime_runs(id,agent_id,input_key,input_json,attempt_id,context_head,acceptance_head,context_profile,context_budget) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, r.ID, l.AgentID, key, b, r.Attempt, r.ContextHead, r.AcceptanceHead, r.ContextProfile, r.ContextBudget)
 		if err != nil {
 			return nil, err
 		}
@@ -510,6 +525,13 @@ func (s *Store) SaveModel(ctx context.Context, l *Lease, r *Run, step int, hash 
 	defer tx.Rollback(ctx)
 	if e = checkLease(ctx, tx, l); e != nil {
 		return e
+	}
+	var rejected bool
+	if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM runtime_context_recoveries WHERE run_id=$1 AND model_step=$2)`, r.ID, step).Scan(&rejected); e != nil {
+		return e
+	}
+	if rejected {
+		return ErrReplayConflict
 	}
 	tag, e := tx.Exec(ctx, `INSERT INTO runtime_model_calls(run_id,step,request_hash,response) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, r.ID, step, hash, b)
 	if e != nil {

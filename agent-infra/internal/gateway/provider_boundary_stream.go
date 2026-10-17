@@ -33,6 +33,9 @@ func guardStreamingResponse(response *http.Response, key string, ctx context.Con
 			Error json.RawMessage `json:"error"`
 		}
 		if json.Unmarshal(body, &result) == nil && len(result.Error) > 0 && string(result.Error) != "null" {
+			if contextErr := providerContextError(body); contextErr != nil {
+				return nil, contextErr
+			}
 			return nil, api.Err(502, "upstream_in_stream_error", "Provider reported an error in its response")
 		}
 		return nil, api.Err(502, "invalid_upstream_response", "Provider did not return an event stream")
@@ -85,6 +88,9 @@ func (b *guardedStreamBody) frame() error {
 		return api.Err(502, "invalid_upstream_response", "Provider sent invalid stream JSON")
 	}
 	if len(chunk.Error) > 0 && string(chunk.Error) != "null" {
+		if contextErr := providerContextError([]byte(raw)); contextErr != nil {
+			return contextErr
+		}
 		return api.Err(502, "upstream_in_stream_error", "Provider reported an error inside its stream")
 	}
 	if chunk.Object != "chat.completion.chunk" || len(chunk.Choices) > 1 || len(chunk.Choices) == 0 && chunk.Usage == nil {

@@ -122,6 +122,8 @@ struct SandboxStartRequest {
   5: required string command
   // Zero/omitted has no command deadline. RPC timeouts never stop the command.
   6: optional i32 timeoutSeconds
+  // Omitted/0 preserves legacy bounded capture. 1 uses durable paged output.
+  7: optional i32 outputVersion
 }
 struct SandboxTaskRequest {
   1: required string serviceToken
@@ -141,6 +143,11 @@ struct SandboxTaskResponse {
   8: optional i64 nextOffset
   9: optional string errorCode
   10: optional string errorMessage
+  11: optional i64 outputBytes
+  12: optional i64 outputLimitBytes
+  13: optional string outputStatus
+  14: optional bool hasMore
+  15: optional string outputSha256
 }
 struct SandboxWorkspaceRequest {
   1: required string serviceToken

@@ -52,7 +52,7 @@ func (c *gatewayHTTPClient) Chat(ctx context.Context, in *wire.GatewayChatReques
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return nil, errors.New("gateway HTTP request failed")
+		return nil, readGatewayHTTPFailure(response)
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, modeltransport.MaxHTTPResponseBytes+1))
 	if err != nil {
@@ -68,4 +68,35 @@ func (c *gatewayHTTPClient) Chat(ctx context.Context, in *wire.GatewayChatReques
 		return nil, errors.New("invalid gateway HTTP response")
 	}
 	return &output, nil
+}
+
+// Only consume the gateway's bounded, structured error envelope. Provider
+// messages and bodies are neither retained in failure decisions nor exposed.
+func readGatewayHTTPFailure(response *http.Response) *ModelError {
+	var body struct {
+		OK           bool   `json:"ok"`
+		ErrorCode    string `json:"errorCode"`
+		ErrorMessage string `json:"errorMessage,omitempty"`
+		StatusCode   int    `json:"statusCode,omitempty"`
+		Error        *struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error,omitempty"`
+	}
+	raw, err := io.ReadAll(io.LimitReader(response.Body, 4097))
+	if err == nil && len(raw) <= 4096 {
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.DisallowUnknownFields()
+		if dec.Decode(&body) == nil && dec.Decode(new(any)) == io.EOF && !body.OK {
+			if body.Error != nil && body.ErrorCode == "" {
+				body.ErrorCode = body.Error.Code
+			}
+			if body.ErrorCode == "" {
+				return &ModelError{Code: "gateway_unavailable", Retry: true}
+			}
+			code := safeGatewayCode(body.ErrorCode)
+			return &ModelError{Code: code, Retry: code != "invalid_request" && !isContextOverflow(code)}
+		}
+	}
+	return &ModelError{Code: "gateway_unavailable", Retry: true}
 }

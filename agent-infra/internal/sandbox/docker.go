@@ -24,6 +24,7 @@ type Job struct {
 	Name, Image, Workspace, AgentHash, Command string
 	TaskHash                                   string
 	Timeout                                    int
+	OutputAnchor                               string
 }
 type Result struct {
 	ExitCode  int32  `json:"exitCode"`
@@ -113,8 +114,27 @@ func (d *Docker) remove(ctx context.Context, id string) error {
 	}
 	return e
 }
-func containerConfig(j Job) map[string]any {
+func legacyContainerConfig(j Job) map[string]any {
 	return map[string]any{"Image": j.Image, "User": "10001:10001", "WorkingDir": "/workspace", "Cmd": []string{"/bin/sh", "-c", j.Command}, "Env": []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=/workspace", "PYTHONDONTWRITEBYTECODE=1", "PYTHONUNBUFFERED=1"}, "AttachStdout": true, "AttachStderr": true, "Tty": false, "OpenStdin": false, "Labels": map[string]string{ManagedLabel: "true", "io.teamie.agent": j.AgentHash, "io.teamie.task": j.TaskHash}, "StopTimeout": 1, "HostConfig": map[string]any{"NetworkMode": "none", "ReadonlyRootfs": true, "CapDrop": []string{"ALL"}, "SecurityOpt": []string{"no-new-privileges:true"}, "Memory": MemoryLimit, "MemorySwap": MemoryLimit, "NanoCpus": 500000000, "PidsLimit": 32, "OomKillDisable": false, "Init": true, "AutoRemove": false, "Binds": []string{j.Workspace + ":/workspace:rw,rprivate"}, "Tmpfs": map[string]string{"/tmp": "rw,noexec,nosuid,nodev,size=16m,mode=1777"}, "Ulimits": []map[string]any{{"Name": "nofile", "Soft": 128, "Hard": 128}, {"Name": "fsize", "Soft": 8 * 1024 * 1024, "Hard": 8 * 1024 * 1024}}, "LogConfig": map[string]any{"Type": "json-file", "Config": map[string]string{"max-size": "128k", "max-file": "1"}}}}
+}
+func containerConfig(j Job) map[string]any {
+	config := legacyContainerConfig(j)
+	if j.OutputAnchor != "" {
+		// The user command cannot run before a daemon timestamp anchor is
+		// durable. Its stdin is closed before exec, so duplicate release after
+		// an ambiguous transport/crash cannot become command input.
+		config["Cmd"] = []string{"/bin/sh", "-c", `printf '%s\n' "$1"; IFS= read -r release; exec /bin/sh -c "$2" </dev/null`, "teamie-output", j.OutputAnchor, j.Command}
+		config["OpenStdin"] = true
+		// json-file replaces invalid UTF-8 bytes before the logs API can read
+		// them. The built-in local driver retains bytes in protobuf records,
+		// including daemon timestamps, within one bounded replay log.
+		// Moby jsonlogbytes.go replaces invalid UTF-8 with U+FFFD; local.go's
+		// messageToProto/protoToMessage instead copies Line bytes unchanged:
+		// https://github.com/moby/moby/blob/master/daemon/logger/jsonfilelog/jsonlog/jsonlogbytes.go
+		// https://github.com/moby/moby/blob/master/daemon/logger/local/local.go
+		config["HostConfig"].(map[string]any)["LogConfig"] = map[string]any{"Type": "local", "Config": map[string]string{"max-size": "16m", "max-file": "1", "compress": "false"}}
+	}
+	return config
 }
 func (d *Docker) Run(ctx context.Context, j Job) (result Result, err error) {
 	res, e := d.request(ctx, "POST", "/containers/create?name="+url.QueryEscape(j.Name), containerConfig(j))

@@ -12,9 +12,9 @@ pg=(docker exec -i "$POSTGRES_CONTAINER_ID")
 for suffix in identity chat agent_control agent_runtime gateway; do
   version=1
   if [[ $suffix == identity || $suffix == chat || $suffix == agent_runtime || $suffix == gateway ]]; then version=2; fi
-  if [[ $suffix == identity || $suffix == chat ]]; then version=3; fi
+  if [[ $suffix == identity || $suffix == chat || $suffix == agent_runtime ]]; then version=3; fi
   # Identity's real schema creates its complete production migration ledger.
-  if [[ $suffix != identity ]]; then
+  if [[ $suffix != identity && $suffix != agent_runtime ]]; then
     "${pg[@]}" psql -U postgres -d "teamie_$suffix" -v ON_ERROR_STOP=1 -v ledger="${suffix}_schema_migrations" -v version="$version" <<'SQL'
 CREATE TABLE :"ledger"(version INTEGER PRIMARY KEY);
 INSERT INTO :"ledger" VALUES(:version);
@@ -57,6 +57,33 @@ INSERT INTO attachments(id,conversation_id,uploader_id,message_id,filename,media
 VALUES('restore-attachment','restore-conversation','owner','restore-message','binary.restore.bin','application/octet-stream',7,'fixture',decode('00fffe80890a0d','hex'));
 SQL
   fi
+  if [[ $suffix == agent_runtime ]]; then
+    # Exercise the actual embedded forward migrations, not a synthetic ledger.
+    python3 - <<'PY' | "${pg[@]}" psql -U postgres -d teamie_agent_runtime -v ON_ERROR_STOP=1 >/dev/null
+from pathlib import Path
+import re
+root=Path('agent-runtime/internal/engine')
+sources='\n'.join(p.read_text() for p in root.glob('*.go') if not p.name.endswith('_test.go'))
+for name in ('schemaSQL','schemaV2SQL','schemaV3SQL','contextArchiveSchemaSQL','contextRecoverySchemaSQL'):
+    match=re.search(r'const\s+'+name+r'\s*=\s*`([^`]+)`',sources,re.S)
+    if match is None:
+        raise SystemExit('missing actual runtime migration: '+name)
+    print(match[1])
+PY
+    runtime_context_budget=$(cat ops/fixtures/runtime-context-budget-v1.json)
+    "${pg[@]}" psql -U postgres -d teamie_agent_runtime -v ON_ERROR_STOP=1 -v frozen_budget="$runtime_context_budget" <<'SQL'
+INSERT INTO runtime_agents(agent_id,cursor) VALUES('10000000-0000-4000-8000-000000000001',42);
+INSERT INTO runtime_runs(id,agent_id,input_key,input_json,attempt_id,context_profile,context_budget,context_head,acceptance_head)
+VALUES('20000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','restore-context','[]',
+       '30000000-0000-4000-8000-000000000001','teamie-context-v038',:'frozen_budget'::jsonb,0,0);
+INSERT INTO runtime_context_artifacts(agent_id,run_id,attempt_id,artifact_key,kind,content,content_hash,sources,source_event_seq)
+VALUES('10000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001',
+       'transcript:restore','transcript',decode('00fffe80890a0d','hex'),repeat('a',64),
+       '[{"eventId":"42","conversationId":"40000000-0000-4000-8000-000000000001","messageId":"50000000-0000-4000-8000-000000000001"}]',42);
+INSERT INTO runtime_context_recoveries(run_id,model_step,context_profile,request_hash,streaming,error_code,decision_version,decision_json)
+VALUES('20000000-0000-4000-8000-000000000001',2,'teamie-context-v038',repeat('b',64),true,'context_overflow',1,jsonb_build_object('version',1,'action','compact_prefix','budget',:'frozen_budget'::jsonb));
+SQL
+  fi
   "${pg[@]}" pg_dump -U postgres -d "teamie_$suffix" --format custom > "$scratch/$suffix.dump"
   "${pg[@]}" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE restore_$suffix;"
   "${pg[@]}" pg_restore -U postgres -d "restore_$suffix" --exit-on-error --no-owner --no-acl < "$scratch/$suffix.dump"
@@ -72,6 +99,13 @@ SQL
     actual=$("${pg[@]}" psql -U postgres -d restore_chat -At -v ON_ERROR_STOP=1 -c \
       "SELECT encode(a.content,'hex')||':'||a.filename||':'||(m.attachments->0->>'id')||':'||m.original_attachment_ids[1] FROM attachments a JOIN messages m ON m.id=a.message_id WHERE a.id='restore-attachment' AND a.size_bytes=7 AND m.body='';")
     [[ $actual == '00fffe80890a0d:binary.restore.bin:restore-attachment:restore-attachment' ]] || { echo 'Chat attachment binary restore verification failed.' >&2; exit 1; }
+  fi
+  if [[ $suffix == agent_runtime ]]; then
+    actual=$("${pg[@]}" psql -U postgres -d restore_agent_runtime -At -v ON_ERROR_STOP=1 -v frozen_budget="$runtime_context_budget" <<'SQL'
+SELECT (SELECT string_agg(version::text,',' ORDER BY version) FROM agent_runtime_schema_migrations)||':'||r.context_profile||':'||(r.context_budget=:'frozen_budget'::jsonb)::text||':'||encode(a.content,'hex')||':'||(a.sources->0->>'eventId')||':'||a.source_event_seq||':'||c.model_step||':'||c.error_code||':'||c.streaming::text||':'||(c.decision_json=jsonb_build_object('version',1,'action','compact_prefix','budget',:'frozen_budget'::jsonb))::text FROM runtime_runs r JOIN runtime_context_artifacts a ON a.run_id=r.id JOIN runtime_context_recoveries c ON c.run_id=r.id WHERE r.id='20000000-0000-4000-8000-000000000001';
+SQL
+)
+    [[ $actual == '1,2,3:teamie-context-v038:true:00fffe80890a0d:42:42:2:context_overflow:true:true' ]] || { echo 'Runtime frozen policy, context archive, source references and recovery tape restore failed.' >&2; exit 1; }
   fi
   # Ordinary owners may not connect to another service's database.
   if "${pg[@]}" env PGPASSWORD=ci-identity-disposable-password psql -h 127.0.0.1 -U teamie_identity -d teamie_gateway -c 'SELECT 1' >/dev/null 2>&1; then

@@ -62,6 +62,14 @@ func resumeCompatibleForRun(metadata *checkpointMetadata, revision int64, run *R
 	if !resumeCompatible(metadata, revision, run.ID) {
 		return false
 	}
+	if contextProfile(run) == contextProfileV1 {
+		_, budget, err := canonicalContextPolicy(run.ContextProfile, run.ContextBudget)
+		if err != nil || metadata.ContextProfile != run.ContextProfile || metadata.ContextBudgetHash != digest(budget) {
+			return false
+		}
+	} else if metadata.ContextProfile != "" && metadata.ContextProfile != contextProfileLegacy {
+		return false
+	}
 	// Existing native-only v0.3.5 checkpoints used the current tool profile.
 	// A classic Run cannot load an unlabelled native checkpoint: v0.3.5 may
 	// have built it with five tools or already changed summary provenance.
