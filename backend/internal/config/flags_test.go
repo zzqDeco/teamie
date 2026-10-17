@@ -30,3 +30,17 @@ func TestUnsupportedCapabilitiesRemainOffAndBadReloadFailsClosed(t *testing.T) {
 		}
 	}
 }
+
+func TestPrivateContextFlagDoesNotBecomeBrowserCapability(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "flags.json")
+	if err := os.WriteFile(path, []byte(`{"revision":"context-engineering-v1","flags":{"agents.enabled":true,"agents.context.v1":true}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	loaded := (Flags{Path: path}).Load()
+	if _, exists := loaded.Flags["agents.context.v1"]; exists {
+		t.Fatal("private context execution flag entered public capabilities")
+	}
+	if !loaded.Flags["agents.enabled"] {
+		t.Fatal("filtering private flags changed the ordinary Agent capability")
+	}
+}
