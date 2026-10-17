@@ -21,6 +21,10 @@ type archiveWorkerSandbox struct {
 	content string
 }
 
+func (*archiveWorkerSandbox) Cancel(context.Context, *wire.CancelRequest, ...callopt.Option) (*wire.Ack, error) {
+	return &wire.Ack{Ok: true}, nil
+}
+
 func (s *archiveWorkerSandbox) Workspace(_ context.Context, _ *wire.SandboxWorkspaceRequest, _ ...callopt.Option) (*wire.SandboxWorkspaceResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

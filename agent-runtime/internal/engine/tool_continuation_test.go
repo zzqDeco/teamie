@@ -19,6 +19,10 @@ type continuationSandbox struct {
 	calls int
 }
 
+func (*continuationSandbox) Cancel(context.Context, *wire.CancelRequest, ...callopt.Option) (*wire.Ack, error) {
+	return &wire.Ack{Ok: true}, nil
+}
+
 func (s *continuationSandbox) Workspace(_ context.Context, _ *wire.SandboxWorkspaceRequest, _ ...callopt.Option) (*wire.SandboxWorkspaceResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
