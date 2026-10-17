@@ -39,19 +39,36 @@ const queryRetry = (count: number, error: Error) =>
 function WorkspaceChips({
   ids,
   workspaces,
+  interactive = false,
 }: {
   ids: string[];
   workspaces: Workspace[];
+  interactive?: boolean;
 }) {
   return (
     <div className="agent-workspace-chips">
       {ids.length ? (
-        ids.map((id) => (
-          <span key={id}>
-            <Hash size={10} />
-            {workspaces.find((w) => w.id === id)?.name || "工作空间"}
-          </span>
-        ))
+        ids.map((id) => {
+          const ws = workspaces.find((w) => w.id === id);
+          if (interactive && ws) {
+            return (
+              <Link
+                key={id}
+                to={`/app/w/${id}/members`}
+                aria-label={`查看 ${ws.name} 成员目录`}
+              >
+                <Hash size={10} />
+                {ws.name}
+              </Link>
+            );
+          }
+          return (
+            <span key={id}>
+              <Hash size={10} />
+              {ws?.name || "工作空间"}
+            </span>
+          );
+        })
       ) : (
         <span className="private-agent-chip">
           <Eye size={11} />
@@ -424,6 +441,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         <WorkspaceChips
           ids={agent.workspaceIds}
           workspaces={data?.workspaces || []}
+          interactive
         />
       </section>
       {deletable && (

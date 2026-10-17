@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -285,23 +286,36 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         JSON.stringify({ type: "typing", conversationId, isTyping: value }),
       );
   }, []);
-  return (
-    <ChatContext.Provider
-      value={{
-        data: query.data?.user.id === user!.id ? query.data : undefined,
-        loading: query.isLoading,
-        error: query.error ? "无法加载你的工作空间，请稍后重试。" : "",
-        connection,
-        syncError,
-        refresh: query.refetch,
-        sync: () => syncRef.current(),
-        sendTyping,
-        typing,
-      }}
-    >
-      {children}
-    </ChatContext.Provider>
+  const sync = useCallback(() => {
+    syncRef.current();
+  }, []);
+  const data = query.data?.user.id === user!.id ? query.data : undefined;
+  const error = query.error ? "无法加载你的工作空间，请稍后重试。" : "";
+  const value = useMemo(
+    () => ({
+      data,
+      loading: query.isLoading,
+      error,
+      connection,
+      syncError,
+      refresh: query.refetch,
+      sync,
+      sendTyping,
+      typing,
+    }),
+    [
+      data,
+      query.isLoading,
+      error,
+      connection,
+      syncError,
+      query.refetch,
+      sync,
+      sendTyping,
+      typing,
+    ],
   );
+  return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;
 }
 export function useChat() {
   const ctx = useContext(ChatContext);

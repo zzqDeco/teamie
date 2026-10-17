@@ -495,8 +495,8 @@ export class TeamieClient {
     if (options.beforeSeq !== undefined) params.set("beforeSeq", String(options.beforeSeq));
     return this.#request<MessagePage>(`/conversations/${part(id)}/messages?${params}`, { signal });
   };
-  message = (conversationId: string, id: string) =>
-    this.#request<{ message: Message }>(`/conversations/${part(conversationId)}/messages/${part(id)}`);
+  message = (conversationId: string, id: string, signal?: AbortSignal) =>
+    this.#request<{ message: Message }>(`/conversations/${part(conversationId)}/messages/${part(id)}`, { signal });
   messagesAround = (id: string, seq: number) =>
     this.#request<MessagePage>(`/conversations/${part(id)}/messages?limit=50&aroundSeq=${seq}`);
   send = (
@@ -517,14 +517,26 @@ export class TeamieClient {
     conversationId: string,
     file: File,
     signal?: AbortSignal,
+    idempotencyKey?: string,
   ) => {
     const form = new FormData();
     form.append("file", file, file.name);
     return this.#request<{ attachment: Attachment }>(
       `/conversations/${part(conversationId)}/attachments`,
-      { method: "POST", body: form, signal },
+      {
+        method: "POST",
+        body: form,
+        signal,
+        ...(idempotencyKey
+          ? { headers: { "Idempotency-Key": idempotencyKey } }
+          : {}),
+      },
     );
   };
+  attachmentUpload = (conversationId: string, uploadKey: string) =>
+    this.#request<{ attachment: Attachment }>(
+      `/conversations/${part(conversationId)}/attachment-uploads/${part(uploadKey)}`,
+    );
   deletePendingAttachment = (conversationId: string, attachmentId: string) =>
     this.#request<void>(
       `/conversations/${part(conversationId)}/attachments/${part(attachmentId)}`,
