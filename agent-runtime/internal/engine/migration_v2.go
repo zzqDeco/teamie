@@ -6,7 +6,21 @@ const schemaV2SQL = `
 ALTER TABLE runtime_agents ADD COLUMN IF NOT EXISTS state text NOT NULL DEFAULT 'idle';
 ALTER TABLE runtime_agents ADD COLUMN IF NOT EXISTS last_error text NOT NULL DEFAULT '';
 ALTER TABLE runtime_agents ADD COLUMN IF NOT EXISTS last_active_at timestamptz;
-ALTER TABLE runtime_inputs ADD COLUMN IF NOT EXISTS delivery_seq bigint GENERATED ALWAYS AS IDENTITY;
+-- Only a first v1 upgrade has no delivery sequence. Identity ADD COLUMN would
+-- backfill in heap order, which can differ from the previous event_id order.
+-- Existing v2/v3 delivery values, including task notifications, are immutable.
+DO $$
+BEGIN
+ IF NOT EXISTS(SELECT 1 FROM pg_attribute WHERE attrelid='runtime_inputs'::regclass AND attname='delivery_seq' AND NOT attisdropped) THEN
+  ALTER TABLE runtime_inputs ADD COLUMN delivery_seq bigint;
+  WITH ordered AS (SELECT agent_id,event_id,row_number() OVER(ORDER BY agent_id,event_id) AS seq FROM runtime_inputs)
+  UPDATE runtime_inputs i SET delivery_seq=o.seq FROM ordered o WHERE i.agent_id=o.agent_id AND i.event_id=o.event_id;
+  ALTER TABLE runtime_inputs ALTER COLUMN delivery_seq SET NOT NULL;
+  ALTER TABLE runtime_inputs ALTER COLUMN delivery_seq ADD GENERATED ALWAYS AS IDENTITY;
+  PERFORM setval(pg_get_serial_sequence('runtime_inputs','delivery_seq')::regclass,COALESCE((SELECT max(delivery_seq) FROM runtime_inputs),1),EXISTS(SELECT 1 FROM runtime_inputs));
+ END IF;
+END;
+$$;
 ALTER TABLE runtime_inputs ADD COLUMN IF NOT EXISTS notification_id text;
 CREATE UNIQUE INDEX IF NOT EXISTS runtime_inputs_notification ON runtime_inputs(agent_id,notification_id) WHERE notification_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS runtime_session_acceptances(seq bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,agent_id uuid NOT NULL,attempt_id uuid NOT NULL UNIQUE);
