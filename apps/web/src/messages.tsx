@@ -212,6 +212,9 @@ export function ConversationView({
       return;
     acknowledgement.current = null;
     if (
+      messages.some(
+        (message) => message.id === pending.id && message.retractedAt,
+      ) ||
       chatStore
         .getSnapshot()
         .messages[
@@ -244,6 +247,7 @@ export function ConversationView({
     visible,
     conversation.id,
     membersOpen,
+    messages,
   ]);
   const loadContext = useCallback(
     async (id: string, readOnDisplay = false) => {
@@ -272,7 +276,13 @@ export function ConversationView({
           target.message.seq,
         );
         if (!current()) return;
-        const context = reconcileMessages(page.messages, [target.message]);
+        const currentTarget = chatStore
+          .getSnapshot()
+          .messages[conversation.id]?.find((message) => message.id === id);
+        const context = reconcileMessages(page.messages, [
+          target.message,
+          ...(currentTarget ? [currentTarget] : []),
+        ]);
         const resolved =
           context.find((m) => m.id === target.message.id) || target.message;
         setResolvedTargets((old) => ({
@@ -281,10 +291,10 @@ export function ConversationView({
             ? reconcileMessages([old[resolved.id]], [resolved])[0]
             : resolved,
         }));
-        if (readOnDisplay && !target.message.retractedAt)
+        if (readOnDisplay && !resolved.retractedAt)
           acknowledgement.current = {
             id,
-            seq: target.message.seq,
+            seq: resolved.seq,
             generation: token,
             operation,
           };

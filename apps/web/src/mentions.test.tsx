@@ -397,6 +397,59 @@ describe("reply navigation", () => {
       vi.useRealTimers();
     }
   });
+  it.each(["context", "sync"])(
+    "does not acknowledge or retain stale reply text when %s retracts a delayed attention source",
+    async (source) => {
+      chatStore.merge([reply]);
+      vi.mocked(api.messages).mockResolvedValue({
+        messages: [reply],
+        hasMore: true,
+      });
+      let finishFirst!: (value: { message: Message }) => void;
+      vi.spyOn(api, "message").mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finishFirst = resolve;
+          }),
+      );
+      const retracted = {
+        ...original,
+        retractedAt: "2026-10-17T00:01:00Z",
+      };
+      vi.spyOn(api, "messagesAround").mockResolvedValue({
+        messages: [source === "context" ? retracted : original],
+        hasMore: false,
+      });
+      await render(
+        <ConversationView
+          conversation={{ ...conversation, readSeq: 0 }}
+          members={members}
+          onMembers={vi.fn()}
+          membersOpen={false}
+          onMenu={vi.fn()}
+          initialMessageId={original.id}
+        />,
+      );
+      expect(api.read).not.toHaveBeenCalled();
+      await act(async () => {
+        if (source === "sync") chatStore.merge([retracted]);
+        finishFirst({ message: original });
+      });
+      expect(api.read).not.toHaveBeenCalled();
+      expect(host.textContent).not.toContain("原始任务");
+      expect(host.querySelector(`#message-${original.id}`)?.textContent).toContain(
+        "这条消息已撤回",
+      );
+      await act(async () =>
+        host.querySelector<HTMLButtonElement>(".located-banner button")!.click(),
+      );
+      expect(host.querySelector(".message-reply")?.textContent).toContain(
+        "消息已撤回",
+      );
+      expect(host.textContent).not.toContain("原始任务");
+      expect(api.read).not.toHaveBeenCalled();
+    },
+  );
   it("does not render a denied or late response after navigating away", async () => {
     vi.mocked(api.messages).mockResolvedValue({
       messages: [reply],
