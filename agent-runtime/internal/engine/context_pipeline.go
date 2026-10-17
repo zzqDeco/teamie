@@ -248,6 +248,21 @@ func (p *ContextPipeline) compact(ctx context.Context, messages []*schema.Agenti
 		target = min(target, measurement.EstimatedTokens*3/4)
 	}
 	systems, prefix, tail := p.partition(messages, force)
+	if p.cfg.Budget.Version >= 3 {
+		pinned, err := p.currentInputSet(ctx, messages)
+		if err != nil {
+			return nil, err
+		}
+		kept, older := []*schema.AgenticMessage{}, []*schema.AgenticMessage{}
+		for _, message := range prefix {
+			if pinned[message] {
+				kept = append(kept, message)
+			} else {
+				older = append(older, message)
+			}
+		}
+		prefix, tail = older, append(kept, tail...)
+	}
 	if len(prefix) == 0 {
 		return p.fitTailTo(ctx, systems, tail, tools, target)
 	}
@@ -261,7 +276,11 @@ func (p *ContextPipeline) compact(ctx context.Context, messages []*schema.Agenti
 	}
 	sources := contextSources(prefix)
 	sourceJSON, _ := json.Marshal(sources)
-	summary := schema.UserAgenticMessage("TEAMIE_SESSION_SUMMARY (source-scoped memory; verify current access using tools):\n" + text + "\n" + contextReadNotice(ref) + "\nTEAMIE_SOURCE_REFERENCES " + string(sourceJSON))
+	summaryText := "TEAMIE_SESSION_SUMMARY (source-scoped memory; verify current access using tools):\n" + text + "\n" + contextReadNotice(ref)
+	if p.cfg.Budget.Version < 3 {
+		summaryText += "\nTEAMIE_SOURCE_REFERENCES " + string(sourceJSON)
+	}
+	summary := schema.UserAgenticMessage(summaryText)
 	summary.Extra = map[string]any{"teamie_context_summary": contextProfileV1, "teamie_context_sources": contextSourceValue(sources), "teamie_context_archive_ref": ref}
 	return p.fitTailTo(ctx, append(append([]*schema.AgenticMessage{}, systems...), summary), tail, tools, target)
 }

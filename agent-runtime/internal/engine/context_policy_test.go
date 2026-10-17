@@ -54,7 +54,7 @@ func TestRunContextPolicyIsFrozenAcrossFlagAndWindowChanges(t *testing.T) {
 	if err = s.DB.QueryRow(ctx, `SELECT max(version) FROM agent_runtime_schema_migrations`).Scan(&ledger); err != nil || ledger != runtimeSchemaVersion {
 		t.Fatal("context migration ledger missing", ledger, err)
 	}
-	if _, err = s.DB.Exec(ctx, schemaV3SQL+contextArchiveSchemaSQL+contextRecoverySchemaSQL+schemaV4SQL); err != nil {
+	if _, err = s.DB.Exec(ctx, schemaV3SQL+contextArchiveSchemaSQL+contextRecoverySchemaSQL+schemaV4SQL+schemaV5SQL); err != nil {
 		t.Fatal("context migration is not repeatable", err)
 	}
 }
@@ -80,9 +80,21 @@ func TestRestoreFixtureContainsOutputRecoveryCapacity(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := ParseContextBudgetSnapshot(raw)
-	expected, makeErr := makeContextBudgetSnapshot(16384)
+	expected, makeErr := makeContextBudgetSnapshotVersion(16384, 2)
 	if err != nil || makeErr != nil || got != expected {
 		t.Fatal("current restore fixture differs from the frozen output policy", err, makeErr)
+	}
+}
+
+func TestRestoreFixtureContainsCurrentInputPolicy(t *testing.T) {
+	raw, err := os.ReadFile("../../../ops/fixtures/runtime-context-budget-v3.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseContextBudgetSnapshot(raw)
+	expected, makeErr := makeContextBudgetSnapshot(16384)
+	if err != nil || makeErr != nil || got != expected {
+		t.Fatal("current restore fixture differs from admission", err, makeErr)
 	}
 }
 
@@ -135,7 +147,7 @@ func TestContextMigrationBackfillsLegacyWithoutChangingItsTape(t *testing.T) {
 	if _, err := s.DB.Exec(ctx, `ALTER TABLE runtime_runs DROP COLUMN context_profile; ALTER TABLE runtime_runs DROP COLUMN context_budget; ALTER TABLE runtime_session_acceptances DROP COLUMN run_id; DROP TABLE runtime_context_artifacts; DROP TABLE runtime_context_recoveries; DELETE FROM agent_runtime_schema_migrations WHERE version>=3;`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DB.Exec(ctx, schemaSQL+schemaV2SQL+schemaV3SQL+contextArchiveSchemaSQL+contextRecoverySchemaSQL+schemaV4SQL); err != nil {
+	if _, err := s.DB.Exec(ctx, schemaSQL+schemaV2SQL+schemaV3SQL+contextArchiveSchemaSQL+contextRecoverySchemaSQL+schemaV4SQL+schemaV5SQL); err != nil {
 		t.Fatal(err)
 	}
 	var profile string
