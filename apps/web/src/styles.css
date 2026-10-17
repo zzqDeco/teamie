@@ -2268,16 +2268,28 @@ label > .copy-input {
   color: #bda7ce;
   flex-shrink: 0;
 }
+.member-dm,
 .remove-member {
   opacity: 0;
   width: 22px;
   height: 22px;
   color: #c5a8ca;
 }
+.member-row:hover .member-dm,
+.member-row:focus-within .member-dm,
 .member-row:hover .remove-member,
 .member-row:focus-within .remove-member {
   opacity: 1;
 }
+@media (hover: none), (pointer: coarse) {
+  .member-dm,
+  .remove-member {
+    opacity: 1;
+    width: 44px;
+    height: 44px;
+  }
+}
+.members-directory-link,
 .members-invite {
   display: flex;
   align-items: center;
@@ -2289,9 +2301,13 @@ label > .copy-input {
   padding: 10px 12px;
   margin: 0 18px 20px;
 }
+.members-directory-link + .members-invite {
+  margin-top: -10px;
+}
 .members-invite > svg:last-child {
   margin-left: auto;
 }
+.members-directory-link:hover,
 .members-invite:hover {
   background: #f6effb;
 }
@@ -5579,7 +5595,8 @@ label > .copy-input {
   flex-wrap: wrap;
   margin: 17px 0 0;
 }
-.agent-workspace-chips > span {
+.agent-workspace-chips > span,
+.agent-workspace-chips > a {
   display: flex;
   align-items: center;
   gap: 4px;
@@ -5592,6 +5609,10 @@ label > .copy-input {
   overflow: hidden;
   text-overflow: ellipsis;
   line-height: 1.4;
+}
+.agent-workspace-chips > a:hover {
+  background: #ebe0f6;
+  color: #9b7bb5;
 }
 .agent-workspace-chips > .private-agent-chip {
   background: #f6f2f9;
