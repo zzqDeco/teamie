@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "counterVersion": "teamie-visible-estimate-v1",
+  "contextWindowTokens": 16384,
+  "inputTokenLimit": 14080,
+  "triggerTokens": 10560,
+  "outputReserveTokens": 2048,
+  "summaryOutputTokens": 2048,
+  "transportLimitBytes": 262144,
+  "transportTargetBytes": 196608,
+  "tailTokenLimit": 4693,
+  "toolResultByteLimit": 3520
+}

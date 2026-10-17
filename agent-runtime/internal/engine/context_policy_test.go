@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"testing"
 
 	"github.com/cloudwego/eino/schema"
@@ -55,6 +56,21 @@ func TestRunContextPolicyIsFrozenAcrossFlagAndWindowChanges(t *testing.T) {
 	}
 	if _, err = s.DB.Exec(ctx, schemaV3SQL+contextArchiveSchemaSQL+contextRecoverySchemaSQL); err != nil {
 		t.Fatal("context migration is not repeatable", err)
+	}
+}
+
+func TestRestoreFixtureContainsTheCompleteSupportedContextBudget(t *testing.T) {
+	raw, err := os.ReadFile("../../../ops/fixtures/runtime-context-budget-v1.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseContextBudgetSnapshot(raw)
+	if err != nil {
+		t.Fatal("restore fixture is not a supported frozen budget", err)
+	}
+	expected, err := makeContextBudgetSnapshot(16384)
+	if err != nil || got != expected {
+		t.Fatal("restore fixture differs from admitted Run policy", err)
 	}
 }
 

@@ -148,7 +148,7 @@ class AgentManifestTest(unittest.TestCase):
         current=copy.deepcopy(previous)
         current["version"]="v0.3.7"
         current["source"]["ref"]="refs/heads/release/v0.3.7"
-        current["schema"]=dict(manifest.SCHEMA_V2)
+        current["schema"]={"identity":3,"chat":3,"agent_control":1,"agent_runtime":2,"gateway":2}
         self.assertEqual(current["schema"]["identity"],3)
         manifest.validate(previous)
         manifest.check_transition(current,previous,previous)
