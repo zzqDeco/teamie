@@ -16,7 +16,7 @@ type Flags struct{ Path string }
 var Implemented = map[string]bool{
 	"agents.enabled": true, "agents.create": true, "agents.update": true, "agents.delete": true, "agents.discover": true,
 	"agents.runtime.v3": true, "agents.tasks.execute": true,
-	"auth.public_signup": false, "im.dm.create": true, "im.group.create": true, "im.channel.create": true,
+	"auth.public_signup": false, "auth.password_reset": true, "im.dm.create": true, "im.group.create": true, "im.channel.create": true,
 	"im.message.edit": true, "im.message.retract": true, "im.typing.publish": true,
 	"im.presence.publish": false, "im.attachments.upload": true, "im.reactions.create": false, "im.threads.create": false,
 }

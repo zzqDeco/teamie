@@ -192,5 +192,6 @@ func (h *Handler) Routes() http.Handler {
 		api.Write(w, 204, nil)
 		return nil
 	}))
+	h.passwordResetRoutes(m)
 	return m
 }

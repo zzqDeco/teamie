@@ -52,13 +52,18 @@ func (s *Store) ChangePassword(ctx context.Context, userID, sessionToken, curren
 	}
 	defer tx.Rollback(ctx)
 	var hash string
-	err = tx.QueryRow(ctx, `SELECT u.password_hash FROM identity_users u JOIN identity_sessions s ON s.user_id=u.id
-		WHERE u.id=$1 AND s.token_hash=$2 AND s.expires_at>now() AND u.kind='human' AND u.enabled AND u.deleted_at IS NULL
-		FOR UPDATE OF u,s`, userID, api.Hash(sessionToken)).Scan(&hash)
+	// Every credential operation locks users before sessions or reset links.
+	// Separate queries make the order explicit, including after waiting for a
+	// concurrent reset to revoke this session.
+	err = tx.QueryRow(ctx, `SELECT password_hash FROM identity_users
+		WHERE id=$1 AND kind='human' AND enabled AND deleted_at IS NULL FOR UPDATE`, userID).Scan(&hash)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return api.Err(401, "unauthenticated", "Session expired or revoked")
 	}
 	if err != nil {
+		return err
+	}
+	if err = validHumanSession(ctx, tx, userID, sessionToken); err != nil {
 		return err
 	}
 	if len(currentPassword) > 72 || bcrypt.CompareHashAndPassword([]byte(hash), []byte(currentPassword)) != nil {
@@ -78,6 +83,9 @@ func (s *Store) ChangePassword(ctx context.Context, userID, sessionToken, curren
 		return err
 	}
 	if _, err = tx.Exec(ctx, "DELETE FROM identity_sessions WHERE user_id=$1", userID); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, "UPDATE identity_password_resets SET revoked_at=clock_timestamp() WHERE user_id=$1 AND used_at IS NULL AND revoked_at IS NULL", userID); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

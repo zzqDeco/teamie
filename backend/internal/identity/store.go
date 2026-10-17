@@ -22,6 +22,9 @@ var schema string
 //go:embed migrations/002_principals.sql
 var schemaV2 string
 
+//go:embed migrations/003_password_resets.sql
+var schemaV3 string
+
 type Store struct {
 	DB                  *pgxpool.Pool
 	Flags               config.Flags
@@ -46,7 +49,7 @@ func Open(ctx context.Context, url string, flags config.Flags, code string) (*St
 	return s, nil
 }
 func (s *Store) Migrate(ctx context.Context) error {
-	return database.Migrate(ctx, s.DB, 704101, "identity_schema_migrations", []database.Migration{{Version: 1, SQL: schema}, {Version: 2, SQL: schemaV2}})
+	return database.Migrate(ctx, s.DB, 704101, "identity_schema_migrations", []database.Migration{{Version: 1, SQL: schema}, {Version: 2, SQL: schemaV2}, {Version: 3, SQL: schemaV3}})
 }
 func (s *Store) Ping(ctx context.Context) error { return s.DB.Ping(ctx) }
 func normalizeEmail(v string) (string, error) {
