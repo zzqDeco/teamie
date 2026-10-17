@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/middlewares/reduction"
@@ -187,7 +188,13 @@ func (a *ContextArchive) imMessageSources(ctx context.Context, r *Run, message *
 			return nil, true, err
 		}
 		if len(matches) == 0 {
-			return nil, true, errContextUnavailable
+			parents, err := a.imReducedParents(ctx, r, []*schema.AgenticMessage{{Role: message.Role, ContentBlocks: []*schema.ContentBlock{block}}}, originRun)
+			if err != nil {
+				return nil, true, err
+			}
+			if len(parents) == 0 {
+				return nil, true, errContextUnavailable
+			}
 		}
 		for _, match := range matches {
 			inputs, err := a.runSources(ctx, match.runID)
@@ -206,6 +213,93 @@ func (a *ContextArchive) imMessageSources(ctx context.Context, r *Run, message *
 	return refs, found, err
 }
 
+// The native string-tool truncation hook returns its notice before the original
+// Session result is persisted. Match that exact generated view to a real
+// immutable offload AND its original committed IM receipt. A copied textual
+// context ref alone cannot acquire a source closure.
+func (a *ContextArchive) imReducedParents(ctx context.Context, r *Run, messages []*schema.AgenticMessage, originRun string) ([]string, error) {
+	parents := []string{}
+	for _, message := range messages {
+		if message == nil {
+			continue
+		}
+		for _, block := range message.ContentBlocks {
+			if block == nil || block.FunctionToolResult == nil || !contextIMTool(block.FunctionToolResult.Name) {
+				continue
+			}
+			result := block.FunctionToolResult
+			if len(result.Content) != 1 || result.Content[0] == nil || result.Content[0].Type != schema.FunctionToolResultContentBlockTypeText || result.Content[0].Text == nil {
+				continue
+			}
+			text := result.Content[0].Text.Text
+			if !strings.HasPrefix(text, "Archived private context: context:v1:") {
+				continue
+			}
+			rows, err := a.Store.DB.Query(ctx, `SELECT a.run_id::text,a.artifact_key FROM runtime_context_artifacts a JOIN runtime_runs r ON r.id=a.run_id WHERE a.agent_id=$1 AND `+contextArtifactVisibility+` AND a.kind IN ('tool_trunc','tool_clear') AND a.tool_name=$6 AND a.tool_call_id=$7 AND ($8='' OR a.run_id::text=$8)`, r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead, result.Name, result.CallID, originRun)
+			if err != nil {
+				return nil, err
+			}
+			candidates := []string{}
+			for rows.Next() {
+				var runID, key string
+				if err = rows.Scan(&runID, &key); err != nil {
+					rows.Close()
+					return nil, err
+				}
+				candidates = append(candidates, "context:v1:"+runID+":"+key)
+			}
+			err = rows.Err()
+			rows.Close()
+			if err != nil {
+				return nil, err
+			}
+			matched := false
+			for _, ref := range candidates {
+				if !strings.HasPrefix(text, "Archived private context: "+ref+".") {
+					continue
+				}
+				artifact, err := a.load(ctx, r, ref)
+				if err != nil {
+					return nil, err
+				}
+				var original struct {
+					Name     string               `json:"name"`
+					CallID   string               `json:"callId"`
+					Argument *schema.ToolArgument `json:"argument"`
+					Result   *schema.ToolResult   `json:"result"`
+				}
+				if json.Unmarshal([]byte(artifact.Text), &original) != nil || original.Name != result.Name || original.CallID != result.CallID || original.Argument == nil || original.Result == nil {
+					return nil, errContextUnavailable
+				}
+				expected := contextReadNotice(ref)
+				if artifact.Kind == "tool_trunc" {
+					var raw []byte
+					if err = a.Store.DB.QueryRow(ctx, `SELECT context_budget FROM runtime_runs WHERE id=$1`, artifact.RunID).Scan(&raw); err != nil {
+						return nil, err
+					}
+					budget, err := ParseContextBudgetSnapshot(raw)
+					if err != nil {
+						return nil, err
+					}
+					expected += "\nPreview (quoted tool data):\n" + utf8Prefix(toolResultText(original.Result), min(1024, budget.ToolResultByteLimit/4))
+				}
+				if text != expected {
+					return nil, errContextUnavailable
+				}
+				if _, err = a.toolSources(ctx, r, &reduction.ToolDetail{ToolContext: &adk.ToolContext{Name: original.Name, CallID: original.CallID}, ToolArgument: original.Argument, ToolResult: original.Result}, false); err != nil {
+					return nil, err
+				}
+				matched = true
+				parents = append(parents, ref)
+			}
+			if !matched {
+				return nil, errContextUnavailable
+			}
+		}
+	}
+	return parents, nil
+}
+
 // Generated text can quote earlier reads from the same Run. Its provenance is
 // the bounded causal prefix of that Run, never later receipts or the lifetime
 // Session. Retrieval pages contribute immutable DAG edges, not copied bodies.
@@ -219,16 +313,20 @@ func (a *ContextArchive) causalMessageSources(ctx context.Context, r *Run, item 
 	} else if found {
 		refs = append(refs, actual...)
 	}
-	parents := []string{}
+	parents, err := a.imReducedParents(ctx, r, []*schema.AgenticMessage{message}, item.runID)
+	if err != nil {
+		return nil, nil, err
+	}
 	if message.Role != schema.AgenticRoleTypeAssistant {
 		refs, err = canonicalContextSources(refs)
 		return refs, parents, err
 	}
-	actual, parents, err := a.causalRunReadSources(ctx, r, item.runID, item.seq)
+	actual, inherited, err := a.causalRunReadSources(ctx, r, item.runID, item.seq)
 	if err != nil {
 		return nil, nil, err
 	}
 	refs = append(refs, actual...)
+	parents = append(parents, inherited...)
 	refs, err = canonicalContextSources(refs)
 	return refs, parents, err
 }
@@ -279,6 +377,11 @@ func (a *ContextArchive) causalRunReadSources(ctx context.Context, r *Run, runID
 			return nil, nil, err
 		}
 		parents = append(parents, inherited...)
+		reduced, err := a.imReducedParents(ctx, r, messages, runID)
+		if err != nil {
+			return nil, nil, err
+		}
+		parents = append(parents, reduced...)
 		if count < 64 {
 			break
 		}

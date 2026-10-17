@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/adk/filesystem"
 	"github.com/cloudwego/eino/adk/middlewares/reduction"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
@@ -514,5 +515,79 @@ func TestContextThreeHistoryPagesCompactAndReplayWithoutSourceLoss(t *testing.T)
 	page, err = f.a.Search(f.ctx(), "THREE_PAGE_DERIVED", "", 8)
 	if err != nil || len(page.Hits) != 0 {
 		t.Fatal("search omitted a chunk ancestor's revocation", err)
+	}
+}
+
+func TestContextRealIMReductionNoticesPreserveReceiptParents(t *testing.T) {
+	f := newContextArchiveFixture(t)
+	b := contextAddForeignMessage(f, "REAL_IM_NOTICE_SOURCE_B "+strings.Repeat("private B body ", 800))
+	args := getMessageArgs{ConversationID: b.ConversationID, MessageID: b.ID}
+	wire, err := invokeContextTool(contextRealIMNode(t, f), f.ctx(), "real-large-B", "im_get_message", args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail := contextRealIMDetail("im_get_message", "real-large-B", args, wire)
+	budget, err := ParseContextBudgetSnapshot(f.run.ContextBudget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pipeline := &ContextPipeline{cfg: ContextPipelineConfig{Budget: budget, Backend: f.a, ArchiveToolPath: f.a.ArchiveToolPath}}
+	truncated, err := pipeline.truncateTool(f.ctx(), detail)
+	if err != nil || !truncated.NeedTrunc || !truncated.NeedOffload {
+		t.Fatal("real typed truncation handler did not offload the committed IM result", err)
+	}
+	if err = f.a.Write(f.ctx(), &filesystem.WriteRequest{FilePath: truncated.OffloadFilePath, Content: truncated.OffloadContent}); err != nil {
+		t.Fatal(err)
+	}
+	notice := toolResultText(truncated.ToolResult)
+	view := contextRetrievalMessage("im_get_message", "real-large-B", notice)
+	view.Extra = map[string]any{"_eino_msg_id": "actual-truncated-IM-result"}
+	f.append(t, "native-truncated-IM-result", view)
+	archived, err := f.a.ArchiveTranscript(f.ctx(), []*schema.AgenticMessage{view})
+	if err != nil {
+		t.Fatal("native IM truncation notice could not enter the next prefix", err)
+	}
+	derived := &schema.AgenticMessage{Role: schema.AgenticRoleTypeAssistant, ContentBlocks: []*schema.ContentBlock{schema.NewContentBlock(&schema.AssistantGenText{Text: "TRUNCATED_IM_DERIVED_FACT"})}, Extra: map[string]any{"_eino_msg_id": "derived-from-native-IM-truncation"}}
+	f.append(t, "derived-after-native-truncation", derived)
+	derivedRef, err := f.a.ArchiveTranscript(f.ctx(), []*schema.AgenticMessage{derived})
+	if err != nil {
+		t.Fatal("derived native IM truncation result lost receipt provenance", err)
+	}
+	if err = f.s.FinishRun(f.ctx(), f.l, f.run, "completed", "", false); err != nil {
+		t.Fatal(err)
+	}
+	f.run = f.newRun(t, "2")
+	f.input = f.run.Inputs[0]
+	cleared, err := pipeline.clearTool(f.ctx(), detail)
+	if err != nil || !cleared.NeedClear {
+		t.Fatal("historical native IM clear did not preserve the original receipt", err)
+	}
+	clearView := contextRetrievalMessage("im_get_message", "real-large-B", toolResultText(cleared.ToolResult))
+	f.append(t, "historical-IM-cleared-view", clearView)
+	clearRef, err := f.a.ArchiveTranscript(f.ctx(), []*schema.AgenticMessage{clearView})
+	if err != nil {
+		t.Fatal("historical IM clear notice could not enter a prefix", err)
+	}
+	for _, ref := range []string{archived, derivedRef, clearRef} {
+		if _, err = f.a.Read(f.ctx(), ref, 0, 0); err != nil {
+			t.Fatal("authorized IM notice archive was unreadable", err)
+		}
+	}
+	for _, forged := range []*schema.AgenticMessage{contextRetrievalMessage("im_get_message", "wrong-native-call", notice), contextRetrievalMessage("im_get_message", "real-large-B", notice+" forged suffix")} {
+		if _, err = f.a.ArchiveTranscript(f.ctx(), []*schema.AgenticMessage{forged}); !errors.Is(err, errContextUnavailable) {
+			t.Fatal("unverified textual notice acquired an artifact source closure", err)
+		}
+	}
+	f.mu.Lock()
+	f.deniedConversations[b.ConversationID] = true
+	f.mu.Unlock()
+	for _, ref := range []string{archived, derivedRef, clearRef} {
+		if _, err = f.a.Read(f.ctx(), ref, 0, 0); !errors.Is(err, errContextUnavailable) {
+			t.Fatal("native reduced IM notice escaped original B revocation", err)
+		}
+	}
+	page, err := f.a.Search(f.ctx(), "TRUNCATED_IM_DERIVED", "", 8)
+	if err != nil || len(page.Hits) != 0 {
+		t.Fatal("native IM truncation leaked a derived historical excerpt", err)
 	}
 }

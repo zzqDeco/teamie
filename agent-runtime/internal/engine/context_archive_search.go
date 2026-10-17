@@ -91,6 +91,11 @@ func (a *ContextArchive) ArchiveTranscript(ctx context.Context, messages []*sche
 	if err != nil {
 		return "", err
 	}
+	reduced, err := a.imReducedParents(ctx, r, messages, "")
+	if err != nil {
+		return "", err
+	}
+	parents = append(parents, reduced...)
 	refs, err := a.transcriptSources(ctx, r, messages, &parents)
 	if err != nil {
 		return "", err
