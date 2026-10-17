@@ -264,8 +264,11 @@ func (a *ContextArchive) inputMessageSources(ctx context.Context, r *Run, messag
 // Retrieval text must not be archived again under the later Run's audience.
 // Only an exact native result linked to its immutable server observation can
 // add parent refs; neither model text nor a copied ref string grants scope.
-func (a *ContextArchive) transcriptRetrievalParents(ctx context.Context, r *Run, messages []*schema.AgenticMessage) ([]string, error) {
+func (a *ContextArchive) transcriptRetrievalProvenance(ctx context.Context, r *Run, messages []*schema.AgenticMessage) ([]InputSource, []string, error) {
 	parents := []string{}
+	sources := []InputSource{}
+	budget, budgetErr := ParseContextBudgetSnapshot(r.ContextBudget)
+	bindEmptyResults := budgetErr == nil && budget.Version >= 4
 	for _, message := range messages {
 		if message == nil {
 			continue
@@ -279,51 +282,65 @@ func (a *ContextArchive) transcriptRetrievalParents(ctx context.Context, r *Run,
 				continue
 			}
 			if result.CallID == "" || len(result.Content) != 1 || result.Content[0] == nil || result.Content[0].Type != schema.FunctionToolResultContentBlockTypeText || result.Content[0].Text == nil {
-				return nil, errContextUnavailable
+				return nil, nil, errContextUnavailable
 			}
 			wire := canonicalContextToolText(result.Content[0].Text.Text)
-			rows, err := a.Store.DB.Query(ctx, `SELECT t.result,o.response FROM runtime_tool_calls t JOIN runtime_runs owner ON owner.id=t.run_id JOIN runtime_tool_observations o ON o.run_id=t.run_id AND o.call_id=t.call_id AND o.observation_key='context-observation-v1' WHERE owner.agent_id=$1 AND t.call_id=$2 AND t.name=$3 AND t.result IS NOT NULL AND (owner.id=$4 OR EXISTS(SELECT 1 FROM runtime_session_acceptances x WHERE x.agent_id=owner.agent_id AND x.run_id=owner.id AND x.seq<=$5))`, r.AgentID, result.CallID, "native:"+result.Name, r.ID, r.AcceptanceHead)
+			rows, err := a.Store.DB.Query(ctx, `SELECT t.run_id::text,t.result,o.response FROM runtime_tool_calls t JOIN runtime_runs owner ON owner.id=t.run_id JOIN runtime_tool_observations o ON o.run_id=t.run_id AND o.call_id=t.call_id AND o.observation_key='context-observation-v1' WHERE owner.agent_id=$1 AND t.call_id=$2 AND t.name=$3 AND t.result IS NOT NULL AND (owner.id=$4 OR EXISTS(SELECT 1 FROM runtime_session_acceptances x WHERE x.agent_id=owner.agent_id AND x.run_id=owner.id AND x.seq<=$5))`, r.AgentID, result.CallID, "native:"+result.Name, r.ID, r.AcceptanceHead)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			matched := false
+			emptyOrigins := map[string]bool{}
 			for rows.Next() {
 				var receipt, raw []byte
-				if err = rows.Scan(&receipt, &raw); err != nil {
+				var origin string
+				if err = rows.Scan(&origin, &receipt, &raw); err != nil {
 					rows.Close()
-					return nil, err
+					return nil, nil, err
 				}
 				var observation contextToolObservation
 				if json.Unmarshal(raw, &observation) != nil || len(observation.Wire) > contextResponseMaximum || !json.Valid([]byte(observation.Wire)) {
 					rows.Close()
-					return nil, ErrReplayConflict
+					return nil, nil, ErrReplayConflict
 				}
 				expected, _ := json.Marshal(observation.Wire)
 				if !bytes.Equal(receipt, expected) {
 					rows.Close()
-					return nil, ErrReplayConflict
+					return nil, nil, ErrReplayConflict
 				}
 				if canonicalContextToolText(observation.Wire) == wire {
 					matched = true
 					parents = append(parents, observation.Refs...)
+					if bindEmptyResults && len(observation.Refs) == 0 {
+						emptyOrigins[origin] = true
+					}
 				}
 			}
 			err = rows.Err()
 			rows.Close()
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			if !matched {
-				return nil, errContextUnavailable
+				return nil, nil, errContextUnavailable
+			}
+			// A committed empty/error retrieval contains no quoted data parent.
+			// Bind it to the authenticated receipt's actual request sources so
+			// it remains compactable without granting an unobserved data source.
+			for origin := range emptyOrigins {
+				refs, err := a.runSources(ctx, origin)
+				if err != nil {
+					return nil, nil, err
+				}
+				sources = append(sources, refs...)
 			}
 		}
 	}
-	return parents, nil
+	return sources, parents, nil
 }
 
-func (a *ContextArchive) transcriptSources(ctx context.Context, r *Run, messages []*schema.AgenticMessage, parents *[]string) ([]InputSource, error) {
+func (a *ContextArchive) transcriptSources(ctx context.Context, r *Run, messages []*schema.AgenticMessage, parents *[]string, refs []InputSource) ([]InputSource, error) {
 	targets := map[string]*contextSourceTarget{}
-	refs := []InputSource{}
 	for _, message := range messages {
 		projection := contextProjectionBytes(message)
 		if projection == nil {

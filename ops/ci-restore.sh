@@ -13,7 +13,7 @@ for suffix in identity chat agent_control agent_runtime gateway; do
   version=1
   if [[ $suffix == identity || $suffix == chat || $suffix == agent_runtime || $suffix == gateway ]]; then version=2; fi
   if [[ $suffix == identity || $suffix == chat || $suffix == agent_runtime ]]; then version=3; fi
-  if [[ $suffix == agent_runtime ]]; then version=5; fi
+  if [[ $suffix == agent_runtime ]]; then version=6; fi
   if [[ $suffix == chat ]]; then version=5; fi
   # Identity's real schema creates its complete production migration ledger.
   if [[ $suffix != identity && $suffix != agent_runtime && $suffix != chat ]]; then
@@ -72,8 +72,8 @@ from pathlib import Path
 import re
 root=Path('agent-runtime/internal/engine')
 sources='\n'.join(p.read_text() for p in root.glob('*.go') if not p.name.endswith('_test.go'))
-print("SET teamie.runtime_writer_schema='5';")
-for name in ('schemaSQL','schemaV2SQL','schemaV3SQL','contextArchiveSchemaSQL','contextRecoverySchemaSQL','schemaV4SQL','schemaV5SQL'):
+print("SET teamie.runtime_writer_schema='6';")
+for name in ('schemaSQL','schemaV2SQL','schemaV3SQL','contextArchiveSchemaSQL','contextRecoverySchemaSQL','schemaV4SQL','schemaV5SQL','schemaV6SQL'):
     match=re.search(r'const\s+'+name+r'\s*=\s*`([^`]+)`',sources,re.S)
     if match is None:
         raise SystemExit('missing actual runtime migration: '+name)
@@ -82,7 +82,8 @@ PY
     runtime_context_budget=$(cat ops/fixtures/runtime-context-budget-v1.json)
     runtime_output_budget=$(cat ops/fixtures/runtime-context-budget-v2.json)
     runtime_current_budget=$(cat ops/fixtures/runtime-context-budget-v3.json)
-    "${pg[@]}" psql -U postgres -d teamie_agent_runtime -v ON_ERROR_STOP=1 -v frozen_budget="$runtime_context_budget" -v output_budget="$runtime_output_budget" -v current_budget="$runtime_current_budget" <<'SQL'
+    runtime_history_budget=$(cat ops/fixtures/runtime-context-budget-v4.json)
+    "${pg[@]}" psql -U postgres -d teamie_agent_runtime -v ON_ERROR_STOP=1 -v frozen_budget="$runtime_context_budget" -v output_budget="$runtime_output_budget" -v current_budget="$runtime_current_budget" -v history_budget="$runtime_history_budget" <<'SQL'
 INSERT INTO runtime_agents(agent_id,cursor) VALUES('10000000-0000-4000-8000-000000000001',42);
 INSERT INTO runtime_runs(id,agent_id,input_key,input_json,attempt_id,context_profile,context_budget,context_head,acceptance_head)
 VALUES('20000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','restore-context','[]',
@@ -96,6 +97,9 @@ VALUES('20000000-0000-4000-8000-000000000003','10000000-0000-4000-8000-000000000
 INSERT INTO runtime_runs(id,agent_id,input_key,input_json,attempt_id,context_profile,context_budget,context_head,acceptance_head)
 VALUES('20000000-0000-4000-8000-000000000004','10000000-0000-4000-8000-000000000001','restore-current-policy','[]',
        '30000000-0000-4000-8000-000000000004','teamie-context-v038',:'current_budget'::jsonb||'{"fileDelivery":true,"structuredMentions":true}'::jsonb,0,0);
+INSERT INTO runtime_runs(id,agent_id,input_key,input_json,attempt_id,context_profile,context_budget,context_head,acceptance_head)
+VALUES('20000000-0000-4000-8000-000000000005','10000000-0000-4000-8000-000000000001','restore-history-policy','[]',
+       '30000000-0000-4000-8000-000000000005','teamie-context-v038',:'history_budget'::jsonb||'{"fileDelivery":true,"structuredMentions":true}'::jsonb,0,0);
 INSERT INTO runtime_context_artifacts(agent_id,run_id,attempt_id,artifact_key,kind,content,content_hash,sources,source_event_seq)
 VALUES('10000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001',
        'transcript:restore','transcript',decode('00fffe80890a0d','hex'),repeat('a',64),
@@ -128,7 +132,7 @@ SQL
 SELECT (SELECT string_agg(version::text,',' ORDER BY version) FROM agent_runtime_schema_migrations)||':'||r.context_profile||':'||(r.context_budget=:'frozen_budget'::jsonb)::text||':'||encode(a.content,'hex')||':'||(a.sources->0->>'eventId')||':'||a.source_event_seq||':'||c.model_step||':'||c.error_code||':'||c.streaming::text||':'||(c.decision_json=jsonb_build_object('version',1,'action','compact_prefix','budget',:'frozen_budget'::jsonb))::text FROM runtime_runs r JOIN runtime_context_artifacts a ON a.run_id=r.id JOIN runtime_context_recoveries c ON c.run_id=r.id WHERE r.id='20000000-0000-4000-8000-000000000001';
 SQL
 )
-    [[ $actual == '1,2,3,4,5:teamie-context-v038:true:00fffe80890a0d:42:42:2:context_overflow:true:true' ]] || { echo 'Runtime frozen policy, context archive, source references and recovery tape restore failed.' >&2; exit 1; }
+    [[ $actual == '1,2,3,4,5,6:teamie-context-v038:true:00fffe80890a0d:42:42:2:context_overflow:true:true' ]] || { echo 'Runtime frozen policy, context archive, source references and recovery tape restore failed.' >&2; exit 1; }
     actual=$("${pg[@]}" psql -U postgres -d restore_agent_runtime -At -v ON_ERROR_STOP=1 -v frozen_budget="$runtime_context_budget" <<'SQL'
 SELECT context_budget=(:'frozen_budget'::jsonb||'{"fileDelivery":true,"structuredMentions":true}'::jsonb) FROM runtime_runs WHERE input_key='restore-file-policy';
 SQL
@@ -144,6 +148,11 @@ SELECT context_budget=(:'current_budget'::jsonb||'{"fileDelivery":true,"structur
 SQL
 )
     [[ $actual == t ]] || { echo 'Runtime current-input policy restore failed.' >&2; exit 1; }
+    actual=$("${pg[@]}" psql -U postgres -d restore_agent_runtime -At -v ON_ERROR_STOP=1 -v history_budget="$runtime_history_budget" <<'SQL'
+SELECT context_budget=(:'history_budget'::jsonb||'{"fileDelivery":true,"structuredMentions":true}'::jsonb) FROM runtime_runs WHERE input_key='restore-history-policy';
+SQL
+)
+    [[ $actual == t ]] || { echo 'Runtime history coalescing policy restore failed.' >&2; exit 1; }
   fi
   # Ordinary owners may not connect to another service's database.
   if "${pg[@]}" env PGPASSWORD=ci-identity-disposable-password psql -h 127.0.0.1 -U teamie_identity -d teamie_gateway -c 'SELECT 1' >/dev/null 2>&1; then

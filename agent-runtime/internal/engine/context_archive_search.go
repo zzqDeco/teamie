@@ -87,7 +87,7 @@ func (a *ContextArchive) ArchiveTranscript(ctx context.Context, messages []*sche
 	// Retrieval results are deliberately absent from the text projection. Their
 	// server-owned observations still carry the source closure of any private
 	// data used to produce the next summary.
-	parents, err := a.transcriptRetrievalParents(ctx, r, messages)
+	retrievalSources, parents, err := a.transcriptRetrievalProvenance(ctx, r, messages)
 	if err != nil {
 		return "", err
 	}
@@ -96,7 +96,7 @@ func (a *ContextArchive) ArchiveTranscript(ctx context.Context, messages []*sche
 		return "", err
 	}
 	parents = append(parents, reduced...)
-	refs, err := a.transcriptSources(ctx, r, messages, &parents)
+	refs, err := a.transcriptSources(ctx, r, messages, &parents, retrievalSources)
 	if err != nil {
 		return "", err
 	}

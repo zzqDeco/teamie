@@ -435,10 +435,11 @@ func (a *ContextArchive) causalRunReadSources(ctx context.Context, r *Run, runID
 			}
 			refs = append(refs, actual...)
 		}
-		inherited, err := a.transcriptRetrievalParents(ctx, r, messages)
+		retrievalSources, inherited, err := a.transcriptRetrievalProvenance(ctx, r, messages)
 		if err != nil {
 			return nil, nil, err
 		}
+		refs = append(refs, retrievalSources...)
 		parents = append(parents, inherited...)
 		reduced, err := a.toolReducedParents(ctx, r, messages, runID)
 		if err != nil {

@@ -159,12 +159,12 @@ func TestCurrentInputMissingOrOnlyRepresentedByPreviewFailsClosed(t *testing.T) 
 }
 
 func TestHistoricalBudgetVersionsKeepTheirCapacityAndSourceProjection(t *testing.T) {
-	for _, version := range []int{1, 2, 3} {
+	for _, version := range []int{1, 2, 3, 4} {
 		budget, err := makeContextBudgetSnapshotVersion(65536, version)
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := map[int]int{1: 2048, 2: 8192, 3: 4096}[version]
+		want := map[int]int{1: 2048, 2: 8192, 3: 4096, 4: 4096}[version]
 		if budget.OutputReserveTokens != want {
 			t.Fatal("changed historical frozen capacity", version, budget)
 		}
