@@ -42,6 +42,11 @@ func canonicalContextPolicy(profile string, raw json.RawMessage) (string, json.R
 	if profile == contextProfileLegacy && len(value) != 0 {
 		return "", nil, errors.New("legacy context policy has no budget snapshot")
 	}
+	if profile == contextProfileV1 {
+		if _, err := ParseContextBudgetSnapshot(raw); err != nil {
+			return "", nil, err
+		}
+	}
 	b, err := json.Marshal(value)
 	return profile, b, err
 }

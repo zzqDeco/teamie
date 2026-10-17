@@ -52,7 +52,10 @@ func TestTaskSnapshotPreservesNewPolicyAndLegacyBytes(t *testing.T) {
 		t.Fatal("old task snapshot changed", string(legacy), err)
 	}
 	run.ContextProfile = contextProfileV1
-	run.ContextBudget = json.RawMessage(`{"version":1,"contextWindowTokens":16384}`)
+	run.ContextBudget, err = NewContextBudgetSnapshot(16384)
+	if err != nil {
+		t.Fatal(err)
+	}
 	run.Inputs = []Input{{EventID: "1", WorkspaceID: "w", ConversationID: "c", MessageID: "m", Body: "PRIVATE_BODY"}}
 	encoded, err := snapshotter.CaptureContext(WithRun(context.Background(), run))
 	if err != nil || strings.Contains(string(encoded), "PRIVATE_BODY") {
