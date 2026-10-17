@@ -243,7 +243,7 @@ func TestContextIMEmptyHistoryAndMissingAttachmentProofFailClosed(t *testing.T) 
 	}
 }
 
-func TestContextSourceBatchLimitDoesNotLimitParentDAG(t *testing.T) {
+func TestContextLargeSourceBatchesAndParentDAGRemainReadable(t *testing.T) {
 	f := newContextArchiveFixture(t)
 	sources := []InputSource{}
 	for range 129 {
@@ -253,14 +253,22 @@ func TestContextSourceBatchLimitDoesNotLimitParentDAG(t *testing.T) {
 		f.mu.Unlock()
 		sources = append(sources, contextMessageSource(message))
 	}
-	if _, err := f.a.PathWithSources(f.ctx(), "message", "overflow", "private", sources); !errors.Is(err, errContextSourceOverflow) {
-		t.Fatal("one oversized source batch was silently truncated", err)
+	batch, err := f.a.PathWithSources(f.ctx(), "message", "large-batch", "private", sources)
+	if err != nil {
+		t.Fatal("a complete source batch was rejected", err)
+	}
+	artifact, err := f.a.load(f.ctx(), f.run, batch)
+	if err != nil || len(artifact.Sources) != 0 || len(artifact.ArtifactRefs) != 2 {
+		t.Fatal("large source batch was not split into private DAG nodes", err)
+	}
+	if _, err = f.a.Read(f.ctx(), batch, 0, 0); err != nil {
+		t.Fatal("chunking lost a source or made the complete batch unreadable", err)
 	}
 	duplicated := make([]InputSource, 300)
 	for i := range duplicated {
 		duplicated[i] = sources[0]
 	}
-	if refs, err := boundedContextSources(duplicated); err != nil || len(refs) != 1 {
+	if refs, err := canonicalContextSources(duplicated); err != nil || len(refs) != 1 {
 		t.Fatal("source count was bounded before deduplication", err)
 	}
 	parent := ""
@@ -394,5 +402,117 @@ func TestContextIMCompatiblePartialSourceEvidenceMerges(t *testing.T) {
 		if _, err := canonicalContextSources([]InputSource{base, conflict}); !errors.Is(err, ErrReplayConflict) {
 			t.Fatal("conflicting known source identities were merged", err)
 		}
+	}
+}
+
+func TestContextThreeHistoryPagesCompactAndReplayWithoutSourceLoss(t *testing.T) {
+	f := newContextArchiveFixture(t)
+	b := contextAddForeignMessage(f, "B history page")
+	for seq := 1; seq <= 150; seq++ {
+		message := b
+		message.ID, message.Seq, message.Body = uuid.NewString(), int64(seq), fmt.Sprintf("private B history %d", seq)
+		f.mu.Lock()
+		f.messages[message.ID] = message
+		f.mu.Unlock()
+	}
+	f.mu.Lock()
+	delete(f.messages, b.ID)
+	f.mu.Unlock()
+	node := contextRealIMNode(t, f)
+	var before int64
+	for page := range 3 {
+		id := fmt.Sprintf("history-page-%d", page)
+		wire, err := invokeContextTool(node, f.ctx(), id, "im_list_messages", listMessagesArgs{ConversationID: b.ConversationID, BeforeSeq: before, Limit: 50})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var output struct {
+			Data struct {
+				Messages      []Message `json:"messages"`
+				NextBeforeSeq int64     `json:"nextBeforeSeq"`
+			} `json:"data"`
+		}
+		if json.Unmarshal([]byte(wire), &output) != nil || len(output.Data.Messages) != 50 || output.Data.NextBeforeSeq <= 0 || before > 0 && output.Data.NextBeforeSeq >= before {
+			t.Fatal("fixture did not read three real, distinct 50-message pages")
+		}
+		before = output.Data.NextBeforeSeq
+		f.append(t, id, contextRetrievalMessage("im_list_messages", id, wire))
+	}
+	derived := &schema.AgenticMessage{Role: schema.AgenticRoleTypeAssistant, ContentBlocks: []*schema.ContentBlock{schema.NewContentBlock(&schema.AssistantGenText{Text: "THREE_PAGE_DERIVED_FACT"})}, Extra: map[string]any{"_eino_msg_id": "derived-from-150-B-messages"}}
+	f.append(t, "derived-150", derived)
+	ref, err := f.a.ArchiveTranscript(f.ctx(), []*schema.AgenticMessage{derived})
+	if err != nil {
+		t.Fatal("normal three-page history could not compact", err)
+	}
+	artifact, err := f.a.load(f.ctx(), f.run, ref)
+	if err != nil || len(artifact.Sources) != 0 || len(artifact.ArtifactRefs) != 2 {
+		t.Fatal("large source set was not preserved in two private chunks", err)
+	}
+	seen := map[string]bool{}
+	for _, parent := range artifact.ArtifactRefs {
+		chunk, err := f.a.load(f.ctx(), f.run, parent)
+		if err != nil || len(chunk.Sources) > 128 || chunk.Text != "" || chunk.ToolName != "context_source_index" {
+			t.Fatal("source chunk copied data or exceeded its direct source size", err)
+		}
+		for _, source := range chunk.Sources {
+			seen[source.ConversationID+"/"+source.MessageID] = true
+		}
+	}
+	if len(seen) != 151 {
+		t.Fatal("source chunking dropped real origins", len(seen))
+	}
+	if _, err = f.a.Read(f.ctx(), ref, 0, 0); err != nil {
+		t.Fatal("authorized large-source archive was unreadable", err)
+	}
+	page, err := f.a.Search(f.ctx(), "THREE_PAGE_DERIVED", "", 8)
+	if err != nil || len(page.Hits) == 0 {
+		t.Fatal("large-source derived event was not searchable", err)
+	}
+	reads := contextToolNode(t, f.a)
+	readArgs := map[string]any{"ref": ref}
+	readWire, err := invokeContextTool(reads, f.ctx(), "cached-large-source", "context_read", readArgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Source-index cache and another execution attempt must retain the same
+	// logical sources, identity and first-write chunk rows.
+	replayed, err := f.a.ArchiveTranscript(f.ctx(), []*schema.AgenticMessage{derived})
+	if err != nil || replayed != ref {
+		t.Fatal("source-index replay changed a chunked archive ref", err)
+	}
+	firstAttempt := f.run.Attempt
+	f.run, err = f.s.StartRunWithContextPolicy(context.Background(), f.l, f.run.Inputs, contextProfileV1, archiveContextBudget(t))
+	if err != nil || f.run.Attempt == firstAttempt {
+		t.Fatal("same logical Run did not start another attempt", err)
+	}
+	replayed, err = f.a.ArchiveTranscript(f.ctx(), []*schema.AgenticMessage{derived})
+	if err != nil || replayed != ref {
+		t.Fatal("another attempt rewrote chunk identity", err)
+	}
+	if count(t, f.s, `SELECT count(*) FROM runtime_context_artifacts WHERE tool_name='context_source_index' AND content=''::bytea AND attempt_id<>$1`, firstAttempt) != 0 {
+		t.Fatal("replay rewrote chunk metadata")
+	}
+	if replay, err := invokeContextTool(reads, f.ctx(), "cached-large-source", "context_read", readArgs); err != nil || replay != readWire {
+		t.Fatal("chunked read observation changed across attempts", err)
+	}
+	f.mu.Lock()
+	for id, message := range f.messages {
+		if message.ConversationID == b.ConversationID && message.Seq == 75 {
+			retracted := "2026-10-17T00:00:00Z"
+			message.RetractedAt = &retracted
+			f.messages[id] = message
+			break
+		}
+	}
+	f.mu.Unlock()
+	if _, err = f.a.Read(f.ctx(), ref, 0, 0); !errors.Is(err, errContextUnavailable) {
+		t.Fatal("one revoked origin among 150 remained readable", err)
+	}
+	if _, err = invokeContextTool(reads, f.ctx(), "cached-large-source", "context_read", readArgs); err == nil {
+		t.Fatal("cached read bypassed one revoked chunk ancestor")
+	}
+	page, err = f.a.Search(f.ctx(), "THREE_PAGE_DERIVED", "", 8)
+	if err != nil || len(page.Hits) != 0 {
+		t.Fatal("search omitted a chunk ancestor's revocation", err)
 	}
 }

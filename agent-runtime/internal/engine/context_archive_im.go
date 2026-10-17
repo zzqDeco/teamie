@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/middlewares/reduction"
@@ -13,8 +12,6 @@ import (
 )
 
 const contextIMArgumentsKey = "context-im-arguments-v1"
-
-var errContextSourceOverflow = fmt.Errorf("%w: context source overflow", errContextUnavailable)
 
 func contextIMTool(name string) bool {
 	switch name {
@@ -40,14 +37,6 @@ func (t *Tools) recordContextIMArguments(ctx context.Context, run *Run, call, na
 	}
 	a := &ContextArchive{Store: t.Store, Lease: t.Lease}
 	return a.saveObservation(ctx, run, call, contextIMArgumentsKey, raw)
-}
-
-func boundedContextSources(refs []InputSource) ([]InputSource, error) {
-	refs, err := canonicalContextSources(refs)
-	if err == nil && len(refs) > 128 {
-		return nil, errContextSourceOverflow
-	}
-	return refs, err
 }
 
 func contextMessageSource(message Message) InputSource {
@@ -151,7 +140,7 @@ func (a *ContextArchive) imReceiptSources(ctx context.Context, runID, call, name
 		}
 		refs = append(refs, InputSource{ConversationID: source.ConversationID, MessageID: source.MessageID, AttachmentIDs: []string{source.AttachmentID}})
 	}
-	return boundedContextSources(refs)
+	return canonicalContextSources(refs)
 }
 
 // An original native IM result can be archived without ever being truncated.
@@ -213,7 +202,7 @@ func (a *ContextArchive) imMessageSources(ctx context.Context, r *Run, message *
 			refs = append(refs, actual...)
 		}
 	}
-	refs, err := boundedContextSources(refs)
+	refs, err := canonicalContextSources(refs)
 	return refs, found, err
 }
 
@@ -232,7 +221,7 @@ func (a *ContextArchive) causalMessageSources(ctx context.Context, r *Run, item 
 	}
 	parents := []string{}
 	if message.Role != schema.AgenticRoleTypeAssistant {
-		refs, err = boundedContextSources(refs)
+		refs, err = canonicalContextSources(refs)
 		return refs, parents, err
 	}
 	actual, parents, err := a.causalRunReadSources(ctx, r, item.runID, item.seq)
@@ -240,7 +229,7 @@ func (a *ContextArchive) causalMessageSources(ctx context.Context, r *Run, item 
 		return nil, nil, err
 	}
 	refs = append(refs, actual...)
-	refs, err = boundedContextSources(refs)
+	refs, err = canonicalContextSources(refs)
 	return refs, parents, err
 }
 
@@ -284,10 +273,6 @@ func (a *ContextArchive) causalRunReadSources(ctx context.Context, r *Run, runID
 				return nil, nil, err
 			}
 			refs = append(refs, actual...)
-			refs, err = boundedContextSources(refs)
-			if err != nil {
-				return nil, nil, err
-			}
 		}
 		inherited, err := a.transcriptRetrievalParents(ctx, r, messages)
 		if err != nil {
@@ -298,6 +283,6 @@ func (a *ContextArchive) causalRunReadSources(ctx context.Context, r *Run, runID
 			break
 		}
 	}
-	refs, err := boundedContextSources(refs)
+	refs, err := canonicalContextSources(refs)
 	return refs, parents, err
 }

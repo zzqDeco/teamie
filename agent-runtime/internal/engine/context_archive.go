@@ -301,7 +301,7 @@ func (a *ContextArchive) sourcesThrough(ctx context.Context, r *Run, eventHead i
 		refs = append(refs, actual...)
 		parents = append(parents, inherited...)
 	}
-	refs, err = boundedContextSources(refs)
+	refs, err = canonicalContextSources(refs)
 	return refs, parents, err
 }
 
@@ -342,12 +342,27 @@ func (a *ContextArchive) put(ctx context.Context, r *Run, artifact contextArtifa
 	if !contextKind(artifact.Kind) || artifact.Key == "" || len(artifact.Key) > 4096 || len(artifact.Text) > contextArtifactMaximum || !utf8.ValidString(artifact.Text) {
 		return "", errContextArguments
 	}
-	refs, err := boundedContextSources(artifact.Sources)
+	refs, err := canonicalContextSources(artifact.Sources)
 	if err != nil {
 		return "", err
 	}
-	sourceJSON, _ := json.Marshal(refs)
 	parents := append([]string{}, artifact.ArtifactRefs...)
+	// Keep each row's direct provenance small without imposing a lifetime or
+	// per-Run source limit. Chunks contain no copied tool/transcript text, and
+	// their identity depends only on canonical sources and the logical Run.
+	if len(refs) > 128 {
+		for start := 0; start < len(refs); start += 128 {
+			chunk := refs[start:min(start+128, len(refs))]
+			raw, _ := json.Marshal(chunk)
+			parent, err := a.put(ctx, r, contextArtifact{RunID: artifact.RunID, Attempt: artifact.Attempt, Key: "provenance/" + digest(raw), Kind: "message", ToolName: "context_source_index", Sources: chunk})
+			if err != nil {
+				return "", err
+			}
+			parents = append(parents, parent)
+		}
+		refs = []InputSource{}
+	}
+	sourceJSON, _ := json.Marshal(refs)
 	sort.Strings(parents)
 	parents = slices.Compact(parents)
 	parentJSON, _ := json.Marshal(parents)

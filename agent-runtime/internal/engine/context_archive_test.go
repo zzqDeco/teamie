@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -99,13 +100,22 @@ func newContextArchiveFixture(t *testing.T) *contextArchiveFixture {
 		}
 		if request.Method == http.MethodGet && len(parts) == 6 && parts[5] == "messages" {
 			messages := []Message{}
+			before, _ := strconv.ParseInt(request.URL.Query().Get("beforeSeq"), 10, 64)
 			for _, message := range f.messages {
-				if message.ConversationID == parts[4] {
+				if message.ConversationID == parts[4] && (before == 0 || message.Seq < before) {
 					messages = append(messages, message)
 				}
 			}
 			sort.Slice(messages, func(i, j int) bool { return messages[i].Seq < messages[j].Seq })
-			_ = json.NewEncoder(w).Encode(map[string]any{"messages": messages, "hasMore": false})
+			limit, _ := strconv.Atoi(request.URL.Query().Get("limit"))
+			if limit == 0 {
+				limit = 20
+			}
+			more := len(messages) > limit
+			if more {
+				messages = messages[len(messages)-limit:]
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"messages": messages, "hasMore": more})
 			return
 		}
 		if request.Method == http.MethodPost && len(parts) == 6 && parts[5] == "messages" {

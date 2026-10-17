@@ -145,7 +145,7 @@ func (a *ContextArchive) toolSources(ctx context.Context, r *Run, detail *reduct
 			refs = append(refs, actual...)
 		}
 	}
-	return boundedContextSources(refs)
+	return canonicalContextSources(refs)
 }
 
 // ArchiveToolPath binds only actual receipt candidates for this native tool
@@ -388,6 +388,28 @@ func (a *ContextArchive) transcriptSources(ctx context.Context, r *Run, messages
 	if err != nil {
 		return nil, err
 	}
+	for _, target := range targets {
+		if !target.found {
+			continue
+		}
+		// Storage can split this index's direct sources into provenance-only
+		// chunks. Recover the same logical source list for archive identity;
+		// retain real transcript/retrieval parent refs as DAG edges.
+		inherited := []string{}
+		for _, ref := range target.parents {
+			parent, err := a.load(ctx, r, ref)
+			if err != nil {
+				return nil, err
+			}
+			raw, _ := json.Marshal(parent.Sources)
+			if parent.Kind == "message" && parent.ToolName == "context_source_index" && parent.Text == "" && len(parent.ArtifactRefs) == 0 && ref == contextRef(parent.RunID, "message", "provenance/"+digest(raw)) {
+				target.refs = append(target.refs, parent.Sources...)
+			} else {
+				inherited = append(inherited, ref)
+			}
+		}
+		target.parents = inherited
+	}
 	ids := []string{}
 	needsLegacy := false
 	for _, target := range targets {
@@ -489,7 +511,7 @@ func (a *ContextArchive) transcriptSources(ctx context.Context, r *Run, messages
 		if len(target.refs) == 0 {
 			target.refs = target.updateRefs
 		}
-		if len(target.refs) == 0 {
+		if len(target.refs) == 0 && len(target.parents) == 0 {
 			return nil, errContextUnavailable
 		}
 		sources, err := canonicalContextSources(target.refs)
@@ -507,7 +529,7 @@ func (a *ContextArchive) transcriptSources(ctx context.Context, r *Run, messages
 	if len(refs) == 0 && len(*parents) == 0 {
 		return nil, errors.New("context source closure is empty")
 	}
-	return boundedContextSources(refs)
+	return canonicalContextSources(refs)
 }
 
 // Ordinary tool adapters may drop ToolOutputPart.Extra. A native persisted
