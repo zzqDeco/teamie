@@ -68,12 +68,14 @@ export function ConversationView({
   onMembers,
   membersOpen,
   onMenu,
+  initialMessageId = "",
 }: {
   conversation: Conversation;
   members: Member[];
   onMembers: () => void;
   membersOpen: boolean;
   onMenu: () => void;
+  initialMessageId?: string;
 }) {
   const { user } = useAuth();
   const { data, syncError, sync, sendTyping, typing } = useChat();
@@ -101,6 +103,12 @@ export function ConversationView({
   const [searchOpen, setSearchOpen] = useState(false);
   const closeSearch = useCallback(() => setSearchOpen(false), []);
   const navigation = useRef(0);
+  const acknowledgement = useRef<{
+    id: string;
+    seq: number;
+    generation: number;
+    operation: number;
+  } | null>(null);
   const [mentions, setMentions] = useState<Mention[]>([]);
   const [editMentions, setEditMentions] = useState<Mention[]>([]);
   const mentionMembers = members.filter((member) =>
@@ -145,6 +153,7 @@ export function ConversationView({
     const hasConfirmed = (
       chatStore.getSnapshot().messages[conversation.id] || []
     ).some((m) => !m.status);
+    acknowledgement.current = null;
     setLocated(null);
     setHighlightId("");
     setLocating(false);
@@ -169,7 +178,12 @@ export function ConversationView({
   }, [conversation.id]);
   const focusMessage = useCallback((id: string) => {
     const target = document.getElementById(`message-${id}`);
-    if (!target || !scrollRef.current?.contains(target)) return;
+    if (
+      !target ||
+      !scrollRef.current?.contains(target) ||
+      target.closest("[inert]")
+    )
+      return;
     target.scrollIntoView({
       block: "center",
       behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
@@ -180,73 +194,141 @@ export function ConversationView({
   }, []);
   useLayoutEffect(() => {
     if (highlightId) focusMessage(highlightId);
-  }, [highlightId, located, focusMessage]);
+    const pending = acknowledgement.current;
+    if (
+      !visible ||
+      !pending ||
+      pending.id !== highlightId ||
+      pending.generation !== chatStore.generation ||
+      pending.operation !== navigation.current
+    )
+      return;
+    const target = document.getElementById(`message-${pending.id}`);
+    if (
+      !target ||
+      !scrollRef.current?.contains(target) ||
+      target.closest("[inert]")
+    )
+      return;
+    acknowledgement.current = null;
+    if (
+      chatStore
+        .getSnapshot()
+        .messages[
+          conversation.id
+        ]?.some((message) => message.id === pending.id && message.retractedAt)
+    )
+      return;
+    void api
+      .read(conversation.id, pending.seq)
+      .then((result) => {
+        if (
+          pending.generation === chatStore.generation &&
+          pending.operation === navigation.current
+        ) {
+          lastRead.current = Math.max(lastRead.current, result.readSeq);
+          chatStore.markRead(conversation.id, result.readSeq);
+        }
+      })
+      .catch(() => {
+        if (
+          pending.generation === chatStore.generation &&
+          pending.operation === navigation.current
+        )
+          setError("已读状态暂未同步");
+      });
+  }, [
+    highlightId,
+    located,
+    focusMessage,
+    visible,
+    conversation.id,
+    membersOpen,
+  ]);
+  const loadContext = useCallback(
+    async (id: string, readOnDisplay = false) => {
+      const token = chatStore.generation;
+      const operation = ++navigation.current;
+      const current = () =>
+        token === chatStore.generation && operation === navigation.current;
+      setAtBottom(false);
+      setLoading(false);
+      setLoadingOlder(false);
+      setLocating(true);
+      acknowledgement.current = null;
+      initialScroll.current = false;
+      setError("");
+      try {
+        const target = await api.message(conversation.id, id);
+        if (!current()) return;
+        setResolvedTargets((old) => ({
+          ...old,
+          [target.message.id]: old[target.message.id]
+            ? reconcileMessages([old[target.message.id]], [target.message])[0]
+            : target.message,
+        }));
+        const page = await api.messagesAround(
+          conversation.id,
+          target.message.seq,
+        );
+        if (!current()) return;
+        const context = reconcileMessages(page.messages, [target.message]);
+        const resolved =
+          context.find((m) => m.id === target.message.id) || target.message;
+        setResolvedTargets((old) => ({
+          ...old,
+          [resolved.id]: old[resolved.id]
+            ? reconcileMessages([old[resolved.id]], [resolved])[0]
+            : resolved,
+        }));
+        if (readOnDisplay && !target.message.retractedAt)
+          acknowledgement.current = {
+            id,
+            seq: target.message.seq,
+            generation: token,
+            operation,
+          };
+        setLocated(context);
+        setHasMore((context[0]?.seq || 1) > 1);
+        setHighlightId(id);
+      } catch (e) {
+        if (current())
+          setError(
+            e instanceof Error && "status" in e && e.status === 404
+              ? "原消息已不可访问"
+              : errorText(e),
+          );
+      } finally {
+        if (current()) setLocating(false);
+      }
+    },
+    [conversation.id],
+  );
   async function locate(id: string) {
-    const token = chatStore.generation;
-    const operation = ++navigation.current;
-    const current = () =>
-      token === chatStore.generation && operation === navigation.current;
+    if (!messages.some((message) => message.id === id)) return loadContext(id);
+    navigation.current++;
+    acknowledgement.current = null;
     setLoading(false);
     setLoadingOlder(false);
     setLocating(false);
     initialScroll.current = false;
     setError("");
-    if (messages.some((m) => m.id === id)) {
-      setHighlightId(id);
-      focusMessage(id);
-      const el = scrollRef.current;
-      if (el) {
-        setAtBottom(
-          !located && el.scrollHeight - el.scrollTop - el.clientHeight < 80,
-        );
-      }
-      return;
-    }
-    setAtBottom(false);
-    setLocating(true);
-    try {
-      const target = await api.message(conversation.id, id);
-      if (!current()) return;
-      setResolvedTargets((old) => ({
-        ...old,
-        [target.message.id]: old[target.message.id]
-          ? reconcileMessages([old[target.message.id]], [target.message])[0]
-          : target.message,
-      }));
-      const page = await api.messagesAround(
-        conversation.id,
-        target.message.seq,
+    setHighlightId(id);
+    focusMessage(id);
+    const el = scrollRef.current;
+    if (el) {
+      setAtBottom(
+        !located && el.scrollHeight - el.scrollTop - el.clientHeight < 80,
       );
-      if (!current()) return;
-      const context = reconcileMessages(page.messages, [target.message]);
-      const resolved =
-        context.find((m) => m.id === target.message.id) || target.message;
-      setResolvedTargets((old) => ({
-        ...old,
-        [resolved.id]: old[resolved.id]
-          ? reconcileMessages([old[resolved.id]], [resolved])[0]
-          : resolved,
-      }));
-      setLocated(context);
-      setHasMore((context[0]?.seq || 1) > 1);
-      setHighlightId(id);
-    } catch (e) {
-      if (current())
-        setError(
-          e instanceof Error && "status" in e && e.status === 404
-            ? "原消息已不可访问"
-            : errorText(e),
-        );
-    } finally {
-      if (current()) setLocating(false);
     }
   }
   useEffect(() => {
-    void fetchLatest();
+    if (initialMessageId) void loadContext(initialMessageId, true);
+    else void fetchLatest();
     return () => {
       sendTyping(conversation.id, false);
     };
-  }, [fetchLatest, sendTyping, conversation.id]);
+  }, [fetchLatest, loadContext, initialMessageId, sendTyping, conversation.id]);
   useEffect(() => {
     const change = () => setVisible(document.visibilityState === "visible");
     document.addEventListener("visibilitychange", change);

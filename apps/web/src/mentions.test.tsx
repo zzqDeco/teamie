@@ -348,6 +348,55 @@ describe("reply navigation", () => {
     );
     expect(host.textContent).toContain("后台刷新的新消息");
   });
+  it("retains an attention source as reply context without reading newer cached messages", async () => {
+    chatStore.merge([reply]);
+    vi.mocked(api.messages).mockResolvedValue({
+      messages: [reply],
+      hasMore: true,
+    });
+    vi.mocked(api.read).mockResolvedValue({ readSeq: original.seq });
+    vi.spyOn(api, "message").mockResolvedValue({ message: original });
+    vi.spyOn(api, "messagesAround").mockResolvedValue({
+      messages: [
+        original,
+        {
+          ...original,
+          id: "neighbor-message",
+          clientMessageId: "neighbor",
+          body: "相邻上下文",
+          seq: 3,
+        },
+      ],
+      hasMore: false,
+    });
+    vi.useFakeTimers();
+    try {
+      await render(
+        <ConversationView
+          conversation={{ ...conversation, readSeq: 0 }}
+          members={members}
+          onMembers={vi.fn()}
+          membersOpen={false}
+          onMenu={vi.fn()}
+          initialMessageId={original.id}
+        />,
+      );
+      await act(async () => vi.advanceTimersByTimeAsync(650));
+      expect(api.messages).not.toHaveBeenCalled();
+      expect(api.read).toHaveBeenCalledExactlyOnceWith("group", original.seq);
+      expect(document.activeElement?.id).toBe(`message-${original.id}`);
+      await act(async () =>
+        host.querySelector<HTMLButtonElement>(".located-banner button")!.click(),
+      );
+      expect(host.querySelector(".located-banner")).toBeNull();
+      expect(host.textContent).toContain("交付结果");
+      expect(host.querySelector(".message-reply")?.textContent).toContain(
+        "原始任务",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("does not render a denied or late response after navigating away", async () => {
     vi.mocked(api.messages).mockResolvedValue({
       messages: [reply],

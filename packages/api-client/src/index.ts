@@ -211,6 +211,14 @@ export type SyncPage = {
   hasMore: boolean;
 };
 export type MessagePage = { messages: Message[]; hasMore: boolean };
+export type AttentionItem = {
+  message: Message;
+  conversation: Pick<Conversation, "id" | "workspaceId" | "name" | "type">;
+  workspaceName: string;
+  reasons: ("mention" | "reply")[];
+  isRead: boolean;
+};
+export type AttentionPage = { items: AttentionItem[]; cursor?: string; unreadCount: number };
 export class ApiError extends Error {
   status: number;
   code: string;
@@ -469,6 +477,13 @@ export class TeamieClient {
     this.#request<MessagePage>(
       `/conversations/${part(id)}/messages?limit=50${beforeSeq ? `&beforeSeq=${beforeSeq}` : ""}`,
     );
+  attention = (options: { cursor?: string; limit?: number; unreadOnly?: boolean } = {}, signal?: AbortSignal) => {
+    const params = new URLSearchParams();
+    if (options.cursor) params.set("cursor", options.cursor);
+    if (options.limit !== undefined) params.set("limit", String(options.limit));
+    if (options.unreadOnly !== undefined) params.set("unreadOnly", String(options.unreadOnly));
+    return this.#request<AttentionPage>(`/attention${params.size ? `?${params}` : ""}`, { signal });
+  };
   searchMessages = (
     id: string,
     options: { q?: string; content?: "files"; beforeSeq?: number },
