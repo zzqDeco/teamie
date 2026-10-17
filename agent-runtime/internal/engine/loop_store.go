@@ -192,7 +192,7 @@ func detachedPersistence(ctx context.Context) (context.Context, context.CancelFu
 }
 
 func acceptSessionAttempt(ctx context.Context, tx pgx.Tx, agent, runID string) error {
-	_, err := tx.Exec(ctx, `INSERT INTO runtime_session_acceptances(agent_id,attempt_id) SELECT $1,unnest(array_append(context_attempts,attempt_id)) FROM runtime_runs WHERE id=$2 ON CONFLICT DO NOTHING`, agent, runID)
+	_, err := tx.Exec(ctx, `INSERT INTO runtime_session_acceptances(agent_id,attempt_id,run_id) SELECT $1,unnest(array_append(context_attempts,attempt_id)),id FROM runtime_runs WHERE id=$2 ON CONFLICT DO NOTHING`, agent, runID)
 	return err
 }
 
