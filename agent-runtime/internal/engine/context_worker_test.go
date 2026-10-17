@@ -53,6 +53,15 @@ func TestNewContextPolicyWorkerUsesOneSessionAndExplicitIMSends(t *testing.T) {
 	if len(requests) == 0 {
 		t.Fatal("new worker never reached the model")
 	}
+	firstMeasurement, err := measureContextRequest(requests[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaultBudget, _ := makeContextBudgetSnapshot(16384)
+	if firstMeasurement.EstimatedTokens >= defaultBudget.TriggerTokens || !defaultBudget.fits(firstMeasurement) {
+		t.Fatal("ordinary first turn has no useful default context capacity", firstMeasurement)
+	}
+	t.Logf("default 16K first model input: estimated=%d tokens, transport=%d bytes", firstMeasurement.EstimatedTokens, firstMeasurement.TransportBytes)
 	var last toolPathRequest
 	if err := decodeFixtureRequest(string(requests[len(requests)-1]), &last); err != nil {
 		t.Fatal(err)
