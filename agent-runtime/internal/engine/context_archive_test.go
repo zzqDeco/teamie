@@ -22,15 +22,16 @@ import (
 )
 
 type contextArchiveFixture struct {
-	s        *Store
-	l        *Lease
-	run      *Run
-	a        *ContextArchive
-	input    Input
-	mu       sync.Mutex
-	messages map[string]Message
-	denied   atomic.Bool
-	checks   atomic.Int64
+	s                   *Store
+	l                   *Lease
+	run                 *Run
+	a                   *ContextArchive
+	input               Input
+	mu                  sync.Mutex
+	messages            map[string]Message
+	deniedConversations map[string]bool
+	denied              atomic.Bool
+	checks              atomic.Int64
 }
 
 func newContextArchiveFixture(t *testing.T) *contextArchiveFixture {
@@ -39,7 +40,7 @@ func newContextArchiveFixture(t *testing.T) *contextArchiveFixture {
 	if _, err := s.DB.Exec(context.Background(), contextArchiveSchemaSQL); err != nil {
 		t.Fatal(err)
 	}
-	f := &contextArchiveFixture{s: s, messages: map[string]Message{}}
+	f := &contextArchiveFixture{s: s, messages: map[string]Message{}, deniedConversations: map[string]bool{}}
 	agent := uuid.NewString()
 	var err error
 	f.l, err = s.Acquire(context.Background(), agent, "context-archive-test")
@@ -69,7 +70,12 @@ func newContextArchiveFixture(t *testing.T) *contextArchiveFixture {
 		}
 		f.mu.Lock()
 		message, exists := f.messages[parts[6]]
+		denied := f.deniedConversations[parts[4]]
 		f.mu.Unlock()
+		if denied {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
 		if !exists || message.ConversationID != parts[4] {
 			w.WriteHeader(http.StatusNotFound)
 			return
@@ -194,6 +200,7 @@ func TestContextArchiveFailedCommitHasNoReferenceAndProjectionIgnoresEphemeralSt
 	input := inputMessages([]Input{f.input})[0]
 	input.Extra = map[string]any{"_eino_msg_id": "first-random"}
 	output := &schema.AgenticMessage{Role: schema.AgenticRoleTypeAssistant, ContentBlocks: []*schema.ContentBlock{schema.NewContentBlock(&schema.Reasoning{Text: "NEVER_ARCHIVE_REASONING"}), schema.NewContentBlock(&schema.AssistantGenText{Text: "visible result"})}, Extra: map[string]any{"signature": "NEVER_ARCHIVE_SIGNATURE"}}
+	f.append(t, "actual-visible-output", output)
 	ref, err := f.a.ArchiveTranscript(f.ctx(), []*schema.AgenticMessage{schema.SystemAgenticMessage("NEVER_ARCHIVE_PLATFORM_POLICY"), input, output})
 	if err != nil {
 		t.Fatal(err)

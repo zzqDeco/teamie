@@ -104,10 +104,13 @@ func (t *contextArchiveTool) InvokableRun(ctx context.Context, arguments string,
 		}
 		response := contextToolResponse{OK: true, Data: data}
 		if err != nil {
-			if !errors.Is(err, errContextArguments) {
+			if !errors.Is(err, errContextArguments) && !errors.Is(err, errContextUnavailable) {
 				return nil, err
 			}
 			response, refs = contextToolResponse{Error: "invalid_arguments"}, []string{}
+			if errors.Is(err, errContextUnavailable) {
+				response.Error = "context_unavailable"
+			}
 		}
 		wire, err := json.Marshal(response)
 		if err != nil {
@@ -180,7 +183,7 @@ func (a *ContextArchive) saveObservation(ctx context.Context, r *Run, call, key 
 		return err
 	}
 	var current bool
-	if err = tx.QueryRow(ctx, `SELECT agent_id=$2 AND attempt_id=$3 FROM runtime_runs WHERE id=$1 FOR SHARE`, r.ID, r.AgentID, r.Attempt).Scan(&current); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT agent_id=$2 AND attempt_id=$3 AND state='running' FROM runtime_runs WHERE id=$1 FOR SHARE`, r.ID, r.AgentID, r.Attempt).Scan(&current); err != nil {
 		return err
 	}
 	if !current {

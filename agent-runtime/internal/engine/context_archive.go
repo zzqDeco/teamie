@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -32,11 +33,14 @@ CREATE TABLE IF NOT EXISTS runtime_context_artifacts(
  content bytea NOT NULL,
  content_hash text NOT NULL,
  sources jsonb NOT NULL,
+ source_artifact_refs jsonb NOT NULL DEFAULT '[]',
  source_event_seq bigint NOT NULL DEFAULT 0,
  created_at timestamptz NOT NULL DEFAULT now(),
  UNIQUE(agent_id,run_id,artifact_key)
 );
+ALTER TABLE runtime_context_artifacts ADD COLUMN IF NOT EXISTS source_artifact_refs jsonb NOT NULL DEFAULT '[]';
 CREATE INDEX IF NOT EXISTS runtime_context_artifacts_agent_order ON runtime_context_artifacts(agent_id,seq);
+CREATE INDEX IF NOT EXISTS runtime_context_artifacts_agent_key ON runtime_context_artifacts(agent_id,artifact_key);
 `
 
 const (
@@ -63,6 +67,7 @@ type contextArtifact struct {
 	RunID, Attempt, Key, Kind, ToolCallID, ToolName string
 	Text                                            string
 	Sources                                         []InputSource
+	ArtifactRefs                                    []string
 	EventSeq                                        int64
 }
 
@@ -104,7 +109,7 @@ func (a *ContextArchive) scope(ctx context.Context) (*Run, error) {
 		return nil, err
 	}
 	var current bool
-	err = a.Store.DB.QueryRow(ctx, `SELECT agent_id=$2 AND attempt_id=$3 FROM runtime_runs WHERE id=$1`, r.ID, r.AgentID, r.Attempt).Scan(&current)
+	err = a.Store.DB.QueryRow(ctx, `SELECT agent_id=$2 AND attempt_id=$3 AND state='running' FROM runtime_runs WHERE id=$1`, r.ID, r.AgentID, r.Attempt).Scan(&current)
 	if err != nil {
 		return nil, err
 	}
@@ -242,8 +247,8 @@ func (a *ContextArchive) runSources(ctx context.Context, runID string) ([]InputS
 	return refs, err
 }
 
-func (a *ContextArchive) viewSources(ctx context.Context, r *Run) ([]InputSource, error) {
-	rows, err := a.Store.DB.Query(ctx, `SELECT DISTINCT e.run_id::text FROM runtime_session_events e JOIN runtime_runs r ON r.id=e.run_id WHERE e.session_id=$1 AND `+contextEventVisibility+` UNION SELECT $3::text`, "agent:"+r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead)
+func (a *ContextArchive) sourcesThrough(ctx context.Context, r *Run, eventHead int64) ([]InputSource, error) {
+	rows, err := a.Store.DB.Query(ctx, `SELECT DISTINCT e.run_id::text FROM runtime_session_events e JOIN runtime_runs r ON r.id=e.run_id WHERE e.session_id=$1 AND `+contextEventVisibility+` AND e.seq<=$6`, "agent:"+r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead, eventHead)
 	if err != nil {
 		return nil, err
 	}
@@ -274,14 +279,17 @@ func (a *ContextArchive) viewSources(ctx context.Context, r *Run) ([]InputSource
 
 // Path commits before returning a reference. Reduction subsequently calls Write,
 // which verifies the same bytes; a failed write can never publish a dangling ref.
-// Generic callers retain the full fixed-view candidate source set. Use the exact
-// form when the originating Run/message is established server-side.
+// Generic callers are scoped to their actual Run. Historical tool reduction and
+// transcript spans must use ArchiveToolPath and ArchiveTranscript respectively.
 func (a *ContextArchive) Path(ctx context.Context, kind, key, content string) (string, error) {
 	r, err := a.scope(ctx)
 	if err != nil {
 		return "", err
 	}
-	refs, err := a.viewSources(ctx, r)
+	if kind == "tool_clear" || kind == "transcript" {
+		return "", errContextUnavailable
+	}
+	refs, err := a.runSources(ctx, r.ID)
 	if err != nil {
 		return "", err
 	}
@@ -311,7 +319,22 @@ func (a *ContextArchive) put(ctx context.Context, r *Run, artifact contextArtifa
 		return "", err
 	}
 	sourceJSON, _ := json.Marshal(refs)
+	parents := append([]string{}, artifact.ArtifactRefs...)
+	sort.Strings(parents)
+	parents = slices.Compact(parents)
+	parentJSON, _ := json.Marshal(parents)
 	ref := contextRef(artifact.RunID, artifact.Kind, artifact.Key)
+	for _, parent := range parents {
+		if parent == ref {
+			return "", ErrReplayConflict
+		}
+		if _, err = a.load(ctx, r, parent); err != nil {
+			return "", err
+		}
+	}
+	if len(refs) == 0 && len(parents) == 0 {
+		return "", errContextUnavailable
+	}
 	_, _, key, _ := parseContextRef(ref)
 	tx, err := a.Store.DB.Begin(ctx)
 	if err != nil {
@@ -322,20 +345,20 @@ func (a *ContextArchive) put(ctx context.Context, r *Run, artifact contextArtifa
 		return "", err
 	}
 	var current bool
-	if err = tx.QueryRow(ctx, `SELECT agent_id=$2 AND attempt_id=$3 FROM runtime_runs WHERE id=$1 FOR SHARE`, r.ID, r.AgentID, r.Attempt).Scan(&current); err != nil || !current {
+	if err = tx.QueryRow(ctx, `SELECT agent_id=$2 AND attempt_id=$3 AND state='running' FROM runtime_runs WHERE id=$1 FOR SHARE`, r.ID, r.AgentID, r.Attempt).Scan(&current); err != nil || !current {
 		if err == nil {
 			err = ErrLeaseLost
 		}
 		return "", err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO runtime_context_artifacts(agent_id,run_id,attempt_id,artifact_key,kind,tool_call_id,tool_name,content,content_hash,sources,source_event_seq) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING`, r.AgentID, artifact.RunID, artifact.Attempt, key, artifact.Kind, artifact.ToolCallID, artifact.ToolName, []byte(artifact.Text), digest([]byte(artifact.Text)), sourceJSON, artifact.EventSeq)
+	_, err = tx.Exec(ctx, `INSERT INTO runtime_context_artifacts(agent_id,run_id,attempt_id,artifact_key,kind,tool_call_id,tool_name,content,content_hash,sources,source_artifact_refs,source_event_seq) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT DO NOTHING`, r.AgentID, artifact.RunID, artifact.Attempt, key, artifact.Kind, artifact.ToolCallID, artifact.ToolName, []byte(artifact.Text), digest([]byte(artifact.Text)), sourceJSON, parentJSON, artifact.EventSeq)
 	if err != nil {
 		return "", err
 	}
 	var hash, kind, call, name string
-	var oldSources []byte
+	var oldSources, oldParents []byte
 	var seq int64
-	err = tx.QueryRow(ctx, `SELECT content_hash,kind,tool_call_id,tool_name,sources,source_event_seq FROM runtime_context_artifacts WHERE agent_id=$1 AND run_id=$2 AND artifact_key=$3`, r.AgentID, artifact.RunID, key).Scan(&hash, &kind, &call, &name, &oldSources, &seq)
+	err = tx.QueryRow(ctx, `SELECT content_hash,kind,tool_call_id,tool_name,sources,source_artifact_refs,source_event_seq FROM runtime_context_artifacts WHERE agent_id=$1 AND run_id=$2 AND artifact_key=$3`, r.AgentID, artifact.RunID, key).Scan(&hash, &kind, &call, &name, &oldSources, &oldParents, &seq)
 	if err != nil {
 		return "", err
 	}
@@ -345,7 +368,12 @@ func (a *ContextArchive) put(ctx context.Context, r *Run, artifact contextArtifa
 	}
 	canonicalOld, e := canonicalContextSources(oldRefs)
 	oldJSON, _ := json.Marshal(canonicalOld)
-	if e != nil || hash != digest([]byte(artifact.Text)) || kind != artifact.Kind || call != artifact.ToolCallID || name != artifact.ToolName || seq != artifact.EventSeq || !bytes.Equal(oldJSON, sourceJSON) {
+	var previousParents []string
+	if json.Unmarshal(oldParents, &previousParents) != nil {
+		return "", ErrReplayConflict
+	}
+	previousJSON, _ := json.Marshal(previousParents)
+	if e != nil || hash != digest([]byte(artifact.Text)) || kind != artifact.Kind || call != artifact.ToolCallID || name != artifact.ToolName || seq != artifact.EventSeq || !bytes.Equal(oldJSON, sourceJSON) || !bytes.Equal(previousJSON, parentJSON) {
 		return "", fmt.Errorf("%w: context artifact changed", ErrReplayConflict)
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -389,17 +417,12 @@ func (a *ContextArchive) OffloadPath(ctx context.Context, phase string, detail *
 		parts = append(parts, part.Text)
 	}
 	content := strings.Join(parts, "\n")
-	argument := ""
-	if detail.ToolArgument != nil {
-		argument = detail.ToolArgument.Text
-	}
-	key := detail.ToolContext.Name + "/" + detail.ToolContext.CallID + "/" + digest([]byte(argument)) + "/" + digest([]byte(content))
-	return a.Path(ctx, kind, key, content)
+	return a.ArchiveToolPath(ctx, kind, detail, content)
 }
 
 const contextEventVisibility = `(e.run_id=$3 OR e.seq<=$4) AND (e.attempt_id=$2 OR (e.run_id=$3 AND e.attempt_id=ANY(r.context_attempts)) OR EXISTS(SELECT 1 FROM runtime_session_acceptances x WHERE x.agent_id=r.agent_id AND x.attempt_id=e.attempt_id AND x.seq<=$5))`
 
-const contextArtifactVisibility = `(a.source_event_seq=0 OR a.run_id=$3 OR a.source_event_seq<=$4) AND ((a.run_id=$3 AND a.source_event_seq=0) OR a.attempt_id=$2 OR (a.run_id=$3 AND a.attempt_id=ANY(r.context_attempts)) OR EXISTS(SELECT 1 FROM runtime_session_acceptances x WHERE x.agent_id=a.agent_id AND x.attempt_id=a.attempt_id AND x.seq<=$5))`
+const contextArtifactVisibility = `((a.source_event_seq=0 AND (a.run_id=$3 OR EXISTS(SELECT 1 FROM runtime_session_acceptances x WHERE x.agent_id=a.agent_id AND x.run_id=a.run_id AND x.seq<=$5))) OR (a.source_event_seq>0 AND (a.run_id=$3 OR a.source_event_seq<=$4) AND (a.attempt_id=$2 OR (a.run_id=$3 AND a.attempt_id=ANY(r.context_attempts)) OR EXISTS(SELECT 1 FROM runtime_session_acceptances x WHERE x.agent_id=a.agent_id AND x.attempt_id=a.attempt_id AND x.seq<=$5))))`
 
 func (a *ContextArchive) load(ctx context.Context, r *Run, ref string) (*contextArtifact, error) {
 	runID, _, key, err := parseContextRef(ref)
@@ -407,16 +430,16 @@ func (a *ContextArchive) load(ctx context.Context, r *Run, ref string) (*context
 		return nil, err
 	}
 	out := &contextArtifact{RunID: runID}
-	var raw, sources []byte
+	var raw, sources, parents []byte
 	var hash string
-	err = a.Store.DB.QueryRow(ctx, `SELECT a.attempt_id::text,a.artifact_key,a.kind,a.tool_call_id,a.tool_name,a.content,a.content_hash,a.sources,a.source_event_seq FROM runtime_context_artifacts a JOIN runtime_runs r ON r.id=a.run_id WHERE a.agent_id=$1 AND `+contextArtifactVisibility+` AND a.run_id=$6 AND a.artifact_key=$7`, r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead, runID, key).Scan(&out.Attempt, &out.Key, &out.Kind, &out.ToolCallID, &out.ToolName, &raw, &hash, &sources, &out.EventSeq)
+	err = a.Store.DB.QueryRow(ctx, `SELECT a.attempt_id::text,a.artifact_key,a.kind,a.tool_call_id,a.tool_name,a.content,a.content_hash,a.sources,a.source_artifact_refs,a.source_event_seq FROM runtime_context_artifacts a JOIN runtime_runs r ON r.id=a.run_id WHERE a.agent_id=$1 AND `+contextArtifactVisibility+` AND a.run_id=$6 AND a.artifact_key=$7`, r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead, runID, key).Scan(&out.Attempt, &out.Key, &out.Kind, &out.ToolCallID, &out.ToolName, &raw, &hash, &sources, &parents, &out.EventSeq)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, errContextUnavailable
 	}
 	if err != nil {
 		return nil, err
 	}
-	if hash != digest(raw) || len(raw) > contextArtifactMaximum || !utf8.Valid(raw) || json.Unmarshal(sources, &out.Sources) != nil {
+	if hash != digest(raw) || len(raw) > contextArtifactMaximum || !utf8.Valid(raw) || json.Unmarshal(sources, &out.Sources) != nil || json.Unmarshal(parents, &out.ArtifactRefs) != nil {
 		return nil, ErrReplayConflict
 	}
 	out.Text = string(raw)
@@ -447,16 +470,31 @@ func (a *ContextArchive) authorizeSources(ctx context.Context, refs []InputSourc
 }
 
 func (a *ContextArchive) validateRefs(ctx context.Context, r *Run, refs []string) error {
-	for _, ref := range refs {
+	pending := append([]string{}, refs...)
+	seen := map[string]bool{}
+	sources := []InputSource{}
+	for len(pending) > 0 {
+		ref := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		if seen[ref] {
+			continue
+		}
+		seen[ref] = true
 		artifact, err := a.load(ctx, r, ref)
 		if err != nil {
 			return err
 		}
-		if err = a.authorizeSources(ctx, artifact.Sources); err != nil {
-			return err
-		}
+		sources = append(sources, artifact.Sources...)
+		pending = append(pending, artifact.ArtifactRefs...)
 	}
-	return nil
+	canonical, err := canonicalContextSources(sources)
+	if err != nil {
+		return err
+	}
+	if len(canonical) == 0 && len(refs) > 0 {
+		return errContextUnavailable
+	}
+	return a.authorizeSources(ctx, canonical)
 }
 
 func (a *ContextArchive) Read(ctx context.Context, ref string, offset, limit int) (*ContextReadPage, error) {
@@ -474,7 +512,7 @@ func (a *ContextArchive) Read(ctx context.Context, ref string, offset, limit int
 	if err != nil {
 		return nil, err
 	}
-	if err = a.authorizeSources(ctx, artifact.Sources); err != nil {
+	if err = a.validateRefs(ctx, r, []string{ref}); err != nil {
 		return nil, err
 	}
 	if offset > len(artifact.Text) || offset < len(artifact.Text) && !utf8.RuneStart(artifact.Text[offset]) {

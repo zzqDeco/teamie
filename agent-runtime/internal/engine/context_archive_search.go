@@ -68,6 +68,10 @@ func contextTranscriptProjection(message *schema.AgenticMessage) *contextTranscr
 }
 
 func (a *ContextArchive) ArchiveTranscript(ctx context.Context, messages []*schema.AgenticMessage) (string, error) {
+	r, err := a.scope(ctx)
+	if err != nil {
+		return "", err
+	}
 	projection := []*contextTranscriptMessage{}
 	for _, message := range messages {
 		if item := contextTranscriptProjection(message); item != nil {
@@ -78,7 +82,12 @@ func (a *ContextArchive) ArchiveTranscript(ctx context.Context, messages []*sche
 	if err != nil {
 		return "", err
 	}
-	return a.Path(ctx, "transcript", "prefix/"+digest(content), string(content))
+	parents := []string{}
+	refs, err := a.transcriptSources(ctx, r, messages, &parents)
+	if err != nil {
+		return "", err
+	}
+	return a.put(ctx, r, contextArtifact{RunID: r.ID, Attempt: r.Attempt, Key: "prefix/" + digest(content), Kind: "transcript", Text: string(content), Sources: refs, ArtifactRefs: parents})
 }
 
 type contextArchiveEvent struct {
@@ -116,9 +125,10 @@ func (a *ContextArchive) eventArtifact(ctx context.Context, item contextArchiveE
 	if item.event.MessageInserted != nil {
 		message = item.event.MessageInserted.Message
 	}
-	if item.event.MessageUpdated != nil {
-		message = item.event.MessageUpdated.Message
-	}
+	// Reduction replacements are views of an existing tool observation. Its
+	// original Message event and separately scoped offload artifact remain the
+	// history sources; a later compactor Run must not become the observation's
+	// source merely because it emitted message_updated.
 	projection := contextTranscriptProjection(message)
 	if projection == nil {
 		return nil, nil
@@ -223,7 +233,7 @@ func (a *ContextArchive) Search(ctx context.Context, query, rawCursor string, li
 	page := &ContextSearchPage{Hits: []ContextSearchHit{}}
 	scanned := 0
 	if cursor.Phase == "artifacts" {
-		rows, e := a.Store.DB.Query(ctx, `SELECT a.seq,a.run_id::text,a.kind,a.artifact_key FROM runtime_context_artifacts a JOIN runtime_runs r ON r.id=a.run_id WHERE a.agent_id=$1 AND `+contextArtifactVisibility+` AND a.source_event_seq=0 AND a.seq>$6 AND a.seq<=$7 ORDER BY a.seq LIMIT $8`, r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead, cursor.After, cursor.ArtifactHead, contextSearchScan)
+		rows, e := a.Store.DB.Query(ctx, `SELECT a.seq,a.run_id::text,a.kind,a.artifact_key FROM runtime_context_artifacts a JOIN runtime_runs r ON r.id=a.run_id WHERE a.agent_id=$1 AND `+contextArtifactVisibility+` AND a.source_event_seq=0 AND a.tool_name<>'context_source_index' AND a.seq>$6 AND a.seq<=$7 ORDER BY a.seq LIMIT $8`, r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead, cursor.After, cursor.ArtifactHead, contextSearchScan)
 		if e != nil {
 			return nil, e
 		}
@@ -254,7 +264,7 @@ func (a *ContextArchive) Search(ctx context.Context, query, rawCursor string, li
 				return nil, e
 			}
 			if strings.Contains(strings.ToLower(artifact.Text), strings.ToLower(query)) {
-				if e = a.authorizeSources(ctx, artifact.Sources); e != nil && !errors.Is(e, errContextUnavailable) {
+				if e = a.validateRefs(ctx, r, []string{ref}); e != nil && !errors.Is(e, errContextUnavailable) {
 					return nil, e
 				}
 				if e == nil {
