@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, useEffect } from "react";
+import { act, StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -89,7 +89,7 @@ async function settle(action?: () => void) {
   });
 }
 function render() {
-  root.render(<QueryClientProvider client={client}><ChatProvider><Probe /></ChatProvider></QueryClientProvider>);
+  root.render(<StrictMode><QueryClientProvider client={client}><ChatProvider><Probe /></ChatProvider></QueryClientProvider></StrictMode>);
 }
 async function mount() {
   await settle(render);
