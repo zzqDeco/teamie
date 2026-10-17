@@ -41,15 +41,17 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticM
 	if e != nil {
 		return nil, e
 	}
+	release, e := run.Front.modelPermit(ctx)
+	if e != nil {
+		return nil, e
+	}
+	defer release()
 	if m.Authorize != nil {
 		if err := m.Authorize(ctx); err != nil {
 			return nil, err
 		}
 	}
 	if e = m.Store.CheckLease(ctx, m.Lease); e != nil {
-		return nil, e
-	}
-	if e = run.Front.acquire(ctx); e != nil {
 		return nil, e
 	}
 	opts := model.GetCommonOptions(nil, options...)
