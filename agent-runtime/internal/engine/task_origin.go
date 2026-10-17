@@ -10,7 +10,7 @@ import (
 // These tools own their cached observation boundary and must recheck current
 // source ACLs even when replaying. Generic native receipts cannot bypass that.
 func privateReadTool(name string) bool {
-	return len(name) >= 3 && name[:3] == "im_" || name == "context_read" || name == "context_search" || name == "workspace_read_page"
+	return len(name) >= 3 && name[:3] == "im_" || name == "context_read" || name == "context_search"
 }
 
 // The task row, not model-authored text or the most recent conversation,

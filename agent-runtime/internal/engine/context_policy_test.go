@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/cloudwego/eino/schema"
+	"github.com/google/uuid"
 )
 
 func TestRunContextPolicyIsFrozenAcrossFlagAndWindowChanges(t *testing.T) {
@@ -62,7 +63,7 @@ func TestNewContextCheckpointRequiresExactPolicyAndBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	run := &Run{ID: "run", Attempt: "attempt", Revision: 1, toolProfile: currentToolProfile, ContextProfile: contextProfileV1, ContextBudget: budget}
+	run := &Run{ID: uuid.NewString(), Attempt: uuid.NewString(), Revision: 1, toolProfile: currentToolProfile, ContextProfile: contextProfileV1, ContextBudget: budget}
 	store := &SessionStore[*schema.AgenticMessage]{Revision: 1}
 	store.bind(run, nil)
 	var metadata checkpointMetadata

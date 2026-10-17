@@ -177,7 +177,11 @@ func (m *nativeToolReceipts) WrapInvokableToolCall(_ context.Context, next adk.I
 		}
 		out, err := next(ctx, args, opts...)
 		if err != nil {
-			return "", err
+			var converted bool
+			out, converted = nativePageContinuation(ctx, err)
+			if !converted {
+				return "", err
+			}
 		}
 		b, err := json.Marshal(out)
 		if err == nil {
@@ -242,7 +246,11 @@ func (m *nativeToolReceipts) WrapEnhancedInvokableToolCall(_ context.Context, ne
 		}
 		out, err := next(ctx, args, opts...)
 		if err != nil {
-			return nil, err
+			text, converted := nativePageContinuation(ctx, err)
+			if !converted {
+				return nil, err
+			}
+			out = textToolResult(text)
 		}
 		b, err := json.Marshal(out)
 		if err == nil {
