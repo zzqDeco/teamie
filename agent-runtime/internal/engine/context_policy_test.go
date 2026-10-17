@@ -90,3 +90,29 @@ func TestContextPolicyRejectsUnsupportedOrPartialBudget(t *testing.T) {
 		}
 	}
 }
+
+func TestContextMigrationBackfillsLegacyWithoutChangingItsTape(t *testing.T) {
+	s, lease, run := nativeModelRun(t)
+	ctx := context.Background()
+	response := []byte(`{"role":"assistant","content":"legacy immutable response"}`)
+	if err := s.SaveModel(ctx, lease, run, 1, "legacy-request-hash", response); err != nil {
+		t.Fatal(err)
+	}
+	// Recreate the exact absence of schema-3 columns/tables around persisted
+	// schema-2 Run/input/tape data, then execute the real forward DDL.
+	if _, err := s.DB.Exec(ctx, `ALTER TABLE runtime_runs DROP COLUMN context_profile; ALTER TABLE runtime_runs DROP COLUMN context_budget; DROP TABLE runtime_context_artifacts; DROP TABLE runtime_context_recoveries; DELETE FROM agent_runtime_schema_migrations WHERE version=3;`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.Exec(ctx, schemaSQL+schemaV2SQL+schemaV3SQL+contextArchiveSchemaSQL+contextRecoverySchemaSQL); err != nil {
+		t.Fatal(err)
+	}
+	var profile string
+	var budget []byte
+	if err := s.DB.QueryRow(ctx, `SELECT context_profile,context_budget FROM runtime_runs WHERE id=$1`, run.ID).Scan(&profile, &budget); err != nil || profile != contextProfileLegacy || string(budget) != "{}" {
+		t.Fatal("migration retroactively selected a new Run policy", profile, string(budget), err)
+	}
+	cached, err := s.CachedModel(ctx, run, 1, "legacy-request-hash")
+	if err != nil || string(cached) != string(response) || count(t, s, `SELECT count(*) FROM runtime_inputs`) != 1 {
+		t.Fatal("migration rewrote the existing tape or input", err)
+	}
+}
