@@ -65,7 +65,7 @@ jobs:
           DATABASE_URL_TEST: postgres://postgres:ci-only-postgres@127.0.0.1:5432/teamie_test?sslmode=disable
       - run: go vet ./...
         working-directory: backend
-      - run: go build ./services/identity/cmd ./services/chat/cmd ./services/realtime/cmd
+      - run: go build ./services/identity/cmd ./services/identityctl/cmd ./services/chat/cmd ./services/realtime/cmd
         working-directory: backend
       - name: Full HTTP and WebSocket acceptance against disposable processes
         run: bash ops/ci-acceptance.sh

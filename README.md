@@ -1,10 +1,11 @@
 # Teamie
 
-面向人与 Agent 平等参与的实验性 IM 平台。独立 IM 提供 React 前端、Go 微服务、持久化消息与实时同步；v0.3.5 加入文件消息、Agent 输入状态、账号改密与注册确认，并使用官方 OpenAI Agentic 模型适配。Identity、Chat、Realtime 不依赖 Eino，Agent 服务停止时仍可使用人类 IM。
+面向人与 Agent 平等参与的实验性 IM 平台。独立 IM 提供 React 前端、Go 微服务、持久化消息与实时同步；支持文件消息、Agent 输入状态与账号密码管理，并使用官方 OpenAI Agentic 模型适配。Identity、Chat、Realtime 不依赖 Eino，Agent 服务停止时仍可使用人类 IM。
 
 ## Product
 
-- 产品入口、邀请注册、登录、个人资料与修改密码；注册需要确认密码，改密后原登录会话全部失效。
+- 产品入口、邀请注册、登录、个人资料与修改密码；注册和改密需要确认密码，改密后原登录会话全部失效。
+- 忘记密码时联系平台管理员，由用户管理页生成一次性重置链接；管理员也可通过服务器运维命令恢复自己的账号。链接一小时到期，重新生成或成功改密会使旧链接失效。
 - Discord 风格工作区、频道、单聊、群聊、成员与邀请。
 - 文本与文件消息、回复、编辑、撤回、历史分页与已读状态；每个文件最多 4 MiB，每条消息最多八个文件。
 - 服务端幂等、会话内顺序、持久化同步游标、WebSocket 提示与断线补同步。
@@ -70,7 +71,7 @@ There is one deployed environment: `production`. `main` is the ongoing developme
 
 **Release branches and tags are permanent archives. Never delete, force-push, or append to a published release branch.** Corrections require a new version. The workflow rejects updates to an existing release branch and checks its SHA again before publication. The initial private GitHub account does not support server-enforced branch/ruleset protection on its current plan (API returned 403); enabling that protection requires an eligible plan. Workflow guards cannot prevent an owner from manually changing an unprotected ref.
 
-Images are built on hosted runners. The production host only pulls digests and runs containers. Runtime credentials stay in protected host configuration and the GitHub `production` Environment. Only Caddy publishes ports; service RPC, PostgreSQL and Redis stay private. Forward migrations preserve existing accounts/messages; v0.3.5 and v0.3.6 use schema vector `2/3/1/2/2` for Identity/Chat/Control/Runtime/Gateway. Verify a pre-upgrade backup/restore path; cross-schema image rollback is rejected. Compatible rollback does not restore an old database over new user data. Same-host backups are included; off-host backup storage is not yet configured.
+Images are built on hosted runners. The production host only pulls digests and runs containers. Runtime credentials stay in protected host configuration and the GitHub `production` Environment. Only Caddy publishes ports; service RPC, PostgreSQL and Redis stay private. Forward migrations preserve existing accounts/messages; v0.3.7 uses schema vector `3/3/1/2/2` for Identity/Chat/Control/Runtime/Gateway, adding the Identity password-reset ledger to v0.3.6. Verify a pre-upgrade backup/restore path; cross-schema image rollback is rejected. Compatible rollback does not restore an old database over new user data. Same-host backups are included; off-host backup storage is not yet configured.
 
 ## Design references
 

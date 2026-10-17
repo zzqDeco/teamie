@@ -35,7 +35,7 @@ flowchart LR
 
 | Service | Owns |
 | --- | --- |
-| Identity | Human credentials/platform roles, registration invitations, profiles, sessions/CSRF; generic machine principals and scoped expiring credentials |
+| Identity | Human credentials/platform roles, registration invitations, one-time password resets, profiles, sessions/CSRF; generic machine principals and scoped expiring credentials |
 | Chat | Workspaces, current normal memberships, conversations, durable messages/files/read/sync/outbox; generic delegated grants and moderation |
 | Realtime | Connections, heartbeats, disposable typing and sync hints; authorization checked through RPC |
 | Agent Control Plane | Human-owned Agent profiles, selected visibility/enabled state, reconciliation revisions and safe runtime status |
@@ -48,6 +48,8 @@ Five persistent services own separate PostgreSQL databases and application roles
 Only Caddy publishes host HTTP/HTTPS. Static web and public API paths are routed through it; backend HTTP/RPC, PostgreSQL, Redis, gateway model HTTP/control RPC and Sandbox RPC remain private. Browser requests are same-origin. CP/worker credentials stay out of browser bundles and Sandbox children.
 
 Identity serializes first-account initialization: the configured bootstrap invitation creates exactly one first platform admin. `BOOTSTRAP_INVITE_CODE` defaults to `teamie-bootstrap`; after any account exists it cannot admit another account. An admin creates a separate random ordinary invitation for each additional successful registration. Hashed codes expire in seven days, support revocation, and are consumed in the account/session transaction. Platform and workspace roles remain independent.
+
+Password recovery remains inside Identity. A live human administrator can issue a one-hour single-use link for a current human account; the current Identity container offers the same issuance operation to the server operator when no administrator can sign in. Only token hashes are persisted. Issuance preserves credentials and sessions; successful redemption changes the password and revokes all target sessions atomically, without signing the browser in. New issuance and ordinary password changes retire prior links. Link inspection does not consume it, and the browser removes the token fragment from its URL. The `auth.password_reset` flag gates new links while preserving existing valid recovery links and the administrator user directory.
 
 ## IM guarantees
 
@@ -81,7 +83,7 @@ Versioned backend flag files carry a revision. Effective capabilities intersect 
 
 One Debian x86_64 host runs the Compose services. The release contains twelve immutable Alibaba Cloud Container Registry images: web, Identity, Chat, Realtime, Control Plane, runtime, gateway, Sandbox, execution-runner, Caddy, PostgreSQL and Redis. Execution-runner is an on-demand child image. Hosted CI pushes to the ACR public endpoint; the production host pulls digest-pinned artifacts through the same instance's VPC endpoint. Persistent volumes preserve databases, workspaces, receipts, certificates and backups.
 
-Only `production` is deployed; disposable CI databases do not constitute a second environment. `main` is the ongoing trunk. Published `release/vx.x.x` branches/tags are immutable permanent archives; fixes require a new version. Forward migrations preserve existing accounts/messages. The v0.3.5 schema vector is Identity 2, Chat 3, Control Plane 1, Runtime 2, Gateway 2. Cross-schema image rollback is rejected; verify a pre-upgrade backup/restore path before migration.
+Only `production` is deployed; disposable CI databases do not constitute a second environment. `main` is the ongoing trunk. Published `release/vx.x.x` branches/tags are immutable permanent archives; fixes require a new version. Forward migrations preserve existing accounts/messages. The v0.3.7 schema vector is Identity 3, Chat 3, Control Plane 1, Runtime 2, Gateway 2. Cross-schema image rollback is rejected; verify a pre-upgrade backup/restore path before migration.
 
 The public IP uses the configured Let's Encrypt ACME `shortlived` issuer and `TLS_SERVER_NAME`/`default_sni` for non-SNI clients. Public trusted HTTPS and renewal are separate acceptance gates. Internal-CA or disabled-verification checks do not establish public trust.
 
