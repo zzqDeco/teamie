@@ -372,7 +372,16 @@ func (r *RuntimeRPC) RetryRun(ctx context.Context, q *wire.RuntimeRequest) (*wir
 	}
 	_, err = tx.Exec(ctx, `UPDATE runtime_runs SET state='retry',cancel_requested=false,next_attempt=now(),finished_at=NULL,updated_at=now(),safe_error='' WHERE id=$1`, q.GetResourceId())
 	if err == nil {
-		_, err = tx.Exec(ctx, `UPDATE runtime_inputs SET state='processing' WHERE agent_id=$1 AND run_id=$2`, q.AgentId, q.GetResourceId())
+		tag, inputErr := tx.Exec(ctx, `UPDATE runtime_inputs SET state='processing' WHERE agent_id=$1 AND run_id=$2`, q.AgentId, q.GetResourceId())
+		if inputErr != nil {
+			return runtimeFail(503, "runtime_unavailable")
+		}
+		// InvalidateRun deliberately detached unavailable sources. Returning
+		// before Commit also rolls back the Run update above; never resurrect
+		// its old input batch or publish a retry event with no discoverable work.
+		if tag.RowsAffected() == 0 {
+			return runtimeFail(409, "run_not_retryable")
+		}
 	}
 	if err == nil {
 		_, err = tx.Exec(ctx, `INSERT INTO runtime_public_events(agent_id,type,run_id,status) VALUES($1,'run.retry_requested',$2,'retry')`, q.AgentId, q.GetResourceId())
