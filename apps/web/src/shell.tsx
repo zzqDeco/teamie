@@ -412,7 +412,16 @@ export function Shell() {
     chat.data?.workspaces.length &&
     conversations.length
   )
-    return <Navigate to={route(channels[0] || conversations[0])} replace />;
+    return (
+      <Navigate
+        to={
+          backChatRoute !== "/app"
+            ? backChatRoute
+            : route(channels[0] || conversations[0])
+        }
+        replace
+      />
+    );
   return (
     <div
       className={`app-shell ${sidebar ? "sidebar-open" : ""} ${details ? "details-open" : ""}`}
@@ -427,7 +436,13 @@ export function Shell() {
         inert={mobile && !sidebar}
       >
         <aside className="workspace-rail" aria-label="工作空间切换">
-          <Link className="rail-home" to="/" title="Teamie 首页">
+          <Link
+            className="rail-home"
+            to="/app"
+            title="回到聊天"
+            aria-label="Teamie 工作空间"
+            onClick={closeSidebar}
+          >
             <Logo compact />
           </Link>
           <div className="rail-divider" />

@@ -2,7 +2,7 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@teamie/api-client";
@@ -14,6 +14,7 @@ import type {
   User,
   Workspace,
 } from "@teamie/api-client";
+import { Landing } from "./public";
 import { Shell } from "./shell";
 import { chatStore } from "./store";
 
@@ -87,12 +88,19 @@ const capabilities = {
   "im.group.create": true,
 };
 let activeUser: User;
+let signedOut = false;
+let authLoading = false;
 let bootstrap: Bootstrap;
 const refresh = vi.fn(async () => {});
 const sendTyping = vi.fn();
 const sync = vi.fn();
 vi.mock("./auth", () => ({
-  useAuth: () => ({ user: activeUser, logout: vi.fn(), updateUser: vi.fn() }),
+  useAuth: () => ({
+    user: signedOut ? null : activeUser,
+    loading: authLoading,
+    logout: vi.fn(),
+    updateUser: vi.fn(),
+  }),
 }));
 vi.mock("./chat", async (original) => ({
   ...(await original<typeof import("./chat")>()),
@@ -190,6 +198,8 @@ beforeEach(() => {
     value: vi.fn(),
   });
   activeUser = { ...owner };
+  signedOut = false;
+  authLoading = false;
   bootstrap = {
     user: activeUser,
     workspaces: [workspace],
@@ -882,5 +892,71 @@ describe("member and account navigation", () => {
     expect(find("[data-location]").textContent).toBe(
       `/app/w/${workspace.id}/members`,
     );
+  });
+
+  it("redirects signed-in users from the landing page directly into /app and keeps rail-home inside /app", async () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: query.includes("1250"),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    );
+    await settle(() =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter initialEntries={["/"]}>
+            <Routes>
+              <Route path="/" element={<Landing />} />
+              <Route path="/app/*" element={<Shell />} />
+            </Routes>
+            <Location />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      ),
+    );
+    await settle();
+    expect(find("[data-location]").textContent).toBe("/app/w/team/c/general");
+    await click('a[href="/app/w/team/c/group"]');
+    expect(find("[data-location]").textContent).toBe("/app/w/team/c/group");
+    await click(".rail-agents");
+    expect(find("[data-location]").textContent).toBe("/app/agents");
+    expect(find(".rail-home").getAttribute("href")).toBe("/app");
+    await click(".rail-home");
+    expect(find("[data-location]").textContent).toBe("/app/w/team/c/group");
+  });
+
+  it("renders a sticky scroll-locked product story without top anchor links for signed-out visitors", async () => {
+    signedOut = true;
+    await settle(() =>
+      root.render(
+        <MemoryRouter initialEntries={["/"]}>
+          <Landing />
+          <Location />
+        </MemoryRouter>,
+      ),
+    );
+    await settle();
+    expect(find("[data-location]").textContent).toBe("/");
+    expect(container.querySelector('.public-header a[href^="#"]')).toBeNull();
+    const track = find(".scroll-story-track");
+    expect(track.getAttribute("data-active-scene")).toBe("0");
+    expect(find(".story-scene-item.active").textContent).toContain(
+      "对的讨论，在对的地方。",
+    );
+    const tabs = container.querySelectorAll<HTMLButtonElement>(".story-step-pill");
+    expect(tabs).toHaveLength(4);
+    await settle(() => tabs[1]?.click());
+    expect(track.getAttribute("data-active-scene")).toBe("1");
+    expect(find(".story-scene-item.active").textContent).toContain(
+      "每位成员，都有专属伙伴。",
+    );
+    await settle(() => tabs[3]?.click());
+    expect(track.getAttribute("data-active-scene")).toBe("3");
+    expect(find(".story-scene-item.active").textContent).toContain(
+      "像邀请一位新队友，安静可靠。",
+    );
+    expect(container.textContent).toContain("下一件好事，一起开始。");
   });
 });
