@@ -36,7 +36,9 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 		return nil, err
 	}
 	opts := model.GetCommonOptions(nil, options...)
-	m.capOutput(opts)
+	if err = m.capRunOutput(run, opts); err != nil {
+		return nil, err
+	}
 	request, err := agenticRequest(input, opts, true)
 	if err != nil {
 		return nil, err
@@ -52,6 +54,12 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 		return schema.StreamReaderFromArray([]*schema.AgenticMessage{result}), nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+	if err = m.cachedRecovery(ctx, run, step, hash, true); err != nil {
+		return nil, err
+	}
+	if err = m.checkContextRequest(ctx, run, step, hash, request, true); err != nil {
 		return nil, err
 	}
 	if m.StreamURL == "" {
@@ -76,9 +84,10 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 		return nil, &ModelError{Code: "gateway_unavailable", Retry: true}
 	}
 	if response.StatusCode != 200 {
+		failure := readGatewayHTTPFailure(response)
 		response.Body.Close()
 		cancel()
-		return nil, &ModelError{Code: "gateway_unavailable", Retry: true}
+		return nil, m.gatewayFailure(ctx, run, step, hash, true, failure.Code)
 	}
 	reader, writer := schema.Pipe[*schema.AgenticMessage](8)
 	output, bridgeDone := cancelStreamOnClose(reader, cancel)
@@ -123,7 +132,13 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 				}
 			case "error":
 				code := safeGatewayCode(frame.ErrorCode)
-				writer.Send(nil, &ModelError{Code: code, Retry: code != "invalid_request"})
+				if isContextOverflow(code) && len(chunks) > 0 {
+					// An accepted partial stream is not a pure rejected request.
+					// Never replay it as a side-effect-free overflow decision.
+					writer.Send(nil, &ModelError{Code: "upstream_in_stream_error"})
+				} else {
+					writer.Send(nil, m.gatewayFailure(ctx, run, step, hash, true, code))
+				}
 				return
 			case "done":
 				done = true
@@ -168,7 +183,7 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 }
 func safeGatewayCode(code string) string {
 	switch code {
-	case "model_unconfigured", "model_disabled", "gateway_unavailable", "upstream_unavailable", "upstream_timeout", "upstream_error", "invalid_request", "request_too_large", "upstream_response_limit", "invalid_upstream_response", "run_cancelled", "gateway_busy", "upstream_rate_limited", "upstream_http_error", "upstream_in_stream_error", "upstream_interrupted", "client_interrupted", "canceled", "protocol_unsupported":
+	case "model_unconfigured", "model_disabled", "gateway_unavailable", "upstream_unavailable", "upstream_timeout", "upstream_error", "invalid_request", "request_too_large", "context_overflow", "upstream_response_limit", "invalid_upstream_response", "run_cancelled", "gateway_busy", "upstream_rate_limited", "upstream_http_error", "upstream_in_stream_error", "upstream_interrupted", "client_interrupted", "canceled", "protocol_unsupported":
 		return code
 	}
 	return "gateway_error"

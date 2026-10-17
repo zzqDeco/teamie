@@ -53,7 +53,9 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticM
 		return nil, e
 	}
 	opts := model.GetCommonOptions(nil, options...)
-	m.capOutput(opts)
+	if e = m.capRunOutput(run, opts); e != nil {
+		return nil, e
+	}
 	request, e := agenticRequest(messages, opts, false)
 	if e != nil {
 		return nil, e
@@ -67,8 +69,18 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticM
 	if !errors.Is(e, pgx.ErrNoRows) {
 		return nil, e
 	}
+	if e = m.cachedRecovery(ctx, run, step, hash, false); e != nil {
+		return nil, e
+	}
+	if e = m.checkContextRequest(ctx, run, step, hash, request, false); e != nil {
+		return nil, e
+	}
 	response, e := m.Client.Chat(ctx, &wire.GatewayChatRequest{ServiceToken: m.Token, OwnerId: m.OwnerID, AgentId: m.AgentID, SessionId: "agent:" + m.AgentID, RunId: executionID(run), RequestJson: string(request)})
 	if e != nil {
+		var gatewayError *ModelError
+		if errors.As(e, &gatewayError) {
+			return nil, m.gatewayFailure(ctx, run, step, hash, false, gatewayError.Code)
+		}
 		return nil, &ModelError{Code: "gateway_unavailable", Retry: true}
 	}
 	if !response.Ok {
@@ -76,7 +88,7 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticM
 		if code == "" {
 			code = "gateway_error"
 		}
-		return nil, &ModelError{Code: code, Retry: code != "invalid_request" && code != "request_too_large"}
+		return nil, m.gatewayFailure(ctx, run, step, hash, false, code)
 	}
 	result, e := decodeAgenticMessage([]byte(response.GetResponseJson()))
 	if e != nil {
@@ -142,6 +154,36 @@ func retryError(err error) bool {
 }
 
 var _ model.AgenticModel = (*GatewayModel)(nil)
+
+func (m *GatewayModel) capRunOutput(run *Run, opts *model.Options) error {
+	if contextProfile(run) != contextProfileV1 {
+		m.capOutput(opts)
+		return nil
+	}
+	budget, err := ParseContextBudgetSnapshot(run.ContextBudget)
+	if err != nil {
+		return err
+	}
+	limit := budget.OutputReserveTokens
+	if opts.MaxTokens == nil || *opts.MaxTokens > limit {
+		opts.MaxTokens = &limit
+	}
+	return nil
+}
+
+func (m *GatewayModel) checkContextRequest(ctx context.Context, run *Run, step int, hash string, request []byte, streaming bool) error {
+	if contextProfile(run) != contextProfileV1 {
+		return nil
+	}
+	budget, err := ParseContextBudgetSnapshot(run.ContextBudget)
+	if err != nil {
+		return err
+	}
+	if !budget.fits(ContextMeasurement{TransportBytes: len(request), EstimatedTokens: estimateContextTokens(request)}) {
+		return m.gatewayFailure(ctx, run, step, hash, streaming, "request_too_large")
+	}
+	return nil
+}
 
 func (m *GatewayModel) capOutput(opts *model.Options) {
 	if m.ContextWindow == nil {
