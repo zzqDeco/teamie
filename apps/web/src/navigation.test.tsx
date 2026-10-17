@@ -207,6 +207,7 @@ beforeEach(() => {
   vi.spyOn(api, "registrationInvites").mockResolvedValue({ invites: [] });
   vi.spyOn(api, "modelGateway");
   vi.spyOn(api, "messages").mockResolvedValue({ messages: [], hasMore: false });
+  vi.spyOn(api, "attention").mockResolvedValue({ items: [], unreadCount: 0 });
   vi.spyOn(api, "read").mockResolvedValue({ readSeq: 0 });
   container = document.createElement("div");
   document.body.append(container);

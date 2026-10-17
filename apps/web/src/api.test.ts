@@ -5,6 +5,18 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe("account-bound transport", () => {
+  it("binds attention pages to the current account and encodes only paging/filter options", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: [], unreadCount: 0 })));
+    vi.stubGlobal("fetch", fetch);
+    const client = new TeamieClient(); client.csrfToken = "current-account";
+    const controller = new AbortController();
+    await client.attention({ cursor: "opaque+cursor", limit: 20, unreadOnly: true }, controller.signal);
+    const [url, options] = fetch.mock.calls[0];
+    expect(new URL(url, "https://example.test").pathname).toBe("/api/v1/attention");
+    expect(Object.fromEntries(new URL(url, "https://example.test").searchParams)).toEqual({ cursor: "opaque+cursor", limit: "20", unreadOnly: "true" });
+    expect(options.headers.get("X-CSRF-Token")).toBe("current-account");
+    expect(options.signal).toBe(controller.signal); expect(options.cache).toBe("no-store");
+  });
   it("encodes literal history searches and file filters with current read authentication and cancellation", async () => {
     const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ messages: [], hasMore: false })));
     vi.stubGlobal("fetch", fetch);
