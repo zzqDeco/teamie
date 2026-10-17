@@ -9,6 +9,7 @@ import (
 	"teamie/backend/internal/api"
 	"teamie/backend/pkg/imtext"
 	"time"
+	"unicode/utf8"
 )
 
 const messageColumns = "id,conversation_id,sender_id,sender_name,sender_kind,client_message_id,seq,body,reply_to_id,created_at,edited_at,retracted_at,attachments,mentions"
@@ -58,8 +59,18 @@ func (s *Store) Messages(ctx context.Context, user, conversation string, before 
 // MessageHistory searches the full authorized conversation before applying the
 // page limit. Around uses immutable message sequence numbers for local context.
 func (s *Store) MessageHistory(ctx context.Context, user, conversation string, before, around int64, query string, limit int) ([]Message, bool, error) {
+	return s.messageHistory(ctx, user, conversation, before, around, query, limit, false)
+}
+
+// FileHistory lists only published files, matched by literal filename. Paging is
+// by message so a message's ordered attachment group is never split across pages.
+func (s *Store) FileHistory(ctx context.Context, user, conversation string, before int64, query string, limit int) ([]Message, bool, error) {
+	return s.messageHistory(ctx, user, conversation, before, 0, query, limit, true)
+}
+
+func (s *Store) messageHistory(ctx context.Context, user, conversation string, before, around int64, query string, limit int, filesOnly bool) ([]Message, bool, error) {
 	query = strings.TrimSpace(query)
-	if before < 0 || around < 0 || before > 0 && around > 0 || limit < 1 || limit > 100 || len([]rune(query)) > 200 {
+	if before < 0 || around < 0 || before > 0 && around > 0 || limit < 1 || limit > 100 || len([]rune(query)) > 200 || !utf8.ValidString(query) || strings.ContainsRune(query, 0) {
 		return nil, false, api.Err(400, "invalid_query", "Invalid history query")
 	}
 	tx, e := s.DB.Begin(ctx)
@@ -77,7 +88,11 @@ func (s *Store) MessageHistory(ctx context.Context, user, conversation string, b
 	if _, e = conversationAccess(ctx, tx, conversation, user); e != nil {
 		return nil, false, e
 	}
-	rows, e := tx.Query(ctx, "SELECT "+messageColumns+" FROM messages WHERE conversation_id=$1 AND ($2::bigint=0 OR seq<$2) AND ($3::text='' OR (retracted_at IS NULL AND strpos(lower(body),lower($3))>0)) AND ($4::bigint=0 OR seq BETWEEN GREATEST(1,$4-($5::bigint/2)) AND $4+(($5::bigint-1)/2)) ORDER BY seq DESC LIMIT $6", conversation, before, query, around, limit, limit+1)
+	filter := "($3::text='' OR (retracted_at IS NULL AND strpos(lower(body),lower($3))>0))"
+	if filesOnly {
+		filter = "(retracted_at IS NULL AND jsonb_array_length(attachments)>0 AND ($3::text='' OR EXISTS (SELECT 1 FROM jsonb_array_elements(attachments) AS file WHERE strpos(lower(file->>'filename'),lower($3))>0)))"
+	}
+	rows, e := tx.Query(ctx, "SELECT "+messageColumns+" FROM messages WHERE conversation_id=$1 AND ($2::bigint=0 OR seq<$2) AND "+filter+" AND ($4::bigint=0 OR seq BETWEEN GREATEST(1,$4-($5::bigint/2)) AND $4+(($5::bigint-1)/2)) ORDER BY seq DESC LIMIT $6", conversation, before, query, around, limit, limit+1)
 	if e != nil {
 		return nil, false, e
 	}

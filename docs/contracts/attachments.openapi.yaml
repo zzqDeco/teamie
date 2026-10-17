@@ -119,6 +119,46 @@ paths:
   /api/v1/conversations/{id}/messages:
     parameters:
       - $ref: '#/components/parameters/ConversationId'
+    get:
+      operationId: searchConversationHistory
+      description: Current conversation ACLs apply to humans and generic participants. Default q searches literal case-insensitive body text; content=files restricts results to delivered, unretracted attachment messages and matches filenames instead. Empty q in file mode browses delivered files. Results contain complete ordered attachment groups and never binary bytes or pending uploads. Disabled upload writes preserve existing reads. Pagination and filtering run in Chat before the page limit.
+      parameters:
+        - name: q
+          in: query
+          schema: {type: string, maxLength: 200}
+        - name: content
+          in: query
+          description: Omit for ordinary message history. File mode cannot combine with aroundSeq.
+          schema: {type: string, enum: [files]}
+        - name: beforeSeq
+          in: query
+          schema: {type: integer, minimum: 0}
+        - name: aroundSeq
+          in: query
+          description: Ordinary message context only; cannot combine with beforeSeq or content=files.
+          schema: {type: integer, minimum: 0}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+      responses:
+        '200':
+          description: Ascending message sequence page, including ordinary source and attachment descriptors
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [messages, hasMore]
+                properties:
+                  messages:
+                    type: array
+                    items: {$ref: '#/components/schemas/Message'}
+                  hasMore: {type: boolean}
+        '400':
+          $ref: '#/components/responses/Failure'
+        '401':
+          $ref: '#/components/responses/Failure'
+        '404':
+          $ref: '#/components/responses/Failure'
     post:
       operationId: sendMessage
       description: Atomic attachment binding and message commit. Files must be the sender's unexpired unlinked uploads in this conversation. A stable clientMessageId compares original body, destination, reply and ordered attachment IDs. File-only messages are allowed.

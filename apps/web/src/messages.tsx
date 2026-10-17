@@ -18,6 +18,7 @@ import {
   MoreHorizontal,
   Pencil,
   RefreshCw,
+  Search,
   SendHorizontal,
   Trash2,
   Users,
@@ -44,6 +45,7 @@ import { MentionInput, MentionText, trimMentionDraft } from "./mentions";
 import type { LocalMessage } from "./store";
 import { Avatar, Button, date, IconButton, Modal, Notice, time } from "./ui";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
+import { ConversationSearch } from "./conversation-search";
 
 export function conversationName(
   conversation: Conversation,
@@ -93,6 +95,8 @@ export function ConversationView({
     : allMessages;
   const [highlightId, setHighlightId] = useState("");
   const [locating, setLocating] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const closeSearch = useCallback(() => setSearchOpen(false), []);
   const navigation = useRef(0);
   const [mentions, setMentions] = useState<Mention[]>([]);
   const [editMentions, setEditMentions] = useState<Mention[]>([]);
@@ -243,6 +247,7 @@ export function ConversationView({
   useEffect(() => {
     if (
       !atBottom ||
+      searchOpen ||
       !visible ||
       loading ||
       !latest ||
@@ -267,6 +272,7 @@ export function ConversationView({
   }, [
     latest,
     atBottom,
+    searchOpen,
     visible,
     loading,
     conversation.id,
@@ -434,6 +440,13 @@ export function ConversationView({
         </div>
         <div className="conversation-header-actions">
           <IconButton
+            label="搜索会话"
+            onClick={() => setSearchOpen(true)}
+            aria-haspopup="dialog"
+          >
+            <Search size={19} />
+          </IconButton>
+          <IconButton
             label="查看会话成员"
             onClick={onMembers}
             aria-expanded={membersOpen}
@@ -442,6 +455,25 @@ export function ConversationView({
           </IconButton>
         </div>
       </header>
+      {searchOpen && (
+        <ConversationSearch
+          key={`${user!.id}:${conversation.id}`}
+          conversationId={conversation.id}
+          onClose={closeSearch}
+          onLocate={(id) => {
+            const token = chatStore.generation;
+            const operation = navigation.current;
+            setSearchOpen(false);
+            requestAnimationFrame(() => {
+              if (
+                token === chatStore.generation &&
+                operation === navigation.current
+              )
+                void locate(id);
+            });
+          }}
+        />
+      )}
       {syncError && (
         <div className="sync-banner" role="status">
           <RefreshCw size={14} />

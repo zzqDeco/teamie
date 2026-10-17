@@ -154,11 +154,13 @@ export function Modal({
   subtitle,
   children,
   onClose,
+  className = "",
 }: {
   title: string;
   subtitle?: string;
   children: ReactNode;
   onClose: () => void;
+  className?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -173,7 +175,7 @@ export function Modal({
     >
       <div
         ref={ref}
-        className="modal"
+        className={`modal ${className}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

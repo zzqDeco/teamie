@@ -5,6 +5,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe("account-bound transport", () => {
+  it("encodes literal history searches and file filters with current read authentication and cancellation", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ messages: [], hasMore: false })));
+    vi.stubGlobal("fetch", fetch);
+    const client = new TeamieClient(); client.csrfToken = "current-account";
+    const controller = new AbortController();
+    await client.searchMessages("conversation/id", { q: "10%_ & 报告", content: "files", beforeSeq: 65 }, controller.signal);
+    const [url, options] = fetch.mock.calls[0];
+    const params = new URL(url, "https://example.test").searchParams;
+    expect(url).toContain("/conversations/conversation%2Fid/messages?");
+    expect(Object.fromEntries(params)).toEqual({ limit: "50", q: "10%_ & 报告", content: "files", beforeSeq: "65" });
+    expect(options.headers.get("X-CSRF-Token")).toBe("current-account");
+    expect(options.credentials).toBe("same-origin"); expect(options.cache).toBe("no-store"); expect(options.signal).toBe(controller.signal);
+  });
   it("binds protected reads to the browser nonce while leaving session discovery unbound", async () => {
     const fetch = vi.fn().mockResolvedValue(new Response("{}"));
     vi.stubGlobal("fetch", fetch);

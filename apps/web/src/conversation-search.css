@@ -1,0 +1,176 @@
+.modal.conversation-search {
+  width: 660px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.conversation-search .modal-heading {
+  margin-bottom: 18px;
+  flex: none;
+}
+.conversation-search .modal-close {
+  width: 40px;
+  height: 40px;
+}
+.search-modes {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 14px;
+  flex: none;
+}
+.search-modes button {
+  min-height: 44px;
+  padding: 8px 20px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #786c85;
+  cursor: pointer;
+  font: inherit;
+}
+.search-modes button[aria-pressed="true"] {
+  background: #eee7f7;
+  color: #75559c;
+}
+.conversation-search .search-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  border: 1px solid #ddd4e6;
+  border-radius: 10px;
+  padding: 3px 5px 3px 12px;
+  flex: none;
+}
+.conversation-search .search-form:focus-within {
+  border-color: #9c7bbd;
+  box-shadow: 0 0 0 2px #9c7bbd18;
+}
+.conversation-search .search-form input {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 0;
+  border: 0;
+  outline: none;
+  box-shadow: none;
+  background: transparent;
+  font-size: 16px;
+}
+.conversation-search .search-form .icon-button {
+  width: 44px;
+  height: 44px;
+  flex: none;
+}
+.search-results {
+  min-height: 160px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.search-empty {
+  color: #8c7f96;
+  font-size: 14px;
+  text-align: center;
+  margin: 36px 12px;
+}
+.search-result-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.search-result-list > li {
+  padding: 16px 4px;
+  border-bottom: 1px solid #eee8f3;
+}
+.search-result-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  font-size: 13px;
+  color: #584765;
+}
+.search-result-meta b {
+  overflow-wrap: anywhere;
+}
+.search-result-meta time {
+  margin-left: auto;
+  font-size: 11px;
+  color: #9888a3;
+}
+.search-message-result {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  width: 100%;
+  border: 0;
+  padding: 12px 0 5px;
+  background: transparent;
+  color: #50435c;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-align: left;
+  cursor: pointer;
+}
+.search-message-result mark {
+  background: #f4e6b7;
+  color: inherit;
+  border-radius: 2px;
+}
+.search-source {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 5px 0;
+  border: 0;
+  background: transparent;
+  color: #9470b3;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.search-message-result:hover,
+.search-source:hover {
+  color: #75559c;
+}
+.search-result-list .message-attachments {
+  margin: 12px 0 0;
+}
+.search-result-list .message-attachments button {
+  max-width: 100%;
+  min-height: 64px;
+}
+.conversation-search .search-more {
+  width: 100%;
+  min-height: 44px;
+  margin: 12px 0 0;
+}
+@media (max-width: 780px) {
+  .modal.conversation-search {
+    height: calc(
+      var(--app-height, 100dvh) - 24px - env(safe-area-inset-top) -
+        env(safe-area-inset-bottom)
+    );
+    padding: 24px 16px 12px;
+  }
+  .search-results {
+    flex: 1;
+  }
+  .search-result-meta time {
+    width: 100%;
+    margin-left: 0;
+  }
+  .search-result-list .message-attachments {
+    flex-direction: column;
+  }
+  .search-result-list .message-attachments li,
+  .search-result-list .message-attachments button {
+    width: 100%;
+  }
+}
