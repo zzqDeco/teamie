@@ -8,7 +8,7 @@
 	encode zstd gzip
 	header {
 		X-Content-Type-Options nosniff
-		Referrer-Policy same-origin
+		Referrer-Policy no-referrer
 		-Server
 	}
 	handle /internal/* {
