@@ -92,6 +92,18 @@ func TestRestoreFixtureContainsCurrentInputPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := ParseContextBudgetSnapshot(raw)
+	expected, makeErr := makeContextBudgetSnapshotVersion(16384, 3)
+	if err != nil || makeErr != nil || got != expected {
+		t.Fatal("historical current-input fixture changed", err, makeErr)
+	}
+}
+
+func TestRestoreFixtureContainsHistoryCoalescingPolicy(t *testing.T) {
+	raw, err := os.ReadFile("../../../ops/fixtures/runtime-context-budget-v4.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseContextBudgetSnapshot(raw)
 	expected, makeErr := makeContextBudgetSnapshot(16384)
 	if err != nil || makeErr != nil || got != expected {
 		t.Fatal("current restore fixture differs from admission", err, makeErr)
