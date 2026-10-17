@@ -12,7 +12,7 @@ import (
 	"teamie/agent-protocol/modeltransport"
 )
 
-const contextBudgetVersion = 4
+const contextBudgetVersion = 5
 const contextCounterVersion = "teamie-visible-estimate-v1"
 const contextTransportLimit = 262144
 
@@ -46,7 +46,7 @@ func makeContextBudgetSnapshotVersion(window, version int) (ContextBudgetSnapsho
 	reserve := min(2048, window/4)
 	if version == 2 {
 		reserve = min(8192, window/4)
-	} else if version == 3 || version == 4 {
+	} else if version == 3 || version == 4 || version == 5 {
 		reserve = min(4096, window/4)
 	} else if version != 1 {
 		return ContextBudgetSnapshot{}, errors.New("unsupported context budget version")
