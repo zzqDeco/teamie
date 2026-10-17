@@ -18,6 +18,9 @@ func (s *Store) RunOutbox(ctx context.Context, rdb *redis.Client) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if _, e := s.prunePublishedOutbox(ctx); e != nil {
+				slog.Warn("published outbox cleanup deferred", "error", e)
+			}
 			for i := 0; i < 100; i++ {
 				sent, e := s.publishOne(ctx, rdb)
 				if e != nil {
@@ -31,7 +34,22 @@ func (s *Store) RunOutbox(ctx context.Context, rdb *redis.Client) {
 		}
 	}
 }
-func (s *Store) publishOne(ctx context.Context, rdb *redis.Client) (bool, error) {
+
+// Old versions retained published hints. Clear them in bounded batches even
+// when there is no new hint or Redis is unavailable; pending hints stay durable.
+func (s *Store) prunePublishedOutbox(ctx context.Context) (int64, error) {
+	tag, e := s.DB.Exec(ctx, `WITH published AS (
+		SELECT id FROM outbox WHERE published_at IS NOT NULL ORDER BY id
+		FOR UPDATE SKIP LOCKED LIMIT 1000
+	) DELETE FROM outbox o USING published p WHERE o.id=p.id AND o.published_at IS NOT NULL`)
+	return tag.RowsAffected(), e
+}
+
+type outboxPublisher interface {
+	Publish(context.Context, string, any) *redis.IntCmd
+}
+
+func (s *Store) publishOne(ctx context.Context, rdb outboxPublisher) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	tx, e := s.DB.Begin(ctx)
@@ -51,7 +69,7 @@ func (s *Store) publishOne(ctx context.Context, rdb *redis.Client) (bool, error)
 	if e = rdb.Publish(ctx, HintChannel, payload).Err(); e != nil {
 		return false, e
 	}
-	if _, e = tx.Exec(ctx, "UPDATE outbox SET published_at=now() WHERE id=$1", id); e != nil {
+	if _, e = tx.Exec(ctx, "DELETE FROM outbox WHERE id=$1", id); e != nil {
 		return false, e
 	}
 	return true, tx.Commit(ctx)
