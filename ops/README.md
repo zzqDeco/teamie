@@ -137,3 +137,5 @@ Database backups cover Gateway/Agent data after v0.2 activation. Sandbox workspa
 - [ACR Enterprise VPC access](https://help.aliyun.com/zh/acr/user-guide/configure-access-over-vpcs)
 
 The file feature originally used default flag revision `im-attachments-v1`; the current default is `context-engineering-v1`. The operator enables `im.attachments.upload=true` in the existing protected production flag file after rollout verification; deploy scripts preserve saved host values. Upload admission off preserves existing authorized file reads and allows pending-upload deletion. Do not replace Gateway settings or credentials when changing this flag.
+
+Task-notification batch compaction advances Runtime to migration 7 and new admission to budget version 5. Current IM bodies remain pinned; completed machine notification envelopes can enter source-scoped history reduction. CI restores all five frozen formats. Older images are fenced, existing policies/receipts stay unchanged, and rollout must use a new permanent release archive.

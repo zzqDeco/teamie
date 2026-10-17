@@ -104,9 +104,21 @@ func TestRestoreFixtureContainsHistoryCoalescingPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := ParseContextBudgetSnapshot(raw)
-	expected, makeErr := makeContextBudgetSnapshot(16384)
+	expected, makeErr := makeContextBudgetSnapshotVersion(16384, 4)
 	if err != nil || makeErr != nil || got != expected {
 		t.Fatal("current restore fixture differs from admission", err, makeErr)
+	}
+}
+
+func TestRestoreFixtureContainsNotificationReductionPolicy(t *testing.T) {
+	raw, err := os.ReadFile("../../../ops/fixtures/runtime-context-budget-v5.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseContextBudgetSnapshot(raw)
+	expected, makeErr := makeContextBudgetSnapshot(16384)
+	if err != nil || makeErr != nil || got != expected {
+		t.Fatal("current notification fixture differs from admission", err, makeErr)
 	}
 }
 
