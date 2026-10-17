@@ -121,6 +121,11 @@ func (s *Service) workspacePage(ctx context.Context, r *agent.SandboxWorkspaceRe
 			}
 		}
 		end := utf8End(b, start+maxBytes)
+		// An explicit byte budget must fit the next complete UTF-8 rune.
+		// Never advertise a successful continuation at the same byte offset.
+		if end == start && start < len(b) {
+			return workspaceError("invalid_request")
+		}
 		if in.Limit > 0 {
 			p := start
 			for n := 0; n < in.Limit && p < end; n++ {

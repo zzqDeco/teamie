@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"teamie/agent-protocol/kitex_gen/agent"
 )
@@ -74,6 +75,44 @@ func TestPagedReadLargeUTF8LongLineVersionAndLegacyLimit(t *testing.T) {
 	r, _ := s.Workspace(context.Background(), &agent.SandboxWorkspaceRequest{ServiceToken: token, AgentId: "paged-agent", Operation: "read", ArgsJson: string(b)})
 	if r.GetErrorCode() != "file_changed" {
 		t.Fatal("mixed file versions", r)
+	}
+}
+
+func TestPagedReadSmallUTF8BudgetsAdvanceOrReject(t *testing.T) {
+	s := fixture(t, &fakeEngine{})
+	workspace, _ := s.workspace("paged-agent")
+	const content = "é中😀x"
+	if err := os.WriteFile(filepath.Join(workspace, "runes.txt"), []byte(content), 0666); err != nil {
+		t.Fatal(err)
+	}
+	for _, offset := range []int{0, 2, 5, 9, len(content)} {
+		for budget := 1; budget <= utf8.UTFMax; budget++ {
+			t.Run(fmt.Sprintf("offset=%d/bytes=%d", offset, budget), func(t *testing.T) {
+				args, _ := json.Marshal(map[string]any{"pageVersion": 1, "path": "runes.txt", "byteOffset": offset, "maxBytes": budget})
+				response, err := s.Workspace(context.Background(), &agent.SandboxWorkspaceRequest{ServiceToken: token, AgentId: "paged-agent", Operation: "read", ArgsJson: string(args)})
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, size := utf8.DecodeRuneInString(content[offset:])
+				if offset < len(content) && budget < size {
+					if response.Ok || response.GetErrorCode() != "invalid_request" {
+						t.Fatal("undersized budget returned a nonadvancing successful page", response)
+					}
+					return
+				}
+				var page struct {
+					Content    string `json:"content"`
+					NextOffset int    `json:"nextOffset"`
+					HasMore    bool   `json:"hasMore"`
+				}
+				if !response.Ok || json.Unmarshal([]byte(response.GetDataJson()), &page) != nil || !utf8.ValidString(page.Content) || len(page.Content) > budget || page.NextOffset != offset+len(page.Content) || page.Content != content[offset:page.NextOffset] {
+					t.Fatal("page lost UTF-8 bytes or exceeded its budget", response)
+				}
+				if offset < len(content) && page.NextOffset <= offset || offset == len(content) && page.HasMore {
+					t.Fatal("successful continuation did not advance", response)
+				}
+			})
+		}
 	}
 }
 
