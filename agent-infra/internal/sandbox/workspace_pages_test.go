@@ -158,3 +158,34 @@ func TestPagedSearchReportsSkippedCoverageAndPreciseContext(t *testing.T) {
 		}
 	}
 }
+
+func TestPagedGrepLongLineReferenceReadsActualMatchAndDetectsChangedContinuation(t *testing.T) {
+	s := fixture(t, &fakeEngine{})
+	workspace, _ := s.workspace("paged-agent")
+	name := filepath.Join(workspace, "long.txt")
+	content := strings.Repeat("x", 300000) + "needle\nneedle again\n"
+	os.WriteFile(name, []byte(content), 0666)
+	out := pagedCall(t, s, "grep", map[string]any{"path": "long.txt", "pattern": "needle", "limit": 1})
+	m := out["matches"].([]any)[0].(map[string]any)
+	if m["matchByteOffset"] != float64(300000) || m["matchEndByteOffset"] != float64(300006) || m["contentTruncated"] != true || m["sha256"] != digest(content) {
+		t.Fatal(m)
+	}
+	resume := m["readResume"].(map[string]any)
+	delete(resume, "operation")
+	read := pagedCall(t, s, "read", resume)
+	if !strings.HasPrefix(read["content"].(string), "needle") {
+		t.Fatal("match could not be read precisely", read)
+	}
+	info, _ := os.Stat(name)
+	changed := strings.Replace(content, "again", "other", 1)
+	os.WriteFile(name, []byte(changed), 0666)
+	os.Chtimes(name, info.ModTime(), info.ModTime())
+	args := out["resume"].(map[string]any)
+	delete(args, "operation")
+	args["pageVersion"] = 1
+	b, _ := json.Marshal(args)
+	response, _ := s.Workspace(context.Background(), &agent.SandboxWorkspaceRequest{ServiceToken: token, AgentId: "paged-agent", Operation: "grep", ArgsJson: string(b)})
+	if response.GetErrorCode() != "file_changed" {
+		t.Fatal("same metadata hid changed grep file", response)
+	}
+}

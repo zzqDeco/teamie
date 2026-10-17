@@ -67,10 +67,15 @@ func TestSandboxPageObservationReplayDoesNotReadFutureOutputAndRechecksAuthoriza
 		t.Fatal(e)
 	}
 	defer s.Release(ctx, lease)
-	run, e := s.StartRunWithContextPolicy(ctx, lease, []Input{{EventID: uuid.NewString()}}, contextProfileV1, json.RawMessage(`{}`))
+	inputs := []Input{{EventID: "1"}}
+	if e = s.Ingest(ctx, lease, "1", inputs); e != nil {
+		t.Fatal(e)
+	}
+	run, e := s.StartRun(ctx, lease, inputs)
 	if e != nil {
 		t.Fatal(e)
 	}
+	run.ContextProfile = contextProfileV1 // This case tests observations, not policy admission.
 	f := &sandboxPageFixture{data: `{"taskId":"shell-test","nextOffset":4,"outputBytes":4,"hasMore":false,"outputStatus":"recording","stdout":"past"}`}
 	revoked := false
 	b := &SandboxBackend{Client: f, Store: s, Lease: lease, Progressive: true, Authorize: func(context.Context) error {
@@ -133,9 +138,18 @@ func TestSandboxNativePagingMetadataCannotDisappear(t *testing.T) {
 		if e == nil || !strings.Contains(e.Error(), "workspace_read_page") {
 			t.Fatal("partial native result appeared complete", e)
 		}
+		var required *workspacePageRequiredError
+		if !errors.As(e, &required) || required.Resume["operation"] != required.Operation || required.Resume["path"] != "a" {
+			t.Fatal("continuation was not a typed model observation", e)
+		}
 		if f.args["pageVersion"] != float64(1) {
 			t.Fatal(f.args)
 		}
+	}
+	_, e := b.GrepRaw(context.Background(), &fs.GrepRequest{Path: "a", Pattern: "needle", Glob: "**/*.txt", CaseInsensitive: true, BeforeLines: 2})
+	var required *workspacePageRequiredError
+	if !errors.As(e, &required) || required.Resume["pattern"] != "needle" || required.Resume["glob"] != "**/*.txt" || required.Resume["caseInsensitive"] != true || required.Resume["beforeLines"] != 2 {
+		t.Fatal("continuation lost native filters", e)
 	}
 	b.Progressive = false
 	if _, e := b.Read(context.Background(), &fs.ReadRequest{FilePath: "a"}); e != nil {

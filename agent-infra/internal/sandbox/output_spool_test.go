@@ -125,6 +125,20 @@ func progressiveStart() *agent.SandboxStartRequest {
 func awaitBytes(t *testing.T, s *Service, n int64) *agent.SandboxTaskResponse {
 	return awaitTask(t, s, func(r *agent.SandboxTaskResponse) bool { return r.GetOutputBytes() == n })
 }
+func awaitDiskTask(t *testing.T, s *Service, predicate func(*agent.SandboxTaskResponse) bool) *agent.SandboxTaskResponse {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	var result *agent.SandboxTaskResponse
+	for time.Now().Before(deadline) {
+		result, _ = s.Get(context.Background(), taskRequest())
+		if predicate(result) {
+			return result
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("disk-backed task did not finish: state=%s bytes=%d status=%s", result.State, result.GetOutputBytes(), result.GetOutputStatus())
+	return nil
+}
 func awaitAnchor(t *testing.T, s *Service) {
 	t.Helper()
 	deadline := time.Now().Add(4 * time.Second)
@@ -312,12 +326,83 @@ func TestDurableOutputSaturationIsExplicitAndPreviewDoesNotSaturate(t *testing.T
 	s.Start(context.Background(), progressiveStart())
 	awaitAnchor(t, s)
 	f.output(taskName(), 1, strings.Repeat("x", int(DurableOutputLimit)+1))
-	result := awaitTask(t, s, func(r *agent.SandboxTaskResponse) bool { return r.State == "failed" })
+	result := awaitDiskTask(t, s, func(r *agent.SandboxTaskResponse) bool { return r.State == "failed" })
 	if result.GetOutputStatus() != "limited" || result.GetOutputBytes() != DurableOutputLimit || result.GetErrorCode() != "execution_output_limit" || len(result.GetStdout()) != OutputLimit {
 		t.Fatal("incorrect physical saturation", result)
 	}
 	info, e := os.Stat(s.outputPath(taskKey("agent-a", "native-task")))
 	if e != nil || info.Size() > SharedOutputLimit || info.Mode().Perm() != 0600 {
 		t.Fatal(info, e)
+	}
+}
+
+func TestDurableOutputSharedQuotaCountsHeaderAndReturnsLimited(t *testing.T) {
+	f := newStampedFixture()
+	s := fixture(t, f)
+	f.service = s
+	padding, e := os.Create(s.StateRoot + "/padding.output")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = padding.Truncate(SharedOutputLimit - 256); e != nil {
+		t.Fatal(e)
+	}
+	padding.Close()
+	r, _ := s.Start(context.Background(), progressiveStart())
+	if !r.Ok {
+		t.Fatal(r)
+	}
+	awaitAnchor(t, s)
+	f.output(taskName(), 1, strings.Repeat("x", 512))
+	result := awaitTask(t, s, func(r *agent.SandboxTaskResponse) bool { return r.State == "failed" })
+	if result.GetOutputStatus() != "limited" || result.GetOutputBytes() <= 0 || result.GetOutputBytes() >= 256 || result.GetErrorCode() != "execution_output_limit" {
+		t.Fatal(result)
+	}
+	s.taskMu.Lock()
+	used, e := s.outputUsedLocked()
+	s.taskMu.Unlock()
+	if e != nil || used != SharedOutputLimit {
+		t.Fatal("header bytes escaped shared quota", used, e)
+	}
+}
+
+func TestDurableOutputWorkspacePagePreservesStreamOffsetsAndHidesControlMarker(t *testing.T) {
+	f := newStampedFixture()
+	s := fixture(t, f)
+	f.service = s
+	s.Start(context.Background(), progressiveStart())
+	awaitAnchor(t, s)
+	f.output(taskName(), 1, "A")
+	f.output(taskName(), 2, "B")
+	f.output(taskName(), 1, "C"+string([]byte{0xff}))
+	awaitBytes(t, s, 4)
+	f.finish(taskName(), 0)
+	awaitTask(t, s, completed)
+	request := &agent.SandboxWorkspaceRequest{ServiceToken: token, AgentId: "agent-a", Operation: "output", ArgsJson: `{"pageVersion":1,"taskId":"native-task","byteOffset":1,"maxBytes":2}`}
+	page, _ := s.Workspace(context.Background(), request)
+	if !page.Ok || strings.Contains(page.GetDataJson(), "TEAMIE_OUTPUT_ANCHOR") {
+		t.Fatal(page)
+	}
+	var out struct {
+		NextOffset   int64
+		HasMore      bool
+		OutputStatus string
+		Segments     []outputSegment
+	}
+	if e := json.Unmarshal([]byte(page.GetDataJson()), &out); e != nil {
+		t.Fatal(e)
+	}
+	if out.NextOffset != 3 || !out.HasMore || out.OutputStatus != "complete" || len(out.Segments) != 2 || out.Segments[0].Stream != "stderr" || out.Segments[0].ByteOffset != 1 || string(out.Segments[0].Data) != "B" || out.Segments[1].Stream != "stdout" || string(out.Segments[1].Data) != "C" {
+		t.Fatal("stream reference lost", page.GetDataJson())
+	}
+	request.AgentId = "another-agent"
+	denied, _ := s.Workspace(context.Background(), request)
+	if denied.Ok {
+		t.Fatal("foreign Agent read output handle")
+	}
+	request.ServiceToken = "invalid"
+	denied, _ = s.Workspace(context.Background(), request)
+	if denied.GetErrorCode() != "unauthorized" {
+		t.Fatal(denied)
 	}
 }

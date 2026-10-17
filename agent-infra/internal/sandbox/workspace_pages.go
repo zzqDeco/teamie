@@ -24,10 +24,11 @@ const MaxPageBytes = 65536
 const maxPageMatches = 10000
 
 type pageCursor struct {
-	Query   string `json:"q"`
-	Version string `json:"v"`
-	File    int    `json:"f"`
-	Match   int    `json:"m,omitempty"`
+	Query       string `json:"q"`
+	Version     string `json:"v"`
+	File        int    `json:"f"`
+	Match       int    `json:"m,omitempty"`
+	FileVersion string `json:"h,omitempty"`
 }
 
 func encodePageCursor(c pageCursor) string {
@@ -157,13 +158,18 @@ func (s *Service) workspacePage(ctx context.Context, r *agent.SandboxWorkspaceRe
 }
 
 type pageGrepMatch struct {
-	Path             string `json:"path"`
-	Line             int    `json:"line"`
-	EndLine          int    `json:"endLine"`
-	ContentStartLine int    `json:"contentStartLine"`
-	MatchByteOffset  int    `json:"matchByteOffset"`
-	Content          string `json:"content"`
-	ContentTruncated bool   `json:"contentTruncated"`
+	Path                 string         `json:"path"`
+	Line                 int            `json:"line"`
+	EndLine              int            `json:"endLine"`
+	ContentStartLine     int            `json:"contentStartLine"`
+	MatchByteOffset      int            `json:"matchByteOffset"`
+	MatchEndByteOffset   int            `json:"matchEndByteOffset"`
+	ContentByteOffset    int            `json:"contentByteOffset"`
+	ContentEndByteOffset int            `json:"contentEndByteOffset"`
+	SHA256               string         `json:"sha256"`
+	Content              string         `json:"content"`
+	ContentTruncated     bool           `json:"contentTruncated"`
+	ReadResume           map[string]any `json:"readResume,omitempty"`
 }
 
 func (s *Service) workspaceSearchPage(ctx context.Context, op string, in workspaceArgs, name string, root *os.Root) *agent.SandboxWorkspaceResponse {
@@ -316,6 +322,7 @@ func (s *Service) workspaceSearchPage(ctx context.Context, op string, in workspa
 			coverage["complete"] = false
 			c.File++
 			c.Match = 0
+			c.FileVersion = ""
 			continue
 		}
 		if scanned > 0 && scanned+int(f.Size) > MaxReadableFileBytes {
@@ -328,9 +335,15 @@ func (s *Service) workspaceSearchPage(ctx context.Context, op string, in workspa
 			coverage["complete"] = false
 			c.File++
 			c.Match = 0
+			c.FileVersion = ""
 			continue
 		}
 		scanned += len(text)
+		fileVersion := digest(string(text))
+		if c.FileVersion != "" && c.FileVersion != fileVersion {
+			return workspaceError("file_changed")
+		}
+		c.FileVersion = fileVersion
 		indices := [][2]int{}
 		if in.EnableMultiline {
 			for _, at := range re.FindAllIndex(text, maxPageMatches+1) {
@@ -342,8 +355,8 @@ func (s *Service) workspaceSearchPage(ctx context.Context, op string, in workspa
 				if end < p {
 					end = len(text)
 				}
-				if re.Match(text[p:end]) {
-					indices = append(indices, [2]int{p, end})
+				if at := re.FindIndex(text[p:end]); at != nil {
+					indices = append(indices, [2]int{p + at[0], p + at[1]})
 					if len(indices) > maxPageMatches {
 						break
 					}
@@ -382,7 +395,10 @@ func (s *Service) workspaceSearchPage(ctx context.Context, op string, in workspa
 				clip = end
 			}
 			short := clip < end
-			m := pageGrepMatch{f.Path, line, endLine, startLine, at[0], string(text[start:clip]), short}
+			m := pageGrepMatch{Path: f.Path, Line: line, EndLine: endLine, ContentStartLine: startLine, MatchByteOffset: at[0], MatchEndByteOffset: at[1], ContentByteOffset: start, ContentEndByteOffset: clip, SHA256: fileVersion, Content: string(text[start:clip]), ContentTruncated: short}
+			if short {
+				m.ReadResume = map[string]any{"operation": "read", "path": f.Path, "byteOffset": at[0], "expectedVersion": fileVersion, "maxBytes": 16384}
+			}
 			matches = append(matches, m)
 			if len(matches) > 1 && !pageFits(result(true)) {
 				matches = matches[:len(matches)-1]
@@ -398,9 +414,11 @@ func (s *Service) workspaceSearchPage(ctx context.Context, op string, in workspa
 			limited = true
 			coverage["complete"] = false
 			coverage["matchLimited"] = true
+			coverage["hint"] = "At most 10000 matches are examined in one file. Narrow the pattern or read that file by byteOffset; no absence claim is made beyond this bound."
 		}
 		c.File++
 		c.Match = 0
+		c.FileVersion = ""
 	}
 	return workspaceResult(result(c.File < len(files)))
 }

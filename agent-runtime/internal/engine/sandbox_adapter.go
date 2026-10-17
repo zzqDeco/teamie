@@ -126,7 +126,7 @@ func (s *SandboxBackend) LsInfo(ctx context.Context, r *fs.LsInfoRequest) ([]fs.
 	}
 	err := s.workspace(ctx, "ls", args, &out)
 	if err == nil && s.progressive(ctx) && (out.HasMore || out.Truncated) {
-		return nil, pageRequired("ls", r.Path)
+		return nil, pageRequired("ls", args)
 	}
 	return out.Files, err
 }
@@ -142,7 +142,7 @@ func (s *SandboxBackend) Read(ctx context.Context, r *fs.ReadRequest) (*fs.FileC
 	}
 	err := s.workspace(ctx, "read", args, &out)
 	if err == nil && s.progressive(ctx) && (out.HasMore || out.Truncated) {
-		return nil, pageRequired("read", r.FilePath)
+		return nil, pageRequired("read", args)
 	}
 	return &fs.FileContent{Content: out.Content}, err
 }
@@ -164,7 +164,7 @@ func (s *SandboxBackend) GlobInfo(ctx context.Context, r *fs.GlobInfoRequest) ([
 	}
 	err := s.workspace(ctx, "glob", args, &out)
 	if err == nil && s.progressive(ctx) && (out.HasMore || out.Truncated) {
-		return nil, pageRequired("glob", r.Path)
+		return nil, pageRequired("glob", args)
 	}
 	return out.Files, err
 }
@@ -180,14 +180,28 @@ func (s *SandboxBackend) GrepRaw(ctx context.Context, r *fs.GrepRequest) ([]fs.G
 	}
 	err := s.workspace(ctx, "grep", args, &out)
 	if err == nil && s.progressive(ctx) && (out.HasMore || out.Truncated) {
-		return nil, pageRequired("grep", r.Path)
+		return nil, pageRequired("grep", args)
 	}
 	return out.Matches, err
 }
 
-func pageRequired(op, path string) error {
-	b, _ := json.Marshal(map[string]any{"operation": op, "path": path})
-	return fmt.Errorf("workspace_page_required: result has incomplete coverage; call workspace_read_page with the same filters and %s, then follow its resume object", b)
+type workspacePageRequiredError struct {
+	Operation string
+	Resume    map[string]any
+}
+
+func (e *workspacePageRequiredError) Error() string {
+	b, _ := json.Marshal(e.Resume)
+	return fmt.Sprintf("workspace_page_required: result has incomplete coverage; call workspace_read_page with the same filters and %s, then follow its resume object", b)
+}
+func pageRequired(op string, args map[string]any) error {
+	resume := map[string]any{"operation": op}
+	for k, v := range args {
+		if k != "pageVersion" {
+			resume[k] = v
+		}
+	}
+	return &workspacePageRequiredError{Operation: op, Resume: resume}
 }
 
 type workspacePageArgs struct {
