@@ -24,15 +24,22 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 	if err != nil {
 		return nil, err
 	}
+	release, err := run.Front.modelPermit(ctx)
+	if err != nil {
+		return nil, err
+	}
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			release()
+		}
+	}()
 	if m.Authorize != nil {
 		if err = m.Authorize(ctx); err != nil {
 			return nil, err
 		}
 	}
 	if err = m.Store.CheckLease(ctx, m.Lease); err != nil {
-		return nil, err
-	}
-	if err = run.Front.acquire(ctx); err != nil {
 		return nil, err
 	}
 	opts := model.GetCommonOptions(nil, options...)
@@ -91,7 +98,9 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 	}
 	reader, writer := schema.Pipe[*schema.AgenticMessage](8)
 	output, bridgeDone := cancelStreamOnClose(reader, cancel)
+	handedOff = true
 	go func() {
+		defer release()
 		defer cancel()
 		defer bridgeDone()
 		defer response.Body.Close()

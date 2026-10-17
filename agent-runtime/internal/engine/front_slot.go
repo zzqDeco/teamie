@@ -5,9 +5,9 @@ import (
 	"sync"
 )
 
-// The host has one foreground slot. Awaiting Sandbox/background work releases
-// it; the next model operation must acquire it again. Agent Session writers
-// remain independently fenced and serial throughout a wait.
+// The host has one model slot. A worker reserves initial admission, then each
+// model operation owns its permit only until completion. Agent Session writers
+// remain independently fenced and serial while other Sessions make progress.
 type frontSlot struct {
 	mu    sync.Mutex
 	slots chan struct{}
@@ -42,6 +42,31 @@ func (f *frontSlot) release() {
 		f.held = false
 	}
 }
+
+// Transfer the initial worker reservation, or acquire a new call-owned permit.
+// A stream may expose its terminal error before its producer has cleaned up.
+// Its release must therefore never act on a later call's shared held flag.
+func (f *frontSlot) modelPermit(ctx context.Context) (func(), error) {
+	if f == nil {
+		return func() {}, nil
+	}
+	f.mu.Lock()
+	reserved := f.held
+	if reserved {
+		f.held = false
+	}
+	f.mu.Unlock()
+	if !reserved {
+		select {
+		case f.slots <- struct{}{}:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	var once sync.Once
+	return func() { once.Do(func() { <-f.slots }) }, nil
+}
+
 func (r *Run) releaseFront() {
 	if r != nil {
 		r.Front.release()
