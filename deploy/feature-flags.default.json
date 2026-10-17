@@ -1,7 +1,8 @@
 {
-  "revision": "im-attachments-v1",
+  "revision": "password-reset-v1",
   "flags": {
     "auth.public_signup": false,
+    "auth.password_reset": true,
     "im.dm.create": true,
     "im.group.create": true,
     "im.channel.create": true,

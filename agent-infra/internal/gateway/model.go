@@ -106,7 +106,15 @@ func (p Provider) nativeModel(ctx context.Context, c Config, key, raw string, st
 		transport = http.DefaultTransport
 	}
 	httpClient.Transport = &providerBoundary{next: transport, key: key, config: c, streaming: streaming}
-	chat, err := agenticopenai.NewChatModel(ctx, &agenticopenai.ChatConfig{APIKey: key, BaseURL: c.BaseURL, Model: c.Model, HTTPClient: &httpClient, MaxCompletionTokens: &limit, ExtraFields: map[string]any{"parallel_tool_calls": false, "n": 1}})
+	extra := map[string]any{"parallel_tool_calls": false, "n": 1}
+	// Qwen3.8 Max enables thinking by default. Summary requests need visible
+	// text within the existing output limit; ordinary tool-enabled turns retain
+	// the provider's normal reasoning policy. Keep this provider option here so
+	// old runtime request hashes and committed receipts remain unchanged.
+	if (c.Model == "qwen3.8-max" || strings.HasPrefix(c.Model, "qwen3.8-max-")) && choice.Type == schema.ToolChoiceForbidden && len(options.Tools) == 0 {
+		extra["enable_thinking"] = false
+	}
+	chat, err := agenticopenai.NewChatModel(ctx, &agenticopenai.ChatConfig{APIKey: key, BaseURL: c.BaseURL, Model: c.Model, HTTPClient: &httpClient, MaxCompletionTokens: &limit, ExtraFields: extra})
 	if err != nil {
 		return nil, nil, nil, api.Err(503, "gateway_unavailable", "Model adapter could not be initialized")
 	}

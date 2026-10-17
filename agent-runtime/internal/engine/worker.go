@@ -337,12 +337,17 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		if run.toolProfile == v034ToolProfile {
 			finalize = finalizeV034Summary
 		}
+		summaryFailovers := 1
 		summary, err := summarization.NewTyped(ctx, &summarization.TypedConfig[*schema.AgenticMessage]{
 			Model:           gatewayModel,
 			ModelOptions:    []model.Option{model.WithAgenticToolChoice(&schema.AgenticToolChoice{Type: schema.ToolChoiceForbidden})},
 			Trigger:         &summarization.TriggerCondition{ContextTokens: trigger, ContextMessages: 32},
 			UserInstruction: summaryInstruction,
 			Finalize:        finalize,
+			Failover: &summarization.TypedFailoverConfig[*schema.AgenticMessage]{
+				MaxRetries:     &summaryFailovers,
+				ShouldFailover: retryEmptyLengthSummary,
+			},
 		})
 		if err != nil {
 			return nil, err

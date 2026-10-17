@@ -29,6 +29,7 @@ import { useAuth } from "./auth";
 import { errorText, useChat, useChatState } from "./chat";
 import { ProfileSettings, WorkspaceDialog } from "./dialogs";
 import { PlatformInvitations } from "./admin";
+import { PlatformUsers } from "./platform-users";
 import { ModelGatewaySettings } from "./model-gateway";
 import { AgentDetail, MyAgents } from "./agents";
 import { AccountMenu } from "./account-menu";
@@ -339,12 +340,14 @@ export function Shell() {
   );
   const isAdminPage = location.pathname === "/app/admin";
   const isGatewayPage = location.pathname === "/app/admin/gateway";
+  const isUsersPage = location.pathname === "/app/admin/users";
   const isAgentsPage = location.pathname === "/app/agents" || !!agentMatch;
   const isDirectoryPage = !!directoryMatch;
   const isManagement =
     isSettings ||
     isAdminPage ||
     isGatewayPage ||
+    isUsersPage ||
     isAgentsPage ||
     isDirectoryPage;
   return (
@@ -510,7 +513,7 @@ export function Shell() {
               </IconButton>
               {isGatewayPage ? (
                 <KeyRound size={18} />
-              ) : isDirectoryPage ? (
+              ) : isDirectoryPage || isUsersPage ? (
                 <Users size={18} />
               ) : isAgentsPage ? (
                 <Bot size={18} />
@@ -522,6 +525,8 @@ export function Shell() {
               <span>
                 {isGatewayPage
                   ? "模型网关"
+                  : isUsersPage
+                    ? "用户管理"
                   : isAdminPage
                     ? "注册邀请"
                     : isAgentsPage
@@ -535,12 +540,16 @@ export function Shell() {
                 <span>对话</span>
               </Link>
             </header>
-            {(isAdminPage || isGatewayPage) &&
+            {(isAdminPage || isGatewayPage || isUsersPage) &&
               user!.platformRole === "admin" && (
                 <nav className="admin-section-nav">
                   <Link to="/app/admin" className={isAdminPage ? "active" : ""}>
                     <ShieldCheck size={13} />
                     注册邀请
+                  </Link>
+                  <Link to="/app/admin/users" className={isUsersPage ? "active" : ""}>
+                    <Users size={13} />
+                    用户管理
                   </Link>
                   <Link
                     to="/app/admin/gateway"
@@ -551,7 +560,9 @@ export function Shell() {
                   </Link>
                 </nav>
               )}
-            {isGatewayPage ? (
+            {isUsersPage ? (
+              <PlatformUsers />
+            ) : isGatewayPage ? (
               <ModelGatewaySettings key={user!.id} />
             ) : isAdminPage ? (
               <PlatformInvitations key={user!.id} />

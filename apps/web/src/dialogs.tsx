@@ -380,7 +380,7 @@ export function ProfileSettings() {
           <ShieldCheck size={19} aria-hidden="true" />
           <span>
             <b>平台管理</b>
-            <small>注册邀请与模型网关</small>
+            <small>注册邀请、用户与模型网关</small>
           </span>
           <ChevronRight size={17} aria-hidden="true" />
         </Link>

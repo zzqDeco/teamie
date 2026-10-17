@@ -52,7 +52,7 @@ func (s *Store) registrationAdmission(ctx context.Context, q rowQuerier, code st
 }
 func (s *Store) requireAdmin(ctx context.Context, user string) error {
 	var role string
-	e := s.DB.QueryRow(ctx, "SELECT platform_role FROM identity_users WHERE id=$1", user).Scan(&role)
+	e := s.DB.QueryRow(ctx, "SELECT platform_role FROM identity_users WHERE id=$1 AND kind='human' AND enabled AND deleted_at IS NULL", user).Scan(&role)
 	if errors.Is(e, pgx.ErrNoRows) || e == nil && role != "admin" {
 		return api.Err(403, "forbidden", "Platform administrator permission is required")
 	}
