@@ -1,0 +1,72 @@
+openapi: 3.1.0
+info:
+  title: Teamie mentions and replies attention
+  version: 1.0.0
+  description: Read-only Chat projection of currently authorized IM messages. No Agent runtime resource appears in this contract.
+security:
+  - session: []
+  - principal: []
+paths:
+  /api/v1/attention:
+    get:
+      operationId: listOwnAttention
+      description: Caller identity derives only from normal authentication. Non-self structured mentions and replies to the caller's unretracted original in the same conversation are coalesced. Current workspace and conversation ACLs filter both items and the global unread count. Delivered content stays readable when write flags are disabled. Reading a page does not mark it read.
+      parameters:
+        - name: cursor
+          in: query
+          description: Opaque descending createdAt/id cursor from the previous page.
+          schema: {type: string, maxLength: 512}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+        - name: unreadOnly
+          in: query
+          schema: {type: boolean, default: false}
+      responses:
+        '200':
+          description: Newest-first current attention page; unreadCount ignores paging and the unread filter.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, unreadCount]
+                properties:
+                  cursor: {type: string}
+                  unreadCount: {type: integer, minimum: 0}
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [message, conversation, workspaceName, reasons, isRead]
+                      properties:
+                        message: {$ref: './attachments.openapi.yaml#/components/schemas/Message'}
+                        workspaceName: {type: string}
+                        isRead: {type: boolean}
+                        reasons:
+                          type: array
+                          minItems: 1
+                          maxItems: 2
+                          uniqueItems: true
+                          items: {type: string, enum: [mention, reply]}
+                        conversation:
+                          type: object
+                          required: [id, workspaceId, name, type]
+                          properties:
+                            id: {type: string}
+                            workspaceId: {type: string}
+                            name: {type: string}
+                            type: {type: string, enum: [channel, direct, group]}
+        '400':
+          description: Invalid cursor, page size or unread filter.
+        '401':
+          description: Invalid or revoked identity/session.
+components:
+  securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: teamie_session
+    principal:
+      type: http
+      scheme: bearer
+      description: Generic participant bearer also requires X-Teamie-Service-Key; browser impersonation is forbidden.

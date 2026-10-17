@@ -2281,6 +2281,14 @@ label > .copy-input {
 .member-row:focus-within .remove-member {
   opacity: 1;
 }
+@media (hover: none), (pointer: coarse) {
+  .member-dm,
+  .remove-member {
+    opacity: 1;
+    width: 44px;
+    height: 44px;
+  }
+}
 .members-directory-link,
 .members-invite {
   display: flex;
