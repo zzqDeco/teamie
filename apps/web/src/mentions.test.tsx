@@ -283,6 +283,9 @@ describe("reply navigation", () => {
       .spyOn(api, "messagesAround")
       .mockResolvedValue({ messages: [original], hasMore: false });
     await render(view());
+    expect(host.querySelector(".message-reply")?.textContent).toContain(
+      "较早的消息",
+    );
     await act(async () =>
       host.querySelector<HTMLButtonElement>(".message-reply")!.click(),
     );
@@ -291,6 +294,18 @@ describe("reply navigation", () => {
     expect(document.activeElement?.id).toBe("message-old-message");
     expect(host.textContent).toContain("原始任务");
     expect(chatStore.getSnapshot().messages.group).toHaveLength(1);
+    await act(async () =>
+      host.querySelector<HTMLButtonElement>(".located-banner button")!.click(),
+    );
+    expect(host.querySelector(".located-banner")).toBeNull();
+    expect(host.textContent).toContain("交付结果");
+    expect(host.querySelector(".message-reply")?.textContent).toContain("助手");
+    expect(host.querySelector(".message-reply")?.textContent).toContain(
+      "原始任务",
+    );
+    await act(async () =>
+      host.querySelector<HTMLButtonElement>(".message-reply")!.click(),
+    );
     await act(async () =>
       chatStore.merge([{ ...original, retractedAt: "2026-10-17T00:01:00Z" }]),
     );
@@ -301,7 +316,204 @@ describe("reply navigation", () => {
     );
     expect(host.querySelector(".located-banner")).toBeNull();
     expect(host.textContent).toContain("交付结果");
+    expect(host.querySelector(".message-reply")?.textContent).toContain("助手");
+    expect(host.querySelector(".message-reply")?.textContent).toContain(
+      "消息已撤回",
+    );
   });
+  it("keeps composer focus while replying in located context across renders and typing", async () => {
+    vi.mocked(api.messages).mockResolvedValue({
+      messages: [reply],
+      hasMore: true,
+    });
+    vi.spyOn(api, "message").mockResolvedValue({ message: original });
+    vi.spyOn(api, "messagesAround").mockResolvedValue({
+      messages: [original],
+      hasMore: false,
+    });
+    await render(view());
+    await act(async () =>
+      host.querySelector<HTMLButtonElement>(".message-reply")!.click(),
+    );
+    expect(document.activeElement?.id).toBe(`message-${original.id}`);
+    await act(async () =>
+      host.querySelector<HTMLButtonElement>('[aria-label="回复 助手"]')!.click(),
+    );
+    const input = host.querySelector("textarea")!;
+    expect(host.querySelector(".reply-preview")?.textContent).toContain("原始任务");
+    expect(document.activeElement).toBe(input);
+    await render(view());
+    expect(document.activeElement).toBe(input);
+    await type("回");
+    expect(document.activeElement).toBe(input);
+    await type("回复");
+    expect(input.value).toBe("回复");
+    expect(document.activeElement).toBe(input);
+    await act(async () =>
+      chatStore.merge([
+        { ...original, body: "更新的原始任务", editedAt: "2026-10-17T00:01:00Z" },
+      ]),
+    );
+    expect(host.querySelector(".reply-preview")?.textContent).toContain(
+      "更新的原始任务",
+    );
+    expect(document.activeElement).toBe(input);
+  });
+  it("renders cached conversation messages immediately without a loading flash while refreshing in the background", async () => {
+    chatStore.merge([reply]);
+    let resolveLatest!: (value: {
+      messages: Message[];
+      hasMore: boolean;
+    }) => void;
+    vi.mocked(api.messages).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveLatest = resolve;
+        }),
+    );
+    await render(view());
+    expect(host.querySelector(".message-loading")).toBeNull();
+    expect(host.textContent).toContain("交付结果");
+    const newer: Message = {
+      ...reply,
+      id: "newer-message",
+      clientMessageId: "newer",
+      body: "后台刷新的新消息",
+      seq: 101,
+    };
+    await act(async () =>
+      resolveLatest({ messages: [reply, newer], hasMore: false }),
+    );
+    expect(host.textContent).toContain("后台刷新的新消息");
+  });
+  it("retains an attention source as reply context without reading newer cached messages", async () => {
+    chatStore.merge([reply]);
+    vi.mocked(api.messages).mockResolvedValue({
+      messages: [reply],
+      hasMore: true,
+    });
+    vi.mocked(api.read).mockResolvedValue({ readSeq: original.seq });
+    vi.spyOn(api, "message").mockResolvedValue({ message: original });
+    vi.spyOn(api, "messagesAround").mockResolvedValue({
+      messages: [
+        original,
+        {
+          ...original,
+          id: "neighbor-message",
+          clientMessageId: "neighbor",
+          body: "相邻上下文",
+          seq: 3,
+        },
+      ],
+      hasMore: false,
+    });
+    vi.useFakeTimers();
+    try {
+      await render(
+        <ConversationView
+          conversation={{ ...conversation, readSeq: 0 }}
+          members={members}
+          onMembers={vi.fn()}
+          membersOpen={false}
+          onMenu={vi.fn()}
+          initialMessageId={original.id}
+        />,
+      );
+      await act(async () => vi.advanceTimersByTimeAsync(650));
+      expect(api.messages).not.toHaveBeenCalled();
+      expect(api.read).toHaveBeenCalledExactlyOnceWith("group", original.seq);
+      expect(document.activeElement?.id).toBe(`message-${original.id}`);
+      await act(async () =>
+        host.querySelector<HTMLButtonElement>(".located-banner button")!.click(),
+      );
+      expect(host.querySelector(".located-banner")).toBeNull();
+      expect(host.textContent).toContain("交付结果");
+      expect(host.querySelector(".message-reply")?.textContent).toContain(
+        "原始任务",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("waits for an inert source context to become interactive before focusing or acknowledging it", async () => {
+    vi.mocked(api.read).mockResolvedValue({ readSeq: original.seq });
+    vi.spyOn(api, "message").mockResolvedValue({ message: original });
+    vi.spyOn(api, "messagesAround").mockResolvedValue({
+      messages: [original],
+      hasMore: false,
+    });
+    const sourceView = (blocked: boolean) => (
+      <div inert={blocked}>
+        <ConversationView
+          conversation={{ ...conversation, readSeq: 0 }}
+          members={members}
+          onMembers={vi.fn()}
+          membersOpen={blocked}
+          onMenu={vi.fn()}
+          initialMessageId={original.id}
+        />
+      </div>
+    );
+    await render(sourceView(true));
+    expect(api.read).not.toHaveBeenCalled();
+    expect(document.activeElement?.id).not.toBe(`message-${original.id}`);
+    await render(sourceView(false));
+    expect(document.activeElement?.id).toBe(`message-${original.id}`);
+    expect(api.read).toHaveBeenCalledExactlyOnceWith("group", original.seq);
+  });
+  it.each(["context", "sync"])(
+    "does not acknowledge or retain stale reply text when %s retracts a delayed attention source",
+    async (source) => {
+      chatStore.merge([reply]);
+      vi.mocked(api.messages).mockResolvedValue({
+        messages: [reply],
+        hasMore: true,
+      });
+      let finishFirst!: (value: { message: Message }) => void;
+      vi.spyOn(api, "message").mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finishFirst = resolve;
+          }),
+      );
+      const retracted = {
+        ...original,
+        retractedAt: "2026-10-17T00:01:00Z",
+      };
+      vi.spyOn(api, "messagesAround").mockResolvedValue({
+        messages: [source === "context" ? retracted : original],
+        hasMore: false,
+      });
+      await render(
+        <ConversationView
+          conversation={{ ...conversation, readSeq: 0 }}
+          members={members}
+          onMembers={vi.fn()}
+          membersOpen={false}
+          onMenu={vi.fn()}
+          initialMessageId={original.id}
+        />,
+      );
+      expect(api.read).not.toHaveBeenCalled();
+      await act(async () => {
+        if (source === "sync") chatStore.merge([retracted]);
+        finishFirst({ message: original });
+      });
+      expect(api.read).not.toHaveBeenCalled();
+      expect(host.textContent).not.toContain("原始任务");
+      expect(host.querySelector(`#message-${original.id}`)?.textContent).toContain(
+        "这条消息已撤回",
+      );
+      await act(async () =>
+        host.querySelector<HTMLButtonElement>(".located-banner button")!.click(),
+      );
+      expect(host.querySelector(".message-reply")?.textContent).toContain(
+        "消息已撤回",
+      );
+      expect(host.textContent).not.toContain("原始任务");
+      expect(api.read).not.toHaveBeenCalled();
+    },
+  );
   it("does not render a denied or late response after navigating away", async () => {
     vi.mocked(api.messages).mockResolvedValue({
       messages: [reply],

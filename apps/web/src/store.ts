@@ -37,29 +37,60 @@ function timestampNanoseconds(value: string): bigint {
 }
 const version = (m: Message) =>
   timestampNanoseconds(m.retractedAt || m.editedAt || m.createdAt);
+const MAX_PERSISTED_MESSAGES = 200;
+const clientKey = (m: Message) => `${m.senderId}\0${m.clientMessageId}`;
+function trimPersistedMessages(messages: LocalMessage[]): LocalMessage[] {
+  const confirmed = messages.filter((m) => !m.status);
+  if (confirmed.length <= MAX_PERSISTED_MESSAGES) return messages;
+  const local = messages.filter((m) => !!m.status);
+  return [...confirmed.slice(-MAX_PERSISTED_MESSAGES), ...local];
+}
 export function reconcileMessages(
   existing: LocalMessage[],
   incoming: LocalMessage[],
 ): LocalMessage[] {
   const output = [...existing];
+  const byId = new Map<string, number>();
+  const byClientKey = new Map<string, number>();
+  for (let i = 0; i < output.length; i++) {
+    const m = output[i];
+    if (!byId.has(m.id)) byId.set(m.id, i);
+    const key = clientKey(m);
+    if (!byClientKey.has(key)) byClientKey.set(key, i);
+  }
   for (const incomingMessage of incoming) {
     const message = incomingMessage.retractedAt
-      ? { ...incomingMessage, body: "", attachments: undefined, mentions: undefined }
+      ? {
+          ...incomingMessage,
+          body: "",
+          attachments: undefined,
+          mentions: undefined,
+        }
       : incomingMessage;
-    const index = output.findIndex(
-      (m) =>
-        m.id === message.id ||
-        (m.senderId === message.senderId &&
-          m.clientMessageId === message.clientMessageId),
-    );
-    if (index === -1) output.push(message);
-    else {
+    const key = clientKey(message);
+    const byIdIndex = byId.get(message.id);
+    const byClientIndex = byClientKey.get(key);
+    const index =
+      byIdIndex !== undefined && byClientIndex !== undefined
+        ? Math.min(byIdIndex, byClientIndex)
+        : (byIdIndex ?? byClientIndex ?? -1);
+    if (index === -1) {
+      const nextIndex = output.length;
+      output.push(message);
+      byId.set(message.id, nextIndex);
+      byClientKey.set(key, nextIndex);
+    } else {
       const old = output[index];
       if (old.retractedAt && !message.retractedAt) continue;
       if (!old.status && message.status) continue;
       if (!old.status && !message.status && version(old) > version(message))
         continue;
       output[index] = message.retractedAt ? { ...message, body: "" } : message;
+      if (old.id !== message.id) byId.delete(old.id);
+      const oldKey = clientKey(old);
+      if (oldKey !== key) byClientKey.delete(oldKey);
+      byId.set(message.id, index);
+      byClientKey.set(key, index);
     }
   }
   return output.sort((a, b) => {
@@ -93,9 +124,18 @@ export class ChatStore {
     this.snapshot = { ...next, revision: this.snapshot.revision + 1 };
     if (next.userId) {
       try {
+        const persisted: ChatSnapshot = {
+          ...this.snapshot,
+          messages: Object.fromEntries(
+            Object.entries(this.snapshot.messages).map(([id, messages]) => [
+              id,
+              trimPersistedMessages(messages),
+            ]),
+          ),
+        };
         this.storage?.setItem(
           storageKey(next.userId),
-          JSON.stringify(this.snapshot),
+          JSON.stringify(persisted),
         );
       } catch {
         /* Sync remains correct in memory if storage is full or unavailable. */
@@ -163,17 +203,23 @@ export class ChatStore {
       messages: { ...this.snapshot.messages },
       conversations: { ...this.snapshot.conversations },
     };
+    const grouped = new Map<string, LocalMessage[]>();
     for (const m of messages) {
-      next.messages[m.conversationId] = reconcileMessages(
-        next.messages[m.conversationId] || [],
-        [m],
-      );
+      const list = grouped.get(m.conversationId);
+      if (list) list.push(m);
+      else grouped.set(m.conversationId, [m]);
       const conversation = next.conversations[m.conversationId];
       if (conversation && !m.status)
         next.conversations[m.conversationId] = {
           ...conversation,
           lastSeq: Math.max(conversation.lastSeq, m.seq),
         };
+    }
+    for (const [conversationId, batch] of grouped) {
+      next.messages[conversationId] = reconcileMessages(
+        next.messages[conversationId] || [],
+        batch,
+      );
     }
     this.commit(next);
   }

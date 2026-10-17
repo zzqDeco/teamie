@@ -120,6 +120,13 @@ function writeComposerDraft(conversationId: string, draft: ComposerDraft) {
   }
   notifyDrafts();
 }
+function extendHistoryBoundary(beforeSeq: number, messages: LocalMessage[]) {
+  const sequences = new Set(
+    messages.filter((message) => !message.status).map((message) => message.seq),
+  );
+  while (beforeSeq > 1 && sequences.has(beforeSeq - 1)) beforeSeq--;
+  return beforeSeq;
+}
 export function ConversationView({
   conversation,
   members,
@@ -147,6 +154,9 @@ export function ConversationView({
   const snapshot = useChatState();
   const allMessages = snapshot.messages[conversation.id] || [];
   const [located, setLocated] = useState<LocalMessage[] | null>(null);
+  const [resolvedTargets, setResolvedTargets] = useState<
+    Record<string, Message>
+  >({});
   const messages = located
     ? reconcileMessages(
         located,
@@ -158,6 +168,7 @@ export function ConversationView({
   const [searchOpen, setSearchOpen] = useState(false);
   const closeSearch = useCallback(() => setSearchOpen(false), []);
   const navigation = useRef(0);
+  const historyBefore = useRef<{ seq: number; generation: number } | null>(null);
   const acknowledgement = useRef<{
     id: string;
     seq: number;
@@ -181,7 +192,12 @@ export function ConversationView({
   const mentionsEnabled = !!data?.capabilities["im.message.mentions"];
   const name = conversationName(conversation, user!.id, members);
   const [actionMessageId, setActionMessageId] = useState("");
-  const [loading, setLoading] = useState(true),
+  const [loading, setLoading] = useState(
+      () =>
+        !(chatStore.getSnapshot().messages[conversation.id] || []).some(
+          (m) => !m.status,
+        ),
+    ),
     [hasMore, setHasMore] = useState(false),
     [loadingOlder, setLoadingOlder] = useState(false),
     [error, setError] = useState("");
@@ -282,19 +298,27 @@ export function ConversationView({
   const fetchLatest = useCallback(async () => {
     const token = chatStore.generation;
     const operation = ++navigation.current;
+    const hasConfirmed = (
+      chatStore.getSnapshot().messages[conversation.id] || []
+    ).some((m) => !m.status);
     acknowledgement.current = null;
+    historyBefore.current = null;
+    setHasMore(false);
     setLocated(null);
     setHighlightId("");
     setLocating(false);
     setLoadingOlder(false);
     initialScroll.current = true;
     setAtBottom(true);
-    setLoading(true);
+    setLoading(!hasConfirmed);
     setError("");
     try {
       const page = await api.messages(conversation.id);
       if (token !== chatStore.generation || operation !== navigation.current)
         return;
+      historyBefore.current = page.messages[0]
+        ? { seq: page.messages[0].seq, generation: token }
+        : null;
       chatStore.merge(page.messages);
       setHasMore(page.hasMore);
     } catch (e) {
@@ -323,6 +347,8 @@ export function ConversationView({
   }, []);
   useLayoutEffect(() => {
     if (highlightId) focusMessage(highlightId);
+  }, [highlightId, located, focusMessage, visible, membersOpen]);
+  useLayoutEffect(() => {
     const pending = acknowledgement.current;
     if (
       !visible ||
@@ -341,6 +367,9 @@ export function ConversationView({
       return;
     acknowledgement.current = null;
     if (
+      messages.some(
+        (message) => message.id === pending.id && message.retractedAt,
+      ) ||
       chatStore
         .getSnapshot()
         .messages[
@@ -369,10 +398,10 @@ export function ConversationView({
   }, [
     highlightId,
     located,
-    focusMessage,
     visible,
     conversation.id,
     membersOpen,
+    messages,
   ]);
   const loadContext = useCallback(
     async (id: string, readOnDisplay = false) => {
@@ -385,26 +414,51 @@ export function ConversationView({
       setLoadingOlder(false);
       setLocating(true);
       acknowledgement.current = null;
+      historyBefore.current = null;
+      setHasMore(false);
       initialScroll.current = false;
       setError("");
       try {
         const target = await api.message(conversation.id, id);
         if (!current()) return;
+        setResolvedTargets((old) => ({
+          ...old,
+          [target.message.id]: old[target.message.id]
+            ? reconcileMessages([old[target.message.id]], [target.message])[0]
+            : target.message,
+        }));
         const page = await api.messagesAround(
           conversation.id,
           target.message.seq,
         );
         if (!current()) return;
-        const context = reconcileMessages(page.messages, [target.message]);
-        if (readOnDisplay && !target.message.retractedAt)
+        const currentTarget = chatStore
+          .getSnapshot()
+          .messages[conversation.id]?.find((message) => message.id === id);
+        const context = reconcileMessages(page.messages, [
+          target.message,
+          ...(currentTarget ? [currentTarget] : []),
+        ]);
+        const resolved =
+          context.find((m) => m.id === target.message.id) || target.message;
+        setResolvedTargets((old) => ({
+          ...old,
+          [resolved.id]: old[resolved.id]
+            ? reconcileMessages([old[resolved.id]], [resolved])[0]
+            : resolved,
+        }));
+        if (readOnDisplay && !resolved.retractedAt)
           acknowledgement.current = {
             id,
-            seq: target.message.seq,
+            seq: resolved.seq,
             generation: token,
             operation,
           };
         setLocated(context);
-        setHasMore((context[0]?.seq || 1) > 1);
+        historyBefore.current = context[0]
+          ? { seq: context[0].seq, generation: token }
+          : null;
+        setHasMore((historyBefore.current?.seq ?? 1) > 1);
         setHighlightId(id);
       } catch (e) {
         if (current())
@@ -423,7 +477,6 @@ export function ConversationView({
     if (!messages.some((message) => message.id === id)) return loadContext(id);
     navigation.current++;
     acknowledgement.current = null;
-    setAtBottom(false);
     setLoading(false);
     setLoadingOlder(false);
     setLocating(false);
@@ -431,6 +484,12 @@ export function ConversationView({
     setError("");
     setHighlightId(id);
     focusMessage(id);
+    const el = scrollRef.current;
+    if (el) {
+      setAtBottom(
+        !located && el.scrollHeight - el.scrollTop - el.clientHeight < 80,
+      );
+    }
   }
   useEffect(() => {
     if (initialMessageId) void loadContext(initialMessageId, true);
@@ -504,8 +563,12 @@ export function ConversationView({
     generation,
   ]);
   async function older() {
-    const first = messages.find((m) => !m.status)?.seq;
-    if (!first) return;
+    const boundary = historyBefore.current;
+    if (!boundary || boundary.generation !== chatStore.generation || loadingOlder)
+      return;
+    // Sync can insert an isolated old edit into a trimmed cache. Only visible,
+    // contiguous history can extend the boundary of a completed history page.
+    const first = extendHistoryBoundary(boundary.seq, messages);
     const token = chatStore.generation;
     const operation = navigation.current;
     const height = scrollRef.current?.scrollHeight || 0;
@@ -515,6 +578,9 @@ export function ConversationView({
       const page = await api.messages(conversation.id, first);
       if (token !== chatStore.generation || operation !== navigation.current)
         return;
+      historyBefore.current = page.messages[0]
+        ? { seq: page.messages[0].seq, generation: token }
+        : null;
       if (located)
         setLocated((old) =>
           old ? reconcileMessages(old, page.messages) : old,
@@ -783,8 +849,23 @@ export function ConversationView({
               5 * 60_000 &&
             !message.replyToId &&
             !previous.retractedAt;
-          const target = message.replyToId
-            ? messages.find((m) => m.id === message.replyToId)
+          const replyCandidates: LocalMessage[] = [];
+          if (message.replyToId) {
+            const cachedTarget = resolvedTargets[message.replyToId];
+            if (cachedTarget && cachedTarget.conversationId === conversation.id)
+              replyCandidates.push(cachedTarget);
+            const storeTarget = allMessages.find(
+              (m) => m.id === message.replyToId,
+            );
+            if (storeTarget) replyCandidates.push(storeTarget);
+            const viewTarget = messages.find((m) => m.id === message.replyToId);
+            if (viewTarget) replyCandidates.push(viewTarget);
+          }
+          const target = replyCandidates.length
+            ? reconcileMessages(
+                [replyCandidates[0]],
+                replyCandidates.slice(1),
+              )[0]
             : undefined;
           return (
             <Fragment key={message.id}>
