@@ -16,23 +16,31 @@ import (
 )
 
 type taskReceipt struct {
-	Version         int          `json:"version"`
-	AgentID         string       `json:"agentId"`
-	RunID           string       `json:"runId"`
-	TaskID          string       `json:"taskId"`
-	Command         string       `json:"command"`
-	Fingerprint     string       `json:"fingerprint"`
-	ContainerName   string       `json:"containerName"`
-	ContainerID     string       `json:"containerId,omitempty"`
-	CleanupDone     bool         `json:"cleanupDone,omitempty"`
-	State           string       `json:"state"`
-	TimeoutSeconds  int32        `json:"timeoutSeconds"`
-	Deadline        time.Time    `json:"deadline,omitempty"`
-	CancelRequested bool         `json:"cancelRequested"`
-	CancelCode      string       `json:"cancelCode,omitempty"`
-	Result          Result       `json:"result"`
-	Output          []outputPart `json:"output,omitempty"`
-	UpdatedAt       time.Time    `json:"updatedAt"`
+	Version            int          `json:"version"`
+	AgentID            string       `json:"agentId"`
+	RunID              string       `json:"runId"`
+	TaskID             string       `json:"taskId"`
+	Command            string       `json:"command"`
+	Fingerprint        string       `json:"fingerprint"`
+	ContainerName      string       `json:"containerName"`
+	ContainerID        string       `json:"containerId,omitempty"`
+	CleanupDone        bool         `json:"cleanupDone,omitempty"`
+	State              string       `json:"state"`
+	TimeoutSeconds     int32        `json:"timeoutSeconds"`
+	Deadline           time.Time    `json:"deadline,omitempty"`
+	CancelRequested    bool         `json:"cancelRequested"`
+	CancelCode         string       `json:"cancelCode,omitempty"`
+	Result             Result       `json:"result"`
+	Output             []outputPart `json:"output,omitempty"`
+	OutputBytes        int64        `json:"outputBytes,omitempty"`
+	OutputFileBytes    int64        `json:"outputFileBytes,omitempty"`
+	OutputFrames       int          `json:"outputFrames,omitempty"`
+	OutputStatus       string       `json:"outputStatus,omitempty"`
+	OutputSHA256       string       `json:"outputSha256,omitempty"`
+	OutputAnchor       string       `json:"outputAnchor,omitempty"`
+	OutputAnchorTime   string       `json:"outputAnchorTime,omitempty"`
+	OutputGateReleased bool         `json:"outputGateReleased,omitempty"`
+	UpdatedAt          time.Time    `json:"updatedAt"`
 }
 
 func taskKey(agentID, taskID string) string   { return digest(agentID + "\x00" + taskID) }
@@ -50,7 +58,26 @@ func taskFailure(taskID, code string) *agent.SandboxTaskResponse {
 func taskResponse(t *taskReceipt) *agent.SandboxTaskResponse {
 	out, errout, truncated, exit := t.Result.Stdout, t.Result.Stderr, t.Result.Truncated, t.Result.ExitCode
 	next := int64(len(out) + len(errout))
+	length, limit, status, hash := next, int64(OutputLimit), "recording", ""
+	if terminalTask(t.State) {
+		status = "complete"
+	}
+	if truncated {
+		status = "legacy_limited"
+	}
+	if t.Version == 2 {
+		length, limit, status, hash = t.OutputBytes, DurableOutputLimit, t.OutputStatus, t.OutputSHA256
+		truncated = truncated || next < length || status == "unknown" || status == "limited"
+	}
+	more := next < length
 	r := &agent.SandboxTaskResponse{Ok: true, TaskId: t.TaskID, State: t.State, Stdout: &out, Stderr: &errout, Truncated: &truncated, NextOffset: &next}
+	r.OutputBytes = &length
+	r.OutputLimitBytes = &limit
+	r.OutputStatus = &status
+	r.HasMore = &more
+	if hash != "" {
+		r.OutputSha256 = &hash
+	}
 	if terminalTask(t.State) {
 		r.ExitCode = &exit
 	}
@@ -76,10 +103,16 @@ func (s *Service) loadTaskLocked(agentID, taskID string) (*taskReceipt, error) {
 		return nil, e
 	}
 	var t taskReceipt
-	if len(b) > 2*1024*1024 || json.Unmarshal(b, &t) != nil || t.Version != 1 || t.AgentID != agentID || t.TaskID != taskID {
+	if len(b) > 2*1024*1024 || json.Unmarshal(b, &t) != nil || (t.Version != 1 && t.Version != 2) || t.AgentID != agentID || t.TaskID != taskID {
 		return nil, errors.New("invalid task receipt")
 	}
-	restoreOutput(&t)
+	if t.Version == 2 {
+		if e = s.loadSpoolLocked(key, &t); e != nil {
+			return nil, e
+		}
+	} else {
+		restoreOutput(&t)
+	}
 	s.tasks[key] = &t
 	return &t, nil
 }
@@ -120,11 +153,14 @@ func (s *Service) Start(_ context.Context, r *agent.SandboxStartRequest) (*agent
 	if r == nil || !api.EqualSecret(r.ServiceToken, s.Token) {
 		return taskFailure("", "unauthorized"), nil
 	}
-	if !validID(r.AgentId) || !validID(r.RunId) || !validID(r.TaskId) || r.Command == "" || len(r.Command) > 16384 || strings.ContainsRune(r.Command, 0) || r.GetTimeoutSeconds() < 0 || r.GetTimeoutSeconds() > 86400 {
+	if !validID(r.AgentId) || !validID(r.RunId) || !validID(r.TaskId) || r.Command == "" || len(r.Command) > 16384 || strings.ContainsRune(r.Command, 0) || r.GetTimeoutSeconds() < 0 || r.GetTimeoutSeconds() > 86400 || r.GetOutputVersion() < 0 || r.GetOutputVersion() > 1 {
 		return taskFailure(r.TaskId, "invalid_request"), nil
 	}
 	key := taskKey(r.AgentId, r.TaskId)
 	fp := digest(r.Command + "\x00" + time.Duration(r.GetTimeoutSeconds()).String())
+	if r.GetOutputVersion() == 1 {
+		fp = digest(fp + "/output-v1")
+	}
 	s.taskMu.Lock()
 	defer s.taskMu.Unlock()
 	if s.closed {
@@ -142,6 +178,11 @@ func (s *Service) Start(_ context.Context, r *agent.SandboxStartRequest) (*agent
 	}
 	if _, ok := s.Engine.(ManagedEngine); !ok {
 		return taskFailure(r.TaskId, "sandbox_unavailable"), nil
+	}
+	if r.GetOutputVersion() == 1 {
+		if _, ok := s.Engine.(TimestampedEngine); !ok {
+			return taskFailure(r.TaskId, "sandbox_unavailable"), nil
+		}
 	}
 	for _, pending := range s.tasks {
 		if pending.State == "unknown" && pending.ContainerID != "" {
@@ -167,6 +208,20 @@ func (s *Service) Start(_ context.Context, r *agent.SandboxStartRequest) (*agent
 		return taskFailure(r.TaskId, "workspace_unavailable"), nil
 	}
 	t := &taskReceipt{Version: 1, AgentID: r.AgentId, RunID: r.RunId, TaskID: r.TaskId, Command: r.Command, Fingerprint: fp, ContainerName: "teamie-task-" + key[:32], State: "not_started", TimeoutSeconds: r.GetTimeoutSeconds()}
+	if r.GetOutputVersion() == 1 {
+		t.Version = 2
+		t.OutputStatus = "recording"
+		t.OutputAnchor, e = newOutputAnchor()
+		if e != nil {
+			<-s.slots
+			return taskFailure(r.TaskId, "receipt_unavailable"), nil
+		}
+		used, err := s.outputUsedLocked()
+		if err != nil || used >= SharedOutputLimit || !diskAvailable(s.StateRoot) {
+			<-s.slots
+			return taskFailure(r.TaskId, "sandbox_capacity"), nil
+		}
+	}
 	if e = s.saveTaskLocked(key, t); e != nil {
 		<-s.slots
 		return taskFailure(r.TaskId, "receipt_unavailable"), nil
@@ -212,6 +267,28 @@ func (s *Service) ReadOutput(ctx context.Context, r *agent.SandboxTaskRequest) (
 	if e != nil {
 		return taskFailure(r.TaskId, "execution_unknown"), nil
 	}
+	res = taskResponse(t)
+	if t.Version == 2 {
+		if r.GetOffset() > t.OutputBytes {
+			return taskFailure(r.TaskId, "invalid_request"), nil
+		}
+		limit := r.GetLimit()
+		if limit == 0 {
+			limit = 16384
+		}
+		out, errout, next, e := s.readSpoolLocked(taskKey(r.AgentId, r.TaskId), t, r.GetOffset(), limit)
+		if e != nil {
+			return taskFailure(r.TaskId, "execution_unknown"), nil
+		}
+		res.Stdout = &out
+		res.Stderr = &errout
+		res.NextOffset = &next
+		more := next < t.OutputBytes
+		res.HasMore = &more
+		truncated := more || t.OutputStatus == "limited" || t.OutputStatus == "unknown"
+		res.Truncated = &truncated
+		return res, nil
+	}
 	parts := t.Output
 	if len(parts) == 0 {
 		parts = []outputPart{{1, t.Result.Stdout}, {2, t.Result.Stderr}}
@@ -253,6 +330,8 @@ func (s *Service) ReadOutput(ctx context.Context, r *agent.SandboxTaskRequest) (
 	res.Stdout = &stdout
 	res.Stderr = &stderr
 	res.NextOffset = &next
+	more := next < length
+	res.HasMore = &more
 	return res, nil
 }
 func (s *Service) CancelTask(_ context.Context, r *agent.SandboxTaskRequest) (*agent.SandboxTaskResponse, error) {
@@ -310,15 +389,24 @@ func (s *Service) Recover(ctx context.Context) error {
 			return e
 		}
 		var t taskReceipt
-		if len(b) > 2*1024*1024 || json.Unmarshal(b, &t) != nil || t.Version != 1 || !validID(t.AgentID) || !validID(t.TaskID) || entry.Name() != taskKey(t.AgentID, t.TaskID)+".task.json" {
+		if len(b) > 2*1024*1024 || json.Unmarshal(b, &t) != nil || (t.Version != 1 && t.Version != 2) || !validID(t.AgentID) || !validID(t.TaskID) || entry.Name() != taskKey(t.AgentID, t.TaskID)+".task.json" {
 			return errors.New("invalid durable task receipt")
 		}
 		key := taskKey(t.AgentID, t.TaskID)
-		restoreOutput(&t)
+		if t.Version == 2 {
+			if e = s.loadSpoolLocked(key, &t); e != nil {
+				return e
+			}
+		} else {
+			restoreOutput(&t)
+		}
 		if s.tasks[key] != nil {
 			continue
 		}
 		s.tasks[key] = &t
+		if t.Version == 2 && t.State == "unknown" && t.OutputStatus == "unknown" && !t.CancelRequested {
+			continue
+		}
 		if terminalTask(t.State) && t.State != "unknown" {
 			// A crash after fsyncing a result but before cleanup may leave only
 			// this known terminal container. Never delete a live or foreign one.
@@ -382,6 +470,10 @@ func (s *Service) setUnknown(key string, t *taskReceipt) {
 	t.State = "unknown"
 	t.Result.ErrorCode = "execution_unknown"
 	t.Result.ExitCode = -1
+	if t.Version == 2 {
+		t.OutputStatus = "unknown"
+		t.Result.Truncated = true
+	}
 	_ = s.saveTaskLocked(key, t)
 }
 func (s *Service) inspect(ctx context.Context, m ManagedEngine, name string) (ContainerState, error) {
@@ -392,7 +484,7 @@ func (s *Service) inspect(ctx context.Context, m ManagedEngine, name string) (Co
 func (s *Service) supervise(ctx context.Context, key string, t *taskReceipt, recovering bool) {
 	m := s.Engine.(ManagedEngine)
 	s.taskMu.Lock()
-	name, agentID, command, state := t.ContainerName, t.AgentID, t.Command, t.State
+	name, agentID, command, state, version, anchor := t.ContainerName, t.AgentID, t.Command, t.State, t.Version, t.OutputAnchor
 	s.taskMu.Unlock()
 	obj, e := s.inspect(ctx, m, name)
 	if errors.Is(e, errContainerMissing) && state == "not_started" {
@@ -402,7 +494,7 @@ func (s *Service) supervise(ctx context.Context, key string, t *taskReceipt, rec
 			return
 		}
 		op, cancel := context.WithTimeout(ctx, 10*time.Second)
-		_, e = m.Create(op, Job{Name: name, Image: s.Image, Workspace: workspace, AgentHash: digest(agentID), TaskHash: key, Command: command})
+		_, e = m.Create(op, Job{Name: name, Image: s.Image, Workspace: workspace, AgentHash: digest(agentID), TaskHash: key, Command: command, OutputAnchor: anchor})
 		cancel()
 		// A lost create response is reconciled through the stable Docker name.
 		obj, e = s.inspect(ctx, m, name)
@@ -432,7 +524,9 @@ func (s *Service) supervise(ctx context.Context, key string, t *taskReceipt, rec
 		s.taskMu.Unlock()
 		if !canceled {
 			// Attach first so a fast command cannot outrun bounded output capture.
-			stream, e = m.Attach(ctx, obj.ID, false)
+			if version == 1 {
+				stream, e = m.Attach(ctx, obj.ID, false)
+			}
 			if e != nil {
 				if ctx.Err() == nil {
 					s.setUnknown(key, t)
@@ -447,7 +541,9 @@ func (s *Service) supervise(ctx context.Context, key string, t *taskReceipt, rec
 			e = s.saveTaskLocked(key, t)
 			s.taskMu.Unlock()
 			if e != nil {
-				stream.Close()
+				if stream != nil {
+					stream.Close()
+				}
 				s.setUnknown(key, t)
 				return
 			}
@@ -455,7 +551,9 @@ func (s *Service) supervise(ctx context.Context, key string, t *taskReceipt, rec
 			e = m.StartContainer(op, obj.ID)
 			cancel()
 			if e != nil {
-				stream.Close()
+				if stream != nil {
+					stream.Close()
+				}
 				if ctx.Err() == nil {
 					s.setUnknown(key, t)
 				}
@@ -466,7 +564,15 @@ func (s *Service) supervise(ctx context.Context, key string, t *taskReceipt, rec
 		}
 	}
 	if stream == nil && obj.State.Status != "created" {
-		stream, e = m.Attach(ctx, obj.ID, true)
+		if version == 2 {
+			if timestamped, ok := m.(TimestampedEngine); ok {
+				stream, e = timestamped.AttachTimestamped(ctx, obj.ID)
+			} else {
+				e = errors.New("timestamped recovery unavailable")
+			}
+		} else {
+			stream, e = m.Attach(ctx, obj.ID, true)
+		}
 		if e != nil {
 			if ctx.Err() == nil {
 				s.setUnknown(key, t)
@@ -491,6 +597,14 @@ func (s *Service) supervise(ctx context.Context, key string, t *taskReceipt, rec
 		defer func() { stream.Close(); <-captureStopped }()
 		go func() {
 			defer close(captureStopped)
+			if version == 2 {
+				e := s.captureSpool(ctx, key, t, stream, m.(TimestampedEngine), obj.ID, recovering)
+				if errors.Is(e, errOutputLimit) {
+					e = nil
+				}
+				captured <- capture{err: e}
+				return
+			}
 			s.taskMu.Lock()
 			priorValue, priorStreams := flattenOutput(t.Output)
 			s.taskMu.Unlock()
@@ -615,8 +729,17 @@ func (s *Service) supervise(ctx context.Context, key string, t *taskReceipt, rec
 				t.State = "failed"
 			}
 		}
-		e = s.saveTaskLocked(key, t)
+		if version == 2 {
+			e = s.finishOutputLocked(key, t)
+		}
+		if e == nil {
+			e = s.saveTaskLocked(key, t)
+		}
 		s.taskMu.Unlock()
+		if e != nil {
+			s.setUnknown(key, t)
+			return
+		}
 		// Persist terminal result before removing the container. A crash before
 		// this point leaves an inspectable container for the next supervisor.
 		if e == nil {

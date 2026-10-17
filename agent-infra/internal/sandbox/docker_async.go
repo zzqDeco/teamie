@@ -23,6 +23,34 @@ type ManagedEngine interface {
 	Remove(context.Context, string) error
 }
 
+// TimestampedEngine supplies daemon-origin record identities. Child text alone
+// is insufficient to recognize rotation when the command repeats its output.
+type TimestampedEngine interface {
+	AttachTimestamped(context.Context, string) (io.ReadCloser, error)
+	ReleaseOutput(context.Context, string) error
+}
+
+func (d *Docker) AttachTimestamped(ctx context.Context, id string) (io.ReadCloser, error) {
+	res, e := d.request(ctx, "GET", "/containers/"+url.PathEscape(id)+"/logs?follow=1&stdout=1&stderr=1&timestamps=1", nil)
+	if e != nil {
+		return nil, e
+	}
+	return res.Body, nil
+}
+func (d *Docker) ReleaseOutput(ctx context.Context, id string) error {
+	res, e := d.request(ctx, "POST", "/containers/"+url.PathEscape(id)+"/attach?logs=0&stream=1&stdin=1&stdout=0&stderr=0", nil)
+	if e != nil {
+		return e
+	}
+	defer res.Body.Close()
+	w, ok := res.Body.(io.Writer)
+	if !ok {
+		return errors.New("Docker stdin upgrade unavailable")
+	}
+	_, e = io.WriteString(w, "go\n")
+	return e
+}
+
 var errContainerMissing = errors.New("managed container does not exist")
 
 type ContainerState struct {
