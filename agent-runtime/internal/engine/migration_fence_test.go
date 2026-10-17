@@ -119,7 +119,7 @@ func TestRuntimeSchemaUpgradePreservesDataAndRejectsV037Startup(t *testing.T) {
 			if cursor != "99" || body != "durable legacy input" || profile != contextProfileLegacy || budget != "{}" || request != "immutable-request-hash" || string(response) != "immutable-model-response" {
 				t.Fatal("forward migration changed legacy durable execution data")
 			}
-			if err = current.DB.QueryRow(ctx, `SELECT string_agg(version::text,',' ORDER BY version),current_setting('teamie.runtime_writer_schema') FROM agent_runtime_schema_migrations`).Scan(&ledger, &protocol); err != nil || ledger != "1,2,3" || protocol != "3" {
+			if err = current.DB.QueryRow(ctx, `SELECT string_agg(version::text,',' ORDER BY version),current_setting('teamie.runtime_writer_schema') FROM agent_runtime_schema_migrations`).Scan(&ledger, &protocol); err != nil || ledger != "1,2,3,4" || protocol != "4" {
 				t.Fatal("current writer did not install its schema/protocol", ledger, protocol, err)
 			}
 			// The old DDL recreates this index before its INSERT(1) ON CONFLICT.
@@ -161,7 +161,7 @@ func TestRuntimeOpenRejectsInvalidLedgerBeforeReplacingGuard(t *testing.T) {
 		name     string
 		versions string
 	}{
-		{"future", "(1),(2),(3),(4)"},
+		{"future", "(1),(2),(3),(4),(5)"},
 		{"gap", "(1),(3)"},
 		{"missing-first", "(2),(3)"},
 		{"nonpositive", "(0),(2),(3)"},
@@ -200,5 +200,53 @@ func TestRuntimeOpenRejectsInvalidLedgerBeforeReplacingGuard(t *testing.T) {
 				t.Fatal("unsupported startup repaired a ledger or overwrote the future guard")
 			}
 		})
+	}
+}
+
+func TestRuntimeV4PreservesFrozenV1RunAndRejectsV3Startup(t *testing.T) {
+	dsn, raw := runtimeMigrationDatabase(t)
+	ctx := context.Background()
+	if _, err := raw.Exec(ctx, `SET teamie.runtime_writer_schema='3';`+schemaSQL+schemaV2SQL+schemaV3SQL+contextArchiveSchemaSQL+contextRecoverySchemaSQL); err != nil {
+		t.Fatal(err)
+	}
+	agent, run, attempt := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	budget, err := os.ReadFile("../../../ops/fixtures/runtime-context-budget-v1.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = raw.Exec(ctx, `INSERT INTO runtime_agents(agent_id) VALUES($1)`, agent); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = raw.Exec(ctx, `INSERT INTO runtime_runs(id,agent_id,input_key,input_json,attempt_id,context_profile,context_budget) VALUES($1,$2,'frozen-v1','[]',$3,$4,$5)`, run, agent, attempt, contextProfileV1, budget); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = raw.Exec(ctx, `INSERT INTO runtime_model_calls(run_id,step,request_hash,response) VALUES($1,1,'original-v1-hash','original-v1-response')`, run); err != nil {
+		t.Fatal(err)
+	}
+	current, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer current.DB.Close()
+	var unchanged bool
+	if err = current.DB.QueryRow(ctx, `SELECT r.context_profile=$2 AND r.context_budget=$3::jsonb AND m.request_hash='original-v1-hash' AND m.response='original-v1-response'::bytea FROM runtime_runs r JOIN runtime_model_calls m ON m.run_id=r.id WHERE r.id=$1`, run, contextProfileV1, budget).Scan(&unchanged); err != nil || !unchanged {
+		t.Fatal("schema 4 changed the prior frozen policy or receipt", err)
+	}
+	before := runtimeFenceSnapshot(t, raw)
+	tx, err := raw.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	_, err = tx.Exec(ctx, schemaSQL+schemaV2SQL+schemaV3SQL+contextArchiveSchemaSQL+contextRecoverySchemaSQL)
+	var rejected *pgconn.PgError
+	if !errors.As(err, &rejected) || rejected.Code != "55000" || rejected.Message != "unsupported runtime writer protocol" {
+		t.Fatal("version 3 startup was not fenced", err)
+	}
+	if err = tx.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if after := runtimeFenceSnapshot(t, raw); after != before {
+		t.Fatal("rejected old startup changed durable data or the writer guard")
 	}
 }

@@ -153,8 +153,13 @@ func TestContextBudgetIncludesUnicodeEscapesToolsAndFrozenOutput(t *testing.T) {
 		g := &GatewayModel{ContextWindow: func() int { return 2_000_000 }}
 		run := &Run{ContextProfile: contextProfileV1, ContextBudget: raw}
 		opts := &model.Options{}
-		if err = g.capRunOutput(run, opts); err != nil || *opts.MaxTokens != b.OutputReserveTokens {
+		if err = g.capRunOutput(run, opts); err != nil || *opts.MaxTokens != b.initialOutputTokens() {
 			t.Fatal("live config changed frozen output", err)
+		}
+		requested := 2_000_000
+		opts.MaxTokens = &requested
+		if err = g.capRunOutput(run, opts); err != nil || *opts.MaxTokens != b.OutputReserveTokens {
+			t.Fatal("output recovery exceeded frozen capacity", err)
 		}
 	}
 	for _, window := range []int{0, 4095, 2_000_001} {

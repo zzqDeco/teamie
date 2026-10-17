@@ -12,7 +12,7 @@ import (
 	"teamie/agent-protocol/modeltransport"
 )
 
-const contextBudgetVersion = 1
+const contextBudgetVersion = 2
 const contextCounterVersion = "teamie-visible-estimate-v1"
 const contextTransportLimit = 262144
 
@@ -36,15 +36,24 @@ type ContextBudgetSnapshot struct {
 }
 
 func makeContextBudgetSnapshot(window int) (ContextBudgetSnapshot, error) {
+	return makeContextBudgetSnapshotVersion(window, contextBudgetVersion)
+}
+
+func makeContextBudgetSnapshotVersion(window, version int) (ContextBudgetSnapshot, error) {
 	if window < 4096 || window > 2_000_000 {
 		return ContextBudgetSnapshot{}, errors.New("invalid context window")
 	}
 	reserve := min(2048, window/4)
+	if version == 2 {
+		reserve = min(8192, window/4)
+	} else if version != 1 {
+		return ContextBudgetSnapshot{}, errors.New("unsupported context budget version")
+	}
 	input := window - reserve - 256
 	return ContextBudgetSnapshot{
-		Version: contextBudgetVersion, CounterVersion: contextCounterVersion,
+		Version: version, CounterVersion: contextCounterVersion,
 		ContextWindowTokens: window, InputTokenLimit: input, TriggerTokens: input * 3 / 4,
-		OutputReserveTokens: reserve, SummaryOutputTokens: reserve,
+		OutputReserveTokens: reserve, SummaryOutputTokens: min(2048, reserve),
 		TransportLimitBytes: contextTransportLimit, TransportTargetBytes: contextTransportLimit * 3 / 4,
 		TailTokenLimit: min(6000, input/3), ToolResultByteLimit: min(16384, max(1024, input/4)),
 	}, nil
@@ -71,13 +80,17 @@ func ParseContextBudgetSnapshot(raw json.RawMessage) (ContextBudgetSnapshot, err
 	if decoder.Decode(&budget) != nil || decoder.Decode(new(any)) != io.EOF {
 		return budget, errors.New("invalid context budget snapshot")
 	}
-	expected, err := makeContextBudgetSnapshot(budget.ContextWindowTokens)
+	expected, err := makeContextBudgetSnapshotVersion(budget.ContextWindowTokens, budget.Version)
 	expected.FileDelivery = budget.FileDelivery
 	expected.StructuredMentions = budget.StructuredMentions
 	if err != nil || budget != expected {
 		return budget, errors.New("unsupported context budget snapshot")
 	}
 	return budget, nil
+}
+
+func (b ContextBudgetSnapshot) initialOutputTokens() int {
+	return min(2048, b.OutputReserveTokens)
 }
 
 type ContextMeasurement struct {

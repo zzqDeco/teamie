@@ -116,6 +116,9 @@ func (p *ContextPipeline) BeforeModelRewriteState(ctx context.Context, state *ad
 
 func (p *ContextPipeline) RetryConfig() *adk.TypedModelRetryConfig[*schema.AgenticMessage] {
 	return &adk.TypedModelRetryConfig[*schema.AgenticMessage]{MaxRetries: 2, BackoffFunc: func(context.Context, int) time.Duration { return 0 }, ShouldRetry: func(ctx context.Context, retry *adk.TypedRetryContext[*schema.AgenticMessage]) *adk.TypedRetryDecision[*schema.AgenticMessage] {
+		if decision := p.retryIncompleteOutput(retry); decision != nil {
+			return decision
+		}
 		var failure *ModelError
 		if !errors.As(retry.Err, &failure) || !isContextOverflow(failure.Code) {
 			return nil
