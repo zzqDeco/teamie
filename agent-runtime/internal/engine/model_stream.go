@@ -99,6 +99,7 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 		scanner := bufio.NewScanner(io.LimitReader(response.Body, 8<<20+1))
 		scanner.Buffer(make([]byte, 4096), 512<<10)
 		chunks := []*schema.AgenticMessage{}
+		requestID := ""
 		total := 0
 		done := false
 		for scanner.Scan() {
@@ -126,6 +127,7 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 				if message == nil {
 					continue
 				}
+				message = streamRequestIDDelta(message, &requestID)
 				chunks = append(chunks, message)
 				if writer.Send(message, nil) {
 					return
@@ -181,6 +183,30 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 	}()
 	return output, nil
 }
+
+// The OpenAI extension repeats this response header on every chunk. Eino's
+// generic Extra concatenation treats strings as text deltas; retain the header
+// once so it does not grow with token count. Other metadata and native content
+// remain untouched. Cached complete receipts bypass this live-stream adapter.
+func streamRequestIDDelta(message *schema.AgenticMessage, previous *string) *schema.AgenticMessage {
+	id, ok := message.Extra["openai-request-id"].(string)
+	if !ok || id == "" {
+		return message
+	}
+	if id != *previous {
+		*previous = id
+		return message
+	}
+	copy := *message
+	copy.Extra = make(map[string]any, len(message.Extra))
+	for key, value := range message.Extra {
+		if key != "openai-request-id" {
+			copy.Extra[key] = value
+		}
+	}
+	return &copy
+}
+
 func safeGatewayCode(code string) string {
 	switch code {
 	case "model_unconfigured", "model_disabled", "gateway_unavailable", "upstream_unavailable", "upstream_timeout", "upstream_error", "invalid_request", "request_too_large", "context_overflow", "upstream_response_limit", "invalid_upstream_response", "run_cancelled", "gateway_busy", "upstream_rate_limited", "upstream_http_error", "upstream_in_stream_error", "upstream_interrupted", "client_interrupted", "canceled", "protocol_unsupported":

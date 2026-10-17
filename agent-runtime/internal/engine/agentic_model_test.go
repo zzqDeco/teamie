@@ -130,7 +130,7 @@ func TestNativeActiveStreamSurvivesForcedGCAndCommitsCompleteReceipt(t *testing.
 		_, _ = io.Copy(io.Discard, r.Body)
 		w.Header().Set("Content-Type", "application/x-ndjson")
 		send := func(block *schema.ContentBlock) bool {
-			m := &schema.AgenticMessage{Role: schema.AgenticRoleTypeAssistant, ContentBlocks: []*schema.ContentBlock{block}}
+			m := &schema.AgenticMessage{Role: schema.AgenticRoleTypeAssistant, ContentBlocks: []*schema.ContentBlock{block}, Extra: map[string]any{"openai-request-id": "gc-request-header"}}
 			b, e := (&schema.HumanReadableSerializer{}).Marshal(m)
 			if e != nil {
 				t.Error(e)
@@ -161,7 +161,7 @@ func TestNativeActiveStreamSurvivesForcedGCAndCommitsCompleteReceipt(t *testing.
 				return
 			}
 		}
-		meta := &schema.AgenticMessage{Role: schema.AgenticRoleTypeAssistant, ResponseMeta: &schema.AgenticResponseMeta{TokenUsage: &schema.TokenUsage{PromptTokens: 8, CompletionTokens: 4, TotalTokens: 12}, Extension: &agenticopenai.ChatResponseMetaExtension{ID: "gc-response", FinishReason: "tool_calls"}}}
+		meta := &schema.AgenticMessage{Role: schema.AgenticRoleTypeAssistant, ResponseMeta: &schema.AgenticResponseMeta{TokenUsage: &schema.TokenUsage{PromptTokens: 8, CompletionTokens: 4, TotalTokens: 12}, Extension: &agenticopenai.ChatResponseMetaExtension{ID: "gc-response", FinishReason: "tool_calls"}}, Extra: map[string]any{"openai-request-id": "gc-request-header"}}
 		b, e := (&schema.HumanReadableSerializer{}).Marshal(meta)
 		if e != nil {
 			t.Error(e)
@@ -219,6 +219,22 @@ func TestNativeActiveStreamSurvivesForcedGCAndCommitsCompleteReceipt(t *testing.
 	}
 	if len(cached.ContentBlocks) != 3 || cached.ContentBlocks[2].FunctionToolCall.CallID != "gc-stable-call" || cached.ResponseMeta.TokenUsage.TotalTokens != 12 {
 		t.Fatal("receipt contains only a prefix after active GC")
+	}
+	if result.Extra["openai-request-id"] != "gc-request-header" || cached.Extra["openai-request-id"] != "gc-request-header" {
+		t.Fatal("stream or persisted receipt concatenated constant request headers")
+	}
+	run.Step.Store(0)
+	replayed, e := gateway.Stream(ctx, inputMessages(run.Inputs))
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer replayed.Close()
+	message, e := replayed.Recv()
+	if e != nil || message.Extra["openai-request-id"] != "gc-request-header" || message.ContentBlocks[2].FunctionToolCall.Arguments != `{"body":"explicit"}` {
+		t.Fatal("complete cached stream lost header identity or tool arguments", e)
+	}
+	if _, e = replayed.Recv(); e != io.EOF || count(t, s, `SELECT count(*) FROM runtime_model_calls`) != 1 {
+		t.Fatal("replay started another model receipt", e)
 	}
 }
 
