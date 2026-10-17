@@ -283,6 +283,9 @@ describe("reply navigation", () => {
       .spyOn(api, "messagesAround")
       .mockResolvedValue({ messages: [original], hasMore: false });
     await render(view());
+    expect(host.querySelector(".message-reply")?.textContent).toContain(
+      "较早的消息",
+    );
     await act(async () =>
       host.querySelector<HTMLButtonElement>(".message-reply")!.click(),
     );
@@ -291,6 +294,18 @@ describe("reply navigation", () => {
     expect(document.activeElement?.id).toBe("message-old-message");
     expect(host.textContent).toContain("原始任务");
     expect(chatStore.getSnapshot().messages.group).toHaveLength(1);
+    await act(async () =>
+      host.querySelector<HTMLButtonElement>(".located-banner button")!.click(),
+    );
+    expect(host.querySelector(".located-banner")).toBeNull();
+    expect(host.textContent).toContain("交付结果");
+    expect(host.querySelector(".message-reply")?.textContent).toContain("助手");
+    expect(host.querySelector(".message-reply")?.textContent).toContain(
+      "原始任务",
+    );
+    await act(async () =>
+      host.querySelector<HTMLButtonElement>(".message-reply")!.click(),
+    );
     await act(async () =>
       chatStore.merge([{ ...original, retractedAt: "2026-10-17T00:01:00Z" }]),
     );
@@ -301,6 +316,37 @@ describe("reply navigation", () => {
     );
     expect(host.querySelector(".located-banner")).toBeNull();
     expect(host.textContent).toContain("交付结果");
+    expect(host.querySelector(".message-reply")?.textContent).toContain("助手");
+    expect(host.querySelector(".message-reply")?.textContent).toContain(
+      "消息已撤回",
+    );
+  });
+  it("renders cached conversation messages immediately without a loading flash while refreshing in the background", async () => {
+    chatStore.merge([reply]);
+    let resolveLatest!: (value: {
+      messages: Message[];
+      hasMore: boolean;
+    }) => void;
+    vi.mocked(api.messages).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveLatest = resolve;
+        }),
+    );
+    await render(view());
+    expect(host.querySelector(".message-loading")).toBeNull();
+    expect(host.textContent).toContain("交付结果");
+    const newer: Message = {
+      ...reply,
+      id: "newer-message",
+      clientMessageId: "newer",
+      body: "后台刷新的新消息",
+      seq: 101,
+    };
+    await act(async () =>
+      resolveLatest({ messages: [reply, newer], hasMore: false }),
+    );
+    expect(host.textContent).toContain("后台刷新的新消息");
   });
   it("does not render a denied or late response after navigating away", async () => {
     vi.mocked(api.messages).mockResolvedValue({

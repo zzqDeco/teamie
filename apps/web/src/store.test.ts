@@ -250,4 +250,50 @@ describe("durable message reconciliation", () => {
     store.replaceConversations([]);
     expect(store.getSnapshot().messages).toEqual({});
   });
+  it("bounds persisted localStorage messages to the latest 200 confirmed messages plus local pending messages while preserving full in-memory history", () => {
+    const disk = storage();
+    const store = new ChatStore(disk);
+    store.begin("u1");
+    store.replaceConversations([conversation]);
+    const confirmedBatch = Array.from({ length: 250 }, (_, index) => {
+      const seq = index + 1;
+      return message({
+        id: `m-${seq}`,
+        clientMessageId: `req-${seq}`,
+        seq,
+        body: `message-${seq}`,
+      });
+    });
+    const pendingMessage = message({
+      id: "local:req-pending",
+      clientMessageId: "req-pending",
+      seq: Number.MAX_SAFE_INTEGER,
+      body: "pending-body",
+      status: "sending",
+    });
+    store.merge([
+      ...confirmedBatch,
+      pendingMessage,
+      message({
+        id: "m-250",
+        clientMessageId: "req-250",
+        seq: 250,
+        body: "edited-250",
+        editedAt: "2026-10-16T02:00:00Z",
+      }),
+    ]);
+    expect(store.getSnapshot().messages.c1).toHaveLength(251);
+    expect(store.getSnapshot().messages.c1[249].body).toBe("edited-250");
+    const restored = new ChatStore(disk);
+    restored.begin("u1");
+    const persistedMessages = restored.getSnapshot().messages.c1;
+    expect(persistedMessages).toHaveLength(201);
+    expect(persistedMessages[0].seq).toBe(51);
+    expect(persistedMessages[199].seq).toBe(250);
+    expect(persistedMessages[199].body).toBe("edited-250");
+    expect(persistedMessages[200]).toMatchObject({
+      clientMessageId: "req-pending",
+      status: "failed",
+    });
+  });
 });

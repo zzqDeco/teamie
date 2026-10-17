@@ -87,6 +87,9 @@ export function ConversationView({
   const snapshot = useChatState();
   const allMessages = snapshot.messages[conversation.id] || [];
   const [located, setLocated] = useState<LocalMessage[] | null>(null);
+  const [resolvedTargets, setResolvedTargets] = useState<
+    Record<string, Message>
+  >({});
   const messages = located
     ? reconcileMessages(
         located,
@@ -106,7 +109,12 @@ export function ConversationView({
   const mentionsEnabled = !!data?.capabilities["im.message.mentions"];
   const name = conversationName(conversation, user!.id, members);
   const [actionMessageId, setActionMessageId] = useState("");
-  const [loading, setLoading] = useState(true),
+  const [loading, setLoading] = useState(
+      () =>
+        !(chatStore.getSnapshot().messages[conversation.id] || []).some(
+          (m) => !m.status,
+        ),
+    ),
     [hasMore, setHasMore] = useState(false),
     [loadingOlder, setLoadingOlder] = useState(false),
     [error, setError] = useState("");
@@ -134,13 +142,16 @@ export function ConversationView({
   const fetchLatest = useCallback(async () => {
     const token = chatStore.generation;
     const operation = ++navigation.current;
+    const hasConfirmed = (
+      chatStore.getSnapshot().messages[conversation.id] || []
+    ).some((m) => !m.status);
     setLocated(null);
     setHighlightId("");
     setLocating(false);
     setLoadingOlder(false);
     initialScroll.current = true;
     setAtBottom(true);
-    setLoading(true);
+    setLoading(!hasConfirmed);
     setError("");
     try {
       const page = await api.messages(conversation.id);
@@ -175,7 +186,6 @@ export function ConversationView({
     const operation = ++navigation.current;
     const current = () =>
       token === chatStore.generation && operation === navigation.current;
-    setAtBottom(false);
     setLoading(false);
     setLoadingOlder(false);
     setLocating(false);
@@ -184,18 +194,39 @@ export function ConversationView({
     if (messages.some((m) => m.id === id)) {
       setHighlightId(id);
       focusMessage(id);
+      const el = scrollRef.current;
+      if (el) {
+        setAtBottom(
+          !located && el.scrollHeight - el.scrollTop - el.clientHeight < 80,
+        );
+      }
       return;
     }
+    setAtBottom(false);
     setLocating(true);
     try {
       const target = await api.message(conversation.id, id);
       if (!current()) return;
+      setResolvedTargets((old) => ({
+        ...old,
+        [target.message.id]: old[target.message.id]
+          ? reconcileMessages([old[target.message.id]], [target.message])[0]
+          : target.message,
+      }));
       const page = await api.messagesAround(
         conversation.id,
         target.message.seq,
       );
       if (!current()) return;
       const context = reconcileMessages(page.messages, [target.message]);
+      const resolved =
+        context.find((m) => m.id === target.message.id) || target.message;
+      setResolvedTargets((old) => ({
+        ...old,
+        [resolved.id]: old[resolved.id]
+          ? reconcileMessages([old[resolved.id]], [resolved])[0]
+          : resolved,
+      }));
       setLocated(context);
       setHasMore((context[0]?.seq || 1) > 1);
       setHighlightId(id);
@@ -556,8 +587,23 @@ export function ConversationView({
               5 * 60_000 &&
             !message.replyToId &&
             !previous.retractedAt;
-          const target = message.replyToId
-            ? messages.find((m) => m.id === message.replyToId)
+          const replyCandidates: LocalMessage[] = [];
+          if (message.replyToId) {
+            const cachedTarget = resolvedTargets[message.replyToId];
+            if (cachedTarget && cachedTarget.conversationId === conversation.id)
+              replyCandidates.push(cachedTarget);
+            const storeTarget = allMessages.find(
+              (m) => m.id === message.replyToId,
+            );
+            if (storeTarget) replyCandidates.push(storeTarget);
+            const viewTarget = messages.find((m) => m.id === message.replyToId);
+            if (viewTarget) replyCandidates.push(viewTarget);
+          }
+          const target = replyCandidates.length
+            ? reconcileMessages(
+                [replyCandidates[0]],
+                replyCandidates.slice(1),
+              )[0]
             : undefined;
           return (
             <Fragment key={message.id}>
