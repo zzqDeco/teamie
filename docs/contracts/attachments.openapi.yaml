@@ -141,6 +141,11 @@ paths:
                   maxItems: 8
                   uniqueItems: true
                   items: {type: string}
+                mentions:
+                  type: array
+                  maxItems: 32
+                  description: Ordered nonoverlapping UTF-16 ranges binding @label text to current conversation members. Labels do not grant permissions.
+                  items: {$ref: '#/components/schemas/Mention'}
       responses:
         '201':
           $ref: '#/components/responses/Message'
@@ -177,6 +182,14 @@ components:
       description: Required for cookie-authenticated writes; trusted Origin is checked separately.
       schema: {type: string}
   schemas:
+    Mention:
+      type: object
+      additionalProperties: false
+      required: [userId, start, end]
+      properties:
+        userId: {type: string, minLength: 1, maxLength: 128}
+        start: {type: integer, minimum: 0}
+        end: {type: integer, minimum: 1}
     Attachment:
       type: object
       additionalProperties: false
@@ -200,6 +213,10 @@ components:
         seq: {type: integer}
         body: {type: string}
         replyToId: {type: string}
+        mentions:
+          type: array
+          maxItems: 32
+          items: {$ref: '#/components/schemas/Mention'}
         attachments:
           type: array
           maxItems: 8

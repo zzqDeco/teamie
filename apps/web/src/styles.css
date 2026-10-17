@@ -2008,7 +2008,7 @@ label > .copy-input {
   border-color: #c3acda;
   box-shadow: 0 0 0 2px #b697d00a;
 }
-.composer > textarea {
+.composer textarea {
   padding: 15px 17px 7px;
   border: 0 !important;
   border-radius: 0;
@@ -2021,7 +2021,7 @@ label > .copy-input {
   resize: none;
   color: #8d799b;
 }
-.composer > textarea::placeholder {
+.composer textarea::placeholder {
   color: #c6b5d2;
   font-size: 11px;
 }
@@ -3751,12 +3751,12 @@ label > .copy-input {
   .composer-area {
     padding: 10px 15px 11px;
   }
-  .composer > textarea {
+  .composer textarea {
     padding: 13px 13px 7px;
     min-height: 48px;
     font-size: 12px;
   }
-  .composer > textarea::placeholder {
+  .composer textarea::placeholder {
     font-size: 10px;
   }
   .composer-tools {
@@ -4058,7 +4058,7 @@ label > .copy-input {
 .member-row b {
   color: #9576a8;
 }
-.composer > textarea {
+.composer textarea {
   color: #75617f;
 }
 .settings-form input {
@@ -4207,11 +4207,11 @@ label > .copy-input {
 .app-shell .failed-status > button {
   font-size: 10px;
 }
-.app-shell .composer > textarea {
+.app-shell .composer textarea {
   font-size: 14px;
   color: #75617f;
 }
-.app-shell .composer > textarea::placeholder {
+.app-shell .composer textarea::placeholder {
   font-size: 13px;
   color: #b4a0c2;
 }
@@ -4459,10 +4459,10 @@ label > .copy-input {
   .app-shell .message-meta time {
     font-size: 9px;
   }
-  .app-shell .composer > textarea {
+  .app-shell .composer textarea {
     font-size: 14px;
   }
-  .app-shell .composer > textarea::placeholder {
+  .app-shell .composer textarea::placeholder {
     font-size: 12px;
   }
   .app-shell .composer-footer {

@@ -71,7 +71,13 @@ Internal `SandboxService.ImportFile(SandboxImportRequest)` carries a Thrift `bin
 
 The shared IM file limit is 4 MiB, fitting under the existing execution child's 8 MiB `fsize` limit. Import/text mutation admission also accounts for the Agent workspace's 64 MiB/4096-entry budget; supervisor monitoring cancels execution that crosses the observed budget. This is admission plus sampled monitoring, not a kernel hard aggregate filesystem quota. Existing child memory/CPU/PID/output/network restrictions remain enforced. Sandbox RPC bounds framed payload size to the file ceiling plus a small metadata allowance. Chat schema advances to 3; Runtime/Gateway/Control/Identity schema versions do not change for files. Existing PostgreSQL backup/restore includes IM files; durable Sandbox files/receipts remain in the existing protected Sandbox roots.
 
-### Explicit file-result delivery
+### Structured recipient annotations
+
+IM messages/history may carry ordinary `mentions:[{userId,start,end}]` metadata, using UTF-16 text ranges. Runtime persists it with the real source envelope and passes it to the continuous Session; unmentioned new messages are still ingested. Mention IDs identify recipients only, never sender roles, membership, authority or a permission to share another conversation. Source references and compaction continue to retain the actual request/conversation/message identity.
+
+The private `agents.mentions.v1` flag admits new context-v1 Runs to the mention-aware send tool and guidance. Its immutable budget snapshot records `structuredMentions:true`; existing Runs retain their previous prompts, tool schemas and request hashes. New Runs can explicitly pass `mentions` to `im_send_message`, combined with files when file delivery is admitted. IM applies the same membership validation to human and Agent senders. Chat schema advances to 5; Runtime remains 3. This remains unreleased product code and adds no owner settings or browser runtime resources.
+
+### Explicit file-result tools
 
 The private `agents.files.deliver.v1` admission flag selects file-result tools only for newly admitted context-v1 Runs. The immutable context budget snapshot stores this selection; retries and native checkpoints keep it even if live flags change. Existing snapshots omit the field and retain their exact tool manifests, prompts and hashes. This adds no browser runtime capability, owner setting or execution architecture layer.
 
@@ -121,7 +127,7 @@ The new native pipeline offloads large tool results, archives a safe transcript 
 
 New-policy workspace pages expose continuation/version/coverage; trusted command output persists separately from the small model preview. Source-scoped background notifications include the actual parent Run and source set, without choosing a conversation. A sanitized pre-output model-context rejection is a durable model-step decision before native compaction/retry; partial streaming remains a distinct failure. This preserves one serial TurnLoop and does not impose an inference duration.
 
-The context-engineering baseline targets schema vector Identity 3, Chat 3, Control 1, Runtime 3, Gateway 2. The unreleased file-delivery extension advances only Chat to 4. These are rollout requirements, not evidence of a published release or deployment. When releasing, create a fresh permanent archive and preserve all previous archives, accounts, conversations, files, runtime receipts and saved gateway settings. Quiesce the old Runtime writer before migration and verify the actual five-database restore, ACR digests, runtime flags, health and external access. Incompatible image rollback is rejected; corrections ship forward.
+The context-engineering baseline targets schema vector Identity 3, Chat 3, Control 1, Runtime 3, Gateway 2. File delivery advances Chat to 4; structured mentions advance it to 5. These are unreleased rollout requirements, not evidence of a published release or deployment. When releasing, create a fresh permanent archive and preserve all previous archives, accounts, conversations, files, runtime receipts and saved gateway settings. Quiesce the old Runtime writer before migration and verify the actual five-database restore, ACR digests, runtime flags, health and external access. Incompatible image rollback is rejected; corrections ship forward.
 
 ## Release acceptance
 

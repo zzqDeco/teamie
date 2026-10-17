@@ -32,6 +32,7 @@ type ContextBudgetSnapshot struct {
 	TailTokenLimit       int    `json:"tailTokenLimit"`
 	ToolResultByteLimit  int    `json:"toolResultByteLimit"`
 	FileDelivery         bool   `json:"fileDelivery,omitempty"`
+	StructuredMentions   bool   `json:"structuredMentions,omitempty"`
 }
 
 func makeContextBudgetSnapshot(window int) (ContextBudgetSnapshot, error) {
@@ -53,12 +54,13 @@ func NewContextBudgetSnapshot(window int) (json.RawMessage, error) {
 	return newContextBudgetWithFiles(window, false)
 }
 
-func newContextBudgetWithFiles(window int, fileDelivery bool) (json.RawMessage, error) {
+func newContextBudgetWithFiles(window int, fileDelivery bool, mentions ...bool) (json.RawMessage, error) {
 	budget, err := makeContextBudgetSnapshot(window)
 	if err != nil {
 		return nil, err
 	}
 	budget.FileDelivery = fileDelivery
+	budget.StructuredMentions = len(mentions) > 0 && mentions[0]
 	return json.Marshal(budget)
 }
 
@@ -71,6 +73,7 @@ func ParseContextBudgetSnapshot(raw json.RawMessage) (ContextBudgetSnapshot, err
 	}
 	expected, err := makeContextBudgetSnapshot(budget.ContextWindowTokens)
 	expected.FileDelivery = budget.FileDelivery
+	expected.StructuredMentions = budget.StructuredMentions
 	if err != nil || budget != expected {
 		return budget, errors.New("unsupported context budget snapshot")
 	}

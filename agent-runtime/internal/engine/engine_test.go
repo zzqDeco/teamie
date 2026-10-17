@@ -26,6 +26,7 @@ import (
 	"teamie/agent-protocol/kitex_gen/agent/sandboxservice"
 	"teamie/backend/kitex_gen/im"
 	"teamie/backend/kitex_gen/im/identityservice"
+	"teamie/backend/pkg/imtext"
 )
 
 func testStore(t *testing.T) *Store {
@@ -248,9 +249,10 @@ func (f *fixtureIM) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(parts) == 6 && r.Method == "POST" {
 		var body struct {
-			ClientMessageID string  `json:"clientMessageId"`
-			Body            string  `json:"body"`
-			ReplyToID       *string `json:"replyToId"`
+			ClientMessageID string           `json:"clientMessageId"`
+			Body            string           `json:"body"`
+			ReplyToID       *string          `json:"replyToId"`
+			Mentions        []imtext.Mention `json:"mentions"`
 		}
 		if json.NewDecoder(r.Body).Decode(&body) != nil {
 			w.WriteHeader(400)
@@ -260,6 +262,13 @@ func (f *fixtureIM) serve(w http.ResponseWriter, r *http.Request) {
 		m, exists := f.sent[body.ClientMessageID]
 		if !exists {
 			m = Message{ID: uuid.NewString(), ConversationID: parts[4], SenderID: f.agent, SenderKind: "agent", Body: body.Body}
+			if len(body.Mentions) > 0 {
+				m.Mentions = body.Mentions
+				if body.ReplyToID != nil {
+					m.ReplyToID = *body.ReplyToID
+				}
+				f.messages[m.ID] = &m
+			}
 			f.sent[body.ClientMessageID] = m
 		}
 		if f.failAfterSend {

@@ -1,5 +1,5 @@
 {
-  "revision": "agent-file-delivery-v1",
+  "revision": "mentions-v1",
   "flags": {
     "auth.public_signup": false,
     "auth.password_reset": true,
@@ -21,6 +21,8 @@
     "agents.runtime.v3": true,
     "agents.context.v1": true,
     "agents.files.deliver.v1": true,
-    "agents.tasks.execute": true
+    "agents.tasks.execute": true,
+    "im.message.mentions": true,
+    "agents.mentions.v1": true
   }
 }

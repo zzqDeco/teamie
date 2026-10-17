@@ -416,16 +416,16 @@ textarea:disabled {
   display: flex;
   align-items: flex-end;
 }
-.app-shell .composer > textarea {
+.app-shell .composer textarea {
   flex: 1;
-  width: 0;
+  width: 100%;
   font-size: 15px;
   line-height: 1.65;
   padding: 13px 14px;
   min-height: 50px;
   max-height: min(180px, calc(var(--app-height, 100dvh) * 0.3));
 }
-.app-shell .composer > textarea::placeholder {
+.app-shell .composer textarea::placeholder {
   font-size: 14px;
 }
 .composer-tools {
@@ -1175,13 +1175,13 @@ textarea:disabled {
   .composer-area {
     padding: 8px 12px max(10px, env(safe-area-inset-bottom));
   }
-  .app-shell .composer > textarea {
+  .app-shell .composer textarea {
     font-size: 16px;
     min-height: 50px;
     max-height: min(140px, calc(var(--app-height, 100dvh) * 0.28));
     padding: 12px;
   }
-  .app-shell .composer > textarea::placeholder {
+  .app-shell .composer textarea::placeholder {
     font-size: 14px;
   }
   .composer-tools {

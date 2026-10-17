@@ -20,6 +20,7 @@ import (
 	"teamie/agent-protocol/kitex_gen/agent/sandboxservice"
 	"teamie/backend/kitex_gen/im"
 	"teamie/backend/kitex_gen/im/identityservice"
+	"teamie/backend/pkg/imtext"
 )
 
 type APIError struct {
@@ -175,17 +176,18 @@ type Conversation struct {
 	MemberIDs   []string `json:"memberIds"`
 }
 type Message struct {
-	ID             string       `json:"id"`
-	ConversationID string       `json:"conversationId"`
-	SenderID       string       `json:"senderId"`
-	SenderName     string       `json:"senderName"`
-	SenderKind     string       `json:"senderKind"`
-	Body           string       `json:"body"`
-	ReplyToID      string       `json:"replyToId,omitempty"`
-	Seq            int64        `json:"seq"`
-	CreatedAt      string       `json:"createdAt"`
-	RetractedAt    *string      `json:"retractedAt,omitempty"`
-	Attachments    []Attachment `json:"attachments,omitempty"`
+	ID             string           `json:"id"`
+	ConversationID string           `json:"conversationId"`
+	SenderID       string           `json:"senderId"`
+	SenderName     string           `json:"senderName"`
+	SenderKind     string           `json:"senderKind"`
+	Body           string           `json:"body"`
+	ReplyToID      string           `json:"replyToId,omitempty"`
+	Seq            int64            `json:"seq"`
+	CreatedAt      string           `json:"createdAt"`
+	RetractedAt    *string          `json:"retractedAt,omitempty"`
+	Attachments    []Attachment     `json:"attachments,omitempty"`
+	Mentions       []imtext.Mention `json:"mentions,omitempty"`
 }
 type Bootstrap struct {
 	Conversations []Conversation `json:"conversations"`

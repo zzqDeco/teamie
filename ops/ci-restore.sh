@@ -13,7 +13,7 @@ for suffix in identity chat agent_control agent_runtime gateway; do
   version=1
   if [[ $suffix == identity || $suffix == chat || $suffix == agent_runtime || $suffix == gateway ]]; then version=2; fi
   if [[ $suffix == identity || $suffix == chat || $suffix == agent_runtime ]]; then version=3; fi
-  if [[ $suffix == chat ]]; then version=4; fi
+  if [[ $suffix == chat ]]; then version=5; fi
   # Identity's real schema creates its complete production migration ledger.
   if [[ $suffix != identity && $suffix != agent_runtime && $suffix != chat ]]; then
     "${pg[@]}" psql -U postgres -d "teamie_$suffix" -v ON_ERROR_STOP=1 -v ledger="${suffix}_schema_migrations" -v version="$version" <<'SQL'
@@ -47,10 +47,11 @@ SQL
     # Restore an actual linked binary attachment through Chat's real schema,
     # including bytes that cannot survive a UTF-8/text-file transport.
     cat backend/internal/chat/schema.sql backend/internal/chat/migrations/002_membership_management.sql \
-      backend/internal/chat/migrations/003_attachments.sql backend/internal/chat/migrations/004_attachment_uploads.sql | "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 >/dev/null
+      backend/internal/chat/migrations/003_attachments.sql backend/internal/chat/migrations/004_attachment_uploads.sql \
+      backend/internal/chat/migrations/005_mentions.sql | "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 >/dev/null
     "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 <<'SQL'
 INSERT INTO workspaces(id,name,created_by) VALUES('restore-workspace','Restore','owner');
-INSERT INTO chat_schema_migrations(version) VALUES(2),(3),(4) ON CONFLICT DO NOTHING;
+INSERT INTO chat_schema_migrations(version) VALUES(2),(3),(4),(5) ON CONFLICT DO NOTHING;
 INSERT INTO conversations(id,workspace_id,type,name) VALUES('restore-conversation','restore-workspace','channel','general');
 INSERT INTO messages(id,conversation_id,sender_id,sender_name,sender_kind,client_message_id,seq,body,original_body_hash,attachments,original_attachment_ids)
 VALUES('restore-message','restore-conversation','owner','Owner','human','restore-send',1,'','fixture',
@@ -60,6 +61,7 @@ VALUES('restore-attachment','restore-conversation','owner','restore-message','bi
 INSERT INTO attachment_uploads(uploader_id,upload_key,conversation_id,fingerprint,attachment_id)
 VALUES('owner','restore-upload','restore-conversation','fixture-fingerprint','restore-attachment'),
       ('owner','restore-removed','restore-conversation','removed-fingerprint',NULL);
+UPDATE messages SET body='@Owner',mentions='[{"userId":"owner","start":0,"end":6}]',original_mentions='[{"userId":"owner","start":0,"end":6}]' WHERE id='restore-message';
 SQL
   fi
   if [[ $suffix == agent_runtime ]]; then
@@ -83,7 +85,7 @@ VALUES('20000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000
        '30000000-0000-4000-8000-000000000001','teamie-context-v038',:'frozen_budget'::jsonb,0,0);
 INSERT INTO runtime_runs(id,agent_id,input_key,input_json,attempt_id,context_profile,context_budget,context_head,acceptance_head)
 VALUES('20000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000001','restore-file-policy','[]',
-       '30000000-0000-4000-8000-000000000002','teamie-context-v038',:'frozen_budget'::jsonb||'{"fileDelivery":true}'::jsonb,0,0);
+       '30000000-0000-4000-8000-000000000002','teamie-context-v038',:'frozen_budget'::jsonb||'{"fileDelivery":true,"structuredMentions":true}'::jsonb,0,0);
 INSERT INTO runtime_context_artifacts(agent_id,run_id,attempt_id,artifact_key,kind,content,content_hash,sources,source_event_seq)
 VALUES('10000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001',
        'transcript:restore','transcript',decode('00fffe80890a0d','hex'),repeat('a',64),
@@ -105,11 +107,11 @@ SQL
   fi
   if [[ $suffix == chat ]]; then
     actual=$("${pg[@]}" psql -U postgres -d restore_chat -At -v ON_ERROR_STOP=1 -c \
-      "SELECT encode(a.content,'hex')||':'||a.filename||':'||(m.attachments->0->>'id')||':'||m.original_attachment_ids[1] FROM attachments a JOIN messages m ON m.id=a.message_id WHERE a.id='restore-attachment' AND a.size_bytes=7 AND m.body='';")
+      "SELECT encode(a.content,'hex')||':'||a.filename||':'||(m.attachments->0->>'id')||':'||m.original_attachment_ids[1] FROM attachments a JOIN messages m ON m.id=a.message_id WHERE a.id='restore-attachment' AND a.size_bytes=7 AND m.body='@Owner' AND m.mentions=m.original_mentions AND m.mentions='[{\"userId\":\"owner\",\"start\":0,\"end\":6}]'::jsonb;")
     [[ $actual == '00fffe80890a0d:binary.restore.bin:restore-attachment:restore-attachment' ]] || { echo 'Chat attachment binary restore verification failed.' >&2; exit 1; }
     actual=$("${pg[@]}" psql -U postgres -d restore_chat -At -v ON_ERROR_STOP=1 -c \
       "SELECT (SELECT string_agg(version::text,',' ORDER BY version) FROM chat_schema_migrations)||':'||(SELECT attachment_id FROM attachment_uploads WHERE uploader_id='owner' AND upload_key='restore-upload')||':'||(SELECT count(*) FROM attachment_uploads WHERE upload_key='restore-removed' AND attachment_id IS NULL);")
-    [[ $actual == '1,2,3,4:restore-attachment:1' ]] || { echo 'Chat upload receipts and tombstones restore verification failed.' >&2; exit 1; }
+    [[ $actual == '1,2,3,4,5:restore-attachment:1' ]] || { echo 'Chat upload receipts and tombstones restore verification failed.' >&2; exit 1; }
   fi
   if [[ $suffix == agent_runtime ]]; then
     actual=$("${pg[@]}" psql -U postgres -d restore_agent_runtime -At -v ON_ERROR_STOP=1 -v frozen_budget="$runtime_context_budget" <<'SQL'
@@ -118,7 +120,7 @@ SQL
 )
     [[ $actual == '1,2,3:teamie-context-v038:true:00fffe80890a0d:42:42:2:context_overflow:true:true' ]] || { echo 'Runtime frozen policy, context archive, source references and recovery tape restore failed.' >&2; exit 1; }
     actual=$("${pg[@]}" psql -U postgres -d restore_agent_runtime -At -v ON_ERROR_STOP=1 -v frozen_budget="$runtime_context_budget" <<'SQL'
-SELECT context_budget=(:'frozen_budget'::jsonb||'{"fileDelivery":true}'::jsonb) FROM runtime_runs WHERE input_key='restore-file-policy';
+SELECT context_budget=(:'frozen_budget'::jsonb||'{"fileDelivery":true,"structuredMentions":true}'::jsonb) FROM runtime_runs WHERE input_key='restore-file-policy';
 SQL
 )
     [[ $actual == t ]] || { echo 'Runtime immutable file-tool admission restore failed.' >&2; exit 1; }

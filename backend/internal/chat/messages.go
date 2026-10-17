@@ -7,19 +7,21 @@ import (
 	"slices"
 	"strings"
 	"teamie/backend/internal/api"
+	"teamie/backend/pkg/imtext"
 	"time"
 )
 
-const messageColumns = "id,conversation_id,sender_id,sender_name,sender_kind,client_message_id,seq,body,reply_to_id,created_at,edited_at,retracted_at,attachments"
+const messageColumns = "id,conversation_id,sender_id,sender_name,sender_kind,client_message_id,seq,body,reply_to_id,created_at,edited_at,retracted_at,attachments,mentions"
 
 type scanner interface{ Scan(...any) error }
 
 func scanMessage(row scanner) (Message, error) {
 	var m Message
-	e := row.Scan(&m.ID, &m.ConversationID, &m.SenderID, &m.SenderName, &m.SenderKind, &m.ClientMessageID, &m.Seq, &m.Body, &m.ReplyToID, &m.CreatedAt, &m.EditedAt, &m.RetractedAt, &m.Attachments)
+	e := row.Scan(&m.ID, &m.ConversationID, &m.SenderID, &m.SenderName, &m.SenderKind, &m.ClientMessageID, &m.Seq, &m.Body, &m.ReplyToID, &m.CreatedAt, &m.EditedAt, &m.RetractedAt, &m.Attachments, &m.Mentions)
 	if m.RetractedAt != nil {
 		m.Body = ""
 		m.Attachments = nil
+		m.Mentions = nil
 	}
 	return m, e
 }
@@ -115,7 +117,33 @@ func validateMessage(body string, attachmentCount int) error {
 }
 
 func (s *Store) SendWithAttachments(ctx context.Context, user api.User, conversation, clientID, body string, reply *string, ids []string) (Message, bool, error) {
+	return s.SendAnnotated(ctx, user, conversation, clientID, body, reply, ids, nil)
+}
+
+func validateMentions(body string, mentions []imtext.Mention) error {
+	if imtext.ValidateMentions(body, mentions) != nil {
+		return api.Err(400, "invalid_mentions", "Use ordered, non-overlapping @ mention ranges in UTF-16 offsets")
+	}
+	return nil
+}
+
+func validateMentionMembers(members []string, mentions []imtext.Mention) error {
+	for _, m := range mentions {
+		if !slices.Contains(members, m.UserID) {
+			return api.Err(400, "invalid_mentions", "Mention recipients must be current conversation members")
+		}
+	}
+	return nil
+}
+
+func (s *Store) SendAnnotated(ctx context.Context, user api.User, conversation, clientID, body string, reply *string, ids []string, mentions []imtext.Mention) (Message, bool, error) {
 	var m Message
+	if e := validateMentions(body, mentions); e != nil {
+		return m, false, e
+	}
+	if mentions == nil {
+		mentions = []imtext.Mention{}
+	}
 	if e := validateAttachmentIDs(ids); e != nil {
 		return m, false, e
 	}
@@ -145,11 +173,12 @@ func (s *Store) SendWithAttachments(ctx context.Context, user api.User, conversa
 	if e == nil {
 		var hash string
 		var originalIDs []string
-		if e = tx.QueryRow(ctx, "SELECT original_body_hash,original_attachment_ids FROM messages WHERE id=$1", m.ID).Scan(&hash, &originalIDs); e != nil {
+		var originalMentions []imtext.Mention
+		if e = tx.QueryRow(ctx, "SELECT original_body_hash,original_attachment_ids,original_mentions FROM messages WHERE id=$1", m.ID).Scan(&hash, &originalIDs, &originalMentions); e != nil {
 			return m, false, e
 		}
 		sameReply := (reply == nil && m.ReplyToID == nil) || (reply != nil && m.ReplyToID != nil && *reply == *m.ReplyToID)
-		if m.ConversationID != conversation || hash != api.Hash(body) || !sameReply || !slices.Equal(ids, originalIDs) {
+		if m.ConversationID != conversation || hash != api.Hash(body) || !sameReply || !slices.Equal(ids, originalIDs) || !slices.Equal(mentions, originalMentions) {
 			return m, false, api.Err(409, "idempotency_conflict", "This clientMessageId was used for a different message")
 		}
 		return m, false, tx.Commit(ctx)
@@ -159,6 +188,14 @@ func (s *Store) SendWithAttachments(ctx context.Context, user api.User, conversa
 	}
 	if e = validateMessage(body, len(ids)); e != nil {
 		return m, false, e
+	}
+	if len(mentions) > 0 {
+		if e = s.requireFlag("im.message.mentions"); e != nil {
+			return m, false, e
+		}
+		if e = validateMentionMembers(c.MemberIDs, mentions); e != nil {
+			return m, false, e
+		}
 	}
 	if len(ids) > 0 {
 		if e = s.requireFlag("im.attachments.upload"); e != nil {
@@ -184,6 +221,12 @@ func (s *Store) SendWithAttachments(ctx context.Context, user api.User, conversa
 	if e != nil {
 		return m, false, e
 	}
+	if len(mentions) > 0 {
+		m.Mentions = mentions
+		if _, e = tx.Exec(ctx, "UPDATE messages SET mentions=$2,original_mentions=$2 WHERE id=$1", m.ID, mentions); e != nil {
+			return m, false, e
+		}
+	}
 	if len(ids) > 0 {
 		if m.Attachments, e = attachFiles(ctx, tx, user.ID, conversation, m.ID, ids); e != nil {
 			return m, false, e
@@ -198,6 +241,10 @@ func (s *Store) SendWithAttachments(ctx context.Context, user api.User, conversa
 	return m, true, tx.Commit(ctx)
 }
 func (s *Store) ChangeMessage(ctx context.Context, user, conversation, id, body string, retract bool) (Message, error) {
+	return s.ChangeAnnotatedMessage(ctx, user, conversation, id, body, retract, nil)
+}
+
+func (s *Store) ChangeAnnotatedMessage(ctx context.Context, user, conversation, id, body string, retract bool, mentions []imtext.Mention) (Message, error) {
 	var m Message
 	flag := "im.message.edit"
 	if retract {
@@ -226,6 +273,19 @@ func (s *Store) ChangeMessage(ctx context.Context, user, conversation, id, body 
 		if e = validateMessage(body, len(m.Attachments)); e != nil {
 			return m, e
 		}
+		if e = validateMentions(body, mentions); e != nil {
+			return m, e
+		}
+		if len(mentions) > 0 {
+			if !slices.Equal(mentions, m.Mentions) {
+				if e = s.requireFlag("im.message.mentions"); e != nil {
+					return m, e
+				}
+			}
+			if e = validateMentionMembers(c.MemberIDs, mentions); e != nil {
+				return m, e
+			}
+		}
 	}
 	event := "message.updated"
 	now := time.Now().UTC()
@@ -236,8 +296,9 @@ func (s *Store) ChangeMessage(ctx context.Context, user, conversation, id, body 
 		m.RetractedAt = &now
 		m.Body = ""
 		m.Attachments = nil
+		m.Mentions = nil
 		event = "message.retracted"
-		_, e = tx.Exec(ctx, "UPDATE messages SET body='',attachments='[]',retracted_at=$2 WHERE id=$1", id, now)
+		_, e = tx.Exec(ctx, "UPDATE messages SET body='',attachments='[]',mentions='[]',retracted_at=$2 WHERE id=$1", id, now)
 		if e == nil {
 			_, e = tx.Exec(ctx, "DELETE FROM attachments WHERE message_id=$1", id)
 		}
@@ -246,8 +307,12 @@ func (s *Store) ChangeMessage(ctx context.Context, user, conversation, id, body 
 			return m, api.Err(409, "message_retracted", "A retracted message cannot be edited")
 		}
 		m.Body = body
+		m.Mentions = mentions
+		if mentions == nil {
+			mentions = []imtext.Mention{}
+		}
 		m.EditedAt = &now
-		_, e = tx.Exec(ctx, "UPDATE messages SET body=$2,edited_at=$3 WHERE id=$1", id, body, now)
+		_, e = tx.Exec(ctx, "UPDATE messages SET body=$2,edited_at=$3,mentions=$4 WHERE id=$1", id, body, now, mentions)
 	}
 	if e != nil {
 		return m, e

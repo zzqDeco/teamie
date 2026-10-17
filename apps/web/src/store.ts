@@ -44,7 +44,7 @@ export function reconcileMessages(
   const output = [...existing];
   for (const incomingMessage of incoming) {
     const message = incomingMessage.retractedAt
-      ? { ...incomingMessage, body: "", attachments: undefined }
+      ? { ...incomingMessage, body: "", attachments: undefined, mentions: undefined }
       : incomingMessage;
     const index = output.findIndex(
       (m) =>

@@ -21,22 +21,26 @@ func contextArgumentHashes(name, argument string) []string {
 	// IM receipts hash their parsed typed arguments, while native receipts hash
 	// the original wire. Reproduce only these known schemas for source lookup;
 	// no receipt or request fingerprint is changed.
-	var parsed any
+	var parsers []any
 	switch name {
 	case "im_list_conversations":
-		parsed = &listConversationsArgs{}
+		parsers = []any{&listConversationsArgs{}}
 	case "im_list_messages":
-		parsed = &listMessagesArgs{}
+		parsers = []any{&listMessagesArgs{}}
 	case "im_get_message":
-		parsed = &getMessageArgs{}
+		parsers = []any{&getMessageArgs{}}
 	case "im_send_message":
-		parsed = &sendArgs{}
+		parsers = []any{&sendArgs{}, &fileMessageArgs{}, &mentionedSendArgs{}}
 	case "im_get_attachment":
-		parsed = &getAttachmentArgs{}
+		parsers = []any{&getAttachmentArgs{}}
+	case "im_upload_file":
+		parsers = []any{&uploadFileArgs{}}
 	}
-	if parsed != nil && json.Unmarshal([]byte(argument), parsed) == nil {
-		canonical, _ := json.Marshal(parsed)
-		hashes = append(hashes, digest(canonical))
+	for _, parsed := range parsers {
+		if json.Unmarshal([]byte(argument), parsed) == nil {
+			canonical, _ := json.Marshal(parsed)
+			hashes = append(hashes, digest(canonical))
+		}
 	}
 	return hashes
 }
