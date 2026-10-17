@@ -185,8 +185,23 @@ class AgentManifestTest(unittest.TestCase):
         previous=self.modern()
         previous["schema"]={"identity":3,"chat":4,"agent_control":1,"agent_runtime":3,"gateway":2}
         current=copy.deepcopy(previous)
-        current["schema"]=dict(manifest.SCHEMA_V2)
+        current["schema"]={"identity":3,"chat":5,"agent_control":1,"agent_runtime":3,"gateway":2}
         self.assertEqual(current["schema"]["chat"],5)
+        manifest.validate(previous)
+        manifest.check_transition(current,previous,previous)
+        with self.assertRaises(ValueError):
+            manifest.check_transition(previous,current,rollback=True)
+
+    def test_output_recovery_schema_preserves_v039_and_rejects_old_runtime(self):
+        previous=self.modern()
+        previous["version"]="v0.3.9"
+        previous["source"]["ref"]="refs/heads/release/v0.3.9"
+        previous["schema"]={"identity":3,"chat":5,"agent_control":1,"agent_runtime":3,"gateway":2}
+        current=copy.deepcopy(previous)
+        current["version"]="v0.3.10"
+        current["source"]["ref"]="refs/heads/release/v0.3.10"
+        current["schema"]=dict(manifest.SCHEMA_V2)
+        self.assertEqual(current["schema"]["agent_runtime"],4)
         manifest.validate(previous)
         manifest.check_transition(current,previous,previous)
         with self.assertRaises(ValueError):

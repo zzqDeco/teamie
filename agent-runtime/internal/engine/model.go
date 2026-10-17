@@ -165,7 +165,10 @@ func (m *GatewayModel) capRunOutput(run *Run, opts *model.Options) error {
 		return err
 	}
 	limit := budget.OutputReserveTokens
-	if opts.MaxTokens == nil || *opts.MaxTokens > limit {
+	if opts.MaxTokens == nil {
+		initial := budget.initialOutputTokens()
+		opts.MaxTokens = &initial
+	} else if *opts.MaxTokens > limit {
 		opts.MaxTokens = &limit
 	}
 	return nil
