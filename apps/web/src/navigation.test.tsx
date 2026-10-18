@@ -2,7 +2,7 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@teamie/api-client";
@@ -14,6 +14,7 @@ import type {
   User,
   Workspace,
 } from "@teamie/api-client";
+import { Landing, Login } from "./public";
 import { Shell } from "./shell";
 import { chatStore } from "./store";
 
@@ -87,12 +88,19 @@ const capabilities = {
   "im.group.create": true,
 };
 let activeUser: User;
+let signedOut = false;
+let authLoading = false;
 let bootstrap: Bootstrap;
 const refresh = vi.fn(async () => {});
 const sendTyping = vi.fn();
 const sync = vi.fn();
 vi.mock("./auth", () => ({
-  useAuth: () => ({ user: activeUser, logout: vi.fn(), updateUser: vi.fn() }),
+  useAuth: () => ({
+    user: signedOut ? null : activeUser,
+    loading: authLoading,
+    logout: vi.fn(),
+    updateUser: vi.fn(),
+  }),
 }));
 vi.mock("./chat", async (original) => ({
   ...(await original<typeof import("./chat")>()),
@@ -190,6 +198,8 @@ beforeEach(() => {
     value: vi.fn(),
   });
   activeUser = { ...owner };
+  signedOut = false;
+  authLoading = false;
   bootstrap = {
     user: activeUser,
     workspaces: [workspace],
@@ -882,5 +892,191 @@ describe("member and account navigation", () => {
     expect(find("[data-location]").textContent).toBe(
       `/app/w/${workspace.id}/members`,
     );
+  });
+
+  it("redirects signed-in users from the landing page directly into /app and keeps rail-home inside /app", async () => {
+    const emptyFirst: Workspace = {
+      id: "empty-first",
+      name: "空置首发空间",
+      createdBy: owner.id,
+      createdAt: owner.createdAt,
+    };
+    bootstrap.workspaces = [workspace, emptyFirst];
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: query.includes("1250"),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    );
+    await settle(() =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter initialEntries={["/"]}>
+            <Routes>
+              <Route path="/" element={<Landing />} />
+              <Route path="/app/*" element={<Shell />} />
+            </Routes>
+            <Location />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      ),
+    );
+    await settle();
+    expect(find("[data-location]").textContent).toBe("/app/w/team/c/general");
+    await click('a[href="/app/w/team/c/group"]');
+    expect(find("[data-location]").textContent).toBe("/app/w/team/c/group");
+    bootstrap.workspaces = [emptyFirst, workspace];
+    await click(".rail-agents");
+    expect(find("[data-location]").textContent).toBe("/app/agents");
+    expect(find(".rail-home").getAttribute("href")).toBe("/app");
+    await click(".rail-home");
+    expect(find("[data-location]").textContent).toBe("/app/w/team/c/group");
+  });
+
+  it("renders a sticky scroll-locked product story without top anchor links for signed-out visitors", async () => {
+    signedOut = true;
+    const scrollTo = vi.fn();
+    vi.stubGlobal("scrollTo", scrollTo);
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: query.includes("prefers-reduced-motion"),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    );
+    await settle(() =>
+      root.render(
+        <MemoryRouter initialEntries={["/"]}>
+          <Landing />
+          <Location />
+        </MemoryRouter>,
+      ),
+    );
+    await settle();
+    expect(find("[data-location]").textContent).toBe("/");
+    expect(container.querySelector('.public-header a[href^="#"]')).toBeNull();
+    const track = find(".scroll-story-track");
+    vi.spyOn(track, "getBoundingClientRect").mockReturnValue({
+      top: 0,
+      bottom: 2400,
+      left: 0,
+      right: 1200,
+      width: 1200,
+      height: 2400,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    expect(track.getAttribute("data-active-scene")).toBe("0");
+    expect(find(".story-scene-item.active").textContent).toContain(
+      "对的讨论，在对的地方。",
+    );
+    const controls = find(".story-controls");
+    expect(controls.getAttribute("role")).toBe("group");
+    const tabs = container.querySelectorAll<HTMLButtonElement>(".story-step-pill");
+    expect(tabs).toHaveLength(4);
+    expect(tabs[0]?.getAttribute("aria-pressed")).toBe("true");
+    expect(tabs[1]?.getAttribute("aria-pressed")).toBe("false");
+    const articles =
+      container.querySelectorAll<HTMLElement>(".story-scene-item");
+    expect(articles[0]?.getAttribute("aria-hidden")).toBe("false");
+    expect(articles[1]?.getAttribute("aria-hidden")).toBe("true");
+    expect(find(".story-scroll-hint").textContent).toContain(
+      "继续滑动切换下一幕",
+    );
+    await settle(() => tabs[1]?.click());
+    expect(track.getAttribute("data-active-scene")).toBe("1");
+    expect(articles[0]?.getAttribute("aria-hidden")).toBe("true");
+    expect(articles[1]?.getAttribute("aria-hidden")).toBe("false");
+    expect(tabs[1]?.getAttribute("aria-pressed")).toBe("true");
+    expect(scrollTo).toHaveBeenLastCalledWith(
+      expect.objectContaining({ behavior: "auto" }),
+    );
+    expect(find(".story-scene-item.active").textContent).toContain(
+      "每位成员，都有专属伙伴。",
+    );
+    await settle(() => tabs[3]?.click());
+    expect(track.getAttribute("data-active-scene")).toBe("3");
+    expect(tabs[3]?.getAttribute("aria-pressed")).toBe("true");
+    expect(find(".story-scene-item.active").textContent).toContain(
+      "像邀请一位新队友，安静可靠。",
+    );
+    expect(container.textContent).toContain("下一件好事，一起开始。");
+  });
+
+  it("keeps the public landing usable while session discovery is pending, disables scroll auto-switching on mobile, and resets scroll on register navigation", async () => {
+    signedOut = true;
+    authLoading = true;
+    vi.spyOn(api, "registration").mockResolvedValue({
+      mode: "invite",
+      bootstrapRequired: false,
+    });
+    const scrollTo = vi.fn();
+    vi.stubGlobal("scrollTo", scrollTo);
+    vi.stubGlobal("innerWidth", 375);
+    vi.stubGlobal("innerHeight", 568);
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: query.includes("780px") || query.includes("700px"),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    );
+    await settle(() =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter initialEntries={["/"]}>
+            <Routes>
+              <Route path="/" element={<Landing />} />
+              <Route path="/login" element={<Login />} />
+            </Routes>
+            <Location />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      ),
+    );
+    await settle();
+    expect(find("[data-location]").textContent).toBe("/");
+    expect(find(".story-scroll-hint").textContent).toContain(
+      "点击上方标签切换下一幕",
+    );
+    expect(find(".landing-register").getAttribute("href")).toBe(
+      "/login?mode=register",
+    );
+    const track = find(".scroll-story-track");
+    vi.spyOn(track, "getBoundingClientRect").mockReturnValue({
+      top: -180,
+      bottom: 720,
+      left: 0,
+      right: 375,
+      width: 375,
+      height: 900,
+      x: 0,
+      y: -180,
+      toJSON: () => ({}),
+    });
+    await settle(() => window.dispatchEvent(new Event("scroll")));
+    expect(track.getAttribute("data-active-scene")).toBe("0");
+    scrollTo.mockClear();
+    const pills =
+      container.querySelectorAll<HTMLButtonElement>(".story-step-pill");
+    await settle(() => pills[1]?.click());
+    expect(track.getAttribute("data-active-scene")).toBe("1");
+    expect(scrollTo).not.toHaveBeenCalled();
+    document.documentElement.scrollTop = 343;
+    document.body.scrollTop = 343;
+    await click(".landing-register");
+    expect(find("[data-location]").textContent).toBe("/login");
+    expect(document.documentElement.scrollTop).toBe(0);
+    expect(document.body.scrollTop).toBe(0);
+    expect(scrollTo).toHaveBeenCalledWith({
+      top: 0,
+      left: 0,
+      behavior: "auto",
+    });
   });
 });
