@@ -1296,16 +1296,29 @@ export function ConversationView({
                   {message.status === "failed" && (
                     <span className="send-status failed-status">
                       {message.error || "发送失败"}
+                      {!(message as LocalMessage).permanent && (
+                        <button
+                          onClick={() =>
+                            void sendMessage(
+                              message as LocalMessage,
+                              chatStore.generation,
+                            )
+                          }
+                        >
+                          <RefreshCw size={11} />
+                          重试
+                        </button>
+                      )}
                       <button
                         onClick={() =>
-                          void sendMessage(
-                            message as LocalMessage,
-                            chatStore.generation,
+                          chatStore.discardLocal(
+                            conversation.id,
+                            message.clientMessageId,
                           )
                         }
                       >
-                        <RefreshCw size={11} />
-                        重试
+                        <Trash2 size={11} />
+                        删除
                       </button>
                     </span>
                   )}

@@ -23,9 +23,11 @@ import {
   Sparkles,
   Users,
 } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@teamie/api-client";
+import { chatStore } from "./store";
 import { useAuth } from "./auth";
+import { clearSessionExpired, readSessionExpired } from "./session-notice";
 import { errorText } from "./chat";
 import { Avatar, Button, Logo, Notice, PublicHeader } from "./ui";
 import { passwordPolicyError } from "./password-policy";
@@ -571,6 +573,10 @@ export function Login() {
   const errorId = useId();
   const pending = useRef(false);
   const active = useRef(false);
+  const [sessionExpired] = useState(readSessionExpired);
+  useEffect(() => {
+    clearSessionExpired();
+  }, []);
   useLayoutEffect(() => {
     resetPageScroll();
   }, [register]);
@@ -705,6 +711,11 @@ export function Login() {
           {!register && params.get("passwordChanged") === "1" && (
             <Notice kind="success">密码已修改，请重新登录。</Notice>
           )}
+          {!register &&
+            sessionExpired &&
+            params.get("passwordChanged") !== "1" && (
+              <Notice kind="info">登录已失效，请重新登录。</Notice>
+            )}
           <form
             onSubmit={submit}
             key={register ? `register:${inviteCode}` : "login"}
@@ -813,6 +824,7 @@ export function Join() {
   const { inviteCode = "" } = useParams();
   const { user, loading } = useAuth();
   const navigate = useNavigate();
+  const client = useQueryClient();
   const query = useQuery({
     queryKey: ["invite", inviteCode],
     queryFn: () => api.invite(inviteCode),
@@ -826,6 +838,8 @@ export function Join() {
     setError("");
     try {
       const result = await api.acceptInvite(inviteCode);
+      result.conversations.forEach((c) => chatStore.addConversation(c));
+      await client.invalidateQueries({ queryKey: ["bootstrap"] });
       navigate(
         result.conversations[0]
           ? `/app/w/${result.workspace.id}/c/${result.conversations[0].id}`

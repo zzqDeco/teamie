@@ -179,6 +179,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         attempt = 0;
         setConnection("connected");
         void sync();
+        retryTransientFailures(chatStore.generation);
       };
       ws.onmessage = (event) => {
         try {
@@ -322,9 +323,19 @@ export function useChat() {
   if (!ctx) throw new Error("Chat provider missing");
   return ctx;
 }
+export function isNetworkError(error: unknown) {
+  return (
+    error instanceof TypeError ||
+    (error instanceof Error && /failed to fetch|load failed|networkerror/i.test(error.message))
+  );
+}
 export function errorText(error: unknown) {
-  if (!(error instanceof ApiError))
-    return error instanceof Error ? error.message : "请求失败，请稍后重试";
+  if (!(error instanceof ApiError)) {
+    if (error instanceof DOMException && error.name === "AbortError")
+      return "请求已取消";
+    if (isNetworkError(error)) return "网络连接失败，请检查网络后重试。";
+    return "请求失败，请稍后重试。";
+  }
   const messages: Record<string, string> = {
     invalid_credentials: "邮箱或密码不正确，请重新输入。",
     invalid_current_password: "当前密码不正确，请重新输入。",
@@ -344,11 +355,34 @@ export function errorText(error: unknown) {
     invalid_attachment: "文件已过期或不可用，请重新上传。",
     invalid_filename: "文件名无效，请重命名后上传。",
     email_exists: "此邮箱已注册，请直接登录。",
+    email_in_use: "此邮箱已注册，请直接登录。",
+    invalid_email: "邮箱格式不正确，请检查后重试。",
+    invalid_name: "名称格式不正确，请修改后重试。",
+    invalid_request: "请求内容无效，请检查后重试。",
+    invalid_query: "搜索关键词无效，请调整后重试（最多 200 个字符）。",
+    upload_conflict: "这个文件与之前的上传记录冲突，请重新选择文件。",
+    attachment_upload_unavailable: "文件已过期或已被移除，请重新上传。",
+    attachment_upload_not_found: "没有找到这次上传，请重新上传。",
+    invalid_reset_link: "重置链接无效或已过期，请联系管理员重新生成。",
+    session_changed: "登录状态已变化，请刷新页面后重试。",
   };
-  return messages[error.code] || error.message;
+  if (messages[error.code]) return messages[error.code];
+  if (error.status >= 500) return "服务暂时不可用，请稍后重试。";
+  if (error.status === 404) return "内容不存在或已无法访问。";
+  return "请求失败，请稍后重试。";
+}
+export function isPermanentSendError(error: unknown) {
+  return (
+    error instanceof ApiError &&
+    error.status !== 429 &&
+    error.status < 500 &&
+    error.status !== 401
+  );
 }
 export async function sendMessage(message: Message, generation: number) {
-  chatStore.merge([{ ...message, status: "sending" }]);
+  chatStore.merge([
+    { ...message, status: "sending", error: undefined, permanent: undefined },
+  ]);
   try {
     const response = await api.send(message.conversationId, {
       clientMessageId: message.clientMessageId,
@@ -364,7 +398,21 @@ export async function sendMessage(message: Message, generation: number) {
   } catch (error) {
     if (chatStore.generation === generation)
       chatStore.merge([
-        { ...message, status: "failed", error: errorText(error) },
+        {
+          ...message,
+          status: "failed",
+          error: errorText(error),
+          ...(isPermanentSendError(error) ? { permanent: true } : {}),
+        },
       ]);
   }
+}
+// Transient failures retry with the same clientMessageId, which the server
+// treats idempotently, so a retry after a lost response cannot duplicate.
+export function retryTransientFailures(generation: number) {
+  if (chatStore.generation !== generation) return;
+  for (const messages of Object.values(chatStore.getSnapshot().messages))
+    for (const message of messages)
+      if (message.status === "failed" && !message.permanent)
+        void sendMessage(message, generation);
 }

@@ -369,13 +369,13 @@ describe("conversation search", () => {
   });
   it("handles authorization failures, retries and rejects overlong Unicode queries before sending", async () => {
     vi.mocked(api.searchMessages).mockRejectedValueOnce(
-      new ApiError(404, "not_found", "会话已不可访问"),
+      new ApiError(404, "not_found", "Conversation not found"),
     );
     await render(view());
     await type("报告");
     await tick();
     expect(host.querySelector('[role="alert"]')?.textContent).toBe(
-      "会话已不可访问",
+      "内容不存在或已无法访问。",
     );
     expect(host.querySelectorAll(".search-result-list > li")).toHaveLength(0);
     vi.mocked(api.searchMessages).mockResolvedValue({

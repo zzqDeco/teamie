@@ -109,7 +109,8 @@ function AgentProfileDialog({
         : [],
   );
   const [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [dirty, setDirty] = useState(false);
   async function submit(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -152,8 +153,9 @@ function AgentProfileDialog({
     <Modal
       title={initialAgent ? "编辑 Agent 资料" : "创建 Agent"}
       onClose={onClose}
+      dismissible={!busy && !dirty}
     >
-      <form onSubmit={submit}>
+      <form onSubmit={submit} onInput={() => setDirty(true)}>
         <Notice>{error}</Notice>
         <label>
           Agent 名称
@@ -373,6 +375,20 @@ export function AgentDetail({ agentId }: { agentId: string }) {
       <div className="agents-empty">
         <LoaderCircle size={24} className="spin" />
         <p>正在加载 Agent 资料…</p>
+      </div>
+    );
+  if (
+    query.error &&
+    !(query.error instanceof ApiError && [403, 404].includes(query.error.status))
+  )
+    return (
+      <div className="unavailable-view">
+        <span className="large-symbol">
+          <Bot size={38} />
+        </span>
+        <h2>Agent 资料暂时无法加载</h2>
+        <p>{agentFailureText(query.error)}</p>
+        <Button onClick={() => void query.refetch()}>重新加载</Button>
       </div>
     );
   if (

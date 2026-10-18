@@ -35,6 +35,7 @@ import { PlatformUsers } from "./platform-users";
 import { ModelGatewaySettings } from "./model-gateway";
 import { AgentDetail, MyAgents } from "./agents";
 import { AccountMenu } from "./account-menu";
+import { ConnectionBanner } from "./connection-banner";
 import { ConversationActions } from "./conversation-actions";
 import { WorkspaceMembers } from "./members";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
@@ -138,6 +139,7 @@ export function Shell() {
     directoryMatch = useMatch("/app/w/:workspaceId/members"),
     legacyDirectoryMatch = useMatch("/app/w/:workspaceId/agents"),
     agentMatch = useMatch("/app/agents/:agentId"),
+    workspaceRootMatch = useMatch("/app/w/:workspaceId"),
     location = useLocation(),
     navigate = useNavigate();
   const sidebarFocus = useRef({ open: false, pathname: location.pathname });
@@ -431,6 +433,38 @@ export function Shell() {
         replace
       />
     );
+  if (workspaceRootMatch && chat.data) {
+    const id = workspaceRootMatch.params.workspaceId!;
+    const inWorkspace = Object.values(snapshot.conversations).filter(
+      (c) => c.workspaceId === id,
+    );
+    const first =
+      inWorkspace.find((c) => c.type === "channel") || inWorkspace[0];
+    return (
+      <Navigate
+        to={first ? route(first) : `/app/w/${id}/members`}
+        replace
+      />
+    );
+  }
+  if (
+    chat.data &&
+    !match &&
+    !directoryMatch &&
+    !legacyDirectoryMatch &&
+    !agentMatch &&
+    ![
+      "/app",
+      "/app/agents",
+      "/app/settings",
+      "/app/profile",
+      "/app/admin",
+      "/app/admin/gateway",
+      "/app/admin/users",
+      "/app/attention",
+    ].includes(location.pathname.replace(/\/+$/, "") || "/app")
+  )
+    return <Navigate to="/app" replace />;
   return (
     <div
       className={`app-shell ${sidebar ? "sidebar-open" : ""} ${details ? "details-open" : ""}`}
@@ -607,6 +641,12 @@ export function Shell() {
           (overlayMembers && details && !isManagement && !!conversation)
         }
       >
+        <ConnectionBanner
+          connection={chat.connection}
+          syncError={chat.syncError}
+          showSyncError={!conversation || isManagement || isAttentionPage}
+          onRetry={chat.sync}
+        />
         {error && !removing && <Notice>{error}</Notice>}
         {isAttentionPage ? (
           <AttentionInbox key={user!.id} onMenu={() => setSidebar(true)} />

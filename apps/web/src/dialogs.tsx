@@ -50,6 +50,7 @@ export function WorkspaceDialog({
       expiresAt: string;
     } | null>(null),
     [copied, setCopied] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const memberQuery = useQuery({
     queryKey: ["members", user!.id, workspace?.id],
     queryFn: () => api.members(workspace!.id),
@@ -131,8 +132,13 @@ export function WorkspaceDialog({
     }
   }
   return (
-    <Modal title={titles[kind][0]} subtitle={titles[kind][1]} onClose={onClose}>
-      <form onSubmit={submit}>
+    <Modal
+      title={titles[kind][0]}
+      subtitle={titles[kind][1]}
+      onClose={onClose}
+      dismissible={!busy && !dirty && !(invite && !copied)}
+    >
+      <form onSubmit={submit} onInput={() => setDirty(true)}>
         <Notice>{error}</Notice>
         {kind === "workspace" && (
           <>

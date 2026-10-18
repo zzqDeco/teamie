@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef } from "react";
+import { useCallback, useEffect, useId, useRef } from "react";
 import type { ButtonHTMLAttributes, ReactNode, RefObject } from "react";
 import { LoaderCircle, X } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -155,22 +155,31 @@ export function Modal({
   children,
   onClose,
   className = "",
+  dismissible = true,
 }: {
   title: string;
   subtitle?: string;
   children: ReactNode;
   onClose: () => void;
   className?: string;
+  dismissible?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const subtitleId = useId();
-  useOverlayFocus(ref, true, onClose);
+  const dismissibleRef = useRef(dismissible);
+  useEffect(() => {
+    dismissibleRef.current = dismissible;
+  }, [dismissible]);
+  const dismiss = useCallback(() => {
+    if (dismissibleRef.current) onClose();
+  }, [onClose]);
+  useOverlayFocus(ref, true, dismiss);
   return (
     <div
       className="modal-backdrop"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
+        if (event.target === event.currentTarget) dismiss();
       }}
     >
       <div
