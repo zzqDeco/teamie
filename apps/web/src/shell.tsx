@@ -718,6 +718,9 @@ export function Shell() {
             key={`${user!.id}:${conversation.id}:${initialMessageId}`}
             conversation={conversation}
             initialMessageId={initialMessageId}
+            onClearMessageTarget={() =>
+              navigate(location.pathname, { replace: true })
+            }
             members={members}
             onMembers={() => {
               setSidebar(false);

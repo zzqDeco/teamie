@@ -49,6 +49,12 @@ export function trimMentionDraft(body: string, mentions: Mention[]) {
   };
 }
 
+// Safari dispatches the candidate-confirming keydown after compositionend with
+// isComposing=false but keyCode 229, so both signals mark an IME keystroke.
+export function isComposingKey(event: KeyboardEvent<HTMLElement>) {
+  return event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229;
+}
+
 export function MentionText({
   body,
   mentions = [],
@@ -168,7 +174,8 @@ export function MentionInput({
     onTyping?.(text);
   }
   function keyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (!event.nativeEvent.isComposing && !composing && candidates.length) {
+    if (composing || isComposingKey(event)) return;
+    if (candidates.length) {
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
         setSelection({
@@ -218,7 +225,10 @@ export function MentionInput({
           onTyping?.(e.target.value);
         }}
         onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
-        onBlur={() => setDismissed(signature)}
+        onBlur={() => {
+          setComposing(false);
+          setDismissed(signature);
+        }}
         onCompositionStart={() => setComposing(true)}
         onCompositionEnd={(e) => {
           setComposing(false);

@@ -42,11 +42,26 @@ import type {
 import { useAuth } from "./auth";
 import { errorText, sendMessage, useChat, useChatState } from "./chat";
 import { chatStore, reconcileMessages } from "./store";
-import { MentionInput, MentionText, trimMentionDraft } from "./mentions";
+import {
+  isComposingKey,
+  MentionInput,
+  MentionText,
+  trimMentionDraft,
+} from "./mentions";
 import type { LocalMessage } from "./store";
 import { Avatar, Button, date, IconButton, Modal, Notice, time } from "./ui";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
 import { ConversationSearch } from "./conversation-search";
+
+function sameMentions(a: Mention[], b: Mention[]) {
+  return (
+    a.length === b.length &&
+    a.every(
+      (m, i) =>
+        m.userId === b[i].userId && m.start === b[i].start && m.end === b[i].end,
+    )
+  );
+}
 
 export function conversationName(
   conversation: Conversation,
@@ -134,6 +149,7 @@ export function ConversationView({
   membersOpen,
   onMenu,
   initialMessageId = "",
+  onClearMessageTarget,
 }: {
   conversation: Conversation;
   members: Member[];
@@ -141,6 +157,7 @@ export function ConversationView({
   membersOpen: boolean;
   onMenu: () => void;
   initialMessageId?: string;
+  onClearMessageTarget?: () => void;
 }) {
   const { user } = useAuth();
   const { data, syncError, sync, sendTyping, typing } = useChat();
@@ -153,6 +170,16 @@ export function ConversationView({
     attachments.blocked || (attachments.files.length > 0 && !uploadsEnabled);
   const snapshot = useChatState();
   const allMessages = snapshot.messages[conversation.id] || [];
+  // The view remounts per conversation, so this freezes what was unread when
+  // it opened; acknowledging messages must not erase the divider mid-read.
+  const [entry] = useState(() => ({
+    readSeq: conversation.readSeq,
+    lastSeq: conversation.lastSeq,
+  }));
+  const entryHasUnread = entry.readSeq > 0 && entry.lastSeq > entry.readSeq;
+  const unreadAnchorPending = useRef(entryHasUnread && !initialMessageId);
+  const [latestLoaded, setLatestLoaded] = useState(false);
+  const [seenSeq, setSeenSeq] = useState(0);
   const [located, setLocated] = useState<LocalMessage[] | null>(null);
   const [resolvedTargets, setResolvedTargets] = useState<
     Record<string, Message>
@@ -321,6 +348,7 @@ export function ConversationView({
         : null;
       chatStore.merge(page.messages);
       setHasMore(page.hasMore);
+      setLatestLoaded(true);
     } catch (e) {
       if (token === chatStore.generation && operation === navigation.current)
         setError(errorText(e));
@@ -473,6 +501,48 @@ export function ConversationView({
     },
     [conversation.id],
   );
+  const loadUnreadContext = useCallback(async () => {
+    const seq = entry.readSeq + 1;
+    const token = chatStore.generation;
+    const operation = ++navigation.current;
+    const current = () =>
+      token === chatStore.generation && operation === navigation.current;
+    unreadAnchorPending.current = false;
+    setAtBottom(false);
+    setLoading(false);
+    setLoadingOlder(false);
+    setLocating(true);
+    acknowledgement.current = null;
+    historyBefore.current = null;
+    setHasMore(false);
+    initialScroll.current = false;
+    setError("");
+    try {
+      const page = await api.messagesAround(conversation.id, seq);
+      if (!current()) return;
+      const context = reconcileMessages(
+        page.messages,
+        (chatStore.getSnapshot().messages[conversation.id] || []).filter(
+          (message) => page.messages.some((m) => m.id === message.id),
+        ),
+      );
+      setLocated(context);
+      historyBefore.current = context[0]
+        ? { seq: context[0].seq, generation: token }
+        : null;
+      setHasMore((historyBefore.current?.seq ?? 1) > 1);
+      const target = context.find((m) => !m.status && m.seq >= seq);
+      if (target) setHighlightId(target.id);
+    } catch (e) {
+      if (current()) setError(errorText(e));
+    } finally {
+      if (current()) setLocating(false);
+    }
+  }, [conversation.id, entry.readSeq]);
+  function returnToLatest() {
+    if (initialMessageId && onClearMessageTarget) onClearMessageTarget();
+    else void fetchLatest();
+  }
   async function locate(id: string) {
     if (!messages.some((message) => message.id === id)) return loadContext(id);
     navigation.current++;
@@ -521,26 +591,78 @@ export function ConversationView({
   }, [atBottom]);
   const latest = messages.filter((m) => !m.status).at(-1)?.seq || 0;
   const tailId = messages.at(-1)?.id;
+  const firstUnread =
+    entry.readSeq > 0
+      ? messages.find(
+          (m) =>
+            !m.status &&
+            m.seq > entry.readSeq &&
+            m.seq <= entry.lastSeq &&
+            m.senderId !== userId,
+        )?.id
+      : undefined;
+  const earliestLoaded = messages.find((m) => !m.status)?.seq || 0;
+  const unreadBeforeWindow =
+    entryHasUnread &&
+    latestLoaded &&
+    !located &&
+    !locating &&
+    earliestLoaded > entry.readSeq + 1;
+  // A message counts as seen once its bottom edge has been inside the
+  // viewport; reads advance only through that point, never past unseen rows.
+  const measureSeen = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const limit = el.getBoundingClientRect().bottom + 2;
+    const rows = el.querySelectorAll<HTMLElement>("article[data-seq]");
+    for (let i = rows.length - 1; i >= 0; i--) {
+      if (rows[i].getBoundingClientRect().bottom <= limit) {
+        const seq = Number(rows[i].dataset.seq);
+        setSeenSeq((old) => Math.max(old, seq));
+        return;
+      }
+    }
+  }, []);
   useEffect(() => {
-    if (!loading && (atBottom || initialScroll.current)) {
-      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+    if (loading) return;
+    const el = scrollRef.current;
+    if (unreadAnchorPending.current && !located) {
+      const anchor = firstUnread
+        ? document.getElementById(`message-${firstUnread}`)
+        : null;
+      if (el && anchor && el.contains(anchor)) {
+        unreadAnchorPending.current = false;
+        initialScroll.current = false;
+        el.scrollTop +=
+          anchor.getBoundingClientRect().top -
+          el.getBoundingClientRect().top -
+          56;
+        setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
+        measureSeen();
+        return;
+      }
+      if (latestLoaded) unreadAnchorPending.current = false;
+    }
+    if (atBottom || initialScroll.current) {
+      el?.scrollTo({ top: el.scrollHeight });
       initialScroll.current = false;
     }
-  }, [loading, tailId, atBottom]);
+    measureSeen();
+  }, [loading, tailId, atBottom, firstUnread, latestLoaded, located, measureSeen]);
+  const readTarget = located ? 0 : Math.min(seenSeq, latest);
   useEffect(() => {
     if (
-      !atBottom ||
+      !readTarget ||
       searchOpen ||
       !visible ||
       loading ||
-      !latest ||
-      latest <= Math.max(lastRead.current, conversation.readSeq)
+      readTarget <= Math.max(lastRead.current, conversation.readSeq)
     )
       return;
     const timer = setTimeout(() => {
       if (generation !== chatStore.generation) return;
       void api
-        .read(conversation.id, latest)
+        .read(conversation.id, readTarget)
         .then((result) => {
           if (generation === chatStore.generation) {
             lastRead.current = result.readSeq;
@@ -553,8 +675,7 @@ export function ConversationView({
     }, 600);
     return () => clearTimeout(timer);
   }, [
-    latest,
-    atBottom,
+    readTarget,
     searchOpen,
     visible,
     loading,
@@ -636,18 +757,50 @@ export function ConversationView({
       mentions: [],
       replyToId: "",
     });
-    if (located) void fetchLatest();
+    if (located) returnToLatest();
     setAtBottom(true);
     lastTyping.current = 0;
     sendTyping(conversation.id, false);
     inputRef.current?.focus();
   }
+  const canEdit = !!data?.capabilities["im.message.edit"];
+  function startEdit(message: Message) {
+    setActionMessageId("");
+    setEditing(message);
+    setEditBody(message.body);
+    setEditMentions(message.mentions || []);
+    setActionError("");
+  }
   function keyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (isComposingKey(event)) return;
+    if (
+      event.key === "ArrowUp" &&
+      !event.shiftKey &&
+      !event.altKey &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !body &&
+      canEdit
+    ) {
+      const own = [...messages]
+        .reverse()
+        .find(
+          (m) =>
+            m.senderId === userId &&
+            !m.status &&
+            !m.retractedAt &&
+            (m.body || m.attachments?.length),
+        );
+      if (own) {
+        event.preventDefault();
+        startEdit(own);
+      }
+      return;
+    }
     if (
       !window.matchMedia("(pointer: coarse)").matches &&
       event.key === "Enter" &&
-      !event.shiftKey &&
-      !event.nativeEvent.isComposing
+      !event.shiftKey
     ) {
       event.preventDefault();
       submit();
@@ -656,11 +809,18 @@ export function ConversationView({
   async function edit(event: FormEvent) {
     event.preventDefault();
     if (!editing || (!editBody.trim() && !editing.attachments?.length)) return;
+    const draft = trimMentionDraft(editBody, editMentions);
+    if (
+      draft.body === editing.body &&
+      sameMentions(draft.mentions, editing.mentions || [])
+    ) {
+      setEditing(null);
+      return;
+    }
     const token = chatStore.generation;
     setActionBusy(true);
     setActionError("");
     try {
-      const draft = trimMentionDraft(editBody, editMentions);
       const result = await api.edit(
         conversation.id,
         editing.id,
@@ -694,9 +854,6 @@ export function ConversationView({
   }
   const closeRetract = useCallback(() => setRetracting(null), [setRetracting]);
   const otherTyping = typing[conversation.id] || [];
-  const firstUnread = messages.find(
-    (m) => !m.status && m.seq > conversation.readSeq,
-  )?.id;
   return (
     <section
       className="conversation-view"
@@ -777,7 +934,21 @@ export function ConversationView({
       {(located || locating) && (
         <div className="located-banner" role="status">
           <span>{locating ? "正在定位消息…" : "消息上下文"}</span>
-          <button onClick={() => void fetchLatest()}>返回最新消息</button>
+          <button onClick={returnToLatest}>返回最新消息</button>
+        </div>
+      )}
+      {unreadBeforeWindow && (
+        <div className="unread-jump-banner" role="status">
+          <span>
+            {entry.lastSeq - entry.readSeq > 99
+              ? "99+"
+              : entry.lastSeq - entry.readSeq}{" "}
+            条新消息，部分在更早的位置
+          </span>
+          <button onClick={() => void loadUnreadContext()}>
+            <ArrowUp size={14} />
+            跳到第一条未读
+          </button>
         </div>
       )}
       <div
@@ -788,6 +959,7 @@ export function ConversationView({
           setAtBottom(
             !located && el.scrollHeight - el.scrollTop - el.clientHeight < 80,
           );
+          measureSeen();
         }}
       >
         {!loading && !messages.length && !error && (
@@ -874,13 +1046,14 @@ export function ConversationView({
                   <span>{date(message.createdAt)}</span>
                 </div>
               )}
-              {message.id === firstUnread && conversation.readSeq > 0 && (
+              {message.id === firstUnread && (
                 <div className="unread-divider">
                   <span>以下是新消息</span>
                 </div>
               )}
               <article
                 id={`message-${message.id}`}
+                data-seq={message.status ? undefined : message.seq}
                 tabIndex={-1}
                 className={`message ${highlightId === message.id ? "located" : ""} ${compact ? "compact" : ""} ${message.status || ""} ${message.retractedAt ? "retracted" : ""} ${actionMessageId === message.id ? "actions-open" : ""}`}
               >
@@ -951,7 +1124,17 @@ export function ConversationView({
                         required={!editing.attachments?.length}
                         aria-label="编辑消息内容"
                         onKeyDown={(e) => {
-                          if (e.key === "Escape") setEditing(null);
+                          if (e.key === "Escape") {
+                            setEditing(null);
+                            inputRef.current?.focus();
+                          } else if (
+                            e.key === "Enter" &&
+                            !e.shiftKey &&
+                            !window.matchMedia("(pointer: coarse)").matches
+                          ) {
+                            e.preventDefault();
+                            e.currentTarget.form?.requestSubmit();
+                          }
                         }}
                       />
                       <Notice>{actionError}</Notice>
@@ -1047,17 +1230,10 @@ export function ConversationView({
                         >
                           <CornerUpLeft size={15} />
                         </IconButton>
-                        {message.senderId === user!.id &&
-                          data?.capabilities["im.message.edit"] && (
+                        {message.senderId === user!.id && canEdit && (
                             <IconButton
                               label="编辑消息"
-                              onClick={() => {
-                                setActionMessageId("");
-                                setEditing(message);
-                                setEditBody(message.body);
-                                setEditMentions(message.mentions || []);
-                                setActionError("");
-                              }}
+                              onClick={() => startEdit(message)}
                             >
                               <Pencil size={14} />
                             </IconButton>
