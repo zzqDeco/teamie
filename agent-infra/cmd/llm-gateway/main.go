@@ -1,7 +1,6 @@
 package main
 
 import (
-	"teamie/backend/pkg/observability"
 	"context"
 	hertzserver "github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/kitex/server"
@@ -10,6 +9,7 @@ import (
 	"teamie/agent-infra/internal/gateway"
 	"teamie/agent-protocol/kitex_gen/agent/modelgatewayservice"
 	"teamie/agent-protocol/modeltransport"
+	"teamie/backend/pkg/observability"
 	"time"
 )
 
@@ -28,7 +28,7 @@ func main() {
 	store, e := gateway.Open(ctx, api.Env("DATABASE_URL", ""))
 	cancel()
 	if e != nil {
-		observability.Fatal("gateway database initialization failed", nil)
+		observability.Fatal("gateway database initialization failed", e)
 	}
 	defer store.DB.Close()
 	origin := api.Env("APP_ORIGIN", "")
@@ -37,18 +37,18 @@ func main() {
 	}
 	auth, e := api.NewAdminAuth(api.Env("IDENTITY_RPC_ADDR", "identity:8881"), origin)
 	if e != nil {
-		observability.Fatal("identity client initialization failed", nil)
+		observability.Fatal("identity client initialization failed", e)
 	}
 	service := gateway.New(store, crypto, token)
 	addr, e := net.ResolveTCPAddr("tcp", api.Env("RPC_ADDR", ":8886"))
 	if e != nil {
-		observability.Fatal("invalid RPC_ADDR", nil)
+		observability.Fatal("invalid RPC_ADDR", e)
 	}
 	rpc := modelgatewayservice.NewServer(service, server.WithServiceAddr(addr), observability.RPCServer())
 	defer rpc.Stop()
 	go func() {
-		if rpc.Run() != nil {
-			observability.Fatal("gateway RPC stopped", nil)
+		if e := rpc.Run(); e != nil {
+			observability.Fatal("gateway RPC stopped", e)
 		}
 	}()
 	go func() {

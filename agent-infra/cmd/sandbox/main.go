@@ -1,7 +1,6 @@
 package main
 
 import (
-	"teamie/backend/pkg/observability"
 	"context"
 	"github.com/cloudwego/kitex/pkg/remote/codec"
 	"github.com/cloudwego/kitex/server"
@@ -10,6 +9,7 @@ import (
 	"teamie/agent-infra/internal/sandbox"
 	"teamie/agent-protocol/kitex_gen/agent/sandboxservice"
 	"teamie/backend/pkg/imlimits"
+	"teamie/backend/pkg/observability"
 	"time"
 )
 
@@ -30,17 +30,17 @@ func main() {
 	e = service.Recover(ctx)
 	cancel()
 	if e != nil {
-		observability.Fatal("sandbox durable task recovery failed", nil)
+		observability.Fatal("sandbox durable task recovery failed", e)
 	}
 	addr, e := net.ResolveTCPAddr("tcp", api.Env("RPC_ADDR", ":8887"))
 	if e != nil {
-		observability.Fatal("invalid RPC_ADDR", nil)
+		observability.Fatal("invalid RPC_ADDR", e)
 	}
 	rpc := sandboxservice.NewServer(service, server.WithServiceAddr(addr), observability.RPCServer(), server.WithCodec(codec.NewDefaultCodecWithSizeLimit(imlimits.AttachmentRequestBytes)))
 	defer rpc.Stop()
 	go func() {
-		if rpc.Run() != nil {
-			observability.Fatal("sandbox RPC stopped", nil)
+		if e := rpc.Run(); e != nil {
+			observability.Fatal("sandbox RPC stopped", e)
 		}
 	}()
 	api.Serve(api.Env("HTTP_ADDR", ":8087"), service.Routes())

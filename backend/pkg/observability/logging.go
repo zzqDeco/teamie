@@ -258,7 +258,9 @@ func sensitiveKey(key string) bool {
 // Fatal keeps startup failures structured and excludes error strings that may
 // contain connection URLs or production configuration. Existing exit behavior
 // is preserved. It is never used for recoverable request/worker errors.
-func Fatal(message string, err error) { zap.L().Fatal(message, zap.Error(err)) }
+func Fatal(message string, err error) {
+	zap.L().Fatal(message, zap.String("event.action", "service-failed"), zap.String("event.outcome", "failure"), zap.Error(err))
+}
 
 // ID returns an opaque diagnostic identifier only when bounded and free from
 // control characters; untrusted provider/tool identifiers are hashed otherwise.
