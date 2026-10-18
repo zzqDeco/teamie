@@ -235,8 +235,8 @@ services:
   llm-gateway:
     <<: *app
     image: ${LLM_GATEWAY_IMAGE:?manifest image required}
-    mem_limit: 192m
-    memswap_limit: 192m
+    mem_limit: 128m
+    memswap_limit: 128m
     networks: [private, egress]
     environment:
       HTTP_ADDR: :8086
@@ -247,7 +247,7 @@ services:
       COOKIE_SECURE: "true"
       GATEWAY_MASTER_KEY: ${GATEWAY_MASTER_KEY:?64 hex master key required}
       GATEWAY_RUNTIME_TOKEN: ${GATEWAY_RUNTIME_TOKEN:?gateway runtime credential required}
-      GOMEMLIMIT: 144MiB
+      GOMEMLIMIT: 96MiB
       GOMAXPROCS: "1"
     depends_on:
       postgres: {condition: service_healthy}
