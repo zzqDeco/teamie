@@ -775,7 +775,9 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 				}
 				ok, _ := loop.Push(in, adk.WithPushStrategy(func(_ context.Context, tc *adk.TurnContext[Input, *schema.AgenticMessage]) []adk.PushOption[Input, *schema.AgenticMessage] {
 					if relevantInput(in, tc) {
-						return []adk.PushOption[Input, *schema.AgenticMessage]{adk.WithPreempt[Input, *schema.AgenticMessage](adk.AnySafePoint)}
+						// Complete the model's tool round and durable receipts before
+						// handing new input to the next serial turn.
+						return []adk.PushOption[Input, *schema.AgenticMessage]{adk.WithPreempt[Input, *schema.AgenticMessage](adk.AfterToolCalls)}
 					}
 					return nil
 				}))
