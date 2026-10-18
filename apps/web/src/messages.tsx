@@ -180,6 +180,8 @@ export function ConversationView({
   const unreadAnchorPending = useRef(entryHasUnread && !initialMessageId);
   const [latestLoaded, setLatestLoaded] = useState(false);
   const [seenSeq, setSeenSeq] = useState(0);
+  const [unreadContext, setUnreadContext] = useState(false);
+  const editPending = useRef(false);
   const [located, setLocated] = useState<LocalMessage[] | null>(null);
   const [resolvedTargets, setResolvedTargets] = useState<
     Record<string, Message>
@@ -332,6 +334,7 @@ export function ConversationView({
     historyBefore.current = null;
     setHasMore(false);
     setLocated(null);
+    setUnreadContext(false);
     setHighlightId("");
     setLocating(false);
     setLoadingOlder(false);
@@ -483,6 +486,7 @@ export function ConversationView({
             operation,
           };
         setLocated(context);
+        setUnreadContext(false);
         historyBefore.current = context[0]
           ? { seq: context[0].seq, generation: token }
           : null;
@@ -502,7 +506,7 @@ export function ConversationView({
     [conversation.id],
   );
   const loadUnreadContext = useCallback(async () => {
-    const seq = entry.readSeq + 1;
+    const seq = conversation.readSeq + 1;
     const token = chatStore.generation;
     const operation = ++navigation.current;
     const current = () =>
@@ -527,6 +531,7 @@ export function ConversationView({
         ),
       );
       setLocated(context);
+      setUnreadContext(true);
       historyBefore.current = context[0]
         ? { seq: context[0].seq, generation: token }
         : null;
@@ -538,7 +543,7 @@ export function ConversationView({
     } finally {
       if (current()) setLocating(false);
     }
-  }, [conversation.id, entry.readSeq]);
+  }, [conversation.id, conversation.readSeq]);
   function returnToLatest() {
     if (initialMessageId && onClearMessageTarget) onClearMessageTarget();
     else void fetchLatest();
@@ -607,7 +612,9 @@ export function ConversationView({
     latestLoaded &&
     !located &&
     !locating &&
-    earliestLoaded > entry.readSeq + 1;
+    conversation.readSeq > 0 &&
+    conversation.readSeq < conversation.lastSeq &&
+    earliestLoaded > conversation.readSeq + 1;
   // A message counts as seen once its bottom edge has been inside the
   // viewport; reads advance only through that point, never past unseen rows.
   const measureSeen = useCallback(() => {
@@ -649,7 +656,23 @@ export function ConversationView({
     }
     measureSeen();
   }, [loading, tailId, atBottom, firstUnread, latestLoaded, located, measureSeen]);
-  const readTarget = located ? 0 : Math.min(seenSeq, latest);
+  const readBase = conversation.readSeq;
+  // Read cursors are cumulative, so the target may only cover a gap-free run
+  // of loaded messages directly after the cursor; unloaded history stays
+  // unread. A never-read conversation (cursor 0) keeps the historic behaviour
+  // of acknowledging what is visible, as it has no prior reading position.
+  let contiguousEnd = readBase;
+  if (readBase === 0) contiguousEnd = Number.MAX_SAFE_INTEGER;
+  else
+    for (const m of messages) {
+      if (m.status || m.seq <= contiguousEnd) continue;
+      if (m.seq !== contiguousEnd + 1) break;
+      contiguousEnd = m.seq;
+    }
+  const readTarget =
+    located && !unreadContext
+      ? 0
+      : Math.min(seenSeq, latest, contiguousEnd);
   useEffect(() => {
     if (
       !readTarget ||
@@ -780,6 +803,9 @@ export function ConversationView({
       !event.metaKey &&
       !event.ctrlKey &&
       !body &&
+      !replyToId &&
+      attachments.files.length === 0 &&
+      !located &&
       canEdit
     ) {
       const own = [...messages]
@@ -808,6 +834,7 @@ export function ConversationView({
   }
   async function edit(event: FormEvent) {
     event.preventDefault();
+    if (editPending.current) return;
     if (!editing || (!editBody.trim() && !editing.attachments?.length)) return;
     const draft = trimMentionDraft(editBody, editMentions);
     if (
@@ -818,6 +845,7 @@ export function ConversationView({
       return;
     }
     const token = chatStore.generation;
+    editPending.current = true;
     setActionBusy(true);
     setActionError("");
     try {
@@ -833,6 +861,7 @@ export function ConversationView({
     } catch (e) {
       if (token === chatStore.generation) setActionError(errorText(e));
     } finally {
+      editPending.current = false;
       setActionBusy(false);
     }
   }
@@ -940,9 +969,9 @@ export function ConversationView({
       {unreadBeforeWindow && (
         <div className="unread-jump-banner" role="status">
           <span>
-            {entry.lastSeq - entry.readSeq > 99
+            {conversation.lastSeq - conversation.readSeq > 99
               ? "99+"
-              : entry.lastSeq - entry.readSeq}{" "}
+              : conversation.lastSeq - conversation.readSeq}{" "}
             条新消息，部分在更早的位置
           </span>
           <button onClick={() => void loadUnreadContext()}>

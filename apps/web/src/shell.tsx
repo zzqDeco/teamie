@@ -285,6 +285,15 @@ export function Shell() {
   const messageTarget =
     new URLSearchParams(location.search).get("message") || "";
   const initialMessageId = messageTarget.length <= 128 ? messageTarget : "";
+  // Clearing ?message= must not remount the view (that would drop staged
+  // uploads); only a new conversation or a new non-empty target remounts it.
+  const viewConversationId = match?.params.conversationId || "";
+  const [viewKey, setViewKey] = useState({ conversation: "", target: "" });
+  if (
+    viewKey.conversation !== viewConversationId ||
+    (initialMessageId && initialMessageId !== viewKey.target)
+  )
+    setViewKey({ conversation: viewConversationId, target: initialMessageId });
   const isManagement =
     isSettings ||
     isAdminPage ||
@@ -715,7 +724,7 @@ export function Shell() {
           workspace &&
           conversation.workspaceId === workspace.id ? (
           <ConversationView
-            key={`${user!.id}:${conversation.id}:${initialMessageId}`}
+            key={`${user!.id}:${conversation.id}:${viewKey.target}`}
             conversation={conversation}
             initialMessageId={initialMessageId}
             onClearMessageTarget={() =>

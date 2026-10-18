@@ -156,7 +156,7 @@ describe("unread entry", () => {
     expect(host.querySelector(".unread-divider")?.nextElementSibling?.id).toBe("message-m4");
   });
 
-  it("offers a jump to the first unread message when it lies before the latest page", async () => {
+  it("never acknowledges across unloaded history and reads inside the unread jump context", async () => {
     const conversation = conversationWith(2, 120);
     chatStore.replaceConversations([conversation]);
     page = Array.from({ length: 50 }, (_, i) => message(71 + i));
@@ -164,6 +164,9 @@ describe("unread entry", () => {
       messages: [1, 2, 3, 4, 5].map((seq) => message(seq)), hasMore: false,
     });
     await show(conversation);
+    await elapse(700);
+    // Rows 71..120 are visible, but 3..70 were never loaded or shown.
+    expect(api.read).not.toHaveBeenCalled();
     const banner = host.querySelector(".unread-jump-banner");
     expect(banner?.textContent).toContain("99+");
     await act(async () => { banner!.querySelector("button")!.click(); });
@@ -171,6 +174,8 @@ describe("unread entry", () => {
     expect(around).toHaveBeenCalledWith("room", 3);
     expect(host.querySelector(".located-banner")?.textContent).toContain("消息上下文");
     expect(host.querySelector(".message.located")?.id).toBe("message-m3");
+    await elapse(700);
+    expect(api.read).toHaveBeenCalledWith("room", 5);
   });
 
   it("clears the message deep link when returning to the latest messages", async () => {
@@ -208,5 +213,37 @@ describe("editing shortcuts", () => {
     await key(editor()!, { key: "Enter" });
     await act(async () => { await Promise.resolve(); });
     expect(edit).toHaveBeenCalledWith("room", "m2", "hello again", []);
+  });
+
+  it("ignores ArrowUp while a reply is selected and sends one PATCH for repeated Enter", async () => {
+    const conversation = conversationWith(0, 2);
+    page = [message(1), message(2, user.id, "hello")];
+    let finish!: () => void;
+    const edit = vi.spyOn(api, "edit").mockImplementation(
+      (_c, _m, body) =>
+        new Promise((resolve) => {
+          finish = () => resolve({ message: { ...message(2, user.id, body), editedAt: "2026-10-17T00:05:00Z" } });
+        }),
+    );
+    await show(conversation);
+    vi.spyOn(api, "message").mockResolvedValue({ message: message(1) });
+    const editor = () => host.querySelector<HTMLTextAreaElement>('textarea[aria-label="编辑消息内容"]');
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>('[aria-label="回复 Peer"]')!.click();
+    });
+    await key(composer(), { key: "ArrowUp" });
+    expect(editor()).toBeNull();
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>('[aria-label="取消回复"]')!.click();
+    });
+
+    await key(composer(), { key: "ArrowUp" });
+    await type(editor()!, "edited once");
+    await key(editor()!, { key: "Enter" });
+    await key(editor()!, { key: "Enter" });
+    await key(editor()!, { key: "Enter" });
+    expect(edit).toHaveBeenCalledTimes(1);
+    await act(async () => { finish(); await Promise.resolve(); });
+    expect(editor()).toBeNull();
   });
 });
