@@ -243,11 +243,30 @@ class AgentManifestTest(unittest.TestCase):
         current=copy.deepcopy(previous)
         current["version"]="v0.3.14"
         current["source"]["ref"]="refs/heads/release/v0.3.14"
-        current["schema"]=dict(manifest.SCHEMA_V2)
+        current["schema"]={"identity":3,"chat":5,"agent_control":1,"agent_runtime":8,"gateway":2}
         self.assertEqual(current["schema"]["agent_runtime"],8)
         manifest.check_transition(current,previous,previous)
         with self.assertRaises(ValueError):
             manifest.check_transition(previous,current,rollback=True)
+
+    def test_event_driven_schema_rejects_explicit_and_automatic_old_writer_rollback(self):
+        previous=self.modern()
+        previous["version"]="v0.3.15"
+        previous["source"]["ref"]="refs/heads/release/v0.3.15"
+        previous["schema"]={"identity":3,"chat":5,"agent_control":1,"agent_runtime":8,"gateway":2}
+        current=copy.deepcopy(previous)
+        current["version"]="v0.3.16"
+        current["source"]["ref"]="refs/heads/release/v0.3.16"
+        current["schema"]=dict(manifest.SCHEMA_V2)
+        self.assertEqual(current["schema"]["agent_runtime"],9)
+        self.assertEqual(current["featureFlags"],previous["featureFlags"])
+        self.assertEqual(current["storage"],previous["storage"])
+        manifest.check_transition(current,previous,previous)
+        with self.assertRaisesRegex(ValueError,"identical schema versions"):
+            manifest.check_transition(previous,current,rollback=True)
+        # deploy.sh restore_previous uses this same compatibility entry point.
+        with self.assertRaisesRegex(ValueError,"identical schema versions"):
+            manifest.compatible(current,previous)
 
 
 class ProductionConfigTest(unittest.TestCase):
