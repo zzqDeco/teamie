@@ -46,6 +46,17 @@ else:
         self.assertFalse(logs.matches({}, {"trace": "id"}))
         self.assertFalse(logs.matches({"custom": "body"}, {"run": "id"}))
 
+    def test_event_lookup_joins_scalar_ingestion_and_run_start_arrays(self):
+        ingestion = {"custom.input.event_id": "event-a"}
+        run_start = {"custom.input.event_ids": ["event-a", "event-b"], "custom.runtime.run_id": "run-a"}
+        nested = {"custom": {"input": {"event_ids": ["event-a", "event-b"]}}}
+        for event in (ingestion, run_start, nested):
+            self.assertTrue(logs.matches(event, {"event": "event-a"}))
+            self.assertFalse(logs.matches(event, {"event": "event"}))
+        self.assertTrue(logs.matches(run_start, {"event": "event-b", "run": "run-a"}))
+        self.assertFalse(logs.matches(run_start, {"event": "event-b", "run": "other-run"}))
+        self.assertFalse(logs.matches({"custom.input.event_ids": "event-a"}, {"event": "event"}))
+
     def test_rejects_unbounded_or_commandlike_cli_arguments(self):
         for args in (("--tail", "100001"), ("--since", "$(private-command)"), ("--trace", "not-a-trace"), ("--service", "agent-runtime;command")):
             with self.assertRaises(SystemExit):

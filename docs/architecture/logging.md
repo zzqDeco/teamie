@@ -121,7 +121,9 @@ python3 ops/logs.py --service sandbox --since 2h --task TASK_ID
 ```
 
 The reader is read-only, calls Docker without shell interpolation, parses each
-JSON line and matches exact identifiers. It never loads production environment
+JSON line and matches exact identifiers. An event lookup matches both ingestion's
+scalar event ID and the bounded input-ID list on Run-start records, enabling
+event-to-Run correlation. It never loads production environment
 files or databases. Query a shorter interval if Docker's existing rotation has
 already removed older events. Long-term/off-host log retention is not provided
 by this change.

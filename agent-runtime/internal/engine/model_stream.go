@@ -209,12 +209,16 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 			}
 		}
 		stage = "stream-read"
-		if !done {
-			fail(&ModelError{Code: "gateway_stream_interrupted", Retry: true, Stage: stage, Reason: "terminal_frame_missing", Cause: scanner.Err()})
+		if err := scanner.Err(); err != nil {
+			reason := "transport_read_failed"
+			if errors.Is(err, bufio.ErrTooLong) {
+				reason = "transport_frame_limit_exceeded"
+			}
+			fail(&ModelError{Code: "gateway_stream_interrupted", Retry: true, Stage: stage, Reason: reason, Cause: err})
 			return
 		}
-		if err := scanner.Err(); err != nil {
-			fail(&ModelError{Code: "gateway_stream_interrupted", Retry: true, Stage: stage, Reason: "transport_read_failed", Cause: err})
+		if !done {
+			fail(&ModelError{Code: "gateway_stream_interrupted", Retry: true, Stage: stage, Reason: "terminal_frame_missing"})
 			return
 		}
 		stage = "stream-terminal"

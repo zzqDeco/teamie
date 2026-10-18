@@ -22,7 +22,15 @@ def field(event, key):
 
 
 def matches(event, filters):
-    return all(field(event, FIELDS[key]) == value for key, value in filters.items() if value is not None)
+    for key, value in filters.items():
+        if value is None or field(event, FIELDS[key]) == value:
+            continue
+        if key == "event":
+            inputs = field(event, "custom.input.event_ids")
+            if isinstance(inputs, list) and value in inputs:
+                continue
+        return False
+    return True
 
 
 def main(argv=None):

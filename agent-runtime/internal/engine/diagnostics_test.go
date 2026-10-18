@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -19,6 +20,7 @@ import (
 	"go.uber.org/zap"
 	wire "teamie/agent-protocol/kitex_gen/agent"
 	"teamie/agent-protocol/kitex_gen/agent/modelgatewayservice"
+	"teamie/agent-protocol/modeltransport"
 	"teamie/backend/pkg/observability"
 )
 
@@ -59,6 +61,8 @@ func TestStreamDiagnosticsIdentifyFailureStageAndPreservePrivacy(t *testing.T) {
 		{"validate", "validate-result", "unsupported_content_block", "invalid_upstream_response", 0},
 		{"empty", "stream-terminal", "empty_stream", "invalid_upstream_response", 0},
 		{"interrupted", "stream-read", "terminal_frame_missing", "gateway_stream_interrupted", 0},
+		{"read-error", "stream-read", "transport_read_failed", "gateway_stream_interrupted", 0},
+		{"frame-limit", "stream-read", "transport_frame_limit_exceeded", "gateway_stream_interrupted", 0},
 		{"persist", "persist-receipt", "", "lease_lost", 0},
 		{"success", "persist-receipt", "", "", 1},
 	} {
@@ -74,6 +78,11 @@ func TestStreamDiagnosticsIdentifyFailureStageAndPreservePrivacy(t *testing.T) {
 			fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				_, _ = io.Copy(io.Discard, r.Body)
 				w.Header().Set("Content-Type", "application/x-ndjson")
+				if test.name == "read-error" {
+					// A valid chunk followed by a truncated HTTP body is a read
+					// failure, distinct from a clean EOF without a terminal frame.
+					w.Header().Set("Content-Length", "10000")
+				}
 				emit := func(message *schema.AgenticMessage) {
 					raw, err := (&schema.HumanReadableSerializer{}).Marshal(message)
 					if err != nil {
@@ -86,6 +95,9 @@ func TestStreamDiagnosticsIdentifyFailureStageAndPreservePrivacy(t *testing.T) {
 					return &schema.AgenticMessage{Role: schema.AgenticRoleTypeAssistant, ContentBlocks: []*schema.ContentBlock{block}}
 				}
 				switch test.name {
+				case "frame-limit":
+					_, _ = io.WriteString(w, strings.Repeat("x", modeltransport.MaxHTTPStreamFrameBytes+1))
+					return
 				case "transport":
 					_, _ = io.WriteString(w, `{"invalid-private-frame`+"\n")
 					return
@@ -102,7 +114,7 @@ func TestStreamDiagnosticsIdentifyFailureStageAndPreservePrivacy(t *testing.T) {
 				default:
 					emit(chunk(schema.NewContentBlockChunk(&schema.AssistantGenText{Text: "private-model-text"}, &schema.StreamingMeta{Index: 0})))
 				}
-				if test.name == "interrupted" {
+				if test.name == "interrupted" || test.name == "read-error" {
 					return
 				}
 				if test.name == "persist" {
@@ -145,6 +157,12 @@ func TestStreamDiagnosticsIdentifyFailureStageAndPreservePrivacy(t *testing.T) {
 				if !errors.As(err, &model) || model.Cause == nil {
 					t.Fatal("native concat cause discarded")
 				}
+			}
+			if test.name == "read-error" && !errors.Is(err, io.ErrUnexpectedEOF) {
+				t.Fatal("underlying transport failure discarded", err)
+			}
+			if test.name == "frame-limit" && !errors.Is(err, bufio.ErrTooLong) {
+				t.Fatal("underlying framing failure discarded", err)
 			}
 			if event["trace.id"] == nil || event["span.id"] == nil || event["event.duration"] == nil {
 				t.Fatal("uncorrelated diagnostic", event)
