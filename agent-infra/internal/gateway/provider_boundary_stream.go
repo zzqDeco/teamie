@@ -145,7 +145,11 @@ func (b *guardedStreamBody) Read(p []byte) (int, error) {
 			continue
 		}
 		if strings.HasPrefix(line, "data:") {
-			b.data.WriteString(strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " "))
+			data := strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " ")
+			if b.data.Len()+len(data)+1 > MaxResponseBytes {
+				return 0, api.Err(502, "invalid_upstream_response", "Provider stream event exceeded limits")
+			}
+			b.data.WriteString(data)
 			b.data.WriteByte('\n')
 		}
 	}

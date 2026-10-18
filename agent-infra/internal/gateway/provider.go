@@ -111,7 +111,14 @@ func normalizeMode(raw, model string, streaming bool) ([]byte, error) {
 	return normalizeModeWithOutputLimit(raw, model, streaming, 4096)
 }
 
-func normalizeModeWithOutputLimit(raw, model string, streaming bool, outputLimit int) ([]byte, error) {
+func inputMessageLimit(limits ...int) int {
+	if len(limits) == 0 || limits[0] == 0 {
+		return modeltransport.LegacyMaxInputMessages
+	}
+	return min(limits[0], modeltransport.MaxInputMessages)
+}
+
+func normalizeModeWithOutputLimit(raw, model string, streaming bool, outputLimit int, messageLimits ...int) ([]byte, error) {
 	if len(raw) > MaxRequestBytes {
 		return nil, api.Err(413, "request_too_large", "Model request is too large")
 	}
@@ -131,7 +138,7 @@ func normalizeModeWithOutputLimit(raw, model string, streaming bool, outputLimit
 		}
 	}
 	var messages []map[string]json.RawMessage
-	if json.Unmarshal(m["messages"], &messages) != nil || len(messages) == 0 || len(messages) > modeltransport.MaxInputMessages {
+	if json.Unmarshal(m["messages"], &messages) != nil || len(messages) == 0 || len(messages) > inputMessageLimit(messageLimits...) {
 		return nil, api.Err(400, "invalid_request", "Invalid chat message count")
 	}
 	for _, msg := range messages {

@@ -115,7 +115,7 @@ func TestLongContextCrossesActualHertzAndOfficialProviderBoundaries(t *testing.T
 			if len(raw) <= 528384 {
 				t.Fatal("fixture does not exercise the former HTTP body ceiling")
 			}
-			body, _ := json.Marshal(modeltransport.CallRequest{OwnerID: "owner", AgentID: "agent", SessionID: "session", RunID: "long-run", RequestJSON: raw})
+			body, _ := json.Marshal(modeltransport.CallRequest{OwnerID: "owner", AgentID: "agent", SessionID: "session", RunID: "long-run", RequestJSON: raw, MessageLimit: modeltransport.MaxInputMessages})
 			path := modeltransport.GeneratePath
 			if streaming {
 				path = modeltransport.StreamPath
@@ -170,5 +170,56 @@ func TestLongContextCrossesActualHertzAndOfficialProviderBoundaries(t *testing.T
 				t.Fatal("large output was truncated", err)
 			}
 		})
+	}
+}
+
+func TestFrozenMessageLimitsReachNativeAndProviderAdmission(t *testing.T) {
+	messages := make([]*schema.AgenticMessage, 129)
+	providerMessages := make([]map[string]string, len(messages))
+	for i := range messages {
+		messages[i] = schema.UserAgenticMessage("small historical record")
+		providerMessages[i] = map[string]string{"role": "user", "content": "small historical record"}
+	}
+	providerRaw, _ := json.Marshal(map[string]any{"messages": providerMessages})
+	for _, limit := range []int{0, modeltransport.MaxInputMessages} {
+		_, err := normalizeModeWithOutputLimit(string(providerRaw), "model", false, modeltransport.MaxOutputTokens, limit)
+		if (err == nil) != (limit > 0) {
+			t.Fatal("provider boundary ignored the frozen count", limit, err)
+		}
+		for _, streaming := range []bool{false, true} {
+			t.Run(fmt.Sprintf("limit=%d/stream=%t", limit, streaming), func(t *testing.T) {
+				var calls atomic.Int64
+				s, unused := streamFixtureService(t, func(w http.ResponseWriter, r *http.Request) {
+					calls.Add(1)
+					if streaming {
+						w.Header().Set("Content-Type", "text/event-stream")
+						fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", finalDelta)
+					} else {
+						w.Header().Set("Content-Type", "application/json")
+						fmt.Fprint(w, `{"id":"count-fixture","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}`)
+					}
+				})
+				unused.Close()
+				raw := nativeRequest(t, messages, model.Options{}, streaming)
+				if len(raw) > 262144 {
+					t.Fatal("historical message fixture exceeded the old byte limit")
+				}
+				body, _ := json.Marshal(modeltransport.CallRequest{OwnerID: "owner", AgentID: "agent", SessionID: "session", RunID: "count-run", RequestJSON: raw, MessageLimit: limit})
+				path := modeltransport.GeneratePath
+				if streaming {
+					path = modeltransport.StreamPath
+				}
+				request := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+				request.Header.Set("Authorization", "Bearer "+testToken)
+				recorder := httptest.NewRecorder()
+				s.Routes(api.AdminAuth{}).ServeHTTP(recorder, request)
+				if limit == 0 && (calls.Load() != 0 || !strings.Contains(recorder.Body.String(), "invalid_request")) {
+					t.Fatal("historical count rejection changed into a provider call", recorder.Body.String())
+				}
+				if limit > 0 && (calls.Load() != 1 || strings.Contains(recorder.Body.String(), "errorCode")) {
+					t.Fatal("new count admission did not reach the provider", recorder.Body.String())
+				}
+			})
+		}
 	}
 }

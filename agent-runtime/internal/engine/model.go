@@ -240,6 +240,17 @@ func modelResultByteLimit(run *Run) int {
 	return 65536
 }
 
+func modelInputMessageLimit(run *Run) int {
+	if contextProfile(run) == contextProfileV1 {
+		budget, err := ParseContextBudgetSnapshot(run.ContextBudget)
+		if err == nil && budget.Version >= 6 {
+			return modeltransport.MaxInputMessages
+		}
+	}
+	// Omit the field so historical private HTTP envelopes remain unchanged.
+	return 0
+}
+
 // The default preserves the exact encoding and cap of historical Run requests.
 // Only the new frozen policy opts into the larger output ceiling.
 func agenticRequest(messages []*schema.AgenticMessage, opts *model.Options, streaming bool, outputLimits ...int) ([]byte, error) {

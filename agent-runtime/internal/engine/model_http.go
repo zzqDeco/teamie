@@ -36,7 +36,11 @@ func (c *gatewayHTTPClient) Chat(ctx context.Context, in *wire.GatewayChatReques
 	if in == nil {
 		return nil, errors.New("invalid gateway request")
 	}
-	body, err := json.Marshal(modeltransport.CallRequest{OwnerID: in.OwnerId, AgentID: in.AgentId, SessionID: in.SessionId, RunID: in.RunId, RequestJSON: in.RequestJson})
+	call := modeltransport.CallRequest{OwnerID: in.OwnerId, AgentID: in.AgentId, SessionID: in.SessionId, RunID: in.RunId, RequestJSON: in.RequestJson}
+	if run, err := CurrentRun(ctx); err == nil {
+		call.MessageLimit = modelInputMessageLimit(run)
+	}
+	body, err := json.Marshal(call)
 	if err != nil {
 		return nil, err
 	}

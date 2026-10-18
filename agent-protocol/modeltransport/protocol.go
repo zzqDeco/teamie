@@ -15,6 +15,7 @@ const StreamPath = GeneratePath + "/stream"
 const MaxRequestBytes = 16 << 20
 const MaxResponseBytes = 8 << 20
 const MaxOutputTokens = 131072
+const LegacyMaxInputMessages = 128
 const MaxInputMessages = 65536
 const MaxProviderStreamBytes = 128 << 20
 const MaxHTTPStreamBytes = 256 << 20
@@ -29,6 +30,16 @@ type CallRequest struct {
 	SessionID   string `json:"sessionId"`
 	RunID       string `json:"runId"`
 	RequestJSON string `json:"requestJson"`
+	// Zero preserves historical admission. New Runs explicitly carry their
+	// frozen input-message ceiling outside the hashed native request.
+	MessageLimit int `json:"messageLimit,omitempty"`
+}
+
+func (r CallRequest) InputMessageLimit() int {
+	if r.MessageLimit == 0 {
+		return LegacyMaxInputMessages
+	}
+	return r.MessageLimit
 }
 
 // Messages use Eino's lossless HumanReadableSerializer; Options contain common

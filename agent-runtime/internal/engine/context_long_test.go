@@ -69,6 +69,10 @@ func TestLongContextOutputEncodingPreservesAllHistoricalRunCaps(t *testing.T) {
 		}
 		raw, _ := json.Marshal(budget)
 		run := &Run{ContextProfile: contextProfileV1, ContextBudget: raw}
+		count := modelInputMessageLimit(run)
+		if (version < 6 && count != 0) || (version >= 6 && count != modeltransport.MaxInputMessages) {
+			t.Fatal("message count policy was not frozen with the Run", version, count)
+		}
 		requested := budget.OutputReserveTokens
 		actual, err := agenticRequestForRun(run, messages, &model.Options{MaxTokens: &requested}, false)
 		if err != nil {
@@ -256,7 +260,7 @@ func TestLongNativeResponsePersistsAndReplaysWithoutAnotherRequest(t *testing.T)
 				var call modeltransport.CallRequest
 				var request modeltransport.Request
 				var opts model.Options
-				if json.NewDecoder(r.Body).Decode(&call) != nil || len(call.RequestJSON) <= contextTransportLimit || json.Unmarshal([]byte(call.RequestJSON), &request) != nil || json.Unmarshal(request.Options, &opts) != nil || opts.MaxTokens == nil || *opts.MaxTokens != 131072 {
+				if json.NewDecoder(r.Body).Decode(&call) != nil || call.MessageLimit != modeltransport.MaxInputMessages || len(call.RequestJSON) <= contextTransportLimit || json.Unmarshal([]byte(call.RequestJSON), &request) != nil || json.Unmarshal(request.Options, &opts) != nil || opts.MaxTokens == nil || *opts.MaxTokens != 131072 {
 					t.Error("runtime did not transmit the full long request and frozen output reserve")
 				}
 				if streaming {
