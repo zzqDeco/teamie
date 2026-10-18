@@ -196,8 +196,8 @@ services:
   agent-runtime:
     <<: *app
     image: ${AGENT_RUNTIME_IMAGE:?manifest image required}
-    mem_limit: 128m
-    memswap_limit: 128m
+    mem_limit: 256m
+    memswap_limit: 256m
     environment:
       HTTP_ADDR: :8085
       RPC_ADDR: :8885
@@ -216,7 +216,7 @@ services:
       SANDBOX_RPC_ADDR: sandbox:8887
       SANDBOX_RUNTIME_TOKEN: ${SANDBOX_RUNTIME_TOKEN:?sandbox runtime credential required}
       FEATURE_FLAGS_FILE: /etc/teamie/feature-flags.json
-      GOMEMLIMIT: 96MiB
+      GOMEMLIMIT: 192MiB
       GOMAXPROCS: "1"
     volumes:
       - ${FEATURE_FLAGS_PATH:-/srv/teamie/config/feature-flags.json}:/etc/teamie/feature-flags.json:ro
@@ -235,8 +235,8 @@ services:
   llm-gateway:
     <<: *app
     image: ${LLM_GATEWAY_IMAGE:?manifest image required}
-    mem_limit: 64m
-    memswap_limit: 64m
+    mem_limit: 128m
+    memswap_limit: 128m
     networks: [private, egress]
     environment:
       HTTP_ADDR: :8086
@@ -247,7 +247,7 @@ services:
       COOKIE_SECURE: "true"
       GATEWAY_MASTER_KEY: ${GATEWAY_MASTER_KEY:?64 hex master key required}
       GATEWAY_RUNTIME_TOKEN: ${GATEWAY_RUNTIME_TOKEN:?gateway runtime credential required}
-      GOMEMLIMIT: 40MiB
+      GOMEMLIMIT: 96MiB
       GOMAXPROCS: "1"
     depends_on:
       postgres: {condition: service_healthy}

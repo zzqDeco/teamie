@@ -12,7 +12,7 @@ import (
 func (p *ContextPipeline) summaryInput(ctx context.Context, system, instruction *schema.AgenticMessage, original []*schema.AgenticMessage) ([]*schema.AgenticMessage, error) {
 	input := append([]*schema.AgenticMessage{system}, original...)
 	input = append(input, instruction)
-	m, err := measureContext(input, nil, p.cfg.Budget.SummaryOutputTokens, false)
+	m, err := p.cfg.Budget.measureContext(input, nil, p.cfg.Budget.SummaryOutputTokens, false)
 	if err != nil {
 		return nil, err
 	}
@@ -31,8 +31,19 @@ func (p *ContextPipeline) summarizePrefix(ctx context.Context, prefix []*schema.
 	for {
 		chunks := [][]*schema.AgenticMessage{}
 		chunk := []*schema.AgenticMessage{}
-		for _, unit := range contextUnits(current) {
-			m, err := measureContext(unit, nil, p.cfg.Budget.SummaryOutputTokens, false)
+		if p.cfg.Budget.Version >= 6 {
+			var err error
+			chunks, err = p.longContextSummaryChunks(ctx, current)
+			if err != nil {
+				return "", err
+			}
+		}
+		units := contextUnits(current)
+		if p.cfg.Budget.Version >= 6 {
+			units = nil
+		}
+		for _, unit := range units {
+			m, err := p.cfg.Budget.measureContext(unit, nil, p.cfg.Budget.SummaryOutputTokens, false)
 			if err != nil {
 				return "", err
 			}
@@ -44,7 +55,7 @@ func (p *ContextPipeline) summarizePrefix(ctx context.Context, prefix []*schema.
 				unit = []*schema.AgenticMessage{notice}
 			}
 			candidate := append(append([]*schema.AgenticMessage{}, chunk...), unit...)
-			m, err = measureContext(candidate, nil, p.cfg.Budget.SummaryOutputTokens, false)
+			m, err = p.cfg.Budget.measureContext(candidate, nil, p.cfg.Budget.SummaryOutputTokens, false)
 			if err != nil {
 				return "", err
 			}
@@ -72,11 +83,11 @@ func (p *ContextPipeline) summarizePrefix(ctx context.Context, prefix []*schema.
 		if len(next) == 1 {
 			return agenticText(next[0]), nil
 		}
-		before, err := measureContext(current, nil, p.cfg.Budget.SummaryOutputTokens, false)
+		before, err := p.cfg.Budget.measureContext(current, nil, p.cfg.Budget.SummaryOutputTokens, false)
 		if err != nil {
 			return "", err
 		}
-		after, err := measureContext(next, nil, p.cfg.Budget.SummaryOutputTokens, false)
+		after, err := p.cfg.Budget.measureContext(next, nil, p.cfg.Budget.SummaryOutputTokens, false)
 		if err != nil {
 			return "", err
 		}
@@ -123,8 +134,8 @@ func (p *ContextPipeline) summarizeChunk(ctx context.Context, chunk []*schema.Ag
 	if archiveErr != nil {
 		return nil, archiveErr
 	}
-	before, _ := measureContext(chunk, nil, p.cfg.Budget.SummaryOutputTokens, false)
-	after, _ := measureContext([]*schema.AgenticMessage{notice}, nil, p.cfg.Budget.SummaryOutputTokens, false)
+	before, _ := p.cfg.Budget.measureContext(chunk, nil, p.cfg.Budget.SummaryOutputTokens, false)
+	after, _ := p.cfg.Budget.measureContext([]*schema.AgenticMessage{notice}, nil, p.cfg.Budget.SummaryOutputTokens, false)
 	if after.EstimatedTokens >= before.EstimatedTokens && after.TransportBytes >= before.TransportBytes {
 		return nil, err
 	}
@@ -149,7 +160,11 @@ func (p *ContextPipeline) archiveUnit(ctx context.Context, unit []*schema.Agenti
 			break
 		}
 	}
-	out := schema.UserAgenticMessage(contextReadNotice(ref) + "\nQuoted data preview:\n" + preview + "\nTEAMIE_SOURCE_REFERENCES " + string(raw))
+	noticeText := contextReadNotice(ref) + "\nQuoted data preview:\n" + preview
+	if p.cfg.Budget.Version < 3 {
+		noticeText += "\nTEAMIE_SOURCE_REFERENCES " + string(raw)
+	}
+	out := schema.UserAgenticMessage(noticeText)
 	request := false
 	for _, message := range unit {
 		if isContextRequest(message) {
@@ -168,9 +183,12 @@ func (p *ContextPipeline) fitTail(ctx context.Context, fixed, tail []*schema.Age
 }
 
 func (p *ContextPipeline) fitTailTo(ctx context.Context, fixed, tail []*schema.AgenticMessage, tools []*schema.ToolInfo, target int) ([]*schema.AgenticMessage, error) {
+	if p.cfg.Budget.Version >= 3 {
+		return p.fitCurrentInputs(ctx, fixed, tail, tools, target)
+	}
 	fits := func(m ContextMeasurement) bool { return p.cfg.Budget.fits(m) && m.EstimatedTokens <= target }
 	out := append(append([]*schema.AgenticMessage{}, fixed...), tail...)
-	m, err := measureContext(out, tools, p.cfg.Budget.OutputReserveTokens, false)
+	m, err := p.cfg.Budget.measureContext(out, tools, p.cfg.Budget.OutputReserveTokens, false)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +202,7 @@ func (p *ContextPipeline) fitTailTo(ctx context.Context, fixed, tail []*schema.A
 			policy = append(policy, msg)
 		}
 	}
-	base, err := measureContext(policy, tools, p.cfg.Budget.OutputReserveTokens, false)
+	base, err := p.cfg.Budget.measureContext(policy, tools, p.cfg.Budget.OutputReserveTokens, false)
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +211,7 @@ func (p *ContextPipeline) fitTailTo(ctx context.Context, fixed, tail []*schema.A
 	}
 	units := contextUnits(out[len(policy):])
 	for i, unit := range units {
-		measure, err := measureContext(unit, nil, p.cfg.Budget.OutputReserveTokens, false)
+		measure, err := p.cfg.Budget.measureContext(unit, nil, p.cfg.Budget.OutputReserveTokens, false)
 		if err != nil {
 			return nil, err
 		}
@@ -210,7 +228,7 @@ func (p *ContextPipeline) fitTailTo(ctx context.Context, fixed, tail []*schema.A
 		for _, part := range units {
 			candidate = append(candidate, part...)
 		}
-		m, err = measureContext(candidate, tools, p.cfg.Budget.OutputReserveTokens, false)
+		m, err = p.cfg.Budget.measureContext(candidate, tools, p.cfg.Budget.OutputReserveTokens, false)
 		if err != nil {
 			return nil, err
 		}

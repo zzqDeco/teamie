@@ -89,7 +89,7 @@ func (s *Service) streamHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 	defer func() { s.mu.Lock(); delete(s.active, index); s.mu.Unlock() }()
 	start := time.Now()
-	prompt, completion, e := s.Provider.Stream(ctx, c, key, in.RequestJSON, func(raw string) error { return emit(StreamEvent{Type: "chunk", ResponseJSON: raw}) })
+	prompt, completion, e := s.Provider.Stream(ctx, c, key, in.RequestJSON, func(raw string) error { return emit(StreamEvent{Type: "chunk", ResponseJSON: raw}) }, in.InputMessageLimit())
 	status := "success"
 	if e != nil {
 		status = failed(e).GetErrorCode()

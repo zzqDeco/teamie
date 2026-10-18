@@ -126,7 +126,7 @@ func TestNativeHTTPGenerateCancelStopsSilentHeadersOrBodyWithoutReceipt(t *testi
 func TestGatewayHTTPResponseLimitAccountsForDoubleEncodedNativeJSON(t *testing.T) {
 	for _, tooLarge := range []bool{false, true} {
 		t.Run(map[bool]string{false: "maximum_escaped_response", true: "over_limit"}[tooLarge], func(t *testing.T) {
-			n := 2 << 20
+			n := modeltransport.MaxResponseBytes
 			if tooLarge {
 				n += 4096
 			}

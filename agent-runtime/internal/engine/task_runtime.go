@@ -340,7 +340,10 @@ func (w *workerTasks) notifications(ctx context.Context, l *Lease) error {
 }
 func (e *Engine) cancelAgentTasks(ctx context.Context, id string) {
 	s := &TaskStore{Store: e.Store, AgentID: id}
-	rows, err := e.Store.DB.Query(ctx, `SELECT id FROM runtime_tasks WHERE agent_id=$1 AND snapshot->>'Status' NOT IN ('completed','failed','canceled')`, id)
+	// An executor may fail on principal revocation before cancellation reaches
+	// the daemon. Failed/canceled SDK state is not proof that its child stopped.
+	// Confirm physical shutdown without rewriting terminal Runtime receipts.
+	rows, err := e.Store.DB.Query(ctx, `SELECT id FROM runtime_tasks WHERE agent_id=$1 AND snapshot->>'Status'<>'completed'`, id)
 	if err != nil {
 		return
 	}
@@ -479,7 +482,7 @@ func (e *Engine) confirmTaskStopped(ctx context.Context, store *TaskStore, id st
 }
 func (e *Engine) cancelRunTasks(ctx context.Context, agent, runID string) {
 	store := &TaskStore{Store: e.Store, AgentID: agent}
-	rows, err := e.Store.DB.Query(ctx, `SELECT id FROM runtime_tasks WHERE agent_id=$1 AND run_id=$2 AND snapshot->>'Status' NOT IN ('completed','failed','canceled')`, agent, runID)
+	rows, err := e.Store.DB.Query(ctx, `SELECT id FROM runtime_tasks WHERE agent_id=$1 AND run_id=$2 AND snapshot->>'Status'<>'completed'`, agent, runID)
 	if err != nil {
 		return
 	}

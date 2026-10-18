@@ -215,6 +215,45 @@ func contextRetrievalMessage(name, call, wire string) *schema.AgenticMessage {
 	return &schema.AgenticMessage{Role: schema.AgenticRoleTypeUser, ContentBlocks: []*schema.ContentBlock{schema.NewContentBlock(&schema.FunctionToolResult{Name: name, CallID: call, Content: []*schema.FunctionToolResultContentBlock{{Type: schema.FunctionToolResultContentBlockTypeText, Text: &schema.UserInputText{Text: wire}}}})}}
 }
 
+func TestEmptyContextSearchCanBeArchivedWithItsActualRequestSource(t *testing.T) {
+	for _, historical := range []bool{false, true} {
+		t.Run(fmt.Sprintf("historical=%t", historical), func(t *testing.T) {
+			f := newContextArchiveFixture(t)
+			origin := f.input.ConversationID
+			wire, err := invokeContextTool(contextToolNode(t, f.a), f.ctx(), "empty-search", "context_search", map[string]any{"query": "no-matching-private-artifact"})
+			if err != nil || !strings.Contains(wire, `"hits":[]`) {
+				t.Fatal("fixture search is not an authenticated empty result", wire, err)
+			}
+			if historical {
+				if err = f.s.FinishRun(f.ctx(), f.l, f.run, "completed", "", false); err != nil {
+					t.Fatal(err)
+				}
+				f.input.ConversationID = uuid.NewString()
+				f.run = f.newRun(t, "2")
+				f.input = f.run.Inputs[0]
+			}
+			result := contextRetrievalMessage("context_search", "empty-search", wire)
+			ref, err := f.a.ArchiveTranscript(f.ctx(), []*schema.AgenticMessage{result})
+			if err != nil {
+				t.Fatal("a valid empty search stopped historical compaction", err)
+			}
+			artifact, err := f.a.load(f.ctx(), f.run, ref)
+			if err != nil || len(artifact.Sources) != 1 || artifact.Sources[0].ConversationID != origin || len(artifact.ArtifactRefs) != 0 || artifact.Text != "[]" {
+				t.Fatal("empty result acquired data or the wrong request source", artifact, err)
+			}
+			if _, err = f.a.ArchiveTranscript(f.ctx(), []*schema.AgenticMessage{contextRetrievalMessage("context_search", "forged-call", wire)}); !errors.Is(err, errContextUnavailable) {
+				t.Fatal("uncommitted retrieval acquired trusted provenance", err)
+			}
+			f.mu.Lock()
+			f.deniedConversations[origin] = true
+			f.mu.Unlock()
+			if _, err = f.a.Read(f.ctx(), ref, 0, 0); !errors.Is(err, errContextUnavailable) {
+				t.Fatal("empty-result archive bypassed its original source ACL", err)
+			}
+		})
+	}
+}
+
 func TestContextRetrievalCompactionInheritsObservationParentsAndRevocation(t *testing.T) {
 	for _, name := range []string{"context_read", "context_search"} {
 		for _, historical := range []bool{false, true} {

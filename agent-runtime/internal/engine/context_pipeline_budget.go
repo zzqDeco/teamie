@@ -12,7 +12,7 @@ import (
 	"teamie/agent-protocol/modeltransport"
 )
 
-const contextBudgetVersion = 1
+const contextBudgetVersion = 6
 const contextCounterVersion = "teamie-visible-estimate-v1"
 const contextTransportLimit = 262144
 
@@ -36,18 +36,39 @@ type ContextBudgetSnapshot struct {
 }
 
 func makeContextBudgetSnapshot(window int) (ContextBudgetSnapshot, error) {
+	return makeContextBudgetSnapshotVersion(window, contextBudgetVersion)
+}
+
+func makeContextBudgetSnapshotVersion(window, version int) (ContextBudgetSnapshot, error) {
 	if window < 4096 || window > 2_000_000 {
 		return ContextBudgetSnapshot{}, errors.New("invalid context window")
 	}
 	reserve := min(2048, window/4)
+	if version == 2 {
+		reserve = min(8192, window/4)
+	} else if version == 3 || version == 4 || version == 5 {
+		reserve = min(4096, window/4)
+	} else if version == 6 {
+		reserve = min(modeltransport.MaxOutputTokens, window/4)
+	} else if version != 1 {
+		return ContextBudgetSnapshot{}, errors.New("unsupported context budget version")
+	}
 	input := window - reserve - 256
-	return ContextBudgetSnapshot{
-		Version: contextBudgetVersion, CounterVersion: contextCounterVersion,
+	budget := ContextBudgetSnapshot{
+		Version: version, CounterVersion: contextCounterVersion,
 		ContextWindowTokens: window, InputTokenLimit: input, TriggerTokens: input * 3 / 4,
-		OutputReserveTokens: reserve, SummaryOutputTokens: reserve,
+		OutputReserveTokens: reserve, SummaryOutputTokens: min(2048, reserve),
 		TransportLimitBytes: contextTransportLimit, TransportTargetBytes: contextTransportLimit * 3 / 4,
 		TailTokenLimit: min(6000, input/3), ToolResultByteLimit: min(16384, max(1024, input/4)),
-	}, nil
+	}
+	if version >= 6 {
+		budget.TransportLimitBytes = modeltransport.MaxRequestBytes
+		budget.TransportTargetBytes = budget.TransportLimitBytes * 3 / 4
+		budget.SummaryOutputTokens = min(reserve, min(8192, max(2048, input/32)))
+		budget.TailTokenLimit = min(262144, input/3)
+		budget.ToolResultByteLimit = min(262144, max(1024, input/4))
+	}
+	return budget, nil
 }
 
 func NewContextBudgetSnapshot(window int) (json.RawMessage, error) {
@@ -71,13 +92,27 @@ func ParseContextBudgetSnapshot(raw json.RawMessage) (ContextBudgetSnapshot, err
 	if decoder.Decode(&budget) != nil || decoder.Decode(new(any)) != io.EOF {
 		return budget, errors.New("invalid context budget snapshot")
 	}
-	expected, err := makeContextBudgetSnapshot(budget.ContextWindowTokens)
+	expected, err := makeContextBudgetSnapshotVersion(budget.ContextWindowTokens, budget.Version)
 	expected.FileDelivery = budget.FileDelivery
 	expected.StructuredMentions = budget.StructuredMentions
 	if err != nil || budget != expected {
 		return budget, errors.New("unsupported context budget snapshot")
 	}
 	return budget, nil
+}
+
+func (b ContextBudgetSnapshot) initialOutputTokens() int {
+	if b.Version >= 6 {
+		return min(b.OutputReserveTokens, max(2048, min(32768, b.OutputReserveTokens/2)))
+	}
+	return min(2048, b.OutputReserveTokens)
+}
+
+func (b ContextBudgetSnapshot) measureContext(messages []*schema.AgenticMessage, tools []*schema.ToolInfo, output int, streaming bool) (ContextMeasurement, error) {
+	if b.Version >= 6 {
+		return measureContext(messages, tools, output, streaming, modeltransport.MaxOutputTokens)
+	}
+	return measureContext(messages, tools, output, streaming)
 }
 
 type ContextMeasurement struct {
@@ -100,9 +135,9 @@ func estimateContextTokens(text []byte) int {
 	return (ascii+2)/3 + nonASCII*2
 }
 
-func measureContext(messages []*schema.AgenticMessage, tools []*schema.ToolInfo, output int, streaming bool) (ContextMeasurement, error) {
+func measureContext(messages []*schema.AgenticMessage, tools []*schema.ToolInfo, output int, streaming bool, outputLimits ...int) (ContextMeasurement, error) {
 	opts := &model.Options{MaxTokens: &output, Tools: tools, AgenticToolChoice: &schema.AgenticToolChoice{Type: schema.ToolChoiceAllowed}}
-	request, err := agenticRequest(messages, opts, streaming)
+	request, err := agenticRequest(messages, opts, streaming, outputLimits...)
 	if err != nil {
 		return ContextMeasurement{}, err
 	}

@@ -51,10 +51,10 @@ func TestRunContextPolicyIsFrozenAcrossFlagAndWindowChanges(t *testing.T) {
 		}
 	}
 	var ledger int
-	if err = s.DB.QueryRow(ctx, `SELECT max(version) FROM agent_runtime_schema_migrations`).Scan(&ledger); err != nil || ledger != 3 {
+	if err = s.DB.QueryRow(ctx, `SELECT max(version) FROM agent_runtime_schema_migrations`).Scan(&ledger); err != nil || ledger != runtimeSchemaVersion {
 		t.Fatal("context migration ledger missing", ledger, err)
 	}
-	if _, err = s.DB.Exec(ctx, schemaV3SQL+contextArchiveSchemaSQL+contextRecoverySchemaSQL); err != nil {
+	if _, err = s.DB.Exec(ctx, schemaV3SQL+contextArchiveSchemaSQL+contextRecoverySchemaSQL+schemaV4SQL+schemaV5SQL); err != nil {
 		t.Fatal("context migration is not repeatable", err)
 	}
 }
@@ -68,9 +68,57 @@ func TestRestoreFixtureContainsTheCompleteSupportedContextBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal("restore fixture is not a supported frozen budget", err)
 	}
-	expected, err := makeContextBudgetSnapshot(16384)
+	expected, err := makeContextBudgetSnapshotVersion(16384, 1)
 	if err != nil || got != expected {
 		t.Fatal("restore fixture differs from admitted Run policy", err)
+	}
+}
+
+func TestRestoreFixtureContainsOutputRecoveryCapacity(t *testing.T) {
+	raw, err := os.ReadFile("../../../ops/fixtures/runtime-context-budget-v2.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseContextBudgetSnapshot(raw)
+	expected, makeErr := makeContextBudgetSnapshotVersion(16384, 2)
+	if err != nil || makeErr != nil || got != expected {
+		t.Fatal("current restore fixture differs from the frozen output policy", err, makeErr)
+	}
+}
+
+func TestRestoreFixtureContainsCurrentInputPolicy(t *testing.T) {
+	raw, err := os.ReadFile("../../../ops/fixtures/runtime-context-budget-v3.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseContextBudgetSnapshot(raw)
+	expected, makeErr := makeContextBudgetSnapshotVersion(16384, 3)
+	if err != nil || makeErr != nil || got != expected {
+		t.Fatal("historical current-input fixture changed", err, makeErr)
+	}
+}
+
+func TestRestoreFixtureContainsHistoryCoalescingPolicy(t *testing.T) {
+	raw, err := os.ReadFile("../../../ops/fixtures/runtime-context-budget-v4.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseContextBudgetSnapshot(raw)
+	expected, makeErr := makeContextBudgetSnapshotVersion(16384, 4)
+	if err != nil || makeErr != nil || got != expected {
+		t.Fatal("current restore fixture differs from admission", err, makeErr)
+	}
+}
+
+func TestRestoreFixtureContainsNotificationReductionPolicy(t *testing.T) {
+	raw, err := os.ReadFile("../../../ops/fixtures/runtime-context-budget-v5.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseContextBudgetSnapshot(raw)
+	expected, makeErr := makeContextBudgetSnapshotVersion(16384, 5)
+	if err != nil || makeErr != nil || got != expected {
+		t.Fatal("frozen notification fixture differs from admission", err, makeErr)
 	}
 }
 
@@ -120,10 +168,10 @@ func TestContextMigrationBackfillsLegacyWithoutChangingItsTape(t *testing.T) {
 	}
 	// Recreate the exact absence of schema-3 columns/tables around persisted
 	// schema-2 Run/input/tape data, then execute the real forward DDL.
-	if _, err := s.DB.Exec(ctx, `ALTER TABLE runtime_runs DROP COLUMN context_profile; ALTER TABLE runtime_runs DROP COLUMN context_budget; ALTER TABLE runtime_session_acceptances DROP COLUMN run_id; DROP TABLE runtime_context_artifacts; DROP TABLE runtime_context_recoveries; DELETE FROM agent_runtime_schema_migrations WHERE version=3;`); err != nil {
+	if _, err := s.DB.Exec(ctx, `ALTER TABLE runtime_runs DROP COLUMN context_profile; ALTER TABLE runtime_runs DROP COLUMN context_budget; ALTER TABLE runtime_session_acceptances DROP COLUMN run_id; DROP TABLE runtime_context_artifacts; DROP TABLE runtime_context_recoveries; DELETE FROM agent_runtime_schema_migrations WHERE version>=3;`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DB.Exec(ctx, schemaSQL+schemaV2SQL+schemaV3SQL+contextArchiveSchemaSQL+contextRecoverySchemaSQL); err != nil {
+	if _, err := s.DB.Exec(ctx, schemaSQL+schemaV2SQL+schemaV3SQL+contextArchiveSchemaSQL+contextRecoverySchemaSQL+schemaV4SQL+schemaV5SQL); err != nil {
 		t.Fatal(err)
 	}
 	var profile string

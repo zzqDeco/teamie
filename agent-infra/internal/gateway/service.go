@@ -56,7 +56,7 @@ func (s *Service) Chat(ctx context.Context, r *agent.GatewayChatRequest) (*agent
 	// provider call here could orphan the single model slot indefinitely.
 	return failed(api.Err(400, "protocol_unsupported", "Model generation requires the private HTTP transport")), nil
 }
-func (s *Service) call(ctx context.Context, owner, id, session, run, raw string) *agent.GatewayChatResponse {
+func (s *Service) call(ctx context.Context, owner, id, session, run, raw string, messageLimits ...int) *agent.GatewayChatResponse {
 	c, e := s.Store.Load(ctx)
 	if e != nil {
 		return failed(e)
@@ -88,7 +88,7 @@ func (s *Service) call(ctx context.Context, owner, id, session, run, raw string)
 	s.mu.Unlock()
 	defer func() { s.mu.Lock(); delete(s.active, index); s.mu.Unlock() }()
 	start := time.Now()
-	body, prompt, completion, e := s.Provider.Chat(ctx, c, key, raw)
+	body, prompt, completion, e := s.Provider.Chat(ctx, c, key, raw, messageLimits...)
 	status := "success"
 	var response *agent.GatewayChatResponse
 	if e != nil {
