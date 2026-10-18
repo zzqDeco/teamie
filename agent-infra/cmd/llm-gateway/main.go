@@ -1,10 +1,10 @@
 package main
 
 import (
+	"teamie/backend/pkg/observability"
 	"context"
 	hertzserver "github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/kitex/server"
-	"log"
 	"net"
 	"teamie/agent-infra/internal/api"
 	"teamie/agent-infra/internal/gateway"
@@ -14,39 +14,41 @@ import (
 )
 
 func main() {
+	stopLogging := observability.Configure("teamie.llm-gateway", api.BuildVersion, api.BuildSHA)
+	defer stopLogging()
 	token := api.Env("GATEWAY_RUNTIME_TOKEN", "")
 	if len(token) < 24 {
-		log.Fatal("GATEWAY_RUNTIME_TOKEN must contain at least 24 characters")
+		observability.Fatal("GATEWAY_RUNTIME_TOKEN must contain at least 24 characters", nil)
 	}
 	crypto, e := gateway.NewCipher(api.Env("GATEWAY_MASTER_KEY", ""))
 	if e != nil {
-		log.Fatal(e)
+		observability.Fatal("Service initialization failed", e)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	store, e := gateway.Open(ctx, api.Env("DATABASE_URL", ""))
 	cancel()
 	if e != nil {
-		log.Fatal("gateway database initialization failed")
+		observability.Fatal("gateway database initialization failed", nil)
 	}
 	defer store.DB.Close()
 	origin := api.Env("APP_ORIGIN", "")
 	if origin == "" {
-		log.Fatal("APP_ORIGIN is required")
+		observability.Fatal("APP_ORIGIN is required", nil)
 	}
 	auth, e := api.NewAdminAuth(api.Env("IDENTITY_RPC_ADDR", "identity:8881"), origin)
 	if e != nil {
-		log.Fatal("identity client initialization failed")
+		observability.Fatal("identity client initialization failed", nil)
 	}
 	service := gateway.New(store, crypto, token)
 	addr, e := net.ResolveTCPAddr("tcp", api.Env("RPC_ADDR", ":8886"))
 	if e != nil {
-		log.Fatal("invalid RPC_ADDR")
+		observability.Fatal("invalid RPC_ADDR", nil)
 	}
-	rpc := modelgatewayservice.NewServer(service, server.WithServiceAddr(addr))
+	rpc := modelgatewayservice.NewServer(service, server.WithServiceAddr(addr), observability.RPCServer())
 	defer rpc.Stop()
 	go func() {
 		if rpc.Run() != nil {
-			log.Fatal("gateway RPC stopped")
+			observability.Fatal("gateway RPC stopped", nil)
 		}
 	}()
 	go func() {

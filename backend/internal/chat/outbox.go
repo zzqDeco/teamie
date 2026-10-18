@@ -4,7 +4,8 @@ import (
 	"context"
 	"github.com/jackc/pgx/v5"
 	"github.com/redis/go-redis/v9"
-	"log/slog"
+	"go.uber.org/zap"
+	"teamie/backend/pkg/observability"
 	"time"
 )
 
@@ -18,13 +19,14 @@ func (s *Store) RunOutbox(ctx context.Context, rdb *redis.Client) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if _, e := s.prunePublishedOutbox(ctx); e != nil {
-				slog.Warn("published outbox cleanup deferred", "error", e)
-			}
+			pruneCtx, pruneLog := observability.Begin(ctx, "outbox-cleanup")
+			_, pruneErr := s.prunePublishedOutbox(pruneCtx)
+			pruneLog.EndRecoverable(pruneErr)
 			for i := 0; i < 100; i++ {
-				sent, e := s.publishOne(ctx, rdb)
+				publishCtx, publishLog := observability.Begin(ctx, "outbox-publish")
+				sent, e := s.publishOne(publishCtx, rdb)
+				publishLog.EndRecoverable(e, zap.Bool("custom.outbox.published", sent))
 				if e != nil {
-					slog.Warn("outbox hint deferred; HTTP sync remains available", "error", e)
 					break
 				}
 				if !sent {

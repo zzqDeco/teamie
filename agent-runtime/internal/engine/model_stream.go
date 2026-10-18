@@ -6,12 +6,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"go.uber.org/zap"
 	"io"
 	"net"
 	"net/http"
 	"runtime"
 	"sort"
 	"sync"
+	"teamie/backend/pkg/observability"
 	"time"
 
 	"github.com/cloudwego/eino/components/model"
@@ -20,16 +22,24 @@ import (
 	"teamie/agent-protocol/modeltransport"
 )
 
-func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessage, options ...model.Option) (*schema.StreamReader[*schema.AgenticMessage], error) {
+func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessage, options ...model.Option) (out *schema.StreamReader[*schema.AgenticMessage], failure error) {
 	run, err := CurrentRun(ctx)
 	if err != nil {
 		return nil, err
 	}
+	ctx, operation := observability.Begin(ctx, "model-call", zap.Bool("custom.model.streaming", true))
+	observability.L(ctx).Info("Model call started", zap.String("event.action", "model-call-started"))
+	phase, step := "model-slot-wait", 0
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			modelCompletion(operation, failure, phase, run, step)
+		}
+	}()
 	release, err := run.Front.modelPermit(ctx)
 	if err != nil {
 		return nil, err
 	}
-	handedOff := false
 	defer func() {
 		if !handedOff {
 			release()
@@ -52,9 +62,17 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 		return nil, err
 	}
 	hash := modelRequestHash(request)
-	step := int(run.Step.Add(1))
+	step = int(run.Step.Add(1))
+	phase = "receipt-lookup"
+	ctx = observability.WithFields(ctx, zap.Int("custom.model.step", step))
+	outputTokens := 0
+	if opts.MaxTokens != nil {
+		outputTokens = *opts.MaxTokens
+	}
+	observability.L(ctx).Info("Model request admitted", zap.String("event.action", "model-request-admitted"), zap.Int("custom.model.request_bytes", len(request)), zap.Int("custom.model.input_messages", len(input)), zap.Int("custom.model.output_token_limit", outputTokens))
 	cached, err := m.cachedModel(ctx, run, step, hash, input, opts, true)
 	if err == nil {
+		phase = "receipt-replay"
 		result, e := decodeAgenticMessage(cached)
 		if e != nil {
 			return nil, e
@@ -73,6 +91,7 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 	if m.StreamURL == "" {
 		return nil, &ModelError{Code: "gateway_stream_unavailable", Retry: true}
 	}
+	phase = "gateway-request"
 	body, _ := json.Marshal(modeltransport.CallRequest{OwnerID: m.OwnerID, AgentID: m.AgentID, SessionID: "agent:" + m.AgentID, RunID: executionID(run), RequestJSON: string(request), MessageLimit: modelInputMessageLimit(run)})
 	requestCtx, cancel := context.WithCancel(ctx)
 	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, m.StreamURL, bytes.NewReader(body))
@@ -86,7 +105,7 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 	if client == nil {
 		client = gatewayStreamHTTP
 	}
-	response, err := client.Do(req)
+	response, err := observability.Client(client, "teamie.llm-gateway").Do(req)
 	if err != nil {
 		cancel()
 		return nil, &ModelError{Code: "gateway_unavailable", Retry: true}
@@ -101,6 +120,16 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 	output, bridgeDone := cancelStreamOnClose(reader, cancel)
 	handedOff = true
 	go func() {
+		var streamFailure error
+		shape := &streamShape{}
+		chunkCount, totalBytes := 0, 0
+		receivedDone, receiptSaved := false, false
+		stage := "stream-read"
+		defer func() {
+			fields := append(shape.fields(), zap.Int("custom.model.stream.chunk_count", chunkCount), zap.Int("custom.model.stream.transport_bytes", totalBytes), zap.Bool("custom.model.stream.done_received", receivedDone), zap.Bool("custom.model.receipt_saved", receiptSaved))
+			modelCompletion(operation, streamFailure, stage, run, step, fields...)
+		}()
+		fail := func(err error) { streamFailure = err; writer.Send(nil, err) }
 		defer release()
 		defer cancel()
 		defer bridgeDone()
@@ -114,8 +143,9 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 		done := false
 		for scanner.Scan() {
 			total += len(scanner.Bytes())
+			totalBytes = total
 			if total > modeltransport.MaxHTTPStreamBytes {
-				writer.Send(nil, &ModelError{Code: "upstream_response_limit"})
+				fail(&ModelError{Code: "upstream_response_limit"})
 				return
 			}
 			var frame struct {
@@ -123,82 +153,98 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 				ResponseJSON string `json:"responseJson"`
 				ErrorCode    string `json:"errorCode"`
 			}
-			if json.Unmarshal(scanner.Bytes(), &frame) != nil {
-				writer.Send(nil, &ModelError{Code: "invalid_upstream_response", Retry: true})
+			stage = "frame-decode"
+			if decodeErr := json.Unmarshal(scanner.Bytes(), &frame); decodeErr != nil {
+				fail(modelDiagnostic(stage, "invalid_transport_frame", decodeErr))
 				return
 			}
 			switch frame.Type {
 			case "chunk":
 				if len(frame.ResponseJSON) > modeltransport.MaxResponseBytes {
-					writer.Send(nil, &ModelError{Code: "upstream_response_limit"})
+					fail(&ModelError{Code: "upstream_response_limit"})
 					return
 				}
+				stage = "message-decode"
 				message, e := decodeAgenticMessage([]byte(frame.ResponseJSON))
 				if e != nil {
-					writer.Send(nil, e)
+					fail(e)
 					return
 				}
 				if message == nil {
 					continue
 				}
+				chunkCount++
+				shape.observe(message)
+				stage = "aggregate-batch"
 				message = streamRequestIDDelta(message, &requestID)
 				if e = chunks.add(message, len(frame.ResponseJSON)); e != nil {
-					writer.Send(nil, e)
+					fail(e)
 					return
 				}
 				if writer.Send(message, nil) {
+					streamFailure = observability.Diagnostic("stream_consumer_closed", requestCtx.Err())
+					stage = "consumer-closed"
 					return
 				}
 			case "error":
+				stage = "gateway-error"
 				code := safeGatewayCode(frame.ErrorCode)
 				if isContextOverflow(code) && chunks.count > 0 {
 					// An accepted partial stream is not a pure rejected request.
 					// Never replay it as a side-effect-free overflow decision.
-					writer.Send(nil, &ModelError{Code: "upstream_in_stream_error"})
+					fail(&ModelError{Code: "upstream_in_stream_error"})
 				} else {
-					writer.Send(nil, m.gatewayFailure(ctx, run, step, hash, true, code))
+					fail(m.gatewayFailure(ctx, run, step, hash, true, code))
 				}
 				return
 			case "done":
 				done = true
+				receivedDone = true
 			default:
-				writer.Send(nil, &ModelError{Code: "invalid_upstream_response", Retry: true})
+				fail(&ModelError{Code: "invalid_upstream_response", Retry: true})
 				return
 			}
 			if done {
 				break
 			}
 		}
+		stage = "stream-read"
 		if !done {
-			writer.Send(nil, &ModelError{Code: "gateway_stream_interrupted", Retry: true})
+			fail(&ModelError{Code: "gateway_stream_interrupted", Retry: true, Stage: stage, Reason: "terminal_frame_missing", Cause: scanner.Err()})
 			return
 		}
 		if err := scanner.Err(); err != nil {
-			writer.Send(nil, &ModelError{Code: "gateway_stream_interrupted", Retry: true})
+			fail(&ModelError{Code: "gateway_stream_interrupted", Retry: true, Stage: stage, Reason: "transport_read_failed", Cause: err})
 			return
 		}
+		stage = "stream-terminal"
 		if chunks.count == 0 {
-			writer.Send(nil, &ModelError{Code: "invalid_upstream_response", Retry: true})
+			fail(modelDiagnostic(stage, "empty_stream", nil))
 			return
 		}
+		stage = "aggregate-final"
 		result, err := chunks.result()
 		if err != nil {
-			writer.Send(nil, &ModelError{Code: "invalid_upstream_response", Retry: true})
+			fail(concatDiagnostic(stage, err))
 			return
 		}
+		stage = "validate-result"
 		if err = validateModelResult(result, modelResultByteLimit(run)); err != nil {
-			writer.Send(nil, err)
+			fail(err)
 			return
 		}
+		stage = "serialize-result"
 		b, err := (&schema.HumanReadableSerializer{}).Marshal(result)
 		if err == nil && len(b) > modeltransport.MaxResponseBytes {
 			err = &ModelError{Code: "upstream_response_limit"}
 		}
 		if err == nil {
+			stage = "persist-receipt"
 			err = m.Store.SaveModel(ctx, m.Lease, run, step, hash, b)
+			receiptSaved = err == nil
 		}
 		if err != nil {
-			writer.Send(nil, err)
+			fail(err)
 		}
 	}()
 	return output, nil
@@ -223,7 +269,7 @@ func (a *modelStreamAccumulator) add(message *schema.AgenticMessage, encodedByte
 	} else {
 		body, err := (&schema.HumanReadableSerializer{}).Marshal(message)
 		if err != nil {
-			return &ModelError{Code: "invalid_upstream_response", Retry: true}
+			return modelDiagnostic("aggregate-serialize", "native_serialize_failed", err)
 		}
 		size = len(body)
 	}
@@ -264,11 +310,11 @@ func (a *modelStreamAccumulator) compact() error {
 	}
 	final, err := a.concatFinal()
 	if err != nil {
-		return &ModelError{Code: "invalid_upstream_response", Retry: true}
+		return concatDiagnostic("aggregate-compact", err)
 	}
 	body, err := (&schema.HumanReadableSerializer{}).Marshal(final)
 	if err != nil {
-		return &ModelError{Code: "invalid_upstream_response", Retry: true}
+		return modelDiagnostic("aggregate-serialize", "native_serialize_failed", err)
 	}
 	if len(body) > modeltransport.MaxResponseBytes {
 		return &ModelError{Code: "upstream_response_limit"}
@@ -279,7 +325,7 @@ func (a *modelStreamAccumulator) compact() error {
 	}
 	retained, err := (&schema.HumanReadableSerializer{}).Marshal(segment)
 	if err != nil {
-		return &ModelError{Code: "invalid_upstream_response", Retry: true}
+		return modelDiagnostic("aggregate-serialize", "native_serialize_failed", err)
 	}
 	a.segments = []*schema.AgenticMessage{segment}
 	a.retainedBytes = len(retained)
@@ -289,7 +335,7 @@ func (a *modelStreamAccumulator) compact() error {
 func concatStreamSegments(messages []*schema.AgenticMessage) (*schema.AgenticMessage, error) {
 	segment, err := schema.ConcatAgenticMessages(messages)
 	if err != nil {
-		return nil, &ModelError{Code: "invalid_upstream_response", Retry: true}
+		return nil, concatDiagnostic("aggregate-batch", err)
 	}
 	return restoreStreamIndices(segment, messages)
 }
@@ -313,7 +359,10 @@ func restoreStreamIndices(segment *schema.AgenticMessage, messages []*schema.Age
 		}
 		sort.Ints(ordered)
 		if len(ordered) != len(segment.ContentBlocks) {
-			return nil, &ModelError{Code: "invalid_upstream_response", Retry: true}
+			failure := modelDiagnostic("restore-block-indices", "block_index_count_mismatch", nil)
+			failure.ExpectedBlocks = len(ordered)
+			failure.ActualBlocks = len(segment.ContentBlocks)
+			return nil, failure
 		}
 		copy := *segment
 		copy.ContentBlocks = make([]*schema.ContentBlock, len(ordered))

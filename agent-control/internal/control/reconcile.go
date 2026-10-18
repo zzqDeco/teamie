@@ -2,6 +2,8 @@ package control
 
 import (
 	"context"
+	"go.uber.org/zap"
+	"teamie/backend/pkg/observability"
 	"time"
 )
 
@@ -26,8 +28,21 @@ func intersect(selected []string, sets ...[]string) []string {
 // Reconcile records the desired revision before making idempotent RPC changes.
 // It disables the identity first, applies ordinary grants, then enables only the
 // fully applied revision. A process crash resumes the same fenced operation.
-func (s *Store) Reconcile(ctx context.Context, id string) error {
+func (s *Store) Reconcile(ctx context.Context, id string) (failure error) {
+	ctx, operation := observability.Begin(ctx, "agent-reconciliation", zap.String("custom.agent.id", id))
+	changed := false
+	attempts := 0
+	defer func() {
+		fields := []zap.Field{zap.Bool("custom.agent.membership_changed", changed), zap.Int("custom.retry.attempts", attempts)}
+		if changed {
+			operation.End(failure, fields...)
+		} else {
+			operation.EndRecoverable(failure, fields...)
+		}
+	}()
+
 	for attempt := 0; attempt < 4; attempt++ {
+		attempts = attempt + 1
 		tx, e := s.DB.Begin(ctx)
 		if e != nil {
 			return e
@@ -107,6 +122,7 @@ func (s *Store) Reconcile(ctx context.Context, id string) error {
 		if e != nil {
 			return failed(e)
 		}
+		changed = true
 		return tx.Commit(ctx)
 	}
 	return errAPI(503, "control_unavailable", "Agent permissions are still changing")

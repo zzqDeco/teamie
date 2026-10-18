@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/adaptor"
+	"go.uber.org/zap"
 	"io"
 	"net/http"
 	"teamie/backend/kitex_gen/im"
+	"teamie/backend/pkg/observability"
 )
 
 type Handler struct {
@@ -36,6 +38,8 @@ func (h *Handler) auth(next handler) http.HandlerFunc {
 			fail(w, errAPI(403, "forbidden", "A human browser session is required"))
 			return
 		}
+		observability.AnnotateHTTP(w, zap.String("user.id", user.Id))
+		r = r.WithContext(observability.WithFields(r.Context(), zap.String("user.id", user.Id)))
 		if r.Method == "GET" || r.Method == "HEAD" {
 			if provided := r.Header.Get("X-CSRF-Token"); provided != "" && subtle.ConstantTimeCompare([]byte(csrf), []byte(provided)) != 1 {
 				fail(w, errAPI(401, "session_changed", "Browser session changed"))
@@ -159,6 +163,6 @@ func (h *Handler) Routes() http.Handler {
 }
 func Serve(addr string, h http.Handler) {
 	s := server.Default(server.WithHostPorts(addr), server.WithMaxRequestBodySize(65536))
-	s.Any("/*path", adaptor.HertzHandler(h))
+	s.Any("/*path", adaptor.HertzHandler(observability.HTTP(h)))
 	s.Spin()
 }

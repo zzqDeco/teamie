@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
+	"go.uber.org/zap"
 	"math"
 	"net/http"
 	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"teamie/backend/pkg/observability"
 	"time"
 
 	"github.com/cloudwego/eino/adk"
@@ -45,7 +46,7 @@ func New(store *Store, c Config) (*Engine, error) {
 		c.GatewayStreamURL = "http://llm-gateway:8086/internal/v1/chat/stream"
 	}
 	opts := func(addr string, timeout time.Duration) []client.Option {
-		return []client.Option{client.WithHostPorts(addr), client.WithRPCTimeout(timeout), client.WithConnectTimeout(time.Second)}
+		return []client.Option{observability.RPCClient(), client.WithHostPorts(addr), client.WithRPCTimeout(timeout), client.WithConnectTimeout(time.Second)}
 	}
 	cp, e := agentcontrolservice.NewClient("teamie.agent-control", opts(c.ControlAddr, 4*time.Second)...)
 	if e != nil {
@@ -516,8 +517,22 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 			return nil, nil, nil, err
 		}
 		run.Front = &frontSlot{slots: e.slots}
-		runctx, cancel := context.WithCancel(WithRun(ctx, run))
+		runctx, diagnostic := observability.Begin(WithRun(ctx, run), "agent-run", zap.Int("custom.runtime.input_count", len(run.Inputs)), zap.Int64("custom.runtime.generation", generation))
+		run.diagnostic = diagnostic
+		inputIDs := []string{}
+		parentRuns := []string{}
+		for _, in := range run.Inputs {
+			if len(inputIDs) < 32 {
+				inputIDs = append(inputIDs, in.EventID)
+			}
+			if in.ParentRunID != "" && len(parentRuns) < 32 {
+				parentRuns = append(parentRuns, in.ParentRunID)
+			}
+		}
+		observability.L(runctx).Info("Agent run started", zap.String("event.action", "agent-run-started"), zap.Strings("custom.input.event_ids", inputIDs), zap.Strings("custom.runtime.parent_run_ids", parentRuns))
+		runctx, cancel := context.WithCancel(runctx)
 		guard.set(run, cancel, run.releaseFront)
+		guard.onFinish(run, func() { diagnostic.End(runctx.Err(), zap.String("custom.runtime.state", "scope-closed")) })
 		qmu.Lock()
 		for _, in := range run.Inputs {
 			queued[in.EventID] = generation
@@ -581,9 +596,24 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 			return &adk.GenResumeResult[Input, *schema.AgenticMessage]{RunCtx: runctx, Decision: adk.TurnLoopResumeDecisionStartNewTurn, Input: &adk.TypedAgentInput[*schema.AgenticMessage]{Messages: inputMessages(run.Inputs), EnableStreaming: e.Config.GatewayStreamURL != ""}, Consumed: run.Inputs, Remaining: remaining}, nil
 		}, PrepareAgent: func(ctx context.Context, _ *adk.TurnLoop[Input, *schema.AgenticMessage], _ []Input) (adk.TypedAgent[*schema.AgenticMessage], error) {
 			return makeAgent(ctx)
-		}, OnAgentEvents: func(ctx context.Context, tc *adk.TurnContext[Input, *schema.AgenticMessage], events *adk.AsyncIterator[*adk.TypedAgentEvent[*schema.AgenticMessage]]) error {
+		}, OnAgentEvents: func(ctx context.Context, tc *adk.TurnContext[Input, *schema.AgenticMessage], events *adk.AsyncIterator[*adk.TypedAgentEvent[*schema.AgenticMessage]]) (eventFailure error) {
 			defer guard.finish()
 			var failure error
+			diagnosticState, preempted := "aborted", false
+			currentRun, _ := CurrentRun(ctx)
+			defer func() {
+				if currentRun != nil && currentRun.diagnostic != nil {
+					logFailure := failure
+					if eventFailure != nil {
+						logFailure = eventFailure
+					}
+					var cancelError *adk.CancelError
+					if preempted && errors.As(logFailure, &cancelError) {
+						logFailure = nil
+					}
+					currentRun.diagnostic.End(logFailure, zap.String("custom.runtime.state", diagnosticState), zap.Bool("custom.runtime.preempted", preempted), zap.String("custom.runtime.failure_code", failureCode(failure)))
+				}
+			}()
 			var businessTargets []string
 			for {
 				event, ok := events.Next()
@@ -626,6 +656,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 			session.bind(run, targets)
 			select {
 			case <-tc.Preempted:
+				preempted, diagnosticState = true, "interrupted"
 				if err = e.Store.preemptRun(commit, lease, run); err != nil {
 					return err
 				}
@@ -638,6 +669,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 			default:
 			}
 			if len(businessTargets) > 0 {
+				diagnosticState = "waiting_input"
 				if err = e.Store.FinishRun(commit, lease, run, "waiting_input", "", true); err != nil {
 					return err
 				}
@@ -655,6 +687,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 					state = "canceled"
 					retry = false
 				}
+				diagnosticState = state
 				if err = e.Store.FinishRun(commit, lease, run, state, SafeError(failure), retry); err != nil {
 					return err
 				}
@@ -665,6 +698,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 				}
 				return failure
 			}
+			diagnosticState = "completed"
 			if err = e.Store.FinishRun(commit, lease, run, "completed", "", false); err != nil {
 				return err
 			}
@@ -713,7 +747,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 				loop = nil
 				clearQueue()
 				if exit.ExitReason != nil {
-					slog.Info("agent turn stopped", "agent_id", def.Id, "reason", SafeError(exit.ExitReason))
+					observability.L(ctx).Info("Agent turn stopped", zap.String("event.action", "agent-turn-stopped"), zap.String("custom.agent.id", def.Id), zap.String("custom.error.code", SafeError(exit.ExitReason)))
 				}
 			default:
 			}
@@ -820,7 +854,9 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		}
 	}
 }
-func (e *Engine) ingest(ctx context.Context, imc *IM, l *Lease) error {
+func (e *Engine) ingest(ctx context.Context, imc *IM, l *Lease) (failure error) {
+	ctx, operation := observability.Begin(ctx, "agent-input-ingest", zap.String("custom.agent.id", l.AgentID))
+	defer func() { operation.EndQuiet(failure) }()
 	cursor, err := e.Store.Cursor(ctx, l)
 	if err != nil {
 		return err
@@ -863,7 +899,13 @@ func (e *Engine) ingest(ctx context.Context, imc *IM, l *Lease) error {
 		}
 		inputs = append(inputs, Input{EventID: event.ID, WorkspaceID: ws, ConversationID: event.ConversationID, MessageID: m.ID, SenderID: m.SenderID, SenderName: m.SenderName, SenderKind: m.SenderKind, Body: m.Body, Attachments: m.Attachments, Mentions: m.Mentions, ReplyToID: m.ReplyToID, Seq: m.Seq, CreatedAt: m.CreatedAt})
 	}
-	return e.Store.Ingest(ctx, l, page.Cursor, inputs)
+	if err = e.Store.Ingest(ctx, l, page.Cursor, inputs); err != nil {
+		return err
+	}
+	for _, input := range inputs {
+		observability.L(ctx).Info("Agent input persisted", zap.String("event.action", "agent-input-persisted"), zap.String("custom.agent.id", l.AgentID), zap.String("custom.input.event_id", input.EventID), zap.String("custom.im.message_id", input.MessageID), zap.String("custom.im.conversation_id", input.ConversationID))
+	}
+	return nil
 }
 func finalizeSummary(ctx context.Context, original []*schema.AgenticMessage, summary *schema.AgenticMessage) ([]*schema.AgenticMessage, error) {
 	return finalizeSummaryWithSourceFormat(ctx, original, summary, false)

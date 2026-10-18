@@ -51,37 +51,37 @@ func validateModelResult(message *schema.AgenticMessage, byteLimits ...int) erro
 		limit = byteLimits[0]
 	}
 	if message == nil || message.Role != schema.AgenticRoleTypeAssistant {
-		return &ModelError{Code: "invalid_upstream_response", Retry: true}
+		return modelDiagnostic("validate-result", "unexpected_message_role", nil)
 	}
 	seen := map[string]bool{}
 	textBytes, reasoningBytes := 0, 0
 	for _, block := range message.ContentBlocks {
 		if block == nil {
-			return &ModelError{Code: "invalid_upstream_response"}
+			return &ModelError{Code: "invalid_upstream_response", Stage: "validate-result", Reason: "nil_content_block"}
 		}
 		switch block.Type {
 		case schema.ContentBlockTypeReasoning:
 			if block.Reasoning == nil || len(block.Reasoning.Text) > limit {
-				return &ModelError{Code: "upstream_response_limit"}
+				return &ModelError{Code: "upstream_response_limit", Stage: "validate-result", Reason: "invalid_or_oversized_reasoning_block"}
 			}
 			reasoningBytes += len(block.Reasoning.Text)
 		case schema.ContentBlockTypeAssistantGenText:
 			if block.AssistantGenText == nil || len(block.AssistantGenText.Text) > limit {
-				return &ModelError{Code: "upstream_response_limit"}
+				return &ModelError{Code: "upstream_response_limit", Stage: "validate-result", Reason: "invalid_or_oversized_text_block"}
 			}
 			textBytes += len(block.AssistantGenText.Text)
 		case schema.ContentBlockTypeFunctionToolCall:
 			c := block.FunctionToolCall
 			if c == nil || c.CallID == "" || seen[c.CallID] || c.Name == "" || len(c.Arguments) > limit {
-				return &ModelError{Code: "invalid_tool_call"}
+				return &ModelError{Code: "invalid_tool_call", Stage: "validate-result", Reason: "invalid_tool_identity_or_argument_size"}
 			}
 			seen[c.CallID] = true
 		default:
-			return &ModelError{Code: "invalid_upstream_response"}
+			return &ModelError{Code: "invalid_upstream_response", Stage: "validate-result", Reason: "unsupported_content_block"}
 		}
 	}
 	if len(seen) > 16 || len(message.ContentBlocks) > 128 || textBytes > limit || reasoningBytes > limit {
-		return &ModelError{Code: "upstream_response_limit"}
+		return &ModelError{Code: "upstream_response_limit", Stage: "validate-result", Reason: "aggregate_content_limit_exceeded"}
 	}
 	return nil
 }
@@ -169,10 +169,10 @@ func decodeAgenticMessage(raw []byte) (*schema.AgenticMessage, error) {
 	}
 	var result schema.AgenticMessage
 	if err := ser.Unmarshal(raw, &result); err != nil {
-		return nil, &ModelError{Code: "invalid_upstream_response", Retry: true}
+		return nil, modelDiagnostic("message-decode", "native_deserialize_failed", err)
 	}
 	if result.Role != schema.AgenticRoleTypeAssistant {
-		return nil, &ModelError{Code: "invalid_upstream_response", Retry: true}
+		return nil, modelDiagnostic("message-decode", "unexpected_message_role", nil)
 	}
 	return &result, nil
 }

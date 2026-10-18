@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"go.uber.org/zap"
 	"strings"
+	"teamie/backend/pkg/observability"
 	"time"
 
 	"github.com/cloudwego/eino/adk"
@@ -245,7 +247,10 @@ func (p *ContextPipeline) partition(messages []*schema.AgenticMessage, force boo
 	return
 }
 
-func (p *ContextPipeline) compact(ctx context.Context, messages []*schema.AgenticMessage, tools []*schema.ToolInfo, force bool) ([]*schema.AgenticMessage, error) {
+func (p *ContextPipeline) compact(ctx context.Context, messages []*schema.AgenticMessage, tools []*schema.ToolInfo, force bool) (result []*schema.AgenticMessage, failure error) {
+	ctx, operation := observability.Begin(ctx, "context-compaction", zap.Int("custom.context.messages_before", len(messages)), zap.Bool("custom.context.forced", force), zap.Int("custom.context.input_token_limit", p.cfg.Budget.InputTokenLimit))
+	observability.L(ctx).Info("Context compaction started", zap.String("event.action", "context-compaction-started"))
+	defer func() { operation.End(failure, zap.Int("custom.context.messages_after", len(result))) }()
 	target := p.cfg.Budget.InputTokenLimit
 	if force {
 		measurement, err := p.cfg.Budget.measureContext(messages, tools, p.cfg.Budget.OutputReserveTokens, false)
