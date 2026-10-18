@@ -233,7 +233,10 @@ func safeFields(fields []zap.Field) []zap.Field {
 			continue
 		}
 		metric := f.Type == zapcore.Int64Type && (strings.HasSuffix(f.Key, ".bytes") || strings.HasSuffix(f.Key, "_bytes") || strings.HasSuffix(f.Key, "_tokens") || strings.HasSuffix(f.Key, "_token_limit") || strings.HasSuffix(f.Key, ".count"))
-		if sensitiveKey(f.Key) && !metric || f.Type == zapcore.ReflectType || f.Type == zapcore.ObjectMarshalerType || f.Type == zapcore.InlineMarshalerType {
+		// These two typed fields describe response state, never header/body
+		// contents. String/object values under the same keys remain redacted.
+		httpState := f.Type == zapcore.Int64Type && f.Key == "custom.http.headers_duration_ns" || f.Type == zapcore.BoolType && f.Key == "custom.http.body_consumed_to_eof"
+		if sensitiveKey(f.Key) && !metric && !httpState || f.Type == zapcore.ReflectType || f.Type == zapcore.ObjectMarshalerType || f.Type == zapcore.InlineMarshalerType {
 			f = zap.String(f.Key, "[REDACTED]")
 		}
 		out = append(out, f)

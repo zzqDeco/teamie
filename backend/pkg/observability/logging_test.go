@@ -79,10 +79,10 @@ func TestNativeECSOutputErrorOwnershipAndRedaction(t *testing.T) {
 	out := testLogging(t)
 	ctx, op := Begin(context.Background(), "fixture-operation")
 	err := Diagnostic("native_concat_failed", errors.New("secret-password private-prompt tool-arguments"))
-	L(ctx).Info("Static event", zap.String("authorization", "Bearer secret-key"), zap.String("api_key", "secret-api-key"), zap.Int("custom.model.output_token_limit", 32768), zap.Any("config", map[string]any{"password": "private"}), zap.String("custom.model.prompt", "private-prompt"), zap.Int("custom.model.prompt_tokens", 7990))
+	L(ctx).Info("Static event", zap.String("authorization", "Bearer secret-key"), zap.String("api_key", "secret-api-key"), zap.Int("custom.model.output_token_limit", 32768), zap.Any("config", map[string]any{"password": "private"}), zap.String("custom.model.prompt", "private-prompt"), zap.Int("custom.model.prompt_tokens", 7990), zap.String("custom.http.headers_duration_ns", "private-headers"), zap.String("custom.http.body_consumed_to_eof", "private-body"))
 	op.End(err)
 	op.End(err)
-	if strings.Contains(out.String(), "secret-password") || strings.Contains(out.String(), "secret-key") || strings.Contains(out.String(), "private-prompt") || strings.Contains(out.String(), "tool-arguments") {
+	if strings.Contains(out.String(), "secret-password") || strings.Contains(out.String(), "secret-key") || strings.Contains(out.String(), "private-prompt") || strings.Contains(out.String(), "tool-arguments") || strings.Contains(out.String(), "private-headers") || strings.Contains(out.String(), "private-body") {
 		t.Fatal("private material reached logs")
 	}
 	events := logLines(t, out)
@@ -280,6 +280,12 @@ func TestStreamingDurationAndCancellationAreLoggedOnce(t *testing.T) {
 			count++
 			if e["event.outcome"] != "failure" || e["event.duration"].(float64) < float64(15*time.Millisecond) {
 				t.Fatal(e)
+			}
+			if _, ok := e["custom.http.headers_duration_ns"].(float64); !ok {
+				t.Fatal("safe response timing metric was redacted", e)
+			}
+			if eof, ok := e["custom.http.body_consumed_to_eof"].(bool); !ok || eof {
+				t.Fatal("canceled body EOF metadata missing or incorrect", e)
 			}
 		}
 	}
