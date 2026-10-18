@@ -980,8 +980,17 @@ describe("member and account navigation", () => {
     expect(tabs).toHaveLength(4);
     expect(tabs[0]?.getAttribute("aria-pressed")).toBe("true");
     expect(tabs[1]?.getAttribute("aria-pressed")).toBe("false");
+    const articles =
+      container.querySelectorAll<HTMLElement>(".story-scene-item");
+    expect(articles[0]?.getAttribute("aria-hidden")).toBe("false");
+    expect(articles[1]?.getAttribute("aria-hidden")).toBe("true");
+    expect(find(".story-scroll-hint").textContent).toContain(
+      "继续滑动切换下一幕",
+    );
     await settle(() => tabs[1]?.click());
     expect(track.getAttribute("data-active-scene")).toBe("1");
+    expect(articles[0]?.getAttribute("aria-hidden")).toBe("true");
+    expect(articles[1]?.getAttribute("aria-hidden")).toBe("false");
     expect(tabs[1]?.getAttribute("aria-pressed")).toBe("true");
     expect(scrollTo).toHaveBeenLastCalledWith(
       expect.objectContaining({ behavior: "auto" }),
@@ -1032,6 +1041,9 @@ describe("member and account navigation", () => {
     );
     await settle();
     expect(find("[data-location]").textContent).toBe("/");
+    expect(find(".story-scroll-hint").textContent).toContain(
+      "点击上方标签切换下一幕",
+    );
     expect(find(".landing-register").getAttribute("href")).toBe(
       "/login?mode=register",
     );

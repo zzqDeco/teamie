@@ -3862,7 +3862,7 @@ label > .copy-input {
     padding-left: 63px;
     min-height: 94px;
   }
-  .value-icon {
+  .value-grid .value-icon {
     position: absolute;
     left: 0;
     top: 0;

@@ -97,6 +97,7 @@ export function Landing() {
   const trackRef = useRef<HTMLDivElement>(null);
   const [activeScene, setActiveScene] = useState(0);
   const [scrollProgress, setScrollProgress] = useState(0);
+  const [stickyStory, setStickyStory] = useState(() => isStickyStoryActive());
 
   useLayoutEffect(() => {
     resetPageScroll();
@@ -105,8 +106,10 @@ export function Landing() {
   useEffect(() => {
     if (user && !loading) return;
     function updateScrollStage() {
+      const sticky = isStickyStoryActive();
+      setStickyStory(sticky);
       const track = trackRef.current;
-      if (!track || !isStickyStoryActive()) return;
+      if (!track || !sticky) return;
       const rect = track.getBoundingClientRect();
       const scrollable = rect.height - window.innerHeight;
       if (scrollable <= 0) return;
@@ -315,6 +318,7 @@ export function Landing() {
                         key={scene.step}
                         className={`story-scene-item ${isActive ? "active" : ""}`}
                         aria-current={isActive ? "step" : undefined}
+                        aria-hidden={!isActive}
                       >
                         <span className="story-scene-eyebrow">{scene.eyebrow}</span>
                         <h3>{scene.title}</h3>
@@ -354,7 +358,8 @@ export function Landing() {
                   />
                 </div>
                 <small className="story-scroll-hint" aria-hidden="true">
-                  继续滑动切换下一幕 · {currentScene.step} / 0{STORY_SCENES.length}
+                  {stickyStory ? "继续滑动切换下一幕" : "点击上方标签切换下一幕"} ·{" "}
+                  {currentScene.step} / 0{STORY_SCENES.length}
                 </small>
               </div>
 
