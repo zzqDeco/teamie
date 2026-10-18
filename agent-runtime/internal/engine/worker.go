@@ -366,7 +366,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 				return nil, err
 			}
 			handlers := append([]adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]{pipeline}, tasks.handlers...)
-			instruction := contextV1Instruction(def)
+			instruction := contextInstruction(def, budget)
 			if budget.FileDelivery {
 				instruction += fileDeliveryGuidance
 			}
@@ -471,7 +471,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		// their persisted selection even when the flag or gateway changes.
 		if e.Config.FlagsFile != "" && runtimeFlag(e.Config.FlagsFile, "agents.context.v1") {
 			profile = contextProfileV1
-			budget, err = newContextBudgetWithFiles(int(contextWindow.Load()), runtimeFlag(e.Config.FlagsFile, "agents.files.deliver.v1"), runtimeFlag(e.Config.FlagsFile, "agents.mentions.v1"))
+			budget, err = newRunContextBudget(int(contextWindow.Load()), runtimeFlag(e.Config.FlagsFile, "agents.files.deliver.v1"), runtimeFlag(e.Config.FlagsFile, "agents.mentions.v1"))
 			if err != nil {
 				return nil, nil, nil, err
 			}
