@@ -207,7 +207,9 @@ func contextExcerpt(text, query string) string {
 	return text[start:end]
 }
 
-func (a *ContextArchive) Search(ctx context.Context, query, rawCursor string, limit int) (*ContextSearchPage, error) {
+func (a *ContextArchive) Search(ctx context.Context, query, rawCursor string, limit int) (_ *ContextSearchPage, failure error) {
+	ctx, operation := toolOperation(ctx, "context_search", compose.GetToolCallID(ctx))
+	defer func() { operation.End(failure) }()
 	r, err := a.scope(ctx)
 	if err != nil {
 		return nil, err

@@ -8,10 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"os"
 	"strings"
+	"teamie/backend/pkg/observability"
 	"time"
 )
 
@@ -36,6 +36,7 @@ type Error struct {
 }
 
 func (e *Error) Error() string                   { return e.Message }
+func (e *Error) DiagnosticMessage() string       { return e.Code + ": " + e.Message }
 func Err(status int, code, message string) error { return &Error{status, code, message} }
 func Write(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -45,9 +46,9 @@ func Write(w http.ResponseWriter, status int, value any) {
 	}
 }
 func Fail(w http.ResponseWriter, err error) {
+	observability.RecordError(w, err)
 	var ae *Error
 	if !errors.As(err, &ae) {
-		slog.Error("request failed", "error", err)
 		ae = &Error{500, "internal_error", "The request could not be completed"}
 	}
 	Write(w, ae.Status, map[string]any{"error": map[string]string{"code": ae.Code, "message": ae.Message}})

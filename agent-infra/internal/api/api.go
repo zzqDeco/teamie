@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"teamie/backend/pkg/observability"
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/app/server"
@@ -27,10 +28,15 @@ var BuildSHA = "unknown"
 type Error struct {
 	Status        int
 	Code, Message string
+	Cause         error
 }
 
-func (e *Error) Error() string                   { return e.Code }
-func Err(status int, code, message string) error { return &Error{status, code, message} }
+func (e *Error) Error() string             { return e.Code }
+func (e *Error) DiagnosticMessage() string { return e.Code + ": " + e.Message }
+func (e *Error) Unwrap() error             { return e.Cause }
+func Err(status int, code, message string) error {
+	return &Error{Status: status, Code: code, Message: message}
+}
 func Write(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
@@ -38,9 +44,10 @@ func Write(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 func Fail(w http.ResponseWriter, err error) {
+	observability.RecordError(w, err)
 	var ae *Error
 	if !errors.As(err, &ae) {
-		ae = &Error{500, "internal_error", "The request could not be completed"}
+		ae = &Error{Status: 500, Code: "internal_error", Message: "The request could not be completed"}
 	}
 	Write(w, ae.Status, map[string]any{"error": map[string]string{"code": ae.Code, "message": ae.Message}})
 }
@@ -85,7 +92,7 @@ func Serve(addr string, handler http.Handler, options ...config.Option) {
 func newServer(addr string, handler http.Handler, options ...config.Option) *server.Hertz {
 	defaults := []config.Option{server.WithHostPorts(addr), server.WithMaxRequestBodySize(528384), server.WithReadTimeout(15 * time.Second), server.WithWriteTimeout(6 * time.Minute), server.WithSenseClientDisconnection(true)}
 	h := server.Default(append(defaults, options...)...)
-	h.Any("/*path", adaptor.HertzHandler(handler))
+	h.Any("/*path", adaptor.HertzHandler(observability.HTTP(handler)))
 	return h
 }
 
@@ -98,7 +105,7 @@ type AdminAuth struct {
 }
 
 func NewAdminAuth(addr, origin string) (AdminAuth, error) {
-	c, err := identityservice.NewClient("teamie.identity", client.WithHostPorts(addr), client.WithRPCTimeout(3*time.Second), client.WithConnectTimeout(time.Second))
+	c, err := identityservice.NewClient("teamie.identity", observability.RPCClient(), client.WithHostPorts(addr), client.WithRPCTimeout(3*time.Second), client.WithConnectTimeout(time.Second))
 	return AdminAuth{Identity: c, Origin: origin}, err
 }
 func (a AdminAuth) Require(r *http.Request) (*im.User, error) {

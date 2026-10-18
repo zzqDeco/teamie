@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"teamie/backend/pkg/observability"
 
 	"github.com/cloudwego/eino-ext/components/model/agenticopenai"
 	"github.com/cloudwego/eino/components/model"
@@ -106,7 +107,7 @@ func (p Provider) nativeModel(ctx context.Context, c Config, key, raw string, st
 	if transport == nil {
 		transport = http.DefaultTransport
 	}
-	httpClient.Transport = &providerBoundary{next: transport, key: key, config: c, streaming: streaming, messageLimit: messageLimit}
+	httpClient.Transport = &providerBoundary{next: observability.Transport{Base: transport, Peer: "llm-provider"}, key: key, config: c, streaming: streaming, messageLimit: messageLimit}
 	extra := map[string]any{"parallel_tool_calls": false, "n": 1}
 	// Qwen3.8 Max enables thinking by default. Summary requests need visible
 	// text within the existing output limit; ordinary tool-enabled turns retain
@@ -140,7 +141,7 @@ func providerError(ctx context.Context, err error) error {
 	if errors.As(err, &safe) {
 		return safe
 	}
-	return api.Err(502, "invalid_upstream_response", "Provider returned an invalid model response")
+	return &api.Error{Status: 502, Code: "invalid_upstream_response", Message: "Provider returned an invalid model response", Cause: err}
 }
 
 func (p Provider) Chat(ctx context.Context, c Config, key, raw string, messageLimits ...int) (string, int64, int64, error) {
