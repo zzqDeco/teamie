@@ -941,11 +941,13 @@ textarea:disabled {
     font-size: 11px;
   }
   .scroll-story-track {
-    height: 280dvh;
+    height: auto;
   }
   .scroll-story-sticky {
+    position: static;
+    height: auto;
     min-height: 0;
-    padding: 24px 0;
+    padding: 48px 0;
   }
   .scroll-story-inner {
     grid-template-columns: 1fr;

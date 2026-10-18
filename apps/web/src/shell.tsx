@@ -410,7 +410,7 @@ export function Shell() {
     !match &&
     location.pathname === "/app" &&
     chat.data?.workspaces.length &&
-    conversations.length
+    (backChatRoute !== "/app" || conversations.length)
   )
     return (
       <Navigate

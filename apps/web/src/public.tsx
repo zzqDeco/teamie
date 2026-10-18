@@ -81,7 +81,8 @@ export function Landing() {
       const track = trackRef.current;
       if (!track) return;
       const rect = track.getBoundingClientRect();
-      const scrollable = Math.max(1, rect.height - window.innerHeight);
+      const scrollable = rect.height - window.innerHeight;
+      if (scrollable <= 0) return;
       const raw = Math.min(1, Math.max(0, -rect.top / scrollable));
       setScrollProgress(raw);
       const index = Math.min(
@@ -111,7 +112,13 @@ export function Landing() {
         window.scrollY +
         rect.top +
         (index / Math.max(1, STORY_SCENES.length - 1)) * scrollable * 0.92;
-      window.scrollTo({ top: targetTop, behavior: "smooth" });
+      const reducedMotion =
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      window.scrollTo({
+        top: targetTop,
+        behavior: reducedMotion ? "auto" : "smooth",
+      });
     }
   }
 
@@ -291,13 +298,16 @@ export function Landing() {
                   })}
                 </div>
 
-                <div className="story-controls" role="tablist" aria-label="产品特性分幕切换">
+                <div
+                  className="story-controls"
+                  role="group"
+                  aria-label="产品特性分幕切换"
+                >
                   {STORY_SCENES.map((scene, index) => (
                     <button
                       key={scene.step}
                       type="button"
-                      role="tab"
-                      aria-selected={index === activeScene}
+                      aria-pressed={index === activeScene}
                       className={`story-step-pill ${index === activeScene ? "active" : ""}`}
                       onClick={() => selectScene(index)}
                     >

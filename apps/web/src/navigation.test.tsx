@@ -895,6 +895,13 @@ describe("member and account navigation", () => {
   });
 
   it("redirects signed-in users from the landing page directly into /app and keeps rail-home inside /app", async () => {
+    const emptyFirst: Workspace = {
+      id: "empty-first",
+      name: "空置首发空间",
+      createdBy: owner.id,
+      createdAt: owner.createdAt,
+    };
+    bootstrap.workspaces = [workspace, emptyFirst];
     vi.stubGlobal(
       "matchMedia",
       vi.fn((query: string) => ({
@@ -920,6 +927,7 @@ describe("member and account navigation", () => {
     expect(find("[data-location]").textContent).toBe("/app/w/team/c/general");
     await click('a[href="/app/w/team/c/group"]');
     expect(find("[data-location]").textContent).toBe("/app/w/team/c/group");
+    bootstrap.workspaces = [emptyFirst, workspace];
     await click(".rail-agents");
     expect(find("[data-location]").textContent).toBe("/app/agents");
     expect(find(".rail-home").getAttribute("href")).toBe("/app");
@@ -929,6 +937,16 @@ describe("member and account navigation", () => {
 
   it("renders a sticky scroll-locked product story without top anchor links for signed-out visitors", async () => {
     signedOut = true;
+    const scrollTo = vi.fn();
+    vi.stubGlobal("scrollTo", scrollTo);
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: query.includes("prefers-reduced-motion"),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    );
     await settle(() =>
       root.render(
         <MemoryRouter initialEntries={["/"]}>
@@ -941,19 +959,39 @@ describe("member and account navigation", () => {
     expect(find("[data-location]").textContent).toBe("/");
     expect(container.querySelector('.public-header a[href^="#"]')).toBeNull();
     const track = find(".scroll-story-track");
+    vi.spyOn(track, "getBoundingClientRect").mockReturnValue({
+      top: 0,
+      bottom: 2400,
+      left: 0,
+      right: 1200,
+      width: 1200,
+      height: 2400,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
     expect(track.getAttribute("data-active-scene")).toBe("0");
     expect(find(".story-scene-item.active").textContent).toContain(
       "对的讨论，在对的地方。",
     );
+    const controls = find(".story-controls");
+    expect(controls.getAttribute("role")).toBe("group");
     const tabs = container.querySelectorAll<HTMLButtonElement>(".story-step-pill");
     expect(tabs).toHaveLength(4);
+    expect(tabs[0]?.getAttribute("aria-pressed")).toBe("true");
+    expect(tabs[1]?.getAttribute("aria-pressed")).toBe("false");
     await settle(() => tabs[1]?.click());
     expect(track.getAttribute("data-active-scene")).toBe("1");
+    expect(tabs[1]?.getAttribute("aria-pressed")).toBe("true");
+    expect(scrollTo).toHaveBeenLastCalledWith(
+      expect.objectContaining({ behavior: "auto" }),
+    );
     expect(find(".story-scene-item.active").textContent).toContain(
       "每位成员，都有专属伙伴。",
     );
     await settle(() => tabs[3]?.click());
     expect(track.getAttribute("data-active-scene")).toBe("3");
+    expect(tabs[3]?.getAttribute("aria-pressed")).toBe("true");
     expect(find(".story-scene-item.active").textContent).toContain(
       "像邀请一位新队友，安静可靠。",
     );

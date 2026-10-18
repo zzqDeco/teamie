@@ -797,6 +797,17 @@ label > .copy-input {
   align-items: center;
   justify-content: center;
 }
+@media (max-height: 700px) {
+  .scroll-story-track {
+    height: auto;
+  }
+  .scroll-story-sticky {
+    position: static;
+    height: auto;
+    min-height: 0;
+    padding: 56px 0;
+  }
+}
 .scroll-story-inner {
   max-width: 1188px;
   width: 100%;
