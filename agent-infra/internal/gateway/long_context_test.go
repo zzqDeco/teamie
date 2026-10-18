@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -17,6 +18,45 @@ import (
 	"teamie/agent-protocol/kitex_gen/agent"
 	"teamie/agent-protocol/modeltransport"
 )
+
+func TestGatewayPreservesFrozenOutputAfterWindowDecrease(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		for _, requested := range []int{4096, 131072, 262144} {
+			t.Run(fmt.Sprintf("stream=%t/output=%d", streaming, requested), func(t *testing.T) {
+				var observed atomic.Int64
+				fixture := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					var request struct {
+						Max int `json:"max_completion_tokens"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+						t.Error(err)
+					}
+					observed.Store(int64(request.Max))
+					if streaming {
+						w.Header().Set("Content-Type", "text/event-stream")
+						fmt.Fprint(w, "data: {\"id\":\"frozen-output\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"done\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+					} else {
+						w.Header().Set("Content-Type", "application/json")
+						fmt.Fprint(w, `{"id":"frozen-output","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}`)
+					}
+				}))
+				defer fixture.Close()
+				provider := Provider{fixture.Client()}
+				config := Config{BaseURL: fixture.URL + "/v1", Model: "chosen-model", ContextWindowTokens: 4096}
+				raw := nativeRequest(t, []*schema.AgenticMessage{schema.UserAgenticMessage("frozen request")}, model.Options{MaxTokens: &requested}, streaming)
+				var err error
+				if streaming {
+					_, _, err = provider.Stream(context.Background(), config, "synthetic-key", raw, func(string) error { return nil })
+				} else {
+					_, _, _, err = provider.Chat(context.Background(), config, "synthetic-key", raw)
+				}
+				if err != nil || observed.Load() != int64(min(requested, modeltransport.MaxOutputTokens)) {
+					t.Fatal("current gateway window changed frozen output, or bypassed protocol ceiling", err, observed.Load())
+				}
+			})
+		}
+	}
+}
 
 func TestLongContextCrossesActualHertzAndOfficialProviderBoundaries(t *testing.T) {
 	for _, streaming := range []bool{false, true} {

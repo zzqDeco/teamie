@@ -129,6 +129,10 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 			}
 			switch frame.Type {
 			case "chunk":
+				if len(frame.ResponseJSON) > modeltransport.MaxResponseBytes {
+					writer.Send(nil, &ModelError{Code: "upstream_response_limit"})
+					return
+				}
 				message, e := decodeAgenticMessage([]byte(frame.ResponseJSON))
 				if e != nil {
 					writer.Send(nil, e)
@@ -138,7 +142,7 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 					continue
 				}
 				message = streamRequestIDDelta(message, &requestID)
-				if e = chunks.add(message); e != nil {
+				if e = chunks.add(message, len(frame.ResponseJSON)); e != nil {
 					writer.Send(nil, e)
 					return
 				}
@@ -207,11 +211,31 @@ type modelStreamAccumulator struct {
 	pending  []*schema.AgenticMessage
 	segments []*schema.AgenticMessage
 	count    int
+	// Sum of encoded retained chunks/segments bounds the reconstructed message
+	// without serializing an ever-growing response after every token.
+	retainedBytes int
 }
 
-func (a *modelStreamAccumulator) add(message *schema.AgenticMessage) error {
+func (a *modelStreamAccumulator) add(message *schema.AgenticMessage, encodedBytes ...int) error {
+	var size int
+	if len(encodedBytes) > 0 {
+		size = encodedBytes[0]
+	} else {
+		body, err := (&schema.HumanReadableSerializer{}).Marshal(message)
+		if err != nil {
+			return &ModelError{Code: "invalid_upstream_response", Retry: true}
+		}
+		size = len(body)
+	}
+	if size > modeltransport.MaxResponseBytes {
+		return &ModelError{Code: "upstream_response_limit"}
+	}
 	a.pending = append(a.pending, message)
 	a.count++
+	a.retainedBytes += size
+	if a.retainedBytes > modeltransport.MaxResponseBytes {
+		return a.compact()
+	}
 	if len(a.pending) >= 128 {
 		return a.flush()
 	}
@@ -222,15 +246,60 @@ func (a *modelStreamAccumulator) flush() error {
 	if len(a.pending) == 0 {
 		return nil
 	}
-	segment, err := schema.ConcatAgenticMessages(a.pending)
+	segment, err := concatStreamSegments(a.pending)
+	if err != nil {
+		return err
+	}
+	a.segments = append(a.segments, segment)
+	a.pending = nil
+	return nil
+}
+
+// Remove repeated chunk framing once the encoded upper bound reaches the native
+// cap, then check the exact reconstructed size before accepting another delta.
+// At most one bounded incoming chunk is added to the retained response first.
+func (a *modelStreamAccumulator) compact() error {
+	if err := a.flush(); err != nil {
+		return err
+	}
+	final, err := a.concatFinal()
 	if err != nil {
 		return &ModelError{Code: "invalid_upstream_response", Retry: true}
 	}
+	body, err := (&schema.HumanReadableSerializer{}).Marshal(final)
+	if err != nil {
+		return &ModelError{Code: "invalid_upstream_response", Retry: true}
+	}
+	if len(body) > modeltransport.MaxResponseBytes {
+		return &ModelError{Code: "upstream_response_limit"}
+	}
+	segment, err := restoreStreamIndices(final, a.segments)
+	if err != nil {
+		return err
+	}
+	retained, err := (&schema.HumanReadableSerializer{}).Marshal(segment)
+	if err != nil {
+		return &ModelError{Code: "invalid_upstream_response", Retry: true}
+	}
+	a.segments = []*schema.AgenticMessage{segment}
+	a.retainedBytes = len(retained)
+	return nil
+}
+
+func concatStreamSegments(messages []*schema.AgenticMessage) (*schema.AgenticMessage, error) {
+	segment, err := schema.ConcatAgenticMessages(messages)
+	if err != nil {
+		return nil, &ModelError{Code: "invalid_upstream_response", Retry: true}
+	}
+	return restoreStreamIndices(segment, messages)
+}
+
+func restoreStreamIndices(segment *schema.AgenticMessage, messages []*schema.AgenticMessage) (*schema.AgenticMessage, error) {
 	// Native concatenation finalizes streaming block indices. Restore those
 	// indices on intermediate batches so later deltas still join the same block
 	// instead of becoming separate text/reasoning/tool calls.
 	indices := map[int]bool{}
-	for _, message := range a.pending {
+	for _, message := range messages {
 		for _, block := range message.ContentBlocks {
 			if block != nil && block.StreamingMeta != nil {
 				indices[block.StreamingMeta.Index] = true
@@ -244,7 +313,7 @@ func (a *modelStreamAccumulator) flush() error {
 		}
 		sort.Ints(ordered)
 		if len(ordered) != len(segment.ContentBlocks) {
-			return &ModelError{Code: "invalid_upstream_response", Retry: true}
+			return nil, &ModelError{Code: "invalid_upstream_response", Retry: true}
 		}
 		copy := *segment
 		copy.ContentBlocks = make([]*schema.ContentBlock, len(ordered))
@@ -255,16 +324,23 @@ func (a *modelStreamAccumulator) flush() error {
 		}
 		segment = &copy
 	}
-	a.segments = append(a.segments, segment)
-	a.pending = nil
-	return nil
+	return segment, nil
 }
 
 func (a *modelStreamAccumulator) result() (*schema.AgenticMessage, error) {
 	if err := a.flush(); err != nil {
 		return nil, err
 	}
-	return schema.ConcatAgenticMessages(a.segments)
+	return a.concatFinal()
+}
+
+func (a *modelStreamAccumulator) concatFinal() (*schema.AgenticMessage, error) {
+	segments := a.segments
+	if len(segments) == 1 && a.count > 1 {
+		// Eino's one-element fast path would retain the intermediate indices.
+		segments = []*schema.AgenticMessage{segments[0], {}}
+	}
+	return schema.ConcatAgenticMessages(segments)
 }
 
 // The OpenAI extension repeats this response header on every chunk. Eino's

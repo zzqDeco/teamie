@@ -84,7 +84,9 @@ func (p Provider) nativeModel(ctx context.Context, c Config, key, raw string, st
 		}
 		limit = *options.MaxTokens
 	}
-	limit = min(limit, configuredOutputLimit(c))
+	// Runtime freezes output admission with each logical Run. Applying today's
+	// window here would silently rewrite an older Run after reconfiguration.
+	limit = min(limit, modeltransport.MaxOutputTokens)
 	if options.Temperature != nil && (*options.Temperature < 0 || *options.Temperature > 2) || options.TopP != nil && (*options.TopP <= 0 || *options.TopP > 1) || len(options.Stop) > 16 {
 		return nil, nil, nil, api.Err(400, "invalid_request", "Invalid generation options")
 	}
@@ -224,7 +226,7 @@ func (g *providerBoundary) RoundTrip(request *http.Request) (*http.Response, err
 	if err != nil || len(raw) > MaxRequestBytes {
 		return nil, api.Err(413, "request_too_large", "Model request is too large")
 	}
-	payload, err := normalizeModeWithOutputLimit(string(raw), g.config.Model, g.streaming, configuredOutputLimit(g.config))
+	payload, err := normalizeModeWithOutputLimit(string(raw), g.config.Model, g.streaming, modeltransport.MaxOutputTokens)
 	if err != nil {
 		return nil, err
 	}

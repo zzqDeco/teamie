@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -137,6 +138,63 @@ func TestLongContextStreamBatchingMatchesNativeConcatenation(t *testing.T) {
 	}
 	if len(accumulator.segments) > 40 || len(accumulator.pending) != 0 {
 		t.Fatal("aggregation retained every token-sized native object")
+	}
+}
+
+func TestLongContextStreamRejectsOversizedContentBeforeCompletion(t *testing.T) {
+	for _, kind := range []string{"text", "reasoning", "tool", "extra"} {
+		t.Run(kind, func(t *testing.T) {
+			accumulator := &modelStreamAccumulator{}
+			text := strings.Repeat("x", 65536)
+			for i := 0; i < 160; i++ {
+				message := &schema.AgenticMessage{Role: schema.AgenticRoleTypeAssistant}
+				var block *schema.ContentBlock
+				switch kind {
+				case "text":
+					block = schema.NewContentBlock(&schema.AssistantGenText{Text: text})
+				case "reasoning":
+					block = schema.NewContentBlock(&schema.Reasoning{Text: text})
+				case "tool":
+					block = schema.NewContentBlock(&schema.FunctionToolCall{Name: "tool", Arguments: text})
+				case "extra":
+					message.Extra = map[string]any{"delta": text}
+				}
+				if block != nil {
+					block.StreamingMeta = &schema.StreamingMeta{Index: 0}
+					message.ContentBlocks = []*schema.ContentBlock{block}
+				}
+				if err := accumulator.add(message); err != nil {
+					var failure *ModelError
+					if !errors.As(err, &failure) || failure.Code != "upstream_response_limit" || i > 128 {
+						t.Fatal("oversized response was not rejected incrementally", i, err)
+					}
+					return
+				}
+			}
+			t.Fatal("oversized content was retained until stream completion")
+		})
+	}
+}
+
+func TestLongContextStreamCompactsFramingWithoutRejectingValidContent(t *testing.T) {
+	accumulator := &modelStreamAccumulator{}
+	var previous string
+	for i := 0; i < 20000; i++ {
+		message := &schema.AgenticMessage{Role: schema.AgenticRoleTypeAssistant,
+			ContentBlocks: []*schema.ContentBlock{schema.NewContentBlockChunk(&schema.AssistantGenText{Text: "x"}, &schema.StreamingMeta{Index: 0})},
+			Extra:         map[string]any{"openai-request-id": strings.Repeat("header", 100)},
+		}
+		body, err := (&schema.HumanReadableSerializer{}).Marshal(message)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = accumulator.add(streamRequestIDDelta(message, &previous), len(body)); err != nil {
+			t.Fatal("repeated native framing was mistaken for reconstructed content", err)
+		}
+	}
+	result, err := accumulator.result()
+	if err != nil || len(result.ContentBlocks) != 1 || result.ContentBlocks[0].StreamingMeta != nil || result.ContentBlocks[0].AssistantGenText.Text != strings.Repeat("x", 20000) || result.Extra["openai-request-id"] != strings.Repeat("header", 100) {
+		t.Fatal("incremental capacity checks changed final native content", err)
 	}
 }
 
