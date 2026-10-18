@@ -140,6 +140,7 @@ describe("unread entry", () => {
 
   it("keeps the divider and acknowledges only rows that were actually visible", async () => {
     const conversation = conversationWith(3, 6);
+    bootstrap.conversations = [conversation];
     chatStore.replaceConversations([conversation]);
     page = [1, 2, 3, 4, 5, 6].map((seq) => message(seq));
     layout(70, 300);
@@ -158,6 +159,7 @@ describe("unread entry", () => {
 
   it("never acknowledges across unloaded history and reads inside the unread jump context", async () => {
     const conversation = conversationWith(2, 120);
+    bootstrap.conversations = [conversation];
     chatStore.replaceConversations([conversation]);
     page = Array.from({ length: 50 }, (_, i) => message(71 + i));
     const around = vi.spyOn(api, "messagesAround").mockResolvedValue({
@@ -176,6 +178,71 @@ describe("unread entry", () => {
     expect(host.querySelector(".message.located")?.id).toBe("message-m3");
     await elapse(700);
     expect(api.read).toHaveBeenCalledWith("room", 5);
+  });
+
+  function visibleOnly(seqs: () => Set<number>) {
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      const el = this as HTMLElement;
+      const rect = (top: number, bottom: number) =>
+        ({ top, bottom, left: 0, right: 0, width: 0, height: bottom - top, x: 0, y: top, toJSON: noop }) as DOMRect;
+      if (el.classList.contains("message-scroll")) return rect(0, 600);
+      const seq = Number(el.dataset?.seq || 0);
+      return seqs().has(seq) ? rect(10, 50) : rect(900, 940);
+    });
+  }
+
+  it("never counts rows of a replaced window that were not on screen", async () => {
+    const conversation = conversationWith(2, 120);
+    bootstrap.conversations = [conversation];
+    chatStore.replaceConversations([conversation]);
+    page = Array.from({ length: 50 }, (_, i) => message(71 + i));
+    let visible = new Set(page.map((m) => m.seq));
+    visibleOnly(() => visible);
+    vi.spyOn(api, "messagesAround").mockResolvedValue({
+      messages: Array.from({ length: 27 }, (_, i) => message(i + 1)), hasMore: false,
+    });
+    await show(conversation);
+    await elapse(700);
+    expect(api.read).not.toHaveBeenCalled();
+    visible = new Set([1, 2, 3, 4, 5, 6]);
+    await act(async () => { host.querySelector<HTMLButtonElement>(".unread-jump-banner button")!.click(); });
+    await elapse(700);
+    expect(api.read).toHaveBeenCalledWith("room", 6);
+    expect(api.read).not.toHaveBeenCalledWith("room", 27);
+  });
+
+  it("keeps a never-read paginated conversation unread until the user chooses to mark it read", async () => {
+    const conversation = conversationWith(0, 120);
+    bootstrap.conversations = [conversation];
+    chatStore.replaceConversations([conversation]);
+    page = Array.from({ length: 50 }, (_, i) => message(71 + i));
+    await show(conversation);
+    await elapse(700);
+    expect(api.read).not.toHaveBeenCalled();
+    const actions = host.querySelectorAll<HTMLButtonElement>(".unread-jump-banner button");
+    expect(actions[1]?.textContent).toBe("全部标为已读");
+    await act(async () => { actions[1].click(); });
+    expect(api.read).toHaveBeenCalledWith("room", 120);
+  });
+
+  it("still detects the unread gap when an isolated old row is cached", async () => {
+    const conversation = conversationWith(5, 120);
+    bootstrap.conversations = [conversation];
+    chatStore.replaceConversations([conversation]);
+    chatStore.merge([{ ...message(1), editedAt: "2026-10-17T00:05:00Z" }]);
+    page = Array.from({ length: 50 }, (_, i) => message(71 + i));
+    await show(conversation);
+    expect(host.querySelector(".unread-jump-banner")).not.toBeNull();
+  });
+
+  it("freezes the entry from fresh bootstrap cursors rather than a stale cached snapshot", async () => {
+    const cached = conversationWith(6, 6);
+    bootstrap.conversations = [conversationWith(6, 10)];
+    chatStore.replaceConversations([cached]);
+    page = Array.from({ length: 10 }, (_, i) => message(i + 1));
+    layout(70, 300);
+    await show(cached);
+    expect(host.querySelector(".unread-divider")?.nextElementSibling?.id).toBe("message-m7");
   });
 
   it("clears the message deep link when returning to the latest messages", async () => {
@@ -239,6 +306,9 @@ describe("editing shortcuts", () => {
 
     await key(composer(), { key: "ArrowUp" });
     await type(editor()!, "edited once");
+    // Returning to the composer and pressing ArrowUp must not reset the draft.
+    await key(composer(), { key: "ArrowUp" });
+    expect(editor()?.value).toBe("edited once");
     await key(editor()!, { key: "Enter" });
     await key(editor()!, { key: "Enter" });
     await key(editor()!, { key: "Enter" });

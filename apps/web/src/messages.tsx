@@ -170,18 +170,34 @@ export function ConversationView({
     attachments.blocked || (attachments.files.length > 0 && !uploadsEnabled);
   const snapshot = useChatState();
   const allMessages = snapshot.messages[conversation.id] || [];
-  // The view remounts per conversation, so this freezes what was unread when
-  // it opened; acknowledging messages must not erase the divider mid-read.
-  const [entry] = useState(() => ({
-    readSeq: conversation.readSeq,
-    lastSeq: conversation.lastSeq,
-  }));
-  const entryHasUnread = entry.readSeq > 0 && entry.lastSeq > entry.readSeq;
-  const unreadAnchorPending = useRef(entryHasUnread && !initialMessageId);
+  // Freeze what was unread when the view opened so acknowledging messages does
+  // not erase the divider mid-read. Wait for the bootstrap response: a reload
+  // can mount the view from a persisted snapshot with stale cursors.
+  const authoritative = data
+    ? data.conversations.find((c) => c.id === conversation.id) || conversation
+    : undefined;
+  const [entry, setEntry] = useState<{ readSeq: number; lastSeq: number } | null>(
+    null,
+  );
+  const [anchorPending, setAnchorPending] = useState(false);
+  if (!entry && authoritative) {
+    const frozen = {
+      readSeq: authoritative.readSeq,
+      lastSeq: Math.max(authoritative.lastSeq, conversation.lastSeq),
+    };
+    setEntry(frozen);
+    setAnchorPending(
+      !initialMessageId && frozen.readSeq > 0 && frozen.lastSeq > frozen.readSeq,
+    );
+  }
   const [latestLoaded, setLatestLoaded] = useState(false);
-  const [seenSeq, setSeenSeq] = useState(0);
+  // Sequences whose rows were actually visible after scrolling settled. Reads
+  // only advance through a gap-free run of these after the current cursor.
+  const seenRows = useRef(new Set<number>());
+  const [readCandidate, setReadCandidate] = useState(0);
   const [unreadContext, setUnreadContext] = useState(false);
   const editPending = useRef(false);
+  const fetchedLatest = useRef(false);
   const [located, setLocated] = useState<LocalMessage[] | null>(null);
   const [resolvedTargets, setResolvedTargets] = useState<
     Record<string, Message>
@@ -330,6 +346,16 @@ export function ConversationView({
     const hasConfirmed = (
       chatStore.getSnapshot().messages[conversation.id] || []
     ).some((m) => !m.status);
+    if (fetchedLatest.current) {
+      const current = chatStore.getSnapshot().conversations[conversation.id];
+      if (current) {
+        setEntry({ readSeq: current.readSeq, lastSeq: current.lastSeq });
+        setAnchorPending(
+          current.readSeq > 0 && current.lastSeq > current.readSeq,
+        );
+      }
+    }
+    fetchedLatest.current = true;
     acknowledgement.current = null;
     historyBefore.current = null;
     setHasMore(false);
@@ -511,7 +537,7 @@ export function ConversationView({
     const operation = ++navigation.current;
     const current = () =>
       token === chatStore.generation && operation === navigation.current;
-    unreadAnchorPending.current = false;
+    setAnchorPending(false);
     setAtBottom(false);
     setLoading(false);
     setLoadingOlder(false);
@@ -597,7 +623,7 @@ export function ConversationView({
   const latest = messages.filter((m) => !m.status).at(-1)?.seq || 0;
   const tailId = messages.at(-1)?.id;
   const firstUnread =
-    entry.readSeq > 0
+    entry && entry.readSeq > 0
       ? messages.find(
           (m) =>
             !m.status &&
@@ -606,106 +632,125 @@ export function ConversationView({
             m.senderId !== userId,
         )?.id
       : undefined;
-  const earliestLoaded = messages.find((m) => !m.status)?.seq || 0;
+  const nextUnreadSeq = conversation.readSeq + 1;
+  // A real gap: the next unread sequence is not loaded, yet later rows are.
+  // Isolated cached rows (e.g. a synced old edit) do not hide the gap.
   const unreadBeforeWindow =
-    entryHasUnread &&
     latestLoaded &&
     !located &&
     !locating &&
-    conversation.readSeq > 0 &&
-    conversation.readSeq < conversation.lastSeq &&
-    earliestLoaded > conversation.readSeq + 1;
-  // A message counts as seen once its bottom edge has been inside the
-  // viewport; reads advance only through that point, never past unseen rows.
-  const measureSeen = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const limit = el.getBoundingClientRect().bottom + 2;
-    const rows = el.querySelectorAll<HTMLElement>("article[data-seq]");
-    for (let i = rows.length - 1; i >= 0; i--) {
-      if (rows[i].getBoundingClientRect().bottom <= limit) {
-        const seq = Number(rows[i].dataset.seq);
-        setSeenSeq((old) => Math.max(old, seq));
-        return;
+    conversation.lastSeq > conversation.readSeq &&
+    !messages.some((m) => !m.status && m.seq === nextUnreadSeq) &&
+    messages.some((m) => !m.status && m.seq > nextUnreadSeq);
+  const ackState = useRef({ allowed: true, blocked: false });
+  useEffect(() => {
+    ackState.current = {
+      allowed: !located || unreadContext,
+      blocked: searchOpen || !visible || loading,
+    };
+  }, [located, unreadContext, searchOpen, visible, loading]);
+  const dwell = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // Record rows that are visible once scrolling has settled; programmatic or
+  // smooth scrolls keep rescheduling this, so transit frames never count.
+  const scheduleSeen = useCallback(() => {
+    clearTimeout(dwell.current);
+    dwell.current = setTimeout(() => {
+      const el = scrollRef.current;
+      if (!el || !ackState.current.allowed || ackState.current.blocked) return;
+      const root = el.getBoundingClientRect();
+      for (const row of el.querySelectorAll<HTMLElement>("article[data-seq]")) {
+        const rect = row.getBoundingClientRect();
+        const inside = rect.top >= root.top - 1 && rect.bottom <= root.bottom + 1;
+        const tallAndCovering =
+          rect.height > root.height * 0.8 &&
+          rect.top < root.bottom &&
+          rect.bottom > root.top;
+        if (inside || tallAndCovering) seenRows.current.add(Number(row.dataset.seq));
       }
-    }
-  }, []);
+      const base =
+        chatStore.getSnapshot().conversations[conversation.id]?.readSeq ?? 0;
+      let end = base;
+      while (seenRows.current.has(end + 1)) end++;
+      setReadCandidate(end);
+    }, 400);
+  }, [conversation.id]);
+  useEffect(() => () => clearTimeout(dwell.current), []);
   useEffect(() => {
     if (loading) return;
     const el = scrollRef.current;
-    if (unreadAnchorPending.current && !located) {
+    if (anchorPending && !located) {
       const anchor = firstUnread
         ? document.getElementById(`message-${firstUnread}`)
         : null;
       if (el && anchor && el.contains(anchor)) {
-        unreadAnchorPending.current = false;
+        setAnchorPending(false);
         initialScroll.current = false;
         el.scrollTop +=
           anchor.getBoundingClientRect().top -
           el.getBoundingClientRect().top -
           56;
         setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
-        measureSeen();
+        scheduleSeen();
         return;
       }
-      if (latestLoaded) unreadAnchorPending.current = false;
+      if (latestLoaded) setAnchorPending(false);
+      // Keep the current position until the latest page can be anchored.
+      else return;
     }
     if (atBottom || initialScroll.current) {
       el?.scrollTo({ top: el.scrollHeight });
       initialScroll.current = false;
     }
-    measureSeen();
-  }, [loading, tailId, atBottom, firstUnread, latestLoaded, located, measureSeen]);
-  const readBase = conversation.readSeq;
-  // Read cursors are cumulative, so the target may only cover a gap-free run
-  // of loaded messages directly after the cursor; unloaded history stays
-  // unread. A never-read conversation (cursor 0) keeps the historic behaviour
-  // of acknowledging what is visible, as it has no prior reading position.
-  let contiguousEnd = readBase;
-  if (readBase === 0) contiguousEnd = Number.MAX_SAFE_INTEGER;
-  else
-    for (const m of messages) {
-      if (m.status || m.seq <= contiguousEnd) continue;
-      if (m.seq !== contiguousEnd + 1) break;
-      contiguousEnd = m.seq;
-    }
-  const readTarget =
-    located && !unreadContext
-      ? 0
-      : Math.min(seenSeq, latest, contiguousEnd);
+    scheduleSeen();
+  }, [
+    loading,
+    tailId,
+    atBottom,
+    anchorPending,
+    firstUnread,
+    latestLoaded,
+    located,
+    visible,
+    searchOpen,
+    scheduleSeen,
+  ]);
   useEffect(() => {
     if (
-      !readTarget ||
-      searchOpen ||
-      !visible ||
-      loading ||
-      readTarget <= Math.max(lastRead.current, conversation.readSeq)
+      !readCandidate ||
+      readCandidate > latest ||
+      readCandidate <= Math.max(lastRead.current, conversation.readSeq) ||
+      generation !== chatStore.generation
     )
       return;
-    const timer = setTimeout(() => {
-      if (generation !== chatStore.generation) return;
-      void api
-        .read(conversation.id, readTarget)
-        .then((result) => {
-          if (generation === chatStore.generation) {
-            lastRead.current = result.readSeq;
-            chatStore.markRead(conversation.id, result.readSeq);
-          }
-        })
-        .catch(() => {
-          /* Durable sync and the next read retry preserve unread state. */
-        });
-    }, 600);
-    return () => clearTimeout(timer);
-  }, [
-    readTarget,
-    searchOpen,
-    visible,
-    loading,
-    conversation.id,
-    conversation.readSeq,
-    generation,
-  ]);
+    void api
+      .read(conversation.id, readCandidate)
+      .then((result) => {
+        if (generation === chatStore.generation) {
+          lastRead.current = Math.max(lastRead.current, result.readSeq);
+          chatStore.markRead(conversation.id, result.readSeq);
+        }
+      })
+      .catch(() => {
+        /* Durable sync and the next read retry preserve unread state. */
+      });
+  }, [readCandidate, latest, conversation.id, conversation.readSeq, generation]);
+  // Explicit user choice to acknowledge skipped history through the latest
+  // loaded message; never triggered implicitly.
+  function markLatestRead() {
+    if (!latest || latest <= conversation.readSeq) return;
+    const token = chatStore.generation;
+    void api
+      .read(conversation.id, latest)
+      .then((result) => {
+        if (token === chatStore.generation) {
+          lastRead.current = Math.max(lastRead.current, result.readSeq);
+          chatStore.markRead(conversation.id, result.readSeq);
+        }
+      })
+      .catch((e) => {
+        if (token === chatStore.generation) setError(errorText(e));
+      });
+  }
   async function older() {
     const boundary = historyBefore.current;
     if (!boundary || boundary.generation !== chatStore.generation || loadingOlder)
@@ -803,6 +848,7 @@ export function ConversationView({
       !event.metaKey &&
       !event.ctrlKey &&
       !body &&
+      !editing &&
       !replyToId &&
       attachments.files.length === 0 &&
       !located &&
@@ -974,10 +1020,13 @@ export function ConversationView({
               : conversation.lastSeq - conversation.readSeq}{" "}
             条新消息，部分在更早的位置
           </span>
-          <button onClick={() => void loadUnreadContext()}>
-            <ArrowUp size={14} />
-            跳到第一条未读
-          </button>
+          <span className="unread-jump-actions">
+            <button onClick={() => void loadUnreadContext()}>
+              <ArrowUp size={14} />
+              跳到第一条未读
+            </button>
+            <button onClick={markLatestRead}>全部标为已读</button>
+          </span>
         </div>
       )}
       <div
@@ -988,7 +1037,7 @@ export function ConversationView({
           setAtBottom(
             !located && el.scrollHeight - el.scrollTop - el.clientHeight < 80,
           );
-          measureSeen();
+          scheduleSeen();
         }}
       >
         {!loading && !messages.length && !error && (

@@ -92,3 +92,8 @@
   cursor: pointer;
   min-height: 32px;
 }
+.unread-jump-actions {
+  display: inline-flex;
+  gap: 12px;
+  flex-shrink: 0;
+}
