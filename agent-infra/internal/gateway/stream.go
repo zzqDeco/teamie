@@ -93,7 +93,7 @@ func (s *Service) streamHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	key, e := s.Cipher.Decrypt(c.CipherKey)
 	if e != nil {
-		terminal(api.Err(503, "credential_unavailable", "Saved model credential could not be decrypted"))
+		terminal(&api.Error{Status: 503, Code: "credential_unavailable", Message: "Saved model credential could not be decrypted", Cause: e})
 		return
 	}
 	ctx, cancel := context.WithCancel(ctx)
@@ -112,14 +112,18 @@ func (s *Service) streamHTTP(w http.ResponseWriter, r *http.Request) {
 	status := "success"
 	if e != nil {
 		status = failed(e).GetErrorCode()
+	} else {
+		phase = "usage-persist"
 	}
-	phase = "usage-persist"
 	audit, auditCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer auditCancel()
-	if s.Store.Record(audit, Usage{OwnerID: in.OwnerID, AgentID: in.AgentID, SessionID: in.SessionID, RunID: in.RunID, Status: status, PromptTokens: prompt, CompletionTokens: completion, LatencyMS: time.Since(start).Milliseconds()}) != nil {
-		terminal(api.Err(503, "usage_unavailable", "Model usage could not be recorded"))
+	if auditErr := s.Store.Record(audit, Usage{OwnerID: in.OwnerID, AgentID: in.AgentID, SessionID: in.SessionID, RunID: in.RunID, Status: status, PromptTokens: prompt, CompletionTokens: completion, LatencyMS: time.Since(start).Milliseconds()}); auditErr != nil {
+		phase = "usage-persist"
+		terminal(&api.Error{Status: 503, Code: "usage_unavailable", Message: "Model usage could not be recorded", Cause: auditErr})
 		return
 	}
-	phase = "terminal-write"
+	if e == nil {
+		phase = "terminal-write"
+	}
 	terminal(e)
 }

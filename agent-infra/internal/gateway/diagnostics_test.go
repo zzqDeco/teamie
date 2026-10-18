@@ -77,11 +77,16 @@ func TestProviderCompletionLogsAreCorrelatedAndContentFree(t *testing.T) {
 					t.Fatal("provider attribution missing", event)
 				}
 				want := "success"
+				wantStage := "terminal-write"
 				if broken {
 					want = "failure"
+					wantStage = "provider-stream"
 				}
 				if event["event.outcome"] != want {
 					t.Fatal("provider outcome incorrect", event)
+				}
+				if event["custom.model.failure_stage"] != wantStage {
+					t.Fatal("provider failure stage overwritten by later audit/terminal work", event)
 				}
 			}
 			if count != 1 {

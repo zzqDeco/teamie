@@ -85,7 +85,7 @@ func (s *Service) call(ctx context.Context, owner, id, session, run, raw string,
 	}
 	key, e := s.Cipher.Decrypt(c.CipherKey)
 	if e != nil {
-		return fail(api.Err(503, "credential_unavailable", "Saved model credential could not be decrypted"))
+		return fail(&api.Error{Status: 503, Code: "credential_unavailable", Message: "Saved model credential could not be decrypted", Cause: e})
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -109,12 +109,13 @@ func (s *Service) call(ctx context.Context, owner, id, session, run, raw string,
 		status = response.GetErrorCode()
 	} else {
 		response = &agent.GatewayChatResponse{Ok: true, ResponseJson: &body, StatusCode: ptr(int32(200))}
+		phase = "usage-persist"
 	}
-	phase = "usage-persist"
 	auditCtx, auditCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer auditCancel()
-	if s.Store.Record(auditCtx, Usage{OwnerID: owner, AgentID: id, SessionID: session, RunID: run, Status: status, PromptTokens: prompt, CompletionTokens: completion, LatencyMS: time.Since(start).Milliseconds()}) != nil {
-		return fail(api.Err(503, "usage_unavailable", "Model usage could not be recorded"))
+	if auditErr := s.Store.Record(auditCtx, Usage{OwnerID: owner, AgentID: id, SessionID: session, RunID: run, Status: status, PromptTokens: prompt, CompletionTokens: completion, LatencyMS: time.Since(start).Milliseconds()}); auditErr != nil {
+		phase = "usage-persist"
+		return fail(&api.Error{Status: 503, Code: "usage_unavailable", Message: "Model usage could not be recorded", Cause: auditErr})
 	}
 	return response
 }
