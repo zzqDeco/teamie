@@ -169,8 +169,11 @@ export function Landing() {
             <h1>
               团队与 Agent，
               <br />
-              在同一个空间<span className="hand-underline">做成事</span>
-              <span className="purple">。</span>
+              在同一个空间
+              <span className="hero-title-ending">
+                <span className="hand-underline">做成事</span>
+                <span className="purple">。</span>
+              </span>
             </h1>
             <p>
               少一点工具切换，多一点心有灵犀。

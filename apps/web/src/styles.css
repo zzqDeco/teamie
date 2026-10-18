@@ -449,6 +449,10 @@ label > .copy-input {
   letter-spacing: -2px;
   margin: 21px 0 21px;
 }
+.hero-title-ending {
+  display: inline-block;
+  white-space: nowrap;
+}
 .hand-underline {
   position: relative;
   display: inline-block;
