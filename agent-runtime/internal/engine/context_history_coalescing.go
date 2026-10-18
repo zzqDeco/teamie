@@ -43,11 +43,11 @@ func (p *ContextPipeline) coalesceHistory(ctx context.Context, policy []*schema.
 		// remains attached to the notice and every later read is authorized.
 		ref := notice.Extra["teamie_context_archive_ref"].(string)
 		notice.ContentBlocks = schema.UserAgenticMessage(contextReadNotice(ref)).ContentBlocks
-		before, err := measureContext(older, nil, p.cfg.Budget.OutputReserveTokens, false)
+		before, err := p.cfg.Budget.measureContext(older, nil, p.cfg.Budget.OutputReserveTokens, false)
 		if err != nil {
 			return nil, err
 		}
-		after, err := measureContext([]*schema.AgenticMessage{notice}, nil, p.cfg.Budget.OutputReserveTokens, false)
+		after, err := p.cfg.Budget.measureContext([]*schema.AgenticMessage{notice}, nil, p.cfg.Budget.OutputReserveTokens, false)
 		if err != nil {
 			return nil, err
 		}
@@ -63,7 +63,7 @@ func (p *ContextPipeline) coalesceHistory(ctx context.Context, policy []*schema.
 				candidate = append(candidate, unit...)
 			}
 		}
-		measurement, err := measureContext(candidate, tools, p.cfg.Budget.OutputReserveTokens, false)
+		measurement, err := p.cfg.Budget.measureContext(candidate, tools, p.cfg.Budget.OutputReserveTokens, false)
 		if err != nil {
 			return nil, err
 		}

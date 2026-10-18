@@ -58,7 +58,7 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticM
 	if e = m.capRunOutput(run, opts); e != nil {
 		return nil, e
 	}
-	request, e := agenticRequest(messages, opts, false)
+	request, e := agenticRequestForRun(run, messages, opts, false)
 	if e != nil {
 		return nil, e
 	}
@@ -92,11 +92,14 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticM
 		}
 		return nil, m.gatewayFailure(ctx, run, step, hash, false, code)
 	}
+	if len(response.GetResponseJson()) > modeltransport.MaxResponseBytes {
+		return nil, &ModelError{Code: "upstream_response_limit"}
+	}
 	result, e := decodeAgenticMessage([]byte(response.GetResponseJson()))
 	if e != nil {
 		return nil, e
 	}
-	if e = validateModelResult(result); e != nil {
+	if e = validateModelResult(result, modelResultByteLimit(run)); e != nil {
 		return nil, e
 	}
 	b, e := (&schema.HumanReadableSerializer{}).Marshal(result)
@@ -214,7 +217,36 @@ func (m *GatewayModel) capOutput(opts *model.Options) {
 	}
 }
 
-func agenticRequest(messages []*schema.AgenticMessage, opts *model.Options, streaming bool) ([]byte, error) {
+func agenticRequestForRun(run *Run, messages []*schema.AgenticMessage, opts *model.Options, streaming bool) ([]byte, error) {
+	if contextProfile(run) == contextProfileV1 {
+		budget, err := ParseContextBudgetSnapshot(run.ContextBudget)
+		if err != nil {
+			return nil, err
+		}
+		if budget.Version >= 6 {
+			return agenticRequest(messages, opts, streaming, modeltransport.MaxOutputTokens)
+		}
+	}
+	return agenticRequest(messages, opts, streaming)
+}
+
+func modelResultByteLimit(run *Run) int {
+	if contextProfile(run) == contextProfileV1 {
+		budget, err := ParseContextBudgetSnapshot(run.ContextBudget)
+		if err == nil && budget.Version >= 6 {
+			return modeltransport.MaxResponseBytes
+		}
+	}
+	return 65536
+}
+
+// The default preserves the exact encoding and cap of historical Run requests.
+// Only the new frozen policy opts into the larger output ceiling.
+func agenticRequest(messages []*schema.AgenticMessage, opts *model.Options, streaming bool, outputLimits ...int) ([]byte, error) {
+	limit := 4096
+	if len(outputLimits) > 0 {
+		limit = min(outputLimits[0], modeltransport.MaxOutputTokens)
+	}
 	if opts.MaxTokens == nil {
 		n := 2048
 		opts.MaxTokens = &n
@@ -222,8 +254,8 @@ func agenticRequest(messages []*schema.AgenticMessage, opts *model.Options, stre
 	if *opts.MaxTokens <= 0 {
 		return nil, &ModelError{Code: "invalid_request"}
 	}
-	if *opts.MaxTokens > 4096 {
-		n := 4096
+	if *opts.MaxTokens > limit {
+		n := limit
 		opts.MaxTokens = &n
 	}
 	if opts.AgenticToolChoice == nil {

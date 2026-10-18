@@ -119,7 +119,7 @@ func TestRuntimeSchemaUpgradePreservesDataAndRejectsV037Startup(t *testing.T) {
 			if cursor != "99" || body != "durable legacy input" || profile != contextProfileLegacy || budget != "{}" || request != "immutable-request-hash" || string(response) != "immutable-model-response" {
 				t.Fatal("forward migration changed legacy durable execution data")
 			}
-			if err = current.DB.QueryRow(ctx, `SELECT string_agg(version::text,',' ORDER BY version),current_setting('teamie.runtime_writer_schema') FROM agent_runtime_schema_migrations`).Scan(&ledger, &protocol); err != nil || ledger != "1,2,3,4,5,6,7" || protocol != "7" {
+			if err = current.DB.QueryRow(ctx, `SELECT string_agg(version::text,',' ORDER BY version),current_setting('teamie.runtime_writer_schema') FROM agent_runtime_schema_migrations`).Scan(&ledger, &protocol); err != nil || ledger != "1,2,3,4,5,6,7,8" || protocol != "8" {
 				t.Fatal("current writer did not install its schema/protocol", ledger, protocol, err)
 			}
 			// The old DDL recreates this index before its INSERT(1) ON CONFLICT.
@@ -330,6 +330,49 @@ func TestRuntimeV7PreservesFrozenV4AndRejectsV6Startup(t *testing.T) {
 	before := runtimeFenceSnapshot(t, raw)
 	if _, err = raw.Exec(ctx, schemaSQL+schemaV2SQL+schemaV3SQL+contextArchiveSchemaSQL+contextRecoverySchemaSQL+schemaV4SQL+schemaV5SQL+schemaV6SQL); err == nil {
 		t.Fatal("schema 6 startup remained authorized after migration")
+	} else {
+		var rejected *pgconn.PgError
+		if !errors.As(err, &rejected) || rejected.Code != "55000" {
+			t.Fatal("unexpected old-writer failure", err)
+		}
+	}
+	if after := runtimeFenceSnapshot(t, raw); before != after {
+		t.Fatal("rejected startup changed durable data or the writer guard")
+	}
+}
+
+func TestRuntimeV8PreservesFrozenV5AndRejectsV7Startup(t *testing.T) {
+	dsn, raw := runtimeMigrationDatabase(t)
+	ctx := context.Background()
+	if _, err := raw.Exec(ctx, `SET teamie.runtime_writer_schema='7';`+schemaSQL+schemaV2SQL+schemaV3SQL+contextArchiveSchemaSQL+contextRecoverySchemaSQL+schemaV4SQL+schemaV5SQL+schemaV6SQL+schemaV7SQL); err != nil {
+		t.Fatal(err)
+	}
+	agent, run, attempt := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	budget, err := os.ReadFile("../../../ops/fixtures/runtime-context-budget-v5.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = raw.Exec(ctx, `INSERT INTO runtime_agents(agent_id) VALUES($1)`, agent); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = raw.Exec(ctx, `INSERT INTO runtime_runs(id,agent_id,input_key,input_json,attempt_id,context_profile,context_budget) VALUES($1,$2,'frozen-v5','[]',$3,$4,$5)`, run, agent, attempt, contextProfileV1, budget); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = raw.Exec(ctx, `INSERT INTO runtime_model_calls(run_id,step,request_hash,response) VALUES($1,1,'original-v5-hash','original-v5-response')`, run); err != nil {
+		t.Fatal(err)
+	}
+	current, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer current.DB.Close()
+	var unchanged bool
+	if err = current.DB.QueryRow(ctx, `SELECT r.context_budget=$2::jsonb AND m.request_hash='original-v5-hash' AND m.response='original-v5-response'::bytea FROM runtime_runs r JOIN runtime_model_calls m ON m.run_id=r.id WHERE r.id=$1`, run, budget).Scan(&unchanged); err != nil || !unchanged {
+		t.Fatal("schema 8 changed a frozen v5 Run or receipt", err)
+	}
+	before := runtimeFenceSnapshot(t, raw)
+	if _, err = raw.Exec(ctx, schemaSQL+schemaV2SQL+schemaV3SQL+contextArchiveSchemaSQL+contextRecoverySchemaSQL+schemaV4SQL+schemaV5SQL+schemaV6SQL+schemaV7SQL); err == nil {
+		t.Fatal("schema 7 startup remained authorized after migration")
 	} else {
 		var rejected *pgconn.PgError
 		if !errors.As(err, &rejected) || rejected.Code != "55000" {

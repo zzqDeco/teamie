@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"teamie/agent-infra/internal/api"
+	"teamie/agent-protocol/modeltransport"
 )
 
 // A synchronous response-body guard adds no producer goroutine. The official
@@ -27,7 +28,7 @@ type guardedStreamBody struct {
 
 func guardStreamingResponse(response *http.Response, key string, ctx context.Context) (*http.Response, error) {
 	if !strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
-		body, _ := io.ReadAll(io.LimitReader(response.Body, MaxRequestBytes))
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 16385))
 		response.Body.Close()
 		var result struct {
 			Error json.RawMessage `json:"error"`
@@ -40,8 +41,8 @@ func guardStreamingResponse(response *http.Response, key string, ctx context.Con
 		}
 		return nil, api.Err(502, "invalid_upstream_response", "Provider did not return an event stream")
 	}
-	scanner := bufio.NewScanner(io.LimitReader(response.Body, MaxResponseBytes+1))
-	scanner.Buffer(make([]byte, 4096), MaxRequestBytes)
+	scanner := bufio.NewScanner(io.LimitReader(response.Body, modeltransport.MaxProviderStreamBytes+1))
+	scanner.Buffer(make([]byte, 4096), MaxResponseBytes)
 	response.Body = &guardedStreamBody{source: response.Body, scanner: scanner, ctx: ctx, guard: newCredentialStreamGuard(key)}
 	response.ContentLength = -1
 	return response, nil
@@ -134,7 +135,7 @@ func (b *guardedStreamBody) Read(p []byte) (int, error) {
 		}
 		line := b.scanner.Text()
 		b.total += len(line) + 1
-		if b.total > MaxResponseBytes {
+		if b.total > modeltransport.MaxProviderStreamBytes {
 			return 0, api.Err(502, "invalid_upstream_response", "Provider response exceeded limits")
 		}
 		if line == "" {

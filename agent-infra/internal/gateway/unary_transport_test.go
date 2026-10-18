@@ -87,7 +87,7 @@ func serveUnaryHertz(t *testing.T, handler http.Handler) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := hertzserver.New(hertzserver.WithListener(listener), hertzserver.WithReadTimeout(15*time.Second), hertzserver.WithWriteTimeout(0), hertzserver.WithSenseClientDisconnection(true))
+	h := hertzserver.New(hertzserver.WithListener(listener), hertzserver.WithReadTimeout(15*time.Second), hertzserver.WithWriteTimeout(0), hertzserver.WithSenseClientDisconnection(true), hertzserver.WithMaxRequestBodySize(2*modeltransport.MaxRequestBytes+4096))
 	h.Any("/*path", adaptor.HertzHandler(handler))
 	stopped := make(chan error, 1)
 	go func() { stopped <- h.Run() }()

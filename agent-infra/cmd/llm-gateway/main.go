@@ -9,6 +9,7 @@ import (
 	"teamie/agent-infra/internal/api"
 	"teamie/agent-infra/internal/gateway"
 	"teamie/agent-protocol/kitex_gen/agent/modelgatewayservice"
+	"teamie/agent-protocol/modeltransport"
 	"time"
 )
 
@@ -57,5 +58,5 @@ func main() {
 			cancel()
 		}
 	}()
-	api.Serve(api.Env("HTTP_ADDR", ":8086"), service.Routes(auth), hertzserver.WithWriteTimeout(0))
+	api.Serve(api.Env("HTTP_ADDR", ":8086"), service.Routes(auth), hertzserver.WithWriteTimeout(0), hertzserver.WithMaxRequestBodySize(2*modeltransport.MaxRequestBytes+4096))
 }

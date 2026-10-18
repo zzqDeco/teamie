@@ -36,7 +36,7 @@ func (p Provider) nativeModel(ctx context.Context, c Config, key, raw string, st
 	}
 	var input []*schema.AgenticMessage
 	var options model.Options
-	if (&schema.HumanReadableSerializer{}).Unmarshal(envelope.Messages, &input) != nil || len(input) < 1 || len(input) > 128 || json.Unmarshal(envelope.Options, &options) != nil {
+	if (&schema.HumanReadableSerializer{}).Unmarshal(envelope.Messages, &input) != nil || len(input) < 1 || len(input) > modeltransport.MaxInputMessages || json.Unmarshal(envelope.Options, &options) != nil {
 		return nil, nil, nil, api.Err(400, "invalid_request", "Invalid model input")
 	}
 	for _, message := range input {
@@ -84,9 +84,7 @@ func (p Provider) nativeModel(ctx context.Context, c Config, key, raw string, st
 		}
 		limit = *options.MaxTokens
 	}
-	if limit > 4096 {
-		limit = 4096
-	}
+	limit = min(limit, configuredOutputLimit(c))
 	if options.Temperature != nil && (*options.Temperature < 0 || *options.Temperature > 2) || options.TopP != nil && (*options.TopP <= 0 || *options.TopP > 1) || len(options.Stop) > 16 {
 		return nil, nil, nil, api.Err(400, "invalid_request", "Invalid generation options")
 	}
@@ -226,7 +224,7 @@ func (g *providerBoundary) RoundTrip(request *http.Request) (*http.Response, err
 	if err != nil || len(raw) > MaxRequestBytes {
 		return nil, api.Err(413, "request_too_large", "Model request is too large")
 	}
-	payload, err := normalizeMode(string(raw), g.config.Model, g.streaming)
+	payload, err := normalizeModeWithOutputLimit(string(raw), g.config.Model, g.streaming, configuredOutputLimit(g.config))
 	if err != nil {
 		return nil, err
 	}

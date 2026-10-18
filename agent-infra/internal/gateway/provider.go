@@ -14,10 +14,11 @@ import (
 	"time"
 
 	"teamie/agent-infra/internal/api"
+	"teamie/agent-protocol/modeltransport"
 )
 
-const MaxRequestBytes = 262144
-const MaxResponseBytes = 2097152
+const MaxRequestBytes = modeltransport.MaxRequestBytes
+const MaxResponseBytes = modeltransport.MaxResponseBytes
 
 var deniedPrefixes = []string{"0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24", "192.0.2.0/24", "192.168.0.0/16", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4", "::/96", "::ffff:0:0/96", "64:ff9b::/96", "64:ff9b:1::/48", "100::/64", "2001::/23", "2001:db8::/32", "2002::/16", "fc00::/7", "fe80::/10", "ff00::/8"}
 
@@ -107,6 +108,10 @@ func NewHTTPClient() *http.Client {
 }
 func normalizeRequest(raw, model string) ([]byte, error) { return normalizeMode(raw, model, false) }
 func normalizeMode(raw, model string, streaming bool) ([]byte, error) {
+	return normalizeModeWithOutputLimit(raw, model, streaming, 4096)
+}
+
+func normalizeModeWithOutputLimit(raw, model string, streaming bool, outputLimit int) ([]byte, error) {
 	if len(raw) > MaxRequestBytes {
 		return nil, api.Err(413, "request_too_large", "Model request is too large")
 	}
@@ -126,8 +131,8 @@ func normalizeMode(raw, model string, streaming bool) ([]byte, error) {
 		}
 	}
 	var messages []map[string]json.RawMessage
-	if json.Unmarshal(m["messages"], &messages) != nil || len(messages) == 0 || len(messages) > 128 {
-		return nil, api.Err(400, "invalid_request", "Expected 1 to 128 chat messages")
+	if json.Unmarshal(m["messages"], &messages) != nil || len(messages) == 0 || len(messages) > modeltransport.MaxInputMessages {
+		return nil, api.Err(400, "invalid_request", "Invalid chat message count")
 	}
 	for _, msg := range messages {
 		var role string
@@ -152,8 +157,8 @@ func normalizeMode(raw, model string, streaming bool) ([]byte, error) {
 			if json.Unmarshal(b, &n) != nil || n < 1 {
 				return nil, api.Err(400, "invalid_request", "Invalid completion token limit")
 			}
-			if n > 4096 {
-				m[k] = json.RawMessage("4096")
+			if n > outputLimit {
+				m[k] = json.RawMessage(strconv.Itoa(outputLimit))
 			}
 		}
 	}

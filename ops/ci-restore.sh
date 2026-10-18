@@ -13,7 +13,7 @@ for suffix in identity chat agent_control agent_runtime gateway; do
   version=1
   if [[ $suffix == identity || $suffix == chat || $suffix == agent_runtime || $suffix == gateway ]]; then version=2; fi
   if [[ $suffix == identity || $suffix == chat || $suffix == agent_runtime ]]; then version=3; fi
-  if [[ $suffix == agent_runtime ]]; then version=7; fi
+  if [[ $suffix == agent_runtime ]]; then version=8; fi
   if [[ $suffix == chat ]]; then version=5; fi
   # Identity's real schema creates its complete production migration ledger.
   if [[ $suffix != identity && $suffix != agent_runtime && $suffix != chat ]]; then
@@ -72,8 +72,8 @@ from pathlib import Path
 import re
 root=Path('agent-runtime/internal/engine')
 sources='\n'.join(p.read_text() for p in root.glob('*.go') if not p.name.endswith('_test.go'))
-print("SET teamie.runtime_writer_schema='7';")
-for name in ('schemaSQL','schemaV2SQL','schemaV3SQL','contextArchiveSchemaSQL','contextRecoverySchemaSQL','schemaV4SQL','schemaV5SQL','schemaV6SQL','schemaV7SQL'):
+print("SET teamie.runtime_writer_schema='8';")
+for name in ('schemaSQL','schemaV2SQL','schemaV3SQL','contextArchiveSchemaSQL','contextRecoverySchemaSQL','schemaV4SQL','schemaV5SQL','schemaV6SQL','schemaV7SQL','schemaV8SQL'):
     match=re.search(r'const\s+'+name+r'\s*=\s*`([^`]+)`',sources,re.S)
     if match is None:
         raise SystemExit('missing actual runtime migration: '+name)
@@ -84,7 +84,8 @@ PY
     runtime_current_budget=$(cat ops/fixtures/runtime-context-budget-v3.json)
     runtime_history_budget=$(cat ops/fixtures/runtime-context-budget-v4.json)
     runtime_notification_budget=$(cat ops/fixtures/runtime-context-budget-v5.json)
-    "${pg[@]}" psql -U postgres -d teamie_agent_runtime -v ON_ERROR_STOP=1 -v frozen_budget="$runtime_context_budget" -v output_budget="$runtime_output_budget" -v current_budget="$runtime_current_budget" -v history_budget="$runtime_history_budget" -v notification_budget="$runtime_notification_budget" <<'SQL'
+    runtime_long_budget=$(cat ops/fixtures/runtime-context-budget-v6.json)
+    "${pg[@]}" psql -U postgres -d teamie_agent_runtime -v ON_ERROR_STOP=1 -v frozen_budget="$runtime_context_budget" -v output_budget="$runtime_output_budget" -v current_budget="$runtime_current_budget" -v history_budget="$runtime_history_budget" -v notification_budget="$runtime_notification_budget" -v long_budget="$runtime_long_budget" <<'SQL'
 INSERT INTO runtime_agents(agent_id,cursor) VALUES('10000000-0000-4000-8000-000000000001',42);
 INSERT INTO runtime_runs(id,agent_id,input_key,input_json,attempt_id,context_profile,context_budget,context_head,acceptance_head)
 VALUES('20000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','restore-context','[]',
@@ -104,6 +105,9 @@ VALUES('20000000-0000-4000-8000-000000000005','10000000-0000-4000-8000-000000000
 INSERT INTO runtime_runs(id,agent_id,input_key,input_json,attempt_id,context_profile,context_budget,context_head,acceptance_head)
 VALUES('20000000-0000-4000-8000-000000000006','10000000-0000-4000-8000-000000000001','restore-notification-policy','[]',
        '30000000-0000-4000-8000-000000000006','teamie-context-v038',:'notification_budget'::jsonb||'{"fileDelivery":true,"structuredMentions":true}'::jsonb,0,0);
+INSERT INTO runtime_runs(id,agent_id,input_key,input_json,attempt_id,context_profile,context_budget,context_head,acceptance_head)
+VALUES('20000000-0000-4000-8000-000000000007','10000000-0000-4000-8000-000000000001','restore-long-policy','[]',
+       '30000000-0000-4000-8000-000000000007','teamie-context-v038',:'long_budget'::jsonb,0,0);
 INSERT INTO runtime_context_artifacts(agent_id,run_id,attempt_id,artifact_key,kind,content,content_hash,sources,source_event_seq)
 VALUES('10000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001',
        'transcript:restore','transcript',decode('00fffe80890a0d','hex'),repeat('a',64),
@@ -136,7 +140,7 @@ SQL
 SELECT (SELECT string_agg(version::text,',' ORDER BY version) FROM agent_runtime_schema_migrations)||':'||r.context_profile||':'||(r.context_budget=:'frozen_budget'::jsonb)::text||':'||encode(a.content,'hex')||':'||(a.sources->0->>'eventId')||':'||a.source_event_seq||':'||c.model_step||':'||c.error_code||':'||c.streaming::text||':'||(c.decision_json=jsonb_build_object('version',1,'action','compact_prefix','budget',:'frozen_budget'::jsonb))::text FROM runtime_runs r JOIN runtime_context_artifacts a ON a.run_id=r.id JOIN runtime_context_recoveries c ON c.run_id=r.id WHERE r.id='20000000-0000-4000-8000-000000000001';
 SQL
 )
-    [[ $actual == '1,2,3,4,5,6,7:teamie-context-v038:true:00fffe80890a0d:42:42:2:context_overflow:true:true' ]] || { echo 'Runtime frozen policy, context archive, source references and recovery tape restore failed.' >&2; exit 1; }
+    [[ $actual == '1,2,3,4,5,6,7,8:teamie-context-v038:true:00fffe80890a0d:42:42:2:context_overflow:true:true' ]] || { echo 'Runtime frozen policy, context archive, source references and recovery tape restore failed.' >&2; exit 1; }
     actual=$("${pg[@]}" psql -U postgres -d restore_agent_runtime -At -v ON_ERROR_STOP=1 -v frozen_budget="$runtime_context_budget" <<'SQL'
 SELECT context_budget=(:'frozen_budget'::jsonb||'{"fileDelivery":true,"structuredMentions":true}'::jsonb) FROM runtime_runs WHERE input_key='restore-file-policy';
 SQL
@@ -162,6 +166,11 @@ SELECT context_budget=(:'notification_budget'::jsonb||'{"fileDelivery":true,"str
 SQL
 )
     [[ $actual == t ]] || { echo 'Runtime task notification policy restore failed.' >&2; exit 1; }
+    actual=$("${pg[@]}" psql -U postgres -d restore_agent_runtime -At -v ON_ERROR_STOP=1 -v long_budget="$runtime_long_budget" <<'SQL'
+SELECT context_budget=:'long_budget'::jsonb AND context_budget->>'contextWindowTokens'='1000000' AND context_budget->>'version'='6' FROM runtime_runs WHERE input_key='restore-long-policy';
+SQL
+)
+    [[ $actual == t ]] || { echo 'Runtime million-token policy restore failed.' >&2; exit 1; }
 
   fi
   # Ordinary owners may not connect to another service's database.

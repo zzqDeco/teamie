@@ -11,7 +11,7 @@ import (
 func fragmentedHistoryFixture(t *testing.T) (*ContextPipeline, []*schema.AgenticMessage, []*schema.ToolInfo) {
 	t.Helper()
 	p, _, messages, tools := currentInputFixture(t)
-	p.cfg.Budget.Version = 4
+	p.cfg.Budget, _ = makeContextBudgetSnapshotVersion(16384, 4)
 	history := []*schema.AgenticMessage{messages[0]}
 	for i := 0; i < 30; i++ {
 		message := schema.UserAgenticMessage(fmt.Sprintf("older-message-%02d: %s", i, strings.Repeat("A small immutable observation. ", 18)))
