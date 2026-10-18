@@ -47,3 +47,5 @@ Lifetime regressions include real local TLS responses whose headers arrive after
 ## Long-context transport
 
 Snapshot version 6 removes the historical 4K output clamp for newly admitted Runs. With a 1000000-token declared window, Runtime initially requests 32768 and reserves up to 131072 output tokens; both the official adapter configuration and provider request normalization honor that ceiling, also bounded by one quarter of the configured window. Historical Runs still send their exact original options. Native requests allow 16 MiB and 65536 messages; the gateway overrides Hertz's request-body ceiling for the double-encoded private envelope. Native responses, provider SSE, private NDJSON and single-frame limits are aligned with large outputs. Admin browser input, IM files and Sandbox limits are unchanged.
+
+Frozen output admission belongs to the logical Runtime Run. The gateway honors that request up to the 131072-token protocol ceiling; it does not clamp an existing Run to a later administrator window. The declared window changes admission for new Runs only.
