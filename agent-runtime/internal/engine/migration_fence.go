@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const runtimeSchemaVersion = 8
+const runtimeSchemaVersion = 9
 const runtimeWriterSchemaSetting = "teamie.runtime_writer_schema"
 
 var errUnsupportedRuntimeSchema = errors.New("unsupported runtime schema")

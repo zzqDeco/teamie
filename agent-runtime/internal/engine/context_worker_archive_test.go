@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"sync"
@@ -45,11 +46,17 @@ type archiveWorkerGateway struct {
 func (g *archiveWorkerGateway) Chat(_ context.Context, r *wire.GatewayChatRequest, _ ...callopt.Option) (*wire.GatewayChatResponse, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.step++
 	var req toolPathRequest
 	if err := decodeFixtureRequest(r.RequestJson, &req); err != nil {
 		return nil, err
 	}
+	// The selected guidance can bring the real 16K pipeline to its summary
+	// threshold between these tool rounds. Summary calls are not work steps.
+	if len(req.Tools) == 0 {
+		raw := `{"choices":[{"message":{"role":"assistant","content":"A requested workspace file was archived; retain its source reference and inspect the bounded archive page."},"finish_reason":"stop"}]}`
+		return &wire.GatewayChatResponse{Ok: true, ResponseJson: modelFixtureResponse(raw)}, nil
+	}
+	g.step++
 	response := chatMessage{Role: "assistant", Content: "private archive completion"}
 	switch g.step {
 	case 1:
@@ -61,11 +68,11 @@ func (g *archiveWorkerGateway) Chat(_ context.Context, r *wire.GatewayChatReques
 			g.failure = errors.New("full native tool observation was not reduced to a retrievable archive")
 			return nil, g.failure
 		}
-		response, _ = toolPathCall("context_read", "read-archived-file", map[string]any{"ref": g.ref, "limit": 4096})
+		response, _ = toolPathCall("context_read", "read-archived-file", map[string]any{"ref": g.ref, "limit": 1024})
 	case 3:
 		last := req.Messages[len(req.Messages)-1].Content
 		if !strings.Contains(last, "ARCHIVE_PAYLOAD_MARKER") || !strings.Contains(last, `"hasMore":true`) || strings.Contains(last, "Archived private context: ") {
-			g.failure = errors.New("bounded archive read was lost or recursively archived")
+			g.failure = fmt.Errorf("bounded archive read was lost or recursively archived: %q", last)
 			return nil, g.failure
 		}
 	default:
@@ -86,7 +93,7 @@ func TestContextWorkerOffloadsNativeToolAndReadsOriginalArchive(t *testing.T) {
 	f.add("read and inspect the large file privately", "")
 	cancel, done := startFixtureWorker(t, e, f)
 	waitFor(t, func() bool {
-		return count(t, s, `SELECT count(*) FROM runtime_runs WHERE state IN ('completed','failed')`) == 1
+		return count(t, s, `SELECT count(*) FROM runtime_runs WHERE state IN ('completed','failed','retry')`) == 1
 	})
 	cancel()
 	<-done

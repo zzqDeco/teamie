@@ -121,6 +121,7 @@ func TestContextWorkerCompactsRealSessionPrefixWithDefaultBudget(t *testing.T) {
 	budget, _ := makeContextBudgetSnapshot(16384)
 	var initialMessages []*schema.AgenticMessage
 	var initialOptions model.Options
+	seenSummary, seenAfterSummary := false, false
 	for i, request := range requests {
 		measurement, err := measureContextRequest(request)
 		if err != nil || !budget.fits(measurement) {
@@ -135,8 +136,21 @@ func TestContextWorkerCompactsRealSessionPrefixWithDefaultBudget(t *testing.T) {
 			if opts.AgenticToolChoice == nil || opts.AgenticToolChoice.Type != schema.ToolChoiceForbidden {
 				t.Fatal("native summary was allowed to execute tools")
 			}
+			seenSummary = true
+			var decoded behaviorRequest
+			if err = decodeFixtureRequest(string(request), &decoded); err != nil {
+				t.Fatal(err)
+			}
+			behaviorHasGuidance(t, decoded.Messages[len(decoded.Messages)-1].Content, "history already inspected", "do not create a follow-up task to poll", "explicit requests to verify an original")
 		} else if len(opts.Tools) != 21 {
 			t.Fatal("test did not exercise the full production tool manifest", len(opts.Tools))
+		} else {
+			var decoded behaviorRequest
+			if err = decodeFixtureRequest(string(request), &decoded); err != nil {
+				t.Fatal(err)
+			}
+			behaviorHasGuidance(t, behaviorSystem(t, decoded), "teamie-event-driven-inputs-v1", "sufficient facts already in context", "Runtime delivers new inputs")
+			seenAfterSummary = seenAfterSummary || seenSummary
 		}
 		if i == 0 {
 			initialOptions = opts
@@ -144,6 +158,9 @@ func TestContextWorkerCompactsRealSessionPrefixWithDefaultBudget(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
+	}
+	if !seenAfterSummary {
+		t.Fatal("event-driven guidance was not checked on a post-compaction model request")
 	}
 	rows, err := s.DB.Query(context.Background(), `SELECT seq,run_id::text,payload FROM runtime_session_events WHERE kind='messages_replaced' ORDER BY seq`)
 	if err != nil {
