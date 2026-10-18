@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import {
   Link,
@@ -27,7 +27,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@teamie/api-client";
 import { useAuth } from "./auth";
 import { errorText } from "./chat";
-import { Avatar, Button, Loading, Logo, Notice, PublicHeader } from "./ui";
+import { Avatar, Button, Logo, Notice, PublicHeader } from "./ui";
 import { passwordPolicyError } from "./password-policy";
 
 const STORY_SCENES = [
@@ -69,17 +69,44 @@ const STORY_SCENES = [
   },
 ] as const;
 
+function isStickyStoryActive() {
+  if (typeof window === "undefined") return false;
+  if (
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(max-width: 780px), (max-height: 700px)").matches
+  )
+    return false;
+  return window.innerWidth > 780 && window.innerHeight > 700;
+}
+
+function resetPageScroll() {
+  if (typeof window === "undefined") return;
+  const scrolled =
+    window.scrollY !== 0 ||
+    document.documentElement.scrollTop !== 0 ||
+    document.body.scrollTop !== 0;
+  document.documentElement.scrollTop = 0;
+  document.body.scrollTop = 0;
+  if (scrolled && typeof window.scrollTo === "function") {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }
+}
+
 export function Landing() {
   const { user, loading } = useAuth();
   const trackRef = useRef<HTMLDivElement>(null);
   const [activeScene, setActiveScene] = useState(0);
   const [scrollProgress, setScrollProgress] = useState(0);
 
+  useLayoutEffect(() => {
+    resetPageScroll();
+  }, []);
+
   useEffect(() => {
-    if (user || loading) return;
+    if (user && !loading) return;
     function updateScrollStage() {
       const track = trackRef.current;
-      if (!track) return;
+      if (!track || !isStickyStoryActive()) return;
       const rect = track.getBoundingClientRect();
       const scrollable = rect.height - window.innerHeight;
       if (scrollable <= 0) return;
@@ -104,7 +131,8 @@ export function Landing() {
     setActiveScene(index);
     setScrollProgress((index + 0.5) / STORY_SCENES.length);
     const track = trackRef.current;
-    if (!track || typeof window === "undefined") return;
+    if (!track || typeof window === "undefined" || !isStickyStoryActive())
+      return;
     const rect = track.getBoundingClientRect();
     const scrollable = Math.max(0, rect.height - window.innerHeight);
     if (scrollable > 0 && typeof window.scrollTo === "function") {
@@ -122,8 +150,7 @@ export function Landing() {
     }
   }
 
-  if (loading) return <Loading />;
-  if (user) return <Navigate to="/app" replace />;
+  if (user && !loading) return <Navigate to="/app" replace />;
   const currentScene = STORY_SCENES[activeScene];
 
   return (
@@ -536,6 +563,9 @@ export function Login() {
   const errorId = useId();
   const pending = useRef(false);
   const active = useRef(false);
+  useLayoutEffect(() => {
+    resetPageScroll();
+  }, [register]);
   useEffect(() => {
     active.current = true;
     return () => {

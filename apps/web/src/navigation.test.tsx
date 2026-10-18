@@ -14,7 +14,7 @@ import type {
   User,
   Workspace,
 } from "@teamie/api-client";
-import { Landing } from "./public";
+import { Landing, Login } from "./public";
 import { Shell } from "./shell";
 import { chatStore } from "./store";
 
@@ -996,5 +996,75 @@ describe("member and account navigation", () => {
       "像邀请一位新队友，安静可靠。",
     );
     expect(container.textContent).toContain("下一件好事，一起开始。");
+  });
+
+  it("keeps the public landing usable while session discovery is pending, disables scroll auto-switching on mobile, and resets scroll on register navigation", async () => {
+    signedOut = true;
+    authLoading = true;
+    vi.spyOn(api, "registration").mockResolvedValue({
+      mode: "invite",
+      bootstrapRequired: false,
+    });
+    const scrollTo = vi.fn();
+    vi.stubGlobal("scrollTo", scrollTo);
+    vi.stubGlobal("innerWidth", 375);
+    vi.stubGlobal("innerHeight", 568);
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: query.includes("780px") || query.includes("700px"),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    );
+    await settle(() =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter initialEntries={["/"]}>
+            <Routes>
+              <Route path="/" element={<Landing />} />
+              <Route path="/login" element={<Login />} />
+            </Routes>
+            <Location />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      ),
+    );
+    await settle();
+    expect(find("[data-location]").textContent).toBe("/");
+    expect(find(".landing-register").getAttribute("href")).toBe(
+      "/login?mode=register",
+    );
+    const track = find(".scroll-story-track");
+    vi.spyOn(track, "getBoundingClientRect").mockReturnValue({
+      top: -180,
+      bottom: 720,
+      left: 0,
+      right: 375,
+      width: 375,
+      height: 900,
+      x: 0,
+      y: -180,
+      toJSON: () => ({}),
+    });
+    await settle(() => window.dispatchEvent(new Event("scroll")));
+    expect(track.getAttribute("data-active-scene")).toBe("0");
+    scrollTo.mockClear();
+    const pills =
+      container.querySelectorAll<HTMLButtonElement>(".story-step-pill");
+    await settle(() => pills[1]?.click());
+    expect(track.getAttribute("data-active-scene")).toBe("1");
+    expect(scrollTo).not.toHaveBeenCalled();
+    document.documentElement.scrollTop = 343;
+    document.body.scrollTop = 343;
+    await click(".landing-register");
+    expect(find("[data-location]").textContent).toBe("/login");
+    expect(document.documentElement.scrollTop).toBe(0);
+    expect(document.body.scrollTop).toBe(0);
+    expect(scrollTo).toHaveBeenCalledWith({
+      top: 0,
+      left: 0,
+      behavior: "auto",
+    });
   });
 });
