@@ -125,11 +125,11 @@ func TestProtocolFixtureModelLimitsToolsAndUsage(t *testing.T) {
 	store := &memoryStore{c: Config{BaseURL: fixture.URL + "/v1", Model: "configured", CipherKey: encrypted, Enabled: true}}
 	s := New(store, crypto, testToken)
 	s.Provider = Provider{fixture.Client()}
-	r, e := fixtureHTTPChat(t, s, context.Background(), &agent.GatewayChatRequest{ServiceToken: testToken, OwnerId: "owner", AgentId: "agent", SessionId: "session", RunId: "run", RequestJson: fixtureNativeRequest(`{"model":"bypass","messages":[{"role":"user","content":"hello"}],"max_tokens":99999,"tools":[{"type":"function","function":{"name":"exec","parameters":{"type":"object"}}}]}`, false)})
+	r, e := fixtureHTTPChat(t, s, context.Background(), &agent.GatewayChatRequest{ServiceToken: testToken, OwnerId: "owner", AgentId: "agent", SessionId: "session", RunId: "run", RequestJson: fixtureNativeRequest(`{"model":"bypass","messages":[{"role":"user","content":"hello"}],"max_tokens":262144,"tools":[{"type":"function","function":{"name":"exec","parameters":{"type":"object"}}}]}`, false)})
 	if e != nil || !r.Ok {
 		t.Fatalf("%+v %v", r, e)
 	}
-	if string(observed["model"]) != `"configured"` || string(observed["max_completion_tokens"]) != "4096" || !strings.Contains(r.GetResponseJson(), "function_tool_call") {
+	if string(observed["model"]) != `"configured"` || string(observed["max_completion_tokens"]) != "131072" || !strings.Contains(r.GetResponseJson(), "function_tool_call") {
 		t.Fatal(observed)
 	}
 	if len(store.usage) != 1 || store.usage[0].OwnerID != "owner" || store.usage[0].PromptTokens != 12 || store.usage[0].CompletionTokens != 8 {
