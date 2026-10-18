@@ -69,7 +69,7 @@ func (p *ContextPipeline) fitCurrentInputs(ctx context.Context, fixed, tail []*s
 			required = append(required, message)
 		}
 	}
-	minimum, err := measureContext(append(append([]*schema.AgenticMessage{}, policy...), required...), tools, p.cfg.Budget.OutputReserveTokens, false)
+	minimum, err := p.cfg.Budget.measureContext(append(append([]*schema.AgenticMessage{}, policy...), required...), tools, p.cfg.Budget.OutputReserveTokens, false)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +78,7 @@ func (p *ContextPipeline) fitCurrentInputs(ctx context.Context, fixed, tail []*s
 	}
 	target = max(target, minimum.EstimatedTokens)
 	fits := func(messages []*schema.AgenticMessage) (bool, error) {
-		measurement, err := measureContext(messages, tools, p.cfg.Budget.OutputReserveTokens, false)
+		measurement, err := p.cfg.Budget.measureContext(messages, tools, p.cfg.Budget.OutputReserveTokens, false)
 		return err == nil && p.cfg.Budget.fits(measurement) && measurement.EstimatedTokens <= target, err
 	}
 	if ok, err := fits(out); ok || err != nil {
@@ -98,7 +98,7 @@ func (p *ContextPipeline) fitCurrentInputs(ctx context.Context, fixed, tail []*s
 		if protected {
 			continue
 		}
-		measurement, err := measureContext(unit, nil, p.cfg.Budget.OutputReserveTokens, false)
+		measurement, err := p.cfg.Budget.measureContext(unit, nil, p.cfg.Budget.OutputReserveTokens, false)
 		if err != nil {
 			return nil, err
 		}
@@ -125,7 +125,7 @@ func (p *ContextPipeline) fitCurrentInputs(ctx context.Context, fixed, tail []*s
 	for _, messages := range units {
 		candidate = append(candidate, messages...)
 	}
-	measurement, err := measureContext(candidate, tools, p.cfg.Budget.OutputReserveTokens, false)
+	measurement, err := p.cfg.Budget.measureContext(candidate, tools, p.cfg.Budget.OutputReserveTokens, false)
 	if err != nil {
 		return nil, err
 	}

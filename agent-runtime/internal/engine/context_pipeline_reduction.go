@@ -159,7 +159,7 @@ func (p *ContextPipeline) reducer(ctx context.Context, names []string) (adk.Type
 		config[name] = entry
 	}
 	return reduction.NewTyped(ctx, &reduction.TypedConfig[*schema.AgenticMessage]{Backend: p.cfg.Backend, ReadFileToolName: "context_read", TruncExcludeTools: []string{"context_read", "context_search", "workspace_read_page"}, MaxLengthForTrunc: p.cfg.Budget.ToolResultByteLimit, MaxTokensForClear: int64(p.cfg.Budget.TriggerTokens), ClearRetentionSuffixLimit: 2, ClearAtLeastTokens: 1, ToolConfig: config, TokenCounter: func(_ context.Context, msgs []*schema.AgenticMessage, tools []*schema.ToolInfo) (int64, error) {
-		m, err := measureContext(msgs, tools, p.cfg.Budget.OutputReserveTokens, false)
+		m, err := p.cfg.Budget.measureContext(msgs, tools, p.cfg.Budget.OutputReserveTokens, false)
 		if m.TransportBytes > p.cfg.Budget.TransportTargetBytes {
 			return int64(max(m.EstimatedTokens, p.cfg.Budget.TriggerTokens)), err
 		}

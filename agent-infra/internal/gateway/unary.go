@@ -19,7 +19,7 @@ func (s *Service) decodeHTTPCall(w http.ResponseWriter, r *http.Request) (*model
 	var in modeltransport.CallRequest
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
-	if dec.Decode(&in) != nil || dec.Decode(new(any)) != io.EOF || !validID(in.OwnerID) || !validID(in.AgentID) || !validID(in.SessionID) || !validID(in.RunID) {
+	if dec.Decode(&in) != nil || dec.Decode(new(any)) != io.EOF || !validID(in.OwnerID) || !validID(in.AgentID) || !validID(in.SessionID) || !validID(in.RunID) || in.MessageLimit < 0 || in.MessageLimit > modeltransport.MaxInputMessages {
 		api.Fail(w, api.Err(400, "invalid_request", "Invalid model request"))
 		return nil, false
 	}
@@ -33,5 +33,5 @@ func (s *Service) generateHTTP(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	api.Write(w, 200, s.call(r.Context(), in.OwnerID, in.AgentID, in.SessionID, in.RunID, in.RequestJSON))
+	api.Write(w, 200, s.call(r.Context(), in.OwnerID, in.AgentID, in.SessionID, in.RunID, in.RequestJSON, in.InputMessageLimit()))
 }

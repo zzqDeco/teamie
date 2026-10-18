@@ -116,9 +116,9 @@ func TestRestoreFixtureContainsNotificationReductionPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := ParseContextBudgetSnapshot(raw)
-	expected, makeErr := makeContextBudgetSnapshot(16384)
+	expected, makeErr := makeContextBudgetSnapshotVersion(16384, 5)
 	if err != nil || makeErr != nil || got != expected {
-		t.Fatal("current notification fixture differs from admission", err, makeErr)
+		t.Fatal("frozen notification fixture differs from admission", err, makeErr)
 	}
 }
 

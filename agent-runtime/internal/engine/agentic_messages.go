@@ -45,7 +45,11 @@ func hasToolResults(message *schema.AgenticMessage) bool {
 	return false
 }
 
-func validateModelResult(message *schema.AgenticMessage) error {
+func validateModelResult(message *schema.AgenticMessage, byteLimits ...int) error {
+	limit := 65536
+	if len(byteLimits) > 0 {
+		limit = byteLimits[0]
+	}
 	if message == nil || message.Role != schema.AgenticRoleTypeAssistant {
 		return &ModelError{Code: "invalid_upstream_response", Retry: true}
 	}
@@ -57,18 +61,18 @@ func validateModelResult(message *schema.AgenticMessage) error {
 		}
 		switch block.Type {
 		case schema.ContentBlockTypeReasoning:
-			if block.Reasoning == nil || len(block.Reasoning.Text) > 65536 {
+			if block.Reasoning == nil || len(block.Reasoning.Text) > limit {
 				return &ModelError{Code: "upstream_response_limit"}
 			}
 			reasoningBytes += len(block.Reasoning.Text)
 		case schema.ContentBlockTypeAssistantGenText:
-			if block.AssistantGenText == nil || len(block.AssistantGenText.Text) > 65536 {
+			if block.AssistantGenText == nil || len(block.AssistantGenText.Text) > limit {
 				return &ModelError{Code: "upstream_response_limit"}
 			}
 			textBytes += len(block.AssistantGenText.Text)
 		case schema.ContentBlockTypeFunctionToolCall:
 			c := block.FunctionToolCall
-			if c == nil || c.CallID == "" || seen[c.CallID] || c.Name == "" || len(c.Arguments) > 65536 {
+			if c == nil || c.CallID == "" || seen[c.CallID] || c.Name == "" || len(c.Arguments) > limit {
 				return &ModelError{Code: "invalid_tool_call"}
 			}
 			seen[c.CallID] = true
@@ -76,7 +80,7 @@ func validateModelResult(message *schema.AgenticMessage) error {
 			return &ModelError{Code: "invalid_upstream_response"}
 		}
 	}
-	if len(seen) > 16 || len(message.ContentBlocks) > 128 || textBytes > 65536 || reasoningBytes > 65536 {
+	if len(seen) > 16 || len(message.ContentBlocks) > 128 || textBytes > limit || reasoningBytes > limit {
 		return &ModelError{Code: "upstream_response_limit"}
 	}
 	return nil

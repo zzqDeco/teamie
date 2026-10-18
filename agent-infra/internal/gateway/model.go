@@ -18,7 +18,7 @@ import (
 
 // The gateway is the only provider codec. Runtime sends native blocks and
 // request-scoped tool definitions; credentials and model policy stay here.
-func (p Provider) nativeModel(ctx context.Context, c Config, key, raw string, streaming bool) (model.AgenticModel, []*schema.AgenticMessage, []model.Option, error) {
+func (p Provider) nativeModel(ctx context.Context, c Config, key, raw string, streaming bool, messageLimits ...int) (model.AgenticModel, []*schema.AgenticMessage, []model.Option, error) {
 	if len(raw) > MaxRequestBytes {
 		return nil, nil, nil, api.Err(413, "request_too_large", "Model request is too large")
 	}
@@ -36,7 +36,8 @@ func (p Provider) nativeModel(ctx context.Context, c Config, key, raw string, st
 	}
 	var input []*schema.AgenticMessage
 	var options model.Options
-	if (&schema.HumanReadableSerializer{}).Unmarshal(envelope.Messages, &input) != nil || len(input) < 1 || len(input) > 128 || json.Unmarshal(envelope.Options, &options) != nil {
+	messageLimit := inputMessageLimit(messageLimits...)
+	if (&schema.HumanReadableSerializer{}).Unmarshal(envelope.Messages, &input) != nil || len(input) < 1 || len(input) > messageLimit || json.Unmarshal(envelope.Options, &options) != nil {
 		return nil, nil, nil, api.Err(400, "invalid_request", "Invalid model input")
 	}
 	for _, message := range input {
@@ -84,9 +85,9 @@ func (p Provider) nativeModel(ctx context.Context, c Config, key, raw string, st
 		}
 		limit = *options.MaxTokens
 	}
-	if limit > 4096 {
-		limit = 4096
-	}
+	// Runtime freezes output admission with each logical Run. Applying today's
+	// window here would silently rewrite an older Run after reconfiguration.
+	limit = min(limit, modeltransport.MaxOutputTokens)
 	if options.Temperature != nil && (*options.Temperature < 0 || *options.Temperature > 2) || options.TopP != nil && (*options.TopP <= 0 || *options.TopP > 1) || len(options.Stop) > 16 {
 		return nil, nil, nil, api.Err(400, "invalid_request", "Invalid generation options")
 	}
@@ -105,7 +106,7 @@ func (p Provider) nativeModel(ctx context.Context, c Config, key, raw string, st
 	if transport == nil {
 		transport = http.DefaultTransport
 	}
-	httpClient.Transport = &providerBoundary{next: transport, key: key, config: c, streaming: streaming}
+	httpClient.Transport = &providerBoundary{next: transport, key: key, config: c, streaming: streaming, messageLimit: messageLimit}
 	extra := map[string]any{"parallel_tool_calls": false, "n": 1}
 	// Qwen3.8 Max enables thinking by default. Summary requests need visible
 	// text within the existing output limit; ordinary tool-enabled turns retain
@@ -142,11 +143,11 @@ func providerError(ctx context.Context, err error) error {
 	return api.Err(502, "invalid_upstream_response", "Provider returned an invalid model response")
 }
 
-func (p Provider) Chat(ctx context.Context, c Config, key, raw string) (string, int64, int64, error) {
+func (p Provider) Chat(ctx context.Context, c Config, key, raw string, messageLimits ...int) (string, int64, int64, error) {
 	if ctx.Err() != nil {
 		return "", 0, 0, streamError(ctx, "")
 	}
-	chat, input, opts, err := p.nativeModel(ctx, c, key, raw, false)
+	chat, input, opts, err := p.nativeModel(ctx, c, key, raw, false, messageLimits...)
 	if err != nil {
 		return "", 0, 0, err
 	}
@@ -169,10 +170,10 @@ func (p Provider) Chat(ctx context.Context, c Config, key, raw string) (string, 
 // The official extension emits actual incremental reasoning, text and function
 // blocks. Closing this function always cancels its upstream context before
 // closing the official reader, including when the downstream write fails.
-func (p Provider) Stream(ctx context.Context, c Config, key, raw string, emit func(string) error) (prompt, completion int64, err error) {
+func (p Provider) Stream(ctx context.Context, c Config, key, raw string, emit func(string) error, messageLimits ...int) (prompt, completion int64, err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	chat, input, opts, err := p.nativeModel(ctx, c, key, raw, true)
+	chat, input, opts, err := p.nativeModel(ctx, c, key, raw, true, messageLimits...)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -211,10 +212,11 @@ func (p Provider) Stream(ctx context.Context, c Config, key, raw string, emit fu
 // credential suppression. OpenAI serialization and stream conversion are
 // owned by the official extension.
 type providerBoundary struct {
-	next      http.RoundTripper
-	key       string
-	config    Config
-	streaming bool
+	next         http.RoundTripper
+	key          string
+	config       Config
+	streaming    bool
+	messageLimit int
 }
 
 func (g *providerBoundary) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -226,7 +228,7 @@ func (g *providerBoundary) RoundTrip(request *http.Request) (*http.Response, err
 	if err != nil || len(raw) > MaxRequestBytes {
 		return nil, api.Err(413, "request_too_large", "Model request is too large")
 	}
-	payload, err := normalizeMode(string(raw), g.config.Model, g.streaming)
+	payload, err := normalizeModeWithOutputLimit(string(raw), g.config.Model, g.streaming, modeltransport.MaxOutputTokens, g.messageLimit)
 	if err != nil {
 		return nil, err
 	}

@@ -244,7 +244,7 @@ class AgentManifestTest(unittest.TestCase):
         current["version"]="v0.3.14"
         current["source"]["ref"]="refs/heads/release/v0.3.14"
         current["schema"]=dict(manifest.SCHEMA_V2)
-        self.assertEqual(current["schema"]["agent_runtime"],7)
+        self.assertEqual(current["schema"]["agent_runtime"],8)
         manifest.check_transition(current,previous,previous)
         with self.assertRaises(ValueError):
             manifest.check_transition(previous,current,rollback=True)
