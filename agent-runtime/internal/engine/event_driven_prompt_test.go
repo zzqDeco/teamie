@@ -130,7 +130,9 @@ func TestEventDrivenGuidanceSelectsDescriptionsWithoutChangingToolContracts(t *t
 	budget := ContextBudgetSnapshot{EventDrivenInputs: true}
 	policy := contextInstruction(&wire.AgentDefinition{Id: "agent", OwnerId: "owner", Name: "Agent"}, budget)
 	behaviorHasGuidance(t, policy, "serial TurnLoop", "before starting work", "periodically during work", "final check", "specific missing fact", "explicitly asks to verify", "concrete evidence", "vary search keywords", "then end the turn", "tool ACL checks", "Runtime's own sync polling")
-	behaviorHasGuidance(t, contextSummaryInstruction(budget), "history already inspected", "explicit requests to verify", "settled facts", "ending the turn")
+	behaviorHasGuidance(t, policy, "all requested fields", "no conflicting evidence", "required pages left unread", "final", "latest", "confirm", "advertised keyword argument")
+	behaviorHasGuidance(t, eventDrivenDescriptions["im_list_messages"], "keyword/aroundSeq", "all requested fields", "Final/latest/confirm", "unread required pages")
+	behaviorHasGuidance(t, contextSummaryInstruction(budget), "history already inspected", "explicit requests to verify", "settled facts", "ending the turn", "which requested fields are resolved", "conflicting evidence", "unread required page")
 	behaviorHasGuidance(t, contextManagementInstruction(budget), "sufficient facts already in context", "explicit verification", "do not routinely reconfirm", "Runtime delivers new inputs")
 }
 
