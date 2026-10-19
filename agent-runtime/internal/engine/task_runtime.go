@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"go.uber.org/zap"
 	"io"
 	"os"
 	"strings"
+	"teamie/backend/pkg/observability"
 	"time"
 
 	"github.com/cloudwego/eino/adk"
@@ -170,7 +172,9 @@ func (m *nativeToolReceipts) WrapInvokableToolCall(_ context.Context, next adk.I
 	if privateReadTool(tc.Name) {
 		return next, nil
 	}
-	return func(ctx context.Context, args string, opts ...tool.Option) (string, error) {
+	return func(ctx context.Context, args string, opts ...tool.Option) (_ string, failure error) {
+		ctx, operation := toolOperation(ctx, "native:"+tc.Name, tc.CallID)
+		defer func() { operation.End(failure) }()
 		r, cached, err := m.before(ctx, tc, []byte(args))
 		if err != nil {
 			return "", err
@@ -199,7 +203,9 @@ func (m *nativeToolReceipts) WrapEnhancedInvokableToolCall(_ context.Context, ne
 	if privateReadTool(tc.Name) {
 		return next, nil
 	}
-	return func(ctx context.Context, args *schema.ToolArgument, opts ...tool.Option) (*schema.ToolResult, error) {
+	return func(ctx context.Context, args *schema.ToolArgument, opts ...tool.Option) (_ *schema.ToolResult, failure error) {
+		ctx, operation := toolOperation(ctx, "native:"+tc.Name, tc.CallID)
+		defer func() { operation.End(failure) }()
 		if args == nil {
 			return nil, errors.New("missing tool arguments")
 		}
@@ -300,7 +306,9 @@ func (w *workerTasks) dispatch(ctx context.Context) {
 
 // Notifications are durable inputs before an acknowledgement clears the outbox.
 // A repeat delivery reuses notification_id, so completion can wake exactly once.
-func (w *workerTasks) notifications(ctx context.Context, l *Lease) error {
+func (w *workerTasks) notifications(ctx context.Context, l *Lease) (failure error) {
+	ctx, operation := observability.Begin(ctx, "task-notification-drain", zap.String("custom.agent.id", l.AgentID))
+	defer func() { operation.EndQuiet(failure) }()
 	out, err := w.store.Receive(ctx, &bg.ReceiveNotificationsRequest{Limit: 100, LeaseDuration: 10 * time.Second})
 	if err != nil {
 		return err
@@ -321,8 +329,11 @@ func (w *workerTasks) notifications(ctx context.Context, l *Lease) error {
 			in.ParentRunID, in.SourceRefs, in.SourceOverflow, err = taskInputOrigin(ctx, tx, l.AgentID, n.TaskID)
 		}
 		b, _ := json.Marshal(in)
+		inserted := false
 		if err == nil {
-			_, err = tx.Exec(ctx, `INSERT INTO runtime_inputs(agent_id,event_id,payload,notification_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, l.AgentID, seq, b, n.ID)
+			tag, insertErr := tx.Exec(ctx, `INSERT INTO runtime_inputs(agent_id,event_id,payload,notification_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, l.AgentID, seq, b, n.ID)
+			err = insertErr
+			inserted = tag.RowsAffected() > 0
 		}
 		if err == nil {
 			err = tx.Commit(ctx)
@@ -332,6 +343,10 @@ func (w *workerTasks) notifications(ctx context.Context, l *Lease) error {
 		if err != nil {
 			return err
 		}
+		if !inserted {
+			seq = ""
+		}
+		observability.L(ctx).Info("Task notification persisted", zap.Bool("custom.input.inserted", inserted), zap.String("custom.task.notification_id", observability.ID(n.ID)), zap.String("event.action", "task-notification-persisted"), zap.String("custom.agent.id", l.AgentID), zap.String("custom.task.id", observability.ID(n.TaskID)), zap.String("custom.input.event_id", seq), zap.String("custom.runtime.parent_run_id", in.ParentRunID))
 		if err = w.store.Ack(ctx, d.Receipt); err != nil {
 			return err
 		}

@@ -49,8 +49,7 @@ export function useAttentionCount() {
       "count",
       scope.reads,
     ],
-    queryFn: ({ signal }) =>
-      api.attention({ limit: 100, unreadOnly: true }, signal),
+    queryFn: ({ signal }) => api.attention({ limit: 1 }, signal),
     enabled: scope.enabled,
     staleTime: 5_000,
     refetchInterval: 30_000,

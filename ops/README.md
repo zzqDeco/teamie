@@ -139,3 +139,21 @@ Database backups cover Gateway/Agent data after v0.2 activation. Sandbox workspa
 The file feature originally used default flag revision `im-attachments-v1`; the current default is `context-engineering-v1`. The operator enables `im.attachments.upload=true` in the existing protected production flag file after rollout verification; deploy scripts preserve saved host values. Upload admission off preserves existing authorized file reads and allows pending-upload deletion. Do not replace Gateway settings or credentials when changing this flag.
 
 Task-notification batch compaction advances Runtime to migration 7 and new admission to budget version 5. Current IM bodies remain pinned; completed machine notification envelopes can enter source-scoped history reduction. CI restores all five frozen formats. Older images are fenced, existing policies/receipts stay unchanged, and rollout must use a new permanent release archive.
+
+## Application log lookup
+
+Go services emit internal ECS JSON logs to the existing Docker log ring. The
+release bundle includes this read-only reader; it requires host Docker access:
+
+```sh
+python3 /srv/teamie/current/recipe/ops/logs.py --service agent-runtime --since 30m --run RUN_UUID
+python3 /srv/teamie/current/recipe/ops/logs.py --since 30m --trace TRACE_ID
+```
+
+Use `--attempt`, `--step`, `--task` or `--event` for an exact private diagnostic
+scope. `LOG_LEVEL=info` suppresses healthy polling noise; `debug` exposes it.
+The reader does not load credentials/configuration or query databases. It skips
+legacy/dependency non-JSON lines. Existing 10 MiB x 3 per-container rotation is
+unchanged; there is no new long-term log store or browser diagnostics endpoint.
+See [logging and trace correlation](../docs/architecture/logging.md) for fields,
+privacy, timing scopes, durable-boundary joins and acceptance limits.

@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"go.uber.org/zap"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
+	"teamie/backend/pkg/observability"
 	"time"
 
 	"teamie/agent-infra/internal/api"
@@ -497,6 +499,24 @@ func (s *Service) inspect(ctx context.Context, m ManagedEngine, name string) (Co
 	return m.Inspect(op, name)
 }
 func (s *Service) supervise(ctx context.Context, key string, t *taskReceipt, recovering bool) {
+	s.taskMu.Lock()
+	agentIDForLog, runIDForLog, taskIDForLog := t.AgentID, t.RunID, t.TaskID
+	s.taskMu.Unlock()
+	ctx, operation := observability.Begin(ctx, "sandbox-task", zap.String("custom.agent.id", observability.ID(agentIDForLog)), zap.String("custom.runtime.run_id", observability.ID(runIDForLog)), zap.String("custom.task.id", observability.ID(taskIDForLog)), zap.Bool("custom.task.recovering", recovering))
+	observability.L(ctx).Info("Sandbox task supervision started", zap.String("event.action", "sandbox-task-started"))
+	defer func() {
+		s.taskMu.Lock()
+		state, code, bytes := t.State, t.Result.ErrorCode, t.OutputBytes
+		s.taskMu.Unlock()
+		var err error
+		if code != "" || state == "failed" || state == "unknown" {
+			err = observability.Diagnostic("sandbox_task_failed", nil)
+		}
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
+		operation.End(err, zap.String("custom.task.state", state), zap.String("custom.error.code", observability.ID(code)), zap.Int64("custom.sandbox.output_bytes", bytes))
+	}()
 	m := s.Engine.(ManagedEngine)
 	s.taskMu.Lock()
 	name, agentID, command, state, version, anchor := t.ContainerName, t.AgentID, t.Command, t.State, t.Version, t.OutputAnchor

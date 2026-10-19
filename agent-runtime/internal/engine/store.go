@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"teamie/backend/pkg/observability"
 	"time"
 
 	"github.com/cloudwego/eino/adk"
@@ -51,6 +52,7 @@ type Input struct {
 	SourceOverflow bool             `json:"sourceOverflow,omitempty"`
 }
 type Run struct {
+	diagnostic                  *observability.Operation
 	toolProfile                 string
 	ContextProfile              string
 	ContextBudget               json.RawMessage
@@ -67,7 +69,7 @@ func executionID(run *Run) string { return run.ID + ":" + run.Attempt }
 type runKey struct{}
 
 func WithRun(ctx context.Context, run *Run) context.Context {
-	return context.WithValue(ctx, runKey{}, run)
+	return context.WithValue(observability.WithFields(ctx, runFields(run)...), runKey{}, run)
 }
 func CurrentRun(ctx context.Context) (*Run, error) {
 	r, ok := ctx.Value(runKey{}).(*Run)
