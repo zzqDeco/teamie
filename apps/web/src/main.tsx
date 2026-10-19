@@ -38,7 +38,7 @@ function Protected({ children }: { children: ReactNode }) {
   if (!user)
     return (
       <Navigate
-        to={`/login?next=${encodeURIComponent(location.pathname)}`}
+        to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`}
         replace
       />
     );

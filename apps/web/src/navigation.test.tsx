@@ -895,6 +895,32 @@ describe("member and account navigation", () => {
     );
   });
 
+  it("redirects unknown app routes and bare workspace URLs to a real view", async () => {
+    await mount("/app/w/team");
+    expect(find("[data-location]").textContent).toBe("/app/w/team/c/general");
+    await settle(() => root.unmount());
+    root = createRoot(container);
+    await mount("/app/does-not-exist");
+    expect(find("[data-location]").textContent).toBe("/app/w/team/c/general");
+  });
+
+  it("explains an expired session once on the login page", async () => {
+    signedOut = true;
+    sessionStorage.setItem("teamie.sessionExpired", "1");
+    await settle(() =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter initialEntries={["/login"]}>
+            <Login />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      ),
+    );
+    await settle();
+    expect(container.textContent).toContain("登录已失效，请重新登录。");
+    expect(sessionStorage.getItem("teamie.sessionExpired")).toBeNull();
+  });
+
   it("clears a message deep link in place without remounting the conversation view", async () => {
     const target = {
       id: "m1", conversationId: channel.id, senderId: "human", senderName: "设计伙伴",

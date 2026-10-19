@@ -13,6 +13,7 @@ import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "@teamie/api-client";
 import type { Session, User } from "@teamie/api-client";
 import { chatStore } from "./store";
+import { markSessionExpired } from "./session-notice";
 
 type Auth = {
   user: User | null;
@@ -81,11 +82,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     setAttempt((n) => n + 1);
   }, [reset]);
+  const expire = useCallback(() => {
+    if (subject.current) markSessionExpired();
+    reset();
+  }, [reset]);
   useEffect(() => {
     let active = true;
     const requestGeneration = generation.current;
     const isCurrent = () => active && requestGeneration === generation.current;
-    api.onUnauthorized = reset;
+    api.onUnauthorized = expire;
     api.onSessionChanged = reconcileSession;
     setLoading(true);
     setError("");
@@ -103,10 +108,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
     return () => {
       active = false;
-      if (api.onUnauthorized === reset) api.onUnauthorized = undefined;
+      if (api.onUnauthorized === expire) api.onUnauthorized = undefined;
       if (api.onSessionChanged === reconcileSession) api.onSessionChanged = undefined;
     };
-  }, [attempt, reconcileSession, reset, setSession]);
+  }, [attempt, expire, reconcileSession, setSession]);
   const logout = async () => {
     const requestGeneration = generation.current;
     const requestSubject = subject.current;

@@ -50,6 +50,7 @@ export function WorkspaceDialog({
       expiresAt: string;
     } | null>(null),
     [copied, setCopied] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const memberQuery = useQuery({
     queryKey: ["members", user!.id, workspace?.id],
     queryFn: () => api.members(workspace!.id),
@@ -131,8 +132,13 @@ export function WorkspaceDialog({
     }
   }
   return (
-    <Modal title={titles[kind][0]} subtitle={titles[kind][1]} onClose={onClose}>
-      <form onSubmit={submit}>
+    <Modal
+      title={titles[kind][0]}
+      subtitle={titles[kind][1]}
+      onClose={onClose}
+      dismissible={!busy && !dirty && !(invite && !copied)}
+    >
+      <form onSubmit={submit} onInput={() => setDirty(true)}>
         <Notice>{error}</Notice>
         {kind === "workspace" && (
           <>
@@ -199,15 +205,16 @@ export function WorkspaceDialog({
                 type="button"
                 disabled={kind === "group" && !selected.includes(member.userId) && eligibleSelected.length >= 49}
                 className={`member-option ${selected.includes(member.userId) ? "selected" : ""}`}
-                onClick={() =>
+                onClick={() => {
+                  setDirty(true);
                   setSelected((old) =>
                     kind === "direct"
                       ? [member.userId]
                       : old.includes(member.userId)
                         ? old.filter((id) => id !== member.userId)
                         : [...old, member.userId],
-                  )
-                }
+                  );
+                }}
               >
                 <ParticipantIdentity member={member} />
                 <span className="selection-check">

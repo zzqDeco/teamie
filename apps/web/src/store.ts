@@ -3,6 +3,9 @@ import type { Conversation, Message, SyncPage } from "@teamie/api-client";
 export type LocalMessage = Message & {
   status?: "sending" | "failed";
   error?: string;
+  // A failure the same idempotent retry cannot fix (conflict, lost access,
+  // expired file, disabled feature). Only transient failures auto-retry.
+  permanent?: boolean;
 };
 export type ChatSnapshot = {
   userId: string;
@@ -166,7 +169,12 @@ export class ChatStore {
                   ? {
                       ...m,
                       status: "failed" as const,
-                      error: "上次发送未确认，请重试",
+                      error:
+                        m.status === "failed" &&
+                        typeof m.permanent === "boolean" &&
+                        m.error
+                          ? m.error
+                          : "上次发送未确认，请重试",
                     }
                   : m,
               ),
@@ -196,6 +204,18 @@ export class ChatStore {
     this.generation += 1;
     this.conversationVersion += 1;
     this.commit(empty(this.snapshot.userId));
+  }
+  discardLocal(conversationId: string, clientMessageId: string) {
+    const current = this.snapshot.messages[conversationId];
+    if (!current) return;
+    const kept = current.filter(
+      (m) => !(m.status === "failed" && m.clientMessageId === clientMessageId),
+    );
+    if (kept.length === current.length) return;
+    this.commit({
+      ...this.snapshot,
+      messages: { ...this.snapshot.messages, [conversationId]: kept },
+    });
   }
   merge(messages: LocalMessage[]) {
     const next = {

@@ -35,6 +35,7 @@ import { PlatformUsers } from "./platform-users";
 import { ModelGatewaySettings } from "./model-gateway";
 import { AgentDetail, MyAgents } from "./agents";
 import { AccountMenu } from "./account-menu";
+import { ConnectionBanner } from "./connection-banner";
 import { ConversationActions } from "./conversation-actions";
 import { WorkspaceMembers } from "./members";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
@@ -138,6 +139,7 @@ export function Shell() {
     directoryMatch = useMatch("/app/w/:workspaceId/members"),
     legacyDirectoryMatch = useMatch("/app/w/:workspaceId/agents"),
     agentMatch = useMatch("/app/agents/:agentId"),
+    workspaceRootMatch = useMatch("/app/w/:workspaceId"),
     location = useLocation(),
     navigate = useNavigate();
   const sidebarFocus = useRef({ open: false, pathname: location.pathname });
@@ -272,16 +274,15 @@ export function Shell() {
       document.documentElement.style.removeProperty("--app-height");
     };
   }, []);
+  const pathname = location.pathname.replace(/\/+$/, "") || "/app";
   const caps = chat.data?.capabilities || {};
-  const isSettings = ["/app/settings", "/app/profile"].includes(
-    location.pathname,
-  );
-  const isAdminPage = location.pathname === "/app/admin";
-  const isGatewayPage = location.pathname === "/app/admin/gateway";
-  const isUsersPage = location.pathname === "/app/admin/users";
-  const isAgentsPage = location.pathname === "/app/agents" || !!agentMatch;
+  const isSettings = ["/app/settings", "/app/profile"].includes(pathname);
+  const isAdminPage = pathname === "/app/admin";
+  const isGatewayPage = pathname === "/app/admin/gateway";
+  const isUsersPage = pathname === "/app/admin/users";
+  const isAgentsPage = pathname === "/app/agents" || !!agentMatch;
   const isDirectoryPage = !!directoryMatch;
-  const isAttentionPage = location.pathname === "/app/attention";
+  const isAttentionPage = pathname === "/app/attention";
   const messageTarget =
     new URLSearchParams(location.search).get("message") || "";
   const initialMessageId = messageTarget.length <= 128 ? messageTarget : "";
@@ -417,7 +418,7 @@ export function Shell() {
     );
   if (
     !match &&
-    location.pathname === "/app" &&
+    pathname === "/app" &&
     chat.data?.workspaces.length &&
     (backChatRoute !== "/app" || conversations.length)
   )
@@ -431,6 +432,41 @@ export function Shell() {
         replace
       />
     );
+  if (workspaceRootMatch && chat.data) {
+    const id = workspaceRootMatch.params.workspaceId!;
+    const stored = Object.values(snapshot.conversations).filter(
+      (c) => c.workspaceId === id,
+    );
+    const inWorkspace = stored.length
+      ? stored
+      : chat.data.conversations.filter((c) => c.workspaceId === id);
+    const first =
+      inWorkspace.find((c) => c.type === "channel") || inWorkspace[0];
+    return (
+      <Navigate
+        to={first ? route(first) : `/app/w/${id}/members`}
+        replace
+      />
+    );
+  }
+  if (
+    chat.data &&
+    !match &&
+    !directoryMatch &&
+    !legacyDirectoryMatch &&
+    !agentMatch &&
+    ![
+      "/app",
+      "/app/agents",
+      "/app/settings",
+      "/app/profile",
+      "/app/admin",
+      "/app/admin/gateway",
+      "/app/admin/users",
+      "/app/attention",
+    ].includes(pathname)
+  )
+    return <Navigate to="/app" replace />;
   return (
     <div
       className={`app-shell ${sidebar ? "sidebar-open" : ""} ${details ? "details-open" : ""}`}
@@ -607,6 +643,12 @@ export function Shell() {
           (overlayMembers && details && !isManagement && !!conversation)
         }
       >
+        <ConnectionBanner
+          connection={chat.connection}
+          syncError={chat.syncError}
+          showSyncError={!conversation || isManagement || isAttentionPage}
+          onRetry={chat.reconnect ?? chat.sync}
+        />
         {error && !removing && <Notice>{error}</Notice>}
         {isAttentionPage ? (
           <AttentionInbox key={user!.id} onMenu={() => setSidebar(true)} />

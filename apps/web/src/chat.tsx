@@ -24,6 +24,7 @@ type Chat = {
   syncError: string;
   refresh: () => Promise<unknown>;
   sync: () => void;
+  reconnect: () => void;
   sendTyping: (conversationId: string, value: boolean) => void;
   typing: Record<
     string,
@@ -62,6 +63,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [typing, setTyping] = useState<Chat["typing"]>({});
   const socket = useRef<WebSocket | null>(null);
   const syncRef = useRef<() => void>(() => {});
+  const reconnectRef = useRef<() => void>(() => {});
   const capabilities = useRef<Record<string, boolean>>({});
   useEffect(() => {
     if (query.data) {
@@ -179,6 +181,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         attempt = 0;
         setConnection("connected");
         void sync();
+        void retryTransientFailures(chatStore.generation);
       };
       ws.onmessage = (event) => {
         try {
@@ -225,13 +228,21 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       ws.onerror = () => ws?.close();
     }
     const online = () => {
-      if (timer) clearTimeout(timer);
+      if (timer) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
       if (ws) {
         ws.onclose = null;
         ws.close();
       }
       connect();
       void sync();
+    };
+    reconnectRef.current = () => {
+      if (stopped) return;
+      if (!ws || ws.readyState !== WebSocket.OPEN) online();
+      else void sync();
     };
     const offline = () => {
       setConnection("offline");
@@ -289,6 +300,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const sync = useCallback(() => {
     syncRef.current();
   }, []);
+  const reconnect = useCallback(() => {
+    reconnectRef.current();
+  }, []);
   const data = query.data?.user.id === user!.id ? query.data : undefined;
   const error = query.error ? "无法加载你的工作空间，请稍后重试。" : "";
   const value = useMemo(
@@ -300,6 +314,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       syncError,
       refresh: query.refetch,
       sync,
+      reconnect,
       sendTyping,
       typing,
     }),
@@ -311,6 +326,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       syncError,
       query.refetch,
       sync,
+      reconnect,
       sendTyping,
       typing,
     ],
@@ -322,9 +338,19 @@ export function useChat() {
   if (!ctx) throw new Error("Chat provider missing");
   return ctx;
 }
+export function isNetworkError(error: unknown) {
+  return (
+    error instanceof TypeError ||
+    (error instanceof Error && /failed to fetch|load failed|networkerror/i.test(error.message))
+  );
+}
 export function errorText(error: unknown) {
-  if (!(error instanceof ApiError))
-    return error instanceof Error ? error.message : "请求失败，请稍后重试";
+  if (!(error instanceof ApiError)) {
+    if (error instanceof DOMException && error.name === "AbortError")
+      return "请求已取消";
+    if (isNetworkError(error)) return "网络连接失败，请检查网络后重试。";
+    return "请求失败，请稍后重试。";
+  }
   const messages: Record<string, string> = {
     invalid_credentials: "邮箱或密码不正确，请重新输入。",
     invalid_current_password: "当前密码不正确，请重新输入。",
@@ -336,19 +362,51 @@ export function errorText(error: unknown) {
       "邀请码无效、已使用或已失效，请联系管理员获取新的邀请。",
     forbidden: "你当前没有执行此操作的权限。",
     conflict: "这条消息与之前的发送记录冲突，请刷新后重试。",
+    idempotency_conflict: "这条消息与之前的发送记录冲突，请删除后重新发送。",
     feature_disabled: "此功能已由工作空间管理员关闭。",
     rate_limited: "操作过于频繁，请稍后再试。",
     attachment_busy: "文件传输繁忙，请稍后重试。",
     attachment_capacity: "待发送文件过多，请移除部分文件后重试。",
     attachment_too_large: "文件不能超过 4 MiB。",
+    too_many_attachments: "单条消息最多可附加 8 个文件。",
     invalid_attachment: "文件已过期或不可用，请重新上传。",
     invalid_filename: "文件名无效，请重命名后上传。",
+    invalid_upload: "上传文件格式无效，请重新选择文件。",
+    invalid_upload_key: "上传标识无效，请重新上传文件。",
+    invalid_body: "消息内容需在 1 到 8000 个字符之间。",
+    invalid_mentions: "提及的成员不在当前对话中或格式无效，请修改后重新发送。",
+    invalid_reply: "引用回复的目标消息不在当前对话中，请移除引用后重新发送。",
+    invalid_client_message_id: "消息标识无效，请删除后重新发送。",
+    message_retracted: "已撤回的消息无法继续编辑。",
     email_exists: "此邮箱已注册，请直接登录。",
+    email_in_use: "此邮箱已注册，请直接登录。",
+    invalid_email: "邮箱格式不正确，请检查后重试。",
+    invalid_name: "名称格式不正确，请修改后重试。",
+    invalid_request: "请求内容无效，请检查后重试。",
+    invalid_query: "搜索关键词无效，请调整后重试（最多 200 个字符）。",
+    upload_conflict: "这个文件与之前的上传记录冲突，请重新选择文件。",
+    attachment_upload_unavailable: "文件已过期或已被移除，请重新上传。",
+    attachment_upload_not_found: "没有找到这次上传，请重新上传。",
+    invalid_reset_link: "重置链接无效或已过期，请联系管理员重新生成。",
+    session_changed: "登录状态已变化，请刷新页面后重试。",
   };
-  return messages[error.code] || error.message;
+  if (messages[error.code]) return messages[error.code];
+  if (error.status >= 500) return "服务暂时不可用，请稍后重试。";
+  if (error.status === 404) return "内容不存在或已无法访问。";
+  return "请求失败，请稍后重试。";
+}
+export function isPermanentSendError(error: unknown) {
+  return (
+    error instanceof ApiError &&
+    error.status !== 429 &&
+    error.status < 500 &&
+    error.status !== 401
+  );
 }
 export async function sendMessage(message: Message, generation: number) {
-  chatStore.merge([{ ...message, status: "sending" }]);
+  chatStore.merge([
+    { ...message, status: "sending", error: undefined, permanent: undefined },
+  ]);
   try {
     const response = await api.send(message.conversationId, {
       clientMessageId: message.clientMessageId,
@@ -362,9 +420,66 @@ export async function sendMessage(message: Message, generation: number) {
     if (chatStore.generation === generation)
       chatStore.merge([response.message]);
   } catch (error) {
-    if (chatStore.generation === generation)
+    if (chatStore.generation === generation) {
+      const permanent = isPermanentSendError(error);
+      const text = errorText(error);
       chatStore.merge([
-        { ...message, status: "failed", error: errorText(error) },
+        {
+          ...message,
+          status: "failed",
+          error:
+            permanent && text === "请求失败，请稍后重试。"
+              ? "消息内容无法发送，请删除后重新编辑。"
+              : text,
+          permanent,
+        },
       ]);
+    }
   }
+}
+let activeRetryDrain: Promise<void> | null = null;
+let activeRetryGeneration = -1;
+let retryDrainRequested = false;
+
+// Transient failures retry with the same clientMessageId, which the server
+// treats idempotently, so a retry after a lost response cannot duplicate.
+export async function retryTransientFailures(generation: number) {
+  if (chatStore.generation !== generation) return;
+  if (activeRetryDrain && activeRetryGeneration === generation) {
+    retryDrainRequested = true;
+    return activeRetryDrain;
+  }
+  const run = (async () => {
+    do {
+      retryDrainRequested = false;
+      if (chatStore.generation !== generation) return;
+      const queued = Object.values(chatStore.getSnapshot().messages).flatMap(
+        (messages) =>
+          messages.filter(
+            (m) => m.status === "failed" && m.permanent === false,
+          ),
+      );
+      for (const item of queued) {
+        if (chatStore.generation !== generation) return;
+        const current = (
+          chatStore.getSnapshot().messages[item.conversationId] || []
+        ).find((m) => m.clientMessageId === item.clientMessageId);
+        if (
+          current &&
+          current.status === "failed" &&
+          current.permanent === false
+        )
+          await sendMessage(current, generation);
+      }
+    } while (retryDrainRequested && chatStore.generation === generation);
+  })();
+  const tracked = run.finally(() => {
+    if (activeRetryDrain === tracked) {
+      activeRetryDrain = null;
+      activeRetryGeneration = -1;
+    }
+  });
+  activeRetryGeneration = generation;
+  activeRetryDrain = tracked;
+  return tracked;
 }
