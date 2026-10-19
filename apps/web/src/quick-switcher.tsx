@@ -48,8 +48,13 @@ export function QuickSwitcher({
   onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
-  const [activeIndex, setActiveIndex] = useState(0);
+  const [activeId, setActiveId] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus({ preventScroll: true });
+  }, []);
 
   const memberQueries = useQueries({
     queries: workspaces.map((space) => ({
@@ -173,9 +178,10 @@ export function QuickSwitcher({
         `${item.label} ${item.subtitle}`.toLocaleLowerCase().includes(term),
       )
     : allItems;
-  const boundedIndex = items.length
-    ? Math.min(activeIndex, items.length - 1)
-    : 0;
+  const foundIndex = activeId
+    ? items.findIndex((item) => item.id === activeId)
+    : -1;
+  const boundedIndex = foundIndex >= 0 ? foundIndex : 0;
   const activeItemId = items[boundedIndex]?.id;
 
   useEffect(() => {
@@ -190,19 +196,25 @@ export function QuickSwitcher({
     if (event.key === "ArrowDown") {
       event.preventDefault();
       if (items.length)
-        setActiveIndex(
-          (current) => (Math.min(current, items.length - 1) + 1) % items.length,
-        );
+        setActiveId((currentId) => {
+          const currentIndex = currentId
+            ? items.findIndex((item) => item.id === currentId)
+            : -1;
+          const base = currentIndex >= 0 ? currentIndex : 0;
+          return items[(base + 1) % items.length]?.id || "";
+        });
       return;
     }
     if (event.key === "ArrowUp") {
       event.preventDefault();
       if (items.length)
-        setActiveIndex(
-          (current) =>
-            (Math.min(current, items.length - 1) - 1 + items.length) %
-            items.length,
-        );
+        setActiveId((currentId) => {
+          const currentIndex = currentId
+            ? items.findIndex((item) => item.id === currentId)
+            : -1;
+          const base = currentIndex >= 0 ? currentIndex : 0;
+          return items[(base - 1 + items.length) % items.length]?.id || "";
+        });
       return;
     }
     if (event.key === "Enter" && items[boundedIndex]) {
@@ -217,12 +229,14 @@ export function QuickSwitcher({
         <label className="quick-switcher-input">
           <Search size={17} aria-hidden="true" />
           <input
+            ref={inputRef}
             type="search"
             autoFocus
+            data-autofocus
             value={query}
             onChange={(event) => {
               setQuery(event.target.value);
-              setActiveIndex(0);
+              setActiveId("");
             }}
             onKeyDown={handleKeyDown}
             placeholder="输入频道、私信或工作空间名称…"
@@ -243,7 +257,7 @@ export function QuickSwitcher({
                   <button
                     type="button"
                     className={`quick-switcher-option ${selected ? "selected" : ""}`}
-                    onMouseEnter={() => setActiveIndex(index)}
+                    onMouseEnter={() => setActiveId(item.id)}
                     onClick={() => onSelect(item.path)}
                   >
                     <span className="quick-switcher-icon" aria-hidden="true">

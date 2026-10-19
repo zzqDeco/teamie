@@ -121,7 +121,10 @@ export function useOverlayFocus(
           'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], [tabindex="0"]',
         ),
       ).filter((element) => element.getClientRects().length > 0);
-    (focusables()[0] || node).focus({ preventScroll: true });
+    const autoFocusTarget = node.querySelector<HTMLElement>(
+      "[data-autofocus]:not(:disabled)",
+    );
+    (autoFocusTarget || focusables()[0] || node).focus({ preventScroll: true });
     function handle(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.preventDefault();

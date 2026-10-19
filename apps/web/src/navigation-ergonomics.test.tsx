@@ -408,27 +408,23 @@ describe("PR-3 navigation & notification ergonomics", () => {
       updatedAt: "2026-10-16T04:00:00Z",
     };
     chatStore.replaceConversations([channel, dmOne, dmTwo, crossDm]);
-    vi.spyOn(api, "members").mockImplementation(async (wsId) => ({
-      members:
-        wsId === secondWorkspace.id
-          ? [
-              ...persistedMembers,
-              {
-                userId: "designer",
-                displayName: "设计师阿青",
-                email: "designer@example.test",
-                role: "member",
-                kind: "human",
-                joinedAt: owner.createdAt,
-              },
-            ]
-          : persistedMembers,
-    }));
+    let resolveSecondMembers!: (value: { members: Member[] }) => void;
+    const secondMembersPromise = new Promise<{ members: Member[] }>((r) => {
+      resolveSecondMembers = r;
+    });
+    vi.spyOn(api, "members").mockImplementation((wsId) =>
+      wsId === secondWorkspace.id
+        ? secondMembersPromise
+        : Promise.resolve({ members: persistedMembers }),
+    );
     const scrollIntoView = vi.fn();
     Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
       configurable: true,
       value: scrollIntoView,
     });
+    vi.spyOn(HTMLElement.prototype, "getClientRects").mockReturnValue(
+      [{ width: 10, height: 10 }] as unknown as DOMRectList,
+    );
     await mount("/app/w/team/c/general");
 
     await act(async () => {
@@ -436,11 +432,34 @@ describe("PR-3 navigation & notification ergonomics", () => {
         new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }),
       );
     });
-    await flush();
     const searchInput = document.querySelector<HTMLInputElement>(
       'input[aria-label="快速跳转搜索"]',
     );
     expect(searchInput).toBeTruthy();
+    expect(document.activeElement).toBe(searchInput);
+
+    scrollIntoView.mockClear();
+    await act(async () => {
+      searchInput!.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+      );
+    });
+    expect(scrollIntoView).toHaveBeenCalled();
+
+    await act(async () => {
+      resolveSecondMembers({
+        members: [
+          ...persistedMembers,
+          {
+            userId: "designer",
+            displayName: "设计师阿青",
+            role: "member",
+            kind: "human",
+          },
+        ],
+      });
+    });
+    await flush();
     const options = Array.from(
       document.querySelectorAll(".quick-switcher-option"),
     );
@@ -448,17 +467,6 @@ describe("PR-3 navigation & notification ergonomics", () => {
     expect(options.some((el) => el.textContent?.includes("设计师阿青"))).toBe(
       true,
     );
-
-    scrollIntoView.mockClear();
-    await act(async () => {
-      searchInput!.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
-      );
-      searchInput!.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
-      );
-    });
-    expect(scrollIntoView).toHaveBeenCalled();
     await act(async () => {
       searchInput!.dispatchEvent(
         new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
@@ -482,7 +490,7 @@ describe("PR-3 navigation & notification ergonomics", () => {
     );
   });
 
-  it("persists composer drafts in sessionStorage and clears them on logout", async () => {
+  it("persists composer drafts synchronously in sessionStorage and clears them on logout", async () => {
     await mount("/app/w/team/c/general");
     const textarea = container.querySelector<HTMLTextAreaElement>(
       'textarea[aria-label="消息内容"]',
@@ -493,6 +501,8 @@ describe("PR-3 navigation & notification ergonomics", () => {
         HTMLTextAreaElement.prototype,
         "value",
       )?.set;
+      setter?.call(textarea, "第一段");
+      textarea!.dispatchEvent(new Event("input", { bubbles: true }));
       setter?.call(textarea, "未发送的草稿内容");
       textarea!.dispatchEvent(new Event("input", { bubbles: true }));
     });

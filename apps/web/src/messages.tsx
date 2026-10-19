@@ -102,9 +102,7 @@ const subscribeDrafts = (listener: () => void) => {
     draftListeners.delete(listener);
   };
 };
-let persistTimer: ReturnType<typeof setTimeout> | undefined;
-let persistPendingUser = "";
-function flushSessionDrafts(userId: string) {
+function persistSessionDrafts(userId: string) {
   if (!userId) return;
   try {
     if (composerDrafts.size === 0)
@@ -116,29 +114,6 @@ function flushSessionDrafts(userId: string) {
       );
   } catch {
     /* Drafts remain usable in memory when sessionStorage is full or blocked. */
-  }
-}
-function persistSessionDrafts(userId: string) {
-  if (!userId) return;
-  if (composerDrafts.size === 0) {
-    clearTimeout(persistTimer);
-    persistTimer = undefined;
-    persistPendingUser = "";
-    flushSessionDrafts(userId);
-    return;
-  }
-  if (!persistTimer) {
-    flushSessionDrafts(userId);
-    persistTimer = setTimeout(() => {
-      persistTimer = undefined;
-      if (persistPendingUser) {
-        const target = persistPendingUser;
-        persistPendingUser = "";
-        flushSessionDrafts(target);
-      }
-    }, 150);
-  } else {
-    persistPendingUser = userId;
   }
 }
 function loadSessionDrafts(userId: string) {
@@ -169,9 +144,6 @@ function loadSessionDrafts(userId: string) {
 }
 if (draftUserId) loadSessionDrafts(draftUserId);
 export function clearComposerDrafts() {
-  clearTimeout(persistTimer);
-  persistTimer = undefined;
-  persistPendingUser = "";
   const previousUser = draftUserId;
   const currentUser = chatStore.getSnapshot().userId;
   try {
@@ -188,9 +160,6 @@ export function clearComposerDrafts() {
 chatStore.subscribe(() => {
   const snap = chatStore.getSnapshot();
   if (draftGeneration !== chatStore.generation) {
-    clearTimeout(persistTimer);
-    persistTimer = undefined;
-    persistPendingUser = "";
     try {
       if (draftUserId) sessionStorage.removeItem(draftStorageKey(draftUserId));
     } catch {
