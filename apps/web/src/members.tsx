@@ -5,6 +5,7 @@ import {
   LoaderCircle,
   MessageCircle,
   Search,
+  UserPlus,
   Users,
 } from "lucide-react";
 import { api } from "@teamie/api-client";
@@ -39,11 +40,14 @@ export function WorkspaceMembers({
   const { user } = useAuth();
   const { data, refresh } = useChat();
   const navigate = useNavigate();
+  const owner = workspace.createdBy === user!.id;
   const [search, setSearch] = useState("");
   const [busyId, setBusyId] = useState("");
   const [error, setError] = useState("");
+  const [inviting, setInviting] = useState(false);
   const [groupMemberId, setGroupMemberId] = useState("");
   const [newGroupMemberId, setNewGroupMemberId] = useState("");
+  const closeInviting = useCallback(() => setInviting(false), []);
   const closeGroup = useCallback(() => setGroupMemberId(""), []);
   const closeNewGroup = useCallback(() => setNewGroupMemberId(""), []);
   const eligibleMember = (id: string) =>
@@ -96,6 +100,13 @@ export function WorkspaceMembers({
           </h1>
           <p>{workspace.name}</p>
         </div>
+        {owner ? (
+          <Button onClick={() => setInviting(true)}>
+            <UserPlus size={16} /> 邀请成员
+          </Button>
+        ) : (
+          <span className="members-invite-hint">请联系空间创建者邀请</span>
+        )}
       </header>
       <label className="member-search">
         <Search size={18} aria-hidden="true" />
@@ -200,6 +211,13 @@ export function WorkspaceMembers({
           workspace={workspace}
           initialMemberIds={[newGroupMember.userId]}
           onClose={closeNewGroup}
+        />
+      )}
+      {inviting && owner && (
+        <WorkspaceDialog
+          kind="invite"
+          workspace={workspace}
+          onClose={closeInviting}
         />
       )}
     </div>

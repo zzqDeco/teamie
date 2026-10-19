@@ -189,11 +189,24 @@ function AgentProfileDialog({
             type="checkbox"
             checked={enabled}
             disabled={busy || (!initialAgent?.enabled && !data?.capabilities["agents.enabled"])}
+            aria-describedby={
+              !initialAgent?.enabled && !data?.capabilities["agents.enabled"]
+                ? "agent-enable-disabled-reason"
+                : undefined
+            }
             onChange={(e) => setEnabled(e.target.checked)}
           />
           <span>
             <b>启用 Agent</b>
             <small>处理已加入对话中的新消息</small>
+            {!initialAgent?.enabled && !data?.capabilities["agents.enabled"] && (
+              <small
+                id="agent-enable-disabled-reason"
+                className="agent-disabled-reason"
+              >
+                平台暂未开放启用 Agent
+              </small>
+            )}
           </span>
           <i />
         </label>
@@ -436,11 +449,24 @@ export function AgentDetail({ agentId }: { agentId: string }) {
                 className={agent.enabled ? "secondary" : ""}
                 busy={busy}
                 disabled={!agent.enabled && !canEnable}
+                aria-describedby={
+                  !agent.enabled && !canEnable
+                    ? "agent-detail-enable-disabled-reason"
+                    : undefined
+                }
                 onClick={() => void enable()}
               >
                 {agent.enabled ? <CirclePause size={14} /> : <Play size={14} />}{" "}
                 {agent.enabled ? "停用" : "启用"}
               </Button>
+              {!agent.enabled && !canEnable && (
+                <span
+                  id="agent-detail-enable-disabled-reason"
+                  className="agent-disabled-reason"
+                >
+                  平台暂未开放启用 Agent
+                </span>
+              )}
             </>
           )}
         </div>

@@ -88,7 +88,9 @@ const emptyComposerDraft: ComposerDraft = {
   mentions: [],
   replyToId: "",
 };
+const draftStorageKey = (userId: string) => `teamie.drafts.v1:${userId}`;
 let draftGeneration = chatStore.generation;
+let draftUserId = chatStore.getSnapshot().userId;
 // Drafts retain reply identity, never a copied IM body, and disappear with
 // their account or conversation access.
 const composerDrafts = new Map<string, ComposerDraft>();
@@ -100,29 +102,131 @@ const subscribeDrafts = (listener: () => void) => {
     draftListeners.delete(listener);
   };
 };
+let persistTimer: ReturnType<typeof setTimeout> | undefined;
+let persistPendingUser = "";
+function flushSessionDrafts(userId: string) {
+  if (!userId) return;
+  try {
+    if (composerDrafts.size === 0)
+      sessionStorage.removeItem(draftStorageKey(userId));
+    else
+      sessionStorage.setItem(
+        draftStorageKey(userId),
+        JSON.stringify(Object.fromEntries(composerDrafts)),
+      );
+  } catch {
+    /* Drafts remain usable in memory when sessionStorage is full or blocked. */
+  }
+}
+function persistSessionDrafts(userId: string) {
+  if (!userId) return;
+  if (composerDrafts.size === 0) {
+    clearTimeout(persistTimer);
+    persistTimer = undefined;
+    persistPendingUser = "";
+    flushSessionDrafts(userId);
+    return;
+  }
+  if (!persistTimer) {
+    flushSessionDrafts(userId);
+    persistTimer = setTimeout(() => {
+      persistTimer = undefined;
+      if (persistPendingUser) {
+        const target = persistPendingUser;
+        persistPendingUser = "";
+        flushSessionDrafts(target);
+      }
+    }, 150);
+  } else {
+    persistPendingUser = userId;
+  }
+}
+function loadSessionDrafts(userId: string) {
+  if (!userId) return;
+  try {
+    const raw = sessionStorage.getItem(draftStorageKey(userId));
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as Record<string, ComposerDraft>;
+    if (!parsed || typeof parsed !== "object") return;
+    for (const [id, entry] of Object.entries(parsed)) {
+      if (
+        entry &&
+        typeof entry.body === "string" &&
+        Array.isArray(entry.mentions) &&
+        typeof entry.replyToId === "string" &&
+        (entry.body || entry.mentions.length > 0 || entry.replyToId)
+      ) {
+        composerDrafts.set(id, {
+          body: entry.body,
+          mentions: entry.mentions,
+          replyToId: entry.replyToId,
+        });
+      }
+    }
+  } catch {
+    /* Corrupted or unavailable sessionStorage falls back to in-memory drafts. */
+  }
+}
+if (draftUserId) loadSessionDrafts(draftUserId);
 export function clearComposerDrafts() {
+  clearTimeout(persistTimer);
+  persistTimer = undefined;
+  persistPendingUser = "";
+  const previousUser = draftUserId;
+  const currentUser = chatStore.getSnapshot().userId;
+  try {
+    if (previousUser) sessionStorage.removeItem(draftStorageKey(previousUser));
+    if (currentUser) sessionStorage.removeItem(draftStorageKey(currentUser));
+  } catch {
+    /* Ignore storage access errors. */
+  }
   draftGeneration = chatStore.generation;
+  draftUserId = currentUser;
   composerDrafts.clear();
   notifyDrafts();
 }
 chatStore.subscribe(() => {
+  const snap = chatStore.getSnapshot();
   if (draftGeneration !== chatStore.generation) {
-    clearComposerDrafts();
+    clearTimeout(persistTimer);
+    persistTimer = undefined;
+    persistPendingUser = "";
+    try {
+      if (draftUserId) sessionStorage.removeItem(draftStorageKey(draftUserId));
+    } catch {
+      /* Ignore storage access errors. */
+    }
+    draftGeneration = chatStore.generation;
+    draftUserId = snap.userId;
+    composerDrafts.clear();
+    if (draftUserId) loadSessionDrafts(draftUserId);
+    notifyDrafts();
     return;
   }
-  const allowed = chatStore.getSnapshot().conversations;
-  let changed = false;
-  for (const id of composerDrafts.keys()) {
-    if (!allowed[id]) changed = composerDrafts.delete(id) || changed;
+  let userChanged = false;
+  if (snap.userId !== draftUserId) {
+    draftUserId = snap.userId;
+    composerDrafts.clear();
+    if (draftUserId) loadSessionDrafts(draftUserId);
+    userChanged = true;
   }
-  if (changed) notifyDrafts();
+  const allowed = snap.conversations;
+  let pruned = false;
+  if (chatStore.conversationVersion > 0 || Object.keys(allowed).length > 0) {
+    for (const id of composerDrafts.keys()) {
+      if (!allowed[id]) pruned = composerDrafts.delete(id) || pruned;
+    }
+    if (pruned) persistSessionDrafts(draftUserId);
+  }
+  if (userChanged || pruned) notifyDrafts();
 });
 function readComposerDraft(conversationId: string): ComposerDraft {
   return composerDrafts.get(conversationId) || emptyComposerDraft;
 }
 function writeComposerDraft(conversationId: string, draft: ComposerDraft) {
+  const snap = chatStore.getSnapshot();
   if (
-    !chatStore.getSnapshot().conversations[conversationId] ||
+    !snap.conversations[conversationId] ||
     (!draft.body && draft.mentions.length === 0 && !draft.replyToId)
   ) {
     composerDrafts.delete(conversationId);
@@ -133,6 +237,7 @@ function writeComposerDraft(conversationId: string, draft: ComposerDraft) {
       replyToId: draft.replyToId,
     });
   }
+  persistSessionDrafts(snap.userId);
   notifyDrafts();
 }
 function extendHistoryBoundary(beforeSeq: number, messages: LocalMessage[]) {
@@ -150,6 +255,8 @@ export function ConversationView({
   onMenu,
   initialMessageId = "",
   onClearMessageTarget,
+  isWorkspaceOwner,
+  onInvite,
 }: {
   conversation: Conversation;
   members: Member[];
@@ -158,6 +265,8 @@ export function ConversationView({
   onMenu: () => void;
   initialMessageId?: string;
   onClearMessageTarget?: () => void;
+  isWorkspaceOwner?: boolean;
+  onInvite?: () => void;
 }) {
   const { user } = useAuth();
   const { data, syncError, sync, sendTyping, typing } = useChat();
@@ -209,6 +318,7 @@ export function ConversationView({
       )
     : allMessages;
   const [highlightId, setHighlightId] = useState("");
+  const [focusedMessageId, setFocusedMessageId] = useState("");
   const [locating, setLocating] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const closeSearch = useCallback(() => setSearchOpen(false), []);
@@ -956,6 +1066,15 @@ export function ConversationView({
   }
   const closeRetract = useCallback(() => setRetracting(null), [setRetracting]);
   const otherTyping = typing[conversation.id] || [];
+  const rovingMessageId =
+    (focusedMessageId && messages.some((m) => m.id === focusedMessageId)
+      ? focusedMessageId
+      : undefined) ||
+    (highlightId && messages.some((m) => m.id === highlightId)
+      ? highlightId
+      : undefined) ||
+    messages.at(-1)?.id ||
+    "";
   return (
     <section
       className="conversation-view"
@@ -1085,6 +1204,16 @@ export function ConversationView({
                 : `你好，${name}`}
             </h2>
             <p>还没有消息，打个招呼吧。</p>
+            {conversation.type === "channel" &&
+              (isWorkspaceOwner && onInvite ? (
+                <Button className="secondary small-button" onClick={onInvite}>
+                  邀请成员加入
+                </Button>
+              ) : isWorkspaceOwner === false ? (
+                <span className="conversation-invite-hint">
+                  请联系空间创建者邀请
+                </span>
+              ) : null)}
           </div>
         )}
         {hasMore && (
@@ -1145,6 +1274,9 @@ export function ConversationView({
                 replyCandidates.slice(1),
               )[0]
             : undefined;
+          const isRovingTarget = message.id === rovingMessageId;
+          const actionTabIndex =
+            isRovingTarget || actionMessageId === message.id ? 0 : -1;
           return (
             <Fragment key={message.id}>
               {showDate && (
@@ -1161,7 +1293,52 @@ export function ConversationView({
                 id={`message-${message.id}`}
                 data-seq={message.status ? undefined : message.seq}
                 data-own={message.senderId === user!.id ? "true" : undefined}
-                tabIndex={-1}
+                tabIndex={isRovingTarget ? 0 : -1}
+                onFocus={(event) => {
+                  if (event.currentTarget.contains(event.target as Node))
+                    setFocusedMessageId(message.id);
+                }}
+                onKeyDown={(event) => {
+                  const tag = (event.target as HTMLElement | null)?.tagName;
+                  if (tag === "INPUT" || tag === "TEXTAREA") return;
+                  if (
+                    (event.key === "ArrowUp" || event.key === "ArrowDown") &&
+                    !event.shiftKey &&
+                    !event.altKey &&
+                    !event.metaKey &&
+                    !event.ctrlKey
+                  ) {
+                    event.preventDefault();
+                    const next =
+                      messages[
+                        event.key === "ArrowUp" ? index - 1 : index + 1
+                      ];
+                    if (next) {
+                      setFocusedMessageId(next.id);
+                      focusMessage(next.id);
+                    }
+                    return;
+                  }
+                  if (
+                    event.key === "Enter" &&
+                    event.target === event.currentTarget &&
+                    !message.retractedAt &&
+                    !message.status &&
+                    editing?.id !== message.id
+                  ) {
+                    event.preventDefault();
+                    setActionMessageId((current) =>
+                      current === message.id ? "" : message.id,
+                    );
+                    return;
+                  }
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setActionMessageId("");
+                    inputRef.current?.focus();
+                  }
+                }}
                 className={`message ${highlightId === message.id ? "located" : ""} ${compact ? "compact" : ""} ${message.status || ""} ${message.retractedAt ? "retracted" : ""} ${actionMessageId === message.id ? "actions-open" : ""}`}
               >
                 <div className="message-avatar">
@@ -1338,6 +1515,7 @@ export function ConversationView({
                       <IconButton
                         label={`消息操作：${message.senderName}`}
                         className="message-more-button"
+                        tabIndex={actionTabIndex}
                         aria-expanded={actionMessageId === message.id}
                         onClick={() =>
                           setActionMessageId(
@@ -1350,6 +1528,7 @@ export function ConversationView({
                       <div className="message-actions">
                         <IconButton
                           label={`回复 ${message.senderName}`}
+                          tabIndex={actionTabIndex}
                           onClick={() => {
                             setActionMessageId("");
                             updateComposerDraft({ replyToId: message.id });
@@ -1361,6 +1540,7 @@ export function ConversationView({
                         {message.senderId === user!.id && canEdit && (
                             <IconButton
                               label="编辑消息"
+                              tabIndex={actionTabIndex}
                               onClick={() => startEdit(message)}
                             >
                               <Pencil size={14} />
@@ -1371,6 +1551,7 @@ export function ConversationView({
                             <IconButton
                               label="撤回消息"
                               className="danger-hover"
+                              tabIndex={actionTabIndex}
                               onClick={() => {
                                 setActionMessageId("");
                                 setRetracting(message);

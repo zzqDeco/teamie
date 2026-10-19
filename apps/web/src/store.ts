@@ -40,6 +40,15 @@ function timestampNanoseconds(value: string): bigint {
 }
 const version = (m: Message) =>
   timestampNanoseconds(m.retractedAt || m.editedAt || m.createdAt);
+function newerTimestamp(a?: string, b?: string): string {
+  if (!a) return b || "";
+  if (!b) return a;
+  try {
+    return timestampNanoseconds(b) > timestampNanoseconds(a) ? b : a;
+  } catch {
+    return b > a ? b : a;
+  }
+}
 const MAX_PERSISTED_MESSAGES = 200;
 const clientKey = (m: Message) => `${m.senderId}\0${m.clientMessageId}`;
 function trimPersistedMessages(messages: LocalMessage[]): LocalMessage[] {
@@ -148,7 +157,7 @@ export class ChatStore {
   }
   begin(userId: string) {
     if (this.snapshot.userId === userId) return;
-    this.clear();
+    if (this.snapshot.userId) this.clear();
     let restored = empty(userId);
     try {
       const raw = this.storage?.getItem(storageKey(userId));
@@ -183,6 +192,8 @@ export class ChatStore {
     } catch {
       /* A corrupt snapshot restarts durable sync from zero. */
     }
+    this.conversationVersion =
+      Object.keys(restored.conversations).length > 0 ? 1 : 0;
     this.commit(restored);
   }
   clear() {
@@ -231,6 +242,7 @@ export class ChatStore {
         next.conversations[m.conversationId] = {
           ...conversation,
           lastSeq: Math.max(conversation.lastSeq, m.seq),
+          updatedAt: newerTimestamp(conversation.updatedAt, m.createdAt),
         };
     }
     for (const [conversationId, batch] of grouped) {
@@ -265,6 +277,7 @@ export class ChatStore {
               ...c,
               lastSeq: Math.max(c.lastSeq, old?.lastSeq ?? 0),
               readSeq: Math.max(c.readSeq, old?.readSeq ?? 0),
+              updatedAt: newerTimestamp(old?.updatedAt, c.updatedAt),
             },
           ];
         }),
@@ -314,6 +327,7 @@ export class ChatStore {
           next.conversations[m.conversationId] = {
             ...conversation,
             lastSeq: Math.max(conversation.lastSeq, m.seq),
+            updatedAt: newerTimestamp(conversation.updatedAt, m.createdAt),
           };
       }
       if (event.conversation) {
@@ -322,6 +336,10 @@ export class ChatStore {
           ...event.conversation,
           readSeq: Math.max(old?.readSeq || 0, event.conversation.readSeq),
           lastSeq: Math.max(old?.lastSeq || 0, event.conversation.lastSeq),
+          updatedAt: newerTimestamp(
+            old?.updatedAt,
+            event.conversation.updatedAt,
+          ),
         };
       }
       if (

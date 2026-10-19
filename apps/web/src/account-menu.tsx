@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { LogOut, Settings } from "lucide-react";
+import { Keyboard, LogOut, Settings } from "lucide-react";
 import type { User } from "@teamie/api-client";
 import type { Connection } from "./chat";
 import { Avatar } from "./ui";
@@ -13,6 +13,7 @@ export function AccountMenu({
   connectionLabel,
   onSignOut,
   onNavigate,
+  onShortcuts,
 }: {
   user: User;
   busy: boolean;
@@ -21,6 +22,7 @@ export function AccountMenu({
   connectionLabel: string;
   onSignOut: () => void;
   onNavigate: () => void;
+  onShortcuts?: () => void;
 }) {
   const { expanded, setOpen, panel, trigger, popover, id, onBlur } =
     usePopover(active);
@@ -62,6 +64,19 @@ export function AccountMenu({
             <Settings size={17} aria-hidden="true" />
             账号设置
           </Link>
+          {onShortcuts && (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                onNavigate();
+                onShortcuts();
+              }}
+            >
+              <Keyboard size={17} aria-hidden="true" />
+              键盘快捷键
+            </button>
+          )}
           <button
             className="danger-text"
             disabled={busy}

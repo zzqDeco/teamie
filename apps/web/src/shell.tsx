@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { FormEvent } from "react";
 import {
   Link,
   Navigate,
@@ -42,6 +43,7 @@ import { AgentAvatar, AgentBadge } from "./agent-ui";
 import { GroupMembersDialog } from "./group-members";
 import { enrichParticipants } from "./participants";
 import type { Participant } from "./participants";
+import { KeyboardShortcutsModal, QuickSwitcher } from "./quick-switcher";
 import { chatStore } from "./store";
 import type { DialogKind } from "./dialogs";
 import { ConversationView, conversationName } from "./messages";
@@ -59,6 +61,70 @@ import {
 
 function route(conversation: Conversation) {
   return `/app/w/${conversation.workspaceId}/c/${conversation.id}`;
+}
+export function parseInviteCode(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  const match = trimmed.match(/\/join\/([^/?#\s]+)/i);
+  if (match?.[1]) {
+    try {
+      return decodeURIComponent(match[1]);
+    } catch {
+      return match[1];
+    }
+  }
+  if (trimmed.includes("://") || trimmed.includes("/")) return "";
+  return trimmed;
+}
+function useDocumentTitle(
+  pageTitle: string,
+  urgentCount: number,
+  hasChannelUnread: boolean,
+) {
+  useEffect(() => {
+    const base = pageTitle ? `${pageTitle} · Teamie` : "Teamie";
+    const prefix =
+      urgentCount > 0
+        ? `(${urgentCount > 99 ? "99+" : urgentCount}) `
+        : hasChannelUnread
+          ? "• "
+          : "";
+    document.title = `${prefix}${base}`;
+  }, [pageTitle, urgentCount, hasChannelUnread]);
+  useEffect(
+    () => () => {
+      document.title = "Teamie";
+    },
+    [],
+  );
+}
+function pickAdjacentConversation(
+  list: Conversation[],
+  currentId: string | undefined,
+  direction: -1 | 1,
+  unreadOnly: boolean,
+) {
+  if (!list.length) return undefined;
+  const currentIndex = currentId
+    ? list.findIndex((c) => c.id === currentId)
+    : -1;
+  for (let step = 1; step <= list.length; step++) {
+    const index =
+      currentIndex === -1
+        ? direction === 1
+          ? step - 1
+          : list.length - step
+        : (currentIndex + direction * step + list.length) % list.length;
+    const candidate = list[index];
+    if (
+      candidate &&
+      (!unreadOnly ||
+        (candidate.lastSeq > candidate.readSeq && candidate.id !== currentId))
+    ) {
+      return candidate;
+    }
+  }
+  return undefined;
 }
 function ConversationItem({
   conversation,
@@ -146,6 +212,11 @@ export function Shell() {
   const lastConversationByWorkspace = useRef<Record<string, string>>({});
   const lastChatRoute = useRef<string>("");
   const [lastChatPath, setLastChatPath] = useState("");
+  const [recentConversationIds, setRecentConversationIds] = useState<string[]>(
+    [],
+  );
+  const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [dialog, setDialog] = useState<DialogKind | null>(null),
     [sidebar, setSidebar] = useState(false),
     [details, setDetails] = useState(false),
@@ -173,6 +244,9 @@ export function Shell() {
     lastConversationByWorkspace.current = {};
     lastChatRoute.current = "";
     setLastChatPath("");
+    setRecentConversationIds([]);
+    setQuickSwitcherOpen(false);
+    setShortcutsOpen(false);
   }, [user?.id]);
   useEffect(() => {
     if (conversation && workspace && conversation.workspaceId === workspace.id) {
@@ -180,6 +254,14 @@ export function Shell() {
       lastConversationByWorkspace.current[workspace.id] = conversation.id;
       lastChatRoute.current = nextRoute;
       setLastChatPath(nextRoute);
+      setRecentConversationIds((prev) =>
+        prev[0] === conversation.id
+          ? prev
+          : [
+              conversation.id,
+              ...prev.filter((id) => id !== conversation.id),
+            ].slice(0, 20),
+      );
     }
   }, [conversation, workspace]);
   const conversations = Object.values(snapshot.conversations).filter(
@@ -217,7 +299,9 @@ export function Shell() {
       : members;
   const closeDialog = useCallback(() => setDialog(null), []),
     closeRemoving = useCallback(() => setRemoving(null), []),
-    closeGroupManager = useCallback(() => setManagingGroup(false), []);
+    closeGroupManager = useCallback(() => setManagingGroup(false), []),
+    closeQuickSwitcher = useCallback(() => setQuickSwitcherOpen(false), []),
+    closeShortcuts = useCallback(() => setShortcutsOpen(false), []);
   useEffect(() => {
     setSidebar(false);
     setManagingGroup(false);
@@ -229,14 +313,20 @@ export function Shell() {
   }, [location.pathname, location.search]);
   const closeSidebar = useCallback(() => setSidebar(false), []);
   const closeDetails = useCallback(() => setDetails(false), []);
-  useOverlayFocus(navigationRef, mobile && sidebar && !dialog, closeSidebar);
+  const hasOverlayModal =
+    !!dialog || quickSwitcherOpen || shortcutsOpen || managingGroup || !!removing;
+  useOverlayFocus(
+    navigationRef,
+    mobile && sidebar && !hasOverlayModal,
+    closeSidebar,
+  );
   useEffect(() => {
     const previous = sidebarFocus.current;
     sidebarFocus.current = { open: sidebar, pathname: location.pathname };
     if (
       sidebar ||
       !mobile ||
-      dialog ||
+      hasOverlayModal ||
       (!previous.open && previous.pathname === location.pathname)
     )
       return;
@@ -246,15 +336,13 @@ export function Shell() {
         ?.querySelector<HTMLElement>(".app-main .mobile-menu")
         ?.focus({ preventScroll: true });
     }
-  }, [sidebar, mobile, dialog, location.pathname]);
+  }, [sidebar, mobile, hasOverlayModal, location.pathname]);
   useOverlayFocus(
     membersRef,
     overlayMembers &&
       details &&
       !sidebar &&
-      !dialog &&
-      !managingGroup &&
-      !removing &&
+      !hasOverlayModal &&
       !!conversation,
     closeDetails,
   );
@@ -283,6 +371,112 @@ export function Shell() {
   const isAgentsPage = pathname === "/app/agents" || !!agentMatch;
   const isDirectoryPage = !!directoryMatch;
   const isAttentionPage = pathname === "/app/attention";
+  const activeWorkspaceIds = new Set(
+    (chat.data?.workspaces || []).map((w) => w.id),
+  );
+  const allAuthorizedConversations = Object.values(
+    snapshot.conversations,
+  ).filter((c) => activeWorkspaceIds.has(c.workspaceId));
+  const directUnreadCount = allAuthorizedConversations.reduce(
+    (sum, c) =>
+      c.type !== "channel"
+        ? sum + Math.max(0, c.lastSeq - c.readSeq)
+        : sum,
+    0,
+  );
+  const hasChannelUnread = allAuthorizedConversations.some(
+    (c) => c.type === "channel" && c.lastSeq > c.readSeq,
+  );
+  const urgentCount =
+    (attentionCount.data?.unreadCount || 0) + directUnreadCount;
+  const pageTitle = isAttentionPage
+    ? "提及与回复"
+    : isGatewayPage
+      ? "模型网关"
+      : isUsersPage
+        ? "用户管理"
+        : isAdminPage
+          ? "注册邀请"
+          : isAgentsPage
+            ? "个人 Agent"
+            : isDirectoryPage
+              ? workspace
+                ? `${workspace.name} · 成员`
+                : "成员"
+              : isSettings
+                ? "账号设置"
+                : conversation &&
+                    workspace &&
+                    conversation.workspaceId === workspace.id
+                  ? conversation.type === "channel"
+                    ? `# ${conversationName(conversation, user!.id, members)}`
+                    : conversationName(conversation, user!.id, members)
+                  : workspace?.name || "";
+  useDocumentTitle(pageTitle, urgentCount, hasChannelUnread);
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.isComposing || event.keyCode === 229) return;
+      const anyModalOpen = !!document.querySelector(".modal-backdrop");
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        !event.altKey &&
+        !event.shiftKey &&
+        event.key.toLowerCase() === "k"
+      ) {
+        if (anyModalOpen && !quickSwitcherOpen && !shortcutsOpen) return;
+        event.preventDefault();
+        setShortcutsOpen(false);
+        setQuickSwitcherOpen((open) => !open);
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      const inEditable =
+        !!target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable);
+      if (inEditable || hasOverlayModal || anyModalOpen) return;
+      if (
+        event.altKey &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        (event.key === "ArrowUp" || event.key === "ArrowDown")
+      ) {
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        const ordered = [...channels, ...direct];
+        const wsIds = new Set(
+          (chat.data?.workspaces || []).map((w) => w.id),
+        );
+        const authorized = Object.values(snapshot.conversations).filter((c) =>
+          wsIds.has(c.workspaceId),
+        );
+        const pool = ordered.length ? ordered : authorized;
+        const next = pickAdjacentConversation(
+          pool,
+          conversation?.id,
+          direction,
+          event.shiftKey,
+        );
+        if (next) {
+          event.preventDefault();
+          navigate(route(next));
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    channels,
+    direct,
+    snapshot.conversations,
+    chat.data?.workspaces,
+    conversation?.id,
+    hasOverlayModal,
+    quickSwitcherOpen,
+    shortcutsOpen,
+    navigate,
+  ]);
   const messageTarget =
     new URLSearchParams(location.search).get("message") || "";
   const initialMessageId = messageTarget.length <= 128 ? messageTarget : "";
@@ -512,18 +706,30 @@ export function Shell() {
             )}
           </Link>
           <div className="workspace-buttons">
-            {chat.data?.workspaces.map((space) => (
-              <button
-                key={space.id}
-                className={`workspace-button ${space.id === workspace?.id ? "selected" : ""}`}
-                title={space.name}
-                aria-label={`打开工作空间 ${space.name}`}
-                onClick={() => selectWorkspace(space)}
-              >
-                <span>{Array.from(space.name).slice(0, 2).join("")}</span>
-                {space.id === workspace?.id && <i />}
-              </button>
-            ))}
+            {chat.data?.workspaces.map((space) => {
+              const hasUnread = allAuthorizedConversations.some(
+                (c) => c.workspaceId === space.id && c.lastSeq > c.readSeq,
+              );
+              return (
+                <button
+                  key={space.id}
+                  className={`workspace-button ${space.id === workspace?.id ? "selected" : ""}`}
+                  title={space.name}
+                  aria-label={`打开工作空间 ${space.name}`}
+                  onClick={() => selectWorkspace(space)}
+                >
+                  <span>{Array.from(space.name).slice(0, 2).join("")}</span>
+                  {space.id === workspace?.id && <i />}
+                  {hasUnread && (
+                    <em
+                      className="workspace-unread-dot"
+                      role="img"
+                      aria-label="有未读消息"
+                    />
+                  )}
+                </button>
+              );
+            })}
           </div>
           <IconButton
             label="创建工作空间"
@@ -546,11 +752,12 @@ export function Shell() {
           <AccountMenu
             user={user!}
             busy={busy}
-            active={!mobile || sidebar}
+            active={(!mobile || sidebar) && !hasOverlayModal}
             connection={chat.connection}
             connectionLabel={connectionLabel}
             onSignOut={() => void signOut()}
             onNavigate={closeSidebar}
+            onShortcuts={() => setShortcutsOpen(true)}
           />
         </aside>
         <aside className="navigation-sidebar">
@@ -561,7 +768,7 @@ export function Shell() {
             {workspace && (caps["im.dm.create"] || caps["im.group.create"]) && (
               <ConversationActions
                 key={workspace.id}
-                active={(!mobile || sidebar) && !dialog}
+                active={(!mobile || sidebar) && !hasOverlayModal}
                 canDirect={!!caps["im.dm.create"]}
                 canGroup={!!caps["im.group.create"]}
                 onSelect={openDialog}
@@ -779,6 +986,8 @@ export function Shell() {
             }}
             membersOpen={details}
             onMenu={() => setSidebar(true)}
+            isWorkspaceOwner={owner}
+            onInvite={() => openDialog("invite")}
           />
         ) : chat.data?.workspaces.length === 0 ? (
           <Welcome
@@ -967,6 +1176,33 @@ export function Shell() {
           onClose={closeDialog}
         />
       )}{" "}
+      {quickSwitcherOpen && (
+        <QuickSwitcher
+          workspaces={chat.data?.workspaces || []}
+          conversations={allAuthorizedConversations}
+          currentWorkspaceId={workspace?.id}
+          members={members}
+          userId={user!.id}
+          recentConversationIds={recentConversationIds}
+          onSelect={(path) => {
+            setQuickSwitcherOpen(false);
+            setSidebar(false);
+            const wsPrefix = "/app/w/";
+            if (path.startsWith(wsPrefix) && !path.includes("/c/")) {
+              const targetWs = chat.data?.workspaces.find(
+                (w) => w.id === path.slice(wsPrefix.length),
+              );
+              if (targetWs) {
+                selectWorkspace(targetWs);
+                return;
+              }
+            }
+            navigate(path);
+          }}
+          onClose={closeQuickSwitcher}
+        />
+      )}
+      {shortcutsOpen && <KeyboardShortcutsModal onClose={closeShortcuts} />}
       {managingGroup &&
         conversation?.type === "group" &&
         conversation.canManageMembers && (
@@ -1009,6 +1245,14 @@ function Welcome({
   onCreate: () => void;
   onMenu: () => void;
 }) {
+  const navigate = useNavigate();
+  const [inviteInput, setInviteInput] = useState("");
+  const inviteCode = parseInviteCode(inviteInput);
+  function submitInvite(event: FormEvent) {
+    event.preventDefault();
+    if (!inviteCode) return;
+    navigate(`/join/${encodeURIComponent(inviteCode)}`);
+  }
   return (
     <div className="welcome-view">
       <header>
@@ -1030,12 +1274,27 @@ function Welcome({
         <p>
           创建一个团队，开始协作。
           <br />
-          已有团队邀请？打开邀请链接即可加入。
+          已有团队邀请？输入邀请链接或邀请码即可加入。
         </p>
         <Button onClick={onCreate}>
           <Plus size={18} />
           创建工作空间
         </Button>
+        <form className="welcome-join-form" onSubmit={submitInvite}>
+          <input
+            value={inviteInput}
+            onChange={(event) => setInviteInput(event.target.value)}
+            placeholder="粘贴邀请链接或输入邀请码"
+            aria-label="邀请链接或邀请码"
+          />
+          <Button
+            type="submit"
+            className="secondary"
+            disabled={!inviteCode}
+          >
+            加入团队
+          </Button>
+        </form>
       </div>
     </div>
   );
