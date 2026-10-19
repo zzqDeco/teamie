@@ -22,15 +22,15 @@
   min-height: 44px;
   padding: 8px 20px;
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--r-md);
   background: transparent;
-  color: #786c85;
+  color: var(--text-muted);
   cursor: pointer;
   font: inherit;
 }
 .search-modes button[aria-pressed="true"] {
   background: #eee7f7;
-  color: #75559c;
+  color: var(--text-muted);
 }
 .conversation-search .search-form {
   display: flex;
@@ -38,13 +38,13 @@
   gap: 6px;
   margin-bottom: 12px;
   border: 1px solid #ddd4e6;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   padding: 3px 5px 3px 12px;
   flex: none;
 }
 .conversation-search .search-form:focus-within {
   border-color: #9c7bbd;
-  box-shadow: 0 0 0 2px #9c7bbd18;
+  box-shadow: var(--focus-halo);
 }
 .conversation-search .search-form input {
   width: 100%;
@@ -69,7 +69,7 @@
   scrollbar-width: thin;
 }
 .search-empty {
-  color: #8c7f96;
+  color: var(--text-muted);
   font-size: 14px;
   text-align: center;
   margin: 36px 12px;
@@ -89,7 +89,7 @@
   flex-wrap: wrap;
   gap: 7px;
   font-size: 13px;
-  color: #584765;
+  color: var(--text);
 }
 .search-result-meta b {
   overflow-wrap: anywhere;
@@ -97,7 +97,7 @@
 .search-result-meta time {
   margin-left: auto;
   font-size: 11px;
-  color: #9888a3;
+  color: var(--text-muted);
 }
 .search-message-result {
   display: -webkit-box;
@@ -108,7 +108,7 @@
   border: 0;
   padding: 12px 0 5px;
   background: transparent;
-  color: #50435c;
+  color: var(--text);
   font: inherit;
   font-size: 14px;
   line-height: 1.65;
@@ -120,7 +120,7 @@
 .search-message-result mark {
   background: #f4e6b7;
   color: inherit;
-  border-radius: 2px;
+  border-radius: var(--r-xs);
 }
 .search-source {
   display: flex;
@@ -130,14 +130,14 @@
   padding: 5px 0;
   border: 0;
   background: transparent;
-  color: #9470b3;
+  color: var(--brand-text);
   font: inherit;
   font-size: 12px;
   cursor: pointer;
 }
 .search-message-result:hover,
 .search-source:hover {
-  color: #75559c;
+  color: var(--text-muted);
 }
 .search-result-list .message-attachments {
   margin: 12px 0 0;

@@ -15,15 +15,15 @@
   min-height: 44px;
   padding: 8px 20px;
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--r-md);
   font: inherit;
-  font-weight: 550;
-  color: #685578;
+  font-weight: 600;
+  color: var(--text);
   background: transparent;
   cursor: pointer;
 }
 .attention-filters button[aria-pressed="true"] {
-  color: #5f4fc1;
+  color: var(--brand-text);
   background: #eee7f7;
   font-weight: 600;
 }
@@ -37,7 +37,7 @@
 .attention-empty {
   margin: 50px 12px;
   font-size: 14px;
-  color: #786787;
+  color: var(--text-muted);
   text-align: center;
 }
 .attention-list {
@@ -53,7 +53,7 @@
   align-items: flex-start;
   gap: 12px;
   padding: 18px 12px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   color: inherit;
   text-decoration: none;
 }
@@ -73,10 +73,10 @@
   align-items: center;
   flex-wrap: wrap;
   font-size: 12px;
-  color: #766685;
+  color: var(--text-muted);
 }
 .attention-item-meta b {
-  color: #382e44;
+  color: var(--text-strong);
   font-size: 14px;
   overflow-wrap: anywhere;
 }
@@ -94,7 +94,7 @@
 .attention-item-body {
   margin: 8px 0;
   font-size: 14px;
-  color: #3f344c;
+  color: var(--text-strong);
   line-height: 1.65;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -104,7 +104,7 @@
   overflow: hidden;
 }
 .attention-source {
-  color: #766685;
+  color: var(--text-muted);
   font-size: 12px;
   overflow-wrap: anywhere;
 }
@@ -121,12 +121,12 @@
   width: 44px;
   height: 44px;
   margin: 0 auto 6px;
-  border-radius: 12px;
-  color: #786592;
+  border-radius: var(--r-lg);
+  color: var(--text-muted);
 }
 .rail-attention:hover,
 .rail-attention.selected {
-  color: #5f4fc1;
+  color: var(--brand-text);
   background: #e1d9ed;
 }
 .rail-attention-count {
@@ -134,11 +134,11 @@
   top: -2px;
   right: -5px;
   padding: 2px 5px;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   min-width: 17px;
-  background: #7c65c9;
+  background: var(--brand);
   color: white;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   line-height: 1.3;
   text-align: center;

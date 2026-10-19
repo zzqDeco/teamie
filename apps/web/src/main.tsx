@@ -16,6 +16,7 @@ import { Landing, Login, Join } from "./public";
 import { ForgotPassword, ResetPassword } from "./password-recovery";
 import { Shell } from "./shell";
 import { Button, Loading, Logo, Notice } from "./ui";
+import "./tokens.css";
 import "./styles.css";
 import "./layout.css";
 import "./password-recovery.css";
