@@ -5,12 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"go.uber.org/zap"
 	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"sync"
+	"teamie/backend/pkg/observability"
 	"time"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -133,7 +135,11 @@ func (imc *IM) request(ctx context.Context, baseURL, method, path string, body i
 	if client == nil {
 		client = &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	}
-	response, e := client.Do(req)
+	peer := "teamie.chat"
+	if baseURL == imc.RealtimeURL {
+		peer = "teamie.realtime"
+	}
+	response, e := observability.Client(client, peer).Do(req)
 	if e != nil {
 		return errors.New("im_unavailable")
 	}
@@ -253,11 +259,24 @@ func observeError(e error) *Observation {
 }
 
 // Tool receipts share the model's stable call ID. No arbitrary model output reaches IM.
-func (t *Tools) execute(ctx context.Context, name string, args any, fn func(context.Context, string) (*Observation, error)) (*Observation, error) {
+func (t *Tools) execute(ctx context.Context, name string, args any, fn func(context.Context, string) (*Observation, error)) (result *Observation, failure error) {
 	run, e := CurrentRun(ctx)
 	if e != nil {
 		return nil, e
 	}
+	ctx, operation := toolOperation(ctx, name, compose.GetToolCallID(ctx))
+	replayed := false
+	defer func() {
+		logError := failure
+		code := ""
+		if result != nil {
+			code = result.Error
+			if !result.OK && logError == nil {
+				logError = observability.Diagnostic("tool_observation_failed", nil)
+			}
+		}
+		operation.End(logError, zap.Bool("custom.tool.receipt_replay", replayed), zap.String("custom.error.code", observability.ID(code)))
+	}()
 	if t.Authorize != nil {
 		if err := t.Authorize(ctx); err != nil {
 			return nil, err
@@ -290,6 +309,7 @@ func (t *Tools) execute(ctx context.Context, name string, args any, fn func(cont
 		}
 	}
 	if cached != nil {
+		replayed = true
 		var out Observation
 		if e = json.Unmarshal(cached, &out); e != nil {
 			return nil, e
