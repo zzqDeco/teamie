@@ -24,6 +24,7 @@ type Chat = {
   syncError: string;
   refresh: () => Promise<unknown>;
   sync: () => void;
+  reconnect: () => void;
   sendTyping: (conversationId: string, value: boolean) => void;
   typing: Record<
     string,
@@ -62,6 +63,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [typing, setTyping] = useState<Chat["typing"]>({});
   const socket = useRef<WebSocket | null>(null);
   const syncRef = useRef<() => void>(() => {});
+  const reconnectRef = useRef<() => void>(() => {});
   const capabilities = useRef<Record<string, boolean>>({});
   useEffect(() => {
     if (query.data) {
@@ -179,7 +181,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         attempt = 0;
         setConnection("connected");
         void sync();
-        retryTransientFailures(chatStore.generation);
+        void retryTransientFailures(chatStore.generation);
       };
       ws.onmessage = (event) => {
         try {
@@ -226,13 +228,21 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       ws.onerror = () => ws?.close();
     }
     const online = () => {
-      if (timer) clearTimeout(timer);
+      if (timer) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
       if (ws) {
         ws.onclose = null;
         ws.close();
       }
       connect();
       void sync();
+    };
+    reconnectRef.current = () => {
+      if (stopped) return;
+      if (!ws || ws.readyState !== WebSocket.OPEN) online();
+      else void sync();
     };
     const offline = () => {
       setConnection("offline");
@@ -290,6 +300,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const sync = useCallback(() => {
     syncRef.current();
   }, []);
+  const reconnect = useCallback(() => {
+    reconnectRef.current();
+  }, []);
   const data = query.data?.user.id === user!.id ? query.data : undefined;
   const error = query.error ? "无法加载你的工作空间，请稍后重试。" : "";
   const value = useMemo(
@@ -301,6 +314,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       syncError,
       refresh: query.refetch,
       sync,
+      reconnect,
       sendTyping,
       typing,
     }),
@@ -312,6 +326,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       syncError,
       query.refetch,
       sync,
+      reconnect,
       sendTyping,
       typing,
     ],
@@ -409,10 +424,18 @@ export async function sendMessage(message: Message, generation: number) {
 }
 // Transient failures retry with the same clientMessageId, which the server
 // treats idempotently, so a retry after a lost response cannot duplicate.
-export function retryTransientFailures(generation: number) {
+export async function retryTransientFailures(generation: number) {
   if (chatStore.generation !== generation) return;
-  for (const messages of Object.values(chatStore.getSnapshot().messages))
-    for (const message of messages)
-      if (message.status === "failed" && !message.permanent)
-        void sendMessage(message, generation);
+  const queued = Object.values(chatStore.getSnapshot().messages).flatMap(
+    (messages) =>
+      messages.filter((m) => m.status === "failed" && !m.permanent),
+  );
+  for (const item of queued) {
+    if (chatStore.generation !== generation) return;
+    const current = (
+      chatStore.getSnapshot().messages[item.conversationId] || []
+    ).find((m) => m.clientMessageId === item.clientMessageId);
+    if (current && current.status === "failed" && !current.permanent)
+      await sendMessage(current, generation);
+  }
 }

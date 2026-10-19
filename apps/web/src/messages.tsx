@@ -1310,12 +1310,20 @@ export function ConversationView({
                         </button>
                       )}
                       <button
-                        onClick={() =>
+                        onClick={() => {
+                          for (const attachment of message.attachments || []) {
+                            void api
+                              .deletePendingAttachment(
+                                conversation.id,
+                                attachment.id,
+                              )
+                              .catch(() => {});
+                          }
                           chatStore.discardLocal(
                             conversation.id,
                             message.clientMessageId,
-                          )
-                        }
+                          );
+                        }}
                       >
                         <Trash2 size={11} />
                         删除

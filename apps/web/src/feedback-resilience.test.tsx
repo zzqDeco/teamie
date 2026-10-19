@@ -56,12 +56,32 @@ describe("failed messages", () => {
     expect(local().find((m) => m.clientMessageId === "c2")).toMatchObject({ status: "failed" });
     expect(local().find((m) => m.clientMessageId === "c2")?.permanent).toBeUndefined();
 
-    send.mockResolvedValueOnce({ message: { ...message, id: "m2", clientMessageId: "c2", seq: 2 } });
-    retryTransientFailures(chatStore.generation);
-    await act(async () => { await Promise.resolve(); });
-    expect(send).toHaveBeenCalledTimes(3);
-    expect(send.mock.calls[2][1]).toMatchObject({ clientMessageId: "c2" });
+    let releaseFirst!: () => void;
+    const order: string[] = [];
+    chatStore.merge([
+      { ...message, id: "local:c2", clientMessageId: "c2", status: "failed" },
+      { ...message, id: "local:c3", clientMessageId: "c3", status: "failed" },
+    ]);
+    send.mockImplementationOnce((_id, draft) => {
+      order.push(`start:${draft.clientMessageId}`);
+      return new Promise((resolve) => {
+        releaseFirst = () => {
+          order.push(`end:${draft.clientMessageId}`);
+          resolve({ message: { ...message, id: "m2", clientMessageId: "c2", seq: 2 } });
+        };
+      });
+    });
+    send.mockImplementationOnce(async (_id, draft) => {
+      order.push(`start:${draft.clientMessageId}`);
+      return { message: { ...message, id: "m3", clientMessageId: "c3", seq: 3 } };
+    });
+    const retryPromise = retryTransientFailures(chatStore.generation);
+    expect(order).toEqual(["start:c2"]);
+    releaseFirst();
+    await retryPromise;
+    expect(order).toEqual(["start:c2", "end:c2", "start:c3"]);
     expect(local().find((m) => m.id === "m2")?.status).toBeUndefined();
+    expect(local().find((m) => m.id === "m3")?.status).toBeUndefined();
 
     chatStore.discardLocal("room", "c1");
     expect(local().some((m) => m.clientMessageId === "c1")).toBe(false);

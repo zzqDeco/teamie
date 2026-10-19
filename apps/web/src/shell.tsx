@@ -435,9 +435,12 @@ export function Shell() {
     );
   if (workspaceRootMatch && chat.data) {
     const id = workspaceRootMatch.params.workspaceId!;
-    const inWorkspace = Object.values(snapshot.conversations).filter(
+    const stored = Object.values(snapshot.conversations).filter(
       (c) => c.workspaceId === id,
     );
+    const inWorkspace = stored.length
+      ? stored
+      : chat.data.conversations.filter((c) => c.workspaceId === id);
     const first =
       inWorkspace.find((c) => c.type === "channel") || inWorkspace[0];
     return (
@@ -645,7 +648,7 @@ export function Shell() {
           connection={chat.connection}
           syncError={chat.syncError}
           showSyncError={!conversation || isManagement || isAttentionPage}
-          onRetry={chat.sync}
+          onRetry={chat.reconnect ?? chat.sync}
         />
         {error && !removing && <Notice>{error}</Notice>}
         {isAttentionPage ? (

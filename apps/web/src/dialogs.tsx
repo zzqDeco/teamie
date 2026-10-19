@@ -205,15 +205,16 @@ export function WorkspaceDialog({
                 type="button"
                 disabled={kind === "group" && !selected.includes(member.userId) && eligibleSelected.length >= 49}
                 className={`member-option ${selected.includes(member.userId) ? "selected" : ""}`}
-                onClick={() =>
+                onClick={() => {
+                  setDirty(true);
                   setSelected((old) =>
                     kind === "direct"
                       ? [member.userId]
                       : old.includes(member.userId)
                         ? old.filter((id) => id !== member.userId)
                         : [...old, member.userId],
-                  )
-                }
+                  );
+                }}
               >
                 <ParticipantIdentity member={member} />
                 <span className="selection-check">

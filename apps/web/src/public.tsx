@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@teamie/api-client";
+import type { Bootstrap } from "@teamie/api-client";
 import { chatStore } from "./store";
 import { useAuth } from "./auth";
 import { clearSessionExpired, readSessionExpired } from "./session-notice";
@@ -839,7 +840,31 @@ export function Join() {
     try {
       const result = await api.acceptInvite(inviteCode);
       result.conversations.forEach((c) => chatStore.addConversation(c));
-      await client.invalidateQueries({ queryKey: ["bootstrap"] });
+      if (user) {
+        client.setQueryData<Bootstrap>(["bootstrap", user.id], (old) =>
+          old
+            ? {
+                ...old,
+                workspaces: old.workspaces.some(
+                  (w) => w.id === result.workspace.id,
+                )
+                  ? old.workspaces
+                  : [...old.workspaces, result.workspace],
+                conversations: [
+                  ...old.conversations.filter(
+                    (c) =>
+                      !result.conversations.some((added) => added.id === c.id),
+                  ),
+                  ...result.conversations,
+                ],
+              }
+            : old,
+        );
+      }
+      await client.invalidateQueries({
+        queryKey: ["bootstrap"],
+        refetchType: "all",
+      });
       navigate(
         result.conversations[0]
           ? `/app/w/${result.workspace.id}/c/${result.conversations[0].id}`

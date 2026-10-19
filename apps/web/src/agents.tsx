@@ -378,6 +378,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
       </div>
     );
   if (
+    !agent &&
     query.error &&
     !(query.error instanceof ApiError && [403, 404].includes(query.error.status))
   )
@@ -444,7 +445,11 @@ export function AgentDetail({ agentId }: { agentId: string }) {
           )}
         </div>
       </div>
-      <Notice>{!deleting ? error : ""}</Notice>
+      <Notice>
+        {!deleting
+          ? error || (query.error ? agentFailureText(query.error) : "")
+          : ""}
+      </Notice>
       <section className="agent-profile-section">
         <header>
           <h2>团队可见范围</h2>
