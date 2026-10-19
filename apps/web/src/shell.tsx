@@ -388,69 +388,23 @@ export function Shell() {
         : sum,
     0,
   );
-  const rawAttentionUnread = attentionCount.data?.unreadCount || 0;
-  const attentionItems = attentionCount.data?.items || [];
-  let channelAttentionCount = 0;
-  if (typeof attentionCount.data?.channelUnreadCount === "number") {
-    let locallyResolvedChannel = 0;
-    for (const item of attentionItems) {
-      if (item.isRead || item.conversation.type !== "channel") continue;
-      const current = currentAttention(item, snapshot, user!.id);
-      if (
-        !current ||
-        current.isRead ||
-        current.conversation.type !== "channel"
-      ) {
-        locallyResolvedChannel += 1;
-      }
+  const rawChannelAttention = attentionCount.data?.channelUnreadCount || 0;
+  let locallyResolvedChannel = 0;
+  for (const item of attentionCount.data?.items || []) {
+    if (item.isRead || item.conversation.type !== "channel") continue;
+    const current = currentAttention(item, snapshot, user!.id);
+    if (
+      !current ||
+      current.isRead ||
+      current.conversation.type !== "channel"
+    ) {
+      locallyResolvedChannel += 1;
     }
-    channelAttentionCount = Math.max(
-      0,
-      attentionCount.data.channelUnreadCount - locallyResolvedChannel,
-    );
-  } else {
-    const excludedAttentionIds = new Set<string>();
-    for (const item of attentionItems) {
-      if (item.isRead) continue;
-      const current = currentAttention(item, snapshot, user!.id);
-      if (
-        !current ||
-        current.isRead ||
-        current.conversation.type !== "channel"
-      ) {
-        excludedAttentionIds.add(item.message.id);
-      }
-    }
-    if (attentionItems.length === 0 && rawAttentionUnread > 0) {
-      for (const c of allAuthorizedConversations) {
-        if (c.type === "channel") continue;
-        const cached = snapshot.messages[c.id] || [];
-        for (const m of cached) {
-          if (
-            m.status ||
-            m.retractedAt ||
-            m.senderId === user!.id ||
-            m.seq <= c.readSeq
-          )
-            continue;
-          const isMention = m.mentions?.some((mt) => mt.userId === user!.id);
-          const isReply =
-            !!m.replyToId &&
-            cached.some(
-              (orig) =>
-                orig.id === m.replyToId &&
-                !orig.retractedAt &&
-                orig.senderId === user!.id,
-            );
-          if (isMention || isReply) excludedAttentionIds.add(m.id);
-        }
-      }
-    }
-    channelAttentionCount = Math.max(
-      0,
-      rawAttentionUnread - excludedAttentionIds.size,
-    );
   }
+  const channelAttentionCount = Math.max(
+    0,
+    rawChannelAttention - locallyResolvedChannel,
+  );
   const urgentCount = directUnreadCount + channelAttentionCount;
   const hasChannelUnread = allAuthorizedConversations.some(
     (c) => c.type === "channel" && c.lastSeq > c.readSeq,

@@ -326,6 +326,7 @@ describe("PR-3 navigation & notification ergonomics", () => {
         },
       ],
       unreadCount: 2,
+      channelUnreadCount: 1,
     });
     act(() => {
       chatStore.replaceConversations([
