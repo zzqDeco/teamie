@@ -169,7 +169,10 @@ export class ChatStore {
                   ? {
                       ...m,
                       status: "failed" as const,
-                      error: "上次发送未确认，请重试",
+                      error:
+                        m.status === "failed" && m.error
+                          ? m.error
+                          : "上次发送未确认，请重试",
                     }
                   : m,
               ),

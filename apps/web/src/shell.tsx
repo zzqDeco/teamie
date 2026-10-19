@@ -274,16 +274,15 @@ export function Shell() {
       document.documentElement.style.removeProperty("--app-height");
     };
   }, []);
+  const pathname = location.pathname.replace(/\/+$/, "") || "/app";
   const caps = chat.data?.capabilities || {};
-  const isSettings = ["/app/settings", "/app/profile"].includes(
-    location.pathname,
-  );
-  const isAdminPage = location.pathname === "/app/admin";
-  const isGatewayPage = location.pathname === "/app/admin/gateway";
-  const isUsersPage = location.pathname === "/app/admin/users";
-  const isAgentsPage = location.pathname === "/app/agents" || !!agentMatch;
+  const isSettings = ["/app/settings", "/app/profile"].includes(pathname);
+  const isAdminPage = pathname === "/app/admin";
+  const isGatewayPage = pathname === "/app/admin/gateway";
+  const isUsersPage = pathname === "/app/admin/users";
+  const isAgentsPage = pathname === "/app/agents" || !!agentMatch;
   const isDirectoryPage = !!directoryMatch;
-  const isAttentionPage = location.pathname === "/app/attention";
+  const isAttentionPage = pathname === "/app/attention";
   const messageTarget =
     new URLSearchParams(location.search).get("message") || "";
   const initialMessageId = messageTarget.length <= 128 ? messageTarget : "";
@@ -419,7 +418,7 @@ export function Shell() {
     );
   if (
     !match &&
-    location.pathname === "/app" &&
+    pathname === "/app" &&
     chat.data?.workspaces.length &&
     (backChatRoute !== "/app" || conversations.length)
   )
@@ -465,7 +464,7 @@ export function Shell() {
       "/app/admin/gateway",
       "/app/admin/users",
       "/app/attention",
-    ].includes(location.pathname.replace(/\/+$/, "") || "/app")
+    ].includes(pathname)
   )
     return <Navigate to="/app" replace />;
   return (

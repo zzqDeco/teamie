@@ -7,7 +7,7 @@ import { api, ApiError } from "@teamie/api-client";
 import type { Message } from "@teamie/api-client";
 import { errorText, retryTransientFailures, sendMessage } from "./chat";
 import { ConnectionBanner } from "./connection-banner";
-import { chatStore } from "./store";
+import { ChatStore, chatStore } from "./store";
 import { Modal } from "./ui";
 
 const message: Message = {
@@ -52,7 +52,16 @@ describe("failed messages", () => {
       .mockRejectedValueOnce(new TypeError("Failed to fetch"));
     await sendMessage(message, chatStore.generation);
     await sendMessage({ ...message, id: "local:c2", clientMessageId: "c2" }, chatStore.generation);
-    expect(local().find((m) => m.clientMessageId === "c1")).toMatchObject({ status: "failed", permanent: true });
+    expect(local().find((m) => m.clientMessageId === "c1")).toMatchObject({
+      status: "failed",
+      permanent: true,
+    });
+    const permanentError = local().find((m) => m.clientMessageId === "c1")?.error;
+    const reloaded = new ChatStore(localStorage);
+    reloaded.begin("me");
+    expect(
+      reloaded.getSnapshot().messages.room?.find((m) => m.clientMessageId === "c1")?.error,
+    ).toBe(permanentError);
     expect(local().find((m) => m.clientMessageId === "c2")).toMatchObject({ status: "failed" });
     expect(local().find((m) => m.clientMessageId === "c2")?.permanent).toBeUndefined();
 
