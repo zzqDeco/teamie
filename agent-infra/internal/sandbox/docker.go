@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"teamie/backend/pkg/observability"
 	"time"
 )
 
@@ -47,7 +48,7 @@ func NewDocker(socket string) *Docker {
 	tr := &http.Transport{Proxy: nil, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{Timeout: 3 * time.Second}).DialContext(ctx, "unix", socket)
 	}, MaxIdleConns: 4, MaxIdleConnsPerHost: 4, IdleConnTimeout: 30 * time.Second}
-	return &Docker{HTTP: &http.Client{Transport: tr}, prefix: "/v1.45"}
+	return &Docker{HTTP: &http.Client{Transport: observability.Transport{Base: tr, Peer: "docker", Quiet: true}}, prefix: "/v1.45"}
 }
 func (d *Docker) request(ctx context.Context, method, path string, data any) (*http.Response, error) {
 	var body io.Reader

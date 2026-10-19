@@ -8,6 +8,7 @@ COPY agent-control/go.mod agent-control/go.sum ./agent-control/
 WORKDIR /src/agent-control
 RUN go mod download
 COPY backend/kitex_gen/ /src/backend/kitex_gen/
+COPY backend/pkg/ /src/backend/pkg/
 COPY agent-protocol/ /src/agent-protocol/
 COPY agent-control/ ./
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X teamie/agent-control/internal/control.Version=$VERSION -X teamie/agent-control/internal/control.SHA=$COMMIT_SHA" -o /out/service ./cmd

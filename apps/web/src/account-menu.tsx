@@ -68,6 +68,7 @@ export function AccountMenu({
             <button
               type="button"
               onClick={() => {
+                trigger.current?.focus({ preventScroll: true });
                 setOpen(false);
                 onNavigate();
                 onShortcuts();

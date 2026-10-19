@@ -1,6 +1,7 @@
 package rpcutil
 
 import (
+	"teamie/backend/pkg/observability"
 	"context"
 	"fmt"
 	"github.com/cloudwego/kitex/client"
@@ -25,7 +26,7 @@ func FromUser(u *im.User) api.User {
 type Identity struct{ Client identityservice.Client }
 
 func NewIdentity(addr string) (*Identity, error) {
-	c, e := identityservice.NewClient("teamie.identity", client.WithHostPorts(addr), client.WithRPCTimeout(3*time.Second), client.WithConnectTimeout(time.Second))
+	c, e := identityservice.NewClient("teamie.identity", observability.RPCClient(), client.WithHostPorts(addr), client.WithRPCTimeout(3*time.Second), client.WithConnectTimeout(time.Second))
 	return &Identity{c}, e
 }
 func (c *Identity) Validate(ctx context.Context, token string) (api.Session, error) {
@@ -90,7 +91,7 @@ func (c *Identity) ValidatePrincipal(ctx context.Context, token, key string) (ap
 type Chat struct{ Client chatservice.Client }
 
 func NewChat(addr string) (*Chat, error) {
-	c, e := chatservice.NewClient("teamie.chat", client.WithHostPorts(addr), client.WithRPCTimeout(3*time.Second), client.WithConnectTimeout(time.Second))
+	c, e := chatservice.NewClient("teamie.chat", observability.RPCClient(), client.WithHostPorts(addr), client.WithRPCTimeout(3*time.Second), client.WithConnectTimeout(time.Second))
 	return &Chat{c}, e
 }
 func (c *Chat) CheckAccess(ctx context.Context, user, conversation string) (*im.AccessResponse, error) {

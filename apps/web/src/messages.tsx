@@ -89,7 +89,6 @@ const emptyComposerDraft: ComposerDraft = {
   replyToId: "",
 };
 const draftStorageKey = (userId: string) => `teamie.drafts.v1:${userId}`;
-let draftGeneration = chatStore.generation;
 let draftUserId = chatStore.getSnapshot().userId;
 // Drafts retain reply identity, never a copied IM body, and disappear with
 // their account or conversation access.
@@ -152,28 +151,19 @@ export function clearComposerDrafts() {
   } catch {
     /* Ignore storage access errors. */
   }
-  draftGeneration = chatStore.generation;
   draftUserId = currentUser;
   composerDrafts.clear();
   notifyDrafts();
 }
 chatStore.subscribe(() => {
   const snap = chatStore.getSnapshot();
-  if (draftGeneration !== chatStore.generation) {
+  let userChanged = false;
+  if (snap.userId !== draftUserId) {
     try {
       if (draftUserId) sessionStorage.removeItem(draftStorageKey(draftUserId));
     } catch {
       /* Ignore storage access errors. */
     }
-    draftGeneration = chatStore.generation;
-    draftUserId = snap.userId;
-    composerDrafts.clear();
-    if (draftUserId) loadSessionDrafts(draftUserId);
-    notifyDrafts();
-    return;
-  }
-  let userChanged = false;
-  if (snap.userId !== draftUserId) {
     draftUserId = snap.userId;
     composerDrafts.clear();
     if (draftUserId) loadSessionDrafts(draftUserId);
@@ -651,6 +641,12 @@ export function ConversationView({
     }
   }, [conversation.id, conversation.readSeq]);
   function returnToLatest() {
+    // Leaving the initial deep link can be the first latest-page fetch.
+    const current = chatStore.getSnapshot().conversations[conversation.id];
+    if (current) {
+      setEntry({ readSeq: current.readSeq, lastSeq: current.lastSeq });
+      setAnchorPending(current.lastSeq > current.readSeq);
+    }
     if (initialMessageId && onClearMessageTarget) onClearMessageTarget();
     else void fetchLatest();
   }

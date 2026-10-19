@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"teamie/backend/pkg/observability"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -50,7 +51,7 @@ func (c *gatewayHTTPClient) Chat(ctx context.Context, in *wire.GatewayChatReques
 	}
 	req.Header.Set("Authorization", "Bearer "+in.ServiceToken)
 	req.Header.Set("Content-Type", "application/json")
-	response, err := c.http.Do(req)
+	response, err := observability.Client(c.http, "teamie.llm-gateway").Do(req)
 	if err != nil {
 		return nil, err
 	}
