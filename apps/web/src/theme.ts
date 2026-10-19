@@ -3,9 +3,11 @@ import { useEffect, useState } from "react";
 export type ThemePreference = "system" | "light" | "dark";
 export const THEME_STORAGE_KEY = "teamie.theme";
 
-const listeners = new Set<() => void>();
+let fallbackPreference: ThemePreference | null = null;
+const listeners = new Set<(pref: ThemePreference) => void>();
 
 export function getThemePreference(): ThemePreference {
+  if (fallbackPreference) return fallbackPreference;
   try {
     const raw = window.localStorage?.getItem(THEME_STORAGE_KEY);
     if (raw === "light" || raw === "dark" || raw === "system") return raw;
@@ -43,11 +45,12 @@ export function applyTheme(
 export function setThemePreference(pref: ThemePreference): void {
   try {
     window.localStorage?.setItem(THEME_STORAGE_KEY, pref);
+    fallbackPreference = null;
   } catch {
-    // Ignore storage quota/access errors
+    fallbackPreference = pref;
   }
   applyTheme(pref);
-  for (const listener of listeners) listener();
+  for (const listener of listeners) listener(pref);
 }
 
 export function useThemePreference(): [
@@ -61,10 +64,9 @@ export function useThemePreference(): [
   );
 
   useEffect(() => {
-    const sync = () => {
-      const current = getThemePreference();
-      setPref(current);
-      setResolved(applyTheme(current));
+    const sync = (nextPref: ThemePreference = getThemePreference()) => {
+      setPref(nextPref);
+      setResolved(applyTheme(nextPref));
     };
     listeners.add(sync);
 
@@ -78,7 +80,10 @@ export function useThemePreference(): [
       }
     };
     const onStorage = (event: StorageEvent) => {
-      if (!event.key || event.key === THEME_STORAGE_KEY) sync();
+      if (!event.key || event.key === THEME_STORAGE_KEY) {
+        fallbackPreference = null;
+        sync();
+      }
     };
 
     media?.addEventListener("change", onMediaChange);

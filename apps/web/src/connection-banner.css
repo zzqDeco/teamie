@@ -12,12 +12,12 @@
 }
 .connection-banner.offline {
   background: var(--warning-bg);
-  border-bottom-color: #efe5cf;
+  border-bottom-color: var(--warning-border);
   color: var(--warning-text);
 }
 .connection-banner.restored {
   background: var(--success-bg);
-  border-bottom-color: #dcebd4;
+  border-bottom-color: var(--success-border);
   color: var(--success-text);
 }
 .connection-banner button {

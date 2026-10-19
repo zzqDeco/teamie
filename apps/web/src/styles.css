@@ -1608,7 +1608,7 @@ label > .copy-input {
   font-size: 11px;
   font-weight: 600;
   color: var(--on-brand);
-  background: #7c65c9;
+  background: var(--brand);
   border-radius: var(--r-sm);
   padding: 2px 6px;
   min-width: 18px;
@@ -2036,11 +2036,11 @@ label > .copy-input {
   align-items: center;
   justify-content: center;
   background: var(--purple);
-  color: white;
+  color: var(--on-brand);
   transition: background 0.15s;
 }
 .send-button:hover {
-  background: #6550bf;
+  background: var(--purple-dark);
 }
 .send-button:disabled {
   background: var(--lavender);
@@ -2670,14 +2670,14 @@ label > .copy-input {
   height: 17px;
   border: 1px solid var(--border-strong);
   border-radius: var(--r-xs);
-  color: white;
+  color: var(--on-brand);
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 .selected .selection-check {
-  border-color: var(--brand-text);
-  background: #b390d0;
+  border-color: var(--brand);
+  background: var(--brand);
 }
 .mini-empty {
   padding: 25px 15px;
@@ -5043,7 +5043,7 @@ label > .copy-input {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
+  color: var(--on-brand);
 }
 .agent-group-option.selected {
   background: var(--lavender);

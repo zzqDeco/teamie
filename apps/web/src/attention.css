@@ -137,7 +137,7 @@
   border-radius: var(--r-md);
   min-width: 17px;
   background: var(--brand);
-  color: white;
+  color: var(--on-brand);
   font-size: 11px;
   font-weight: 600;
   line-height: 1.3;

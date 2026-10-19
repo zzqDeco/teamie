@@ -221,5 +221,43 @@ describe("PR-6 dark mode tokens, head bootstrap & settings switcher", () => {
       setThemePreference("light");
     });
     expect(document.documentElement.dataset.theme).toBe("light");
+
+    const setItemSpy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new DOMException("QuotaExceededError", "QuotaExceededError");
+      });
+    try {
+      await act(async () => {
+        darkBtn.click();
+      });
+      expect(getThemePreference()).toBe("dark");
+      expect(document.documentElement.dataset.theme).toBe("dark");
+      expect(darkBtn.getAttribute("aria-pressed")).toBe("true");
+    } finally {
+      setItemSpy.mockRestore();
+      await act(async () => {
+        setThemePreference("system");
+      });
+    }
+  });
+
+  it("pairs brand backgrounds with --on-brand and uses --surface on mention popup", () => {
+    const stylesCss = readFileSync(join(srcDir, "styles.css"), "utf8");
+    const attentionCss = readFileSync(join(srcDir, "attention.css"), "utf8");
+    const mentionsCss = readFileSync(join(srcDir, "mentions.css"), "utf8");
+
+    expect(stylesCss).toMatch(
+      /\.unread-badge\s*\{[^}]*color:\s*var\(--on-brand\);[^}]*background:\s*var\(--brand\);/s,
+    );
+    expect(stylesCss).toMatch(
+      /\.send-button\s*\{[^}]*background:\s*var\(--purple\);[^}]*color:\s*var\(--on-brand\);/s,
+    );
+    expect(attentionCss).toMatch(
+      /\.rail-attention-count\s*\{[^}]*background:\s*var\(--brand\);[^}]*color:\s*var\(--on-brand\);/s,
+    );
+    expect(mentionsCss).toMatch(
+      /\.mention-options\s*\{[^}]*background:\s*var\(--surface\);/s,
+    );
   });
 });

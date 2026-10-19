@@ -113,8 +113,8 @@
   cursor: pointer;
 }
 .message-attachments button:hover {
-  border-color: var(--accent, #2a7669);
-  background: var(--hover-bg, #f6f8f8);
+  border-color: var(--border-strong);
+  background: var(--hover-bg);
 }
 .message-attachments button:disabled {
   opacity: 0.65;
