@@ -1,7 +1,8 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { ICON } from "./icons";
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const cssFiles = [
@@ -181,6 +182,78 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
           `${file}: unmapped text color ${hex}`,
         ).toBeGreaterThan(0.62);
       }
+    }
+  });
+});
+
+describe("PR-5 CSS cleanup, unified focus, icon scale & self-hosted DM Sans", () => {
+  it("contains zero unreferenced CSS classes in styles.css and layout.css", () => {
+    const allFiles = readdirSync(srcDir);
+    const tsFiles = allFiles.filter(
+      (f) => f.endsWith(".ts") || f.endsWith(".tsx"),
+    );
+    let corpus =
+      readFileSync(join(srcDir, "..", "index.html"), "utf8") + "\n";
+    for (const f of tsFiles) {
+      corpus += readFileSync(join(srcDir, f), "utf8") + "\n";
+    }
+    for (const cssFile of ["styles.css", "layout.css"]) {
+      const content = readFileSync(join(srcDir, cssFile), "utf8");
+      const classes = new Set<string>();
+      for (const m of content.matchAll(/\.([a-zA-Z_-][a-zA-Z0-9_-]*)/g)) {
+        classes.add(m[1]);
+      }
+      const unreferenced = [...classes].filter((cls) => !corpus.includes(cls));
+      expect(unreferenced, `${cssFile} unreferenced classes`).toEqual([]);
+    }
+  });
+
+  it("self-hosts Latin DM Sans, keeps Chinese on system fonts, and removes external Google Fonts @import", () => {
+    const mainTsx = readFileSync(join(srcDir, "main.tsx"), "utf8");
+    const tokensCss = readFileSync(join(srcDir, "tokens.css"), "utf8");
+    expect(mainTsx).toContain('import "@fontsource-variable/dm-sans"');
+    for (const file of cssFiles) {
+      const content = readFileSync(join(srcDir, file), "utf8");
+      expect(content).not.toContain("fonts.googleapis.com");
+    }
+    expect(tokensCss).toContain('"DM Sans Variable"');
+    expect(tokensCss).toContain('"DM Sans Fallback"');
+    expect(tokensCss).toContain('"PingFang SC"');
+    expect(tokensCss).toContain('"Microsoft YaHei UI"');
+    expect(tokensCss).toContain('"Noto Sans CJK SC"');
+  });
+
+  it("unifies :focus-visible across interactive controls and eliminates non-motion !important rules", () => {
+    const tokensCss = readFileSync(join(srcDir, "tokens.css"), "utf8");
+    expect(tokensCss).toContain("select:focus-visible");
+    expect(tokensCss).toContain("summary:focus-visible");
+    expect(tokensCss).toContain("outline: var(--focus-ring);");
+    for (const file of cssFiles) {
+      if (file === "tokens.css") continue;
+      const content = readFileSync(join(srcDir, file), "utf8");
+      expect(content, `${file} should have no !important`).not.toContain(
+        "!important",
+      );
+    }
+  });
+
+  it("standardizes Lucide icon sizes onto ICON scale {14, 16, 18, 20, 24}", () => {
+    expect(ICON).toEqual({
+      xs: 14,
+      sm: 16,
+      md: 18,
+      lg: 20,
+      xl: 24,
+    });
+    const tsxFiles = readdirSync(srcDir).filter(
+      (f) => f.endsWith(".tsx") && !f.endsWith(".test.tsx"),
+    );
+    for (const file of tsxFiles) {
+      const content = readFileSync(join(srcDir, file), "utf8");
+      expect(
+        [...content.matchAll(/size=\{\d+\}/g)],
+        `${file} raw numeric icon size`,
+      ).toEqual([]);
     }
   });
 });

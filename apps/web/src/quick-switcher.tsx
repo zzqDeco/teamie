@@ -16,6 +16,7 @@ import { isComposingKey } from "./mentions";
 import { conversationName } from "./messages";
 import { enrichParticipants } from "./participants";
 import { Modal } from "./ui";
+import { ICON } from "./icons";
 
 type QuickItem = {
   id: string;
@@ -227,7 +228,7 @@ export function QuickSwitcher({
     <Modal title="快速跳转" subtitle="搜索对话、工作空间或常用页面" onClose={onClose}>
       <div className="quick-switcher">
         <label className="quick-switcher-input">
-          <Search size={17} aria-hidden="true" />
+          <Search size={ICON.md} aria-hidden="true" />
           <input
             ref={inputRef}
             type="search"
@@ -275,17 +276,17 @@ export function QuickSwitcher({
                   >
                     <span className="quick-switcher-icon" aria-hidden="true">
                       {item.kind === "channel" ? (
-                        <Hash size={16} />
+                        <Hash size={ICON.sm} />
                       ) : item.kind === "group" || item.kind === "workspace" ? (
-                        <Users size={16} />
+                        <Users size={ICON.sm} />
                       ) : item.kind === "direct" ? (
-                        <MessageCircle size={16} />
+                        <MessageCircle size={ICON.sm} />
                       ) : item.id === "page:attention" ? (
-                        <Bell size={16} />
+                        <Bell size={ICON.sm} />
                       ) : item.id === "page:agents" ? (
-                        <Bot size={16} />
+                        <Bot size={ICON.sm} />
                       ) : (
-                        <Settings size={16} />
+                        <Settings size={ICON.sm} />
                       )}
                     </span>
                     <span className="quick-switcher-text">

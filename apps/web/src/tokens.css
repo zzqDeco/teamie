@@ -1,3 +1,12 @@
+@font-face {
+  font-family: "DM Sans Fallback";
+  src: local("Arial"), local("Helvetica Neue"), local("Helvetica");
+  size-adjust: 99.2%;
+  ascent-override: 94%;
+  descent-override: 26%;
+  line-gap-override: 0%;
+}
+
 :root {
   /* Text hierarchy — all verified >= 4.5:1 WCAG AA on #ffffff, #fbfaf8, #f7f5f9, and #ece8f3 */
   --text-strong: #302d3b;
@@ -43,16 +52,19 @@
   --focus-ring-offset: 2px;
   --focus-halo: 0 0 0 3px rgba(116, 99, 212, 0.2);
 
-  /* Typography families & scale */
+  /* Typography families & scale (Latin fixed to self-hosted DM Sans; Chinese follows platform system fonts) */
   --font-sans:
+    "DM Sans Variable",
     "DM Sans",
-    "Noto Sans SC",
+    "DM Sans Fallback",
     -apple-system,
     BlinkMacSystemFont,
     "PingFang SC",
     "Hiragino Sans GB",
     "Microsoft YaHei UI",
     "Microsoft YaHei",
+    "Noto Sans CJK SC",
+    "Source Han Sans SC",
     sans-serif;
   --font-mono:
     "JetBrains Mono",
@@ -105,4 +117,26 @@
   --space-6: 24px;
   --space-8: 32px;
   --space-12: 48px;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

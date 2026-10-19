@@ -10,6 +10,7 @@ import {
 import { api } from "@teamie/api-client";
 import type { Attachment, AttachmentLimits } from "@teamie/api-client";
 import { errorText } from "./chat";
+import { ICON } from "./icons";
 import "./attachments.css";
 
 export type DraftFile = {
@@ -208,7 +209,7 @@ export function AttachmentPicker({
         aria-label="添加文件"
         title={`添加文件，每个最多 ${fileSize(limit)}`}
       >
-        <Paperclip size={18} />
+        <Paperclip size={ICON.md} />
       </button>
     </>
   );
@@ -231,7 +232,7 @@ export function AttachmentDraft({
         <ul className="attachment-drafts" aria-label="待发送文件">
           {files.map((file) => (
             <li key={file.id} className={`attachment-draft ${file.state}`}>
-              <FileIcon size={18} />
+              <FileIcon size={ICON.md} />
               <span className="attachment-details">
                 <span className="attachment-name">{file.file.name}</span>
                 <span
@@ -246,7 +247,7 @@ export function AttachmentDraft({
                 </span>
               </span>
               {file.state === "uploading" && (
-                <LoaderCircle size={15} className="spin" />
+                <LoaderCircle size={ICON.sm} className="spin" />
               )}
               {file.state === "failed" && (
                 <button
@@ -254,7 +255,7 @@ export function AttachmentDraft({
                   aria-label={`重试上传 ${file.file.name}`}
                   onClick={() => onRetry(file)}
                 >
-                  <RefreshCw size={16} />
+                  <RefreshCw size={ICON.sm} />
                 </button>
               )}
               <button
@@ -262,7 +263,7 @@ export function AttachmentDraft({
                 aria-label={`移除文件 ${file.file.name}`}
                 onClick={() => onRemove(file.id)}
               >
-                <X size={16} />
+                <X size={ICON.sm} />
               </button>
             </li>
           ))}
@@ -314,7 +315,7 @@ export function MessageAttachments({
               onClick={() => void download(attachment)}
               aria-label={`下载文件 ${attachment.filename}`}
             >
-              <FileIcon size={21} />
+              <FileIcon size={ICON.lg} />
               <span className="attachment-details">
                 <span className="attachment-name">{attachment.filename}</span>
                 <span className="attachment-meta">
@@ -322,9 +323,9 @@ export function MessageAttachments({
                 </span>
               </span>
               {busy === attachment.id ? (
-                <LoaderCircle className="spin" size={16} />
+                <LoaderCircle className="spin" size={ICON.sm} />
               ) : (
-                <Download size={16} />
+                <Download size={ICON.sm} />
               )}
             </button>
           </li>

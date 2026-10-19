@@ -21,6 +21,7 @@ import {
 import type { Participant } from "./participants";
 import { chatStore } from "./store";
 import { Button, Notice } from "./ui";
+import { ICON } from "./icons";
 
 export function WorkspaceMembers({
   workspace,
@@ -102,14 +103,14 @@ export function WorkspaceMembers({
         </div>
         {owner ? (
           <Button onClick={() => setInviting(true)}>
-            <UserPlus size={16} /> 邀请成员
+            <UserPlus size={ICON.sm} /> 邀请成员
           </Button>
         ) : (
           <span className="members-invite-hint">请联系空间创建者邀请</span>
         )}
       </header>
       <label className="member-search">
-        <Search size={18} aria-hidden="true" />
+        <Search size={ICON.md} aria-hidden="true" />
         <span className="sr-only">搜索成员</span>
         <input
           type="search"
@@ -130,7 +131,7 @@ export function WorkspaceMembers({
       )}
       {loading && !members.length ? (
         <div className="members-empty" role="status">
-          <LoaderCircle className="spin" size={24} />
+          <LoaderCircle className="spin" size={ICON.xl} />
           <p>正在加载成员…</p>
         </div>
       ) : filtered.length ? (
@@ -160,7 +161,7 @@ export function WorkspaceMembers({
                       aria-label={`与 ${member.displayName} 发起私聊`}
                       onClick={() => void direct(member)}
                     >
-                      <MessageCircle size={15} /> 私聊
+                      <MessageCircle size={ICON.sm} /> 私聊
                     </Button>
                   )}
                   {!self && data?.capabilities["im.group.create"] && (
@@ -170,7 +171,7 @@ export function WorkspaceMembers({
                       aria-label={`将 ${member.displayName} 添加到小组`}
                       onClick={() => setGroupMemberId(member.userId)}
                     >
-                      <Users size={15} /> 添加到小组
+                      <Users size={ICON.sm} /> 添加到小组
                     </Button>
                   )}
                   {agent && canManageAgent(user, agent) && (
@@ -179,7 +180,7 @@ export function WorkspaceMembers({
                       className="member-manage-link"
                       aria-label={`管理 ${member.displayName}`}
                     >
-                      管理 <ArrowRight size={14} />
+                      管理 <ArrowRight size={ICON.xs} />
                     </Link>
                   )}
                 </div>
@@ -189,7 +190,7 @@ export function WorkspaceMembers({
         </ul>
       ) : (
         <div className="members-empty" role="status">
-          <Users size={28} />
+          <Users size={ICON.xl} />
           <h2>{search ? "没有找到成员" : "暂无成员"}</h2>
           {search && <p>试试其他名称或 Agent 创建者。</p>}
         </div>

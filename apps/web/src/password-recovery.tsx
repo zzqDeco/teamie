@@ -7,6 +7,7 @@ import type { PasswordResetInspection } from "@teamie/api-client";
 import { useAuth } from "./auth";
 import { passwordPolicyError } from "./password-policy";
 import { Button, Logo, Notice } from "./ui";
+import { ICON } from "./icons";
 
 function RecoveryFrame({ children }: { children: ReactNode }) {
   return (
@@ -20,7 +21,7 @@ function RecoveryFrame({ children }: { children: ReactNode }) {
         <span className="story-bottom">TEAMIE © {new Date().getFullYear()}</span>
       </div>
       <main className="auth-content">
-        <Link to="/login" className="back-link"><ArrowLeft size={16} />返回登录</Link>
+        <Link to="/login" className="back-link"><ArrowLeft size={ICON.sm} />返回登录</Link>
         <div className="auth-form recovery-form">
           <Link to="/" className="auth-mobile-brand" aria-label="Teamie 首页"><Logo /></Link>
           {children}
@@ -33,7 +34,7 @@ function RecoveryFrame({ children }: { children: ReactNode }) {
 export function ForgotPassword() {
   return (
     <RecoveryFrame>
-      <span className="recovery-symbol"><KeyRound size={23} /></span>
+      <span className="recovery-symbol"><KeyRound size={ICON.xl} /></span>
       <h2>忘记密码</h2>
       <p>请联系平台管理员，核实身份后获取一次性密码重置链接。</p>
       <div className="recovery-instructions">
@@ -45,7 +46,7 @@ export function ForgotPassword() {
         </ol>
         <small>链接 1 小时内有效，仅可使用一次。管理员也无法登录时，请联系服务器维护者。</small>
       </div>
-      <Link to="/login" className="button full-width">返回登录<ArrowRight size={17} /></Link>
+      <Link to="/login" className="button full-width">返回登录<ArrowRight size={ICON.md} /></Link>
     </RecoveryFrame>
   );
 }
@@ -183,15 +184,15 @@ function ResetPasswordForm({ fragment }: { fragment: string }) {
   return (
     <RecoveryFrame>
       <span className={`recovery-symbol ${state === "success" ? "success" : ""}`}>
-        {state === "success" ? <Check size={23} /> : <KeyRound size={23} />}
+        {state === "success" ? <Check size={ICON.xl} /> : <KeyRound size={ICON.xl} />}
       </span>
       <h2>{state === "success" ? "密码已重置" : state === "expired" ? "链接已过期" : state === "invalid" ? "链接无法使用" : "设置新密码"}</h2>
       {state === "checking" ? (
-        <div className="recovery-loading" role="status"><LoaderCircle className="spin" size={20} />正在验证重置链接…</div>
+        <div className="recovery-loading" role="status"><LoaderCircle className="spin" size={ICON.lg} />正在验证重置链接…</div>
       ) : state === "invalid" || state === "expired" ? (
         <>
           <p>{state === "expired" ? "重置链接的有效期已结束。" : "链接可能已过期、已使用，或被新链接替代。"}请联系平台管理员获取新链接。</p>
-          <Link to="/forgot-password" className="button full-width">联系管理员<ArrowRight size={17} /></Link>
+          <Link to="/forgot-password" className="button full-width">联系管理员<ArrowRight size={ICON.md} /></Link>
         </>
       ) : state === "error" ? (
         <>
@@ -204,9 +205,9 @@ function ResetPasswordForm({ fragment }: { fragment: string }) {
           {user ? (
             <>
               <Notice kind="info">当前账号仍保持登录。切换账号时，请先从账号设置退出。</Notice>
-              <Link to="/app" className="button full-width">返回当前账号<ArrowRight size={17} /></Link>
+              <Link to="/app" className="button full-width">返回当前账号<ArrowRight size={ICON.md} /></Link>
             </>
-          ) : <Link to="/login" className="button full-width">使用新密码登录<ArrowRight size={17} /></Link>}
+          ) : <Link to="/login" className="button full-width">使用新密码登录<ArrowRight size={ICON.md} /></Link>}
         </>
       ) : inspection && (
         <>
@@ -217,7 +218,7 @@ function ResetPasswordForm({ fragment }: { fragment: string }) {
             <label>新密码<input type="password" name="newPassword" autoComplete="new-password" placeholder="至少 12 个字符" minLength={12} required disabled={busy} aria-invalid={invalidField === "newPassword" || undefined} aria-describedby={invalidField === "newPassword" ? errorId : undefined} /></label>
             <label>确认新密码<input type="password" name="confirmPassword" autoComplete="new-password" placeholder="再次输入新密码" required disabled={busy} aria-invalid={invalidField === "confirmPassword" || undefined} aria-describedby={invalidField === "confirmPassword" ? errorId : undefined} /></label>
             <small className="field-help reset-session-help">重置后，该账号原有的登录会话将失效。</small>
-            <Button type="submit" className="full-width" busy={busy} disabled={loading}>重置密码<ArrowRight size={17} /></Button>
+            <Button type="submit" className="full-width" busy={busy} disabled={loading}>重置密码<ArrowRight size={ICON.md} /></Button>
           </form>
         </>
       )}

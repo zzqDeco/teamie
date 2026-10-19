@@ -33,6 +33,7 @@ import {
   snapshotAgentProfile,
 } from "./agent-management";
 import { Button, Modal, Notice } from "./ui";
+import { ICON } from "./icons";
 const queryRetry = (count: number, error: Error) =>
   !(error instanceof ApiError && [401, 403, 404].includes(error.status)) &&
   count < 1;
@@ -57,21 +58,21 @@ function WorkspaceChips({
                 to={`/app/w/${id}/members`}
                 aria-label={`查看 ${ws.name} 成员目录`}
               >
-                <Hash size={10} />
+                <Hash size={ICON.xs} />
                 {ws.name}
               </Link>
             );
           }
           return (
             <span key={id}>
-              <Hash size={10} />
+              <Hash size={ICON.xs} />
               {ws?.name || "工作空间"}
             </span>
           );
         })
       ) : (
         <span className="private-agent-chip">
-          <Eye size={11} />
+          <Eye size={ICON.xs} />
           未选择团队
         </span>
       )}
@@ -248,14 +249,14 @@ export function MyAgents() {
         </div>
         {canCreate && (
           <Button onClick={() => setCreating(true)}>
-            <Plus size={16} />
+            <Plus size={ICON.sm} />
             创建 Agent
           </Button>
         )}
       </div>
       {query.isLoading ? (
         <div className="agents-empty">
-          <LoaderCircle size={24} className="spin" />
+          <LoaderCircle size={ICON.xl} className="spin" />
           <p>加载 Agent…</p>
         </div>
       ) : query.error ? (
@@ -286,7 +287,7 @@ export function MyAgents() {
               />
               <div className="agent-card-bottom">
                 <span>
-                  管理 Agent <ArrowRight size={13} />
+                  管理 Agent <ArrowRight size={ICON.xs} />
                 </span>
               </div>
             </Link>
@@ -295,13 +296,13 @@ export function MyAgents() {
       ) : (
         <div className="agents-empty">
           <span className="agents-empty-icon">
-            <Bot size={34} />
+            <Bot size={ICON.xl} />
           </span>
           <h2>还没有 Agent</h2>
           <p>创建 Agent，让它加入你的团队。</p>
           {canCreate ? (
             <Button onClick={() => setCreating(true)}>
-              <Plus size={16} />
+              <Plus size={ICON.sm} />
               创建 Agent
             </Button>
           ) : (
@@ -386,7 +387,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
   if (query.isLoading)
     return (
       <div className="agents-empty">
-        <LoaderCircle size={24} className="spin" />
+        <LoaderCircle size={ICON.xl} className="spin" />
         <p>正在加载 Agent 资料…</p>
       </div>
     );
@@ -398,7 +399,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
     return (
       <div className="unavailable-view">
         <span className="large-symbol">
-          <Bot size={38} />
+          <Bot size={ICON.xl} />
         </span>
         <h2>Agent 资料暂时无法加载</h2>
         <p>{agentFailureText(query.error)}</p>
@@ -413,7 +414,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
     return (
       <div className="unavailable-view">
         <span className="large-symbol">
-          <Bot size={38} />
+          <Bot size={ICON.xl} />
         </span>
         <h2>这个 Agent 暂时无法管理</h2>
         <p>请使用所有者账户访问。</p>
@@ -425,7 +426,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
   return (
     <div className="agents-view agent-detail-view">
       <Link className="agent-back" to="/app/agents">
-        <ArrowLeft size={14} />
+        <ArrowLeft size={ICON.xs} />
         个人 Agent
       </Link>
       <div className="agent-detail-heading">
@@ -442,7 +443,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
           {editable && (
             <>
               <Button className="secondary" onClick={() => setEditing(true)}>
-                <Pencil size={14} />
+                <Pencil size={ICON.xs} />
                 编辑资料
               </Button>
               <Button
@@ -456,7 +457,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
                 }
                 onClick={() => void enable()}
               >
-                {agent.enabled ? <CirclePause size={14} /> : <Play size={14} />}{" "}
+                {agent.enabled ? <CirclePause size={ICON.xs} /> : <Play size={ICON.xs} />}{" "}
                 {agent.enabled ? "停用" : "启用"}
               </Button>
               {!agent.enabled && !canEnable && (
@@ -481,7 +482,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
           <h2>团队可见范围</h2>
           {editable && (
             <button onClick={() => setEditing(true)}>
-              调整可见团队 <Pencil size={12} />
+              调整可见团队 <Pencil size={ICON.xs} />
             </button>
           )}
         </header>
@@ -501,7 +502,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
             className="secondary danger-text"
             onClick={() => setDeleting(true)}
           >
-            <Trash2 size={13} />
+            <Trash2 size={ICON.xs} />
             删除 Agent
           </Button>
         </div>

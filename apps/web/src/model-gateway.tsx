@@ -18,6 +18,7 @@ import {
 import { GatewayConfigurationFields } from "./agent-ui";
 import type { GatewayFormValue } from "./agent-ui";
 import { Button, Notice } from "./ui";
+import { ICON } from "./icons";
 export function ModelGatewaySettings() {
   const { user } = useAuth();
   const client = useQueryClient();
@@ -88,7 +89,7 @@ export function ModelGatewaySettings() {
     return (
       <div className="unavailable-view">
         <span className="large-symbol">
-          <ShieldCheck size={38} />
+          <ShieldCheck size={ICON.xl} />
         </span>
         <h2>需要平台管理员权限</h2>
         <p>模型连接由平台管理员统一配置。你仍可以管理自己的 Agent。</p>
@@ -104,19 +105,19 @@ export function ModelGatewaySettings() {
           <h1>
             模型网关{" "}
             <span className="platform-role-badge">
-              <ShieldCheck size={11} />
+              <ShieldCheck size={ICON.xs} />
               平台管理员
             </span>
           </h1>
           <p>所有 Agent 共用的模型连接。</p>
         </div>
         <span className="admin-heading-icon">
-          <KeyRound size={27} />
+          <KeyRound size={ICON.xl} />
         </span>
       </div>
       {query.isLoading ? (
         <div className="admin-empty">
-          <LoaderCircle className="spin" size={23} />
+          <LoaderCircle className="spin" size={ICON.xl} />
           <p>正在加载模型配置…</p>
         </div>
       ) : !query.data ? (
@@ -131,9 +132,9 @@ export function ModelGatewaySettings() {
           <div className={`gateway-saved-state ${query.data.status}`}>
             <span>
               {query.data.status === "ready" ? (
-                <CheckCheck size={23} />
+                <CheckCheck size={ICON.xl} />
               ) : (
-                <Clock3 size={23} />
+                <Clock3 size={ICON.xl} />
               )}
             </span>
             <div>

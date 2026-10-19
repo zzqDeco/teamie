@@ -7,6 +7,7 @@ import { errorText, useChatState } from "./chat";
 import { chatStore, reconcileMessages } from "./store";
 import { AgentBadge } from "./agent-ui";
 import { Button, date, IconButton, Modal, Notice, time } from "./ui";
+import { ICON } from "./icons";
 import "./conversation-search.css";
 
 type SearchResult = MessagePage & {
@@ -209,9 +210,9 @@ export function ConversationSearch({
         />
         <IconButton type="submit" label="搜索" disabled={!enabled}>
           {pending ? (
-            <LoaderCircle size={19} className="spin" />
+            <LoaderCircle size={ICON.lg} className="spin" />
           ) : (
-            <Search size={19} />
+            <Search size={ICON.lg} />
           )}
         </IconButton>
       </form>
@@ -262,7 +263,7 @@ export function ConversationSearch({
                   className="search-source"
                   onClick={() => onLocate(message.id)}
                 >
-                  <CornerUpLeft size={14} /> 查看消息
+                  <CornerUpLeft size={ICON.xs} /> 查看消息
                 </button>
               )}
             </li>

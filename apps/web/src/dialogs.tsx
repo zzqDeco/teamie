@@ -22,6 +22,7 @@ import { enrichParticipants } from "./participants";
 import { ParticipantIdentity } from "./group-members";
 import { canConfigureModelGateway } from "./agent-management";
 import { PasswordSettings } from "./password-settings";
+import { ICON } from "./icons";
 export type DialogKind =
   | "workspace"
   | "channel"
@@ -153,7 +154,7 @@ export function WorkspaceDialog({
               />
             </label>
             <div className="form-note">
-              <Hash size={17} />
+              <Hash size={ICON.md} />
               <span>自动创建 general 频道。</span>
             </div>
           </>
@@ -163,7 +164,7 @@ export function WorkspaceDialog({
             <label>
               频道名称
               <div className="input-icon">
-                <Hash size={16} />
+                <Hash size={ICON.sm} />
                 <input
                   name="name"
                   placeholder="例如：产品讨论"
@@ -174,7 +175,7 @@ export function WorkspaceDialog({
               </div>
             </label>
             <div className="form-note">
-              <Users size={17} />
+              <Users size={ICON.md} />
               <span>工作空间内的所有成员都可以访问这个频道。</span>
             </div>
           </>
@@ -218,7 +219,7 @@ export function WorkspaceDialog({
               >
                 <ParticipantIdentity member={member} />
                 <span className="selection-check">
-                  {selected.includes(member.userId) && <Check size={14} />}
+                  {selected.includes(member.userId) && <Check size={ICON.xs} />}
                 </span>
               </button>
             ))}
@@ -234,7 +235,7 @@ export function WorkspaceDialog({
         {kind === "invite" && (
           <div className="invite-generator">
             <div className="invite-generator-icon">
-              <LinkIcon size={27} />
+              <LinkIcon size={ICON.xl} />
             </div>
             <h3>
               {invite ? "链接准备好了！" : `邀请伙伴加入「${workspace?.name}」`}
@@ -256,7 +257,7 @@ export function WorkspaceDialog({
                       onClick={copy}
                       aria-label="复制邀请链接"
                     >
-                      {copied ? <CheckCheck size={17} /> : <Copy size={17} />}
+                      {copied ? <CheckCheck size={ICON.md} /> : <Copy size={ICON.md} />}
                     </button>
                   </div>
                 </label>
@@ -387,12 +388,12 @@ export function ProfileSettings() {
       <PasswordSettings />
       {canConfigureModelGateway(user) && (
         <Link to="/app/admin" className="platform-management-link">
-          <ShieldCheck size={19} aria-hidden="true" />
+          <ShieldCheck size={ICON.lg} aria-hidden="true" />
           <span>
             <b>平台管理</b>
             <small>注册邀请、用户与模型网关</small>
           </span>
-          <ChevronRight size={17} aria-hidden="true" />
+          <ChevronRight size={ICON.md} aria-hidden="true" />
         </Link>
       )}
       <div className="session-setting">

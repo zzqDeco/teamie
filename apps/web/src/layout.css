@@ -36,8 +36,7 @@ textarea:disabled {
   font-size: 12px;
 }
 .button {
-  transition:
-    background 0.15s,
+  transition: background 0.15s,
     border-color 0.15s,
     box-shadow 0.15s;
 }
@@ -106,19 +105,6 @@ textarea:disabled {
   font-size: 13px;
   font-weight: 600;
   color: var(--purple-dark);
-}
-.landing-features {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  margin-top: 40px;
-  color: var(--text);
-  font-size: 13px;
-}
-.landing-features > span {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
 }
 .hero-visual {
   min-width: 0;
@@ -312,7 +298,7 @@ textarea:disabled {
   width: auto;
   padding: 0;
 }
-.app-shell .workspace-title > b {
+.workspace-title > b {
   display: block;
   font-size: 15px;
   overflow: hidden;
@@ -324,19 +310,19 @@ textarea:disabled {
   padding-top: 8px;
   overscroll-behavior: contain;
 }
-.app-shell .nav-section-title > span {
+.nav-section-title > span {
   font-size: 12px;
   color: var(--text-muted);
 }
-.app-shell .conversation-link {
+.conversation-link {
   min-height: 38px;
   font-size: 14px;
   color: var(--text);
 }
-.app-shell .conversation-link.active {
+.conversation-link.active {
   color: var(--brand-text);
 }
-.app-shell .sidebar-empty {
+.sidebar-empty {
   font-size: 12px;
   padding: 10px 13px;
   color: var(--text-muted);
@@ -348,10 +334,10 @@ textarea:disabled {
   height: 66px;
   padding: 0 24px;
 }
-.app-shell .conversation-header h1 {
+.conversation-header h1 {
   font-size: 16px;
 }
-.app-shell .conversation-header > div > span {
+.conversation-header > div > span {
   font-size: 12px;
   color: var(--text-muted);
   margin-top: 3px;
@@ -366,27 +352,27 @@ textarea:disabled {
 .conversation-start {
   padding: 44px 28px;
 }
-.app-shell .conversation-start h2 {
+.conversation-start h2 {
   font-size: 24px;
 }
-.app-shell .conversation-start p {
+.conversation-start p {
   font-size: 14px;
   color: var(--text-muted);
 }
 .message-scroll {
   scrollbar-gutter: stable;
 }
-.app-shell .message-text {
+.message-text {
   font-size: 15px;
   line-height: 1.65;
   color: var(--text-strong);
   overflow-wrap: anywhere;
 }
-.app-shell .message-meta b {
+.message-meta b {
   font-size: 14px;
   color: var(--text-strong);
 }
-.app-shell .message-meta time {
+.message-meta time {
   font-size: 11px;
   color: var(--text-muted);
 }
@@ -399,14 +385,14 @@ textarea:disabled {
 .message:focus-within {
   background: #fcfaff;
 }
-.app-shell .message-actions .icon-button {
+.message-actions .icon-button {
   min-width: 32px;
   min-height: 32px;
 }
-.app-shell .message-reply {
+.message-reply {
   font-size: 12px;
 }
-.app-shell .message-meta > .agent-badge > small {
+.message-meta > .agent-badge > small {
   font-size: 11px;
 }
 .composer-area {
@@ -416,7 +402,7 @@ textarea:disabled {
   display: flex;
   align-items: flex-end;
 }
-.app-shell .composer textarea {
+.composer textarea {
   flex: 1;
   width: 100%;
   font-size: 15px;
@@ -425,7 +411,7 @@ textarea:disabled {
   min-height: 50px;
   max-height: min(180px, calc(var(--app-height, 100dvh) * 0.3));
 }
-.app-shell .composer textarea::placeholder {
+.composer textarea::placeholder {
   font-size: 14px;
 }
 .composer-tools {
@@ -442,7 +428,7 @@ textarea:disabled {
 .character-count {
   font-size: 11px;
 }
-.app-shell .composer-footer {
+.composer-footer {
   padding-top: 6px;
   font-size: 11px;
   min-height: 20px;
@@ -465,11 +451,11 @@ textarea:disabled {
 .member-cover {
   display: none;
 }
-.app-shell .members-description h3 {
+.members-description h3 {
   font-size: 16px;
   margin-top: 0;
 }
-.app-shell .members-list-label {
+.members-list-label {
   font-size: 12px;
   color: var(--text-muted);
 }
@@ -477,15 +463,15 @@ textarea:disabled {
   min-height: 0;
   overscroll-behavior: contain;
 }
-.app-shell .member-row b {
+.member-row b {
   font-size: 13px;
   color: var(--text-strong);
 }
-.app-shell .member-row > div > span {
+.member-row > div > span {
   font-size: 11px;
   color: var(--text-muted);
 }
-.app-shell .member-row b > small {
+.member-row b > small {
   font-size: 11px;
 }
 .member-row > .remove-member {
@@ -503,7 +489,7 @@ textarea:disabled {
   padding: 0 28px;
   gap: 10px;
 }
-.app-shell .settings-header > a {
+.settings-header > a {
   font-size: 13px;
   display: inline-flex;
   align-items: center;
@@ -606,18 +592,11 @@ textarea:disabled {
   font-size: 13px;
   margin-bottom: 16px;
 }
-.agent-profile-section,
-.agent-owner-card {
+.agent-profile-section {
   padding: 20px;
 }
 .agent-profile-section h2 {
   font-size: 15px;
-}
-.agent-owner-card > div > b {
-  font-size: 14px;
-}
-.agent-owner-card > div > span {
-  font-size: 12px;
 }
 .agent-delete-section h3 {
   font-size: 14px;
@@ -629,7 +608,6 @@ textarea:disabled {
   min-height: 36px;
   font-size: 13px;
 }
-.agent-configuration-notice p,
 .gateway-configuration-form > label,
 .modal label {
   font-size: 13px;
@@ -1096,7 +1074,7 @@ textarea:disabled {
     display: inline-flex;
     margin-left: 0;
   }
-  .app-shell .conversation-link {
+  .conversation-link {
     min-height: 44px;
   }
   .nav-section-title {
@@ -1119,10 +1097,10 @@ textarea:disabled {
     width: 30px;
     height: 30px;
   }
-  .app-shell .conversation-header h1 {
+  .conversation-header h1 {
     font-size: 16px;
   }
-  .app-shell .conversation-header > div > span {
+  .conversation-header > div > span {
     font-size: 11px;
   }
   .conversation-header-actions {
@@ -1132,19 +1110,16 @@ textarea:disabled {
     width: 44px;
     height: 44px;
   }
-  .conversation-header-actions svg {
-    width: 20px;
-  }
   .conversation-header .conversation-symbol {
     display: none;
   }
   .conversation-start {
     padding: 40px 22px;
   }
-  .app-shell .conversation-start h2 {
+  .conversation-start h2 {
     font-size: 24px;
   }
-  .app-shell .conversation-start p {
+  .conversation-start p {
     font-size: 14px;
   }
   .message {
@@ -1155,13 +1130,13 @@ textarea:disabled {
     padding-top: 4px;
     padding-bottom: 8px;
   }
-  .app-shell .message-text {
+  .message-text {
     font-size: 15px;
   }
-  .app-shell .message-meta b {
+  .message-meta b {
     font-size: 13px;
   }
-  .app-shell .message-meta time {
+  .message-meta time {
     font-size: 11px;
   }
   .message-more-button {
@@ -1195,13 +1170,9 @@ textarea:disabled {
   .message.actions-open .message-actions {
     display: flex;
   }
-  .app-shell .message-actions .icon-button {
+  .message-actions .icon-button {
     width: 44px;
     height: 44px;
-  }
-  .message-actions .icon-button > svg {
-    width: 18px;
-    height: 18px;
   }
   .message-meta > .agent-badge {
     font-size: 11px;
@@ -1213,20 +1184,20 @@ textarea:disabled {
     max-width: none;
     min-width: 0;
   }
-  .app-shell .date-divider {
+  .date-divider {
     font-size: 11px;
     margin: 20px 16px;
   }
   .composer-area {
     padding: 8px 12px max(10px, env(safe-area-inset-bottom));
   }
-  .app-shell .composer textarea {
+  .composer textarea {
     font-size: 16px;
     min-height: 50px;
     max-height: min(140px, calc(var(--app-height, 100dvh) * 0.28));
     padding: 12px;
   }
-  .app-shell .composer textarea::placeholder {
+  .composer textarea::placeholder {
     font-size: 14px;
   }
   .composer-tools {
@@ -1237,7 +1208,7 @@ textarea:disabled {
     width: 44px;
     height: 44px;
   }
-  .app-shell .composer-footer {
+  .composer-footer {
     min-height: 0;
     padding-top: 0;
     font-size: 11px;
@@ -1245,13 +1216,13 @@ textarea:disabled {
   .composer-footer > span:first-child:not(:empty) {
     padding-top: 7px;
   }
-  .app-shell .composer-footer > span:last-child {
+  .composer-footer > span:last-child {
     display: none;
   }
   .reply-preview {
     font-size: 13px;
   }
-  .app-shell .reply-preview > div > span {
+  .reply-preview > div > span {
     font-size: 12px;
   }
   .jump-latest {
@@ -1272,17 +1243,17 @@ textarea:disabled {
     height: 64px;
     padding-top: env(safe-area-inset-top);
   }
-  .app-shell .members-pane > header,
-  .app-shell .members-pane > header b {
+  .members-pane > header,
+  .members-pane > header b {
     font-size: 14px;
   }
-  .app-shell .member-row {
+  .member-row {
     min-height: 60px;
   }
-  .app-shell .member-row b {
+  .member-row b {
     font-size: 14px;
   }
-  .app-shell .member-row > div > span {
+  .member-row > div > span {
     font-size: 12px;
   }
   .members-invite {
@@ -1300,7 +1271,7 @@ textarea:disabled {
   .settings-header > a > svg {
     display: none;
   }
-  .app-shell .settings-header > a {
+  .settings-header > a {
     font-size: 13px;
     white-space: nowrap;
   }
@@ -1370,8 +1341,7 @@ textarea:disabled {
     min-height: 44px;
     font-size: 13px;
   }
-  .agent-profile-section,
-  .agent-owner-card {
+  .agent-profile-section {
     padding: 17px;
   }
   .agent-profile-section > header > button {
@@ -1383,7 +1353,6 @@ textarea:disabled {
   .agent-delete-section p {
     font-size: 12px;
   }
-  .agent-configuration-notice p,
   .admin-heading {
     gap: 10px;
   }
@@ -1486,11 +1455,11 @@ textarea:disabled {
     font-size: 30px;
     overflow-wrap: anywhere;
   }
-  .app-shell .welcome-content > p {
+  .welcome-content > p {
     font-size: 14px;
     margin-top: 16px;
   }
-  .app-shell .welcome-content > .button {
+  .welcome-content > .button {
     font-size: 14px;
     margin-top: 24px;
   }
@@ -1567,23 +1536,14 @@ textarea:disabled {
   .settings-form input {
     font-size: 16px;
   }
-  .app-shell .settings-form .field-help {
+  .settings-form .field-help {
     font-size: 12px;
   }
-  .app-shell .session-setting h3 {
+  .session-setting h3 {
     font-size: 14px;
   }
-  .app-shell .session-setting p {
+  .session-setting p {
     font-size: 12px;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    scroll-behavior: auto !important;
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
   }
 }
 @media (max-width: 780px) {
@@ -1595,7 +1555,6 @@ textarea:disabled {
     min-width: 44px;
   }
 }
-
 .modal label,
 .gateway-configuration-form > label {
   color: var(--text-muted);
@@ -1623,7 +1582,6 @@ textarea:disabled {
 .agent-enabled-switch small {
   color: var(--text-muted);
 }
-
 .admin-footnote {
   color: var(--text-muted);
 }
@@ -1692,7 +1650,6 @@ textarea:disabled {
     font-size: 13px;
   }
 }
-
 /* Account navigation and a shared directory for every IM participant. */
 .conversation-actions {
   position: relative;
@@ -1803,16 +1760,6 @@ textarea:disabled {
 .account-menu > button {
   border-top: 1px solid #eee7f4;
   margin-top: 4px;
-}
-.account-trigger:focus-visible,
-.account-menu > :focus-visible,
-.conversation-actions-trigger:focus-visible,
-.conversation-actions-menu > :focus-visible,
-.rail-agents:focus-visible,
-.member-directory-actions > :focus-visible,
-.platform-management-link:focus-visible {
-  outline: 2px solid var(--purple);
-  outline-offset: 2px;
 }
 .members-view {
   flex: 1;
@@ -2053,7 +2000,6 @@ textarea:disabled {
     overflow: auto;
   }
 }
-
 .agent-detail-labels {
   display: flex;
   align-items: center;

@@ -1,5 +1,6 @@
 import { MessageSquarePlus, Plus, Users } from "lucide-react";
 import { usePopover } from "./popover";
+import { ICON } from "./icons";
 
 export function ConversationActions({
   active,
@@ -32,7 +33,7 @@ export function ConversationActions({
         aria-controls={id}
         onClick={() => setOpen(!expanded)}
       >
-        <Plus size={20} aria-hidden="true" />
+        <Plus size={ICON.lg} aria-hidden="true" />
       </button>
       {expanded && (
         <div
@@ -44,13 +45,13 @@ export function ConversationActions({
         >
           {canDirect && (
             <button onClick={() => select("direct")}>
-              <MessageSquarePlus size={17} aria-hidden="true" />
+              <MessageSquarePlus size={ICON.md} aria-hidden="true" />
               发起私聊
             </button>
           )}
           {canGroup && (
             <button onClick={() => select("group")}>
-              <Users size={17} aria-hidden="true" />
+              <Users size={ICON.md} aria-hidden="true" />
               创建小组
             </button>
           )}

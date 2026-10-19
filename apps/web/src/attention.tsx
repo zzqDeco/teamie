@@ -11,6 +11,7 @@ import type { ChatSnapshot } from "./store";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
 import { MentionText } from "./mentions";
 import { Avatar, Button, date, IconButton, Notice, time } from "./ui";
+import { ICON } from "./icons";
 import "./attention.css";
 
 function useAttentionScope() {
@@ -141,10 +142,10 @@ export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
           className="mobile-menu"
           onClick={onMenu}
         >
-          <ArrowLeft size={21} />
+          <ArrowLeft size={ICON.lg} />
         </IconButton>
         <span className="conversation-symbol">
-          <Bell size={22} />
+          <Bell size={ICON.lg} />
         </span>
         <div>
           <h1>提及与回复</h1>
@@ -155,7 +156,7 @@ export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
             disabled={query.isFetching}
             onClick={() => void query.refetch()}
           >
-            <RefreshCw size={18} className={query.isFetching ? "spin" : ""} />
+            <RefreshCw size={ICON.md} className={query.isFetching ? "spin" : ""} />
           </IconButton>
         </div>
       </header>
