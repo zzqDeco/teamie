@@ -21,6 +21,7 @@ import type {
 import { useAuth } from "./auth";
 import { errorText } from "./chat";
 import { Button, IconButton, Modal, Notice } from "./ui";
+import { ICON } from "./icons";
 export type InviteStatus = "available" | "used" | "revoked" | "expired";
 export function registrationInviteStatus(
   invite: RegistrationInvite,
@@ -134,7 +135,7 @@ export function PlatformInvitations() {
     return (
       <div className="unavailable-view">
         <span className="large-symbol">
-          <ShieldCheck size={38} />
+          <ShieldCheck size={ICON.xl} />
         </span>
         <h2>需要平台管理员权限</h2>
         <p>注册邀请由平台管理员管理。请联系管理员获取邀请码。</p>
@@ -152,14 +153,14 @@ export function PlatformInvitations() {
           <h1>
             注册邀请{" "}
             <span className="platform-role-badge">
-              <ShieldCheck size={11} />
+              <ShieldCheck size={ICON.xs} />
               平台管理员
             </span>
           </h1>
           <p>一次性邀请码，7 天内有效。</p>
         </div>
         <span className="admin-heading-icon">
-          <KeyRound size={27} />
+          <KeyRound size={ICON.xl} />
         </span>
       </div>
       <Notice>{!revoking ? error : ""}</Notice>
@@ -173,7 +174,7 @@ export function PlatformInvitations() {
           busy={busy}
           disabled={!!created || query.isLoading || denied}
         >
-          <Plus size={16} />
+          <Plus size={ICON.sm} />
           生成邀请码
         </Button>
       </div>
@@ -181,7 +182,7 @@ export function PlatformInvitations() {
         <section className="created-invite" aria-label="新生成的一次性注册邀请">
           <div className="created-invite-heading">
             <span>
-              <CheckCheck size={17} />
+              <CheckCheck size={ICON.md} />
               邀请码已生成
             </span>
             <small>仅显示一次 · 请及时保存</small>
@@ -202,9 +203,9 @@ export function PlatformInvitations() {
                 aria-label="复制注册邀请码"
               >
                 {copied === "code" ? (
-                  <CheckCheck size={17} />
+                  <CheckCheck size={ICON.md} />
                 ) : (
-                  <Copy size={17} />
+                  <Copy size={ICON.md} />
                 )}
               </button>
             </div>
@@ -224,9 +225,9 @@ export function PlatformInvitations() {
                 aria-label="复制注册邀请链接"
               >
                 {copied === "link" ? (
-                  <CheckCheck size={17} />
+                  <CheckCheck size={ICON.md} />
                 ) : (
-                  <Copy size={17} />
+                  <Copy size={ICON.md} />
                 )}
               </button>
             </div>
@@ -243,7 +244,7 @@ export function PlatformInvitations() {
               }}
             >
               已保存，关闭
-              <ChevronRight size={13} />
+              <ChevronRight size={ICON.xs} />
             </button>
           </div>
           {copied && (
@@ -266,12 +267,12 @@ export function PlatformInvitations() {
               void query.refetch();
             }}
           >
-            <RefreshCw size={16} className={query.isFetching ? "spin" : ""} />
+            <RefreshCw size={ICON.sm} className={query.isFetching ? "spin" : ""} />
           </IconButton>
         </header>
         {query.isLoading ? (
           <div className="admin-empty">
-            <LoaderCircle className="spin" size={22} />
+            <LoaderCircle className="spin" size={ICON.lg} />
             <p>正在加载邀请码记录…</p>
           </div>
         ) : query.error ? (
@@ -287,7 +288,7 @@ export function PlatformInvitations() {
         ) : invites.length === 0 ? (
           <div className="admin-empty">
             <span>
-              <UserPlus size={27} />
+              <UserPlus size={ICON.xl} />
             </span>
             <h3>暂无邀请码</h3>
             <p>点击上方按钮创建注册邀请。</p>
@@ -345,7 +346,7 @@ export function PlatformInvitations() {
                               }}
                               aria-label={`撤销邀请码 ${invite.id.slice(-8)}`}
                             >
-                              <Ban size={13} />
+                              <Ban size={ICON.xs} />
                               撤销
                             </button>
                           )}
@@ -359,7 +360,7 @@ export function PlatformInvitations() {
         )}
       </section>
       <p className="admin-footnote">
-        <KeyRound size={13} />
+        <KeyRound size={ICON.xs} />
         已使用、撤销或过期的邀请码均不能再次注册账户。
       </p>
       {revoking && (

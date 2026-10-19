@@ -7,6 +7,7 @@ import { api, ApiError } from "@teamie/api-client";
 import type { CreatedPasswordResetLink, User } from "@teamie/api-client";
 import { useAuth } from "./auth";
 import { Avatar, Button, Modal, Notice } from "./ui";
+import { ICON } from "./icons";
 
 type SessionScope = ReturnType<ReturnType<typeof useAuth>["captureSession"]>;
 type ResetDialog = {
@@ -21,7 +22,7 @@ type ResetDialog = {
 function AdminRequired() {
   return (
     <div className="unavailable-view">
-      <span className="large-symbol"><ShieldCheck size={38} /></span>
+      <span className="large-symbol"><ShieldCheck size={ICON.xl} /></span>
       <h2>需要平台管理员权限</h2>
       <p>用户与密码重置链接由平台管理员管理。</p>
       <Link to="/app" className="button">回到我的工作空间</Link>
@@ -133,22 +134,22 @@ function AdminUsers({ user }: { user: User }) {
     <div className="admin-view platform-users-view">
       <div className="admin-heading">
         <div>
-          <h1>用户管理<span className="platform-role-badge"><ShieldCheck size={11} />平台管理员</span></h1>
+          <h1>用户管理<span className="platform-role-badge"><ShieldCheck size={ICON.xs} />平台管理员</span></h1>
           <p>为已核实身份的用户提供一次性密码重置链接。</p>
         </div>
-        <span className="admin-heading-icon"><Users size={27} /></span>
+        <span className="admin-heading-icon"><Users size={ICON.xl} /></span>
       </div>
       <form className="platform-user-search" onSubmit={search} role="search">
-        <label><Search size={17} aria-hidden="true" /><span className="sr-only">搜索用户名称或邮箱</span><input type="search" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="搜索名称或邮箱" maxLength={200} /></label>
+        <label><Search size={ICON.md} aria-hidden="true" /><span className="sr-only">搜索用户名称或邮箱</span><input type="search" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="搜索名称或邮箱" maxLength={200} /></label>
         <Button type="submit" className="secondary">搜索</Button>
       </form>
       <section className="platform-user-list" aria-label="平台用户">
         {query.isPending ? (
-          <div className="admin-empty" role="status"><LoaderCircle className="spin" size={22} /><p>正在加载用户…</p></div>
+          <div className="admin-empty" role="status"><LoaderCircle className="spin" size={ICON.lg} /><p>正在加载用户…</p></div>
         ) : query.isError ? (
           <div className="admin-empty"><Notice>用户加载失败，请重新加载。</Notice><Button className="secondary" onClick={() => void query.refetch()}>重新加载</Button></div>
         ) : users.length === 0 ? (
-          <div className="admin-empty"><Users size={27} /><h3>{q ? "没有匹配的用户" : "暂无用户"}</h3><p>{q ? "试试其他名称或邮箱。" : "已注册的用户会显示在这里。"}</p></div>
+          <div className="admin-empty"><Users size={ICON.xl} /><h3>{q ? "没有匹配的用户" : "暂无用户"}</h3><p>{q ? "试试其他名称或邮箱。" : "已注册的用户会显示在这里。"}</p></div>
         ) : (
           <ul>{users.map((account) => (
             <li key={account.id} className="platform-user-row">
@@ -156,13 +157,13 @@ function AdminUsers({ user }: { user: User }) {
               <div className="platform-user-actions"><span className="platform-user-role">{account.platformRole === "admin" ? "管理员" : "用户"}</span><Button className="secondary" aria-label={`为 ${account.displayName} 重置密码`} onClick={() => {
                 requestSequence.current += 1;
                 setDialog({ account, scope: captureSession(), busy: false, created: null, copied: false, error: "" });
-              }}><KeyRound size={14} />重置密码</Button></div>
+              }}><KeyRound size={ICON.xs} />重置密码</Button></div>
             </li>
           ))}</ul>
         )}
       </section>
       {(pages.length > 0 || query.data?.cursor) && <nav className="platform-users-pagination" aria-label="用户列表分页"><Button className="secondary" disabled={!pages.length || query.isFetching} onClick={() => setPages((value) => value.slice(0, -1))}>上一页</Button><span>第 {pages.length + 1} 页</span><Button className="secondary" disabled={!query.data?.cursor || query.isFetching} onClick={() => { if (query.data?.cursor) setPages((value) => [...value, query.data!.cursor!]); }}>下一页</Button></nav>}
-      <p className="admin-footnote"><KeyRound size={13} />链接 1 小时内有效。生成新链接会使该用户此前未使用的链接失效。</p>
+      <p className="admin-footnote"><KeyRound size={ICON.xs} />链接 1 小时内有效。生成新链接会使该用户此前未使用的链接失效。</p>
       {currentDialog && (
         <Modal title={currentDialog.created ? expired ? "重置链接已过期" : "重置链接已生成" : "生成密码重置链接"} subtitle="请先核实用户身份，再将链接私下交给本人。" onClose={close}>
           <div className="reset-target"><Avatar name={currentDialog.account.displayName} seed={currentDialog.account.id} /><div><b>{currentDialog.account.displayName}</b><span>{currentDialog.account.email}</span></div></div>
@@ -171,7 +172,7 @@ function AdminUsers({ user }: { user: User }) {
             <Notice kind="info">链接已过期，请重新生成后交给用户。</Notice>
           ) : (
             <div className="created-reset-link">
-              <label>一次性重置链接<div className="copy-input"><input aria-label="一次性重置链接" value={link} readOnly onFocus={(event) => event.target.select()} /><button aria-label="复制重置链接" onClick={() => void copy(link)}>{currentDialog.copied ? <CheckCheck size={17} /> : <Copy size={17} />}</button></div></label>
+              <label>一次性重置链接<div className="copy-input"><input aria-label="一次性重置链接" value={link} readOnly onFocus={(event) => event.target.select()} /><button aria-label="复制重置链接" onClick={() => void copy(link)}>{currentDialog.copied ? <CheckCheck size={ICON.md} /> : <Copy size={ICON.md} />}</button></div></label>
               <small>有效期至 {new Date(currentDialog.created.reset.expiresAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })} · 仅显示这一次</small>
               {currentDialog.copied && <Notice kind="success">链接已复制。</Notice>}
             </div>

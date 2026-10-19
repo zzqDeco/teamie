@@ -62,6 +62,7 @@ import {
   Notice,
   useOverlayFocus,
 } from "./ui";
+import { ICON } from "./icons";
 
 function route(conversation: Conversation) {
   return `/app/w/${conversation.workspaceId}/c/${conversation.id}`;
@@ -156,10 +157,10 @@ function ConversationItem({
       aria-current={selected ? "page" : undefined}
     >
       {conversation.type === "channel" ? (
-        <Hash size={18} />
+        <Hash size={ICON.md} />
       ) : conversation.type === "group" ? (
         <span className="group-avatar">
-          <Users size={15} />
+          <Users size={ICON.sm} />
         </span>
       ) : otherMember?.kind === "agent" ? (
         <AgentAvatar size="small" />
@@ -729,7 +730,7 @@ export function Shell() {
             aria-current={isAttentionPage ? "page" : undefined}
             onClick={closeSidebar}
           >
-            <Bell size={21} />
+            <Bell size={ICON.lg} />
             {!!attentionCount.data?.unreadCount && (
               <span
                 className="rail-attention-count"
@@ -772,7 +773,7 @@ export function Shell() {
             className="rail-add"
             onClick={() => openDialog("workspace")}
           >
-            <Plus size={23} />
+            <Plus size={ICON.xl} />
           </IconButton>
           <span className="rail-spacer" />
           <Link
@@ -783,7 +784,7 @@ export function Shell() {
             aria-current={isAgentsPage ? "page" : undefined}
             onClick={closeSidebar}
           >
-            <Bot size={22} aria-hidden="true" />
+            <Bot size={ICON.lg} aria-hidden="true" />
           </Link>
           <AccountMenu
             user={user!}
@@ -815,21 +816,21 @@ export function Shell() {
               label="关闭频道列表"
               onClick={() => setSidebar(false)}
             >
-              <X size={18} />
+              <X size={ICON.md} />
             </IconButton>
           </div>
           <div className="sidebar-scroll">
             <div className="nav-section">
               <div className="nav-section-title">
                 <span>
-                  <ChevronDown size={12} /> 团队频道
+                  <ChevronDown size={ICON.xs} /> 团队频道
                 </span>
                 {workspace && owner && caps["im.channel.create"] && (
                   <IconButton
                     label="创建频道"
                     onClick={() => openDialog("channel")}
                   >
-                    <Plus size={15} />
+                    <Plus size={ICON.sm} />
                   </IconButton>
                 )}
               </div>
@@ -851,7 +852,7 @@ export function Shell() {
             <div className="nav-section">
               <div className="nav-section-title">
                 <span>
-                  <ChevronDown size={12} /> 私信与小组
+                  <ChevronDown size={ICON.xs} /> 私信与小组
                 </span>
               </div>
               {direct.map((c) => (
@@ -903,18 +904,18 @@ export function Shell() {
                 className="mobile-menu"
                 onClick={() => setSidebar(true)}
               >
-                <Menu size={21} />
+                <Menu size={ICON.lg} />
               </IconButton>
               {isGatewayPage ? (
-                <KeyRound size={18} />
+                <KeyRound size={ICON.md} />
               ) : isDirectoryPage || isUsersPage ? (
-                <Users size={18} />
+                <Users size={ICON.md} />
               ) : isAgentsPage ? (
-                <Bot size={18} />
+                <Bot size={ICON.md} />
               ) : isAdminPage ? (
-                <ShieldCheck size={18} />
+                <ShieldCheck size={ICON.md} />
               ) : (
-                <Settings size={18} />
+                <Settings size={ICON.md} />
               )}
               <span>
                 {isGatewayPage
@@ -930,7 +931,7 @@ export function Shell() {
                           : "账号设置"}
               </span>
               <Link to={backChatRoute}>
-                <ArrowLeft size={15} />
+                <ArrowLeft size={ICON.sm} />
                 <span>对话</span>
               </Link>
             </header>
@@ -938,21 +939,21 @@ export function Shell() {
               user!.platformRole === "admin" && (
                 <nav className="admin-section-nav">
                   <Link to="/app/admin" className={isAdminPage ? "active" : ""}>
-                    <ShieldCheck size={13} />
+                    <ShieldCheck size={ICON.xs} />
                     注册邀请
                   </Link>
                   <Link
                     to="/app/admin/users"
                     className={isUsersPage ? "active" : ""}
                   >
-                    <Users size={13} />
+                    <Users size={ICON.xs} />
                     用户管理
                   </Link>
                   <Link
                     to="/app/admin/gateway"
                     className={isGatewayPage ? "active" : ""}
                   >
-                    <KeyRound size={13} />
+                    <KeyRound size={ICON.xs} />
                     模型网关
                   </Link>
                 </nav>
@@ -1038,10 +1039,10 @@ export function Shell() {
               className="mobile-menu"
               onClick={() => setSidebar(true)}
             >
-              <Menu size={21} />
+              <Menu size={ICON.lg} />
             </IconButton>
             <span className="large-symbol">
-              <Hash size={40} />
+              <Hash size={ICON.xl} />
             </span>
             <h2>{match ? "这个对话暂时无法访问" : "选择一个对话"}</h2>
             <p>
@@ -1086,12 +1087,12 @@ export function Shell() {
                 label="关闭成员列表"
                 onClick={() => setDetails(false)}
               >
-                <X size={17} />
+                <X size={ICON.md} />
               </IconButton>
             </header>
             <div className="members-description">
               <span className="member-cover">
-                <Users size={27} />
+                <Users size={ICON.xl} />
               </span>
               <h3>
                 {conversation
@@ -1107,7 +1108,7 @@ export function Shell() {
               </span>
               {membersQuery.isLoading && (
                 <div className="member-loading">
-                  <LoaderCircle size={16} className="spin" />
+                  <LoaderCircle size={ICON.sm} className="spin" />
                   加载成员…
                 </div>
               )}
@@ -1138,7 +1139,7 @@ export function Shell() {
                     </span>
                   </div>
                   {member.role === "owner" && (
-                    <ShieldCheck size={14} className="owner-shield" />
+                    <ShieldCheck size={ICON.xs} className="owner-shield" />
                   )}
                   {member.userId !== user!.id &&
                     caps["im.dm.create"] &&
@@ -1149,7 +1150,7 @@ export function Shell() {
                         disabled={busy}
                         onClick={() => void startDirect(member)}
                       >
-                        <MessageCircle size={14} />
+                        <MessageCircle size={ICON.xs} />
                       </IconButton>
                     )}
                   {((conversation?.type === "group" &&
@@ -1167,7 +1168,7 @@ export function Shell() {
                           setError("");
                         }}
                       >
-                        <X size={14} />
+                        <X size={ICON.xs} />
                       </IconButton>
                     )}
                 </div>
@@ -1178,7 +1179,7 @@ export function Shell() {
               to={`/app/w/${workspace.id}/members`}
               onClick={closeDetails}
             >
-              <Users size={16} />
+              <Users size={ICON.sm} />
               查看全部成员
             </Link>
             {conversation?.type === "group" &&
@@ -1187,9 +1188,9 @@ export function Shell() {
                   className="members-invite"
                   onClick={() => setManagingGroup(true)}
                 >
-                  <Users size={16} />
+                  <Users size={ICON.sm} />
                   管理小组成员
-                  <Plus size={14} />
+                  <Plus size={ICON.xs} />
                 </button>
               )}
             {owner && conversation?.type === "channel" && (
@@ -1197,9 +1198,9 @@ export function Shell() {
                 className="members-invite"
                 onClick={() => setDialog("invite")}
               >
-                <UserPlus size={16} />
+                <UserPlus size={ICON.sm} />
                 邀请成员
-                <Plus size={14} />
+                <Plus size={ICON.xs} />
               </button>
             )}
           </aside>
@@ -1294,10 +1295,10 @@ function Welcome({
     <div className="welcome-view">
       <header>
         <IconButton label="打开侧栏" className="mobile-menu" onClick={onMenu}>
-          <Menu size={21} />
+          <Menu size={ICON.lg} />
         </IconButton>
         <span>
-          <Home size={16} />
+          <Home size={ICON.sm} />
           你的起点
         </span>
       </header>
@@ -1314,7 +1315,7 @@ function Welcome({
           已有团队邀请？输入邀请链接或邀请码即可加入。
         </p>
         <Button onClick={onCreate}>
-          <Plus size={18} />
+          <Plus size={ICON.md} />
           创建工作空间
         </Button>
         <form className="welcome-join-form" onSubmit={submitInvite}>

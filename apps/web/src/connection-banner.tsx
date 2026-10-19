@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { RefreshCw, WifiOff } from "lucide-react";
 import type { Connection } from "./chat";
+import { ICON } from "./icons";
 import "./connection-banner.css";
 
 type Shown = "offline" | "reconnecting" | "restored" | null;
@@ -45,12 +46,12 @@ export function ConnectionBanner({
     <div className={`connection-banner ${kind}`} role="status" aria-live="polite">
       {shown === "offline" ? (
         <>
-          <WifiOff size={15} />
+          <WifiOff size={ICON.sm} />
           <span>网络已断开，恢复后会自动同步消息。</span>
         </>
       ) : shown === "reconnecting" ? (
         <>
-          <RefreshCw size={15} className="spin" />
+          <RefreshCw size={ICON.sm} className="spin" />
           <span>正在重新连接…</span>
           <button type="button" onClick={onRetry}>
             立即重试
@@ -60,7 +61,7 @@ export function ConnectionBanner({
         <span>已重新连接</span>
       ) : (
         <>
-          <RefreshCw size={15} />
+          <RefreshCw size={ICON.sm} />
           <span>{syncError}</span>
           <button type="button" onClick={onRetry}>
             立即重试

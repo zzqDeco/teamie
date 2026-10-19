@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useRef } from "react";
 import type { ButtonHTMLAttributes, ReactNode, RefObject } from "react";
 import { LoaderCircle, X } from "lucide-react";
 import { Link } from "react-router-dom";
+import { ICON } from "./icons";
 export function Logo({ compact = false }: { compact?: boolean }) {
   return (
     <span className="brand">
@@ -56,7 +57,7 @@ export function Button({
       disabled={props.disabled || busy}
       className={`button ${className}`}
     >
-      {busy && <LoaderCircle className="spin" size={16} />} {children}
+      {busy && <LoaderCircle className="spin" size={ICON.sm} />} {children}
     </button>
   );
 }
@@ -100,7 +101,7 @@ export function Loading({ label = "正在加载你的空间…" }: { label?: str
   return (
     <div className="loading-screen">
       <Logo />
-      <LoaderCircle className="spin" size={26} />
+      <LoaderCircle className="spin" size={ICON.xl} />
       <p>{label}</p>
     </div>
   );
@@ -195,7 +196,7 @@ export function Modal({
         tabIndex={-1}
       >
         <IconButton label="关闭弹窗" className="modal-close" onClick={onClose}>
-          <X size={19} />
+          <X size={ICON.lg} />
         </IconButton>
         <div className="modal-heading">
           <h2 id={titleId}>{title}</h2>

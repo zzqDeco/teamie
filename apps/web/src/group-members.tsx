@@ -9,6 +9,7 @@ import { chatStore } from "./store";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
 import { Avatar, Button, Modal, Notice } from "./ui";
 import type { Participant } from "./participants";
+import { ICON } from "./icons";
 export function ParticipantIdentity({ member }: { member: Member }) {
   return (
     <>
@@ -110,9 +111,9 @@ export function GroupMembersDialog({
                   aria-label={`从小组移除 ${member.displayName}`}
                 >
                   {busyId === member.userId ? (
-                    <LoaderCircle className="spin" size={14} />
+                    <LoaderCircle className="spin" size={ICON.xs} />
                   ) : (
-                    <UserMinus size={14} />
+                    <UserMinus size={ICON.xs} />
                   )}
                 </button>
               )
@@ -133,7 +134,7 @@ export function GroupMembersDialog({
                   disabled={!!busyId}
                   onClick={() => void change(member)}
                 >
-                  <Plus size={12} />
+                  <Plus size={ICON.xs} />
                   添加
                 </Button>
               </div>
@@ -223,7 +224,7 @@ export function AddParticipantToGroupDialog({
                 onClick={() => setSelected(group.id)}
               >
                 <span className="group-avatar">
-                  <Users size={17} />
+                  <Users size={ICON.md} />
                 </span>
                 <span>
                   {group.name || "小组对话"}
@@ -233,7 +234,7 @@ export function AddParticipantToGroupDialog({
                       : `${group.memberIds.length} 位成员`}
                   </small>
                 </span>
-                <i>{selected === group.id && <Check size={12} />}</i>
+                <i>{selected === group.id && <Check size={ICON.xs} />}</i>
               </button>
             );
           })
@@ -246,7 +247,7 @@ export function AddParticipantToGroupDialog({
         disabled={!addAllowed || busy}
         onClick={onCreateGroup}
       >
-        <Plus size={14} />
+        <Plus size={ICON.xs} />
         创建新小组
       </button>
       <div className="modal-actions">

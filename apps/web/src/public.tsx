@@ -32,6 +32,7 @@ import { clearSessionExpired, readSessionExpired } from "./session-notice";
 import { errorText } from "./chat";
 import { Avatar, Button, Logo, Notice, PublicHeader } from "./ui";
 import { passwordPolicyError } from "./password-policy";
+import { ICON } from "./icons";
 
 const STORY_SCENES = [
   {
@@ -186,10 +187,10 @@ export function Landing() {
             <div className="hero-actions">
               <Link to="/login" className="button">
                 登录 Teamie
-                <ArrowRight size={18} />
+                <ArrowRight size={ICON.md} />
               </Link>
               <Link className="landing-register" to="/login?mode=register">
-                凭邀请码注册 <ChevronRight size={16} />
+                凭邀请码注册 <ChevronRight size={ICON.sm} />
               </Link>
             </div>
             <div className="hero-footnote">
@@ -221,16 +222,16 @@ export function Landing() {
                   <span className="demo-workspace">产品研发空间</span>
                   <small>公开频道</small>
                   <span className="demo-channel selected">
-                    <Hash size={14} />
+                    <Hash size={ICON.xs} />
                     general
                   </span>
                   <span className="demo-channel">
-                    <Hash size={14} />
+                    <Hash size={ICON.xs} />
                     设计灵感
                   </span>
                   <small>小组与私信</small>
                   <span className="demo-channel">
-                    <Users size={14} />
+                    <Users size={ICON.xs} />
                     前端体验专项
                   </span>
                   <span className="demo-channel">
@@ -238,16 +239,16 @@ export function Landing() {
                     林小满
                   </span>
                   <span className="demo-channel">
-                    <Bot size={15} />
+                    <Bot size={ICON.sm} />
                     产品伙伴
                   </span>
                 </div>
                 <div className="demo-chat">
                   <div className="demo-chat-heading">
-                    <Hash size={16} />
+                    <Hash size={ICON.sm} />
                     <b>general</b>
                     <span className="demo-topic">日常灵感与版本节奏</span>
-                    <Users size={15} />
+                    <Users size={ICON.sm} />
                   </div>
                   <div className="demo-message">
                     <Avatar name="林" />
@@ -271,7 +272,7 @@ export function Landing() {
                   </div>
                   <div className="demo-message">
                     <span className="avatar lilac">
-                      <Bot size={17} />
+                      <Bot size={ICON.md} />
                     </span>
                     <div>
                       <b>
@@ -282,7 +283,7 @@ export function Landing() {
                   </div>
                   <div className="demo-input">
                     <span>写下你的想法，或输入 @ 提及伙伴…</span>
-                    <SendHorizontal size={15} />
+                    <SendHorizontal size={ICON.sm} />
                   </div>
                 </div>
               </div>
@@ -290,7 +291,7 @@ export function Landing() {
             </div>
             <div className="floating-note">
               <div className="floating-icon">
-                <Sparkles size={18} />
+                <Sparkles size={ICON.md} />
               </div>
               <span>
                 想法，接住了。
@@ -377,7 +378,7 @@ export function Landing() {
                 >
                   <div className="stage-card-head">
                     <span className="value-icon lilac">
-                      <MessagesSquare size={20} />
+                      <MessagesSquare size={ICON.lg} />
                     </span>
                     <div>
                       <b>公开频道与私密小组</b>
@@ -387,7 +388,7 @@ export function Landing() {
                   </div>
                   <div className="stage-channel-list">
                     <div className="stage-channel-row active">
-                      <Hash size={16} />
+                      <Hash size={ICON.sm} />
                       <div>
                         <b>general</b>
                         <small>全员公开频道 · 沉淀版本节奏与团队共识</small>
@@ -395,7 +396,7 @@ export function Landing() {
                       <span>24 人</span>
                     </div>
                     <div className="stage-channel-row">
-                      <Users size={16} />
+                      <Users size={ICON.sm} />
                       <div>
                         <b>前端体验专项</b>
                         <small>受控私密小组 · 聚焦专项议题与设计走查</small>
@@ -403,7 +404,7 @@ export function Landing() {
                       <span>6 人</span>
                     </div>
                     <div className="stage-channel-row">
-                      <Heart size={16} />
+                      <Heart size={ICON.sm} />
                       <div>
                         <b>1v1 直接私信</b>
                         <small>与人类成员或专属 Agent 随时快速对齐细节</small>
@@ -420,7 +421,7 @@ export function Landing() {
                 >
                   <div className="stage-card-head">
                     <span className="value-icon mint">
-                      <Bot size={20} />
+                      <Bot size={ICON.lg} />
                     </span>
                     <div>
                       <b>人类与 Agent 同场协作</b>
@@ -442,7 +443,7 @@ export function Landing() {
                     </div>
                     <div className="stage-msg agent">
                       <span className="avatar lilac">
-                        <Bot size={16} />
+                        <Bot size={ICON.sm} />
                       </span>
                       <div>
                         <b>
@@ -463,7 +464,7 @@ export function Landing() {
                 >
                   <div className="stage-card-head">
                     <span className="value-icon peach">
-                      <Bell size={20} />
+                      <Bell size={ICON.lg} />
                     </span>
                     <div>
                       <b>提及与回复收件箱</b>
@@ -481,7 +482,7 @@ export function Landing() {
                       </div>
                     </div>
                     <div className="stage-quote-jump">
-                      <CornerUpLeft size={15} />
+                      <CornerUpLeft size={ICON.sm} />
                       <span>点击任意引用预览，跨越长历史直接高亮定位至原消息位置</span>
                     </div>
                   </div>
@@ -494,7 +495,7 @@ export function Landing() {
                 >
                   <div className="spotlight-card-header">
                     <span className="avatar lilac">
-                      <Bot size={22} />
+                      <Bot size={ICON.lg} />
                     </span>
                     <div>
                       <b>产品伙伴</b>
@@ -513,7 +514,7 @@ export function Landing() {
                     </div>
                   </div>
                   <div className="spotlight-foot">
-                    <Lock size={13} />
+                    <Lock size={ICON.xs} />
                     <span>仅访问已加入的频道与小组 · 与成员共享同一套权限边界</span>
                   </div>
                 </div>
@@ -530,10 +531,10 @@ export function Landing() {
           <div className="landing-cta-actions">
             <Link to="/login" className="button">
               进入 Teamie
-              <ArrowRight size={17} />
+              <ArrowRight size={ICON.md} />
             </Link>
             <Link to="/login?mode=register" className="landing-register">
-              凭邀请码注册 <ChevronRight size={16} />
+              凭邀请码注册 <ChevronRight size={ICON.sm} />
             </Link>
           </div>
           <span className="cta-decoration" aria-hidden="true">
@@ -673,7 +674,7 @@ export function Login() {
       </div>
       <main className="auth-content">
         <Link to="/" className="back-link">
-          <ArrowLeft size={16} />
+          <ArrowLeft size={ICON.sm} />
           首页
         </Link>
         <div className="auth-form">
@@ -812,7 +813,7 @@ export function Login() {
             )}
             <Button type="submit" busy={busy} className="full-width">
               {register ? "创建账户" : "登录"}
-              <ArrowRight size={17} />
+              <ArrowRight size={ICON.md} />
             </Button>
           </form>
         </div>
@@ -882,7 +883,7 @@ export function Join() {
       <PublicHeader />
       <main className="join-card">
         <div className="invitation-icon">
-          <Users size={34} />
+          <Users size={ICON.xl} />
         </div>
         <h1>
           {query.data
@@ -909,7 +910,7 @@ export function Join() {
                     以 <b>{user.displayName}</b> 的身份加入
                     <small>{user.email}</small>
                   </span>
-                  <Check size={17} />
+                  <Check size={ICON.md} />
                 </div>
                 <Button
                   busy={busy || loading}
@@ -917,7 +918,7 @@ export function Join() {
                   className="full-width"
                 >
                   接受邀请
-                  <ArrowRight size={17} />
+                  <ArrowRight size={ICON.md} />
                 </Button>
               </>
             ) : (
@@ -926,7 +927,7 @@ export function Join() {
                 to={`/login?next=${encodeURIComponent(`/join/${inviteCode}`)}`}
               >
                 登录并接受邀请
-                <ArrowRight size={17} />
+                <ArrowRight size={ICON.md} />
               </Link>
             )}
             <small className="invite-expiry">

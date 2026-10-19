@@ -4,6 +4,7 @@ import type { User } from "@teamie/api-client";
 import type { Connection } from "./chat";
 import { Avatar } from "./ui";
 import { usePopover } from "./popover";
+import { ICON } from "./icons";
 
 export function AccountMenu({
   user,
@@ -61,7 +62,7 @@ export function AccountMenu({
           ref={popover}
         >
           <Link to="/app/settings" onClick={navigate}>
-            <Settings size={17} aria-hidden="true" />
+            <Settings size={ICON.md} aria-hidden="true" />
             账号设置
           </Link>
           {onShortcuts && (
@@ -74,7 +75,7 @@ export function AccountMenu({
                 onShortcuts();
               }}
             >
-              <Keyboard size={17} aria-hidden="true" />
+              <Keyboard size={ICON.md} aria-hidden="true" />
               键盘快捷键
             </button>
           )}
@@ -87,7 +88,7 @@ export function AccountMenu({
               onSignOut();
             }}
           >
-            <LogOut size={17} aria-hidden="true" />
+            <LogOut size={ICON.md} aria-hidden="true" />
             退出登录
           </button>
         </nav>

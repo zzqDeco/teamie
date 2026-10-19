@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { Bot, Check, CirclePause, Eye, LockKeyhole } from "lucide-react";
 import type { Workspace } from "@teamie/api-client";
 import { Button, Notice } from "./ui";
+import { ICON } from "./icons";
 
 export function AgentBadge({
   ownerName,
@@ -52,7 +53,7 @@ export function WorkspaceVisibilityFields({
   return (
     <fieldset className="agent-visibility" disabled={disabled}>
       <legend>
-        <Eye size={15} />
+        <Eye size={ICON.sm} />
         可见团队
       </legend>
       <p>选择的团队成员可以发现此 Agent。</p>
@@ -81,7 +82,7 @@ export function WorkspaceVisibilityFields({
                 {Array.from(workspace.name).slice(0, 1).join("")}
               </span>
               <span>{workspace.name}</span>
-              <i>{selectedIds.includes(workspace.id) && <Check size={12} />}</i>
+              <i>{selectedIds.includes(workspace.id) && <Check size={ICON.xs} />}</i>
             </label>
           ))}
         </div>
@@ -89,7 +90,7 @@ export function WorkspaceVisibilityFields({
         <div className="visibility-empty">加入团队后，可在这里选择。</div>
       )}
       <small>
-        <LockKeyhole size={12} />
+        <LockKeyhole size={ICON.xs} />
         可访问所选团队的频道；私信和小组需要加入对话。
       </small>
     </fieldset>
@@ -99,7 +100,7 @@ export function AgentEnabledStatus({ enabled }: { enabled: boolean }) {
   const Icon = enabled ? Check : CirclePause;
   return (
     <span className={`agent-status ${enabled ? "enabled" : "disabled"}`}>
-      <Icon size={12} aria-hidden="true" />
+      <Icon size={ICON.xs} aria-hidden="true" />
       {enabled ? "已启用" : "已停用"}
     </span>
   );

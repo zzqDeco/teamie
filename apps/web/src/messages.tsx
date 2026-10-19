@@ -52,6 +52,7 @@ import type { LocalMessage } from "./store";
 import { Avatar, Button, date, IconButton, Modal, Notice, time } from "./ui";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
 import { ConversationSearch } from "./conversation-search";
+import { ICON } from "./icons";
 
 function sameMentions(a: Mention[], b: Mention[]) {
   return (
@@ -1054,15 +1055,15 @@ export function ConversationView({
           className="mobile-menu"
           onClick={onMenu}
         >
-          <ArrowLeft size={21} />
+          <ArrowLeft size={ICON.lg} />
         </IconButton>
         <span className="conversation-symbol">
           {conversation.type === "channel" ? (
-            <Hash size={23} />
+            <Hash size={ICON.xl} />
           ) : conversation.type === "group" ? (
-            <Users size={22} />
+            <Users size={ICON.lg} />
           ) : (
-            <MessageCircle size={22} />
+            <MessageCircle size={ICON.lg} />
           )}
         </span>
         <div>
@@ -1081,14 +1082,14 @@ export function ConversationView({
             onClick={() => setSearchOpen(true)}
             aria-haspopup="dialog"
           >
-            <Search size={19} />
+            <Search size={ICON.lg} />
           </IconButton>
           <IconButton
             label="查看会话成员"
             onClick={onMembers}
             aria-expanded={membersOpen}
           >
-            <Users size={19} />
+            <Users size={ICON.lg} />
           </IconButton>
         </div>
       </header>
@@ -1113,7 +1114,7 @@ export function ConversationView({
       )}
       {syncError && (
         <div className="sync-banner" role="status">
-          <RefreshCw size={14} />
+          <RefreshCw size={ICON.xs} />
           <span>{syncError}</span>
           <button onClick={sync}>立即重试</button>
         </div>
@@ -1134,7 +1135,7 @@ export function ConversationView({
           </span>
           <span className="unread-jump-actions">
             <button onClick={() => void loadUnreadContext()}>
-              <ArrowUp size={14} />
+              <ArrowUp size={ICON.xs} />
               跳到第一条未读
             </button>
             <button onClick={markLatestRead}>全部标为已读</button>
@@ -1159,9 +1160,9 @@ export function ConversationView({
               className={`conversation-start-icon ${conversation.type === "channel" ? "" : "mint"}`}
             >
               {conversation.type === "channel" ? (
-                <Hash size={34} />
+                <Hash size={ICON.xl} />
               ) : (
-                <MessageCircle size={32} />
+                <MessageCircle size={ICON.xl} />
               )}
             </span>
             <h2>
@@ -1189,16 +1190,16 @@ export function ConversationView({
             disabled={loadingOlder}
           >
             {loadingOlder ? (
-              <LoaderCircle size={14} className="spin" />
+              <LoaderCircle size={ICON.xs} className="spin" />
             ) : (
-              <ArrowUp size={14} />
+              <ArrowUp size={ICON.xs} />
             )}{" "}
             加载更早的消息
           </button>
         )}
         {loading && (
           <div className="message-loading">
-            <LoaderCircle size={17} className="spin" />
+            <LoaderCircle size={ICON.md} className="spin" />
             加载消息…
           </div>
         )}
@@ -1352,7 +1353,7 @@ export function ConversationView({
                       className="message-reply"
                       onClick={() => void locate(message.replyToId!)}
                     >
-                      <CornerUpLeft size={13} />
+                      <CornerUpLeft size={ICON.xs} />
                       <b>{target?.senderName || "较早的消息"}</b>
                       <span>
                         {target?.retractedAt
@@ -1438,7 +1439,7 @@ export function ConversationView({
                   )}
                   {message.status === "sending" && (
                     <span className="send-status">
-                      <LoaderCircle size={11} className="spin" /> 正在发送
+                      <LoaderCircle size={ICON.xs} className="spin" /> 正在发送
                     </span>
                   )}
                   {message.status === "failed" && (
@@ -1453,7 +1454,7 @@ export function ConversationView({
                             )
                           }
                         >
-                          <RefreshCw size={11} />
+                          <RefreshCw size={ICON.xs} />
                           重试
                         </button>
                       )}
@@ -1473,7 +1474,7 @@ export function ConversationView({
                           );
                         }}
                       >
-                        <Trash2 size={11} />
+                        <Trash2 size={ICON.xs} />
                         删除
                       </button>
                     </span>
@@ -1494,7 +1495,7 @@ export function ConversationView({
                           )
                         }
                       >
-                        <MoreHorizontal size={18} />
+                        <MoreHorizontal size={ICON.md} />
                       </IconButton>
                       <div className="message-actions">
                         <IconButton
@@ -1506,7 +1507,7 @@ export function ConversationView({
                             inputRef.current?.focus();
                           }}
                         >
-                          <CornerUpLeft size={15} />
+                          <CornerUpLeft size={ICON.sm} />
                         </IconButton>
                         {message.senderId === user!.id && canEdit && (
                             <IconButton
@@ -1514,7 +1515,7 @@ export function ConversationView({
                               tabIndex={actionTabIndex}
                               onClick={() => startEdit(message)}
                             >
-                              <Pencil size={14} />
+                              <Pencil size={ICON.xs} />
                             </IconButton>
                           )}
                         {message.senderId === user!.id &&
@@ -1529,7 +1530,7 @@ export function ConversationView({
                                 setActionError("");
                               }}
                             >
-                              <Trash2 size={14} />
+                              <Trash2 size={ICON.xs} />
                             </IconButton>
                           )}
                       </div>
@@ -1556,7 +1557,7 @@ export function ConversationView({
             });
           }}
         >
-          <ArrowDown size={14} />
+          <ArrowDown size={ICON.xs} />
           回到最新消息
         </button>
       )}
@@ -1574,7 +1575,7 @@ export function ConversationView({
         />
         {replyToId && (
           <div className="reply-preview">
-            <CornerUpLeft size={15} />
+            <CornerUpLeft size={ICON.sm} />
             <div>
               回复 <b>{reply?.senderName || "原消息"}</b>
               <span>
@@ -1589,7 +1590,7 @@ export function ConversationView({
               label="取消回复"
               onClick={() => updateComposerDraft({ replyToId: "" })}
             >
-              <X size={16} />
+              <X size={ICON.sm} />
             </IconButton>
           </div>
         )}
@@ -1654,7 +1655,7 @@ export function ConversationView({
               aria-label="发送消息"
               title="发送消息"
             >
-              <SendHorizontal size={18} />
+              <SendHorizontal size={ICON.md} />
             </button>
           </div>
         </form>
