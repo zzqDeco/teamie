@@ -27,9 +27,10 @@ type AttentionItem struct {
 }
 
 type AttentionPage struct {
-	Items       []AttentionItem `json:"items"`
-	Cursor      string          `json:"cursor,omitempty"`
-	UnreadCount int64           `json:"unreadCount"`
+	Items              []AttentionItem `json:"items"`
+	Cursor             string          `json:"cursor,omitempty"`
+	UnreadCount        int64           `json:"unreadCount"`
+	ChannelUnreadCount int64           `json:"channelUnreadCount"`
 }
 
 type attentionCursor struct {
@@ -104,7 +105,7 @@ func (s *Store) Attention(ctx context.Context, user, rawCursor string, limit int
 	var rawItems []byte
 	err = tx.QueryRow(ctx, `
 WITH candidates AS MATERIALIZED (
- SELECT m.id,m.created_at,m.seq>COALESCE(r.seq,0) AS unread,
+ SELECT m.id,m.created_at,c.type AS conversation_type,m.seq>COALESCE(r.seq,0) AS unread,
         m.mentions @> jsonb_build_array(jsonb_build_object('userId',$1::text)) AS mentioned,
         (original.id IS NOT NULL AND original.sender_id=$1 AND original.retracted_at IS NULL) AS replied
  FROM messages m
@@ -121,6 +122,7 @@ WITH candidates AS MATERIALIZED (
  ORDER BY created_at DESC,id DESC LIMIT $5
 )
 SELECT (SELECT count(*) FROM candidates WHERE unread),
+ (SELECT count(*) FROM candidates WHERE unread AND conversation_type='channel'),
  COALESCE((SELECT jsonb_agg(jsonb_build_object(
    'message',jsonb_build_object('id',m.id,'conversationId',m.conversation_id,'senderId',m.sender_id,'senderName',m.sender_name,'senderKind',m.sender_kind,'clientMessageId',m.client_message_id,'seq',m.seq,'body',m.body,'replyToId',m.reply_to_id,'createdAt',m.created_at,'editedAt',m.edited_at,'retractedAt',m.retracted_at,'attachments',m.attachments,'mentions',m.mentions),
    'conversation',jsonb_build_object('id',c.id,'workspaceId',c.workspace_id,'name',c.name,'type',c.type),
@@ -128,7 +130,7 @@ SELECT (SELECT count(*) FROM candidates WHERE unread),
    'reasons',to_jsonb(array_remove(ARRAY[CASE WHEN p.mentioned THEN 'mention' END,CASE WHEN p.replied THEN 'reply' END],NULL))
  ) ORDER BY p.created_at DESC,p.id DESC)
  FROM page p JOIN messages m ON m.id=p.id JOIN conversations c ON c.id=m.conversation_id JOIN workspaces w ON w.id=c.workspace_id),'[]'::jsonb)
-`, user, before, cursor.ID, unreadOnly, limit+1, conversations).Scan(&out.UnreadCount, &rawItems)
+`, user, before, cursor.ID, unreadOnly, limit+1, conversations).Scan(&out.UnreadCount, &out.ChannelUnreadCount, &rawItems)
 	if err != nil {
 		return out, err
 	}

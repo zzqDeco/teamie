@@ -14,7 +14,7 @@ import { api } from "@teamie/api-client";
 import type { Conversation, Member, Workspace } from "@teamie/api-client";
 import { isComposingKey } from "./mentions";
 import { conversationName } from "./messages";
-import { enrichParticipants } from "./participants";
+import { compareTimestampsDesc } from "./store";
 import { Modal } from "./ui";
 
 type QuickItem = {
@@ -30,7 +30,6 @@ export function QuickSwitcher({
   workspaces,
   conversations,
   currentWorkspaceId,
-  discoveryAllowed = false,
   members,
   userId,
   recentConversationIds,
@@ -56,19 +55,17 @@ export function QuickSwitcher({
     inputRef.current?.focus({ preventScroll: true });
   }, []);
 
+  const workspacesNeedingMembers = new Set(
+    conversations
+      .filter((c) => c.type !== "channel" && !c.name.trim())
+      .map((c) => c.workspaceId),
+  );
   const memberQueries = useQueries({
     queries: workspaces.map((space) => ({
       queryKey: ["members", userId, space.id],
       queryFn: () => api.members(space.id),
+      enabled: workspacesNeedingMembers.has(space.id),
       staleTime: 60_000,
-    })),
-  });
-  const agentQueries = useQueries({
-    queries: workspaces.map((space) => ({
-      queryKey: ["workspaceAgents", userId, space.id],
-      queryFn: () => api.workspaceAgents(space.id),
-      enabled: discoveryAllowed,
-      staleTime: 30_000,
     })),
   });
   const membersByWorkspace = new Map<string, Member[]>();
@@ -76,9 +73,6 @@ export function QuickSwitcher({
     const loaded = memberQueries[index]?.data?.members;
     const rawMembers =
       loaded || (space.id === currentWorkspaceId ? members : undefined);
-    const rawAgents = discoveryAllowed
-      ? agentQueries[index]?.data?.agents || []
-      : [];
     if (rawMembers) {
       const merged =
         space.id === currentWorkspaceId && members.length
@@ -89,7 +83,7 @@ export function QuickSwitcher({
               ),
             ]
           : rawMembers;
-      membersByWorkspace.set(space.id, enrichParticipants(merged, rawAgents));
+      membersByWorkspace.set(space.id, merged);
     }
   });
 
@@ -118,7 +112,7 @@ export function QuickSwitcher({
       const rankA = recentOrder.get(a.id) ?? Number.MAX_SAFE_INTEGER;
       const rankB = recentOrder.get(b.id) ?? Number.MAX_SAFE_INTEGER;
       if (rankA !== rankB) return rankA - rankB;
-      return b.updatedAt.localeCompare(a.updatedAt);
+      return compareTimestampsDesc(a.updatedAt, b.updatedAt);
     });
 
   const allItems: QuickItem[] = [

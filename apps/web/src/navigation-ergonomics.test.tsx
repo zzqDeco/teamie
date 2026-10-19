@@ -730,4 +730,116 @@ describe("PR-3 navigation & notification ergonomics", () => {
       container.querySelector('textarea[aria-label="消息内容"]'),
     );
   });
+
+  it("sorts fractional-second updatedAt timestamps, uses channelUnreadCount, scopes QuickSwitcher queries, and restores focus to account trigger after closing shortcuts", async () => {
+    const dmWholeSecond: Conversation = {
+      ...dmOne,
+      updatedAt: "2026-10-16T01:00:00Z",
+    };
+    const dmSubSecond: Conversation = {
+      ...dmTwo,
+      updatedAt: "2026-10-16T01:00:00.123456Z",
+    };
+    const secondChannel: Conversation = {
+      ...channel,
+      id: "design-general",
+      workspaceId: secondWorkspace.id,
+      name: "design",
+    };
+    chatStore.replaceConversations([
+      channel,
+      dmWholeSecond,
+      dmSubSecond,
+      secondChannel,
+    ]);
+    vi.spyOn(api, "attention").mockResolvedValue({
+      items: [
+        {
+          message: {
+            id: "dm-mention",
+            clientMessageId: "c-dm",
+            conversationId: dmOne.id,
+            body: "@创建者 私聊提醒",
+            mentions: [{ userId: owner.id, start: 0, end: 4 }],
+            senderId: regularMember.id,
+            senderName: regularMember.displayName,
+            senderKind: "human",
+            seq: 4,
+            createdAt: "2026-10-16T03:01:00Z",
+          },
+          conversation: {
+            id: dmOne.id,
+            workspaceId: workspace.id,
+            name: dmOne.name,
+            type: "direct",
+          },
+          workspaceName: workspace.name,
+          reasons: ["mention"],
+          isRead: false,
+        },
+      ],
+      unreadCount: 60,
+      channelUnreadCount: 2,
+    });
+    const membersSpy = vi
+      .spyOn(api, "members")
+      .mockResolvedValue({ members: persistedMembers });
+
+    await mount("/app/w/team/c/general");
+
+    // 2 unread channel mentions from channelUnreadCount + 0 unread DMs = (2)
+    expect(document.title).toBe("(2) # general · Teamie");
+
+    // dmSubSecond (.123456Z) must sort ahead of dmWholeSecond (Z)
+    const dmLabels = Array.from(
+      container.querySelectorAll(
+        ".nav-section:nth-of-type(2) .conversation-link > span:not(.avatar):not(.unread-badge)",
+      ),
+    ).map((el) => el.textContent);
+    expect(dmLabels).toEqual(["私聊乙", "私聊甲"]);
+
+    // Open QuickSwitcher: secondWorkspace has only channels so api.members("design") must not be called
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }),
+      );
+    });
+    await flush();
+    expect(
+      membersSpy.mock.calls.some((call) => call[0] === secondWorkspace.id),
+    ).toBe(false);
+
+    // Close QuickSwitcher
+    await act(async () => {
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+    });
+    await flush();
+
+    // Open AccountMenu -> click 键盘快捷键 -> close modal -> focus returns to .account-trigger
+    const accountTrigger =
+      container.querySelector<HTMLButtonElement>(".account-trigger")!;
+    await act(async () => {
+      accountTrigger.focus();
+      accountTrigger.click();
+    });
+    const shortcutsItem = Array.from(
+      container.querySelectorAll<HTMLButtonElement>(".account-menu button"),
+    ).find((btn) => btn.textContent?.includes("键盘快捷键"))!;
+    await act(async () => {
+      shortcutsItem.focus();
+      shortcutsItem.click();
+    });
+    await flush();
+    expect(document.querySelector(".shortcuts-list")).toBeTruthy();
+
+    await act(async () => {
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+    });
+    await flush();
+    expect(document.activeElement).toBe(accountTrigger);
+  });
 });

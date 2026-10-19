@@ -473,12 +473,13 @@ export async function retryTransientFailures(generation: number) {
       }
     } while (retryDrainRequested && chatStore.generation === generation);
   })();
-  activeRetryGeneration = generation;
-  activeRetryDrain = run.finally(() => {
-    if (activeRetryDrain === run) {
+  const tracked = run.finally(() => {
+    if (activeRetryDrain === tracked) {
       activeRetryDrain = null;
       activeRetryGeneration = -1;
     }
   });
-  return activeRetryDrain;
+  activeRetryGeneration = generation;
+  activeRetryDrain = tracked;
+  return tracked;
 }

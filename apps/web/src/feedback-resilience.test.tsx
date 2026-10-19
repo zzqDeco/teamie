@@ -123,6 +123,18 @@ describe("failed messages", () => {
     expect(local().find((m) => m.id === "m2")?.status).toBeUndefined();
     expect(local().find((m) => m.id === "m3")?.status).toBeUndefined();
 
+    // Subsequent reconnect drain in the same generation must still run after the first drain settles
+    chatStore.merge([
+      { ...message, id: "local:c4", clientMessageId: "c4", status: "failed", permanent: false },
+    ]);
+    send.mockImplementationOnce(async (_id, draft) => {
+      order.push(`start:${draft.clientMessageId}`);
+      return { message: { ...message, id: "m4", clientMessageId: "c4", seq: 4 } };
+    });
+    await retryTransientFailures(chatStore.generation);
+    expect(order).toEqual(["start:c2", "end:c2", "start:c3", "start:c4"]);
+    expect(local().find((m) => m.id === "m4")?.status).toBeUndefined();
+
     chatStore.discardLocal("room", "c1");
     expect(local().some((m) => m.clientMessageId === "c1")).toBe(false);
     // Confirmed messages are never discarded.

@@ -38,6 +38,14 @@ function timestampNanoseconds(value: string): bigint {
     BigInt((match[2] || "").padEnd(9, "0"))
   );
 }
+export function compareTimestampsDesc(a: string, b: string): number {
+  try {
+    const diff = timestampNanoseconds(b) - timestampNanoseconds(a);
+    return diff > 0n ? 1 : diff < 0n ? -1 : 0;
+  } catch {
+    return b.localeCompare(a);
+  }
+}
 const version = (m: Message) =>
   timestampNanoseconds(m.retractedAt || m.editedAt || m.createdAt);
 function newerTimestamp(a?: string, b?: string): string {
