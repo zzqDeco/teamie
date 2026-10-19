@@ -160,10 +160,27 @@ describe("PR-6 dark mode tokens, head bootstrap & settings switcher", () => {
     ).toBeGreaterThanOrEqual(4.5);
   });
 
-  it("includes synchronous theme initialization script in index.html head", () => {
+  it("includes synchronous theme initialization script in index.html head and applies system theme when storage throws", () => {
     const html = readFileSync(join(srcDir, "..", "index.html"), "utf8");
     expect(html).toContain('localStorage.getItem("teamie.theme")');
     expect(html).toContain("document.documentElement.dataset.theme");
+
+    const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>/);
+    expect(scriptMatch).toBeTruthy();
+    darkMatches = true;
+    const getItemSpy = vi
+      .spyOn(Storage.prototype, "getItem")
+      .mockImplementation(() => {
+        throw new DOMException("SecurityError", "SecurityError");
+      });
+    try {
+      document.documentElement.dataset.theme = "light";
+      new Function(scriptMatch![1])();
+      expect(document.documentElement.dataset.theme).toBe("dark");
+      expect(document.documentElement.dataset.themePreference).toBe("system");
+    } finally {
+      getItemSpy.mockRestore();
+    }
   });
 
   it("switches between 跟随系统 / 浅色 / 深色 in ProfileSettings and reacts to OS color-scheme changes", async () => {
