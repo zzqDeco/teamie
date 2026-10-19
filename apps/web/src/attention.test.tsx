@@ -193,13 +193,18 @@ beforeEach(() => {
     return { readSeq };
   });
   vi.spyOn(api, "attention").mockImplementation(async (options) => {
-    const unreadCount = rows.filter((row) => row.message.seq > readSeq).length;
+    const unread = rows.filter((row) => row.message.seq > readSeq);
+    const unreadCount = unread.length;
+    const channelUnreadCount = unread.filter(
+      (row) => row.conversation.type === "channel",
+    ).length;
     const visible = rows
       .map((row) => ({ ...row, isRead: row.message.seq <= readSeq }))
       .filter((row) => !options?.unreadOnly || !row.isRead);
     return {
       items: options?.limit === 1 ? visible.slice(0, 1) : visible,
       unreadCount,
+      channelUnreadCount,
     };
   });
   client = new QueryClient({

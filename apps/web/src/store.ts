@@ -38,8 +38,25 @@ function timestampNanoseconds(value: string): bigint {
     BigInt((match[2] || "").padEnd(9, "0"))
   );
 }
+export function compareTimestampsDesc(a: string, b: string): number {
+  try {
+    const diff = timestampNanoseconds(b) - timestampNanoseconds(a);
+    return diff > 0n ? 1 : diff < 0n ? -1 : 0;
+  } catch {
+    return b.localeCompare(a);
+  }
+}
 const version = (m: Message) =>
   timestampNanoseconds(m.retractedAt || m.editedAt || m.createdAt);
+function newerTimestamp(a?: string, b?: string): string {
+  if (!a) return b || "";
+  if (!b) return a;
+  try {
+    return timestampNanoseconds(b) > timestampNanoseconds(a) ? b : a;
+  } catch {
+    return b > a ? b : a;
+  }
+}
 const MAX_PERSISTED_MESSAGES = 200;
 const clientKey = (m: Message) => `${m.senderId}\0${m.clientMessageId}`;
 function trimPersistedMessages(messages: LocalMessage[]): LocalMessage[] {
@@ -113,6 +130,7 @@ export class ChatStore {
   private storage?: StorageLike;
   generation = 0;
   conversationVersion = 0;
+  hasAuthoritativeConversations = false;
   constructor(storage?: StorageLike) {
     this.storage = storage;
   }
@@ -148,7 +166,7 @@ export class ChatStore {
   }
   begin(userId: string) {
     if (this.snapshot.userId === userId) return;
-    this.clear();
+    if (this.snapshot.userId) this.clear();
     let restored = empty(userId);
     try {
       const raw = this.storage?.getItem(storageKey(userId));
@@ -185,11 +203,15 @@ export class ChatStore {
     } catch {
       /* A corrupt snapshot restarts durable sync from zero. */
     }
+    this.hasAuthoritativeConversations = false;
+    this.conversationVersion =
+      Object.keys(restored.conversations).length > 0 ? 1 : 0;
     this.commit(restored);
   }
   clear() {
     this.generation += 1;
     this.conversationVersion += 1;
+    this.hasAuthoritativeConversations = false;
     if (this.snapshot.userId) {
       try {
         this.storage?.removeItem(storageKey(this.snapshot.userId));
@@ -203,6 +225,7 @@ export class ChatStore {
   revoke() {
     this.generation += 1;
     this.conversationVersion += 1;
+    this.hasAuthoritativeConversations = false;
     this.commit(empty(this.snapshot.userId));
   }
   discardLocal(conversationId: string, clientMessageId: string) {
@@ -233,6 +256,7 @@ export class ChatStore {
         next.conversations[m.conversationId] = {
           ...conversation,
           lastSeq: Math.max(conversation.lastSeq, m.seq),
+          updatedAt: newerTimestamp(conversation.updatedAt, m.createdAt),
         };
     }
     for (const [conversationId, batch] of grouped) {
@@ -249,6 +273,7 @@ export class ChatStore {
   ) {
     if (observed && (observed.generation !== this.generation || observed.conversationVersion !== this.conversationVersion))
       return false;
+    this.hasAuthoritativeConversations = true;
     this.conversationVersion += 1;
     const allowed = new Set(conversations.map((c) => c.id));
     this.commit({
@@ -267,6 +292,7 @@ export class ChatStore {
               ...c,
               lastSeq: Math.max(c.lastSeq, old?.lastSeq ?? 0),
               readSeq: Math.max(c.readSeq, old?.readSeq ?? 0),
+              updatedAt: newerTimestamp(old?.updatedAt, c.updatedAt),
             },
           ];
         }),
@@ -316,6 +342,7 @@ export class ChatStore {
           next.conversations[m.conversationId] = {
             ...conversation,
             lastSeq: Math.max(conversation.lastSeq, m.seq),
+            updatedAt: newerTimestamp(conversation.updatedAt, m.createdAt),
           };
       }
       if (event.conversation) {
@@ -324,6 +351,10 @@ export class ChatStore {
           ...event.conversation,
           readSeq: Math.max(old?.readSeq || 0, event.conversation.readSeq),
           lastSeq: Math.max(old?.lastSeq || 0, event.conversation.lastSeq),
+          updatedAt: newerTimestamp(
+            old?.updatedAt,
+            event.conversation.updatedAt,
+          ),
         };
       }
       if (
