@@ -1295,8 +1295,12 @@ export function ConversationView({
                 data-own={message.senderId === user!.id ? "true" : undefined}
                 tabIndex={isRovingTarget ? 0 : -1}
                 onFocus={(event) => {
-                  if (event.currentTarget.contains(event.target as Node))
+                  if (event.currentTarget.contains(event.target as Node)) {
                     setFocusedMessageId(message.id);
+                    setActionMessageId((current) =>
+                      current && current !== message.id ? "" : current,
+                    );
+                  }
                 }}
                 onKeyDown={(event) => {
                   const tag = (event.target as HTMLElement | null)?.tagName;
@@ -1314,6 +1318,7 @@ export function ConversationView({
                         event.key === "ArrowUp" ? index - 1 : index + 1
                       ];
                     if (next) {
+                      setActionMessageId("");
                       setFocusedMessageId(next.id);
                       focusMessage(next.id);
                     }

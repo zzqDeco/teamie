@@ -387,8 +387,6 @@ export function Shell() {
   const hasChannelUnread = allAuthorizedConversations.some(
     (c) => c.type === "channel" && c.lastSeq > c.readSeq,
   );
-  const urgentCount =
-    (attentionCount.data?.unreadCount || 0) + directUnreadCount;
   const pageTitle = isAttentionPage
     ? "提及与回复"
     : isGatewayPage
@@ -412,7 +410,7 @@ export function Shell() {
                     ? `# ${conversationName(conversation, user!.id, members)}`
                     : conversationName(conversation, user!.id, members)
                   : workspace?.name || "";
-  useDocumentTitle(pageTitle, urgentCount, hasChannelUnread);
+  useDocumentTitle(pageTitle, directUnreadCount, hasChannelUnread);
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.isComposing || event.keyCode === 229) return;
@@ -1181,6 +1179,7 @@ export function Shell() {
           workspaces={chat.data?.workspaces || []}
           conversations={allAuthorizedConversations}
           currentWorkspaceId={workspace?.id}
+          discoveryAllowed={discoveryAllowed}
           members={members}
           userId={user!.id}
           recentConversationIds={recentConversationIds}

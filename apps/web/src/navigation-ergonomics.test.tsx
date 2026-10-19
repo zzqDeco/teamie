@@ -396,7 +396,39 @@ describe("PR-3 navigation & notification ergonomics", () => {
     );
   });
 
-  it("supports Cmd/Ctrl+K quick switcher and Alt+Up/Down conversation switching", async () => {
+  it("supports Cmd/Ctrl+K quick switcher across workspaces and Alt+Up/Down conversation switching", async () => {
+    const crossDm: Conversation = {
+      id: "design-dm",
+      workspaceId: secondWorkspace.id,
+      type: "direct",
+      name: "",
+      memberIds: [owner.id, "designer"],
+      lastSeq: 0,
+      readSeq: 0,
+      updatedAt: "2026-10-16T04:00:00Z",
+    };
+    chatStore.replaceConversations([channel, dmOne, dmTwo, crossDm]);
+    vi.spyOn(api, "members").mockImplementation(async (wsId) => ({
+      members:
+        wsId === secondWorkspace.id
+          ? [
+              ...persistedMembers,
+              {
+                userId: "designer",
+                displayName: "设计师阿青",
+                email: "designer@example.test",
+                role: "member",
+                kind: "human",
+                joinedAt: owner.createdAt,
+              },
+            ]
+          : persistedMembers,
+    }));
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
     await mount("/app/w/team/c/general");
 
     await act(async () => {
@@ -404,18 +436,29 @@ describe("PR-3 navigation & notification ergonomics", () => {
         new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }),
       );
     });
+    await flush();
     const searchInput = document.querySelector<HTMLInputElement>(
       'input[aria-label="快速跳转搜索"]',
     );
     expect(searchInput).toBeTruthy();
-    const options = document.querySelectorAll(".quick-switcher-option");
-    expect(options.length).toBeGreaterThanOrEqual(4);
+    const options = Array.from(
+      document.querySelectorAll(".quick-switcher-option"),
+    );
+    expect(options.length).toBeGreaterThanOrEqual(5);
+    expect(options.some((el) => el.textContent?.includes("设计师阿青"))).toBe(
+      true,
+    );
 
+    scrollIntoView.mockClear();
     await act(async () => {
       searchInput!.dispatchEvent(
         new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
       );
+      searchInput!.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+      );
     });
+    expect(scrollIntoView).toHaveBeenCalled();
     await act(async () => {
       searchInput!.dispatchEvent(
         new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
@@ -522,10 +565,18 @@ describe("PR-3 navigation & notification ergonomics", () => {
 
     await act(async () => {
       row1.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+      );
+    });
+    expect(document.activeElement).toBe(row2);
+    expect(row1.classList.contains("actions-open")).toBe(false);
+
+    await act(async () => {
+      row2.dispatchEvent(
         new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
       );
     });
-    expect(row1.classList.contains("actions-open")).toBe(false);
+    expect(row2.classList.contains("actions-open")).toBe(false);
     expect(document.activeElement).toBe(
       container.querySelector('textarea[aria-label="消息内容"]'),
     );

@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
+import { useQueries } from "@tanstack/react-query";
 import {
   Bell,
   Bot,
@@ -9,9 +10,11 @@ import {
   Settings,
   Users,
 } from "lucide-react";
+import { api } from "@teamie/api-client";
 import type { Conversation, Member, Workspace } from "@teamie/api-client";
 import { isComposingKey } from "./mentions";
 import { conversationName } from "./messages";
+import { enrichParticipants } from "./participants";
 import { Modal } from "./ui";
 
 type QuickItem = {
@@ -27,6 +30,7 @@ export function QuickSwitcher({
   workspaces,
   conversations,
   currentWorkspaceId,
+  discoveryAllowed = false,
   members,
   userId,
   recentConversationIds,
@@ -36,6 +40,7 @@ export function QuickSwitcher({
   workspaces: Workspace[];
   conversations: Conversation[];
   currentWorkspaceId?: string;
+  discoveryAllowed?: boolean;
   members: Member[];
   userId: string;
   recentConversationIds: string[];
@@ -44,6 +49,44 @@ export function QuickSwitcher({
 }) {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
+  const listRef = useRef<HTMLUListElement>(null);
+
+  const memberQueries = useQueries({
+    queries: workspaces.map((space) => ({
+      queryKey: ["members", userId, space.id],
+      queryFn: () => api.members(space.id),
+      staleTime: 60_000,
+    })),
+  });
+  const agentQueries = useQueries({
+    queries: workspaces.map((space) => ({
+      queryKey: ["workspaceAgents", userId, space.id],
+      queryFn: () => api.workspaceAgents(space.id),
+      enabled: discoveryAllowed,
+      staleTime: 30_000,
+    })),
+  });
+  const membersByWorkspace = new Map<string, Member[]>();
+  workspaces.forEach((space, index) => {
+    const loaded = memberQueries[index]?.data?.members;
+    const rawMembers =
+      loaded || (space.id === currentWorkspaceId ? members : undefined);
+    const rawAgents = discoveryAllowed
+      ? agentQueries[index]?.data?.agents || []
+      : [];
+    if (rawMembers) {
+      const merged =
+        space.id === currentWorkspaceId && members.length
+          ? [
+              ...rawMembers,
+              ...members.filter(
+                (m) => !rawMembers.some((rm) => rm.userId === m.userId),
+              ),
+            ]
+          : rawMembers;
+      membersByWorkspace.set(space.id, enrichParticipants(merged, rawAgents));
+    }
+  });
 
   const workspaceMap = new Map(workspaces.map((w) => [w.id, w]));
   const recentOrder = new Map(
@@ -51,7 +94,21 @@ export function QuickSwitcher({
   );
 
   const sortedConversations = [...conversations]
-    .filter((c) => workspaceMap.has(c.workspaceId))
+    .filter((c) => {
+      if (!workspaceMap.has(c.workspaceId)) return false;
+      if (c.type !== "channel" && !c.name.trim()) {
+        const wsMembers = membersByWorkspace.get(c.workspaceId);
+        const otherIds = c.memberIds.filter((id) => id !== userId);
+        if (
+          !wsMembers ||
+          (otherIds.length > 0 &&
+            !otherIds.some((id) => wsMembers.some((m) => m.userId === id)))
+        ) {
+          return false;
+        }
+      }
+      return true;
+    })
     .sort((a, b) => {
       const rankA = recentOrder.get(a.id) ?? Number.MAX_SAFE_INTEGER;
       const rankB = recentOrder.get(b.id) ?? Number.MAX_SAFE_INTEGER;
@@ -65,7 +122,7 @@ export function QuickSwitcher({
       const label = conversationName(
         c,
         userId,
-        c.workspaceId === currentWorkspaceId ? members : [],
+        membersByWorkspace.get(c.workspaceId) || [],
       );
       return {
         id: `conv:${c.id}`,
@@ -119,18 +176,33 @@ export function QuickSwitcher({
   const boundedIndex = items.length
     ? Math.min(activeIndex, items.length - 1)
     : 0;
+  const activeItemId = items[boundedIndex]?.id;
+
+  useEffect(() => {
+    const activeOption = listRef.current?.querySelector<HTMLElement>(
+      '[role="option"][aria-selected="true"]',
+    );
+    activeOption?.scrollIntoView?.({ block: "nearest" });
+  }, [boundedIndex, activeItemId]);
 
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (isComposingKey(event)) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      if (items.length) setActiveIndex((boundedIndex + 1) % items.length);
+      if (items.length)
+        setActiveIndex(
+          (current) => (Math.min(current, items.length - 1) + 1) % items.length,
+        );
       return;
     }
     if (event.key === "ArrowUp") {
       event.preventDefault();
       if (items.length)
-        setActiveIndex((boundedIndex - 1 + items.length) % items.length);
+        setActiveIndex(
+          (current) =>
+            (Math.min(current, items.length - 1) - 1 + items.length) %
+            items.length,
+        );
       return;
     }
     if (event.key === "Enter" && items[boundedIndex]) {
@@ -158,7 +230,12 @@ export function QuickSwitcher({
           />
         </label>
         {items.length ? (
-          <ul className="quick-switcher-list" role="listbox" aria-label="跳转结果">
+          <ul
+            ref={listRef}
+            className="quick-switcher-list"
+            role="listbox"
+            aria-label="跳转结果"
+          >
             {items.map((item, index) => {
               const selected = index === boundedIndex;
               return (
