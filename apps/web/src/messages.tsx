@@ -181,7 +181,7 @@ chatStore.subscribe(() => {
   }
   const allowed = snap.conversations;
   let pruned = false;
-  if (chatStore.conversationVersion > 0 || Object.keys(allowed).length > 0) {
+  if (chatStore.hasAuthoritativeConversations) {
     for (const id of composerDrafts.keys()) {
       if (!allowed[id]) pruned = composerDrafts.delete(id) || pruned;
     }
@@ -195,7 +195,8 @@ function readComposerDraft(conversationId: string): ComposerDraft {
 function writeComposerDraft(conversationId: string, draft: ComposerDraft) {
   const snap = chatStore.getSnapshot();
   if (
-    !snap.conversations[conversationId] ||
+    (chatStore.hasAuthoritativeConversations &&
+      !snap.conversations[conversationId]) ||
     (!draft.body && draft.mentions.length === 0 && !draft.replyToId)
   ) {
     composerDrafts.delete(conversationId);

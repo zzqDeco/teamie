@@ -122,6 +122,7 @@ export class ChatStore {
   private storage?: StorageLike;
   generation = 0;
   conversationVersion = 0;
+  hasAuthoritativeConversations = false;
   constructor(storage?: StorageLike) {
     this.storage = storage;
   }
@@ -192,6 +193,7 @@ export class ChatStore {
     } catch {
       /* A corrupt snapshot restarts durable sync from zero. */
     }
+    this.hasAuthoritativeConversations = false;
     this.conversationVersion =
       Object.keys(restored.conversations).length > 0 ? 1 : 0;
     this.commit(restored);
@@ -199,6 +201,7 @@ export class ChatStore {
   clear() {
     this.generation += 1;
     this.conversationVersion += 1;
+    this.hasAuthoritativeConversations = false;
     if (this.snapshot.userId) {
       try {
         this.storage?.removeItem(storageKey(this.snapshot.userId));
@@ -212,6 +215,7 @@ export class ChatStore {
   revoke() {
     this.generation += 1;
     this.conversationVersion += 1;
+    this.hasAuthoritativeConversations = true;
     this.commit(empty(this.snapshot.userId));
   }
   discardLocal(conversationId: string, clientMessageId: string) {
@@ -259,6 +263,7 @@ export class ChatStore {
   ) {
     if (observed && (observed.generation !== this.generation || observed.conversationVersion !== this.conversationVersion))
       return false;
+    this.hasAuthoritativeConversations = true;
     this.conversationVersion += 1;
     const allowed = new Set(conversations.map((c) => c.id));
     this.commit({

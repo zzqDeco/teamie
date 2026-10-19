@@ -47,7 +47,11 @@ import { KeyboardShortcutsModal, QuickSwitcher } from "./quick-switcher";
 import { chatStore } from "./store";
 import type { DialogKind } from "./dialogs";
 import { ConversationView, conversationName } from "./messages";
-import { AttentionInbox, useAttentionCount } from "./attention";
+import {
+  AttentionInbox,
+  currentAttention,
+  useAttentionCount,
+} from "./attention";
 import {
   Avatar,
   Button,
@@ -384,6 +388,46 @@ export function Shell() {
         : sum,
     0,
   );
+  const rawAttentionUnread = attentionCount.data?.unreadCount || 0;
+  const attentionItems = attentionCount.data?.items || [];
+  const excludedAttentionIds = new Set<string>();
+  for (const item of attentionItems) {
+    if (item.isRead) continue;
+    const current = currentAttention(item, snapshot, user!.id);
+    if (!current || current.isRead || current.conversation.type !== "channel") {
+      excludedAttentionIds.add(item.message.id);
+    }
+  }
+  if (attentionItems.length === 0 && rawAttentionUnread > 0) {
+    for (const c of allAuthorizedConversations) {
+      if (c.type === "channel") continue;
+      const cached = snapshot.messages[c.id] || [];
+      for (const m of cached) {
+        if (
+          m.status ||
+          m.retractedAt ||
+          m.senderId === user!.id ||
+          m.seq <= c.readSeq
+        )
+          continue;
+        const isMention = m.mentions?.some((mt) => mt.userId === user!.id);
+        const isReply =
+          !!m.replyToId &&
+          cached.some(
+            (orig) =>
+              orig.id === m.replyToId &&
+              !orig.retractedAt &&
+              orig.senderId === user!.id,
+          );
+        if (isMention || isReply) excludedAttentionIds.add(m.id);
+      }
+    }
+  }
+  const channelAttentionCount = Math.max(
+    0,
+    rawAttentionUnread - excludedAttentionIds.size,
+  );
+  const urgentCount = directUnreadCount + channelAttentionCount;
   const hasChannelUnread = allAuthorizedConversations.some(
     (c) => c.type === "channel" && c.lastSeq > c.readSeq,
   );
@@ -410,7 +454,7 @@ export function Shell() {
                     ? `# ${conversationName(conversation, user!.id, members)}`
                     : conversationName(conversation, user!.id, members)
                   : workspace?.name || "";
-  useDocumentTitle(pageTitle, directUnreadCount, hasChannelUnread);
+  useDocumentTitle(pageTitle, urgentCount, hasChannelUnread);
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.isComposing || event.keyCode === 229) return;
@@ -443,13 +487,28 @@ export function Shell() {
       ) {
         const direction = event.key === "ArrowDown" ? 1 : -1;
         const ordered = [...channels, ...direct];
-        const wsIds = new Set(
-          (chat.data?.workspaces || []).map((w) => w.id),
-        );
-        const authorized = Object.values(snapshot.conversations).filter((c) =>
-          wsIds.has(c.workspaceId),
-        );
-        const pool = ordered.length ? ordered : authorized;
+        const orderedWorkspaces = [
+          ...(workspace ? [workspace] : []),
+          ...(chat.data?.workspaces || []).filter(
+            (w) => w.id !== workspace?.id,
+          ),
+        ];
+        const allOrdered = orderedWorkspaces.flatMap((ws) => {
+          if (ws.id === workspace?.id) return ordered;
+          const inWs = Object.values(snapshot.conversations).filter(
+            (c) => c.workspaceId === ws.id,
+          );
+          return [
+            ...inWs
+              .filter((c) => c.type === "channel")
+              .sort((a, b) => a.name.localeCompare(b.name)),
+            ...inWs
+              .filter((c) => c.type !== "channel")
+              .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+          ];
+        });
+        const pool =
+          event.shiftKey || ordered.length === 0 ? allOrdered : ordered;
         const next = pickAdjacentConversation(
           pool,
           conversation?.id,
@@ -467,6 +526,7 @@ export function Shell() {
   }, [
     channels,
     direct,
+    workspace,
     snapshot.conversations,
     chat.data?.workspaces,
     conversation?.id,

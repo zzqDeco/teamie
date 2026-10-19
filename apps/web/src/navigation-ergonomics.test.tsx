@@ -275,6 +275,67 @@ describe("PR-3 navigation & notification ergonomics", () => {
     });
     await flush();
     expect(document.title).toBe("(3) # general · Teamie");
+
+    vi.spyOn(api, "attention").mockResolvedValue({
+      items: [
+        {
+          message: {
+            id: "chan-mention",
+            clientMessageId: "c-chan",
+            conversationId: channel.id,
+            body: "@创建者 看看这个",
+            mentions: [{ userId: owner.id, start: 0, end: 4 }],
+            senderId: regularMember.id,
+            senderName: regularMember.displayName,
+            senderKind: "human",
+            seq: 3,
+            createdAt: "2026-10-16T03:00:00Z",
+          },
+          conversation: {
+            id: channel.id,
+            workspaceId: workspace.id,
+            name: channel.name,
+            type: "channel",
+          },
+          workspaceName: workspace.name,
+          reasons: ["mention"],
+          isRead: false,
+        },
+        {
+          message: {
+            id: "dm-mention",
+            clientMessageId: "c-dm",
+            conversationId: dmOne.id,
+            body: "@创建者 私聊提醒",
+            mentions: [{ userId: owner.id, start: 0, end: 4 }],
+            senderId: regularMember.id,
+            senderName: regularMember.displayName,
+            senderKind: "human",
+            seq: 4,
+            createdAt: "2026-10-16T03:01:00Z",
+          },
+          conversation: {
+            id: dmOne.id,
+            workspaceId: workspace.id,
+            name: dmOne.name,
+            type: "direct",
+          },
+          workspaceName: workspace.name,
+          reasons: ["mention"],
+          isRead: false,
+        },
+      ],
+      unreadCount: 2,
+    });
+    act(() => {
+      chatStore.replaceConversations([
+        { ...channel, lastSeq: 3, readSeq: 1 },
+        { ...dmOne, lastSeq: 4, readSeq: 3 },
+      ]);
+    });
+    await flush();
+    // 1 unread DM (which is also an attention item) + 1 unread channel mention = (2), not (3)
+    expect(document.title).toBe("(2) # general · Teamie");
   });
 
   it("re-sorts DM list immediately when a newer message arrives via store.apply", async () => {
@@ -500,9 +561,32 @@ describe("PR-3 navigation & notification ergonomics", () => {
     expect(container.querySelector('[data-testid="path"]')?.textContent).toBe(
       "/app/w/team/c/dm-1",
     );
+
+    act(() => {
+      chatStore.replaceConversations([
+        channel,
+        dmOne,
+        dmTwo,
+        { ...crossDm, lastSeq: 5, readSeq: 2 },
+      ]);
+    });
+    await flush();
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "ArrowDown",
+          altKey: true,
+          shiftKey: true,
+          bubbles: true,
+        }),
+      );
+    });
+    expect(container.querySelector('[data-testid="path"]')?.textContent).toBe(
+      "/app/w/design/c/design-dm",
+    );
   });
 
-  it("persists composer drafts synchronously in sessionStorage and clears them on logout", async () => {
+  it("persists composer drafts synchronously in sessionStorage, retains drafts across stale localStorage restore, and clears them on logout", async () => {
     await mount("/app/w/team/c/general");
     const textarea = container.querySelector<HTMLTextAreaElement>(
       'textarea[aria-label="消息内容"]',
@@ -520,6 +604,46 @@ describe("PR-3 navigation & notification ergonomics", () => {
     });
     expect(sessionStorage.getItem("teamie.drafts.v1:owner")).toContain(
       "未发送的草稿内容",
+    );
+
+    // Simulate reload where sessionStorage has a draft for a newer conversation (dm-2)
+    // not yet present in a stale non-empty localStorage snapshot
+    act(() => {
+      chatStore.clear();
+    });
+    sessionStorage.setItem(
+      "teamie.drafts.v1:owner",
+      JSON.stringify({
+        general: { body: "未发送的草稿内容", mentions: [], replyToId: "" },
+        "dm-2": { body: "新会话草稿", mentions: [], replyToId: "" },
+        "revoked-conv": { body: "已移除会话草稿", mentions: [], replyToId: "" },
+      }),
+    );
+    localStorage.setItem(
+      "teamie.chat.v1:owner",
+      JSON.stringify({
+        userId: owner.id,
+        cursor: "1",
+        revision: 1,
+        messages: {},
+        conversations: { general: channel },
+      }),
+    );
+    act(() => {
+      chatStore.begin(owner.id);
+    });
+    // Before replaceConversations runs, dm-2 draft must NOT be pruned by stale localStorage
+    expect(sessionStorage.getItem("teamie.drafts.v1:owner")).toContain(
+      "新会话草稿",
+    );
+    act(() => {
+      chatStore.replaceConversations([channel, dmOne, dmTwo]);
+    });
+    expect(sessionStorage.getItem("teamie.drafts.v1:owner")).toContain(
+      "新会话草稿",
+    );
+    expect(sessionStorage.getItem("teamie.drafts.v1:owner")).not.toContain(
+      "已移除会话草稿",
     );
 
     act(() => {
