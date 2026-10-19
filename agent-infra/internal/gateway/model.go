@@ -10,7 +10,7 @@ import (
 	"strings"
 	"teamie/backend/pkg/observability"
 
-	"github.com/cloudwego/eino-ext/components/model/agenticopenai"
+	"github.com/cloudwego/eino-ext/libs/acl/openai"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 	"teamie/agent-infra/internal/api"
@@ -116,11 +116,12 @@ func (p Provider) nativeModel(ctx context.Context, c Config, key, raw string, st
 	if (c.Model == "qwen3.8-max" || strings.HasPrefix(c.Model, "qwen3.8-max-")) && choice.Type == schema.ToolChoiceForbidden && len(options.Tools) == 0 {
 		extra["enable_thinking"] = false
 	}
-	chat, err := agenticopenai.NewChatModel(ctx, &agenticopenai.ChatConfig{APIKey: key, BaseURL: c.BaseURL, Model: c.Model, HTTPClient: &httpClient, MaxCompletionTokens: &limit, ExtraFields: extra})
+	chat, err := openai.NewAgenticClient(ctx, &openai.Config{APIKey: key, BaseURL: c.BaseURL, Model: c.Model, HTTPClient: &httpClient, MaxCompletionTokens: &limit, ExtraFields: extra})
 	if err != nil {
 		return nil, nil, nil, api.Err(503, "gateway_unavailable", "Model adapter could not be initialized")
 	}
 	opts := []model.Option{model.WithTools(options.Tools), model.WithAgenticToolChoice(choice)}
+	opts = append(opts, agenticResponseOptions(streaming)...)
 	if options.Temperature != nil {
 		opts = append(opts, model.WithTemperature(*options.Temperature))
 	}
@@ -211,7 +212,7 @@ func (p Provider) Stream(ctx context.Context, c Config, key, raw string, emit fu
 // The only implementation-specific HTTP behavior here is Teamie's policy:
 // model selection, bounded bodies, SSRF-safe client, sanitized failures and
 // credential suppression. OpenAI serialization and stream conversion are
-// owned by the official extension.
+// owned by the official client; public hooks normalize streaming identities.
 type providerBoundary struct {
 	next         http.RoundTripper
 	key          string
