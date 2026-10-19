@@ -49,8 +49,7 @@ export function useAttentionCount() {
       "count",
       scope.reads,
     ],
-    queryFn: ({ signal }) =>
-      api.attention({ limit: 100, unreadOnly: true }, signal),
+    queryFn: ({ signal }) => api.attention({ limit: 1 }, signal),
     enabled: scope.enabled,
     staleTime: 5_000,
     refetchInterval: 30_000,
@@ -205,51 +204,53 @@ export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
     setMarkReadError("");
 
     try {
-      let targets: Array<[string, number]>;
-      let totalTargets: number;
-
-      if (retryRemainingOnly && batchFailure && activeRemaining.length > 0) {
-        targets = activeRemaining;
-        totalTargets = batchFailure.total;
-      } else {
-        const maxSeqByConv = new Map<string, number>();
-        const recordUnread = (rawItem: AttentionItem) => {
-          const current = currentAttention(
-            rawItem,
-            chatStore.getSnapshot(),
-            userId,
-          );
-          if (!current || current.isRead) return;
-          const prev = maxSeqByConv.get(current.conversation.id) ?? 0;
-          if (current.message.seq > prev) {
-            maxSeqByConv.set(current.conversation.id, current.message.seq);
-          }
-        };
-
-        let cursor: string | undefined = undefined;
-        const seenCursors = new Set<string>();
-        for (;;) {
-          const page = await api.attention(
-            { cursor, unreadOnly: true, limit: 100 },
-            controller.signal,
-          );
-          if (controller.signal.aborted || chatStore.generation !== generation)
-            return;
-          for (const rawItem of page.items) {
-            recordUnread(rawItem);
-          }
-          if (!page.cursor || seenCursors.has(page.cursor)) break;
-          seenCursors.add(page.cursor);
-          cursor = page.cursor;
-        }
-
-        const currentConvs = chatStore.getSnapshot().conversations;
-        targets = Array.from(maxSeqByConv.entries()).filter(
-          ([convId, seq]) =>
-            Boolean(currentConvs[convId]) && currentConvs[convId].readSeq < seq,
+      // Retrying keeps the original batch's scope, but its failed targets may
+      // have stopped being attention since the previous attempt.
+      const retryBounds =
+        retryRemainingOnly && batchFailure
+          ? new Map(activeRemaining)
+          : null;
+      const maxSeqByConv = new Map<string, number>();
+      const recordUnread = (rawItem: AttentionItem) => {
+        const current = currentAttention(
+          rawItem,
+          chatStore.getSnapshot(),
+          userId,
         );
-        totalTargets = targets.length;
+        if (!current || current.isRead) return;
+        if (retryBounds) {
+          const bound = retryBounds.get(current.conversation.id);
+          if (bound === undefined || current.message.seq > bound) return;
+        }
+        const prev = maxSeqByConv.get(current.conversation.id) ?? 0;
+        if (current.message.seq > prev) {
+          maxSeqByConv.set(current.conversation.id, current.message.seq);
+        }
+      };
+
+      let cursor: string | undefined = undefined;
+      const seenCursors = new Set<string>();
+      for (;;) {
+        const page = await api.attention(
+          { cursor, unreadOnly: true, limit: 100 },
+          controller.signal,
+        );
+        if (controller.signal.aborted || chatStore.generation !== generation)
+          return;
+        for (const rawItem of page.items) {
+          recordUnread(rawItem);
+        }
+        if (!page.cursor || seenCursors.has(page.cursor)) break;
+        seenCursors.add(page.cursor);
+        cursor = page.cursor;
       }
+
+      const currentConvs = chatStore.getSnapshot().conversations;
+      const targets = Array.from(maxSeqByConv.entries()).filter(
+        ([convId, seq]) =>
+          Boolean(currentConvs[convId]) && currentConvs[convId].readSeq < seq,
+      );
+      const totalTargets = retryBounds ? batchFailure!.total : targets.length;
 
       if (targets.length === 0) {
         setBatchFailure(null);

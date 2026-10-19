@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go.uber.org/zap"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"teamie/backend/pkg/observability"
 	"time"
 
 	"teamie/agent-infra/internal/api"
@@ -202,13 +204,29 @@ func writeAtomicJSON(path string, r any) error {
 	}
 	return e
 }
-func (s *Service) Exec(ctx context.Context, r *agent.SandboxExecRequest) (*agent.SandboxExecResponse, error) {
+func (s *Service) Exec(ctx context.Context, r *agent.SandboxExecRequest) (reply *agent.SandboxExecResponse, executionErr error) {
 	if r == nil || !api.EqualSecret(r.ServiceToken, s.Token) {
 		return failure("unauthorized"), nil
 	}
 	if !validID(r.AgentId) || !validID(r.RunId) || !validID(r.RequestId) || len(r.Command) == 0 || len(r.Command) > 16384 || strings.ContainsRune(r.Command, 0) || r.TimeoutSeconds < 0 || r.TimeoutSeconds > 60 {
 		return failure("invalid_request"), nil
 	}
+	ctx, operation := observability.Begin(ctx, "sandbox-execution", zap.String("custom.agent.id", observability.ID(r.AgentId)), zap.String("custom.runtime.run_id", observability.ID(r.RunId)), zap.String("custom.sandbox.receipt_id", observability.ID(r.RequestId)))
+	defer func() {
+		err := executionErr
+		code := ""
+		outputBytes := 0
+		if reply != nil {
+			outputBytes = len(reply.Stdout) + len(reply.Stderr)
+			if !reply.Ok {
+				code = reply.GetErrorCode()
+				if err == nil {
+					err = observability.Diagnostic("sandbox_execution_failed", nil)
+				}
+			}
+		}
+		operation.End(err, zap.String("custom.error.code", observability.ID(code)), zap.Int("custom.sandbox.output_bytes", outputBytes))
+	}()
 	executionID := r.RunId
 	if r.ExecutionId != nil {
 		executionID = r.GetExecutionId()

@@ -258,6 +258,46 @@ describe("unread entry", () => {
     expect(clear).toHaveBeenCalledTimes(1);
   });
 
+  it("reanchors unread messages on the first return from a deep link without losing the draft", async () => {
+    const conversation = conversationWith(2, 8);
+    bootstrap.conversations = [conversation];
+    chatStore.replaceConversations([conversation]);
+    page = Array.from({ length: 8 }, (_, i) => message(i + 1));
+    vi.spyOn(api, "message").mockResolvedValue({ message: message(2) });
+    vi.spyOn(api, "messagesAround").mockResolvedValue({ messages: page, hasMore: false });
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      const el = this as HTMLElement;
+      const rect = (top: number, bottom: number) =>
+        ({ top, bottom, left: 0, right: 0, width: 0, height: bottom - top, x: 0, y: top, toJSON: noop }) as DOMRect;
+      if (el.classList.contains("message-scroll")) return rect(0, 300);
+      const seq = Number(el.dataset?.seq || 0);
+      const scrollTop = el.closest<HTMLElement>(".message-scroll")?.scrollTop || 0;
+      const top = (seq - 1) * 100 - scrollTop;
+      return rect(top, top + 100);
+    });
+    const clear = vi.fn();
+    await show(conversation, { initialMessageId: "m2", onClearMessageTarget: clear });
+    const input = composer();
+    await type(input, "保留这份草稿");
+    vi.mocked(HTMLElement.prototype.scrollTo).mockClear();
+    vi.mocked(api.read).mockClear();
+
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>(".located-banner button")!.click();
+    });
+    expect(clear).toHaveBeenCalledTimes(1);
+    await show(conversation, { initialMessageId: "", onClearMessageTarget: clear });
+
+    expect(composer()).toBe(input);
+    expect(composer().value).toBe("保留这份草稿");
+    expect(HTMLElement.prototype.scrollTo).not.toHaveBeenCalled();
+    expect(host.querySelector<HTMLElement>(".message-scroll")!.scrollTop).toBe(144);
+    expect(host.querySelector(".unread-divider")?.nextElementSibling?.id).toBe("message-m3");
+    await elapse(700);
+    expect(api.read).toHaveBeenCalledWith("room", 4);
+    expect(api.read).not.toHaveBeenCalledWith("room", 8);
+  });
+
   it("anchors never-read conversations at sequence one and advances across own messages", async () => {
     const conversation = conversationWith(0, 8);
     bootstrap.conversations = [conversation];

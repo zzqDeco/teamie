@@ -25,7 +25,7 @@ import { ICON } from "./icons";
 import { isComposingKey } from "./mentions";
 import { conversationName } from "./messages";
 import { enrichParticipants } from "./participants";
-import { chatStore, reconcileMessages } from "./store";
+import { chatStore, compareTimestampsDesc, reconcileMessages } from "./store";
 import { Button, date, Modal, Notice, time } from "./ui";
 
 type QuickItem = {
@@ -57,7 +57,7 @@ export function QuickSwitcher({
   workspaces,
   conversations,
   currentWorkspaceId,
-  discoveryAllowed = false,
+  discoveryAllowed,
   members,
   userId,
   recentConversationIds,
@@ -91,40 +91,67 @@ export function QuickSwitcher({
     inputRef.current?.focus({ preventScroll: true });
   }, [mode]);
 
+  const workspacesNeedingMembers = new Set(
+    conversations
+      .filter((c) => c.type !== "channel" && !c.name.trim())
+      .map((c) => c.workspaceId),
+  );
   const memberQueries = useQueries({
     queries: workspaces.map((space) => ({
       queryKey: ["members", userId, space.id],
       queryFn: () => api.members(space.id),
+      enabled: workspacesNeedingMembers.has(space.id),
       staleTime: 60_000,
+      retry: false,
     })),
   });
   const agentQueries = useQueries({
     queries: workspaces.map((space) => ({
       queryKey: ["workspaceAgents", userId, space.id],
       queryFn: () => api.workspaceAgents(space.id),
-      enabled: discoveryAllowed,
+      enabled: Boolean(
+        discoveryAllowed && workspacesNeedingMembers.has(space.id),
+      ),
       staleTime: 30_000,
+      retry: false,
     })),
   });
   const membersByWorkspace = new Map<string, Member[]>();
+  const agentLoadingByWorkspace = new Map<string, boolean>();
   workspaces.forEach((space, index) => {
-    const loaded = memberQueries[index]?.data?.members;
+    const memberQuery = memberQueries[index];
+    const agentQuery = agentQueries[index];
+    agentLoadingByWorkspace.set(
+      space.id,
+      Boolean(
+        discoveryAllowed &&
+          workspacesNeedingMembers.has(space.id) &&
+          agentQuery?.isPending,
+      ),
+    );
+    const loaded = memberQuery?.data?.members;
     const rawMembers =
-      loaded || (space.id === currentWorkspaceId ? members : undefined);
-    const rawAgents = discoveryAllowed
-      ? agentQueries[index]?.data?.agents || []
-      : [];
+      loaded ||
+      (space.id === currentWorkspaceId
+        ? members
+        : !workspacesNeedingMembers.has(space.id) || !memberQuery?.isPending
+          ? []
+          : undefined);
     if (rawMembers) {
+      const loadedAgents = discoveryAllowed
+        ? agentQuery?.data?.agents || []
+        : [];
+      const enriched = enrichParticipants(rawMembers, loadedAgents);
       const merged =
         space.id === currentWorkspaceId && members.length
           ? [
-              ...rawMembers,
+              ...enriched,
               ...members.filter(
-                (m) => !rawMembers.some((rm) => rm.userId === m.userId),
+                (m) => !enriched.some((rm) => rm.userId === m.userId),
               ),
             ]
-          : rawMembers;
-      membersByWorkspace.set(space.id, enrichParticipants(merged, rawAgents));
+          : enriched;
+      membersByWorkspace.set(space.id, merged);
     }
   });
 
@@ -142,12 +169,12 @@ export function QuickSwitcher({
       if (!workspaceMap.has(c.workspaceId)) return false;
       if (c.type !== "channel" && !c.name.trim()) {
         const wsMembers = membersByWorkspace.get(c.workspaceId);
+        if (!wsMembers) return false;
         const otherIds = c.memberIds.filter((id) => id !== userId);
-        if (
-          !wsMembers ||
-          (otherIds.length > 0 &&
-            !otherIds.some((id) => wsMembers.some((m) => m.userId === id)))
-        ) {
+        const resolved =
+          otherIds.length === 0 ||
+          otherIds.some((id) => wsMembers.some((m) => m.userId === id));
+        if (!resolved && agentLoadingByWorkspace.get(c.workspaceId)) {
           return false;
         }
       }
@@ -157,7 +184,7 @@ export function QuickSwitcher({
       const rankA = recentOrder.get(a.id) ?? Number.MAX_SAFE_INTEGER;
       const rankB = recentOrder.get(b.id) ?? Number.MAX_SAFE_INTEGER;
       if (rankA !== rankB) return rankA - rankB;
-      return b.updatedAt.localeCompare(a.updatedAt);
+      return compareTimestampsDesc(a.updatedAt, b.updatedAt);
     });
 
   const allItems: QuickItem[] = [

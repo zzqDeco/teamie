@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"teamie/backend/pkg/observability"
 	"time"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -52,7 +53,7 @@ func (imc *IM) downloadAttachment(ctx context.Context, conversation string, a At
 		client = *imc.HTTP
 	}
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	response, e := client.Do(req)
+	response, e := observability.Client(&client, "teamie.chat").Do(req)
 	if e != nil {
 		return nil, errors.New("im_unavailable")
 	}

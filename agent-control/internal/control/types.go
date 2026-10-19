@@ -11,6 +11,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"teamie/backend/pkg/observability"
 	"time"
 )
 
@@ -51,8 +52,10 @@ type Error struct {
 }
 
 func (e *Error) Error() string                      { return e.Message }
+func (e *Error) DiagnosticMessage() string          { return e.Code }
 func errAPI(status int, code, message string) error { return &Error{status, code, message} }
 func fail(w http.ResponseWriter, e error) {
+	observability.RecordError(w, e)
 	var a *Error
 	if !errors.As(e, &a) {
 		a = &Error{503, "control_unavailable", "Agent control is temporarily unavailable"}
