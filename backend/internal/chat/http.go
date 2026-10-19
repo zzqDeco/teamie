@@ -181,6 +181,18 @@ func (h *Handler) Routes() http.Handler {
 		api.Write(w, 201, map[string]any{"conversation": c})
 		return nil
 	})
+	auth("GET /api/v1/workspaces/{id}/messages/search", func(w http.ResponseWriter, r *http.Request, s api.Session) error {
+		limit, err := queryInt(r, "limit", 20, 1, 50)
+		if err != nil {
+			return err
+		}
+		page, err := h.Store.SearchWorkspaceMessages(r.Context(), s.User.ID, r.PathValue("id"), r.URL.Query().Get("q"), r.URL.Query().Get("cursor"), int(limit))
+		if err != nil {
+			return err
+		}
+		api.Write(w, 200, page)
+		return nil
+	})
 	auth("GET /api/v1/conversations/{id}/messages", func(w http.ResponseWriter, r *http.Request, s api.Session) error {
 		before, e := queryInt(r, "beforeSeq", 0, 0, 1<<62)
 		if e != nil {
