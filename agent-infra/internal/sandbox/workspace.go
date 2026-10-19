@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"go.uber.org/zap"
 	"io"
 	"io/fs"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"syscall"
+	"teamie/backend/pkg/observability"
 	"time"
 	"unicode/utf8"
 
@@ -238,13 +240,30 @@ func globMatches(pattern, name string) bool {
 	return match(0, 0)
 }
 
-func (s *Service) Workspace(ctx context.Context, r *agent.SandboxWorkspaceRequest) (*agent.SandboxWorkspaceResponse, error) {
+func (s *Service) Workspace(ctx context.Context, r *agent.SandboxWorkspaceRequest) (result *agent.SandboxWorkspaceResponse, failure error) {
 	if r == nil || !api.EqualSecret(r.ServiceToken, s.Token) {
 		return workspaceError("unauthorized"), nil
 	}
 	if !validID(r.AgentId) || len(r.ArgsJson) > maxFileBytes*2 {
 		return workspaceError("invalid_request"), nil
 	}
+	operationName := "unsupported"
+	switch r.Operation {
+	case "ls", "read", "write", "edit", "delete", "glob", "grep", "output":
+		operationName = r.Operation
+	}
+	ctx, operation := observability.Begin(ctx, "sandbox-workspace", zap.String("custom.agent.id", observability.ID(r.AgentId)), zap.String("custom.sandbox.operation", operationName))
+	defer func() {
+		err := failure
+		code := ""
+		if result != nil && !result.Ok {
+			code = result.GetErrorCode()
+			if err == nil {
+				err = observability.Diagnostic("sandbox_workspace_failed", nil)
+			}
+		}
+		operation.End(err, zap.String("custom.error.code", observability.ID(code)))
+	}()
 	var in workspaceArgs
 	dec := json.NewDecoder(strings.NewReader(r.ArgsJson))
 	dec.DisallowUnknownFields()

@@ -81,6 +81,7 @@ Images are built on hosted runners. The production host only pulls digests and r
 ## Design references
 
 - [Architecture and message guarantees](docs/architecture/overview.md)
+- [Application logging and trace correlation](docs/architecture/logging.md)
 - [HTTP and realtime contract](docs/contracts/http-v1.md)
 - [First-stage scope and acceptance](docs/product/phase-one.md)
 - [Second-stage Agent scope and acceptance](docs/product/phase-two.md)
