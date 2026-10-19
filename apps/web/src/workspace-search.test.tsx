@@ -404,4 +404,97 @@ describe("PR-8 workspace-wide message search in QuickSwitcher and API client", (
     expect(options).toHaveLength(1);
     expect(options[0].textContent).toContain("已编辑的 beta 最新内容");
   });
+
+  it("keeps pagination available when reconciliation empties a page, preserves loaded results on load-more error, and avoids locale-dependent false negatives", async () => {
+    const mRetracted = makeMsg("m-ret", "c-chan", 30, "INPUT 规划");
+    const mOlder = makeMsg("m-old", "c-chan", 15, "INPUT 历史定稿");
+
+    // Simulate local retraction of mRetracted before search
+    chatStore.merge([
+      {
+        ...mRetracted,
+        body: "",
+        retractedAt: "2026-10-18T12:10:00Z",
+      },
+    ]);
+
+    // Simulate Turkish-like toLocaleLowerCase where "I" -> "ı"
+    const origToLocaleLower = String.prototype.toLocaleLowerCase;
+    vi.spyOn(String.prototype, "toLocaleLowerCase").mockImplementation(
+      function (this: string) {
+        return origToLocaleLower.call(this).replace(/i/g, "ı");
+      },
+    );
+
+    let call = 0;
+    vi.spyOn(api, "searchWorkspaceMessages").mockImplementation(
+      async (_wsId, opts) => {
+        call += 1;
+        if (!opts.cursor) {
+          return {
+            items: [
+              {
+                message: mRetracted,
+                conversation: {
+                  id: channelConv.id,
+                  workspaceId: channelConv.workspaceId,
+                  name: channelConv.name,
+                  type: channelConv.type,
+                },
+              },
+            ],
+            cursor: "cursor-after-empty-page",
+          };
+        }
+        if (call === 2) {
+          throw new Error("分页服务暂时不可用");
+        }
+        return {
+          items: [
+            {
+              message: mOlder,
+              conversation: {
+                id: channelConv.id,
+                workspaceId: channelConv.workspaceId,
+                name: channelConv.name,
+                type: channelConv.type,
+              },
+            },
+          ],
+          cursor: "cursor-page-3",
+        };
+      },
+    );
+
+    await renderSwitcher();
+    await act(async () => {
+      host
+        .querySelectorAll<HTMLButtonElement>(".quick-switcher-modes button")[1]
+        .click();
+    });
+
+    await typeQuery("input");
+    await tick(300);
+
+    // Page 1 was emptied by local retraction reconciliation, but cursor pagination remains available
+    const moreBtn = host.querySelector<HTMLButtonElement>(
+      ".quick-switcher-more",
+    )!;
+    expect(moreBtn).not.toBeNull();
+    expect(moreBtn.textContent).toContain("加载更多");
+
+    // First click on 加载更多 fails -> error notice is shown AND 加载更多 remains available
+    await act(async () => {
+      moreBtn.click();
+    });
+    expect(host.textContent).toContain("请求失败，请稍后重试。");
+    expect(host.querySelector(".quick-switcher-more")).not.toBeNull();
+
+    // Retry 加载更多 succeeds -> mOlder ("INPUT 历史定稿") is kept despite Turkish toLocaleLowerCase
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>(".quick-switcher-more")!.click();
+    });
+    expect(host.querySelectorAll('[role="option"]')).toHaveLength(1);
+    expect(host.textContent).toContain("INPUT 历史定稿");
+  });
 });

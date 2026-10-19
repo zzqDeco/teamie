@@ -282,3 +282,30 @@ func TestWorkspaceSearchRechecksMembershipAfterWaitingForRevocation(t *testing.T
 		})
 	}
 }
+
+func TestWorkspaceSearchDoesNotLockUnmatchedConversations(t *testing.T) {
+	ctx := context.Background()
+	s, ws, channel, owner, member := setup(t)
+	otherConv, err := s.CreateConversation(ctx, owner.ID, ws.ID, "group", "other", []string{member.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = s.Send(ctx, owner, channel.ID, api.ID(), "无锁扫描匹配关键字", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = s.Send(ctx, owner, otherConv.ID, api.ID(), "无关对话内容", nil); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := s.DB.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, "SELECT id FROM conversations WHERE id=$1 FOR UPDATE", otherConv.ID); err != nil {
+		t.Fatal(err)
+	}
+	page, err := s.SearchWorkspaceMessages(ctx, member.ID, ws.ID, "无锁扫描匹配", "", 20)
+	if err != nil || len(page.Items) != 1 || page.Items[0].Conversation.ID != channel.ID {
+		t.Fatal("search blocked or failed while unrelated conversation held FOR UPDATE", page, err)
+	}
+}
