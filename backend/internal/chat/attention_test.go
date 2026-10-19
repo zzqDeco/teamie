@@ -141,11 +141,15 @@ func TestAttentionPaginationRevocationAndHTTPIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	attentionMessage(t, s, member, group.ID, owner.ID, nil)
+	page, err := s.Attention(ctx, owner.ID, "", 1, true)
+	if err != nil || page.UnreadCount != 7 || page.ChannelUnreadCount != 6 {
+		t.Fatal("channelUnreadCount did not separate channel from group unread", page, err)
+	}
 	if _, err = s.GroupMember(ctx, member.ID, group.ID, owner.ID, false); err != nil {
 		t.Fatal(err)
 	}
-	page, err := s.Attention(ctx, owner.ID, "", 100, false)
-	if err != nil || len(page.Items) != 6 || page.UnreadCount != 6 {
+	page, err = s.Attention(ctx, owner.ID, "", 100, false)
+	if err != nil || len(page.Items) != 6 || page.UnreadCount != 6 || page.ChannelUnreadCount != 6 {
 		t.Fatal("workspace owner bypassed private group", page, err)
 	}
 	outsider := api.User{ID: api.ID(), Kind: "human", PlatformRole: "admin"}

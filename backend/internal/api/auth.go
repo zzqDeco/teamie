@@ -3,8 +3,10 @@ package api
 import (
 	"context"
 	"crypto/subtle"
+	"go.uber.org/zap"
 	"net/http"
 	"strings"
+	"teamie/backend/pkg/observability"
 )
 
 type Identity interface {
@@ -52,6 +54,8 @@ func Auth(identity Identity, origin string, next AuthedHandler) http.HandlerFunc
 			Fail(w, err)
 			return
 		}
+		observability.AnnotateHTTP(w, zap.String("user.id", s.User.ID), zap.String("custom.principal.kind", s.User.Kind))
+		r = r.WithContext(observability.WithFields(r.Context(), zap.String("user.id", s.User.ID)))
 		if !Mutating(r) && !s.ServicePrincipal && r.URL.Path != "/api/v1/auth/session" {
 			if token := r.Header.Get("X-CSRF-Token"); token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(s.CSRFToken)) != 1 {
 				Fail(w, Err(401, "session_changed", "Browser session changed"))

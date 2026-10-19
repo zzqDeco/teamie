@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"go.uber.org/zap"
 	"net"
 	"net/http"
 	"strings"
+	"teamie/backend/pkg/observability"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
@@ -21,9 +23,21 @@ import (
 type ModelError struct {
 	Code  string
 	Retry bool
+	// Private diagnostics never change Error(), public safe codes, hashes or
+	// durable model/tool receipts. The native cause remains available internally.
+	Stage, Reason                string
+	ExpectedBlocks, ActualBlocks int
+	Cause                        error
 }
 
 func (e *ModelError) Error() string { return "model gateway: " + e.Code }
+func (e *ModelError) Unwrap() error { return e.Cause }
+func (e *ModelError) DiagnosticMessage() string {
+	if e.Stage == "" {
+		return e.Code
+	}
+	return e.Code + " at " + e.Stage + ": " + e.Reason
+}
 
 type GatewayModel struct {
 	Client                  modelgatewayservice.Client
@@ -36,11 +50,15 @@ type GatewayModel struct {
 	Authorize               func(context.Context) error
 }
 
-func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticMessage, options ...model.Option) (*schema.AgenticMessage, error) {
+func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticMessage, options ...model.Option) (_ *schema.AgenticMessage, failure error) {
 	run, e := CurrentRun(ctx)
 	if e != nil {
 		return nil, e
 	}
+	ctx, operation := observability.Begin(ctx, "model-call", zap.Bool("custom.model.streaming", false))
+	phase, step := "model-slot-wait", 0
+	defer func() { modelCompletion(operation, failure, phase, run, step) }()
+	observability.L(ctx).Info("Model call started", zap.String("event.action", "model-call-started"))
 	release, e := run.Front.modelPermit(ctx)
 	if e != nil {
 		return nil, e
@@ -63,9 +81,17 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticM
 		return nil, e
 	}
 	hash := modelRequestHash(request)
-	step := int(run.Step.Add(1))
+	step = int(run.Step.Add(1))
+	phase = "receipt-lookup"
+	ctx = observability.WithFields(ctx, zap.Int("custom.model.step", step))
+	outputTokens := 0
+	if opts.MaxTokens != nil {
+		outputTokens = *opts.MaxTokens
+	}
+	observability.L(ctx).Info("Model request admitted", zap.String("event.action", "model-request-admitted"), zap.Int("custom.model.request_bytes", len(request)), zap.Int("custom.model.input_messages", len(messages)), zap.Int("custom.model.output_token_limit", outputTokens))
 	cached, e := m.cachedModel(ctx, run, step, hash, messages, opts, false)
 	if e == nil {
+		phase = "receipt-replay"
 		return decodeAgenticMessage(cached)
 	}
 	if !errors.Is(e, pgx.ErrNoRows) {
@@ -77,6 +103,7 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticM
 	if e = m.checkContextRequest(ctx, run, step, hash, request, false); e != nil {
 		return nil, e
 	}
+	phase = "gateway-request"
 	response, e := m.Client.Chat(ctx, &wire.GatewayChatRequest{ServiceToken: m.Token, OwnerId: m.OwnerID, AgentId: m.AgentID, SessionId: "agent:" + m.AgentID, RunId: executionID(run), RequestJson: string(request)})
 	if e != nil {
 		var gatewayError *ModelError
@@ -95,17 +122,21 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticM
 	if len(response.GetResponseJson()) > modeltransport.MaxResponseBytes {
 		return nil, &ModelError{Code: "upstream_response_limit"}
 	}
+	phase = "message-decode"
 	result, e := decodeAgenticMessage([]byte(response.GetResponseJson()))
 	if e != nil {
 		return nil, e
 	}
+	phase = "validate-result"
 	if e = validateModelResult(result, modelResultByteLimit(run)); e != nil {
 		return nil, e
 	}
+	phase = "serialize-result"
 	b, e := (&schema.HumanReadableSerializer{}).Marshal(result)
 	if e != nil {
 		return nil, e
 	}
+	phase = "persist-receipt"
 	if e = m.Store.SaveModel(ctx, m.Lease, run, step, hash, b); e != nil {
 		return nil, e
 	}
