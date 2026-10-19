@@ -571,6 +571,12 @@ export function ConversationView({
     }
   }, [conversation.id, conversation.readSeq]);
   function returnToLatest() {
+    // Leaving the initial deep link can be the first latest-page fetch.
+    const current = chatStore.getSnapshot().conversations[conversation.id];
+    if (current) {
+      setEntry({ readSeq: current.readSeq, lastSeq: current.lastSeq });
+      setAnchorPending(current.lastSeq > current.readSeq);
+    }
     if (initialMessageId && onClearMessageTarget) onClearMessageTarget();
     else void fetchLatest();
   }
