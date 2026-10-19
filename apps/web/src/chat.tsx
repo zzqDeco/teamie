@@ -13,6 +13,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@teamie/api-client";
 import type { Bootstrap, Message } from "@teamie/api-client";
 import { useAuth } from "./auth";
+import {
+  notifySyncedMessages,
+  resetNotificationSession,
+} from "./notifications";
 import { chatStore } from "./store";
 export type Connection =
   "connecting" | "connected" | "reconnecting" | "offline";
@@ -82,9 +86,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, [client, query.data, reconcileSession, user]);
   useEffect(() => {
     chatStore.begin(user!.id);
+    resetNotificationSession(user!.id);
     let stopped = false,
       syncing = false,
       requested = false,
+      initialSyncCompleted = false,
       attempt = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let ws: WebSocket | null = null;
@@ -106,6 +112,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         do {
           requested = false;
           let hasMore = true;
+          const notifyCandidates: Array<{
+            conversationId: string;
+            messageId: string;
+          }> = [];
           while (hasMore && !stopped) {
             const cursor = chatStore.getSnapshot().cursor;
             const page = await api.sync(cursor);
@@ -141,9 +151,31 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               void client.invalidateQueries({ queryKey: ["workspaceAgents"] });
             }
             chatStore.apply(page);
+            if (initialSyncCompleted && cursor !== "0") {
+              for (const event of page.events) {
+                if (event.type === "message.created" && event.message) {
+                  notifyCandidates.push({
+                    conversationId: event.message.conversationId,
+                    messageId: event.message.id,
+                  });
+                }
+              }
+            }
             if (page.events.some((event) => event.type.startsWith("message.") || event.type === "read.updated" || event.type === "membership.changed"))
               void client.invalidateQueries({ queryKey: ["attention", user!.id] });
             hasMore = page.hasMore;
+          }
+          initialSyncCompleted = true;
+          if (
+            !stopped &&
+            generation === chatStore.generation &&
+            notifyCandidates.length > 0
+          ) {
+            notifySyncedMessages(
+              notifyCandidates,
+              chatStore.getSnapshot(),
+              user!.id,
+            );
           }
         } while (requested && !stopped);
         setSyncError("");
@@ -286,6 +318,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("online", online);
       window.removeEventListener("offline", offline);
       document.removeEventListener("visibilitychange", focus);
+      resetNotificationSession(null);
     };
   }, [user, client, reconcileSession]);
   const sendTyping = useCallback((conversationId: string, value: boolean) => {
