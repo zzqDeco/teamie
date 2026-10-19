@@ -233,6 +233,7 @@ afterEach(async () => {
   chatStore.clear();
   vi.restoreAllMocks();
   delete (HTMLElement.prototype as Partial<HTMLElement>).scrollTo;
+  delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
   vi.unstubAllGlobals();
 });
 
@@ -892,6 +893,23 @@ describe("member and account navigation", () => {
     expect(find("[data-location]").textContent).toBe(
       `/app/w/${workspace.id}/members`,
     );
+  });
+
+  it("clears a message deep link in place without remounting the conversation view", async () => {
+    const target = {
+      id: "m1", conversationId: channel.id, senderId: "human", senderName: "设计伙伴",
+      senderKind: "human" as const, clientMessageId: "c1", seq: 1, body: "旧消息",
+      createdAt: owner.createdAt,
+    };
+    vi.spyOn(api, "message").mockResolvedValue({ message: target });
+    vi.spyOn(api, "messagesAround").mockResolvedValue({ messages: [target], hasMore: false });
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
+    await mount("/app/w/team/c/general?message=m1");
+    const composer = find<HTMLTextAreaElement>('textarea[aria-label="消息内容"]');
+    expect(find(".located-banner").textContent).toContain("消息上下文");
+    await click(".located-banner button");
+    expect(container.querySelector(".located-banner")).toBeNull();
+    expect(find<HTMLTextAreaElement>('textarea[aria-label="消息内容"]')).toBe(composer);
   });
 
   it("redirects signed-in users from the landing page directly into /app and keeps rail-home inside /app", async () => {

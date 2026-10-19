@@ -68,7 +68,8 @@
   background: #eee9ff;
   outline: none;
 }
-.located-banner {
+.located-banner,
+.unread-jump-banner {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -76,12 +77,23 @@
   padding: 8px 16px;
   font-size: 12px;
   background: #f2edf9;
+  color: #4a4356;
 }
-.located-banner button {
+.located-banner button,
+.unread-jump-banner button {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   border: 0;
   background: transparent;
-  color: #7252a3;
+  color: #5f4fc1;
+  font-weight: 600;
   cursor: pointer;
   min-height: 32px;
+}
+.unread-jump-actions {
+  display: inline-flex;
+  gap: 12px;
+  flex-shrink: 0;
 }
