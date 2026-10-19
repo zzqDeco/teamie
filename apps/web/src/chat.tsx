@@ -156,7 +156,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               void client.invalidateQueries({ queryKey: ["workspaceAgents"] });
             }
             chatStore.apply(page);
-            if (initialSyncCompleted && cursor !== "0") {
+            if (initialSyncCompleted) {
               for (const event of page.events) {
                 if (event.type === "message.created" && event.message) {
                   notifyCandidates.push({
@@ -192,8 +192,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             ["invalid_cursor", "cursor_invalid", "future_cursor"].includes(
               error.code,
             )
-          )
+          ) {
             chatStore.revoke();
+            initialSyncCompleted = false;
+            completedInitialSyncUser.current = null;
+          }
           setSyncError("消息同步暂时中断，正在自动重试");
         }
       } finally {
