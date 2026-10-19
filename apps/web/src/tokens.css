@@ -7,6 +7,7 @@
 
   /* Brand & interactive accents */
   --brand: #7463d4;
+  --brand-muted: #7264bd;
   --brand-text: #5f4fc1;
   --brand-strong: #4f3ea6;
   --logo-accent: #d8efae;
@@ -42,7 +43,25 @@
   --focus-ring-offset: 2px;
   --focus-halo: 0 0 0 3px rgba(116, 99, 212, 0.2);
 
-  /* Typography scale */
+  /* Typography families & scale */
+  --font-sans:
+    "DM Sans",
+    "Noto Sans SC",
+    -apple-system,
+    BlinkMacSystemFont,
+    "PingFang SC",
+    "Hiragino Sans GB",
+    "Microsoft YaHei UI",
+    "Microsoft YaHei",
+    sans-serif;
+  --font-mono:
+    "JetBrains Mono",
+    "SFMono-Regular",
+    ui-monospace,
+    Menlo,
+    Monaco,
+    Consolas,
+    monospace;
   --font-xs: 11px;
   --font-sm: 12px;
   --font-base: 13px;
@@ -52,6 +71,16 @@
   --font-2xl: 20px;
   --font-3xl: 24px;
   --font-4xl: 30px;
+
+  /* Global root typography, colors, and font rendering */
+  font-family: var(--font-sans);
+  color: var(--text-strong);
+  background: var(--bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-size: var(--font-md);
 
   /* Border radius scale */
   --r-xs: 4px;

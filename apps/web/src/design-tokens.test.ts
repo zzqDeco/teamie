@@ -70,9 +70,12 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
       "--text-muted",
       "--text-subtle",
       "--brand",
+      "--brand-muted",
       "--brand-text",
       "--brand-strong",
       "--focus-ring",
+      "--font-sans",
+      "--font-mono",
       "--bg",
       "--surface",
       "--surface-sunken",
@@ -102,6 +105,10 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
     for (const name of required) {
       expect(tokenMap.has(name), `missing token ${name}`).toBe(true);
     }
+    expect(tokensCss).toContain("font-family: var(--font-sans);");
+    expect(tokensCss).toContain("color: var(--text-strong);");
+    expect(tokensCss).toContain("background: var(--bg);");
+    expect(tokensCss).toContain("font-size: var(--font-md);");
   });
 
   it("ensures every text token meets WCAG AA >= 4.5:1 across all light surfaces", () => {
