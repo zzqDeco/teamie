@@ -1,10 +1,12 @@
 package identity
 
 import (
+	"go.uber.org/zap"
 	"net/http"
 	"strings"
 	"sync"
 	"teamie/backend/internal/api"
+	"teamie/backend/pkg/observability"
 	"time"
 )
 
@@ -99,6 +101,7 @@ func (h *Handler) Routes() http.Handler {
 				api.Fail(w, e)
 				return
 			}
+			observability.AnnotateHTTP(w, zap.String("user.id", ss.User.ID))
 			h.cookie(w, token, 7*86400)
 			w.Header().Set("Cache-Control", "no-store")
 			api.Write(w, status, ss)

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/cloudwego/eino/compose"
 	"slices"
 	"sort"
 	"strings"
@@ -610,7 +611,9 @@ func (a *ContextArchive) validateRefs(ctx context.Context, r *Run, refs []string
 	return a.authorizeSources(ctx, canonical)
 }
 
-func (a *ContextArchive) Read(ctx context.Context, ref string, offset, limit int) (*ContextReadPage, error) {
+func (a *ContextArchive) Read(ctx context.Context, ref string, offset, limit int) (_ *ContextReadPage, failure error) {
+	ctx, operation := toolOperation(ctx, "context_read", compose.GetToolCallID(ctx))
+	defer func() { operation.End(failure) }()
 	r, err := a.scope(ctx)
 	if err != nil {
 		return nil, err

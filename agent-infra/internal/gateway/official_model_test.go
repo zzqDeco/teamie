@@ -80,7 +80,7 @@ func TestOfficialAgenticUnaryOptionsBlocksAndMetadata(t *testing.T) {
 			t.Error("native message/tool-result history lost")
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"id":"official-fixture","object":"chat.completion","model":"admin-chosen","choices":[{"index":0,"message":{"role":"assistant","reasoning_content":"private thought","content":"private answer","tool_calls":[{"id":"call-stable","type":"function","function":{"name":"im_send_message","arguments":"{\"body\":\"你好\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":12,"completion_tokens":7,"total_tokens":19,"prompt_tokens_details":{"cached_tokens":4},"completion_tokens_details":{"reasoning_tokens":3}}}`)
+		fmt.Fprint(w, `{"id":"official-fixture","object":"chat.completion","model":"admin-chosen","choices":[{"index":0,"message":{"role":"assistant","reasoning_content":"private thought","content":"private answer","tool_calls":[{"id":"call-stable","type":"function","function":{"name":"im_send_message","arguments":"{\"body\":\"你好\"}"}}]},"finish_reason":"tool_calls","logprobs":{"content":[{"token":"private answer","logprob":-0.25}]}}],"usage":{"prompt_tokens":12,"completion_tokens":7,"total_tokens":19,"prompt_tokens_details":{"cached_tokens":4},"completion_tokens_details":{"reasoning_tokens":3}}}`)
 	}))
 	defer fixture.Close()
 	prior := &schema.AgenticMessage{Role: schema.AgenticRoleTypeAssistant, ContentBlocks: []*schema.ContentBlock{schema.NewContentBlock(&schema.Reasoning{Text: "prior reasoning"}), schema.NewContentBlock(&schema.FunctionToolCall{CallID: "prior-call", Name: "im_send_message", Arguments: "{}"})}}
@@ -102,7 +102,7 @@ func TestOfficialAgenticUnaryOptionsBlocksAndMetadata(t *testing.T) {
 	}
 	meta, ok := output.ResponseMeta.Extension.(*agenticopenai.ChatResponseMetaExtension)
 	usage := output.ResponseMeta.TokenUsage
-	if !ok || meta.ID != "official-fixture" || meta.FinishReason != "tool_calls" || prompt != 12 || completion != 7 || usage.TotalTokens != 19 || usage.PromptTokenDetails.CachedTokens != 4 || usage.CompletionTokensDetails.ReasoningTokens != 3 {
+	if !ok || meta.ID != "official-fixture" || meta.FinishReason != "tool_calls" || meta.LogProbs == nil || len(meta.LogProbs.Content) != 1 || meta.LogProbs.Content[0].Token != "private answer" || meta.LogProbs.Content[0].LogProb != -0.25 || prompt != 12 || completion != 7 || usage.TotalTokens != 19 || usage.PromptTokenDetails.CachedTokens != 4 || usage.CompletionTokensDetails.ReasoningTokens != 3 {
 		t.Fatalf("official usage/metadata lost: %+v %+v", meta, usage)
 	}
 }

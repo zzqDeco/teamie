@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"go.uber.org/zap"
 	"net/http"
 	"strings"
 	"sync"
+	"teamie/backend/pkg/observability"
 	"time"
 
 	"teamie/agent-infra/internal/api"
@@ -56,26 +58,34 @@ func (s *Service) Chat(ctx context.Context, r *agent.GatewayChatRequest) (*agent
 	// provider call here could orphan the single model slot indefinitely.
 	return failed(api.Err(400, "protocol_unsupported", "Model generation requires the private HTTP transport")), nil
 }
-func (s *Service) call(ctx context.Context, owner, id, session, run, raw string, messageLimits ...int) *agent.GatewayChatResponse {
+func (s *Service) call(ctx context.Context, owner, id, session, run, raw string, messageLimits ...int) (result *agent.GatewayChatResponse) {
+	ctx, operation := gatewayOperation(ctx, id, session, run, false)
+	var callFailure error
+	var prompt, completion int64
+	phase := "admission"
+	defer func() {
+		operation.End(callFailure, zap.String("custom.model.failure_stage", phase), zap.Int64("custom.model.prompt_tokens", prompt), zap.Int64("custom.model.completion_tokens", completion), zap.String("custom.duration_scope", "admission-through-provider-response-and-usage-record"), zap.Int("custom.retry.attempts", observability.HTTPAttempts(ctx)))
+	}()
+	fail := func(err error) *agent.GatewayChatResponse { callFailure = err; return failed(err) }
 	c, e := s.Store.Load(ctx)
 	if e != nil {
-		return failed(e)
+		return fail(e)
 	}
 	if !c.Configured() {
-		return failed(api.Err(409, "model_unconfigured", "An administrator must configure the model gateway"))
+		return fail(api.Err(409, "model_unconfigured", "An administrator must configure the model gateway"))
 	}
 	if !c.Enabled {
-		return failed(api.Err(409, "model_disabled", "The model gateway is disabled"))
+		return fail(api.Err(409, "model_disabled", "The model gateway is disabled"))
 	}
 	select {
 	case s.slots <- struct{}{}:
 		defer func() { <-s.slots }()
 	default:
-		return failed(api.Err(429, "gateway_busy", "The model gateway is busy"))
+		return fail(api.Err(429, "gateway_busy", "The model gateway is busy"))
 	}
 	key, e := s.Cipher.Decrypt(c.CipherKey)
 	if e != nil {
-		return failed(api.Err(503, "credential_unavailable", "Saved model credential could not be decrypted"))
+		return fail(&api.Error{Status: 503, Code: "credential_unavailable", Message: "Saved model credential could not be decrypted", Cause: e})
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -88,19 +98,24 @@ func (s *Service) call(ctx context.Context, owner, id, session, run, raw string,
 	s.mu.Unlock()
 	defer func() { s.mu.Lock(); delete(s.active, index); s.mu.Unlock() }()
 	start := time.Now()
-	body, prompt, completion, e := s.Provider.Chat(ctx, c, key, raw, messageLimits...)
+	phase = "provider-generate"
+	var body string
+	body, prompt, completion, e = s.Provider.Chat(ctx, c, key, raw, messageLimits...)
 	status := "success"
 	var response *agent.GatewayChatResponse
 	if e != nil {
+		callFailure = e
 		response = failed(e)
 		status = response.GetErrorCode()
 	} else {
 		response = &agent.GatewayChatResponse{Ok: true, ResponseJson: &body, StatusCode: ptr(int32(200))}
+		phase = "usage-persist"
 	}
 	auditCtx, auditCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer auditCancel()
-	if s.Store.Record(auditCtx, Usage{OwnerID: owner, AgentID: id, SessionID: session, RunID: run, Status: status, PromptTokens: prompt, CompletionTokens: completion, LatencyMS: time.Since(start).Milliseconds()}) != nil {
-		return failed(api.Err(503, "usage_unavailable", "Model usage could not be recorded"))
+	if auditErr := s.Store.Record(auditCtx, Usage{OwnerID: owner, AgentID: id, SessionID: session, RunID: run, Status: status, PromptTokens: prompt, CompletionTokens: completion, LatencyMS: time.Since(start).Milliseconds()}); auditErr != nil {
+		phase = "usage-persist"
+		return fail(&api.Error{Status: 503, Code: "usage_unavailable", Message: "Model usage could not be recorded", Cause: auditErr})
 	}
 	return response
 }
@@ -143,6 +158,7 @@ func (s *Service) Routes(auth api.AdminAuth) http.Handler {
 				api.Fail(w, e)
 				return
 			}
+			observability.AnnotateHTTP(w, zap.String("user.id", u.Id))
 			fn(w, r, u.Id)
 		}
 	}

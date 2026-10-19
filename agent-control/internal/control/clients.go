@@ -7,6 +7,7 @@ import (
 	"teamie/backend/kitex_gen/im"
 	"teamie/backend/kitex_gen/im/chatservice"
 	"teamie/backend/kitex_gen/im/identityservice"
+	"teamie/backend/pkg/observability"
 	"time"
 )
 
@@ -18,7 +19,7 @@ type IM struct {
 
 func NewIM(identityAddr, chatAddr, token string) (*IM, error) {
 	opts := func(addr string) []client.Option {
-		return []client.Option{client.WithHostPorts(addr), client.WithRPCTimeout(3 * time.Second), client.WithConnectTimeout(time.Second)}
+		return []client.Option{observability.RPCClient(), client.WithHostPorts(addr), client.WithRPCTimeout(3 * time.Second), client.WithConnectTimeout(time.Second)}
 	}
 	identity, e := identityservice.NewClient("teamie.identity", opts(identityAddr)...)
 	if e != nil {

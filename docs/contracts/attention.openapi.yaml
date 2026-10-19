@@ -33,6 +33,7 @@ paths:
                 properties:
                   cursor: {type: string}
                   unreadCount: {type: integer, minimum: 0}
+                  channelUnreadCount: {type: integer, minimum: 0}
                   items:
                     type: array
                     items:

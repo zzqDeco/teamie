@@ -38,6 +38,14 @@ function timestampNanoseconds(value: string): bigint {
     BigInt((match[2] || "").padEnd(9, "0"))
   );
 }
+export function compareTimestampsDesc(a: string, b: string): number {
+  try {
+    const diff = timestampNanoseconds(b) - timestampNanoseconds(a);
+    return diff > 0n ? 1 : diff < 0n ? -1 : 0;
+  } catch {
+    return b.localeCompare(a);
+  }
+}
 const version = (m: Message) =>
   timestampNanoseconds(m.retractedAt || m.editedAt || m.createdAt);
 function newerTimestamp(a?: string, b?: string): string {
@@ -180,7 +188,9 @@ export class ChatStore {
                       ...m,
                       status: "failed" as const,
                       error:
-                        m.status === "failed" && m.error
+                        m.status === "failed" &&
+                        typeof m.permanent === "boolean" &&
+                        m.error
                           ? m.error
                           : "上次发送未确认，请重试",
                     }
@@ -215,7 +225,7 @@ export class ChatStore {
   revoke() {
     this.generation += 1;
     this.conversationVersion += 1;
-    this.hasAuthoritativeConversations = true;
+    this.hasAuthoritativeConversations = false;
     this.commit(empty(this.snapshot.userId));
   }
   discardLocal(conversationId: string, clientMessageId: string) {

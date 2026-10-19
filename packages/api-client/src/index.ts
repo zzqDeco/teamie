@@ -218,7 +218,12 @@ export type AttentionItem = {
   reasons: ("mention" | "reply")[];
   isRead: boolean;
 };
-export type AttentionPage = { items: AttentionItem[]; cursor?: string; unreadCount: number };
+export type AttentionPage = {
+  items: AttentionItem[];
+  cursor?: string;
+  unreadCount: number;
+  channelUnreadCount?: number;
+};
 export class ApiError extends Error {
   status: number;
   code: string;
