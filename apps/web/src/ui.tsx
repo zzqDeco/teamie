@@ -8,7 +8,7 @@ export function Logo({ compact = false }: { compact?: boolean }) {
       <span className="brand-icon" aria-hidden="true">
         <svg viewBox="0 0 40 40">
           <path d="M9 10h23v6h-9v17h-6V16H9z" fill="currentColor" />
-          <circle cx="31" cy="30" r="4" fill="#d8efae" />
+          <circle cx="31" cy="30" r="4" fill="var(--logo-accent, #d8efae)" />
         </svg>
       </span>
       {!compact && (

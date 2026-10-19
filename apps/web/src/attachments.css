@@ -8,15 +8,15 @@
   width: 36px;
   height: 36px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   background: transparent;
-  color: var(--text-muted, #73777c);
+  color: var(--text-muted);
   cursor: pointer;
   flex: none;
 }
 .attachment-add:hover {
   background: var(--hover-bg, #f0f1f3);
-  color: var(--text, #25282c);
+  color: var(--text-strong);
 }
 .attachment-add:disabled {
   opacity: 0.4;
@@ -42,7 +42,7 @@
   gap: 8px;
   padding: 9px 10px;
   border: 1px solid var(--border, #dedfe3);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   min-width: 0;
   max-width: 100%;
   background: var(--surface, #fff);
@@ -59,12 +59,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--text, #25282c);
+  color: var(--text-strong);
   font-size: 13px;
 }
 .attachment-meta {
   font-size: 11px;
-  color: var(--text-muted, #74777c);
+  color: var(--text-muted);
   line-height: 1.4;
 }
 .attachment-draft.failed {
@@ -72,7 +72,7 @@
 }
 .attachment-draft.failed .attachment-meta,
 .attachment-error {
-  color: #b83b3b;
+  color: var(--danger-text);
 }
 .attachment-draft button {
   border: 0;
@@ -81,7 +81,7 @@
   color: inherit;
   cursor: pointer;
   display: flex;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
 }
 .attachment-draft button:hover {
   background: var(--hover-bg, #f0f1f3);
@@ -107,8 +107,8 @@
   min-width: 180px;
   border: 1px solid var(--border, #dedfe3);
   background: var(--surface, #fff);
-  color: var(--text-muted, #74777c);
-  border-radius: 10px;
+  color: var(--text-muted);
+  border-radius: var(--r-md);
   padding: 11px 12px;
   cursor: pointer;
 }

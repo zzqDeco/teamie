@@ -1,0 +1,108 @@
+:root {
+  /* Text hierarchy — all verified >= 4.5:1 WCAG AA on #ffffff, #fbfaf8, #f7f5f9, and #ece8f3 */
+  --text-strong: #302d3b;
+  --text: #4a4356;
+  --text-muted: #5d536b;
+  --text-subtle: #6b6079;
+
+  /* Brand & interactive accents */
+  --brand: #7463d4;
+  --brand-muted: #7264bd;
+  --brand-text: #5f4fc1;
+  --brand-strong: #4f3ea6;
+  --logo-accent: #d8efae;
+
+  /* Legacy variable aliases for compatibility */
+  --purple: var(--brand);
+  --purple-dark: var(--brand-text);
+  --muted: var(--text-muted);
+
+  /* Surfaces & borders (preserving warm ivory & soft lavender identity) */
+  --bg: #fbfaf8;
+  --surface: #ffffff;
+  --surface-sunken: #f7f5f9;
+  --rail: #ece8f3;
+  --lavender: #f0ecfb;
+  --hover-bg: #f2eef8;
+  --border: #eae5ee;
+  --border-strong: #ddd5e6;
+
+  /* Semantic feedback tokens (WCAG AA compliant) */
+  --danger-text: #a82e2e;
+  --danger-bg: #fdf2f2;
+  --danger-border: #e8b4b4;
+  --warning-text: #6b5322;
+  --warning-bg: #fbf6ea;
+  --warning-border: #efe5cf;
+  --success-text: #355d2d;
+  --success-bg: #eef6ea;
+  --success-border: #dcebd4;
+
+  /* Unified focus ring (6.2:1 contrast on light surfaces) */
+  --focus-ring: 2px solid var(--brand-text);
+  --focus-ring-offset: 2px;
+  --focus-halo: 0 0 0 3px rgba(116, 99, 212, 0.2);
+
+  /* Typography families & scale */
+  --font-sans:
+    "DM Sans",
+    "Noto Sans SC",
+    -apple-system,
+    BlinkMacSystemFont,
+    "PingFang SC",
+    "Hiragino Sans GB",
+    "Microsoft YaHei UI",
+    "Microsoft YaHei",
+    sans-serif;
+  --font-mono:
+    "JetBrains Mono",
+    "SFMono-Regular",
+    ui-monospace,
+    Menlo,
+    Monaco,
+    Consolas,
+    monospace;
+  --font-xs: 11px;
+  --font-sm: 12px;
+  --font-base: 13px;
+  --font-md: 14px;
+  --font-lg: 15px;
+  --font-xl: 17px;
+  --font-2xl: 20px;
+  --font-3xl: 24px;
+  --font-4xl: 30px;
+
+  /* Global root typography, colors, and font rendering */
+  font-family: var(--font-sans);
+  color: var(--text-strong);
+  background: var(--bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-size: var(--font-md);
+
+  /* Border radius scale */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+  --r-pill: 999px;
+
+  /* Elevation shadow scale (#3e2e63 tint) */
+  --shadow-sm: 0 2px 6px rgba(62, 46, 99, 0.06);
+  --shadow-md: 0 6px 18px rgba(62, 46, 99, 0.09);
+  --shadow-lg: 0 14px 34px rgba(62, 46, 99, 0.12);
+  --shadow-pop: 0 18px 44px rgba(62, 46, 99, 0.16);
+
+  /* 4px-base spacing scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+}

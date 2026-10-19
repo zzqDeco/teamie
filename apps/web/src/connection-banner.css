@@ -8,23 +8,23 @@
   flex-shrink: 0;
   border-bottom: 1px solid #ece4f2;
   background: #f5f1fb;
-  color: #4a4356;
+  color: var(--text);
 }
 .connection-banner.offline {
   background: #fbf6ea;
   border-bottom-color: #efe5cf;
-  color: #6b5729;
+  color: var(--warning-text);
 }
 .connection-banner.restored {
   background: #eef6ea;
   border-bottom-color: #dcebd4;
-  color: #3d6534;
+  color: var(--success-text);
 }
 .connection-banner button {
   margin-left: auto;
   border: 0;
   background: transparent;
-  color: #5f4fc1;
+  color: var(--brand-text);
   font-weight: 600;
   font-size: 13px;
   min-height: 32px;
