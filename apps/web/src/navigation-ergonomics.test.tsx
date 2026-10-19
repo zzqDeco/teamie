@@ -651,6 +651,14 @@ describe("PR-3 navigation & notification ergonomics", () => {
       "已移除会话草稿",
     );
 
+    // Sync cursor recovery (revoke) must preserve drafts for the same user
+    act(() => {
+      chatStore.revoke();
+    });
+    expect(sessionStorage.getItem("teamie.drafts.v1:owner")).toContain(
+      "新会话草稿",
+    );
+
     act(() => {
       chatStore.clear();
     });

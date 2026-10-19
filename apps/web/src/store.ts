@@ -225,7 +225,7 @@ export class ChatStore {
   revoke() {
     this.generation += 1;
     this.conversationVersion += 1;
-    this.hasAuthoritativeConversations = true;
+    this.hasAuthoritativeConversations = false;
     this.commit(empty(this.snapshot.userId));
   }
   discardLocal(conversationId: string, clientMessageId: string) {
