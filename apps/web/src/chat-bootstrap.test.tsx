@@ -4,9 +4,10 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api } from "@teamie/api-client";
+import { api, ApiError } from "@teamie/api-client";
 import type { Bootstrap, Conversation, Message, SyncPage, User } from "@teamie/api-client";
 import { ChatProvider, useChat } from "./chat";
+import { setActiveNotificationContext, setNotificationPreferences } from "./notifications";
 import { chatStore } from "./store";
 
 const auth = vi.hoisted(() => ({
@@ -133,6 +134,75 @@ afterEach(async () => {
 });
 
 describe("ChatProvider bootstrap ordering", () => {
+  it.each(["unchanged", "retracted", "read", "revoked", "reset"] as const)(
+    "retains committed notification candidates across a failed sync page and reconciles %s messages on retry",
+    async (change) => {
+      const notifications: NotificationOptions[] = [];
+      vi.stubGlobal("Notification", class {
+        static permission = "granted";
+        constructor(_title: string, options: NotificationOptions) {
+          notifications.push(options);
+        }
+        close() {}
+      });
+      setActiveNotificationContext(null);
+      setNotificationPreferences({ enabled: true }, auth.user.id);
+      await mount();
+      const incoming: Message = {
+        ...message,
+        conversationId: first.id,
+        senderId: "other-user",
+        senderName: "Other user",
+        mentions: [{ userId: auth.user.id, start: 0, end: 1 }],
+      };
+      vi.mocked(api.sync)
+        .mockResolvedValueOnce({
+          events: [{ id: "1", type: "message.created", conversationId: first.id, message: incoming, createdAt: incoming.createdAt }],
+          cursor: "1",
+          hasMore: true,
+        })
+        .mockRejectedValueOnce(new Error("Second page unavailable"));
+      await settle(() => sync());
+      expect(chatStore.getSnapshot().cursor).toBe("1");
+      expect(chatStore.getSnapshot().messages[first.id]).toEqual([incoming]);
+      expect(notifications).toHaveLength(0);
+      if (change === "reset") {
+        vi.mocked(api.sync).mockRejectedValueOnce(new ApiError(409, "invalid_cursor", "Cursor expired"));
+        await settle(() => sync());
+        expect(chatStore.getSnapshot().cursor).toBe("0");
+      }
+
+      // A profile update must not discard the pending candidates either.
+      auth.user = { ...auth.user, displayName: "Updated profile" };
+      await settle(render);
+      const retryPage: SyncPage = { events: [], cursor: "1", hasMore: false };
+      if (change === "retracted") {
+        retryPage.events = [{ id: "2", type: "message.retracted", conversationId: first.id, message: { ...incoming, body: "", retractedAt: "2026-10-17T00:01:00Z" }, createdAt: incoming.createdAt }];
+      } else if (change === "read") {
+        retryPage.events = [{ id: "2", type: "read.updated", conversationId: first.id, readSeq: incoming.seq, createdAt: incoming.createdAt }];
+      } else if (change === "revoked") {
+        retryPage.events = [{ id: "2", type: "membership.changed", workspaceId: first.workspaceId, createdAt: incoming.createdAt }];
+        vi.mocked(api.bootstrap).mockResolvedValueOnce(bootstrap([]));
+      } else if (change === "reset") {
+        retryPage.events = [
+          { id: "1", type: "conversation.created", conversationId: first.id, conversation: first, createdAt: first.updatedAt },
+          { id: "2", type: "message.created", conversationId: first.id, message: incoming, createdAt: incoming.createdAt },
+        ];
+      }
+      if (retryPage.events.length) retryPage.cursor = "2";
+      vi.mocked(api.sync).mockResolvedValueOnce(retryPage);
+      await settle(() => sync());
+      await settle();
+      expect(api.sync).toHaveBeenLastCalledWith(change === "reset" ? "0" : "1");
+      expect(notifications).toHaveLength(change === "unchanged" ? 1 : 0);
+      if (change === "unchanged") {
+        expect(notifications[0].tag).toBe(`teamie-message-${incoming.id}`);
+      }
+      await settle(() => sync());
+      expect(notifications).toHaveLength(change === "unchanged" ? 1 : 0);
+    },
+  );
+
   it("refreshes attention projections after durable remote reads and message changes", async () => {
     await mount();
     const invalidate = vi.spyOn(client, "invalidateQueries");

@@ -45,6 +45,7 @@ import { enrichParticipants } from "./participants";
 import type { Participant } from "./participants";
 import { KeyboardShortcutsModal, QuickSwitcher } from "./quick-switcher";
 import { chatStore, compareTimestampsDesc } from "./store";
+import { setActiveNotificationContext } from "./notifications";
 import type { DialogKind } from "./dialogs";
 import { ConversationView, conversationName } from "./messages";
 import {
@@ -269,6 +270,16 @@ export function Shell() {
       );
     }
   }, [conversation, workspace]);
+  useEffect(() => {
+    const activeId =
+      conversation && workspace && conversation.workspaceId === workspace.id
+        ? conversation.id
+        : null;
+    setActiveNotificationContext(activeId, (to) => navigate(to));
+    return () => {
+      setActiveNotificationContext(undefined, null);
+    };
+  }, [conversation, workspace, navigate]);
   const conversations = Object.values(snapshot.conversations).filter(
     (c) => c.workspaceId === workspace?.id,
   );

@@ -5440,3 +5440,14 @@ label > .copy-input {
   border-color: var(--border-strong);
   box-shadow: var(--shadow-sm);
 }
+.notification-settings > .field-help {
+  margin: -4px 0 12px;
+}
+.notification-settings .agent-enabled-switch + .agent-enabled-switch {
+  margin-top: 12px;
+}
+.agent-enabled-switch:has(input:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+

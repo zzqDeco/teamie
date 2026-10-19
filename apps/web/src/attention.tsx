@@ -1,7 +1,7 @@
-import { useState } from "react";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { ArrowLeft, Bell, RefreshCw } from "lucide-react";
+import { ArrowLeft, Bell, CheckCheck, RefreshCw } from "lucide-react";
 import { api, ApiError } from "@teamie/api-client";
 import type { AttentionItem } from "@teamie/api-client";
 import { useAuth } from "./auth";
@@ -97,10 +97,39 @@ export function currentAttention(
   };
 }
 
+type BatchReadFailure = {
+  total: number;
+  remaining: Array<[string, number]>;
+};
+
+const MARK_READ_CONCURRENCY = 4;
+
 export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
   const scope = useAttentionScope();
   const snapshot = useChatState();
+  const client = useQueryClient();
   const [unreadOnly, setUnreadOnly] = useState(false);
+  const [markingRead, setMarkingRead] = useState(false);
+  const [markReadError, setMarkReadError] = useState("");
+  const [batchFailure, setBatchFailure] = useState<BatchReadFailure | null>(
+    null,
+  );
+  const markReadAbort = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    markReadAbort.current?.abort();
+    markReadAbort.current = null;
+    setMarkingRead(false);
+    setMarkReadError("");
+    setBatchFailure(null);
+  }, [scope.userId, scope.generation]);
+
+  useEffect(() => {
+    return () => {
+      markReadAbort.current?.abort();
+    };
+  }, []);
+
   const query = useInfiniteQuery({
     queryKey: [
       "attention",
@@ -133,6 +162,157 @@ export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
       return [current];
     },
   );
+
+  const rawPages = query.data?.pages ?? [];
+  let locallyResolvedUnread = 0;
+  const seenRaw = new Set<string>();
+  for (const page of rawPages) {
+    for (const raw of page.items) {
+      if (seenRaw.has(raw.message.id)) continue;
+      seenRaw.add(raw.message.id);
+      if (!raw.isRead) {
+        const cur = currentAttention(raw, snapshot, scope.userId);
+        if (!cur || cur.isRead) locallyResolvedUnread += 1;
+      }
+    }
+  }
+  const serverUnread = Math.max(
+    0,
+    (rawPages[0]?.unreadCount ?? 0) - locallyResolvedUnread,
+  );
+  const activeRemaining =
+    batchFailure?.remaining.filter(([convId, seq]) => {
+      const conv = snapshot.conversations[convId];
+      return Boolean(conv && conv.readSeq < seq);
+    }) ?? [];
+  const completedCount = batchFailure
+    ? Math.max(0, batchFailure.total - activeRemaining.length)
+    : 0;
+  const hasUnread =
+    items.some((item) => !item.isRead) ||
+    serverUnread > 0 ||
+    activeRemaining.length > 0;
+
+  async function markAllRead(retryRemainingOnly: boolean) {
+    if (markingRead || !scope.enabled) return;
+    const generation = chatStore.generation;
+    const userId = scope.userId;
+    markReadAbort.current?.abort();
+    const controller = new AbortController();
+    markReadAbort.current = controller;
+    setMarkingRead(true);
+    setMarkReadError("");
+
+    try {
+      // Retrying keeps the original batch's scope, but its failed targets may
+      // have stopped being attention since the previous attempt.
+      const retryBounds =
+        retryRemainingOnly && batchFailure
+          ? new Map(activeRemaining)
+          : null;
+      const maxSeqByConv = new Map<string, number>();
+      const recordUnread = (rawItem: AttentionItem) => {
+        const current = currentAttention(
+          rawItem,
+          chatStore.getSnapshot(),
+          userId,
+        );
+        if (!current || current.isRead) return;
+        if (retryBounds) {
+          const bound = retryBounds.get(current.conversation.id);
+          if (bound === undefined || current.message.seq > bound) return;
+        }
+        const prev = maxSeqByConv.get(current.conversation.id) ?? 0;
+        if (current.message.seq > prev) {
+          maxSeqByConv.set(current.conversation.id, current.message.seq);
+        }
+      };
+
+      let cursor: string | undefined = undefined;
+      const seenCursors = new Set<string>();
+      for (;;) {
+        const page = await api.attention(
+          { cursor, unreadOnly: true, limit: 100 },
+          controller.signal,
+        );
+        if (controller.signal.aborted || chatStore.generation !== generation)
+          return;
+        for (const rawItem of page.items) {
+          recordUnread(rawItem);
+        }
+        if (!page.cursor || seenCursors.has(page.cursor)) break;
+        seenCursors.add(page.cursor);
+        cursor = page.cursor;
+      }
+
+      const currentConvs = chatStore.getSnapshot().conversations;
+      const targets = Array.from(maxSeqByConv.entries()).filter(
+        ([convId, seq]) =>
+          Boolean(currentConvs[convId]) && currentConvs[convId].readSeq < seq,
+      );
+      const totalTargets = retryBounds ? batchFailure!.total : targets.length;
+
+      if (targets.length === 0) {
+        setBatchFailure(null);
+        await client.invalidateQueries({ queryKey: ["attention", userId] });
+        return;
+      }
+
+      const failed: Array<[string, number]> = [];
+      let nextIndex = 0;
+      const workerCount = Math.min(MARK_READ_CONCURRENCY, targets.length);
+      const workers = Array.from({ length: workerCount }, async () => {
+        while (nextIndex < targets.length) {
+          const idx = nextIndex++;
+          const [convId, seq] = targets[idx];
+          if (controller.signal.aborted || chatStore.generation !== generation)
+            return;
+          const conv = chatStore.getSnapshot().conversations[convId];
+          if (!conv || conv.readSeq >= seq) continue;
+          try {
+            const res = await api.read(convId, seq);
+            if (
+              controller.signal.aborted ||
+              chatStore.generation !== generation
+            )
+              return;
+            chatStore.markRead(convId, res.readSeq);
+          } catch {
+            if (
+              controller.signal.aborted ||
+              chatStore.generation !== generation
+            )
+              return;
+            failed.push([convId, seq]);
+          }
+        }
+      });
+
+      await Promise.all(workers);
+      if (controller.signal.aborted || chatStore.generation !== generation)
+        return;
+
+      if (failed.length > 0) {
+        setBatchFailure({
+          total: totalTargets,
+          remaining: failed,
+        });
+      } else {
+        setBatchFailure(null);
+      }
+      await client.invalidateQueries({ queryKey: ["attention", userId] });
+    } catch (error) {
+      if (!controller.signal.aborted && chatStore.generation === generation) {
+        setMarkReadError(errorText(error));
+      }
+    } finally {
+      if (markReadAbort.current === controller) {
+        markReadAbort.current = null;
+        setMarkingRead(false);
+      }
+    }
+  }
+
   return (
     <section className="attention-view">
       <header className="conversation-header">
@@ -150,6 +330,18 @@ export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
           <h1>提及与回复</h1>
         </div>
         <div className="conversation-header-actions">
+          <Button
+            className="secondary small-button attention-mark-all-read"
+            busy={markingRead}
+            disabled={markingRead || query.isPending || !hasUnread}
+            title="将各会话标为已读至最新提及或回复位置，之后的普通消息仍保持未读"
+            onClick={() => void markAllRead(activeRemaining.length > 0)}
+          >
+            <CheckCheck size={ICON.sm} aria-hidden="true" />
+            {activeRemaining.length > 0
+              ? `已处理 ${completedCount} / ${batchFailure!.total}，重试剩余`
+              : "全部标为已读"}
+          </Button>
           <IconButton
             label="刷新提醒"
             disabled={query.isFetching}
@@ -174,6 +366,12 @@ export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
           </p>
         )}
         {query.error && <Notice>{errorText(query.error)}</Notice>}
+        {markReadError && <Notice>{markReadError}</Notice>}
+        {activeRemaining.length > 0 && !markReadError && (
+          <Notice>
+            {`已处理 ${completedCount} / ${batchFailure!.total}，重试剩余会话即可完成标记已读。`}
+          </Notice>
+        )}
         {!query.isPending && !query.error && !items.length && (
           <p className="attention-empty">
             {unreadOnly ? "没有未读提醒" : "暂无提及或回复"}

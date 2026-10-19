@@ -27,6 +27,9 @@
   background: var(--lavender);
   font-weight: 600;
 }
+.attention-mark-all-read {
+  gap: 6px;
+}
 .attention-scroll {
   padding: 12px 24px 24px;
   min-height: 0;
