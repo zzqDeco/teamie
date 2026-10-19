@@ -99,6 +99,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       attempt = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let ws: WebSocket | null = null;
+    // Applied pages advance the durable cursor. Keep their notification
+    // candidates until pagination completes, including across transient retries.
+    const notifyCandidates: Array<{
+      conversationId: string;
+      messageId: string;
+    }> = [];
+    let notificationGeneration = chatStore.generation;
     const refreshPermissions = () => {
       // A 403 may reject an owner-only operation or a disabled write. Fetch
       // current permissions before pruning content that is still readable.
@@ -113,14 +120,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
       syncing = true;
       const generation = chatStore.generation;
+      if (notificationGeneration !== generation) {
+        notifyCandidates.length = 0;
+        notificationGeneration = generation;
+      }
       try {
         do {
           requested = false;
           let hasMore = true;
-          const notifyCandidates: Array<{
-            conversationId: string;
-            messageId: string;
-          }> = [];
           while (hasMore && !stopped) {
             const cursor = chatStore.getSnapshot().cursor;
             const page = await api.sync(cursor);
@@ -178,7 +185,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             notifyCandidates.length > 0
           ) {
             notifySyncedMessages(
-              notifyCandidates,
+              notifyCandidates.splice(0),
               chatStore.getSnapshot(),
               userId,
             );
@@ -194,6 +201,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             )
           ) {
             chatStore.revoke();
+            notifyCandidates.length = 0;
             initialSyncCompleted = false;
             completedInitialSyncUser.current = null;
           }
