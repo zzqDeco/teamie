@@ -620,7 +620,7 @@ describe("PR-3 navigation & notification ergonomics", () => {
       }),
     );
     localStorage.setItem(
-      "teamie.chat.v1:owner",
+      "teamie.sync.v1.owner",
       JSON.stringify({
         userId: owner.id,
         cursor: "1",
@@ -632,6 +632,9 @@ describe("PR-3 navigation & notification ergonomics", () => {
     act(() => {
       chatStore.begin(owner.id);
     });
+    expect(Object.keys(chatStore.getSnapshot().conversations)).toEqual([
+      "general",
+    ]);
     // Before replaceConversations runs, dm-2 draft must NOT be pruned by stale localStorage
     expect(sessionStorage.getItem("teamie.drafts.v1:owner")).toContain(
       "新会话草稿",
