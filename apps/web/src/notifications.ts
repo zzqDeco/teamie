@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { chatStore } from "./store";
 import type { ChatSnapshot } from "./store";
 
 export const NOTIFICATION_STORAGE_KEY = "teamie.notifications";
@@ -17,13 +18,23 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
   showPreview: false,
 };
 
-let fallbackPreferences: NotificationPreferences | null = null;
+const fallbackPreferencesByUser = new Map<string, NotificationPreferences>();
 const listeners = new Set<(prefs: NotificationPreferences) => void>();
 const activeNotifications = new Set<{ close?: () => void }>();
 let notifiedUserId: string | null = null;
 const notifiedMessageIds = new Set<string>();
 let registeredConversationId: string | null | undefined = undefined;
 let registeredNavigate: ((to: string) => void) | null = null;
+
+function resolveUserId(userId?: string | null): string | null {
+  if (userId !== undefined) return userId || null;
+  return notifiedUserId || chatStore.getSnapshot().userId || null;
+}
+
+export function notificationStorageKey(userId?: string | null): string | null {
+  const resolved = resolveUserId(userId);
+  return resolved ? `${NOTIFICATION_STORAGE_KEY}.${resolved}` : null;
+}
 
 export function getNotificationPermission(): BrowserNotificationPermission {
   if (
@@ -36,10 +47,17 @@ export function getNotificationPermission(): BrowserNotificationPermission {
   return window.Notification.permission;
 }
 
-export function getNotificationPreferences(): NotificationPreferences {
-  if (fallbackPreferences) return fallbackPreferences;
+export function getNotificationPreferences(
+  userId?: string | null,
+): NotificationPreferences {
+  const resolved = resolveUserId(userId);
+  if (!resolved) return { ...DEFAULT_PREFERENCES };
+  const fallback = fallbackPreferencesByUser.get(resolved);
+  if (fallback) return { ...fallback };
+  const key = notificationStorageKey(resolved);
+  if (!key) return { ...DEFAULT_PREFERENCES };
   try {
-    const raw = window.localStorage?.getItem(NOTIFICATION_STORAGE_KEY);
+    const raw = window.localStorage?.getItem(key);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<NotificationPreferences>;
       return {
@@ -66,28 +84,37 @@ export function closeActiveNotifications(): void {
 
 export function resetNotificationSession(userId: string | null = null): void {
   closeActiveNotifications();
+  if (!userId) {
+    fallbackPreferencesByUser.clear();
+  }
   if (notifiedUserId !== userId) {
     notifiedUserId = userId;
     notifiedMessageIds.clear();
+    const next = getNotificationPreferences(userId);
+    for (const listener of listeners) listener(next);
   }
 }
 
 export function setNotificationPreferences(
   patch: Partial<NotificationPreferences>,
+  userId?: string | null,
 ): NotificationPreferences {
-  const current = getNotificationPreferences();
+  const resolved = resolveUserId(userId);
+  if (!resolved) {
+    closeActiveNotifications();
+    return { ...DEFAULT_PREFERENCES };
+  }
+  const current = getNotificationPreferences(resolved);
   const next: NotificationPreferences = {
     enabled: patch.enabled ?? current.enabled,
     showPreview: patch.showPreview ?? current.showPreview,
   };
+  const key = notificationStorageKey(resolved)!;
   try {
-    window.localStorage?.setItem(
-      NOTIFICATION_STORAGE_KEY,
-      JSON.stringify(next),
-    );
-    fallbackPreferences = null;
+    window.localStorage?.setItem(key, JSON.stringify(next));
+    fallbackPreferencesByUser.delete(resolved);
   } catch {
-    fallbackPreferences = next;
+    fallbackPreferencesByUser.set(resolved, next);
   }
   if (!next.enabled) {
     closeActiveNotifications();
@@ -96,17 +123,19 @@ export function setNotificationPreferences(
   return next;
 }
 
-export async function enableBrowserNotifications(): Promise<{
+export async function enableBrowserNotifications(
+  userId?: string | null,
+): Promise<{
   granted: boolean;
   permission: BrowserNotificationPermission;
 }> {
   const permission = getNotificationPermission();
   if (permission === "unsupported") {
-    setNotificationPreferences({ enabled: false });
+    setNotificationPreferences({ enabled: false }, userId);
     return { granted: false, permission: "unsupported" };
   }
   if (permission === "denied") {
-    setNotificationPreferences({ enabled: false });
+    setNotificationPreferences({ enabled: false }, userId);
     return { granted: false, permission: "denied" };
   }
   if (permission === "default") {
@@ -117,13 +146,13 @@ export async function enableBrowserNotifications(): Promise<{
       requested = getNotificationPermission() as NotificationPermission;
     }
     if (requested === "granted") {
-      setNotificationPreferences({ enabled: true });
+      setNotificationPreferences({ enabled: true }, userId);
       return { granted: true, permission: "granted" };
     }
-    setNotificationPreferences({ enabled: false });
+    setNotificationPreferences({ enabled: false }, userId);
     return { granted: false, permission: requested };
   }
-  setNotificationPreferences({ enabled: true });
+  setNotificationPreferences({ enabled: true }, userId);
   return { granted: true, permission: "granted" };
 }
 
@@ -166,9 +195,11 @@ export function notifySyncedMessages(
 ): void {
   if (!candidates.length || snapshot.userId !== currentUserId) return;
   if (notifiedUserId !== currentUserId) {
-    resetNotificationSession(currentUserId);
+    closeActiveNotifications();
+    notifiedUserId = currentUserId;
+    notifiedMessageIds.clear();
   }
-  const prefs = getNotificationPreferences();
+  const prefs = getNotificationPreferences(currentUserId);
   if (!prefs.enabled || getNotificationPermission() !== "granted") return;
 
   for (const { conversationId, messageId } of candidates) {
@@ -262,25 +293,31 @@ export function notifySyncedMessages(
   }
 }
 
-export function useNotificationPreferences() {
+export function useNotificationPreferences(userId?: string | null) {
   const [preferences, setPreferencesState] = useState<NotificationPreferences>(
-    () => getNotificationPreferences(),
+    () => getNotificationPreferences(userId),
   );
   const [permission, setPermission] = useState<BrowserNotificationPermission>(
     () => getNotificationPermission(),
   );
 
   useEffect(() => {
-    const sync = (next: NotificationPreferences = getNotificationPreferences()) => {
+    const sync = (
+      next: NotificationPreferences = getNotificationPreferences(userId),
+    ) => {
       setPreferencesState(next);
       setPermission(getNotificationPermission());
     };
     listeners.add(sync);
 
     const onStorage = (event: StorageEvent) => {
-      if (!event.key || event.key === NOTIFICATION_STORAGE_KEY) {
-        fallbackPreferences = null;
-        sync();
+      const key = notificationStorageKey(userId);
+      if (!event.key || event.key === key) {
+        const resolved = resolveUserId(userId);
+        if (resolved) {
+          fallbackPreferencesByUser.delete(resolved);
+        }
+        sync(getNotificationPreferences(userId));
       }
     };
     const onVisibilityOrFocus = () => {
@@ -290,7 +327,7 @@ export function useNotificationPreferences() {
     window.addEventListener("storage", onStorage);
     window.addEventListener("focus", onVisibilityOrFocus);
     document.addEventListener("visibilitychange", onVisibilityOrFocus);
-    sync();
+    sync(getNotificationPreferences(userId));
 
     return () => {
       listeners.delete(sync);
@@ -298,17 +335,20 @@ export function useNotificationPreferences() {
       window.removeEventListener("focus", onVisibilityOrFocus);
       document.removeEventListener("visibilitychange", onVisibilityOrFocus);
     };
-  }, []);
+  }, [userId]);
 
   return {
     preferences,
     permission,
-    setPreferences: setNotificationPreferences,
+    setPreferences: (patch: Partial<NotificationPreferences>) =>
+      setNotificationPreferences(patch, userId),
     enableNotifications: async () => {
-      const result = await enableBrowserNotifications();
+      const result = await enableBrowserNotifications(userId);
       setPermission(result.permission);
       return result;
     },
-    disableNotifications: () => setNotificationPreferences({ enabled: false }),
+    disableNotifications: () =>
+      setNotificationPreferences({ enabled: false }, userId),
   };
 }
+

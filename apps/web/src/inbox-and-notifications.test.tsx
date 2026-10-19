@@ -16,7 +16,7 @@ import type {
 import { ProfileSettings } from "./dialogs";
 import {
   getNotificationPreferences,
-  NOTIFICATION_STORAGE_KEY,
+  notificationStorageKey,
   notifySyncedMessages,
   resetNotificationSession,
   setActiveNotificationContext,
@@ -203,6 +203,7 @@ describe("PR-7 inbox batch mark-all-read and opt-in in-tab notifications", () =>
 
   it("pages unreadOnly=true (limit=100), marks max seq per conversation with concurrency<=4, and retries partial failures", async () => {
     const convs = Object.values(chatStore.getSnapshot().conversations);
+    const staleCachedOnlyItem = makeAttention(convs[0], 50);
     const page1Items = [
       makeAttention(convs[0], 15),
       makeAttention(convs[0], 8),
@@ -216,11 +217,11 @@ describe("PR-7 inbox batch mark-all-read and opt-in in-tab notifications", () =>
 
     vi.spyOn(api, "attention").mockImplementation(async (options) => {
       const snap = chatStore.getSnapshot().conversations;
-      const all = [...page1Items, ...page2Items].map((it) => ({
+      const freshAll = [...page1Items, ...page2Items].map((it) => ({
         ...it,
         isRead: snap[it.conversation.id].readSeq >= it.message.seq,
       }));
-      const unreadCount = all.filter((it) => !it.isRead).length;
+      const unreadCount = freshAll.filter((it) => !it.isRead).length;
       if (options?.limit === 100 && options?.unreadOnly) {
         if (options.cursor === "page-2") {
           return {
@@ -239,8 +240,8 @@ describe("PR-7 inbox batch mark-all-read and opt-in in-tab notifications", () =>
         };
       }
       return {
-        items: all,
-        unreadCount,
+        items: [staleCachedOnlyItem, ...freshAll],
+        unreadCount: unreadCount + 1,
       };
     });
 
@@ -289,8 +290,9 @@ describe("PR-7 inbox batch mark-all-read and opt-in in-tab notifications", () =>
 
     // Concurrency is bounded to 4 even across 5 conversations
     expect(maxConcurrentReads).toBeLessThanOrEqual(4);
-    // c1 had seq 15 and 8 -> only max seq 15 was called, leaving messages 16..100 unread
+    // c1 had fresh seq 15 and 8 (and stale cached seq 50 omitted from fresh scan) -> only max fresh seq 15 was called
     expect(readSpy).toHaveBeenCalledWith("c1", 15);
+    expect(readSpy).not.toHaveBeenCalledWith("c1", 50);
     expect(readSpy).not.toHaveBeenCalledWith("c1", 8);
     expect(chatStore.getSnapshot().conversations.c1.readSeq).toBe(15);
     expect(chatStore.getSnapshot().conversations.c1.lastSeq).toBe(100);
@@ -309,10 +311,9 @@ describe("PR-7 inbox batch mark-all-read and opt-in in-tab notifications", () =>
     expect(readSpy).toHaveBeenCalledWith("c3", 31);
     expect(chatStore.getSnapshot().conversations.c3.readSeq).toBe(31);
     expect(markBtn.textContent).toContain("全部标为已读");
-    expect(markBtn.disabled).toBe(true);
   });
 
-  it("requests Notification permission only on user opt-in, defaults preview to off, and fires/navigates on eligible synced messages", async () => {
+  it("requests Notification permission only on user opt-in, defaults preview to off, scopes consent to account, and fires/navigates on eligible synced messages", async () => {
     const createdNotifications: Array<{
       title: string;
       options?: NotificationOptions;
@@ -360,7 +361,7 @@ describe("PR-7 inbox batch mark-all-read and opt-in in-tab notifications", () =>
 
     // Permission is never requested on mount
     expect(requestPermission).not.toHaveBeenCalled();
-    expect(getNotificationPreferences()).toEqual({
+    expect(getNotificationPreferences("human")).toEqual({
       enabled: false,
       showPreview: false,
     });
@@ -380,14 +381,21 @@ describe("PR-7 inbox batch mark-all-read and opt-in in-tab notifications", () =>
       enableInput.click();
     });
     expect(requestPermission).toHaveBeenCalledTimes(1);
-    expect(getNotificationPreferences()).toEqual({
+    expect(getNotificationPreferences("human")).toEqual({
       enabled: true,
       showPreview: false,
     });
     expect(
-      JSON.parse(window.localStorage.getItem(NOTIFICATION_STORAGE_KEY)!),
+      JSON.parse(
+        window.localStorage.getItem(notificationStorageKey("human")!)!,
+      ),
     ).toEqual({
       enabled: true,
+      showPreview: false,
+    });
+    // Another account on the same browser does not inherit human's consent
+    expect(getNotificationPreferences("other-user")).toEqual({
+      enabled: false,
       showPreview: false,
     });
     expect(enableInput.checked).toBe(true);
@@ -455,7 +463,7 @@ describe("PR-7 inbox batch mark-all-read and opt-in in-tab notifications", () =>
 
     // Enable body preview and hide tab -> c1 reply now fires and shows body preview
     await settle(() => {
-      setNotificationPreferences({ showPreview: true });
+      setNotificationPreferences({ showPreview: true }, "human");
     });
     Object.defineProperty(document, "visibilityState", {
       configurable: true,
@@ -482,3 +490,4 @@ describe("PR-7 inbox batch mark-all-read and opt-in in-tab notifications", () =>
     expect(navigatedTo).toEqual(["/app/w/workspace/c/c1?message=reply-11"]);
   });
 });
+

@@ -69,28 +69,33 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const syncRef = useRef<() => void>(() => {});
   const reconnectRef = useRef<() => void>(() => {});
   const capabilities = useRef<Record<string, boolean>>({});
+  const userId = user!.id;
+  const completedInitialSyncUser = useRef<string | null>(null);
   useEffect(() => {
     if (query.data) {
-      if (query.data.user.id !== user!.id) {
+      if (query.data.user.id !== userId) {
         reconcileSession();
         return;
       }
       if (appliedBootstrap.current === query.data) return;
       if (!chatStore.replaceConversations(query.data.conversations, query.data[bootstrapObservation])) {
-        void client.invalidateQueries({ queryKey: ["bootstrap", user!.id] });
+        void client.invalidateQueries({ queryKey: ["bootstrap", userId] });
         return;
       }
       appliedBootstrap.current = query.data;
       capabilities.current = query.data.capabilities;
     }
-  }, [client, query.data, reconcileSession, user]);
+  }, [client, query.data, reconcileSession, userId]);
   useEffect(() => {
-    chatStore.begin(user!.id);
-    resetNotificationSession(user!.id);
+    chatStore.begin(userId);
+    resetNotificationSession(userId);
+    if (completedInitialSyncUser.current !== userId) {
+      completedInitialSyncUser.current = null;
+    }
     let stopped = false,
       syncing = false,
       requested = false,
-      initialSyncCompleted = false,
+      initialSyncCompleted = completedInitialSyncUser.current === userId,
       attempt = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let ws: WebSocket | null = null;
@@ -130,7 +135,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               for (;;) {
                 fresh = await observedBootstrap();
                 if (stopped || generation !== chatStore.generation) return;
-                if (fresh.user.id !== user!.id) {
+                if (fresh.user.id !== userId) {
                   reconcileSession();
                   return;
                 }
@@ -146,7 +151,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
                   event.conversation?.id;
                 return !id || allowed.has(id);
               });
-              client.setQueryData(["bootstrap", user!.id], fresh);
+              client.setQueryData(["bootstrap", userId], fresh);
               void client.invalidateQueries({ queryKey: ["members"] });
               void client.invalidateQueries({ queryKey: ["workspaceAgents"] });
             }
@@ -162,10 +167,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               }
             }
             if (page.events.some((event) => event.type.startsWith("message.") || event.type === "read.updated" || event.type === "membership.changed"))
-              void client.invalidateQueries({ queryKey: ["attention", user!.id] });
+              void client.invalidateQueries({ queryKey: ["attention", userId] });
             hasMore = page.hasMore;
           }
           initialSyncCompleted = true;
+          completedInitialSyncUser.current = userId;
           if (
             !stopped &&
             generation === chatStore.generation &&
@@ -174,7 +180,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             notifySyncedMessages(
               notifyCandidates,
               chatStore.getSnapshot(),
-              user!.id,
+              userId,
             );
           }
         } while (requested && !stopped);
@@ -222,7 +228,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             void sync();
           if (
             hint.type === "typing" &&
-            hint.userId !== user!.id &&
+            hint.userId !== userId &&
             capabilities.current["im.typing.publish"]
           ) {
             setTyping((old) => ({
@@ -320,7 +326,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       document.removeEventListener("visibilitychange", focus);
       resetNotificationSession(null);
     };
-  }, [user, client, reconcileSession]);
+  }, [userId, client, reconcileSession]);
   const sendTyping = useCallback((conversationId: string, value: boolean) => {
     if (
       capabilities.current["im.typing.publish"] &&

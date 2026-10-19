@@ -313,7 +313,7 @@ export function ProfileSettings() {
     setPreferences: setNotificationPrefs,
     enableNotifications,
     disableNotifications,
-  } = useNotificationPreferences();
+  } = useNotificationPreferences(user?.id);
   const effectiveNotificationsEnabled =
     notificationPrefs.enabled && notificationPermission === "granted";
   const [name, setName] = useState(user!.displayName),

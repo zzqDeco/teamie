@@ -226,10 +226,6 @@ export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
           }
         };
 
-        for (const item of items) {
-          recordUnread(item);
-        }
-
         let cursor: string | undefined = undefined;
         const seenCursors = new Set<string>();
         for (;;) {
