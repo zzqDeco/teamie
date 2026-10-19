@@ -13,6 +13,22 @@
     />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Teamie · 在一起，做成事</title>
+    <script>
+      (() => {
+        let pref = "system";
+        try {
+          const raw = localStorage.getItem("teamie.theme");
+          if (raw === "light" || raw === "dark" || raw === "system") pref = raw;
+        } catch {}
+        const dark =
+          pref === "dark" ||
+          (pref !== "light" &&
+            typeof window.matchMedia === "function" &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+        document.documentElement.dataset.themePreference = pref;
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -23,6 +23,8 @@ import { ParticipantIdentity } from "./group-members";
 import { canConfigureModelGateway } from "./agent-management";
 import { PasswordSettings } from "./password-settings";
 import { ICON } from "./icons";
+import { useThemePreference } from "./theme";
+import type { ThemePreference } from "./theme";
 export type DialogKind =
   | "workspace"
   | "channel"
@@ -303,10 +305,16 @@ export function ProfileSettings() {
   const { user, updateUser, logout } = useAuth();
   const client = useQueryClient();
   const navigate = useNavigate();
+  const [themePref, setThemePref] = useThemePreference();
   const [name, setName] = useState(user!.displayName),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [saved, setSaved] = useState(false);
+  const themeOptions: { value: ThemePreference; label: string }[] = [
+    { value: "system", label: "跟随系统" },
+    { value: "light", label: "浅色" },
+    { value: "dark", label: "深色" },
+  ];
   async function save(event: FormEvent) {
     event.preventDefault();
     const sessionToken = api.csrfToken;
@@ -385,6 +393,23 @@ export function ProfileSettings() {
           保存更改
         </Button>
       </form>
+      <section className="settings-form theme-settings" aria-label="外观">
+        <h3>外观</h3>
+        <p className="field-help">选择界面外观主题，仅保存在当前设备。</p>
+        <div className="theme-options" role="group" aria-label="外观主题">
+          {themeOptions.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              className={`theme-option ${themePref === opt.value ? "active" : ""}`}
+              aria-pressed={themePref === opt.value}
+              onClick={() => setThemePref(opt.value)}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </section>
       <PasswordSettings />
       {canConfigureModelGateway(user) && (
         <Link to="/app/admin" className="platform-management-link">

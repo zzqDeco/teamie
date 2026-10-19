@@ -41,7 +41,7 @@
   align-items: center;
   gap: 8px;
   padding: 9px 10px;
-  border: 1px solid var(--border, #dedfe3);
+  border: 1px solid var(--border, var(--border-strong));
   border-radius: var(--r-md);
   min-width: 0;
   max-width: 100%;
@@ -68,7 +68,7 @@
   line-height: 1.4;
 }
 .attachment-draft.failed {
-  border-color: #e8a2a2;
+  border-color: var(--danger-border);
 }
 .attachment-draft.failed .attachment-meta,
 .attachment-error {
@@ -105,7 +105,7 @@
   width: 100%;
   max-width: 340px;
   min-width: 180px;
-  border: 1px solid var(--border, #dedfe3);
+  border: 1px solid var(--border, var(--border-strong));
   background: var(--surface, #fff);
   color: var(--text-muted);
   border-radius: var(--r-md);
@@ -113,8 +113,8 @@
   cursor: pointer;
 }
 .message-attachments button:hover {
-  border-color: var(--accent, #2a7669);
-  background: var(--hover-bg, #f6f8f8);
+  border-color: var(--border-strong);
+  background: var(--hover-bg);
 }
 .message-attachments button:disabled {
   opacity: 0.65;

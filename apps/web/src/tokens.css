@@ -19,6 +19,7 @@
   --brand-muted: #7264bd;
   --brand-text: #5f4fc1;
   --brand-strong: #4f3ea6;
+  --on-brand: #ffffff;
   --logo-accent: #d8efae;
 
   /* Legacy variable aliases for compatibility */
@@ -85,6 +86,7 @@
   --font-4xl: 30px;
 
   /* Global root typography, colors, and font rendering */
+  color-scheme: light;
   font-family: var(--font-sans);
   color: var(--text-strong);
   background: var(--bg);
@@ -117,6 +119,51 @@
   --space-6: 24px;
   --space-8: 32px;
   --space-12: 48px;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Text hierarchy — all verified >= 6.1:1 WCAG AA on #17141c, #201c27, #1c1822, and #1b1722 */
+  --text-strong: #ece8f3;
+  --text: #d6cee3;
+  --text-muted: #b7adc7;
+  --text-subtle: #a79db5;
+
+  /* Brand & interactive accents (brightened lavender-purple paired with dark on-brand text) */
+  --brand: #9d8ff0;
+  --brand-muted: #8b7ce0;
+  --brand-text: #b4a7f5;
+  --brand-strong: #cfc6fa;
+  --on-brand: #17141c;
+
+  /* Warm deep-plum surfaces & borders */
+  --bg: #17141c;
+  --surface: #201c27;
+  --surface-sunken: #1c1822;
+  --rail: #1b1722;
+  --lavender: #2a2338;
+  --hover-bg: #262033;
+  --border: #312a3d;
+  --border-strong: #3e354d;
+
+  /* Semantic feedback tokens in dark mode (WCAG AA compliant) */
+  --danger-text: #f59b9b;
+  --danger-bg: #361c20;
+  --danger-border: #5c2b31;
+  --warning-text: #f0c97a;
+  --warning-bg: #332816;
+  --warning-border: #544120;
+  --success-text: #8fd682;
+  --success-bg: #1b2e19;
+  --success-border: #2c4d29;
+
+  /* Focus & elevation shadows in dark mode */
+  --focus-halo: 0 0 0 3px rgba(157, 143, 240, 0.28);
+  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.28);
+  --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.36);
+  --shadow-lg: 0 14px 34px rgba(0, 0, 0, 0.45);
+  --shadow-pop: 0 18px 44px rgba(0, 0, 0, 0.56);
 }
 
 button:focus-visible,

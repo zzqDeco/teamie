@@ -96,7 +96,7 @@ small {
   padding: 12px 21px;
   border-radius: var(--r-md);
   background: var(--purple);
-  color: white;
+  color: var(--on-brand);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -116,12 +116,12 @@ small {
   box-shadow: none;
 }
 .button.secondary {
-  background: white;
-  border-color: #e4e0e9;
+  background: var(--surface);
+  border-color: var(--border-strong);
   color: var(--text-muted);
 }
 .button.secondary:hover {
-  background: #f8f6fb;
+  background: var(--surface);
 }
 .button.small-button {
   padding: 9px 14px;
@@ -130,6 +130,7 @@ small {
 }
 .button.danger {
   background: #c85564;
+  color: #ffffff;
 }
 .danger-text,
 .icon-button.danger-text {
@@ -148,7 +149,7 @@ small {
     background 0.15s;
 }
 .icon-button:hover {
-  background: #ebe7f3;
+  background: var(--lavender);
   color: var(--brand-text);
 }
 .danger-hover:hover,
@@ -170,11 +171,11 @@ small {
   width: 35px;
   height: 35px;
   border-radius: var(--r-md);
-  background: var(--purple);
+  background: #7463d4;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: white;
+  color: #ffffff;
   overflow: hidden;
   flex-shrink: 0;
 }
@@ -224,23 +225,23 @@ small {
   font-size: 30px;
 }
 .lilac {
-  background: #e9e2fb;
+  background: var(--lavender);
   color: var(--brand-text);
 }
 .mint {
-  background: #e0efdf;
+  background: var(--success-bg);
   color: var(--success-text);
 }
 .peach {
-  background: #f7e8da;
+  background: var(--warning-bg);
   color: var(--warning-text);
 }
 .blue {
-  background: #e2eaf5;
+  background: var(--hover-bg);
   color: var(--text-muted);
 }
 .rose {
-  background: #f3e0e8;
+  background: var(--rail);
   color: var(--danger-text);
 }
 .notice {
@@ -249,17 +250,17 @@ small {
   margin: 10px 0 16px;
 }
 .notice.error {
-  background: #fdf0f0;
+  background: var(--danger-bg);
   color: var(--danger-text);
-  border: 1px solid #f4dadf;
+  border: 1px solid var(--danger-border);
 }
 .notice.success {
-  background: #edf6ec;
+  background: var(--success-bg);
   color: var(--success-text);
-  border: 1px solid #dcebdc;
+  border: 1px solid var(--success-border);
 }
 .notice.info {
-  background: #f0ecfb;
+  background: var(--lavender);
   color: var(--brand-text);
 }
 .loading-screen {
@@ -269,7 +270,7 @@ small {
   justify-content: center;
   flex-direction: column;
   gap: 24px;
-  background: #fbfaf8;
+  background: var(--bg);
   color: var(--brand-text);
 }
 .loading-screen p {
@@ -309,8 +310,8 @@ label {
 input:not([type="checkbox"]),
 select,
 textarea {
-  border: 1px solid #e4e0e8;
-  background: white;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
   border-radius: var(--r-md);
   width: 100%;
   padding: 12px 14px;
@@ -351,7 +352,7 @@ label > .copy-input {
 }
 /* The public front door. */
 .landing {
-  background: #fbfaf8;
+  background: var(--bg);
   overflow-x: clip;
 }
 .public-header {
@@ -413,7 +414,7 @@ label > .copy-input {
   right: 0;
   height: 8px;
   bottom: 7px;
-  background: #d9efb7;
+  background: var(--success-bg);
   z-index: -1;
   transform: rotate(-1.4deg);
   border-radius: 50%;
@@ -451,7 +452,7 @@ label > .copy-input {
   width: 28px;
   height: 28px;
   font-size: 11px;
-  border: 3px solid #fbfaf8;
+  border: 3px solid var(--bg);
   margin-left: -5px;
   border-radius: 50%;
 }
@@ -464,7 +465,7 @@ label > .copy-input {
   inset: -5px -45px 10px 20px;
   border-radius: 48% 47% 41% 45%;
   z-index: -2;
-  background-color: #f0edf6;
+  background-color: var(--lavender);
   background-image: linear-gradient(#ddd6eb50 1px, transparent 1px),
     linear-gradient(90deg, #ddd6eb50 1px, transparent 1px);
   background-size: 30px 30px;
@@ -482,9 +483,9 @@ label > .copy-input {
   transform: rotate(7deg);
 }
 .demo-window {
-  background: #fff;
+  background: var(--surface);
   border-radius: var(--r-lg);
-  border: 1px solid #e5dfee;
+  border: 1px solid var(--border-strong);
   box-shadow: 5px 17px 30px #3e2e6310;
   overflow: hidden;
   width: 100%;
@@ -494,7 +495,7 @@ label > .copy-input {
   display: flex;
   align-items: center;
   padding: 0 17px;
-  border-bottom: 1px solid #ede9f1;
+  border-bottom: 1px solid var(--border);
   justify-content: space-between;
 }
 .demo-title .brand {
@@ -525,9 +526,9 @@ label > .copy-input {
   display: flex;
 }
 .demo-sidebar {
-  background: #f7f5fa;
+  background: var(--lavender);
   padding: 16px 10px;
-  border-right: 1px solid #eee9f4;
+  border-right: 1px solid var(--border);
 }
 .demo-workspace {
   font-size: 11px;
@@ -556,7 +557,7 @@ label > .copy-input {
   border-radius: var(--r-sm);
 }
 .demo-channel.selected {
-  background: #e9e2f7;
+  background: var(--lavender);
   color: var(--brand-text);
   font-weight: 600;
 }
@@ -571,7 +572,7 @@ label > .copy-input {
   display: flex;
   align-items: center;
   gap: 7px;
-  border-bottom: 1px solid #f0edf4;
+  border-bottom: 1px solid var(--border);
   font-size: 11px;
   color: var(--text);
   margin-bottom: 14px;
@@ -616,20 +617,20 @@ label > .copy-input {
 }
 .demo-input {
   color: var(--text-muted);
-  border: 1px solid #e5dfee;
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-sm);
   padding: 11px 12px;
   margin: 20px 0 14px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #fcfbfe;
+  background: var(--surface);
 }
 .demo-label {
   text-align: center;
   color: var(--text-muted);
   padding: 7px;
-  border-top: 1px solid #f2eef7;
+  border-top: 1px solid var(--border);
   letter-spacing: 0.3px;
 }
 .floating-note {
@@ -640,14 +641,14 @@ label > .copy-input {
   align-items: center;
   gap: 12px;
   padding: 13px 16px;
-  background: #fffefb;
+  background: var(--surface);
   box-shadow: var(--shadow-md);
-  border: 1px solid #e6dfd6;
+  border: 1px solid var(--warning-border);
   border-radius: var(--r-md);
   transform: rotate(2.5deg);
 }
 .floating-icon {
-  background: #e6efd9;
+  background: var(--success-bg);
   width: 36px;
   height: 36px;
   border-radius: var(--r-md);
@@ -695,7 +696,7 @@ label > .copy-input {
   position: relative;
   height: 360dvh;
   width: 100%;
-  border-top: 1px solid #eae5ee;
+  border-top: 1px solid var(--border);
 }
 .scroll-story-sticky {
   position: sticky;
@@ -804,8 +805,8 @@ label > .copy-input {
   gap: 7px;
   padding: 8px 13px;
   border-radius: var(--r-pill);
-  border: 1px solid #e7e0f0;
-  background: #fffefb;
+  border: 1px solid var(--border);
+  background: var(--surface);
   color: var(--text-muted);
   font-size: 12px;
   transition: background 0.2s,
@@ -818,8 +819,8 @@ label > .copy-input {
   color: var(--text-muted);
 }
 .story-step-pill.active {
-  background: #eee8f9;
-  border-color: #d6c8ef;
+  background: var(--lavender);
+  border-color: var(--border-strong);
   color: var(--brand-strong);
   font-weight: 600;
 }
@@ -831,7 +832,7 @@ label > .copy-input {
   height: 3px;
   width: 100%;
   max-width: 440px;
-  background: #ebe6f2;
+  background: var(--lavender);
   border-radius: var(--r-pill);
   overflow: hidden;
 }
@@ -852,7 +853,7 @@ label > .copy-input {
   position: relative;
   min-height: 380px;
   padding: 34px;
-  background: #f3eff9;
+  background: var(--lavender);
   border-radius: var(--r-xl);
   display: flex;
   align-items: center;
@@ -862,8 +863,8 @@ label > .copy-input {
 .story-stage-card {
   position: absolute;
   inset: 34px;
-  background: #fffefb;
-  border: 1px solid #e6dfef;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-xl);
   padding: 28px 30px;
   box-shadow: var(--shadow-lg);
@@ -889,7 +890,7 @@ label > .copy-input {
   align-items: center;
   gap: 13px;
   padding-bottom: 18px;
-  border-bottom: 1px solid #f0ebf6;
+  border-bottom: 1px solid var(--border);
 }
 .stage-card-head b {
   display: block;
@@ -922,11 +923,11 @@ label > .copy-input {
   gap: 12px;
   padding: 12px 14px;
   border-radius: var(--r-md);
-  background: #faf8fc;
+  background: var(--surface);
   color: var(--text);
 }
 .stage-channel-row.active {
-  background: #f1ecfb;
+  background: var(--lavender);
   color: var(--brand-strong);
 }
 .stage-channel-row b {
@@ -958,10 +959,10 @@ label > .copy-input {
   gap: 11px;
   padding: 12px 14px;
   border-radius: var(--r-lg);
-  background: #faf8fc;
+  background: var(--surface);
 }
 .stage-msg.agent {
-  background: #f3effb;
+  background: var(--lavender);
 }
 .stage-msg > .avatar {
   width: 32px;
@@ -999,8 +1000,8 @@ label > .copy-input {
   gap: 12px;
   padding: 15px 16px;
   border-radius: var(--r-lg);
-  background: #fcfaf7;
-  border: 1px solid #efe7da;
+  background: var(--surface);
+  border: 1px solid var(--warning-border);
 }
 .stage-unread-dot {
   width: 8px;
@@ -1034,7 +1035,7 @@ label > .copy-input {
   gap: 9px;
   padding: 12px 14px;
   border-radius: var(--r-md);
-  background: #f2eef9;
+  background: var(--lavender);
   color: var(--brand-text);
   font-size: 13px;
   font-weight: 600;
@@ -1071,7 +1072,7 @@ label > .copy-input {
   margin-left: auto;
   padding: 4px 10px;
   border-radius: var(--r-pill);
-  background: #e7f1dc;
+  background: var(--success-bg);
   color: var(--success-text);
   font-size: 11px;
   font-weight: 600;
@@ -1079,7 +1080,7 @@ label > .copy-input {
 .spotlight-spaces {
   margin-top: 18px;
   padding-top: 16px;
-  border-top: 1px solid #f0ebf6;
+  border-top: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1099,14 +1100,14 @@ label > .copy-input {
   font-size: 12px;
   padding: 4px 10px;
   border-radius: var(--r-sm);
-  background: #f2eef9;
+  background: var(--lavender);
   color: var(--brand-text);
   font-weight: 600;
 }
 .spotlight-foot {
   margin-top: 16px;
   padding-top: 14px;
-  border-top: 1px solid #f0ebf6;
+  border-top: 1px solid var(--border);
   display: flex;
   align-items: center;
   gap: 7px;
@@ -1116,7 +1117,7 @@ label > .copy-input {
 .landing-cta {
   max-width: 1188px;
   width: calc(100% - 72px);
-  background: #f0edf5;
+  background: var(--hover-bg);
   border-radius: var(--r-lg);
   margin: 8px auto 76px;
   padding: 44px 52px;
@@ -1160,7 +1161,7 @@ label > .copy-input {
 .public-footer {
   max-width: 1188px;
   margin: auto;
-  border-top: 1px solid #e9e4ec;
+  border-top: 1px solid var(--border);
   padding: 28px 36px 34px;
   display: flex;
   align-items: center;
@@ -1190,10 +1191,10 @@ label > .copy-input {
   display: grid;
   grid-template-columns: minmax(420px, 46%) 1fr;
   min-height: 100dvh;
-  background: #fff;
+  background: var(--surface);
 }
 .auth-story {
-  background: #f0edf5;
+  background: var(--hover-bg);
   display: flex;
   flex-direction: column;
   padding: 45px 60px 32px;
@@ -1265,7 +1266,7 @@ label > .copy-input {
 .auth-tabs {
   display: flex;
   margin: 29px 0 25px;
-  border-bottom: 1px solid #eae5ee;
+  border-bottom: 1px solid var(--border);
   gap: 25px;
 }
 .auth-tabs > button {
@@ -1298,12 +1299,12 @@ label > .copy-input {
 }
 .join-page {
   min-height: 100dvh;
-  background: #f9f7fc;
+  background: var(--surface);
 }
 .join-card {
-  background: #fff;
+  background: var(--surface);
   margin: 50px auto 60px;
-  border: 1px solid #e9e2f0;
+  border: 1px solid var(--border);
   border-radius: var(--r-xl);
   text-align: center;
   box-shadow: var(--shadow-pop);
@@ -1316,7 +1317,7 @@ label > .copy-input {
   height: 75px;
   border-radius: var(--r-xl);
   color: var(--brand-text);
-  background: #f1eafa;
+  background: var(--lavender);
   position: relative;
   margin-bottom: 23px;
   transform: rotate(-4deg);
@@ -1349,9 +1350,9 @@ label > .copy-input {
   align-items: center;
   gap: 12px;
   padding: 14px 13px;
-  border: 1px solid #efe9f4;
+  border: 1px solid var(--border);
   border-radius: var(--r-md);
-  background: #fcfafd;
+  background: var(--surface);
   text-align: left;
   margin: 29px 0 16px;
 }
@@ -1380,7 +1381,7 @@ label > .copy-input {
 /* The working IM canvas. */
 .app-shell {
   display: flex;
-  background: white;
+  background: var(--surface);
   overflow: hidden;
 }
 .workspace-rail {
@@ -1389,9 +1390,9 @@ label > .copy-input {
   align-items: center;
   width: 73px;
   flex-shrink: 0;
-  background: #ece8f3;
+  background: var(--lavender);
   padding: 21px 10px 15px;
-  border-right: 1px solid #e2ddeb;
+  border-right: 1px solid var(--border-strong);
 }
 .rail-home {
   margin-bottom: 19px;
@@ -1407,7 +1408,7 @@ label > .copy-input {
 }
 .rail-divider {
   height: 1px;
-  background: #dcd5e5;
+  background: var(--rail);
   width: 28px;
   margin-bottom: 16px;
 }
@@ -1423,7 +1424,7 @@ label > .copy-input {
 .workspace-button {
   width: 44px;
   height: 44px;
-  background: #dfd8e9;
+  background: var(--rail);
   color: var(--text);
   font-size: 13px;
   border-radius: var(--r-lg);
@@ -1442,13 +1443,13 @@ label > .copy-input {
   font-weight: 600;
 }
 .workspace-button:hover {
-  background: #d4c9e7;
+  background: var(--lavender);
   color: var(--text);
   border-radius: var(--r-lg);
 }
 .workspace-button.selected {
   background: var(--purple);
-  color: white;
+  color: var(--on-brand);
   box-shadow: var(--shadow-sm);
   border-radius: var(--r-lg);
 }
@@ -1464,14 +1465,14 @@ label > .copy-input {
 .rail-add {
   width: 40px;
   height: 40px;
-  background: #e3ddec;
+  background: var(--rail);
   color: var(--text-muted);
   margin-top: 15px;
-  border: 1px dashed #c8b8da;
+  border: 1px dashed var(--border-strong);
   border-radius: var(--r-lg);
 }
 .rail-add:hover {
-  background: #d8cdeb;
+  background: var(--lavender);
   color: var(--text);
 }
 .rail-spacer {
@@ -1488,21 +1489,21 @@ label > .copy-input {
 }
 .rail-settings:hover,
 .rail-settings.selected {
-  background: #e1d9ed;
+  background: var(--lavender);
   color: var(--brand-text);
 }
 .navigation-sidebar {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  background: #f7f5f9;
-  border-right: 1px solid #ebe7ef;
+  background: var(--surface-sunken);
+  border-right: 1px solid var(--border);
   position: relative;
 }
 .workspace-header {
   flex-shrink: 0;
   position: relative;
-  border-bottom: 1px solid #ece7f0;
+  border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
 }
@@ -1568,11 +1569,11 @@ label > .copy-input {
   flex: 1;
 }
 .conversation-link:hover {
-  background: #f0eaf6;
+  background: var(--lavender);
   color: var(--text-strong);
 }
 .conversation-link.active {
-  background: #eae3f7;
+  background: var(--lavender);
   font-weight: 600;
 }
 .conversation-link.active > svg {
@@ -1596,7 +1597,7 @@ label > .copy-input {
 .group-avatar {
   width: 23px;
   height: 23px;
-  background: #e6deef;
+  background: var(--lavender);
   color: var(--text-muted);
   border-radius: var(--r-sm);
   display: flex;
@@ -1606,8 +1607,8 @@ label > .copy-input {
 .unread-badge {
   font-size: 11px;
   font-weight: 600;
-  color: white;
-  background: #7c65c9;
+  color: var(--on-brand);
+  background: var(--brand);
   border-radius: var(--r-sm);
   padding: 2px 6px;
   min-width: 18px;
@@ -1632,7 +1633,7 @@ label > .copy-input {
   position: relative;
   display: flex;
   flex-direction: column;
-  background: #fff;
+  background: var(--surface);
   overflow: hidden;
 }
 .app-main > .notice {
@@ -1648,7 +1649,7 @@ label > .copy-input {
   position: relative;
 }
 .conversation-header {
-  border-bottom: 1px solid #efebf2;
+  border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1657,7 +1658,7 @@ label > .copy-input {
 .conversation-symbol {
   width: 37px;
   height: 37px;
-  background: #f4effa;
+  background: var(--lavender);
   color: var(--text-muted);
   border-radius: var(--r-md);
   display: flex;
@@ -1690,8 +1691,8 @@ label > .copy-input {
 }
 .sync-banner {
   padding: 9px 28px;
-  background: #fbf7ed;
-  border-bottom: 1px solid #efe7d4;
+  background: var(--surface);
+  border-bottom: 1px solid var(--warning-border);
   display: flex;
   align-items: center;
   gap: 7px;
@@ -1722,7 +1723,7 @@ label > .copy-input {
   align-items: center;
   justify-content: center;
   border-radius: var(--r-xl);
-  background: #eee8f8;
+  background: var(--lavender);
   color: var(--text-muted);
   margin-bottom: 19px;
 }
@@ -1744,8 +1745,8 @@ label > .copy-input {
   align-items: center;
   justify-content: center;
   gap: 5px;
-  border: 1px solid #e6ddf0;
-  background: #fcfafd;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
   border-radius: var(--r-sm);
   color: var(--text-muted);
   padding: 8px 16px;
@@ -1754,7 +1755,7 @@ label > .copy-input {
   margin: 6px auto 20px;
 }
 .load-earlier:hover {
-  background: #f4edf9;
+  background: var(--lavender);
 }
 .message-loading {
   display: flex;
@@ -1786,7 +1787,7 @@ label > .copy-input {
 .date-divider:after {
   content: "";
   height: 1px;
-  background: #eee8f4;
+  background: var(--lavender);
   flex: 1;
 }
 .date-divider > span {
@@ -1805,7 +1806,7 @@ label > .copy-input {
 .unread-divider:after {
   content: "";
   height: 1px;
-  background: #e1d2f3;
+  background: var(--lavender);
   flex: 1;
 }
 .unread-divider:before {
@@ -1822,7 +1823,7 @@ label > .copy-input {
   transition: background 0.15s;
 }
 .message:hover {
-  background: #fcfafe;
+  background: var(--surface);
 }
 .message-avatar {
   width: 35px;
@@ -1859,7 +1860,7 @@ label > .copy-input {
 .you-label {
   font-size: 11px;
   color: var(--text-muted);
-  background: #f3ecfa;
+  background: var(--lavender);
   border-radius: var(--r-xs);
   line-height: 15px;
   padding: 0 5px;
@@ -1903,8 +1904,8 @@ label > .copy-input {
   position: absolute;
   right: 24px;
   top: -13px;
-  border: 1px solid #e6dcef;
-  background: #fff;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
   border-radius: var(--r-sm);
   padding: 2px;
   display: flex;
@@ -1974,7 +1975,7 @@ label > .copy-input {
   min-height: 80px;
   resize: vertical;
   line-height: 1.7;
-  background: #fff;
+  background: var(--surface);
   color: var(--text-strong);
 }
 .edit-message > div:last-child {
@@ -2001,19 +2002,19 @@ label > .copy-input {
 }
 .composer-area {
   flex-shrink: 0;
-  background: white;
+  background: var(--surface);
 }
 .composer {
-  border: 1px solid #dfd6e8;
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-md);
   box-shadow: var(--shadow-sm);
   overflow: hidden;
-  background: #fff;
+  background: var(--surface);
   transition: border 0.15s,
     box-shadow 0.15s;
 }
 .composer:focus-within {
-  border-color: #a890d3;
+  border-color: var(--brand-text);
   box-shadow: var(--focus-halo);
 }
 .composer textarea,
@@ -2035,14 +2036,14 @@ label > .copy-input {
   align-items: center;
   justify-content: center;
   background: var(--purple);
-  color: white;
+  color: var(--on-brand);
   transition: background 0.15s;
 }
 .send-button:hover {
-  background: #6550bf;
+  background: var(--purple-dark);
 }
 .send-button:disabled {
-  background: #eee6f7;
+  background: var(--lavender);
   color: var(--text-muted);
 }
 .character-count {
@@ -2069,8 +2070,8 @@ label > .copy-input {
   align-items: center;
   gap: 8px;
   padding: 10px 12px;
-  background: #faf6fd;
-  border: 1px solid #e4d8ee;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
   border-bottom: 0;
   border-radius: 8px 8px 0 0;
 }
@@ -2107,10 +2108,10 @@ label > .copy-input {
   font-size: 12px;
   font-weight: 600;
   color: var(--text);
-  border: 1px solid #dfd1ec;
+  border: 1px solid var(--border-strong);
   box-shadow: var(--shadow-md);
   border-radius: var(--r-xl);
-  background: #fff;
+  background: var(--surface);
   padding: 8px 14px;
   z-index: 3;
 }
@@ -2119,8 +2120,8 @@ label > .copy-input {
   line-height: 1.75;
   margin: 10px 0 25px;
   padding: 14px;
-  border-left: 3px solid #d5c3e5;
-  background: #faf6fd;
+  border-left: 3px solid var(--border-strong);
+  background: var(--surface);
   color: var(--text);
   max-height: 180px;
   overflow: auto;
@@ -2129,15 +2130,15 @@ label > .copy-input {
 }
 .members-pane {
   flex-shrink: 0;
-  border-left: 1px solid #eee7f3;
+  border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  background: #fdfbfd;
+  background: var(--surface);
   z-index: 7;
 }
 .members-pane > header {
   padding: 0 17px 0 20px;
-  border-bottom: 1px solid #eee7f3;
+  border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2145,7 +2146,7 @@ label > .copy-input {
 }
 .members-pane > header b {
   font-weight: 600;
-  background: #eee5f7;
+  background: var(--lavender);
   border-radius: var(--r-sm);
   padding: 2px 7px;
   margin-left: 6px;
@@ -2158,13 +2159,13 @@ label > .copy-input {
 }
 .members-description {
   text-align: center;
-  border-bottom: 1px solid #f0eaf5;
+  border-bottom: 1px solid var(--border);
 }
 .member-cover {
   width: 50px;
   height: 50px;
   border-radius: var(--r-lg);
-  background: #eee6f7;
+  background: var(--lavender);
   color: var(--text-muted);
   align-items: center;
   justify-content: center;
@@ -2255,7 +2256,7 @@ label > .copy-input {
   font-size: 12px;
   font-weight: 600;
   color: var(--text);
-  border: 1px dashed #d6c5e6;
+  border: 1px dashed var(--border-strong);
   border-radius: var(--r-md);
   padding: 10px 12px;
   margin: 0 18px 16px;
@@ -2268,7 +2269,7 @@ label > .copy-input {
 }
 .members-directory-link:hover,
 .members-invite:hover {
-  background: #f5eefb;
+  background: var(--lavender);
   color: var(--purple-dark);
 }
 .member-loading {
@@ -2295,13 +2296,13 @@ label > .copy-input {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: #fffdfd;
+  background: var(--surface);
   overflow: auto;
 }
 .welcome-view > header {
   height: 83px;
   flex-shrink: 0;
-  border-bottom: 1px solid #f1ebf4;
+  border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2336,7 +2337,7 @@ label > .copy-input {
   width: 110px;
   height: 110px;
   position: absolute;
-  background: #eee6f9;
+  background: var(--lavender);
   border-radius: 31px;
   top: 17px;
   left: 29px;
@@ -2392,7 +2393,7 @@ label > .copy-input {
   width: 80px;
   height: 80px;
   border-radius: var(--r-xl);
-  background: #f0e8fa;
+  background: var(--lavender);
   color: var(--text-subtle);
 }
 .large-symbol > svg {
@@ -2414,7 +2415,7 @@ label > .copy-input {
 }
 .settings-header {
   flex-shrink: 0;
-  border-bottom: 1px solid #ede7f2;
+  border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   color: var(--text-muted);
@@ -2447,12 +2448,12 @@ label > .copy-input {
 }
 .profile-card {
   margin: 28px 0 35px;
-  border: 1px solid #eadef3;
+  border: 1px solid var(--border);
   border-radius: var(--r-lg);
   overflow: hidden;
 }
 .profile-banner {
-  background: #f0e8fa;
+  background: var(--lavender);
   position: relative;
   overflow: hidden;
 }
@@ -2483,7 +2484,7 @@ label > .copy-input {
   width: 64px;
   height: 64px;
   border-radius: var(--r-xl);
-  border: 4px solid #fff;
+  border: 4px solid var(--surface);
   font-size: 24px;
 }
 .profile-content > h2 {
@@ -2498,7 +2499,7 @@ label > .copy-input {
   position: absolute;
   right: 24px;
   top: 21px;
-  background: #f7f1fb;
+  background: var(--lavender);
   color: var(--text-subtle);
   padding: 5px 8px;
   border-radius: var(--r-xs);
@@ -2511,7 +2512,7 @@ label > .copy-input {
   padding: 11px 13px;
 }
 .settings-form input.readonly {
-  background: #fcf9fe;
+  background: var(--surface);
   color: var(--text-subtle);
 }
 .settings-form .button {
@@ -2521,7 +2522,7 @@ label > .copy-input {
 .session-setting {
   margin-top: 40px;
   padding-top: 25px;
-  border-top: 1px solid #f0e7f5;
+  border-top: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2562,8 +2563,8 @@ label > .copy-input {
   position: relative;
   max-width: 100%;
   overflow-y: auto;
-  background: white;
-  border: 1px solid #e6d9f0;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-pop);
   scrollbar-width: thin;
@@ -2601,7 +2602,7 @@ label > .copy-input {
   gap: 9px;
   margin-top: 27px;
   padding-top: 18px;
-  border-top: 1px solid #f2eaf7;
+  border-top: 1px solid var(--border);
 }
 .modal-actions > .button {
   padding: 10px 15px;
@@ -2611,8 +2612,8 @@ label > .copy-input {
   align-items: flex-start;
   gap: 8px;
   line-height: 1.9;
-  background: #fbf8fd;
-  border: 1px solid #f2eaf7;
+  background: var(--surface);
+  border: 1px solid var(--border);
   padding: 12px;
   border-radius: var(--r-sm);
   margin: 20px 0 6px;
@@ -2645,11 +2646,11 @@ label > .copy-input {
   margin-bottom: 4px;
 }
 .member-option:hover {
-  background: #fcf7ff;
+  background: var(--surface);
 }
 .member-option.selected {
-  background: #faf3ff;
-  border-color: #eadcf5;
+  background: var(--lavender);
+  border-color: var(--border-strong);
 }
 .member-option > .avatar {
   width: 32px;
@@ -2667,16 +2668,16 @@ label > .copy-input {
 .selection-check {
   width: 17px;
   height: 17px;
-  border: 1px solid #e7d5f2;
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-xs);
-  color: white;
+  color: var(--on-brand);
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 .selected .selection-check {
-  border-color: #b390d0;
-  background: #b390d0;
+  border-color: var(--brand);
+  background: var(--brand);
 }
 .mini-empty {
   padding: 25px 15px;
@@ -2684,7 +2685,7 @@ label > .copy-input {
   color: var(--text-subtle);
   line-height: 2;
   text-align: center;
-  background: #fcf8ff;
+  background: var(--surface);
   border-radius: var(--r-md);
 }
 .invite-generator {
@@ -2697,7 +2698,7 @@ label > .copy-input {
   align-items: center;
   justify-content: center;
   border-radius: var(--r-xl);
-  background: #f3e9fc;
+  background: var(--lavender);
   color: var(--text-subtle);
   margin: 0 auto 18px;
   transform: rotate(-6deg);
@@ -2720,7 +2721,7 @@ label > .copy-input {
 .copy-input {
   display: flex;
   align-items: center;
-  border: 1px solid #e8d7f4;
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-md);
   overflow: hidden;
 }
@@ -2741,7 +2742,7 @@ label > .copy-input {
   color: var(--text-subtle);
 }
 .copy-input > button:hover {
-  background: #f8efff;
+  background: var(--lavender);
 }
 @media (min-width: 1700px) {
   .hero {
@@ -3106,7 +3107,7 @@ label > .copy-input {
   }
   .auth-story {
     padding: 23px 27px;
-    background: #f0edf5;
+    background: var(--hover-bg);
     min-height: 130px;
     position: relative;
   }
@@ -3252,8 +3253,8 @@ label > .copy-input {
     position: absolute;
     right: 14px;
     top: 0;
-    background: white;
-    border: 1px solid #eee5f4;
+    background: var(--surface);
+    border: 1px solid var(--border);
     opacity: 0;
   }
   .message.compact:focus-within .message-actions,
@@ -3660,9 +3661,9 @@ label > .copy-input {
   align-items: center;
   gap: 5px;
   padding: 5px 8px;
-  background: #f0e8fb;
+  background: var(--lavender);
   color: var(--brand-text);
-  border: 1px solid #e8dcf5;
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-sm);
   font-size: 11px;
   letter-spacing: 0;
@@ -3672,7 +3673,7 @@ label > .copy-input {
 }
 .admin-profile-tag,
 .profile-tag.admin-profile-tag {
-  background: #eee5fa;
+  background: var(--lavender);
   color: var(--brand-text);
 }
 .admin-view {
@@ -3718,7 +3719,7 @@ label > .copy-input {
   width: 66px;
   height: 66px;
   border-radius: var(--r-xl);
-  background: #f3ebfa;
+  background: var(--lavender);
   color: var(--text-subtle);
   transform: rotate(-6deg);
   flex-shrink: 0;
@@ -3745,8 +3746,8 @@ label > .copy-input {
   padding: 11px 15px;
 }
 .created-invite {
-  border: 1px solid #dce8d4;
-  background: #f6faf1;
+  border: 1px solid var(--success-border);
+  background: var(--surface);
   border-radius: var(--r-md);
   margin: 0 0 30px;
   position: relative;
@@ -3781,8 +3782,8 @@ label > .copy-input {
   margin-bottom: 16px;
 }
 .created-invite .copy-input {
-  border-color: #dfe8d6;
-  background: #fff;
+  border-color: var(--success-border);
+  background: var(--surface);
 }
 .created-invite .copy-input > input {
   font-size: 12px;
@@ -3792,7 +3793,7 @@ label > .copy-input {
   color: var(--success-text);
 }
 .created-invite .copy-input > button:hover {
-  background: #f0f5e9;
+  background: var(--success-bg);
 }
 .created-invite-footer {
   display: flex;
@@ -3825,18 +3826,18 @@ label > .copy-input {
   margin-top: 12px;
 }
 .admin-invite-history {
-  border: 1px solid #eadef3;
+  border: 1px solid var(--border);
   border-radius: var(--r-md);
   overflow: hidden;
-  background: #fff;
+  background: var(--surface);
 }
 .admin-invite-history > header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 19px 20px;
-  background: #fcf9fe;
-  border-bottom: 1px solid #eee4f5;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
   gap: 14px;
 }
 .admin-invite-history > header > div > span {
@@ -3859,12 +3860,12 @@ label > .copy-input {
   font-weight: 500;
   color: var(--text-subtle);
   padding: 13px 19px;
-  border-bottom: 1px solid #f0e7f5;
-  background: #fefcfe;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
 }
 .admin-invites-table td {
   padding: 16px 19px;
-  border-bottom: 1px solid #f4edf8;
+  border-bottom: 1px solid var(--border);
   color: var(--text-muted);
   line-height: 1.6;
 }
@@ -3888,7 +3889,7 @@ label > .copy-input {
   padding: 4px 8px;
   border-radius: var(--r-xs);
   font-size: 11px;
-  background: #f5f0fa;
+  background: var(--lavender);
   color: var(--text-subtle);
 }
 .invite-status i {
@@ -3899,19 +3900,19 @@ label > .copy-input {
 }
 .invite-status.available {
   color: var(--success-text);
-  background: #f0f5e9;
+  background: var(--success-bg);
 }
 .invite-status.used {
   color: var(--text-muted);
-  background: #f1eafa;
+  background: var(--lavender);
 }
 .invite-status.revoked {
   color: var(--text-subtle);
-  background: #f9eff3;
+  background: var(--danger-bg);
 }
 .invite-status.expired {
   color: var(--text-subtle);
-  background: #f5f0f8;
+  background: var(--lavender);
 }
 .revoke-invite {
   display: inline-flex;
@@ -3919,12 +3920,12 @@ label > .copy-input {
   gap: 5px;
   color: var(--text-subtle);
   font-size: 11px;
-  border: 1px solid #efdfeb;
+  border: 1px solid var(--border);
   border-radius: var(--r-sm);
   padding: 6px 8px;
 }
 .revoke-invite:hover {
-  background: #fdf3f8;
+  background: var(--surface-sunken);
   color: var(--text-muted);
 }
 .revoke-invite:disabled {
@@ -3945,7 +3946,7 @@ label > .copy-input {
   width: 51px;
   height: 51px;
   border-radius: var(--r-lg);
-  background: #f4ebfc;
+  background: var(--lavender);
   color: var(--text-subtle);
   display: flex;
   align-items: center;
@@ -3972,8 +3973,8 @@ label > .copy-input {
 }
 .revoke-details {
   padding: 16px;
-  background: #fbf6fe;
-  border: 1px solid #f0e5f7;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--r-md);
   display: flex;
   align-items: center;
@@ -4125,8 +4126,8 @@ label > .copy-input {
   align-items: center;
   gap: 4px;
   padding: 3px 6px;
-  border: 1px solid #e1d8f5;
-  background: #f1ebfc;
+  border: 1px solid var(--border-strong);
+  background: var(--lavender);
   color: var(--brand-text);
   border-radius: var(--r-xs);
   line-height: 1.35;
@@ -4138,7 +4139,7 @@ label > .copy-input {
   color: var(--text-subtle);
   padding-left: 6px;
   margin-left: 3px;
-  border-left: 1px solid #e3d7f2;
+  border-left: 1px solid var(--border-strong);
 }
 .agent-badge.compact {
   font-size: 11px;
@@ -4146,15 +4147,15 @@ label > .copy-input {
   gap: 3px;
 }
 .avatar.agent-avatar {
-  background: #e9e4f8;
+  background: var(--lavender);
   color: var(--brand-text);
   position: relative;
-  border: 1px solid #ded3ef;
+  border: 1px solid var(--border-strong);
 }
 .avatar.agent-avatar i {
   width: 5px;
   height: 5px;
-  border: 1px solid #fdfaff;
+  border: 1px solid var(--border);
   border-radius: 50%;
   background: #b5c995;
   position: absolute;
@@ -4162,9 +4163,9 @@ label > .copy-input {
   right: 2px;
 }
 .avatar.agent-avatar.disabled {
-  background: #f0edf4;
+  background: var(--hover-bg);
   color: var(--text-subtle);
-  border-color: #e5deec;
+  border-color: var(--border-strong);
 }
 .avatar.agent-avatar.disabled i {
   background: #c1b5cb;
@@ -4210,9 +4211,9 @@ label > .copy-input {
   display: flex;
   align-items: center;
   gap: 9px;
-  border: 1px solid #eee2f5;
+  border: 1px solid var(--border);
   border-radius: var(--r-md);
-  background: #fdfaff;
+  background: var(--surface);
   padding: 11px;
   margin: 0;
   position: relative;
@@ -4223,8 +4224,8 @@ label > .copy-input {
   color: var(--text-muted);
 }
 .visibility-option.selected {
-  background: #f4edfc;
-  border-color: #decef0;
+  background: var(--lavender);
+  border-color: var(--border-strong);
   color: var(--brand-text);
 }
 .visibility-option > input {
@@ -4251,7 +4252,7 @@ label > .copy-input {
   align-items: center;
   justify-content: center;
   border-radius: var(--r-md);
-  background: #efe6f8;
+  background: var(--lavender);
   color: var(--text-subtle);
   font-size: 11px;
   flex-shrink: 0;
@@ -4259,12 +4260,12 @@ label > .copy-input {
 .visibility-option > i {
   width: 16px;
   height: 16px;
-  border: 1px solid #dfcfeb;
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-xs);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
+  color: var(--on-brand);
   flex-shrink: 0;
 }
 .visibility-option.selected > i {
@@ -4287,8 +4288,8 @@ label > .copy-input {
 .visibility-empty {
   font-size: 11px;
   padding: 18px;
-  background: #fcf7ff;
-  border: 1px dashed #eadcf5;
+  background: var(--surface);
+  border: 1px dashed var(--border-strong);
   border-radius: var(--r-md);
   line-height: 1.9;
   color: var(--text-subtle);
@@ -4301,15 +4302,15 @@ label > .copy-input {
   padding: 4px 7px;
   border-radius: var(--r-xs);
   color: var(--text-subtle);
-  background: #f5effa;
+  background: var(--lavender);
 }
 .agent-status.enabled {
   color: var(--success-text);
-  background: #f0f5e9;
+  background: var(--success-bg);
 }
 .agent-status.disabled {
   color: var(--text-muted);
-  background: #f4f0f7;
+  background: var(--lavender);
 }
 .gateway-configuration-form {
   padding: 24px 0;
@@ -4335,9 +4336,9 @@ label > .copy-input {
   position: relative;
   cursor: pointer;
   padding: 16px 17px;
-  border: 1px solid #eee2f6;
+  border: 1px solid var(--border);
   border-radius: var(--r-md);
-  background: #fdfaff;
+  background: var(--surface);
 }
 .agent-enabled-switch > input {
   position: absolute;
@@ -4370,7 +4371,7 @@ label > .copy-input {
   width: 32px;
   height: 18px;
   border-radius: var(--r-md);
-  background: #e4d9ed;
+  background: var(--lavender);
   position: relative;
   flex-shrink: 0;
   transition: background 0.15s;
@@ -4379,7 +4380,7 @@ label > .copy-input {
   content: "";
   width: 12px;
   height: 12px;
-  background: white;
+  background: var(--surface);
   border-radius: 50%;
   position: absolute;
   left: 3px;
@@ -4397,7 +4398,7 @@ label > .copy-input {
   display: flex;
   justify-content: flex-end;
   gap: 9px;
-  border-top: 1px solid #eee3f5;
+  border-top: 1px solid var(--border);
   margin-top: 27px;
   padding-top: 21px;
 }
@@ -4447,11 +4448,11 @@ label > .copy-input {
   display: flex;
   align-items: center;
   gap: 23px;
-  border-bottom: 1px solid #eee5f5;
+  border-bottom: 1px solid var(--border);
   padding: 0 32px;
   min-height: 43px;
   flex-shrink: 0;
-  background: #fefcfe;
+  background: var(--surface);
 }
 .admin-section-nav > a {
   display: flex;
@@ -4507,7 +4508,7 @@ label > .copy-input {
 }
 .agents-heading h1 > span {
   font-size: 11px;
-  background: #f0e8f9;
+  background: var(--lavender);
   color: var(--text-subtle);
   font-weight: 500;
   letter-spacing: 0;
@@ -4531,18 +4532,18 @@ label > .copy-input {
   display: grid;
 }
 .agent-card {
-  border: 1px solid #e9dcf3;
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-lg);
   display: flex;
   flex-direction: column;
-  background: #fefcfe;
+  background: var(--surface);
   transition: background 0.15s,
     box-shadow 0.15s,
     border 0.15s;
 }
 .agent-card:hover {
-  border-color: #dccceb;
-  background: #fdf9ff;
+  border-color: var(--border-strong);
+  background: var(--surface);
   box-shadow: var(--shadow-md);
 }
 .agent-card-top {
@@ -4596,7 +4597,7 @@ label > .copy-input {
   gap: 4px;
   padding: 4px 6px;
   border-radius: var(--r-xs);
-  background: #f3ecfa;
+  background: var(--lavender);
   color: var(--text-subtle);
   font-size: 11px;
   max-width: 100%;
@@ -4605,18 +4606,18 @@ label > .copy-input {
   line-height: 1.4;
 }
 .agent-workspace-chips > a:hover {
-  background: #ebe0f6;
+  background: var(--lavender);
   color: var(--brand-text);
 }
 .agent-workspace-chips > .private-agent-chip {
-  background: #f6f2f9;
+  background: var(--lavender);
   color: var(--text-subtle);
 }
 .agent-card-bottom {
   display: flex;
   align-items: center;
   gap: 10px;
-  border-top: 1px solid #eee3f6;
+  border-top: 1px solid var(--border);
   margin-top: 20px;
   padding-top: 14px;
 }
@@ -4645,8 +4646,8 @@ label > .copy-input {
   align-items: center;
   justify-content: center;
   border-radius: var(--r-xl);
-  background: #f1e7fc;
-  border: 1px solid #e7d8f4;
+  background: var(--lavender);
+  border: 1px solid var(--border-strong);
   transform: rotate(-6deg);
   color: var(--text-subtle);
   margin-bottom: 3px;
@@ -4724,10 +4725,10 @@ label > .copy-input {
   color: var(--text-muted);
 }
 .agent-profile-section {
-  border: 1px solid #eee1f6;
+  border: 1px solid var(--border);
   border-radius: var(--r-md);
   margin-bottom: 23px;
-  background: #fff;
+  background: var(--surface);
 }
 .agent-profile-section > header {
   display: flex;
@@ -4749,7 +4750,7 @@ label > .copy-input {
   margin: 13px 0 2px;
 }
 .agent-delete-section {
-  border-top: 1px solid #eee1f6;
+  border-top: 1px solid var(--border);
   margin-top: 33px;
   padding-top: 23px;
   display: flex;
@@ -4778,8 +4779,8 @@ label > .copy-input {
   display: flex;
   align-items: flex-start;
   gap: 14px;
-  background: #fcf8ef;
-  border: 1px solid #eee1c9;
+  background: var(--surface);
+  border: 1px solid var(--warning-border);
   border-radius: var(--r-md);
 }
 .gateway-saved-state > span {
@@ -4787,7 +4788,7 @@ label > .copy-input {
   height: 41px;
   flex-shrink: 0;
   border-radius: var(--r-lg);
-  background: #f4ead4;
+  background: var(--warning-bg);
   color: var(--warning-text);
   display: flex;
   align-items: center;
@@ -4805,11 +4806,11 @@ label > .copy-input {
   margin-top: 5px;
 }
 .gateway-saved-state.ready {
-  background: #f5f9f0;
-  border-color: #dfe8d4;
+  background: var(--surface);
+  border-color: var(--success-border);
 }
 .gateway-saved-state.ready > span {
-  background: #e8f0dc;
+  background: var(--success-bg);
   color: var(--success-text);
 }
 .gateway-saved-state.ready b {
@@ -4819,11 +4820,11 @@ label > .copy-input {
   color: var(--success-text);
 }
 .gateway-saved-state.disabled {
-  background: #f8f4fb;
-  border-color: #e9dff1;
+  background: var(--lavender);
+  border-color: var(--border);
 }
 .gateway-saved-state.disabled > span {
-  background: #eee6f5;
+  background: var(--lavender);
   color: var(--text-subtle);
 }
 .gateway-saved-state.disabled b {
@@ -4833,9 +4834,9 @@ label > .copy-input {
   color: var(--text-subtle);
 }
 .gateway-test-panel {
-  border: 1px solid #eadef3;
+  border: 1px solid var(--border);
   border-radius: var(--r-md);
-  background: #fcf9fe;
+  background: var(--surface);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -4928,7 +4929,7 @@ label > .copy-input {
 }
 .group-member-section > h3 > span {
   font-size: 11px;
-  background: #f3eafc;
+  background: var(--lavender);
   border-radius: var(--r-xs);
   padding: 3px 6px;
   color: var(--text-subtle);
@@ -4939,7 +4940,7 @@ label > .copy-input {
   align-items: center;
   gap: 10px;
   padding: 10px 2px;
-  border-bottom: 1px solid #f5ecfa;
+  border-bottom: 1px solid var(--border);
 }
 .group-member-row:last-child {
   border-bottom: 0;
@@ -4968,7 +4969,7 @@ label > .copy-input {
   flex-shrink: 0;
 }
 .group-member-remove:hover {
-  background: #fcf0f8;
+  background: var(--surface-sunken);
   color: var(--text-muted);
 }
 .group-member-remove:disabled {
@@ -4977,7 +4978,7 @@ label > .copy-input {
 .member-self-label {
   font-size: 11px;
   color: var(--text-subtle);
-  background: #f8f1fc;
+  background: var(--lavender);
   padding: 4px 7px;
   border-radius: var(--r-xs);
 }
@@ -4986,8 +4987,8 @@ label > .copy-input {
   align-items: center;
   gap: 12px;
   padding: 15px;
-  background: #fcf7ff;
-  border: 1px solid #f0e2f9;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--r-md);
   margin-bottom: 21px;
 }
@@ -5012,7 +5013,7 @@ label > .copy-input {
   align-items: center;
   gap: 10px;
   padding: 12px 10px;
-  border: 1px solid #eee0f8;
+  border: 1px solid var(--border);
   border-radius: var(--r-md);
   width: 100%;
   margin-bottom: 7px;
@@ -5023,7 +5024,7 @@ label > .copy-input {
   width: 31px;
   height: 31px;
   border-radius: var(--r-md);
-  background: #f0e5fa;
+  background: var(--lavender);
   color: var(--text-subtle);
 }
 .agent-group-option > span:nth-child(2) {
@@ -5037,16 +5038,16 @@ label > .copy-input {
 .agent-group-option > i {
   width: 16px;
   height: 16px;
-  border: 1px solid #e5d3f1;
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-xs);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
+  color: var(--on-brand);
 }
 .agent-group-option.selected {
-  background: #fbf3ff;
-  border-color: #ddc5ed;
+  background: var(--lavender);
+  border-color: var(--border-strong);
 }
 .agent-group-option.selected > i {
   background: var(--brand);
@@ -5249,7 +5250,7 @@ label > .copy-input {
   line-height: 1.8;
 }
 .gateway-configuration-form input:disabled {
-  background: #faf6fd;
+  background: var(--surface);
   color: var(--text-subtle);
 }
 .workspace-button .workspace-unread-dot {
@@ -5260,7 +5261,7 @@ label > .copy-input {
   height: 8px;
   border-radius: 50%;
   background: var(--brand);
-  border: 2px solid #ece8f3;
+  border: 2px solid var(--rail);
   pointer-events: none;
 }
 .quick-switcher {
@@ -5273,9 +5274,9 @@ label > .copy-input {
   align-items: center;
   gap: 10px;
   padding: 0 12px;
-  border: 1px solid #e2dbe9;
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-md);
-  background: #fbfaf8;
+  background: var(--bg);
 }
 .quick-switcher-input input,
 .quick-switcher-input input:focus {
@@ -5311,13 +5312,13 @@ label > .copy-input {
 }
 .quick-switcher-option.selected,
 .quick-switcher-option:hover {
-  background: #f0ecfb;
+  background: var(--lavender);
 }
 .quick-switcher-icon {
   width: 28px;
   height: 28px;
   border-radius: var(--r-md);
-  background: #f7f5f9;
+  background: var(--surface-sunken);
   color: var(--brand-text);
   display: inline-flex;
   align-items: center;
@@ -5360,7 +5361,7 @@ label > .copy-input {
   justify-content: space-between;
   gap: 12px;
   padding: 8px 0;
-  border-bottom: 1px solid #f0edf3;
+  border-bottom: 1px solid var(--border);
 }
 .shortcuts-row:last-child {
   border-bottom: 0;
@@ -5378,8 +5379,8 @@ label > .copy-input {
 .shortcuts-row kbd {
   padding: 2px 7px;
   border-radius: var(--r-sm);
-  border: 1px solid #e2dbe9;
-  background: #f7f5f9;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-sunken);
   font-size: 12px;
   font-family: inherit;
   color: var(--text);
@@ -5396,9 +5397,9 @@ label > .copy-input {
   min-width: 0;
   height: 38px;
   padding: 0 12px;
-  border: 1px solid #e2dbe9;
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-md);
-  background: #fff;
+  background: var(--surface);
   font-size: 13px;
   color: var(--text-strong);
 }
@@ -5407,4 +5408,35 @@ label > .copy-input {
 .agent-disabled-reason {
   font-size: 12px;
   color: var(--text);
+}
+.theme-settings > .field-help {
+  margin: -4px 0 12px;
+}
+.theme-options {
+  display: inline-flex;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-sunken);
+}
+.theme-option {
+  padding: 8px 16px;
+  border-radius: var(--r-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.theme-option:hover {
+  color: var(--text-strong);
+  background: var(--hover-bg);
+}
+.theme-option.active {
+  background: var(--surface);
+  color: var(--brand-text);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
 }

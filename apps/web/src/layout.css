@@ -383,7 +383,7 @@ textarea:disabled {
   display: none;
 }
 .message:focus-within {
-  background: #fcfaff;
+  background: var(--surface);
 }
 .message-actions .icon-button {
   min-width: 32px;
@@ -698,7 +698,7 @@ textarea:disabled {
 .password-settings {
   margin-top: 32px;
   padding-top: 28px;
-  border-top: 1px solid #f0e7f5;
+  border-top: 1px solid var(--border);
 }
 .password-settings > h3 {
   margin-bottom: 8px;
@@ -1029,7 +1029,7 @@ textarea:disabled {
     height: 100%;
     z-index: 32;
     display: none;
-    background: #f7f3fb;
+    background: var(--lavender);
   }
   .sidebar-open .app-navigation {
     display: flex;
@@ -1160,9 +1160,9 @@ textarea:disabled {
     position: absolute;
     right: 8px;
     top: 38px;
-    border: 1px solid #e7dfed;
+    border: 1px solid var(--border-strong);
     border-radius: var(--r-md);
-    background: #fff;
+    background: var(--surface);
     padding: 2px;
     box-shadow: var(--shadow-md);
     z-index: 8;
@@ -1662,7 +1662,7 @@ textarea:disabled {
 }
 .conversation-actions-trigger:hover,
 .conversation-actions-trigger[aria-expanded="true"] {
-  background: #eee7f6;
+  background: var(--lavender);
 }
 .conversation-actions-menu {
   position: absolute;
@@ -1671,9 +1671,9 @@ textarea:disabled {
   right: 0;
   width: 180px;
   padding: 6px;
-  border: 1px solid #e3daec;
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-md);
-  background: white;
+  background: var(--surface);
   box-shadow: var(--shadow-lg);
 }
 .account-panel {
@@ -1695,7 +1695,7 @@ textarea:disabled {
 }
 .account-trigger:hover,
 .account-trigger[aria-expanded="true"] {
-  background: #e9e1f2;
+  background: var(--lavender);
 }
 .account-trigger > .avatar {
   width: 36px;
@@ -1710,7 +1710,7 @@ textarea:disabled {
   display: flex;
   padding: 2px;
   border-radius: 50%;
-  background: #ece8f3;
+  background: var(--lavender);
 }
 .rail-connection-status .status-dot {
   width: 7px;
@@ -1733,9 +1733,9 @@ textarea:disabled {
   max-height: min(70dvh, 240px);
   overflow: auto;
   padding: 6px;
-  border: 1px solid #e3daec;
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-md);
-  background: white;
+  background: var(--surface);
   box-shadow: var(--shadow-lg);
 }
 .account-menu > a,
@@ -1755,10 +1755,10 @@ textarea:disabled {
 .account-menu > a:hover,
 .account-menu > button:hover,
 .conversation-actions-menu > button:hover {
-  background: #f5f0fa;
+  background: var(--lavender);
 }
 .account-menu > button {
-  border-top: 1px solid #eee7f4;
+  border-top: 1px solid var(--border);
   margin-top: 4px;
 }
 .members-view {
@@ -1793,7 +1793,7 @@ textarea:disabled {
   font-weight: 500;
   padding: 3px 8px;
   border-radius: var(--r-sm);
-  background: #f0eaf6;
+  background: var(--lavender);
 }
 .members-heading p {
   margin-top: 8px;
@@ -1806,9 +1806,9 @@ textarea:disabled {
   align-items: center;
   gap: 9px;
   min-height: 46px;
-  border: 1px solid #e2d8ed;
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-md);
-  background: #fcfaff;
+  background: var(--surface);
   color: var(--text-muted);
   padding: 0 13px;
   margin-top: 24px;
@@ -1843,7 +1843,7 @@ textarea:disabled {
   align-items: center;
   gap: 18px;
   padding: 18px 0;
-  border-bottom: 1px solid #eee7f4;
+  border-bottom: 1px solid var(--border);
 }
 .member-directory-identity {
   flex: 1;
@@ -1892,7 +1892,7 @@ textarea:disabled {
   border-radius: var(--r-sm);
 }
 .member-manage-link:hover {
-  background: #f5f0fa;
+  background: var(--lavender);
 }
 .member-unavailable {
   font-size: 11px;
@@ -1927,8 +1927,8 @@ textarea:disabled {
   gap: 14px;
   padding: 18px 0;
   margin-top: 28px;
-  border-top: 1px solid #eee7f4;
-  border-bottom: 1px solid #eee7f4;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
   color: var(--text-muted);
 }
 .platform-management-link > span {

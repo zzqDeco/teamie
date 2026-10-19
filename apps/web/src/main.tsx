@@ -15,12 +15,14 @@ import { ChatProvider } from "./chat";
 import { Landing, Login, Join } from "./public";
 import { ForgotPassword, ResetPassword } from "./password-recovery";
 import { Shell } from "./shell";
+import { applyTheme, useThemePreference } from "./theme";
 import { Button, Loading, Logo, Notice } from "./ui";
 import "@fontsource-variable/dm-sans";
 import "./tokens.css";
 import "./styles.css";
 import "./layout.css";
 import "./password-recovery.css";
+applyTheme();
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: true } },
 });
@@ -47,6 +49,7 @@ function Protected({ children }: { children: ReactNode }) {
   return children;
 }
 function App() {
+  useThemePreference();
   return (
     <Routes>
       <Route path="/" element={<Landing />} />
