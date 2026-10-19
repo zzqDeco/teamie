@@ -241,7 +241,7 @@ describe("mentions and replies inbox", () => {
   });
   it("pages independently and filters unread without sending a read acknowledgement", async () => {
     vi.mocked(api.attention).mockImplementation(async (options) =>
-      options?.limit === 100
+      options?.limit === 1
         ? { items: [], unreadCount: 3 }
         : options?.cursor
           ? { items: [item(1)], unreadCount: 3 }
@@ -373,7 +373,7 @@ describe("mentions and replies inbox", () => {
     const pending = deferred<AttentionPage>();
     let signal: AbortSignal | undefined;
     vi.mocked(api.attention).mockImplementation((options, abort) => {
-      if (options?.limit === 100)
+      if (options?.limit === 1)
         return Promise.resolve({ items: [], unreadCount: 0 });
       signal = abort;
       return pending.promise;
@@ -409,7 +409,7 @@ describe("mentions and replies inbox", () => {
   it("keeps revoked conversations hidden when an old page arrives after the ACL snapshot changes", async () => {
     const pending = deferred<AttentionPage>();
     vi.mocked(api.attention).mockImplementation((options) =>
-      options?.limit === 100
+      options?.limit === 1
         ? Promise.resolve({ items: [], unreadCount: 0 })
         : pending.promise,
     );
