@@ -313,6 +313,94 @@ describe("PR-7 inbox batch mark-all-read and opt-in in-tab notifications", () =>
     expect(markBtn.textContent).toContain("全部标为已读");
   });
 
+  it.each(["removed", "edited", "retracted"] as const)(
+    "revalidates %s attention before retrying and leaves newer or unrelated attention unread",
+    async (change) => {
+      const convs = Object.values(chatStore.getSnapshot().conversations);
+      const original = makeAttention(convs[0], 15);
+      let freshItems = [original, makeAttention(convs[1], 22)];
+      const attentionSpy = vi
+        .spyOn(api, "attention")
+        .mockImplementation(async (options) => {
+          const current = freshItems.filter(
+            (item) =>
+              chatStore.getSnapshot().conversations[item.conversation.id]
+                .readSeq < item.message.seq,
+          );
+          // A valid older target is on a later page of the retry scan.
+          if (options?.limit === 100 && options.unreadOnly) {
+            return options.cursor === "remaining"
+              ? { items: current.slice(1), unreadCount: current.length }
+              : {
+                  items: current.slice(0, 1),
+                  cursor: "remaining",
+                  unreadCount: current.length,
+                };
+          }
+          return { items: current, unreadCount: current.length };
+        });
+      const readSpy = vi
+        .spyOn(api, "read")
+        .mockRejectedValue(new Error("网络波动"));
+
+      await settle(() =>
+        root.render(
+          <QueryClientProvider client={client}>
+            <MemoryRouter initialEntries={["/app/attention"]}>
+              <Shell />
+            </MemoryRouter>
+          </QueryClientProvider>,
+        ),
+      );
+      await settle();
+      const markBtn = host.querySelector<HTMLButtonElement>(
+        ".attention-mark-all-read",
+      )!;
+      await settle(() => markBtn.click());
+      await settle();
+      expect(readSpy).toHaveBeenCalledWith("c1", 15);
+      expect(readSpy).toHaveBeenCalledWith("c2", 22);
+      expect(markBtn.textContent).toContain("已处理 0 / 2，重试剩余");
+
+      freshItems = [
+        ...(change === "removed" ? [] : [original]),
+        makeAttention(convs[1], 30),
+        makeAttention(convs[1], 8),
+        makeAttention(convs[2], 35),
+      ];
+      if (change !== "removed") {
+        await settle(() =>
+          chatStore.merge([
+            {
+              ...original.message,
+              body: "普通消息",
+              mentions: [],
+              ...(change === "edited"
+                ? { editedAt: "2026-10-18T10:01:00Z" }
+                : { retractedAt: "2026-10-18T10:01:00Z" }),
+            },
+          ]),
+        );
+      }
+      attentionSpy.mockClear();
+      readSpy.mockClear();
+      readSpy.mockImplementation(async (_convId, seq) => ({ readSeq: seq }));
+      await settle(() => markBtn.click());
+      await settle();
+
+      expect(readSpy.mock.calls).toEqual([["c2", 8]]);
+      expect(
+        attentionSpy.mock.calls
+          .filter(([options]) => options?.limit === 100)
+          .map(([options]) => options?.cursor),
+      ).toEqual([undefined, "remaining"]);
+      expect(chatStore.getSnapshot().conversations.c1.readSeq).toBe(0);
+      expect(chatStore.getSnapshot().conversations.c2.readSeq).toBe(8);
+      expect(chatStore.getSnapshot().conversations.c3.readSeq).toBe(0);
+      expect(markBtn.textContent).toContain("全部标为已读");
+    },
+  );
+
   it("requests Notification permission only on user opt-in, defaults preview to off, scopes consent to account, and fires/navigates on eligible synced messages", async () => {
     const createdNotifications: Array<{
       title: string;
