@@ -253,11 +253,17 @@ describe("PR-3 navigation & notification ergonomics", () => {
 
     const wsButtons = container.querySelectorAll(".workspace-button");
     expect(wsButtons.length).toBe(2);
+    expect(wsButtons[0]?.getAttribute("aria-label")).toBe(
+      "打开工作空间 产品研发（有未读消息）",
+    );
+    expect(wsButtons[1]?.getAttribute("aria-label")).toBe(
+      "打开工作空间 设计中心（有未读消息）",
+    );
     expect(
-      wsButtons[0]?.querySelector('.workspace-unread-dot[aria-label="有未读消息"]'),
+      wsButtons[0]?.querySelector('.workspace-unread-dot[aria-hidden="true"]'),
     ).toBeTruthy();
     expect(
-      wsButtons[1]?.querySelector('.workspace-unread-dot[aria-label="有未读消息"]'),
+      wsButtons[1]?.querySelector('.workspace-unread-dot[aria-hidden="true"]'),
     ).toBeTruthy();
     expect(document.title).toBe("• # general · Teamie");
 
@@ -437,6 +443,9 @@ describe("PR-3 navigation & notification ergonomics", () => {
     );
     expect(searchInput).toBeTruthy();
     expect(document.activeElement).toBe(searchInput);
+    expect(searchInput?.getAttribute("aria-activedescendant")).toBe(
+      "quick-switcher-opt-conv:general",
+    );
 
     scrollIntoView.mockClear();
     await act(async () => {
@@ -445,6 +454,9 @@ describe("PR-3 navigation & notification ergonomics", () => {
       );
     });
     expect(scrollIntoView).toHaveBeenCalled();
+    expect(searchInput?.getAttribute("aria-activedescendant")).toBe(
+      "quick-switcher-opt-conv:dm-2",
+    );
 
     await act(async () => {
       resolveSecondMembers({

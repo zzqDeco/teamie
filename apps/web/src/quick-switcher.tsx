@@ -231,6 +231,13 @@ export function QuickSwitcher({
           <input
             ref={inputRef}
             type="search"
+            role="combobox"
+            aria-expanded={items.length > 0}
+            aria-autocomplete="list"
+            aria-controls="quick-switcher-listbox"
+            aria-activedescendant={
+              activeItemId ? `quick-switcher-opt-${activeItemId}` : undefined
+            }
             autoFocus
             data-autofocus
             value={query}
@@ -245,6 +252,7 @@ export function QuickSwitcher({
         </label>
         {items.length ? (
           <ul
+            id="quick-switcher-listbox"
             ref={listRef}
             className="quick-switcher-list"
             role="listbox"
@@ -253,7 +261,12 @@ export function QuickSwitcher({
             {items.map((item, index) => {
               const selected = index === boundedIndex;
               return (
-                <li key={item.id} role="option" aria-selected={selected}>
+                <li
+                  key={item.id}
+                  id={`quick-switcher-opt-${item.id}`}
+                  role="option"
+                  aria-selected={selected}
+                >
                   <button
                     type="button"
                     className={`quick-switcher-option ${selected ? "selected" : ""}`}

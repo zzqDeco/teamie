@@ -712,18 +712,18 @@ export function Shell() {
                 <button
                   key={space.id}
                   className={`workspace-button ${space.id === workspace?.id ? "selected" : ""}`}
-                  title={space.name}
-                  aria-label={`打开工作空间 ${space.name}`}
+                  title={hasUnread ? `${space.name}（有未读消息）` : space.name}
+                  aria-label={
+                    hasUnread
+                      ? `打开工作空间 ${space.name}（有未读消息）`
+                      : `打开工作空间 ${space.name}`
+                  }
                   onClick={() => selectWorkspace(space)}
                 >
                   <span>{Array.from(space.name).slice(0, 2).join("")}</span>
                   {space.id === workspace?.id && <i />}
                   {hasUnread && (
-                    <em
-                      className="workspace-unread-dot"
-                      role="img"
-                      aria-label="有未读消息"
-                    />
+                    <em className="workspace-unread-dot" aria-hidden="true" />
                   )}
                 </button>
               );
