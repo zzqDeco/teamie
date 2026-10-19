@@ -187,7 +187,7 @@ export function ConversationView({
     };
     setEntry(frozen);
     setAnchorPending(
-      !initialMessageId && frozen.readSeq > 0 && frozen.lastSeq > frozen.readSeq,
+      !initialMessageId && frozen.lastSeq > frozen.readSeq,
     );
   }
   const [latestLoaded, setLatestLoaded] = useState(false);
@@ -351,7 +351,7 @@ export function ConversationView({
       if (current) {
         setEntry({ readSeq: current.readSeq, lastSeq: current.lastSeq });
         setAnchorPending(
-          current.readSeq > 0 && current.lastSeq > current.readSeq,
+          current.lastSeq > current.readSeq,
         );
       }
     }
@@ -623,7 +623,7 @@ export function ConversationView({
   const latest = messages.filter((m) => !m.status).at(-1)?.seq || 0;
   const tailId = messages.at(-1)?.id;
   const firstUnread =
-    entry && entry.readSeq > 0
+    entry && entry.lastSeq > entry.readSeq
       ? messages.find(
           (m) =>
             !m.status &&
@@ -650,6 +650,7 @@ export function ConversationView({
     };
   }, [located, unreadContext, searchOpen, visible, loading]);
   const dwell = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const readFailures = useRef(0);
   // Record rows that are visible once scrolling has settled; programmatic or
   // smooth scrolls keep rescheduling this, so transit frames never count.
   const scheduleSeen = useCallback(() => {
@@ -661,11 +662,14 @@ export function ConversationView({
       for (const row of el.querySelectorAll<HTMLElement>("article[data-seq]")) {
         const rect = row.getBoundingClientRect();
         const inside = rect.top >= root.top - 1 && rect.bottom <= root.bottom + 1;
+        const visibleHeight =
+          Math.min(rect.bottom, root.bottom) - Math.max(rect.top, root.top);
         const tallAndCovering =
           rect.height > root.height * 0.8 &&
-          rect.top < root.bottom &&
-          rect.bottom > root.top;
-        if (inside || tallAndCovering) seenRows.current.add(Number(row.dataset.seq));
+          visibleHeight >= root.height * 0.5 &&
+          visibleHeight > 0;
+        if (inside || tallAndCovering || row.dataset.own === "true")
+          seenRows.current.add(Number(row.dataset.seq));
       }
       const base =
         chatStore.getSnapshot().conversations[conversation.id]?.readSeq ?? 0;
@@ -675,9 +679,12 @@ export function ConversationView({
     }, 400);
   }, [conversation.id]);
   useEffect(() => () => clearTimeout(dwell.current), []);
+  const lastTailId = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (loading) return;
     const el = scrollRef.current;
+    const tailChanged = tailId !== lastTailId.current;
+    lastTailId.current = tailId;
     if (anchorPending && !located) {
       const anchor = firstUnread
         ? document.getElementById(`message-${firstUnread}`)
@@ -697,7 +704,7 @@ export function ConversationView({
       // Keep the current position until the latest page can be anchored.
       else return;
     }
-    if (atBottom || initialScroll.current) {
+    if (initialScroll.current || (atBottom && tailChanged)) {
       el?.scrollTo({ top: el.scrollHeight });
       initialScroll.current = false;
     }
@@ -726,14 +733,28 @@ export function ConversationView({
       .read(conversation.id, readCandidate)
       .then((result) => {
         if (generation === chatStore.generation) {
+          readFailures.current = 0;
           lastRead.current = Math.max(lastRead.current, result.readSeq);
           chatStore.markRead(conversation.id, result.readSeq);
         }
       })
       .catch(() => {
-        /* Durable sync and the next read retry preserve unread state. */
+        if (generation === chatStore.generation) {
+          setReadCandidate(0);
+          if (readFailures.current < 1) {
+            readFailures.current++;
+            scheduleSeen();
+          }
+        }
       });
-  }, [readCandidate, latest, conversation.id, conversation.readSeq, generation]);
+  }, [
+    readCandidate,
+    latest,
+    conversation.id,
+    conversation.readSeq,
+    generation,
+    scheduleSeen,
+  ]);
   // Explicit user choice to acknowledge skipped history through the latest
   // loaded message; never triggered implicitly.
   function markLatestRead() {
@@ -1037,6 +1058,7 @@ export function ConversationView({
           setAtBottom(
             !located && el.scrollHeight - el.scrollTop - el.clientHeight < 80,
           );
+          readFailures.current = 0;
           scheduleSeen();
         }}
       >
@@ -1124,7 +1146,7 @@ export function ConversationView({
                   <span>{date(message.createdAt)}</span>
                 </div>
               )}
-              {message.id === firstUnread && (
+              {message.id === firstUnread && (entry?.readSeq ?? 0) > 0 && (
                 <div className="unread-divider">
                   <span>以下是新消息</span>
                 </div>
@@ -1132,6 +1154,7 @@ export function ConversationView({
               <article
                 id={`message-${message.id}`}
                 data-seq={message.status ? undefined : message.seq}
+                data-own={message.senderId === user!.id ? "true" : undefined}
                 tabIndex={-1}
                 className={`message ${highlightId === message.id ? "located" : ""} ${compact ? "compact" : ""} ${message.status || ""} ${message.retractedAt ? "retracted" : ""} ${actionMessageId === message.id ? "actions-open" : ""}`}
               >

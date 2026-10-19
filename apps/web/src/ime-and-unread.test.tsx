@@ -257,6 +257,54 @@ describe("unread entry", () => {
     });
     expect(clear).toHaveBeenCalledTimes(1);
   });
+
+  it("anchors never-read conversations at sequence one and advances across own messages", async () => {
+    const conversation = conversationWith(0, 8);
+    bootstrap.conversations = [conversation];
+    chatStore.replaceConversations([conversation]);
+    page = [
+      message(1, user.id),
+      message(2, user.id),
+      ...[3, 4, 5, 6, 7, 8].map((seq) => message(seq)),
+    ];
+    visibleOnly(() => new Set([3, 4]));
+    await show(conversation);
+    expect(HTMLElement.prototype.scrollTo).not.toHaveBeenCalled();
+    await elapse(700);
+    expect(api.read).toHaveBeenCalledWith("room", 4);
+  });
+
+  it("requires tall rows to cover at least half the viewport and retries failed reads", async () => {
+    const conversation = conversationWith(0, 2);
+    bootstrap.conversations = [conversation];
+    chatStore.replaceConversations([conversation]);
+    page = [message(1), message(2)];
+    let peekOnly = true;
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      const el = this as HTMLElement;
+      const rect = (top: number, bottom: number) =>
+        ({ top, bottom, left: 0, right: 0, width: 0, height: bottom - top, x: 0, y: top, toJSON: noop }) as DOMRect;
+      if (el.classList.contains("message-scroll")) return rect(0, 300);
+      const seq = Number(el.dataset?.seq || 0);
+      if (seq === 1) return rect(0, 100);
+      return peekOnly ? rect(295, 695) : rect(100, 500);
+    });
+    vi.mocked(api.read).mockRejectedValueOnce(new Error("transient"));
+    await show(conversation);
+    await elapse(450);
+    expect(api.read).toHaveBeenCalledTimes(1);
+    expect(api.read).toHaveBeenLastCalledWith("room", 1);
+    await elapse(450);
+    expect(api.read).toHaveBeenCalledTimes(2);
+    expect(api.read).not.toHaveBeenCalledWith("room", 2);
+
+    peekOnly = false;
+    await act(async () => {
+      host.querySelector(".message-scroll")!.dispatchEvent(new Event("scroll"));
+    });
+    await elapse(450);
+    expect(api.read).toHaveBeenCalledWith("room", 2);
+  });
 });
 
 describe("editing shortcuts", () => {
