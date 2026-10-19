@@ -6,17 +6,17 @@
   font-size: 13px;
   line-height: 1.5;
   flex-shrink: 0;
-  border-bottom: 1px solid #ece4f2;
-  background: #f5f1fb;
+  border-bottom: 1px solid var(--border);
+  background: var(--lavender);
   color: var(--text);
 }
 .connection-banner.offline {
-  background: #fbf6ea;
+  background: var(--warning-bg);
   border-bottom-color: #efe5cf;
   color: var(--warning-text);
 }
 .connection-banner.restored {
-  background: #eef6ea;
+  background: var(--success-bg);
   border-bottom-color: #dcebd4;
   color: var(--success-text);
 }

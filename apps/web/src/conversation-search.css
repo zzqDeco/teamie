@@ -29,7 +29,7 @@
   font: inherit;
 }
 .search-modes button[aria-pressed="true"] {
-  background: #eee7f7;
+  background: var(--lavender);
   color: var(--text-muted);
 }
 .conversation-search .search-form {
@@ -37,13 +37,13 @@
   align-items: center;
   gap: 6px;
   margin-bottom: 12px;
-  border: 1px solid #ddd4e6;
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-md);
   padding: 3px 5px 3px 12px;
   flex: none;
 }
 .conversation-search .search-form:focus-within {
-  border-color: #9c7bbd;
+  border-color: var(--brand-text);
   box-shadow: var(--focus-halo);
 }
 .conversation-search .search-form input {
@@ -81,7 +81,7 @@
 }
 .search-result-list > li {
   padding: 16px 4px;
-  border-bottom: 1px solid #eee8f3;
+  border-bottom: 1px solid var(--border);
 }
 .search-result-meta {
   display: flex;
@@ -118,7 +118,7 @@
   cursor: pointer;
 }
 .search-message-result mark {
-  background: #f4e6b7;
+  background: var(--warning-bg);
   color: inherit;
   border-radius: var(--r-xs);
 }

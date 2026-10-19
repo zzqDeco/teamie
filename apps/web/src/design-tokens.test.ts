@@ -59,8 +59,9 @@ function contrastRatio(hexA: string, hexB: string) {
 
 describe("PR-4 design tokens & WCAG AA contrast", () => {
   const tokensCss = readFileSync(join(srcDir, "tokens.css"), "utf8");
+  const lightBlock = /:root\s*\{([\s\S]*?)\}/.exec(tokensCss)?.[1] || "";
   const tokenMap = new Map<string, string>();
-  for (const match of tokensCss.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)) {
+  for (const match of lightBlock.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)) {
     tokenMap.set(match[1], match[2].trim());
   }
 

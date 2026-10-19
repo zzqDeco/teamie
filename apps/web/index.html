@@ -13,6 +13,18 @@
     />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Teamie · 在一起，做成事</title>
+    <script>
+      try {
+        const pref = localStorage.getItem("teamie.theme") || "system";
+        const dark =
+          pref === "dark" ||
+          (pref !== "light" &&
+            window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+        document.documentElement.dataset.themePreference = pref;
+      } catch {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

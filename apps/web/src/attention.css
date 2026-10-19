@@ -8,7 +8,7 @@
   display: flex;
   gap: 6px;
   padding: 14px 28px;
-  border-bottom: 1px solid #eee8f3;
+  border-bottom: 1px solid var(--border);
   flex: none;
 }
 .attention-filters button {
@@ -24,7 +24,7 @@
 }
 .attention-filters button[aria-pressed="true"] {
   color: var(--brand-text);
-  background: #eee7f7;
+  background: var(--lavender);
   font-weight: 600;
 }
 .attention-scroll {
@@ -46,7 +46,7 @@
   margin: 0;
 }
 .attention-list > li {
-  border-bottom: 1px solid #eee8f3;
+  border-bottom: 1px solid var(--border);
 }
 .attention-item {
   display: flex;
@@ -58,10 +58,10 @@
   text-decoration: none;
 }
 .attention-item:hover {
-  background: #f8f5fb;
+  background: var(--lavender);
 }
 .attention-item.unread {
-  background: #f8f5fb;
+  background: var(--lavender);
 }
 .attention-item-content {
   min-width: 0;
@@ -127,7 +127,7 @@
 .rail-attention:hover,
 .rail-attention.selected {
   color: var(--brand-text);
-  background: #e1d9ed;
+  background: var(--lavender);
 }
 .rail-attention-count {
   position: absolute;

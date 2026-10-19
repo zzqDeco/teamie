@@ -18,7 +18,7 @@
   max-height: min(280px, 35dvh);
   overflow-y: auto;
   padding: 5px;
-  border: 1px solid var(--border, #ded8e9);
+  border: 1px solid var(--border, var(--border-strong));
   border-radius: var(--r-lg);
   background: var(--panel, #fff);
   box-shadow: var(--shadow-lg);
@@ -41,7 +41,7 @@
 }
 .mention-options button[aria-selected="true"],
 .mention-options button:hover {
-  background: #eee8f9;
+  background: var(--lavender);
 }
 .mention-options button > span:not(.agent-badge) {
   min-width: 0;
@@ -65,7 +65,7 @@
   background: #b38bd33b;
 }
 .app-shell .message.located {
-  background: #eee9ff;
+  background: var(--lavender);
   outline: none;
 }
 .located-banner,
@@ -76,7 +76,7 @@
   gap: 12px;
   padding: 8px 16px;
   font-size: 12px;
-  background: #f2edf9;
+  background: var(--lavender);
   color: var(--text);
 }
 .located-banner button,
