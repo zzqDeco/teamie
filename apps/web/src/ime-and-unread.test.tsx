@@ -364,4 +364,15 @@ describe("editing shortcuts", () => {
     await act(async () => { finish(); await Promise.resolve(); });
     expect(editor()).toBeNull();
   });
+
+  it("never selects an isolated older cached own message across an unloaded sequence gap", async () => {
+    const conversation = conversationWith(120, 120);
+    bootstrap.conversations = [conversation];
+    chatStore.replaceConversations([conversation]);
+    chatStore.merge([message(5, user.id, "older isolated own")]);
+    page = Array.from({ length: 50 }, (_, i) => message(71 + i));
+    await show(conversation);
+    await key(composer(), { key: "ArrowUp" });
+    expect(host.querySelector('textarea[aria-label="编辑消息内容"]')).toBeNull();
+  });
 });

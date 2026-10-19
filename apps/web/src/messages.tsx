@@ -873,14 +873,20 @@ export function ConversationView({
       !replyToId &&
       attachments.files.length === 0 &&
       !located &&
+      latestLoaded &&
+      latest >= conversation.lastSeq &&
       canEdit
     ) {
+      const contiguousFrom = latest
+        ? extendHistoryBoundary(latest, messages)
+        : Infinity;
       const own = [...messages]
         .reverse()
         .find(
           (m) =>
             m.senderId === userId &&
             !m.status &&
+            m.seq >= contiguousFrom &&
             !m.retractedAt &&
             (m.body || m.attachments?.length),
         );
