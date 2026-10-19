@@ -219,6 +219,14 @@ export type AttentionItem = {
   isRead: boolean;
 };
 export type AttentionPage = { items: AttentionItem[]; cursor?: string; unreadCount: number };
+export type WorkspaceSearchItem = {
+  message: Message;
+  conversation: Pick<Conversation, "id" | "workspaceId" | "name" | "type">;
+};
+export type WorkspaceSearchPage = {
+  items: WorkspaceSearchItem[];
+  cursor?: string;
+};
 export class ApiError extends Error {
   status: number;
   code: string;
@@ -494,6 +502,19 @@ export class TeamieClient {
     if (options.content) params.set("content", options.content);
     if (options.beforeSeq !== undefined) params.set("beforeSeq", String(options.beforeSeq));
     return this.#request<MessagePage>(`/conversations/${part(id)}/messages?${params}`, { signal });
+  };
+  searchWorkspaceMessages = (
+    workspaceId: string,
+    options: { q: string; cursor?: string; limit?: number },
+    signal?: AbortSignal,
+  ) => {
+    const params = new URLSearchParams({ q: options.q });
+    if (options.cursor) params.set("cursor", options.cursor);
+    if (options.limit !== undefined) params.set("limit", String(options.limit));
+    return this.#request<WorkspaceSearchPage>(
+      `/workspaces/${part(workspaceId)}/messages/search?${params}`,
+      { signal },
+    );
   };
   message = (conversationId: string, id: string, signal?: AbortSignal) =>
     this.#request<{ message: Message }>(`/conversations/${part(conversationId)}/messages/${part(id)}`, { signal });
