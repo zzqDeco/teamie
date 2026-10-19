@@ -14,6 +14,7 @@ import { api } from "@teamie/api-client";
 import type { Conversation, Member, Workspace } from "@teamie/api-client";
 import { isComposingKey } from "./mentions";
 import { conversationName } from "./messages";
+import { enrichParticipants } from "./participants";
 import { compareTimestampsDesc } from "./store";
 import { Modal } from "./ui";
 
@@ -30,6 +31,7 @@ export function QuickSwitcher({
   workspaces,
   conversations,
   currentWorkspaceId,
+  discoveryAllowed,
   members,
   userId,
   recentConversationIds,
@@ -68,21 +70,44 @@ export function QuickSwitcher({
       staleTime: 60_000,
     })),
   });
+  const agentQueries = useQueries({
+    queries: workspaces.map((space) => ({
+      queryKey: ["workspaceAgents", userId, space.id],
+      queryFn: () => api.workspaceAgents(space.id),
+      enabled: Boolean(
+        discoveryAllowed && workspacesNeedingMembers.has(space.id),
+      ),
+      staleTime: 30_000,
+    })),
+  });
   const membersByWorkspace = new Map<string, Member[]>();
+  const agentLoadingByWorkspace = new Map<string, boolean>();
   workspaces.forEach((space, index) => {
+    agentLoadingByWorkspace.set(
+      space.id,
+      Boolean(
+        discoveryAllowed &&
+          workspacesNeedingMembers.has(space.id) &&
+          agentQueries[index]?.isPending,
+      ),
+    );
     const loaded = memberQueries[index]?.data?.members;
     const rawMembers =
       loaded || (space.id === currentWorkspaceId ? members : undefined);
     if (rawMembers) {
+      const loadedAgents = discoveryAllowed
+        ? agentQueries[index]?.data?.agents || []
+        : [];
+      const enriched = enrichParticipants(rawMembers, loadedAgents);
       const merged =
         space.id === currentWorkspaceId && members.length
           ? [
-              ...rawMembers,
+              ...enriched,
               ...members.filter(
-                (m) => !rawMembers.some((rm) => rm.userId === m.userId),
+                (m) => !enriched.some((rm) => rm.userId === m.userId),
               ),
             ]
-          : rawMembers;
+          : enriched;
       membersByWorkspace.set(space.id, merged);
     }
   });
@@ -97,12 +122,12 @@ export function QuickSwitcher({
       if (!workspaceMap.has(c.workspaceId)) return false;
       if (c.type !== "channel" && !c.name.trim()) {
         const wsMembers = membersByWorkspace.get(c.workspaceId);
+        if (!wsMembers) return false;
         const otherIds = c.memberIds.filter((id) => id !== userId);
-        if (
-          !wsMembers ||
-          (otherIds.length > 0 &&
-            !otherIds.some((id) => wsMembers.some((m) => m.userId === id)))
-        ) {
+        const resolved =
+          otherIds.length === 0 ||
+          otherIds.some((id) => wsMembers.some((m) => m.userId === id));
+        if (!resolved && agentLoadingByWorkspace.get(c.workspaceId)) {
           return false;
         }
       }

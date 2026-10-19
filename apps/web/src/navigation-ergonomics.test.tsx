@@ -335,6 +335,7 @@ describe("PR-3 navigation & notification ergonomics", () => {
       ]);
     });
     await flush();
+    await flush();
     // 1 unread DM (which is also an attention item) + 1 unread channel mention = (2), not (3)
     expect(document.title).toBe("(2) # general · Teamie");
   });
@@ -747,12 +748,24 @@ describe("PR-3 navigation & notification ergonomics", () => {
       workspaceId: secondWorkspace.id,
       name: "design",
     };
+    const agentDm: Conversation = {
+      id: "dm-agent",
+      workspaceId: workspace.id,
+      type: "direct",
+      name: "",
+      memberIds: [owner.id, agent.principalId],
+      lastSeq: 0,
+      readSeq: 0,
+      updatedAt: "2026-10-16T00:30:00Z",
+    };
     chatStore.replaceConversations([
       channel,
       dmWholeSecond,
       dmSubSecond,
+      agentDm,
       secondChannel,
     ]);
+    vi.spyOn(api, "workspaceAgents").mockResolvedValue({ agents: [agent] });
     vi.spyOn(api, "attention").mockResolvedValue({
       items: [
         {
@@ -794,12 +807,13 @@ describe("PR-3 navigation & notification ergonomics", () => {
     // dmSubSecond (.123456Z) must sort ahead of dmWholeSecond (Z)
     const dmLabels = Array.from(
       container.querySelectorAll(
-        ".nav-section:nth-of-type(2) .conversation-link > span:not(.avatar):not(.unread-badge)",
+        ".nav-section:nth-of-type(2) .conversation-link > span:not(.avatar):not(.unread-badge):not(.agent-badge)",
       ),
     ).map((el) => el.textContent);
-    expect(dmLabels).toEqual(["私聊乙", "私聊甲"]);
+    expect(dmLabels).toEqual(["私聊乙", "私聊甲", "产品伙伴"]);
 
-    // Open QuickSwitcher: secondWorkspace has only channels so api.members("design") must not be called
+    // Open QuickSwitcher: secondWorkspace has only channels so api.members("design") must not be called,
+    // while unnamed Agent DM ("产品伙伴") is preserved in QuickSwitcher options
     await act(async () => {
       window.dispatchEvent(
         new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }),
@@ -809,6 +823,10 @@ describe("PR-3 navigation & notification ergonomics", () => {
     expect(
       membersSpy.mock.calls.some((call) => call[0] === secondWorkspace.id),
     ).toBe(false);
+    const switcherTexts = Array.from(
+      document.querySelectorAll(".quick-switcher-option"),
+    ).map((el) => el.textContent);
+    expect(switcherTexts.some((t) => t?.includes("产品伙伴"))).toBe(true);
 
     // Close QuickSwitcher
     await act(async () => {
