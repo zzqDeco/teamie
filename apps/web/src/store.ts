@@ -180,7 +180,9 @@ export class ChatStore {
                       ...m,
                       status: "failed" as const,
                       error:
-                        m.status === "failed" && m.error
+                        m.status === "failed" &&
+                        typeof m.permanent === "boolean" &&
+                        m.error
                           ? m.error
                           : "上次发送未确认，请重试",
                     }

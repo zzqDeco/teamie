@@ -6,7 +6,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/adaptor"
 	kitexserver "github.com/cloudwego/kitex/server"
-	"log"
+	"go.uber.org/zap"
 	"net"
 	"net/http"
 	"os"
@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"teamie/agent-protocol/kitex_gen/agent/agentruntimeservice"
 	"teamie/agent-runtime/internal/engine"
+	"teamie/backend/pkg/observability"
 	"time"
 )
 
@@ -27,9 +28,11 @@ func env(k, d string) string {
 	return d
 }
 func main() {
+	stopLogging := observability.Configure("teamie.agent-runtime", BuildVersion, BuildSHA)
+	defer stopLogging()
 	for _, k := range []string{"DATABASE_URL", "AGENT_RUNTIME_TOKEN", "IM_PRINCIPAL_RUNTIME_TOKEN", "GATEWAY_RUNTIME_TOKEN", "SANDBOX_RUNTIME_TOKEN"} {
 		if os.Getenv(k) == "" {
-			log.Fatalf("%s is required", k)
+			observability.Fatal(k+" is required", nil)
 		}
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -38,20 +41,21 @@ func main() {
 	store, err := engine.Open(startup, os.Getenv("DATABASE_URL"))
 	done()
 	if err != nil {
-		log.Fatal("runtime database initialization failed")
+		observability.Fatal("runtime database initialization failed", err)
 	}
 	defer store.DB.Close()
 	runtime, err := engine.New(store, engine.Config{ControlAddr: env("AGENT_CONTROL_RPC_ADDR", "agent-control:8884"), GatewayAddr: env("GATEWAY_RPC_ADDR", "llm-gateway:8886"), SandboxAddr: env("SANDBOX_RPC_ADDR", "sandbox:8887"), IdentityAddr: env("IDENTITY_RPC_ADDR", "identity:8881"), IMURL: env("IM_API_URL", "http://chat:8082"), IMRealtimeURL: env("IM_REALTIME_URL", "http://realtime:8083"), ControlToken: os.Getenv("AGENT_RUNTIME_TOKEN"), GatewayToken: os.Getenv("GATEWAY_RUNTIME_TOKEN"), SandboxToken: os.Getenv("SANDBOX_RUNTIME_TOKEN"), IMToken: os.Getenv("IM_PRINCIPAL_RUNTIME_TOKEN"), FlagsFile: os.Getenv("FEATURE_FLAGS_FILE"), GatewayStreamURL: env("GATEWAY_STREAM_URL", "http://llm-gateway:8086/internal/v1/chat/stream")})
 	if err != nil {
-		log.Fatal("runtime client initialization failed")
+		observability.Fatal("runtime client initialization failed", err)
 	}
 	rpcAddr, err := net.ResolveTCPAddr("tcp", env("RPC_ADDR", ":8885"))
 	if err != nil {
-		log.Fatal("invalid runtime RPC address")
+		observability.Fatal("invalid runtime RPC address", err)
 	}
-	rpc := agentruntimeservice.NewServer(&engine.RuntimeRPC{Engine: runtime}, kitexserver.WithServiceAddr(rpcAddr))
+	rpc := agentruntimeservice.NewServer(&engine.RuntimeRPC{Engine: runtime}, kitexserver.WithServiceAddr(rpcAddr), observability.RPCServer())
 	go func() {
-		if rpc.Run() != nil {
+		if err := rpc.Run(); err != nil {
+			observability.L(ctx).Error("Runtime RPC stopped", zap.Error(err))
 			cancel()
 		}
 	}()
@@ -76,11 +80,12 @@ func main() {
 		write(w, 200, map[string]string{"status": "ready"})
 	})
 	h := server.Default(server.WithHostPorts(env("HTTP_ADDR", ":8085")), server.WithMaxRequestBodySize(16384))
-	h.Any("/*path", adaptor.HertzHandler(mux))
+	h.Any("/*path", adaptor.HertzHandler(observability.HTTP(mux)))
 	stopped := make(chan struct{})
 	go func() { defer close(stopped); runtime.Run(ctx) }()
 	go func() {
-		if h.Run() != nil {
+		if err := h.Run(); err != nil {
+			observability.L(ctx).Error("Runtime HTTP stopped", zap.Error(err))
 			cancel()
 		}
 	}()
@@ -92,6 +97,6 @@ func main() {
 	select {
 	case <-stopped:
 	case <-shutdown.Done():
-		log.Print("runtime shutdown deadline exceeded")
+		observability.L(ctx).Warn("Runtime shutdown deadline exceeded")
 	}
 }

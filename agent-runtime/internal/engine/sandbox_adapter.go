@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go.uber.org/zap"
 	"strings"
+	"teamie/backend/pkg/observability"
 	"time"
 
 	bg "github.com/cloudwego/eino/adk/backgroundtask"
@@ -55,7 +57,9 @@ func (s *SandboxBackend) check(ctx context.Context) error {
 	}
 	return nil
 }
-func (s *SandboxBackend) workspace(ctx context.Context, op string, args any, out any) error {
+func (s *SandboxBackend) workspace(ctx context.Context, op string, args any, out any) (failure error) {
+	ctx, operation := observability.Begin(ctx, "sandbox-workspace", zap.String("custom.agent.id", s.AgentID), zap.String("custom.sandbox.operation", observability.ID(op)))
+	defer func() { operation.End(failure) }()
 	if err := s.check(ctx); err != nil {
 		return err
 	}
