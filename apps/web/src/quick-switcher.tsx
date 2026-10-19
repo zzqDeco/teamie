@@ -68,6 +68,7 @@ export function QuickSwitcher({
       queryFn: () => api.members(space.id),
       enabled: workspacesNeedingMembers.has(space.id),
       staleTime: 60_000,
+      retry: false,
     })),
   });
   const agentQueries = useQueries({
@@ -78,25 +79,33 @@ export function QuickSwitcher({
         discoveryAllowed && workspacesNeedingMembers.has(space.id),
       ),
       staleTime: 30_000,
+      retry: false,
     })),
   });
   const membersByWorkspace = new Map<string, Member[]>();
   const agentLoadingByWorkspace = new Map<string, boolean>();
   workspaces.forEach((space, index) => {
+    const memberQuery = memberQueries[index];
+    const agentQuery = agentQueries[index];
     agentLoadingByWorkspace.set(
       space.id,
       Boolean(
         discoveryAllowed &&
           workspacesNeedingMembers.has(space.id) &&
-          agentQueries[index]?.isPending,
+          agentQuery?.isPending,
       ),
     );
-    const loaded = memberQueries[index]?.data?.members;
+    const loaded = memberQuery?.data?.members;
     const rawMembers =
-      loaded || (space.id === currentWorkspaceId ? members : undefined);
+      loaded ||
+      (space.id === currentWorkspaceId
+        ? members
+        : !workspacesNeedingMembers.has(space.id) || !memberQuery?.isPending
+          ? []
+          : undefined);
     if (rawMembers) {
       const loadedAgents = discoveryAllowed
-        ? agentQueries[index]?.data?.agents || []
+        ? agentQuery?.data?.agents || []
         : [];
       const enriched = enrichParticipants(rawMembers, loadedAgents);
       const merged =
