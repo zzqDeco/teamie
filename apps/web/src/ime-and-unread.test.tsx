@@ -191,6 +191,79 @@ describe("unread entry", () => {
     });
   }
 
+  it("reopens at the latest applied read cursor while bootstrap still has the previous cursor", async () => {
+    const conversation = conversationWith(2, 10);
+    bootstrap.conversations = [conversation];
+    chatStore.replaceConversations([conversation]);
+    page = Array.from({ length: 10 }, (_, i) => message(i + 1));
+    visibleOnly(() => new Set([3, 4]));
+    await show(conversation);
+    await elapse(700);
+    expect(chatStore.getSnapshot().conversations.room.readSeq).toBe(4);
+    expect(host.querySelector(".unread-divider")?.nextElementSibling?.id).toBe("message-m3");
+
+    await act(async () => root.render(null));
+    await show(chatStore.getSnapshot().conversations.room);
+    expect(bootstrap.conversations[0].readSeq).toBe(2);
+    expect(host.querySelector(".unread-divider")?.nextElementSibling?.id).toBe("message-m5");
+  });
+
+  it("recomputes already visible progress after a remote read without another scroll", async () => {
+    const conversation = conversationWith(2, 12);
+    bootstrap.conversations = [conversation];
+    chatStore.replaceConversations([conversation]);
+    page = [10, 11, 12].map((seq) => message(seq));
+    visibleOnly(() => new Set([10, 11, 12]));
+    await show(conversation);
+    await elapse(700);
+    expect(api.read).not.toHaveBeenCalled();
+
+    await act(async () => chatStore.markRead("room", 9));
+    await show(chatStore.getSnapshot().conversations.room);
+    await elapse(700);
+    expect(api.read).toHaveBeenCalledWith("room", 12);
+  });
+
+  it("pages unread context forward to latest without skipping unread rows or moving focus back to the original target", async () => {
+    const conversation = conversationWith(2, 120);
+    bootstrap.conversations = [conversation];
+    chatStore.replaceConversations([conversation]);
+    const history = Array.from({ length: 120 }, (_, i) => message(i + 1));
+    page = history.slice(70);
+    let visible = new Set<number>();
+    visibleOnly(() => visible);
+    const around = vi.spyOn(api, "messagesAround").mockImplementation(async (_id, seq) => ({
+      messages: history.filter((m) => m.seq >= Math.max(1, seq - 25) && m.seq <= seq + 24),
+      hasMore: false,
+    }));
+    await show(conversation);
+    visible = new Set(Array.from({ length: 25 }, (_, i) => i + 3));
+    await act(async () => host.querySelector<HTMLButtonElement>(".unread-jump-banner button")!.click());
+    await elapse(700);
+    expect(api.read).toHaveBeenLastCalledWith("room", 27);
+    const scroll = host.querySelector<HTMLElement>(".message-scroll")!;
+    scroll.scrollTop = 320;
+
+    for (const [from, through] of [[28, 52], [53, 77], [78, 102], [103, 120]]) {
+      vi.mocked(HTMLElement.prototype.scrollIntoView).mockClear();
+      const button = host.querySelector<HTMLButtonElement>(".load-later");
+      expect(button).not.toBeNull();
+      await act(async () => button!.click());
+      await elapse(700);
+      expect(around).toHaveBeenLastCalledWith("room", from);
+      expect(scroll.scrollTop).toBe(320);
+      expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
+      expect(api.read).toHaveBeenLastCalledWith("room", from - 1);
+      visible = new Set(Array.from({ length: through - from + 1 }, (_, i) => from + i));
+      await act(async () => scroll.dispatchEvent(new Event("scroll")));
+      await elapse(700);
+      expect(api.read).toHaveBeenLastCalledWith("room", through);
+    }
+    expect(host.querySelectorAll("article[data-seq]")).toHaveLength(120);
+    expect(host.querySelector(".load-later")).toBeNull();
+    expect(chatStore.getSnapshot().conversations.room.readSeq).toBe(120);
+  });
+
   it("never counts rows of a replaced window that were not on screen", async () => {
     const conversation = conversationWith(2, 120);
     bootstrap.conversations = [conversation];
@@ -209,6 +282,91 @@ describe("unread entry", () => {
     await elapse(700);
     expect(api.read).toHaveBeenCalledWith("room", 6);
     expect(api.read).not.toHaveBeenCalledWith("room", 27);
+  });
+
+  it("advances through the context when previously viewed rows extend beyond its current page", async () => {
+    const conversation = conversationWith(2, 120);
+    bootstrap.conversations = [conversation];
+    chatStore.replaceConversations([conversation]);
+    const history = Array.from({ length: 120 }, (_, i) => message(i + 1));
+    page = history.slice(70);
+    let visible = new Set(history.slice(70, 80).map((m) => m.seq));
+    visibleOnly(() => visible);
+    vi.spyOn(api, "messagesAround").mockImplementation(async (_id, seq) => ({
+      messages: history.filter((m) => m.seq >= Math.max(1, seq - 25) && m.seq <= seq + 24),
+      hasMore: false,
+    }));
+    await show(conversation);
+    await elapse(700);
+    expect(api.read).not.toHaveBeenCalled();
+    visible = new Set(history.slice(0, 27).map((m) => m.seq));
+    await act(async () => host.querySelector<HTMLButtonElement>(".unread-jump-banner button")!.click());
+    await elapse(700);
+    expect(api.read).toHaveBeenLastCalledWith("room", 27);
+    for (const through of [52, 77]) {
+      visible = new Set(history.slice(0, through).map((m) => m.seq));
+      await act(async () => host.querySelector<HTMLButtonElement>(".load-later")!.click());
+      await elapse(700);
+      expect(api.read).toHaveBeenLastCalledWith("room", through);
+    }
+    expect(api.read).not.toHaveBeenCalledWith("room", 80);
+  });
+
+  it("preserves unread context after a failed forward page and allows retry without acknowledging unseen rows", async () => {
+    const conversation = conversationWith(2, 120);
+    bootstrap.conversations = [conversation];
+    chatStore.replaceConversations([conversation]);
+    const history = Array.from({ length: 120 }, (_, i) => message(i + 1));
+    page = history.slice(70);
+    visibleOnly(() => new Set());
+    const around = vi.spyOn(api, "messagesAround")
+      .mockResolvedValueOnce({ messages: history.slice(0, 27), hasMore: false })
+      .mockRejectedValueOnce(new Error("connection lost"))
+      .mockResolvedValueOnce({ messages: history.slice(2, 52), hasMore: false });
+    await show(conversation);
+    await act(async () => host.querySelector<HTMLButtonElement>(".unread-jump-banner button")!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>(".load-later")!.click());
+    expect(host.querySelectorAll("article[data-seq]")).toHaveLength(27);
+    expect(host.textContent).toContain("请求失败，请稍后重试");
+    expect(host.querySelector<HTMLButtonElement>(".load-later")!.disabled).toBe(false);
+
+    await act(async () => host.querySelector<HTMLButtonElement>(".load-later")!.click());
+    await elapse(700);
+    expect(around).toHaveBeenLastCalledWith("room", 28);
+    expect(host.querySelectorAll("article[data-seq]")).toHaveLength(52);
+    expect(host.textContent).not.toContain("请求失败，请稍后重试");
+    expect(api.read).not.toHaveBeenCalled();
+  });
+
+  it.each(["latest", "account"] as const)("discards a forward page after navigating to %s", async (destination) => {
+    const conversation = conversationWith(2, 120);
+    bootstrap.conversations = [conversation];
+    chatStore.replaceConversations([conversation]);
+    const history = Array.from({ length: 120 }, (_, i) => message(i + 1));
+    page = history.slice(70);
+    visibleOnly(() => new Set());
+    let finish!: (value: { messages: Message[]; hasMore: boolean }) => void;
+    vi.spyOn(api, "messagesAround")
+      .mockResolvedValueOnce({ messages: history.slice(0, 27), hasMore: false })
+      .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    await show(conversation);
+    await act(async () => host.querySelector<HTMLButtonElement>(".unread-jump-banner button")!.click());
+    await act(async () => host.querySelector<HTMLButtonElement>(".load-later")!.click());
+    expect(host.querySelector<HTMLButtonElement>(".load-later")!.disabled).toBe(true);
+    if (destination === "latest") {
+      await act(async () => host.querySelector<HTMLButtonElement>(".located-banner button")!.click());
+    } else {
+      await act(async () => {
+        root.render(null);
+        chatStore.begin("another-user");
+      });
+    }
+    await act(async () => finish({ messages: history.slice(2, 52), hasMore: false }));
+    await elapse(700);
+    expect(host.querySelector(".located-banner")).toBeNull();
+    expect(host.querySelector('[data-seq="28"]')).toBeNull();
+    if (destination === "latest") expect(host.querySelector('[data-seq="120"]')).not.toBeNull();
+    expect(api.read).not.toHaveBeenCalled();
   });
 
   it("keeps a never-read paginated conversation unread until the user chooses to mark it read", async () => {
@@ -236,7 +394,7 @@ describe("unread entry", () => {
   });
 
   it("freezes the entry from fresh bootstrap cursors rather than a stale cached snapshot", async () => {
-    const cached = conversationWith(6, 6);
+    const cached = conversationWith(2, 6);
     bootstrap.conversations = [conversationWith(6, 10)];
     chatStore.replaceConversations([cached]);
     page = Array.from({ length: 10 }, (_, i) => message(i + 1));
