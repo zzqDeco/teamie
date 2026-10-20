@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"teamie/backend/pkg/observability"
+	"time"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
@@ -44,10 +45,46 @@ type GatewayModel struct {
 	Token, OwnerID, AgentID string
 	StreamURL               string
 	ContextWindow           func() int
+	ModelConfigID           func() string
 	HTTP                    *http.Client
 	Store                   *Store
 	Lease                   *Lease
 	Authorize               func(context.Context) error
+}
+
+func safeGatewayPing(ctx context.Context, client modelgatewayservice.Client, token string) (resp *wire.PingResponse, err error) {
+	if client == nil {
+		return nil, errors.New("nil gateway client")
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			resp = nil
+			err = errors.New("gateway ping unimplemented")
+		}
+	}()
+	return client.Ping(ctx, &wire.PingRequest{ServiceToken: &token})
+}
+
+func (m *GatewayModel) CurrentModelConfigID(ctx context.Context) (string, bool) {
+	if m == nil {
+		return "", false
+	}
+	if m.Client != nil {
+		pc, cancel := context.WithTimeout(ctx, 2*time.Second)
+		ping, err := safeGatewayPing(pc, m.Client, m.Token)
+		cancel()
+		if err == nil && ping != nil && ping.Ready && ping.GetConfigured() && ping.GetEnabled() {
+			if id := strings.TrimSpace(ping.GetModelConfigId()); id != "" {
+				return id, true
+			}
+		}
+	}
+	if m.ModelConfigID != nil {
+		if id := strings.TrimSpace(m.ModelConfigID()); id != "" {
+			return id, true
+		}
+	}
+	return "", false
 }
 
 func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticMessage, options ...model.Option) (_ *schema.AgenticMessage, failure error) {
@@ -94,7 +131,11 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticM
 		phase = "receipt-replay"
 		result, decodeErr := decodeAgenticMessage(cached)
 		if decodeErr == nil {
-			run.recordModelUsageAnchor(step, request, result)
+			replayedConfigID := ""
+			if saved, ok := extractUsageAnchor(result); ok {
+				replayedConfigID = saved.ConfigID
+			}
+			run.recordModelUsageAnchor(step, request, result, replayedConfigID)
 		}
 		return result, decodeErr
 	}
@@ -135,6 +176,11 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticM
 	if e = validateModelResult(result, modelResultByteLimit(run)); e != nil {
 		return nil, e
 	}
+	respConfigID := strings.TrimSpace(response.GetModelConfigId())
+	if respConfigID == "" {
+		respConfigID, _ = m.CurrentModelConfigID(ctx)
+	}
+	run.recordModelUsageAnchor(step, request, result, respConfigID)
 	phase = "serialize-result"
 	b, e := (&schema.HumanReadableSerializer{}).Marshal(result)
 	if e != nil {
@@ -144,7 +190,6 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticM
 	if e = m.Store.SaveModel(ctx, m.Lease, run, step, hash, b); e != nil {
 		return nil, e
 	}
-	run.recordModelUsageAnchor(step, request, result)
 	return result, nil
 }
 func SafeError(err error) string {
@@ -223,7 +268,8 @@ func (m *GatewayModel) checkContextRequest(ctx context.Context, run *Run, step i
 	if err != nil {
 		return err
 	}
-	measurement, err := budget.measureCalibratedRequest(run.getUsageAnchor(), request)
+	configID, _ := m.CurrentModelConfigID(ctx)
+	measurement, err := budget.measureCalibratedRequest(run.getUsageAnchorForConfig(configID), request)
 	if err != nil {
 		return err
 	}

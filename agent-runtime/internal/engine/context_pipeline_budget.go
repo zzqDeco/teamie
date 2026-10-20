@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/cloudwego/eino/components/model"
@@ -165,14 +166,118 @@ const contextUsageAnchorExtraKey = "_teamie_usage_anchor"
 
 type contextUsageAnchor struct {
 	Step         int    `json:"step"`
+	ConfigID     string `json:"configId,omitempty"`
 	MessageCount int    `json:"messageCount"`
 	PrefixHash   string `json:"prefixHash"`
 	LocalTokens  int    `json:"localTokens"`
 	PromptTokens int    `json:"promptTokens"`
 }
 
+type usageAnchorState struct {
+	mu                 sync.Mutex
+	anchor             *contextUsageAnchor
+	invalidatedAnchors map[string]bool
+}
+
+func (s *usageAnchorState) get() *contextUsageAnchor {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.anchor == nil {
+		return nil
+	}
+	copy := *s.anchor
+	return &copy
+}
+
+func (s *usageAnchorState) getForConfig(configID string) *contextUsageAnchor {
+	anchor := s.get()
+	if anchor == nil || anchor.ConfigID == "" || configID == "" || anchor.ConfigID != configID {
+		return nil
+	}
+	return anchor
+}
+
+func (s *usageAnchorState) set(anchor *contextUsageAnchor, onlyIfValid bool) {
+	if s == nil || anchor == nil || anchor.PromptTokens <= 0 || anchor.MessageCount <= 0 || anchor.PrefixHash == "" || anchor.ConfigID == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if onlyIfValid {
+		if s.invalidatedAnchors[anchor.PrefixHash] {
+			return
+		}
+		if s.anchor != nil && s.anchor.PrefixHash == anchor.PrefixHash && s.anchor.ConfigID == anchor.ConfigID {
+			return
+		}
+	}
+	copy := *anchor
+	s.anchor = &copy
+}
+
+func (s *usageAnchorState) clear() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.anchor = nil
+}
+
+func (s *usageAnchorState) isInvalidated(prefixHash string) bool {
+	if s == nil || prefixHash == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.invalidatedAnchors[prefixHash]
+}
+
+func (s *usageAnchorState) invalidate(messages []*schema.AgenticMessage) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	next := map[string]bool{}
+	if s.anchor != nil && s.anchor.PrefixHash != "" {
+		next[s.anchor.PrefixHash] = true
+	}
+	s.anchor = nil
+	for _, msg := range messages {
+		if msg != nil && msg.Role == schema.AgenticRoleTypeAssistant {
+			if saved, ok := extractUsageAnchor(msg); ok && saved.PrefixHash != "" {
+				next[saved.PrefixHash] = true
+			}
+			clearMessageUsageAnchor(msg)
+		}
+	}
+	if len(next) > 0 {
+		s.invalidatedAnchors = next
+	} else {
+		s.invalidatedAnchors = nil
+	}
+}
+
+func (s *usageAnchorState) pruneAfterCompaction(retained []*schema.AgenticMessage) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.anchor = nil
+	for _, msg := range retained {
+		if msg != nil && msg.Role == schema.AgenticRoleTypeAssistant {
+			clearMessageUsageAnchor(msg)
+		}
+	}
+}
+
 func attachUsageAnchor(msg *schema.AgenticMessage, anchor *contextUsageAnchor) {
-	if msg == nil || anchor == nil || anchor.PromptTokens <= 0 || anchor.MessageCount <= 0 || anchor.PrefixHash == "" || anchor.LocalTokens <= 0 {
+	if msg == nil || anchor == nil || anchor.PromptTokens <= 0 || anchor.MessageCount <= 0 || anchor.PrefixHash == "" || anchor.LocalTokens <= 0 || anchor.ConfigID == "" {
 		return
 	}
 	raw, err := json.Marshal(anchor)
@@ -208,7 +313,7 @@ func extractUsageAnchor(msg *schema.AgenticMessage) (*contextUsageAnchor, bool) 
 	if json.Unmarshal(raw, &anchor) != nil {
 		return nil, false
 	}
-	if anchor.PromptTokens <= 0 || anchor.MessageCount <= 0 || anchor.PrefixHash == "" || anchor.LocalTokens <= 0 {
+	if anchor.PromptTokens <= 0 || anchor.MessageCount <= 0 || anchor.PrefixHash == "" || anchor.LocalTokens <= 0 || anchor.ConfigID == "" {
 		return nil, false
 	}
 	return &anchor, true
@@ -232,7 +337,7 @@ func isSummaryModelOptions(opts *model.Options) bool {
 func (b ContextBudgetSnapshot) measureCalibratedContext(anchor *contextUsageAnchor, messages []*schema.AgenticMessage, tools []*schema.ToolInfo, output int, streaming bool, deferred ...[]*schema.ToolInfo) (ContextMeasurement, error) {
 	allDeferred := flattenToolInfos(deferred)
 	base, err := b.measureContext(messages, tools, output, streaming, allDeferred)
-	if err != nil || b.Version < 7 || anchor == nil || anchor.PromptTokens <= 0 || anchor.MessageCount <= 0 || len(messages) < anchor.MessageCount {
+	if err != nil || b.Version < 7 || anchor == nil || anchor.ConfigID == "" || anchor.PromptTokens <= 0 || anchor.MessageCount <= 0 || len(messages) < anchor.MessageCount {
 		return base, err
 	}
 	_, prefixHash, err := visibleContextBytes(messages[:anchor.MessageCount], tools, allDeferred, nil, &schema.AgenticToolChoice{Type: schema.ToolChoiceAllowed})
@@ -253,7 +358,7 @@ func (b ContextBudgetSnapshot) measureCalibratedContext(anchor *contextUsageAnch
 
 func (b ContextBudgetSnapshot) measureCalibratedRequest(anchor *contextUsageAnchor, request []byte) (ContextMeasurement, error) {
 	base, err := b.measureContextRequest(request)
-	if err != nil || b.Version < 7 || anchor == nil || anchor.PromptTokens <= 0 || anchor.MessageCount <= 0 {
+	if err != nil || b.Version < 7 || anchor == nil || anchor.ConfigID == "" || anchor.PromptTokens <= 0 || anchor.MessageCount <= 0 {
 		return base, err
 	}
 	var envelope modeltransport.Request

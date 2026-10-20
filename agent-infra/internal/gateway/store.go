@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"teamie/agent-protocol/modeltransport"
 )
 
 type Config struct {
@@ -26,6 +27,12 @@ func (c Config) ContextWindow() int64 {
 }
 
 func (c Config) Configured() bool { return c.BaseURL != "" && c.Model != "" && len(c.CipherKey) > 0 }
+func (c Config) CountingConfigID() string {
+	if !c.Configured() {
+		return ""
+	}
+	return modeltransport.CountingConfigID(c.BaseURL, c.Model)
+}
 func (c Config) View() map[string]any {
 	status := "unconfigured"
 	if c.Configured() {

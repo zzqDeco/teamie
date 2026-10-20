@@ -64,88 +64,59 @@ type Run struct {
 	Revision, Generation        int64
 	ContextHead, AcceptanceHead int64
 	Front                       *frontSlot
-	anchorMu                    sync.Mutex
-	usageAnchor                 *contextUsageAnchor
-	invalidatedAnchors          map[string]bool
-	invalidatedMessages         map[*schema.AgenticMessage]bool
+	usageState                  usageAnchorState
 }
 
 func (r *Run) getUsageAnchor() *contextUsageAnchor {
 	if r == nil {
 		return nil
 	}
-	r.anchorMu.Lock()
-	defer r.anchorMu.Unlock()
-	if r.usageAnchor == nil {
-		return nil
-	}
-	copy := *r.usageAnchor
-	return &copy
+	return r.usageState.get()
 }
 
-func (r *Run) setUsageAnchor(anchor *contextUsageAnchor, msg *schema.AgenticMessage, onlyIfValid bool) {
-	if r == nil || anchor == nil || anchor.PromptTokens <= 0 || anchor.MessageCount <= 0 || anchor.PrefixHash == "" {
+func (r *Run) getUsageAnchorForConfig(configID string) *contextUsageAnchor {
+	if r == nil {
+		return nil
+	}
+	return r.usageState.getForConfig(configID)
+}
+
+func (r *Run) setUsageAnchor(anchor *contextUsageAnchor, onlyIfValid bool) {
+	if r == nil {
 		return
 	}
-	r.anchorMu.Lock()
-	defer r.anchorMu.Unlock()
-	if onlyIfValid {
-		if r.invalidatedAnchors[anchor.PrefixHash] || (msg != nil && r.invalidatedMessages[msg]) {
-			return
-		}
-		if r.usageAnchor != nil && r.usageAnchor.PrefixHash == anchor.PrefixHash {
-			return
-		}
-	}
-	copy := *anchor
-	r.usageAnchor = &copy
+	r.usageState.set(anchor, onlyIfValid)
 }
 
 func (r *Run) clearUsageAnchor() {
 	if r == nil {
 		return
 	}
-	r.anchorMu.Lock()
-	defer r.anchorMu.Unlock()
-	r.usageAnchor = nil
+	r.usageState.clear()
 }
 
 func (r *Run) invalidateUsageAnchor(messages []*schema.AgenticMessage) {
 	if r == nil {
 		return
 	}
-	r.anchorMu.Lock()
-	defer r.anchorMu.Unlock()
-	if r.usageAnchor != nil {
-		if r.invalidatedAnchors == nil {
-			r.invalidatedAnchors = map[string]bool{}
-		}
-		r.invalidatedAnchors[r.usageAnchor.PrefixHash] = true
-		r.usageAnchor = nil
-	}
-	for _, msg := range messages {
-		if msg != nil && msg.Role == schema.AgenticRoleTypeAssistant {
-			if saved, ok := extractUsageAnchor(msg); ok {
-				if r.invalidatedAnchors == nil {
-					r.invalidatedAnchors = map[string]bool{}
-				}
-				r.invalidatedAnchors[saved.PrefixHash] = true
-			}
-			clearMessageUsageAnchor(msg)
-			if r.invalidatedMessages == nil {
-				r.invalidatedMessages = map[*schema.AgenticMessage]bool{}
-			}
-			r.invalidatedMessages[msg] = true
-		}
-	}
+	r.usageState.invalidate(messages)
 }
 
-func (r *Run) computeRequestUsageAnchor(step int, request []byte, result *schema.AgenticMessage) *contextUsageAnchor {
+func (r *Run) computeRequestUsageAnchor(step int, request []byte, result *schema.AgenticMessage, configID string) *contextUsageAnchor {
 	if r == nil || contextProfile(r) != contextProfileV1 || result == nil || result.ResponseMeta == nil || result.ResponseMeta.TokenUsage == nil || result.ResponseMeta.TokenUsage.PromptTokens <= 0 {
 		return nil
 	}
 	budget, err := ParseContextBudgetSnapshot(r.ContextBudget)
 	if err != nil || budget.Version < 7 {
+		return nil
+	}
+	configID = strings.TrimSpace(configID)
+	if configID == "" {
+		if saved, ok := extractUsageAnchor(result); ok {
+			configID = saved.ConfigID
+		}
+	}
+	if configID == "" {
 		return nil
 	}
 	var envelope modeltransport.Request
@@ -163,6 +134,7 @@ func (r *Run) computeRequestUsageAnchor(step int, request []byte, result *schema
 	}
 	return &contextUsageAnchor{
 		Step:         step,
+		ConfigID:     configID,
 		MessageCount: len(messages),
 		PrefixHash:   prefixHash,
 		LocalTokens:  estimateVisibleTokensV7(visibleBytes),
@@ -170,13 +142,13 @@ func (r *Run) computeRequestUsageAnchor(step int, request []byte, result *schema
 	}
 }
 
-func (r *Run) recordModelUsageAnchor(step int, request []byte, result *schema.AgenticMessage) {
-	anchor := r.computeRequestUsageAnchor(step, request, result)
+func (r *Run) recordModelUsageAnchor(step int, request []byte, result *schema.AgenticMessage, configID string) {
+	anchor := r.computeRequestUsageAnchor(step, request, result, configID)
 	if anchor == nil {
 		return
 	}
 	attachUsageAnchor(result, anchor)
-	r.setUsageAnchor(anchor, result, false)
+	r.setUsageAnchor(anchor, false)
 }
 
 func executionID(run *Run) string { return run.ID + ":" + run.Attempt }

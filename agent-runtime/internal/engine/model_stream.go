@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 	"teamie/backend/pkg/observability"
 	"time"
@@ -77,7 +78,11 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 		if e != nil {
 			return nil, e
 		}
-		run.recordModelUsageAnchor(step, request, result)
+		replayedConfigID := ""
+		if saved, ok := extractUsageAnchor(result); ok {
+			replayedConfigID = saved.ConfigID
+		}
+		run.recordModelUsageAnchor(step, request, result, replayedConfigID)
 		return schema.StreamReaderFromArray([]*schema.AgenticMessage{result}), nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
@@ -140,6 +145,10 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 		scanner.Buffer(make([]byte, 4096), modeltransport.MaxHTTPStreamFrameBytes)
 		chunks := &modelStreamAccumulator{}
 		requestID := ""
+		streamConfigID := strings.TrimSpace(response.Header.Get(modeltransport.ModelConfigIDHeader))
+		if streamConfigID == "" {
+			streamConfigID, _ = m.CurrentModelConfigID(ctx)
+		}
 		anchorAttached := false
 		total := 0
 		done := false
@@ -151,14 +160,18 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 				return
 			}
 			var frame struct {
-				Type         string `json:"type"`
-				ResponseJSON string `json:"responseJson"`
-				ErrorCode    string `json:"errorCode"`
+				Type          string `json:"type"`
+				ResponseJSON  string `json:"responseJson"`
+				ErrorCode     string `json:"errorCode"`
+				ModelConfigID string `json:"modelConfigId"`
 			}
 			stage = "frame-decode"
 			if decodeErr := json.Unmarshal(scanner.Bytes(), &frame); decodeErr != nil {
 				fail(modelDiagnostic(stage, "invalid_transport_frame", decodeErr))
 				return
+			}
+			if id := strings.TrimSpace(frame.ModelConfigID); id != "" {
+				streamConfigID = id
 			}
 			switch frame.Type {
 			case "chunk":
@@ -185,7 +198,7 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 				}
 				outMsg := message
 				if !anchorAttached && message.ResponseMeta != nil && message.ResponseMeta.TokenUsage != nil && message.ResponseMeta.TokenUsage.PromptTokens > 0 {
-					if anchor := run.computeRequestUsageAnchor(step, request, message); anchor != nil {
+					if anchor := run.computeRequestUsageAnchor(step, request, message, streamConfigID); anchor != nil {
 						anchorAttached = true
 						cloned := *message
 						cloned.Extra = make(map[string]any, len(message.Extra)+1)
@@ -258,12 +271,13 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 			err = &ModelError{Code: "upstream_response_limit"}
 		}
 		if err == nil {
+			run.recordModelUsageAnchor(step, request, result, streamConfigID)
+			b, err = (&schema.HumanReadableSerializer{}).Marshal(result)
+		}
+		if err == nil {
 			stage = "persist-receipt"
 			err = m.Store.SaveModel(ctx, m.Lease, run, step, hash, b)
 			receiptSaved = err == nil
-			if receiptSaved {
-				run.recordModelUsageAnchor(step, request, result)
-			}
 		}
 		if err != nil {
 			fail(err)

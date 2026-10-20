@@ -36,7 +36,11 @@ func (s *Service) Ping(ctx context.Context, r *agent.PingRequest) (*agent.PingRe
 	}
 	c, e := s.Store.Load(ctx)
 	configured, enabled := c.Configured(), c.Enabled
-	return &agent.PingResponse{Ready: e == nil, Configured: &configured, Enabled: &enabled, ContextWindowTokens: ptr(c.ContextWindow())}, nil
+	var configID *string
+	if id := c.CountingConfigID(); id != "" {
+		configID = &id
+	}
+	return &agent.PingResponse{Ready: e == nil, Configured: &configured, Enabled: &enabled, ContextWindowTokens: ptr(c.ContextWindow()), ModelConfigId: configID}, nil
 }
 func ptr[T any](v T) *T { return &v }
 func failed(e error) *agent.GatewayChatResponse {
@@ -108,7 +112,11 @@ func (s *Service) call(ctx context.Context, owner, id, session, run, raw string,
 		response = failed(e)
 		status = response.GetErrorCode()
 	} else {
-		response = &agent.GatewayChatResponse{Ok: true, ResponseJson: &body, StatusCode: ptr(int32(200))}
+		var configID *string
+		if id := c.CountingConfigID(); id != "" {
+			configID = &id
+		}
+		response = &agent.GatewayChatResponse{Ok: true, ResponseJson: &body, StatusCode: ptr(int32(200)), ModelConfigId: configID}
 		phase = "usage-persist"
 	}
 	auditCtx, auditCancel := context.WithTimeout(context.Background(), 2*time.Second)

@@ -77,11 +77,23 @@ func (a *pipelineArchiveFixture) transcript(ctx context.Context, msgs []*schema.
 	return a.path(ctx, "transcript", digest(raw), string(raw))
 }
 
+const testModelConfigID = "modelcfg:v1:fedcba9876543210fedcba9876543210"
+
 type pipelineModelFixture struct {
-	mu      sync.Mutex
-	inputs  [][]*schema.AgenticMessage
-	budgets []ContextMeasurement
-	reject  bool
+	mu       sync.Mutex
+	configID string
+	inputs   [][]*schema.AgenticMessage
+	budgets  []ContextMeasurement
+	reject   bool
+}
+
+func (m *pipelineModelFixture) CurrentModelConfigID(context.Context) (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.configID == "" {
+		return "", false
+	}
+	return m.configID, true
 }
 
 func assistantText(text string) *schema.AgenticMessage {
@@ -114,7 +126,7 @@ func testPipeline(t *testing.T, window int) (*ContextPipeline, *pipelineArchiveF
 		t.Fatal(err)
 	}
 	archive := &pipelineArchiveFixture{}
-	m := &pipelineModelFixture{}
+	m := &pipelineModelFixture{configID: testModelConfigID}
 	p, err := NewContextPipeline(context.Background(), ContextPipelineConfig{Model: m, Budget: budget, Backend: archive, ArchivePath: archive.path, ArchiveTranscript: archive.transcript})
 	if err != nil {
 		t.Fatal(err)

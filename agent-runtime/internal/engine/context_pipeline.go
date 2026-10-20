@@ -6,7 +6,6 @@ import (
 	"errors"
 	"go.uber.org/zap"
 	"strings"
-	"sync"
 	"teamie/backend/pkg/observability"
 	"time"
 
@@ -30,44 +29,46 @@ type contextSummarizer interface {
 	Summarize(context.Context, *adk.TypedChatModelAgentState[*schema.AgenticMessage]) ([]*schema.AgenticMessage, error)
 }
 
+type modelConfigIDProvider interface {
+	CurrentModelConfigID(context.Context) (string, bool)
+}
+
 type ContextPipeline struct {
 	*adk.TypedBaseChatModelAgentMiddleware[*schema.AgenticMessage]
-	cfg                 ContextPipelineConfig
-	summary             adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]
-	anchorMu            sync.Mutex
-	usageAnchor         *contextUsageAnchor
-	invalidatedAnchors  map[string]bool
-	invalidatedMessages map[*schema.AgenticMessage]bool
+	cfg           ContextPipelineConfig
+	summary       adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]
+	fallbackUsage usageAnchorState
+}
+
+func (p *ContextPipeline) usageState(ctx context.Context) *usageAnchorState {
+	if run, err := CurrentRun(ctx); err == nil && run != nil {
+		return &run.usageState
+	}
+	return &p.fallbackUsage
+}
+
+func (p *ContextPipeline) currentModelConfigID(ctx context.Context) (string, bool) {
+	if provider, ok := p.cfg.Model.(modelConfigIDProvider); ok && provider != nil {
+		return provider.CurrentModelConfigID(ctx)
+	}
+	return "", false
 }
 
 func (p *ContextPipeline) getAnchor(ctx context.Context) *contextUsageAnchor {
-	if run, err := CurrentRun(ctx); err == nil && run != nil {
-		if anchor := run.getUsageAnchor(); anchor != nil {
-			return anchor
-		}
-	}
-	p.anchorMu.Lock()
-	defer p.anchorMu.Unlock()
-	if p.usageAnchor == nil {
-		return nil
-	}
-	copy := *p.usageAnchor
-	return &copy
+	configID, _ := p.currentModelConfigID(ctx)
+	return p.usageState(ctx).getForConfig(configID)
 }
 
 func (p *ContextPipeline) clearCurrentAnchor(ctx context.Context) {
-	if run, err := CurrentRun(ctx); err == nil && run != nil {
-		run.clearUsageAnchor()
-	}
-	p.anchorMu.Lock()
-	defer p.anchorMu.Unlock()
-	p.usageAnchor = nil
+	p.usageState(ctx).clear()
 }
 
 func (p *ContextPipeline) seedAnchorFromHistory(ctx context.Context, messages []*schema.AgenticMessage, tools []*schema.ToolInfo, deferred ...[]*schema.ToolInfo) {
 	if p.cfg.Budget.Version < 7 {
 		return
 	}
+	state := p.usageState(ctx)
+	currentConfigID, hasConfig := p.currentModelConfigID(ctx)
 	allDeferred := flattenToolInfos(deferred)
 	lastIdx := -1
 	for i := len(messages) - 1; i >= 0; i-- {
@@ -85,18 +86,18 @@ func (p *ContextPipeline) seedAnchorFromHistory(ctx context.Context, messages []
 		}
 	}
 	if lastIdx <= 0 {
-		p.clearCurrentAnchor(ctx)
+		state.clear()
 		return
 	}
 	assistantMsg := messages[lastIdx]
 	if assistantMsg.ResponseMeta == nil || assistantMsg.ResponseMeta.TokenUsage == nil || assistantMsg.ResponseMeta.TokenUsage.PromptTokens <= 0 {
 		clearMessageUsageAnchor(assistantMsg)
-		p.clearCurrentAnchor(ctx)
+		state.clear()
 		return
 	}
 	savedAnchor, ok := extractUsageAnchor(assistantMsg)
-	if !ok {
-		p.clearCurrentAnchor(ctx)
+	if !ok || !hasConfig || currentConfigID == "" || savedAnchor.ConfigID != currentConfigID {
+		state.clear()
 		return
 	}
 	prefix := messages[:lastIdx]
@@ -106,12 +107,9 @@ func (p *ContextPipeline) seedAnchorFromHistory(ctx context.Context, messages []
 		p.invalidateAnchor(ctx, messages)
 		return
 	}
-	p.anchorMu.Lock()
-	invalidated := p.invalidatedAnchors[prefixHash] || p.invalidatedMessages[assistantMsg]
-	p.anchorMu.Unlock()
-	if invalidated {
+	if state.isInvalidated(prefixHash) {
 		clearMessageUsageAnchor(assistantMsg)
-		p.clearCurrentAnchor(ctx)
+		state.clear()
 		return
 	}
 	step := savedAnchor.Step
@@ -122,48 +120,17 @@ func (p *ContextPipeline) seedAnchorFromHistory(ctx context.Context, messages []
 	}
 	anchor := &contextUsageAnchor{
 		Step:         step,
+		ConfigID:     savedAnchor.ConfigID,
 		MessageCount: savedAnchor.MessageCount,
 		PrefixHash:   savedAnchor.PrefixHash,
 		LocalTokens:  savedAnchor.LocalTokens,
 		PromptTokens: savedAnchor.PromptTokens,
 	}
-	if run, err := CurrentRun(ctx); err == nil && run != nil {
-		run.setUsageAnchor(anchor, assistantMsg, true)
-	}
-	p.anchorMu.Lock()
-	defer p.anchorMu.Unlock()
-	copy := *anchor
-	p.usageAnchor = &copy
+	state.set(anchor, true)
 }
 
 func (p *ContextPipeline) invalidateAnchor(ctx context.Context, messages []*schema.AgenticMessage) {
-	if run, err := CurrentRun(ctx); err == nil && run != nil {
-		run.invalidateUsageAnchor(messages)
-	}
-	p.anchorMu.Lock()
-	defer p.anchorMu.Unlock()
-	if p.usageAnchor != nil {
-		if p.invalidatedAnchors == nil {
-			p.invalidatedAnchors = map[string]bool{}
-		}
-		p.invalidatedAnchors[p.usageAnchor.PrefixHash] = true
-		p.usageAnchor = nil
-	}
-	for _, msg := range messages {
-		if msg != nil && msg.Role == schema.AgenticRoleTypeAssistant {
-			if saved, ok := extractUsageAnchor(msg); ok {
-				if p.invalidatedAnchors == nil {
-					p.invalidatedAnchors = map[string]bool{}
-				}
-				p.invalidatedAnchors[saved.PrefixHash] = true
-			}
-			clearMessageUsageAnchor(msg)
-			if p.invalidatedMessages == nil {
-				p.invalidatedMessages = map[*schema.AgenticMessage]bool{}
-			}
-			p.invalidatedMessages[msg] = true
-		}
-	}
+	p.usageState(ctx).invalidate(messages)
 }
 
 func (p *ContextPipeline) measureMainContext(ctx context.Context, messages []*schema.AgenticMessage, tools []*schema.ToolInfo, deferred ...[]*schema.ToolInfo) (ContextMeasurement, error) {
@@ -398,7 +365,12 @@ func (p *ContextPipeline) compact(ctx context.Context, messages []*schema.Agenti
 	compactionFields := append([]zap.Field{zap.Int("custom.context.messages_before", len(messages)), zap.Bool("custom.context.forced", force)}, p.cfg.Budget.measurementLogFields(initial, p.cfg.Budget.compactionReason(initial, force))...)
 	ctx, operation := observability.Begin(ctx, "context-compaction", compactionFields...)
 	observability.L(ctx).Info("Context compaction started", zap.String("event.action", "context-compaction-started"))
-	defer func() { operation.End(failure, zap.Int("custom.context.messages_after", len(result))) }()
+	defer func() {
+		if failure == nil {
+			p.usageState(ctx).pruneAfterCompaction(result)
+		}
+		operation.End(failure, zap.Int("custom.context.messages_after", len(result)))
+	}()
 	target := p.cfg.Budget.InputTokenLimit
 	shrinkLocal := force || (p.cfg.Budget.Version >= 7 && initial.CounterMode == "usage_delta" && initial.EstimatedTokens > initial.LocalTokens)
 	if shrinkLocal {

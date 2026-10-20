@@ -232,3 +232,52 @@ func TestPrivateGenerationRequiresServiceBearerRatherThanBrowserCredentials(t *t
 		t.Fatal("unauthorized browser call reached model capacity")
 	}
 }
+
+func TestGatewayExposesAndRotatesModelConfigIDAcrossUnaryStreamAndPing(t *testing.T) {
+	s, provider := streamFixtureService(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, lifetimeCompletion)
+	})
+	defer provider.Close()
+
+	pingA, err := s.Ping(context.Background(), &agent.PingRequest{ServiceToken: &s.Token})
+	if err != nil || !pingA.Ready || pingA.GetModelConfigId() == "" {
+		t.Fatalf("gateway Ping did not expose opaque ModelConfigId: %+v (%v)", pingA, err)
+	}
+	configA := pingA.GetModelConfigId()
+	if strings.Contains(configA, provider.URL) || strings.Contains(configA, "fixture") {
+		t.Fatalf("ModelConfigId leaked raw URL or model name: %q", configA)
+	}
+
+	// Verify unary POST response carries both ModelConfigId field and X-Teamie-Model-Config-Id header.
+	rawCall, _ := json.Marshal(modeltransport.CallRequest{
+		OwnerID:     "o",
+		AgentID:     "a",
+		SessionID:   "s",
+		RunID:       "r-1",
+		RequestJSON: fixtureNativeRequest(`{"messages":[{"role":"user","content":"hello"}]}`, false),
+	})
+	postReq, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, modeltransport.GeneratePath, bytes.NewReader(rawCall))
+	postReq.Header.Set("Authorization", "Bearer "+testToken)
+	postRec := httptest.NewRecorder()
+	s.Routes(api.AdminAuth{}).ServeHTTP(postRec, postReq)
+	var chatOut agent.GatewayChatResponse
+	if postRec.Code != 200 || json.Unmarshal(postRec.Body.Bytes(), &chatOut) != nil || !chatOut.Ok || chatOut.GetModelConfigId() != configA || postRec.Header().Get(modeltransport.ModelConfigIDHeader) != configA {
+		t.Fatalf("unary response did not carry ModelConfigId: header=%q out=%+v", postRec.Header().Get(modeltransport.ModelConfigIDHeader), chatOut)
+	}
+
+	// Rotate model in store while keeping ContextWindowTokens unchanged -> ModelConfigId must change.
+	cfg, err := s.Store.Load(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Model = "rotated-model-b"
+	if _, err := s.Store.Save(context.Background(), cfg, nil, false, s.Cipher); err != nil {
+		t.Fatal(err)
+	}
+	pingB, err := s.Ping(context.Background(), &agent.PingRequest{ServiceToken: &s.Token})
+	if err != nil || !pingB.Ready || pingB.GetModelConfigId() == "" || pingB.GetModelConfigId() == configA {
+		t.Fatalf("rotating model under same window did not rotate ModelConfigId: before=%q after=%+v", configA, pingB)
+	}
+}

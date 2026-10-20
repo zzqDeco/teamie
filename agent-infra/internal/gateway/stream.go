@@ -10,16 +10,18 @@ import (
 	"time"
 
 	"teamie/agent-infra/internal/api"
+	"teamie/agent-protocol/modeltransport"
 )
 
 // StreamEvent is the private NDJSON transport. A response has exactly one terminal
 // done/error event; an EOF without a terminal event must never be treated as success.
 type StreamEvent struct {
-	Type         string `json:"type"`
-	ResponseJSON string `json:"responseJson,omitempty"`
-	ErrorCode    string `json:"errorCode,omitempty"`
-	ErrorMessage string `json:"errorMessage,omitempty"`
-	StatusCode   int    `json:"statusCode,omitempty"`
+	Type          string `json:"type"`
+	ResponseJSON  string `json:"responseJson,omitempty"`
+	ErrorCode     string `json:"errorCode,omitempty"`
+	ErrorMessage  string `json:"errorMessage,omitempty"`
+	StatusCode    int    `json:"statusCode,omitempty"`
+	ModelConfigID string `json:"modelConfigId,omitempty"`
 }
 
 func streamError(ctx context.Context, fallback string) error {
@@ -60,10 +62,11 @@ func (s *Service) streamHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		return http.NewResponseController(w).Flush()
 	}
+	var configID string
 	terminal := func(e error) {
 		streamFailure = e
 		if e == nil {
-			if err := emit(StreamEvent{Type: "done"}); err != nil {
+			if err := emit(StreamEvent{Type: "done", ModelConfigID: configID}); err != nil {
 				streamFailure = observability.Diagnostic("downstream_terminal_write_failed", err)
 			}
 			return
@@ -83,6 +86,10 @@ func (s *Service) streamHTTP(w http.ResponseWriter, r *http.Request) {
 	if !c.Enabled {
 		terminal(api.Err(409, "model_disabled", "The model gateway is disabled"))
 		return
+	}
+	configID = c.CountingConfigID()
+	if configID != "" {
+		w.Header().Set(modeltransport.ModelConfigIDHeader, configID)
 	}
 	select {
 	case s.slots <- struct{}{}:

@@ -2,9 +2,15 @@
 // no Eino dependency: independent IM services never import model/runtime types.
 package modeltransport
 
-import "encoding/json"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"strings"
+)
 
 const Version = "teamie-agentic-chat-v1"
+const ModelConfigIDHeader = "X-Teamie-Model-Config-Id"
 
 const GeneratePath = "/internal/v1/chat"
 const StreamPath = GeneratePath + "/stream"
@@ -49,4 +55,26 @@ type Request struct {
 	Messages json.RawMessage `json:"messages"`
 	Options  json.RawMessage `json:"options"`
 	Stream   bool            `json:"stream"`
+}
+
+// CountingConfigID returns an opaque, secret-free SHA-256 digest identifying the
+// active gateway model/tokenizer configuration (transport version, canonical
+// baseURL, and model name). It never exposes provider URLs or credentials.
+func CountingConfigID(baseURL, modelName string) string {
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	model := strings.TrimSpace(modelName)
+	if base == "" || model == "" {
+		return ""
+	}
+	payload, _ := json.Marshal(struct {
+		Version string `json:"version"`
+		BaseURL string `json:"baseUrl"`
+		Model   string `json:"model"`
+	}{
+		Version: Version,
+		BaseURL: base,
+		Model:   model,
+	})
+	sum := sha256.Sum256(payload)
+	return "modelcfg:v1:" + hex.EncodeToString(sum[:16])
 }

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/cloudwego/kitex/client/callopt"
 	wire "teamie/agent-protocol/kitex_gen/agent"
@@ -31,6 +32,13 @@ func newGatewayHTTPClient(rpc modelgatewayservice.Client, streamURL string) (*ga
 	}
 	u.Path, u.RawPath = modeltransport.GeneratePath, ""
 	return &gatewayHTTPClient{Client: rpc, url: u.String(), http: gatewayStreamHTTP}, nil
+}
+
+func (c *gatewayHTTPClient) Ping(ctx context.Context, in *wire.PingRequest, opts ...callopt.Option) (*wire.PingResponse, error) {
+	if c == nil || c.Client == nil {
+		return nil, errors.New("gateway RPC client not configured")
+	}
+	return c.Client.Ping(ctx, in, opts...)
 }
 
 func (c *gatewayHTTPClient) Chat(ctx context.Context, in *wire.GatewayChatRequest, _ ...callopt.Option) (*wire.GatewayChatResponse, error) {
@@ -71,6 +79,11 @@ func (c *gatewayHTTPClient) Chat(ctx context.Context, in *wire.GatewayChatReques
 	dec.DisallowUnknownFields()
 	if dec.Decode(&output) != nil || dec.Decode(new(any)) != io.EOF {
 		return nil, errors.New("invalid gateway HTTP response")
+	}
+	if !output.IsSetModelConfigId() {
+		if hdr := strings.TrimSpace(response.Header.Get(modeltransport.ModelConfigIDHeader)); hdr != "" {
+			output.ModelConfigId = &hdr
+		}
 	}
 	return &output, nil
 }

@@ -7,8 +7,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"weak"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
@@ -40,6 +44,7 @@ func anchoredAssistantTextWithUsage(t *testing.T, prefix []*schema.AgenticMessag
 	}
 	attachUsageAnchor(msg, &contextUsageAnchor{
 		Step:         1,
+		ConfigID:     testModelConfigID,
 		MessageCount: len(prefix),
 		PrefixHash:   prefixHash,
 		LocalTokens:  estimateVisibleTokensV7(visibleBytes),
@@ -200,7 +205,7 @@ func TestPromptTokensDeltaCalibrationAndPrefixInvalidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gw := &GatewayModel{}
+	gw := &GatewayModel{ModelConfigID: func() string { return testModelConfigID }}
 	if err := gw.checkContextRequest(ctx, run, 2, modelRequestHash(rawReq), rawReq, false); err != nil {
 		t.Fatalf("checkContextRequest rejected a request that fits under calibrated PromptTokens: %v", err)
 	}
@@ -371,8 +376,8 @@ func TestSummaryRequestsAreIsolatedFromMainPromptTokensAnchor(t *testing.T) {
 		t.Fatal(err)
 	}
 	mainResp := assistantTextWithUsage("Main response", 42000, 100)
-	run.recordModelUsageAnchor(1, mainReq, mainResp)
-	if anchor := run.getUsageAnchor(); anchor == nil || anchor.PromptTokens != 42000 || anchor.Step != 1 {
+	run.recordModelUsageAnchor(1, mainReq, mainResp, testModelConfigID)
+	if anchor := run.getUsageAnchorForConfig(testModelConfigID); anchor == nil || anchor.PromptTokens != 42000 || anchor.Step != 1 {
 		t.Fatalf("main model response did not record anchor: %+v", anchor)
 	}
 
@@ -389,14 +394,14 @@ func TestSummaryRequestsAreIsolatedFromMainPromptTokensAnchor(t *testing.T) {
 		t.Fatal(err)
 	}
 	summaryResp := assistantTextWithUsage("Summary text", 900, 50)
-	run.recordModelUsageAnchor(2, summaryReq, summaryResp)
-	if anchor := run.getUsageAnchor(); anchor == nil || anchor.PromptTokens != 42000 || anchor.Step != 1 {
+	run.recordModelUsageAnchor(2, summaryReq, summaryResp, testModelConfigID)
+	if anchor := run.getUsageAnchorForConfig(testModelConfigID); anchor == nil || anchor.PromptTokens != 42000 || anchor.Step != 1 {
 		t.Fatalf("summary receipt polluted main PromptTokens anchor: %+v", anchor)
 	}
 
 	budget, _ := ParseContextBudgetSnapshot(run.ContextBudget)
 	// Summary measurement via measureCalibratedRequest must also ignore the main anchor and stay in "local" mode.
-	summaryMeasured, err := budget.measureCalibratedRequest(run.getUsageAnchor(), summaryReq)
+	summaryMeasured, err := budget.measureCalibratedRequest(run.getUsageAnchorForConfig(testModelConfigID), summaryReq)
 	if err != nil || summaryMeasured.CounterMode != "local" || summaryMeasured.AnchorPromptTokens != 0 {
 		t.Fatalf("summary request used main conversation anchor: %+v (%v)", summaryMeasured, err)
 	}
@@ -421,17 +426,25 @@ func TestGatewayModelAnchorPersistsAndReplaysDeterministically(t *testing.T) {
 
 			callCount := 0
 			fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					cfg, en := true, true
+					id := testModelConfigID
+					_ = json.NewEncoder(w).Encode(&wire.PingResponse{Ready: true, Configured: &cfg, Enabled: &en, ModelConfigId: &id})
+					return
+				}
 				callCount++
 				payload := step1Raw
 				if callCount == 2 {
 					payload = step2Raw
 				}
+				w.Header().Set(modeltransport.ModelConfigIDHeader, testModelConfigID)
 				if streaming {
 					_ = json.NewEncoder(w).Encode(map[string]string{"type": "chunk", "responseJson": string(payload)})
-					_ = json.NewEncoder(w).Encode(map[string]string{"type": "done"})
+					_ = json.NewEncoder(w).Encode(map[string]string{"type": "done", "modelConfigId": testModelConfigID})
 				} else {
 					text := string(payload)
-					_ = json.NewEncoder(w).Encode(&wire.GatewayChatResponse{Ok: true, ResponseJson: &text})
+					id := testModelConfigID
+					_ = json.NewEncoder(w).Encode(&wire.GatewayChatResponse{Ok: true, ResponseJson: &text, ModelConfigId: &id})
 				}
 			}))
 			defer fixture.Close()
@@ -440,7 +453,7 @@ func TestGatewayModelAnchorPersistsAndReplaysDeterministically(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			gateway := &GatewayModel{Store: s, Lease: lease, AgentID: lease.AgentID, Client: client, StreamURL: fixture.URL + modeltransport.StreamPath}
+			gateway := &GatewayModel{Store: s, Lease: lease, AgentID: lease.AgentID, Client: client, StreamURL: fixture.URL + modeltransport.StreamPath, ModelConfigID: func() string { return testModelConfigID }}
 			tools := []*schema.ToolInfo{{Name: "im_send_message", Desc: "Send message"}}
 			step1Msgs := []*schema.AgenticMessage{
 				schema.SystemAgenticMessage("System policy"),
@@ -464,7 +477,8 @@ func TestGatewayModelAnchorPersistsAndReplaysDeterministically(t *testing.T) {
 				ctx := WithRun(context.Background(), activeRun)
 
 				// Before step 1: no anchor exists yet (must not peek at future step 1 or step 2 receipts in DB!).
-				m1, err := budget.measureCalibratedContext(activeRun.getUsageAnchor(), step1Msgs, tools, budget.OutputReserveTokens, streaming)
+				activeConfigID, _ := gateway.CurrentModelConfigID(ctx)
+				m1, err := budget.measureCalibratedContext(activeRun.getUsageAnchorForConfig(activeConfigID), step1Msgs, tools, budget.OutputReserveTokens, streaming)
 				if err != nil || m1.CounterMode != "local" || m1.AnchorStep != 0 {
 					t.Fatalf("attempt %d step 1 pre-call measurement used future receipt: %+v (%v)", attempt, m1, err)
 				}
@@ -489,7 +503,7 @@ func TestGatewayModelAnchorPersistsAndReplaysDeterministically(t *testing.T) {
 				}
 
 				// After step 1 completes (live or replayed from cachedModel), step 1 anchor must be active for step 2!
-				m2, err := budget.measureCalibratedContext(activeRun.getUsageAnchor(), step2Msgs, tools, budget.OutputReserveTokens, streaming)
+				m2, err := budget.measureCalibratedContext(activeRun.getUsageAnchorForConfig(activeConfigID), step2Msgs, tools, budget.OutputReserveTokens, streaming)
 				if err != nil || m2.CounterMode != "usage_delta" || m2.AnchorStep != 1 || m2.AnchorPromptTokens != 50000 {
 					t.Fatalf("attempt %d step 2 measurement did not restore step 1 anchor: %+v (%v)", attempt, m2, err)
 				}
@@ -554,6 +568,7 @@ func TestContextObservabilityLogsCalibrationFieldsWithoutPrivateContent(t *testi
 	}
 	attachUsageAnchor(resp1, &contextUsageAnchor{
 		Step:         1,
+		ConfigID:     testModelConfigID,
 		MessageCount: 2,
 		PrefixHash:   pHash,
 		LocalTokens:  estimateVisibleTokensV7(visBytes),
@@ -603,5 +618,330 @@ func TestContextObservabilityLogsCalibrationFieldsWithoutPrivateContent(t *testi
 		measuredEvent["custom.context.anchor_prompt_tokens"] != float64(10600) ||
 		measuredEvent["custom.context.compaction_reason"] != "token_threshold" {
 		t.Fatalf("unexpected context-measured diagnostic fields: %+v", measuredEvent)
+	}
+}
+
+func retainsAgenticMessagePointer(root any, target *schema.AgenticMessage) bool {
+	visited := map[uintptr]bool{}
+	targetPtr := reflect.ValueOf(target).Pointer()
+	var walk func(v reflect.Value) bool
+	walk = func(v reflect.Value) bool {
+		if !v.IsValid() {
+			return false
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() {
+				return false
+			}
+			ptr := v.Pointer()
+			if v.Type() == reflect.TypeOf(target) && ptr == targetPtr {
+				return true
+			}
+			if visited[ptr] {
+				return false
+			}
+			visited[ptr] = true
+			return walk(v.Elem())
+		case reflect.Interface:
+			if v.IsNil() {
+				return false
+			}
+			return walk(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				if walk(v.Field(i)) {
+					return true
+				}
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				if walk(v.Index(i)) {
+					return true
+				}
+			}
+		case reflect.Map:
+			iter := v.MapRange()
+			for iter.Next() {
+				if walk(iter.Key()) || walk(iter.Value()) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return walk(reflect.ValueOf(root))
+}
+
+func TestReviewPR53CompactionRetainsDiscardedMessages(t *testing.T) {
+	p, _, summary := testPipeline(t, 16384)
+	run := &Run{ContextProfile: contextProfileV1}
+	run.ContextBudget, _ = NewContextBudgetSnapshot(16384)
+	ctx := WithRun(context.Background(), run)
+
+	var weakDiscarded []weak.Pointer[schema.AgenticMessage]
+	for cycle := 0; cycle < 3; cycle++ {
+		messages := []*schema.AgenticMessage{schema.SystemAgenticMessage("policy")}
+		var cycleMsgs []*schema.AgenticMessage
+		for i := 0; i < 6; i++ {
+			msg := anchoredAssistantTextWithUsage(
+				t,
+				messages,
+				nil,
+				nil,
+				strings.Repeat(fmt.Sprintf("discarded_%d_%d ", cycle, i), 1200),
+				6000+i*100,
+				20,
+			)
+			messages = append(messages, msg)
+			cycleMsgs = append(cycleMsgs, msg)
+		}
+		messages = append(messages, schema.UserAgenticMessage("continue"))
+		p.seedAnchorFromHistory(ctx, messages, nil)
+
+		compacted, err := p.compact(ctx, messages, nil, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(compacted) >= len(messages) {
+			t.Fatal("fixture did not compact")
+		}
+		keptSet := map[*schema.AgenticMessage]bool{}
+		for _, m := range compacted {
+			keptSet[m] = true
+		}
+		for _, msg := range cycleMsgs {
+			if !keptSet[msg] {
+				if retainsAgenticMessagePointer(run, msg) || retainsAgenticMessagePointer(&p.fallbackUsage, msg) {
+					t.Fatalf("cycle %d: Run or ContextPipeline retained discarded *schema.AgenticMessage pointer", cycle)
+				}
+				weakDiscarded = append(weakDiscarded, weak.Make(msg))
+			}
+		}
+		if len(run.usageState.invalidatedAnchors) > 6 {
+			t.Fatalf("cycle %d: invalidatedAnchors accumulated unbounded entries across compactions: %d", cycle, len(run.usageState.invalidatedAnchors))
+		}
+		// Verify neither the compacted slice nor a re-seed resurrects any old anchor.
+		p.seedAnchorFromHistory(ctx, compacted, nil)
+		afterMeasure, err := p.measureMainContext(ctx, compacted, nil)
+		if err != nil || afterMeasure.CounterMode != "local" || afterMeasure.AnchorPromptTokens != 0 {
+			t.Fatalf("cycle %d: compacted history resurrected a discarded usage anchor: %+v (%v)", cycle, afterMeasure, err)
+		}
+		// Even if pre-compaction messages are passed back to seedAnchorFromHistory in the same turn,
+		// the cleared Extra and invalidated hash prevent resurrecting the old anchor.
+		p.seedAnchorFromHistory(ctx, messages, nil)
+		if run.getUsageAnchor() != nil {
+			t.Fatalf("cycle %d: pre-compaction messages resurrected an invalidated anchor", cycle)
+		}
+	}
+
+	if len(weakDiscarded) == 0 {
+		t.Fatal("no assistant messages were discarded across compaction cycles")
+	}
+	// Clear the test fixture model's recorded inputs slice so only Run and ContextPipeline remain live.
+	summary.mu.Lock()
+	summary.inputs = nil
+	summary.mu.Unlock()
+	for i := 0; i < 4; i++ {
+		runtime.GC()
+	}
+	for i, wp := range weakDiscarded {
+		if wp.Value() != nil {
+			t.Fatalf("discarded message %d remained reachable after GC", i)
+		}
+	}
+	runtime.KeepAlive(p)
+	runtime.KeepAlive(run)
+}
+
+func TestGatewayModelConfigIDBindsAndInvalidatesPromptTokensAnchorOnModelSwitch(t *testing.T) {
+	s, lease, run := contextModelRun(t)
+	run.ContextBudget, _ = NewContextBudgetSnapshot(16384)
+	if _, err := s.DB.Exec(context.Background(), `UPDATE runtime_runs SET context_budget=$2 WHERE id=$1`, run.ID, run.ContextBudget); err != nil {
+		t.Fatal(err)
+	}
+	budget, err := ParseContextBudgetSnapshot(run.ContextBudget)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	configA := modeltransport.CountingConfigID("https://provider-a.example/v1", "model-a")
+	configBModel := modeltransport.CountingConfigID("https://provider-a.example/v1", "model-b")
+	configBURL := modeltransport.CountingConfigID("https://provider-b.example/v1", "model-b")
+	if configA == "" || configA == configBModel || configBModel == configBURL {
+		t.Fatalf("expected distinct opaque config IDs: %q %q %q", configA, configBModel, configBURL)
+	}
+
+	var activeConfigID atomic.Value
+	activeConfigID.Store(configA)
+	var activePromptTokens atomic.Int64
+	activePromptTokens.Store(6000)
+
+	gatewayServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cfgID, _ := activeConfigID.Load().(string)
+		if r.Method == http.MethodGet {
+			configured := cfgID != ""
+			win := int64(16384)
+			var idPtr *string
+			if cfgID != "" {
+				idPtr = &cfgID
+			}
+			_ = json.NewEncoder(w).Encode(&wire.PingResponse{
+				Ready:               configured,
+				Configured:          &configured,
+				Enabled:             &configured,
+				ContextWindowTokens: &win,
+				ModelConfigId:       idPtr,
+			})
+			return
+		}
+		prompt := int(activePromptTokens.Load())
+		resp := assistantTextWithUsage("网关模型回复", prompt, 40)
+		raw, _ := (&schema.HumanReadableSerializer{}).Marshal(resp)
+		text := string(raw)
+		if cfgID != "" {
+			w.Header().Set(modeltransport.ModelConfigIDHeader, cfgID)
+		}
+		var idPtr *string
+		if cfgID != "" {
+			idPtr = &cfgID
+		}
+		_ = json.NewEncoder(w).Encode(&wire.GatewayChatResponse{Ok: true, ResponseJson: &text, ModelConfigId: idPtr})
+	}))
+	defer gatewayServer.Close()
+
+	httpClient, err := newGatewayHTTPClient(nil, gatewayServer.URL+modeltransport.StreamPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gwModel := &GatewayModel{
+		Store:     s,
+		Lease:     lease,
+		AgentID:   lease.AgentID,
+		Client:    httpClient,
+		StreamURL: gatewayServer.URL + modeltransport.StreamPath,
+		ModelConfigID: func() string {
+			cfgID, _ := activeConfigID.Load().(string)
+			return cfgID
+		},
+	}
+
+	// Step 1 on Model A: local prefix is ~9,900 tokens (39,600 UTF-8 bytes), real PromptTokens is 6,000.
+	sys := schema.SystemAgenticMessage("Trusted system instructions.")
+	user1 := schema.UserAgenticMessage(strings.Repeat("甲乙丙丁", 3300))
+	step1Prefix := []*schema.AgenticMessage{sys, user1}
+	ctx1 := WithRun(context.Background(), run)
+	respA, err := gwModel.Generate(ctx1, step1Prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	savedAnchor, ok := extractUsageAnchor(respA)
+	if !ok || savedAnchor.ConfigID != configA || savedAnchor.PromptTokens != 6000 {
+		t.Fatalf("Model A response did not attach ConfigID-bound usage anchor: %+v (ok=%v)", savedAnchor, ok)
+	}
+
+	// Follow-up input (~1,200 local tokens) -> uncalibrated local total ~11,100 > TriggerTokens (10,828),
+	// calibrated effective total ~7,200 <= TriggerTokens (10,828).
+	inputs := []Input{{EventID: "turn-2", ConversationID: "conv", MessageID: "msg-2", SenderID: "user", SenderKind: "human", Body: strings.Repeat("继续第二阶段补充说明", 160)}}
+	historyWithRespA := append([]*schema.AgenticMessage{sys, user1, respA}, inputMessages(inputs)...)
+
+	// 1. Same-model restart recovery: fresh Run + fresh ContextPipeline with Gateway still on Model A (configA)
+	// must continue to hit usage_delta and skip premature compaction!
+	archiveRestart := &pipelineArchiveFixture{}
+	pRestartSameModel, err := NewContextPipeline(context.Background(), ContextPipelineConfig{
+		Model: gwModel, Budget: budget, Backend: archiveRestart, ArchivePath: archiveRestart.path, ArchiveTranscript: archiveRestart.transcript,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runRestartSame := &Run{ID: run.ID, Attempt: run.Attempt, AgentID: run.AgentID, Inputs: inputs, ContextProfile: contextProfileV1, ContextBudget: run.ContextBudget, Front: run.Front}
+	ctxRestartSame := WithRun(context.Background(), runRestartSame)
+	pRestartSameModel.seedAnchorFromHistory(ctxRestartSame, historyWithRespA, nil)
+	mSame, err := pRestartSameModel.measureMainContext(ctxRestartSame, historyWithRespA, nil)
+	if err != nil || mSame.CounterMode != "usage_delta" || mSame.AnchorPromptTokens != 6000 || mSame.EstimatedTokens > budget.TriggerTokens {
+		t.Fatalf("same-model restart failed to restore usage_delta anchor: %+v (%v)", mSame, err)
+	}
+
+	// Also verify checkContextRequest accepts a candidate (~12,200 local tokens > InputTokenLimit 12,032, ~8,250 effective tokens) on Model A.
+	user2Large := schema.UserAgenticMessage(strings.Repeat("补充材料", 750))
+	largeCandidate := []*schema.AgenticMessage{sys, user1, respA, user2Large}
+	maxOut := budget.initialOutputTokens()
+	rawLargeReq, err := agenticRequestForRun(runRestartSame, largeCandidate, &model.Options{MaxTokens: &maxOut}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gwModel.checkContextRequest(ctxRestartSame, runRestartSame, 2, modelRequestHash(rawLargeReq), rawLargeReq, false); err != nil {
+		t.Fatalf("same-model checkContextRequest rejected request fitting under Model A calibration: %v", err)
+	}
+
+	// 2. Same contextWindowTokens (16384), switch Gateway model from "model-a" to "model-b" (configBModel):
+	// Both existing Run/ContextPipeline and a freshly restarted Run/ContextPipeline must reject Model A's anchor
+	// and fall back to "local" estimation!
+	activeConfigID.Store(configBModel)
+	activePromptTokens.Store(7100)
+
+	mSwitchedLive, err := pRestartSameModel.measureMainContext(ctxRestartSame, historyWithRespA, nil)
+	if err != nil || mSwitchedLive.CounterMode != "local" || mSwitchedLive.AnchorPromptTokens != 0 || mSwitchedLive.EstimatedTokens <= budget.TriggerTokens {
+		t.Fatalf("live ContextPipeline continued using Model A anchor after gateway switched to Model B: %+v (%v)", mSwitchedLive, err)
+	}
+	if err := gwModel.checkContextRequest(ctxRestartSame, runRestartSame, 99, modelRequestHash(rawLargeReq), rawLargeReq, false); err == nil {
+		t.Fatal("checkContextRequest continued using Model A anchor after gateway switched to Model B")
+	}
+
+	runRestartSwitched := &Run{ID: run.ID, Attempt: run.Attempt, AgentID: run.AgentID, Inputs: inputs, ContextProfile: contextProfileV1, ContextBudget: run.ContextBudget, Front: run.Front}
+	ctxRestartSwitched := WithRun(context.Background(), runRestartSwitched)
+	pRestartSameModel.seedAnchorFromHistory(ctxRestartSwitched, historyWithRespA, nil)
+	mSwitchedSeeded, err := pRestartSameModel.measureMainContext(ctxRestartSwitched, historyWithRespA, nil)
+	if err != nil || mSwitchedSeeded.CounterMode != "local" || mSwitchedSeeded.AnchorPromptTokens != 0 {
+		t.Fatalf("seedAnchorFromHistory accepted Model A anchor after gateway switched to Model B: %+v (%v)", mSwitchedSeeded, err)
+	}
+
+	// Even if Step 1 is replayed from runtime_model_calls after the gateway switched to Model B,
+	// the replayed receipt retains Model A's ConfigID and must NOT enable usage_delta under Model B!
+	replayedRespA, err := gwModel.Generate(ctxRestartSwitched, step1Prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayedAnchorA, ok := extractUsageAnchor(replayedRespA)
+	if !ok || replayedAnchorA.ConfigID != configA {
+		t.Fatalf("replayed Step 1 receipt did not preserve original Model A ConfigID: %+v (ok=%v)", replayedAnchorA, ok)
+	}
+	mAfterReplayMismatch, err := pRestartSameModel.measureMainContext(ctxRestartSwitched, historyWithRespA, nil)
+	if err != nil || mAfterReplayMismatch.CounterMode != "local" || mAfterReplayMismatch.AnchorPromptTokens != 0 {
+		t.Fatalf("replayed Model A receipt enabled usage_delta after gateway switched to Model B: %+v (%v)", mAfterReplayMismatch, err)
+	}
+
+	// Once Model B completes a real call (Step 2) and returns its receipt, a new anchor bound to configBModel is established!
+	respB, err := gwModel.Generate(ctxRestartSwitched, historyWithRespA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	anchorB, ok := extractUsageAnchor(respB)
+	if !ok || anchorB.ConfigID != configBModel || anchorB.PromptTokens != 7100 {
+		t.Fatalf("Model B response did not establish new ConfigID anchor: %+v (ok=%v)", anchorB, ok)
+	}
+	followUpInputs := []Input{{EventID: "turn-3", ConversationID: "conv", MessageID: "msg-3", SenderID: "user", SenderKind: "human", Body: "继续第三阶段"}}
+	historyWithRespB := append(append([]*schema.AgenticMessage{}, historyWithRespA...), respB)
+	historyWithRespB = append(historyWithRespB, inputMessages(followUpInputs)...)
+	mAfterB, err := pRestartSameModel.measureMainContext(ctxRestartSwitched, historyWithRespB, nil)
+	if err != nil || mAfterB.CounterMode != "usage_delta" || mAfterB.AnchorPromptTokens != 7100 {
+		t.Fatalf("Model B anchor did not activate usage_delta on subsequent turn: %+v (%v)", mAfterB, err)
+	}
+
+	// 3. Same contextWindowTokens (16384), switch Gateway baseUrl (configBURL):
+	// Model B's old baseUrl anchor must immediately mismatch and fall back to "local"!
+	activeConfigID.Store(configBURL)
+	pRestartSameModel.seedAnchorFromHistory(ctxRestartSwitched, historyWithRespB, nil)
+	mURLSwitched, err := pRestartSameModel.measureMainContext(ctxRestartSwitched, historyWithRespB, nil)
+	if err != nil || mURLSwitched.CounterMode != "local" || mURLSwitched.AnchorPromptTokens != 0 {
+		t.Fatalf("baseUrl switch under same window did not invalidate old usage anchor: %+v (%v)", mURLSwitched, err)
+	}
+
+	// 4. Unprovable model config (empty configID): must also fall back to "local".
+	activeConfigID.Store("")
+	pRestartSameModel.seedAnchorFromHistory(ctxRestartSwitched, historyWithRespB, nil)
+	mUnprovable, err := pRestartSameModel.measureMainContext(ctxRestartSwitched, historyWithRespB, nil)
+	if err != nil || mUnprovable.CounterMode != "local" || mUnprovable.AnchorPromptTokens != 0 {
+		t.Fatalf("unprovable gateway config did not fall back to local estimation: %+v (%v)", mUnprovable, err)
 	}
 }
