@@ -55,10 +55,20 @@ func (p *ContextPipeline) getAnchor(ctx context.Context) *contextUsageAnchor {
 	return &copy
 }
 
-func (p *ContextPipeline) seedAnchorFromHistory(ctx context.Context, messages []*schema.AgenticMessage, tools []*schema.ToolInfo) {
+func (p *ContextPipeline) clearCurrentAnchor(ctx context.Context) {
+	if run, err := CurrentRun(ctx); err == nil && run != nil {
+		run.clearUsageAnchor()
+	}
+	p.anchorMu.Lock()
+	defer p.anchorMu.Unlock()
+	p.usageAnchor = nil
+}
+
+func (p *ContextPipeline) seedAnchorFromHistory(ctx context.Context, messages []*schema.AgenticMessage, tools []*schema.ToolInfo, deferred ...[]*schema.ToolInfo) {
 	if p.cfg.Budget.Version < 7 {
 		return
 	}
+	allDeferred := flattenToolInfos(deferred)
 	lastIdx := -1
 	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i] != nil && messages[i].Role == schema.AgenticRoleTypeAssistant {
@@ -67,39 +77,52 @@ func (p *ContextPipeline) seedAnchorFromHistory(ctx context.Context, messages []
 		}
 	}
 	if lastIdx <= 0 {
+		p.clearCurrentAnchor(ctx)
 		return
 	}
 	assistantMsg := messages[lastIdx]
 	if assistantMsg.ResponseMeta == nil || assistantMsg.ResponseMeta.TokenUsage == nil || assistantMsg.ResponseMeta.TokenUsage.PromptTokens <= 0 {
+		p.clearCurrentAnchor(ctx)
+		return
+	}
+	savedAnchor, ok := extractUsageAnchor(assistantMsg)
+	if !ok {
+		p.clearCurrentAnchor(ctx)
 		return
 	}
 	prefix := messages[:lastIdx]
-	visibleBytes, prefixHash, err := visibleContextBytes(prefix, tools, nil, nil, &schema.AgenticToolChoice{Type: schema.ToolChoiceAllowed})
-	if err != nil {
+	visibleBytes, prefixHash, err := visibleContextBytes(prefix, tools, allDeferred, nil, &schema.AgenticToolChoice{Type: schema.ToolChoiceAllowed})
+	if err != nil || lastIdx != savedAnchor.MessageCount || prefixHash != savedAnchor.PrefixHash || estimateVisibleTokensV7(visibleBytes) != savedAnchor.LocalTokens || assistantMsg.ResponseMeta.TokenUsage.PromptTokens != savedAnchor.PromptTokens {
+		clearMessageUsageAnchor(assistantMsg)
+		p.invalidateAnchor(ctx, messages)
 		return
 	}
-	step := 0
-	if run, err := CurrentRun(ctx); err == nil && run != nil {
-		step = int(run.Step.Load())
+	p.anchorMu.Lock()
+	invalidated := p.invalidatedAnchors[prefixHash] || p.invalidatedMessages[assistantMsg]
+	p.anchorMu.Unlock()
+	if invalidated {
+		clearMessageUsageAnchor(assistantMsg)
+		p.clearCurrentAnchor(ctx)
+		return
+	}
+	step := savedAnchor.Step
+	if step <= 0 {
+		if run, err := CurrentRun(ctx); err == nil && run != nil {
+			step = int(run.Step.Load())
+		}
 	}
 	anchor := &contextUsageAnchor{
 		Step:         step,
-		MessageCount: lastIdx,
-		PrefixHash:   prefixHash,
-		LocalTokens:  estimateVisibleTokensV7(visibleBytes),
-		PromptTokens: assistantMsg.ResponseMeta.TokenUsage.PromptTokens,
+		MessageCount: savedAnchor.MessageCount,
+		PrefixHash:   savedAnchor.PrefixHash,
+		LocalTokens:  savedAnchor.LocalTokens,
+		PromptTokens: savedAnchor.PromptTokens,
 	}
 	if run, err := CurrentRun(ctx); err == nil && run != nil {
 		run.setUsageAnchor(anchor, assistantMsg, true)
 	}
 	p.anchorMu.Lock()
 	defer p.anchorMu.Unlock()
-	if p.invalidatedAnchors[prefixHash] || p.invalidatedMessages[assistantMsg] {
-		return
-	}
-	if p.usageAnchor != nil && p.usageAnchor.PrefixHash == prefixHash {
-		return
-	}
 	copy := *anchor
 	p.usageAnchor = &copy
 }
@@ -119,6 +142,13 @@ func (p *ContextPipeline) invalidateAnchor(ctx context.Context, messages []*sche
 	}
 	for _, msg := range messages {
 		if msg != nil && msg.Role == schema.AgenticRoleTypeAssistant {
+			if saved, ok := extractUsageAnchor(msg); ok {
+				if p.invalidatedAnchors == nil {
+					p.invalidatedAnchors = map[string]bool{}
+				}
+				p.invalidatedAnchors[saved.PrefixHash] = true
+			}
+			clearMessageUsageAnchor(msg)
 			if p.invalidatedMessages == nil {
 				p.invalidatedMessages = map[*schema.AgenticMessage]bool{}
 			}
@@ -127,8 +157,8 @@ func (p *ContextPipeline) invalidateAnchor(ctx context.Context, messages []*sche
 	}
 }
 
-func (p *ContextPipeline) measureMainContext(ctx context.Context, messages []*schema.AgenticMessage, tools []*schema.ToolInfo) (ContextMeasurement, error) {
-	return p.cfg.Budget.measureCalibratedContext(p.getAnchor(ctx), messages, tools, p.cfg.Budget.OutputReserveTokens, false)
+func (p *ContextPipeline) measureMainContext(ctx context.Context, messages []*schema.AgenticMessage, tools []*schema.ToolInfo, deferred ...[]*schema.ToolInfo) (ContextMeasurement, error) {
+	return p.cfg.Budget.measureCalibratedContext(p.getAnchor(ctx), messages, tools, p.cfg.Budget.OutputReserveTokens, false, deferred...)
 }
 
 func NewContextPipeline(ctx context.Context, cfg ContextPipelineConfig) (*ContextPipeline, error) {
@@ -176,9 +206,12 @@ func (p *ContextPipeline) BeforeModelRewriteState(ctx context.Context, state *ad
 	copyState.ToolInfos = contextToolInfos(state.ToolInfos, p.cfg.Budget)
 	copyState.DeferredToolInfos = contextToolInfos(state.DeferredToolInfos, p.cfg.Budget)
 	state = &copyState
-	p.seedAnchorFromHistory(ctx, state.Messages, state.ToolInfos)
+	p.seedAnchorFromHistory(ctx, state.Messages, state.ToolInfos, state.DeferredToolInfos)
 	names := []string{}
 	for _, tool := range state.ToolInfos {
+		names = append(names, tool.Name)
+	}
+	for _, tool := range state.DeferredToolInfos {
 		names = append(names, tool.Name)
 	}
 	for _, msg := range state.Messages {
@@ -190,7 +223,7 @@ func (p *ContextPipeline) BeforeModelRewriteState(ctx context.Context, state *ad
 			}
 		}
 	}
-	r, err := p.reducer(ctx, names)
+	r, err := p.reducer(ctx, names, state.DeferredToolInfos)
 	if err != nil {
 		return ctx, nil, err
 	}
@@ -198,7 +231,7 @@ func (p *ContextPipeline) BeforeModelRewriteState(ctx context.Context, state *ad
 	if err != nil {
 		return ctx, nil, err
 	}
-	m, err := p.measureMainContext(ctx, reduced.Messages, reduced.ToolInfos)
+	m, err := p.measureMainContext(ctx, reduced.Messages, reduced.ToolInfos, reduced.DeferredToolInfos)
 	if err != nil {
 		return ctx, nil, err
 	}
@@ -207,7 +240,7 @@ func (p *ContextPipeline) BeforeModelRewriteState(ctx context.Context, state *ad
 	if !p.cfg.Budget.shouldCompact(m) {
 		return ctx, reduced, nil
 	}
-	msgs, err := p.compact(ctx, reduced.Messages, reduced.ToolInfos, false)
+	msgs, err := p.compact(ctx, reduced.Messages, reduced.ToolInfos, false, reduced.DeferredToolInfos)
 	if err != nil {
 		return ctx, nil, err
 	}
@@ -232,15 +265,15 @@ func (p *ContextPipeline) RetryConfig() *adk.TypedModelRetryConfig[*schema.Agent
 			return nil
 		}
 		opts := model.GetCommonOptions(nil, retry.Options...)
-		msgs, err := p.compact(ctx, retry.InputMessages, opts.Tools, true)
+		msgs, err := p.compact(ctx, retry.InputMessages, opts.Tools, true, opts.DeferredTools)
 		if err != nil {
 			return &adk.TypedRetryDecision[*schema.AgenticMessage]{RewriteError: err}
 		}
-		before, err := p.cfg.Budget.measureContext(retry.InputMessages, opts.Tools, p.cfg.Budget.OutputReserveTokens, false)
+		before, err := p.cfg.Budget.measureContext(retry.InputMessages, opts.Tools, p.cfg.Budget.OutputReserveTokens, false, opts.DeferredTools)
 		if err != nil {
 			return &adk.TypedRetryDecision[*schema.AgenticMessage]{RewriteError: err}
 		}
-		after, err := p.cfg.Budget.measureContext(msgs, opts.Tools, p.cfg.Budget.OutputReserveTokens, false)
+		after, err := p.cfg.Budget.measureContext(msgs, opts.Tools, p.cfg.Budget.OutputReserveTokens, false, opts.DeferredTools)
 		if err != nil {
 			return &adk.TypedRetryDecision[*schema.AgenticMessage]{RewriteError: err}
 		}
@@ -346,8 +379,9 @@ func (p *ContextPipeline) partition(messages []*schema.AgenticMessage, force boo
 	return
 }
 
-func (p *ContextPipeline) compact(ctx context.Context, messages []*schema.AgenticMessage, tools []*schema.ToolInfo, force bool) (result []*schema.AgenticMessage, failure error) {
-	initial, err := p.measureMainContext(ctx, messages, tools)
+func (p *ContextPipeline) compact(ctx context.Context, messages []*schema.AgenticMessage, tools []*schema.ToolInfo, force bool, deferred ...[]*schema.ToolInfo) (result []*schema.AgenticMessage, failure error) {
+	allDeferred := flattenToolInfos(deferred)
+	initial, err := p.measureMainContext(ctx, messages, tools, allDeferred)
 	if err != nil {
 		return nil, err
 	}
@@ -359,7 +393,7 @@ func (p *ContextPipeline) compact(ctx context.Context, messages []*schema.Agenti
 	target := p.cfg.Budget.InputTokenLimit
 	shrinkLocal := force || (p.cfg.Budget.Version >= 7 && initial.CounterMode == "usage_delta" && initial.EstimatedTokens > initial.LocalTokens)
 	if shrinkLocal {
-		measurement, err := p.cfg.Budget.measureContext(messages, tools, p.cfg.Budget.OutputReserveTokens, false)
+		measurement, err := p.cfg.Budget.measureContext(messages, tools, p.cfg.Budget.OutputReserveTokens, false, allDeferred)
 		if err != nil {
 			return nil, err
 		}
@@ -382,7 +416,7 @@ func (p *ContextPipeline) compact(ctx context.Context, messages []*schema.Agenti
 		prefix, tail = older, append(kept, tail...)
 	}
 	if len(prefix) == 0 {
-		return p.fitTailTo(ctx, systems, tail, tools, target)
+		return p.fitTailTo(ctx, systems, tail, tools, target, allDeferred)
 	}
 	ref, err := p.cfg.ArchiveTranscript(ctx, prefix)
 	if err != nil {
@@ -400,7 +434,7 @@ func (p *ContextPipeline) compact(ctx context.Context, messages []*schema.Agenti
 	}
 	summary := schema.UserAgenticMessage(summaryText)
 	summary.Extra = map[string]any{"teamie_context_summary": contextProfileV1, "teamie_context_sources": contextSourceValue(sources), "teamie_context_archive_ref": ref}
-	return p.fitTailTo(ctx, append(append([]*schema.AgenticMessage{}, systems...), summary), tail, tools, target)
+	return p.fitTailTo(ctx, append(append([]*schema.AgenticMessage{}, systems...), summary), tail, tools, target, allDeferred)
 }
 
 func contextSourceValue(sources []InputSource) any {

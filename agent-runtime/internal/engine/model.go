@@ -344,6 +344,7 @@ func modelRequestHash(raw []byte) string {
 		var extra map[string]json.RawMessage
 		if json.Unmarshal(message["extra"], &extra) == nil {
 			delete(extra, "_eino_msg_id")
+			delete(extra, contextUsageAnchorExtraKey)
 			if len(extra) == 0 {
 				delete(message, "extra")
 			} else {

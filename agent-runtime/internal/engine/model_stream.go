@@ -140,6 +140,7 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 		scanner.Buffer(make([]byte, 4096), modeltransport.MaxHTTPStreamFrameBytes)
 		chunks := &modelStreamAccumulator{}
 		requestID := ""
+		anchorAttached := false
 		total := 0
 		done := false
 		for scanner.Scan() {
@@ -182,7 +183,20 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 					fail(e)
 					return
 				}
-				if writer.Send(message, nil) {
+				outMsg := message
+				if !anchorAttached && message.ResponseMeta != nil && message.ResponseMeta.TokenUsage != nil && message.ResponseMeta.TokenUsage.PromptTokens > 0 {
+					if anchor := run.computeRequestUsageAnchor(step, request, message); anchor != nil {
+						anchorAttached = true
+						cloned := *message
+						cloned.Extra = make(map[string]any, len(message.Extra)+1)
+						for k, v := range message.Extra {
+							cloned.Extra[k] = v
+						}
+						attachUsageAnchor(&cloned, anchor)
+						outMsg = &cloned
+					}
+				}
+				if writer.Send(outMsg, nil) {
 					streamFailure = observability.Diagnostic("stream_consumer_closed", requestCtx.Err())
 					stage = "consumer-closed"
 					return

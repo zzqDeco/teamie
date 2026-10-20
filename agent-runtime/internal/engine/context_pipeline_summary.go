@@ -178,13 +178,13 @@ func (p *ContextPipeline) archiveUnit(ctx context.Context, unit []*schema.Agenti
 // A final hard check also includes the current policy and full tool schema.
 // If one recent round itself exceeds the window, archive the whole round; never
 // leave orphaned tool calls/results. Platform policy and tools are immutable.
-func (p *ContextPipeline) fitTail(ctx context.Context, fixed, tail []*schema.AgenticMessage, tools []*schema.ToolInfo) ([]*schema.AgenticMessage, error) {
-	return p.fitTailTo(ctx, fixed, tail, tools, p.cfg.Budget.InputTokenLimit)
+func (p *ContextPipeline) fitTail(ctx context.Context, fixed, tail []*schema.AgenticMessage, tools []*schema.ToolInfo, deferred ...[]*schema.ToolInfo) ([]*schema.AgenticMessage, error) {
+	return p.fitTailTo(ctx, fixed, tail, tools, p.cfg.Budget.InputTokenLimit, deferred...)
 }
 
-func (p *ContextPipeline) fitTailTo(ctx context.Context, fixed, tail []*schema.AgenticMessage, tools []*schema.ToolInfo, target int) ([]*schema.AgenticMessage, error) {
+func (p *ContextPipeline) fitTailTo(ctx context.Context, fixed, tail []*schema.AgenticMessage, tools []*schema.ToolInfo, target int, deferred ...[]*schema.ToolInfo) ([]*schema.AgenticMessage, error) {
 	if p.cfg.Budget.Version >= 3 {
-		return p.fitCurrentInputs(ctx, fixed, tail, tools, target)
+		return p.fitCurrentInputs(ctx, fixed, tail, tools, target, deferred...)
 	}
 	fits := func(m ContextMeasurement) bool { return p.cfg.Budget.fits(m) && m.EstimatedTokens <= target }
 	out := append(append([]*schema.AgenticMessage{}, fixed...), tail...)

@@ -118,9 +118,20 @@ func (b ContextBudgetSnapshot) initialOutputTokens() int {
 	return min(2048, b.OutputReserveTokens)
 }
 
-func (b ContextBudgetSnapshot) measureContext(messages []*schema.AgenticMessage, tools []*schema.ToolInfo, output int, streaming bool) (ContextMeasurement, error) {
+func flattenToolInfos(groups [][]*schema.ToolInfo) []*schema.ToolInfo {
+	if len(groups) == 0 {
+		return nil
+	}
+	var out []*schema.ToolInfo
+	for _, group := range groups {
+		out = append(out, group...)
+	}
+	return out
+}
+
+func (b ContextBudgetSnapshot) measureContext(messages []*schema.AgenticMessage, tools []*schema.ToolInfo, output int, streaming bool, deferred ...[]*schema.ToolInfo) (ContextMeasurement, error) {
 	if b.Version >= 7 {
-		return measureContext(messages, tools, output, streaming, modeltransport.MaxOutputTokens)
+		return measureContextWithDeferred(messages, tools, flattenToolInfos(deferred), output, streaming, modeltransport.MaxOutputTokens)
 	}
 	if b.Version == 6 {
 		return measureLegacyContext(messages, tools, output, streaming, modeltransport.MaxOutputTokens)
@@ -128,7 +139,7 @@ func (b ContextBudgetSnapshot) measureContext(messages []*schema.AgenticMessage,
 	if b.Version > 0 {
 		return measureLegacyContext(messages, tools, output, streaming)
 	}
-	return measureContext(messages, tools, output, streaming)
+	return measureContextWithDeferred(messages, tools, flattenToolInfos(deferred), output, streaming)
 }
 
 func (b ContextBudgetSnapshot) measureSummaryContext(messages []*schema.AgenticMessage, output int, streaming bool) (ContextMeasurement, error) {
@@ -150,12 +161,67 @@ func (b ContextBudgetSnapshot) measureContextRequest(request []byte) (ContextMea
 	return measureContextRequest(request)
 }
 
+const contextUsageAnchorExtraKey = "_teamie_usage_anchor"
+
 type contextUsageAnchor struct {
-	Step         int
-	MessageCount int
-	PrefixHash   string
-	LocalTokens  int
-	PromptTokens int
+	Step         int    `json:"step"`
+	MessageCount int    `json:"messageCount"`
+	PrefixHash   string `json:"prefixHash"`
+	LocalTokens  int    `json:"localTokens"`
+	PromptTokens int    `json:"promptTokens"`
+}
+
+func attachUsageAnchor(msg *schema.AgenticMessage, anchor *contextUsageAnchor) {
+	if msg == nil || anchor == nil || anchor.PromptTokens <= 0 || anchor.MessageCount <= 0 || anchor.PrefixHash == "" || anchor.LocalTokens <= 0 {
+		return
+	}
+	raw, err := json.Marshal(anchor)
+	if err != nil {
+		return
+	}
+	if msg.Extra == nil {
+		msg.Extra = map[string]any{}
+	}
+	msg.Extra[contextUsageAnchorExtraKey] = string(raw)
+}
+
+func extractUsageAnchor(msg *schema.AgenticMessage) (*contextUsageAnchor, bool) {
+	if msg == nil || len(msg.Extra) == 0 {
+		return nil, false
+	}
+	val, ok := msg.Extra[contextUsageAnchorExtraKey]
+	if !ok || val == nil {
+		return nil, false
+	}
+	var raw []byte
+	switch v := val.(type) {
+	case string:
+		raw = []byte(v)
+	default:
+		var err error
+		raw, err = json.Marshal(v)
+		if err != nil {
+			return nil, false
+		}
+	}
+	var anchor contextUsageAnchor
+	if json.Unmarshal(raw, &anchor) != nil {
+		return nil, false
+	}
+	if anchor.PromptTokens <= 0 || anchor.MessageCount <= 0 || anchor.PrefixHash == "" || anchor.LocalTokens <= 0 {
+		return nil, false
+	}
+	return &anchor, true
+}
+
+func clearMessageUsageAnchor(msg *schema.AgenticMessage) {
+	if msg == nil || len(msg.Extra) == 0 {
+		return
+	}
+	delete(msg.Extra, contextUsageAnchorExtraKey)
+	if len(msg.Extra) == 0 {
+		msg.Extra = nil
+	}
 }
 
 func isSummaryModelOptions(opts *model.Options) bool {
@@ -163,12 +229,13 @@ func isSummaryModelOptions(opts *model.Options) bool {
 		opts.AgenticToolChoice != nil && opts.AgenticToolChoice.Type == schema.ToolChoiceForbidden
 }
 
-func (b ContextBudgetSnapshot) measureCalibratedContext(anchor *contextUsageAnchor, messages []*schema.AgenticMessage, tools []*schema.ToolInfo, output int, streaming bool) (ContextMeasurement, error) {
-	base, err := b.measureContext(messages, tools, output, streaming)
+func (b ContextBudgetSnapshot) measureCalibratedContext(anchor *contextUsageAnchor, messages []*schema.AgenticMessage, tools []*schema.ToolInfo, output int, streaming bool, deferred ...[]*schema.ToolInfo) (ContextMeasurement, error) {
+	allDeferred := flattenToolInfos(deferred)
+	base, err := b.measureContext(messages, tools, output, streaming, allDeferred)
 	if err != nil || b.Version < 7 || anchor == nil || anchor.PromptTokens <= 0 || anchor.MessageCount <= 0 || len(messages) < anchor.MessageCount {
 		return base, err
 	}
-	_, prefixHash, err := visibleContextBytes(messages[:anchor.MessageCount], tools, nil, nil, &schema.AgenticToolChoice{Type: schema.ToolChoiceAllowed})
+	_, prefixHash, err := visibleContextBytes(messages[:anchor.MessageCount], tools, allDeferred, nil, &schema.AgenticToolChoice{Type: schema.ToolChoiceAllowed})
 	if err != nil || prefixHash != anchor.PrefixHash {
 		return base, nil
 	}
@@ -294,7 +361,7 @@ func estimateVisibleTokensV7(visibleBytes int) int {
 	if visibleBytes <= 0 {
 		return 0
 	}
-	return (visibleBytes + 3) / 4
+	return (visibleBytes+3)/4 + 64
 }
 
 func visibleContextBytes(messages []*schema.AgenticMessage, tools, deferred []*schema.ToolInfo, stop []string, choice *schema.AgenticToolChoice) (int, string, error) {
@@ -389,13 +456,17 @@ func measureLegacyContext(messages []*schema.AgenticMessage, tools []*schema.Too
 	return measureLegacyContextRequest(request)
 }
 
-func measureContext(messages []*schema.AgenticMessage, tools []*schema.ToolInfo, output int, streaming bool, outputLimits ...int) (ContextMeasurement, error) {
-	opts := &model.Options{MaxTokens: &output, Tools: tools, AgenticToolChoice: &schema.AgenticToolChoice{Type: schema.ToolChoiceAllowed}}
+func measureContextWithDeferred(messages []*schema.AgenticMessage, tools, deferred []*schema.ToolInfo, output int, streaming bool, outputLimits ...int) (ContextMeasurement, error) {
+	opts := &model.Options{MaxTokens: &output, Tools: tools, DeferredTools: deferred, AgenticToolChoice: &schema.AgenticToolChoice{Type: schema.ToolChoiceAllowed}}
 	request, err := agenticRequest(messages, opts, streaming, outputLimits...)
 	if err != nil {
 		return ContextMeasurement{}, err
 	}
 	return measureContextRequest(request)
+}
+
+func measureContext(messages []*schema.AgenticMessage, tools []*schema.ToolInfo, output int, streaming bool, outputLimits ...int) (ContextMeasurement, error) {
+	return measureContextWithDeferred(messages, tools, nil, output, streaming, outputLimits...)
 }
 
 // Transport capacity counts the complete lossless native wire. Token capacity

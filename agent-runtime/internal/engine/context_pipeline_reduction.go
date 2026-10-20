@@ -148,7 +148,8 @@ func (p *ContextPipeline) clearTool(ctx context.Context, detail *reduction.ToolD
 // .35 exposes custom reduction handlers per tool, so construct the native
 // reducer with the exact names at each wrapper/model hook. No mutable name map
 // is shared between parallel SDK tool wrapper construction.
-func (p *ContextPipeline) reducer(ctx context.Context, names []string) (adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage], error) {
+func (p *ContextPipeline) reducer(ctx context.Context, names []string, deferred ...[]*schema.ToolInfo) (adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage], error) {
+	allDeferred := flattenToolInfos(deferred)
 	var callCount, firstEffective, firstLocal int
 	var didClear bool
 	var initialMsgs []*schema.AgenticMessage
@@ -169,7 +170,12 @@ func (p *ContextPipeline) reducer(ctx context.Context, names []string) (adk.Type
 		}
 		config[name] = entry
 	}
-	return reduction.NewTyped(ctx, &reduction.TypedConfig[*schema.AgenticMessage]{Backend: p.cfg.Backend, ReadFileToolName: "context_read", TruncExcludeTools: []string{"context_read", "context_search", "workspace_read_page"}, MaxLengthForTrunc: p.cfg.Budget.ToolResultByteLimit, MaxTokensForClear: int64(p.cfg.Budget.TriggerTokens), ClearRetentionSuffixLimit: 2, ClearAtLeastTokens: 1, ToolConfig: config, TokenCounter: func(counterCtx context.Context, msgs []*schema.AgenticMessage, tools []*schema.ToolInfo) (int64, error) {
+	return reduction.NewTyped(ctx, &reduction.TypedConfig[*schema.AgenticMessage]{Backend: p.cfg.Backend, ReadFileToolName: "context_read", TruncExcludeTools: []string{"context_read", "context_search", "workspace_read_page"}, MaxLengthForTrunc: p.cfg.Budget.ToolResultByteLimit, MaxTokensForClear: int64(p.cfg.Budget.TriggerTokens), ClearRetentionSuffixLimit: 2, ClearAtLeastTokens: 1, ToolConfig: config, ClearPostProcess: func(postCtx context.Context, state *adk.TypedChatModelAgentState[*schema.AgenticMessage]) context.Context {
+		if didClear && state != nil {
+			p.invalidateAnchor(postCtx, state.Messages)
+		}
+		return postCtx
+	}, TokenCounter: func(counterCtx context.Context, msgs []*schema.AgenticMessage, tools []*schema.ToolInfo) (int64, error) {
 		if p.cfg.Budget.Version < 7 {
 			m, err := p.cfg.Budget.measureContext(msgs, tools, p.cfg.Budget.OutputReserveTokens, false)
 			if m.TransportBytes > p.cfg.Budget.TransportTargetBytes {
@@ -180,7 +186,7 @@ func (p *ContextPipeline) reducer(ctx context.Context, names []string) (adk.Type
 		callCount++
 		if callCount == 1 {
 			initialMsgs = msgs
-			m, err := p.measureMainContext(counterCtx, msgs, tools)
+			m, err := p.measureMainContext(counterCtx, msgs, tools, allDeferred)
 			firstEffective = m.EstimatedTokens
 			firstLocal = m.localTokens()
 			if m.TransportBytes > p.cfg.Budget.TransportTargetBytes {
@@ -191,7 +197,7 @@ func (p *ContextPipeline) reducer(ctx context.Context, names []string) (adk.Type
 		if !didClear {
 			return int64(firstEffective), nil
 		}
-		m, err := p.cfg.Budget.measureContext(msgs, tools, p.cfg.Budget.OutputReserveTokens, false)
+		m, err := p.cfg.Budget.measureContext(msgs, tools, p.cfg.Budget.OutputReserveTokens, false, allDeferred)
 		if m.TransportBytes > p.cfg.Budget.TransportTargetBytes {
 			return int64(max(m.EstimatedTokens, p.cfg.Budget.TriggerTokens)), err
 		}

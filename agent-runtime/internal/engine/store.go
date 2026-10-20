@@ -101,6 +101,15 @@ func (r *Run) setUsageAnchor(anchor *contextUsageAnchor, msg *schema.AgenticMess
 	r.usageAnchor = &copy
 }
 
+func (r *Run) clearUsageAnchor() {
+	if r == nil {
+		return
+	}
+	r.anchorMu.Lock()
+	defer r.anchorMu.Unlock()
+	r.usageAnchor = nil
+}
+
 func (r *Run) invalidateUsageAnchor(messages []*schema.AgenticMessage) {
 	if r == nil {
 		return
@@ -116,6 +125,13 @@ func (r *Run) invalidateUsageAnchor(messages []*schema.AgenticMessage) {
 	}
 	for _, msg := range messages {
 		if msg != nil && msg.Role == schema.AgenticRoleTypeAssistant {
+			if saved, ok := extractUsageAnchor(msg); ok {
+				if r.invalidatedAnchors == nil {
+					r.invalidatedAnchors = map[string]bool{}
+				}
+				r.invalidatedAnchors[saved.PrefixHash] = true
+			}
+			clearMessageUsageAnchor(msg)
 			if r.invalidatedMessages == nil {
 				r.invalidatedMessages = map[*schema.AgenticMessage]bool{}
 			}
@@ -124,34 +140,43 @@ func (r *Run) invalidateUsageAnchor(messages []*schema.AgenticMessage) {
 	}
 }
 
-func (r *Run) recordModelUsageAnchor(step int, request []byte, result *schema.AgenticMessage) {
+func (r *Run) computeRequestUsageAnchor(step int, request []byte, result *schema.AgenticMessage) *contextUsageAnchor {
 	if r == nil || contextProfile(r) != contextProfileV1 || result == nil || result.ResponseMeta == nil || result.ResponseMeta.TokenUsage == nil || result.ResponseMeta.TokenUsage.PromptTokens <= 0 {
-		return
+		return nil
 	}
 	budget, err := ParseContextBudgetSnapshot(r.ContextBudget)
 	if err != nil || budget.Version < 7 {
-		return
+		return nil
 	}
 	var envelope modeltransport.Request
 	var messages []*schema.AgenticMessage
 	var opts model.Options
 	if json.Unmarshal(request, &envelope) != nil || (&schema.HumanReadableSerializer{}).Unmarshal(envelope.Messages, &messages) != nil || json.Unmarshal(envelope.Options, &opts) != nil {
-		return
+		return nil
 	}
 	if isSummaryModelOptions(&opts) || len(messages) == 0 {
-		return
+		return nil
 	}
 	visibleBytes, prefixHash, err := visibleContextBytes(messages, opts.Tools, opts.DeferredTools, opts.Stop, opts.AgenticToolChoice)
 	if err != nil {
-		return
+		return nil
 	}
-	r.setUsageAnchor(&contextUsageAnchor{
+	return &contextUsageAnchor{
 		Step:         step,
 		MessageCount: len(messages),
 		PrefixHash:   prefixHash,
 		LocalTokens:  estimateVisibleTokensV7(visibleBytes),
 		PromptTokens: result.ResponseMeta.TokenUsage.PromptTokens,
-	}, result, false)
+	}
+}
+
+func (r *Run) recordModelUsageAnchor(step int, request []byte, result *schema.AgenticMessage) {
+	anchor := r.computeRequestUsageAnchor(step, request, result)
+	if anchor == nil {
+		return
+	}
+	attachUsageAnchor(result, anchor)
+	r.setUsageAnchor(anchor, result, false)
 }
 
 func executionID(run *Run) string { return run.ID + ":" + run.Attempt }

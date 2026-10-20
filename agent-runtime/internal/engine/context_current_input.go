@@ -54,7 +54,8 @@ func (p *ContextPipeline) currentInputSet(ctx context.Context, messages []*schem
 	return pinned, nil
 }
 
-func (p *ContextPipeline) fitCurrentInputs(ctx context.Context, fixed, tail []*schema.AgenticMessage, tools []*schema.ToolInfo, target int) ([]*schema.AgenticMessage, error) {
+func (p *ContextPipeline) fitCurrentInputs(ctx context.Context, fixed, tail []*schema.AgenticMessage, tools []*schema.ToolInfo, target int, deferred ...[]*schema.ToolInfo) ([]*schema.AgenticMessage, error) {
+	allDeferred := flattenToolInfos(deferred)
 	out := append(append([]*schema.AgenticMessage{}, fixed...), tail...)
 	pinned, err := p.currentInputSet(ctx, out)
 	if err != nil {
@@ -69,7 +70,7 @@ func (p *ContextPipeline) fitCurrentInputs(ctx context.Context, fixed, tail []*s
 			required = append(required, message)
 		}
 	}
-	minimum, err := p.cfg.Budget.measureContext(append(append([]*schema.AgenticMessage{}, policy...), required...), tools, p.cfg.Budget.OutputReserveTokens, false)
+	minimum, err := p.cfg.Budget.measureContext(append(append([]*schema.AgenticMessage{}, policy...), required...), tools, p.cfg.Budget.OutputReserveTokens, false, allDeferred)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +79,7 @@ func (p *ContextPipeline) fitCurrentInputs(ctx context.Context, fixed, tail []*s
 	}
 	target = max(target, minimum.EstimatedTokens)
 	fits := func(messages []*schema.AgenticMessage) (bool, error) {
-		measurement, err := p.cfg.Budget.measureContext(messages, tools, p.cfg.Budget.OutputReserveTokens, false)
+		measurement, err := p.cfg.Budget.measureContext(messages, tools, p.cfg.Budget.OutputReserveTokens, false, allDeferred)
 		return err == nil && p.cfg.Budget.fits(measurement) && measurement.EstimatedTokens <= target, err
 	}
 	if ok, err := fits(out); ok || err != nil {
@@ -86,7 +87,7 @@ func (p *ContextPipeline) fitCurrentInputs(ctx context.Context, fixed, tail []*s
 	}
 	units := contextUnits(out[len(policy):])
 	if p.cfg.Budget.Version >= 4 {
-		if compacted, err := p.coalesceHistory(ctx, policy, units, pinned, tools); compacted != nil || err != nil {
+		if compacted, err := p.coalesceHistory(ctx, policy, units, pinned, tools, allDeferred); compacted != nil || err != nil {
 			return compacted, err
 		}
 	}

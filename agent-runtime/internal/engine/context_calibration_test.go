@@ -31,6 +31,23 @@ func assistantTextWithUsage(text string, promptTokens, completionTokens int) *sc
 	return msg
 }
 
+func anchoredAssistantTextWithUsage(t *testing.T, prefix []*schema.AgenticMessage, tools, deferred []*schema.ToolInfo, text string, promptTokens, completionTokens int) *schema.AgenticMessage {
+	t.Helper()
+	msg := assistantTextWithUsage(text, promptTokens, completionTokens)
+	visibleBytes, prefixHash, err := visibleContextBytes(prefix, tools, deferred, nil, &schema.AgenticToolChoice{Type: schema.ToolChoiceAllowed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachUsageAnchor(msg, &contextUsageAnchor{
+		Step:         1,
+		MessageCount: len(prefix),
+		PrefixHash:   prefixHash,
+		LocalTokens:  estimateVisibleTokensV7(visibleBytes),
+		PromptTokens: promptTokens,
+	})
+	return msg
+}
+
 func TestVisibleBytesDiv4CounterAlignsChineseAndEnglishDensity(t *testing.T) {
 	chinese := strings.Repeat("中文长会话上下文容量校准测试", 1000) // 14,000 Chinese chars = 42,000 UTF-8 bytes
 	english := strings.Repeat("long context token calibration test ", 1000) // 36,000 ASCII bytes
@@ -46,7 +63,10 @@ func TestVisibleBytesDiv4CounterAlignsChineseAndEnglishDensity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 14,000 Chinese chars = 42,000 bytes -> ~10,500 tokens (0.75 tokens/char), whereas legacy was ~28,000+ tokens (2.0 tokens/char).
+	if estimateVisibleTokensV7(4) != 65 || estimateVisibleTokensV7(0) != 0 {
+		t.Fatalf("estimateVisibleTokensV7 did not include contracted 64-token framing allowance: got %d", estimateVisibleTokensV7(4))
+	}
+	// 14,000 Chinese chars = 42,000 bytes -> ~10,564 tokens (0.75 tokens/char + 64 allowance), whereas legacy was ~28,000+ tokens (2.0 tokens/char).
 	if zhMeasured.EstimatedTokens < 10400 || zhMeasured.EstimatedTokens > 10700 || zhMeasured.CounterMode != "local" {
 		t.Fatalf("unexpected v7 Chinese token estimate: %+v", zhMeasured)
 	}
@@ -58,8 +78,8 @@ func TestVisibleBytesDiv4CounterAlignsChineseAndEnglishDensity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 36,000 ASCII bytes -> ~9,000 tokens (0.25 tokens/char).
-	if enMeasured.EstimatedTokens < 8950 || enMeasured.EstimatedTokens > 9150 {
+	// 36,000 ASCII bytes -> ~9,064 tokens (0.25 tokens/char + 64 allowance).
+	if enMeasured.EstimatedTokens < 8950 || enMeasured.EstimatedTokens > 9200 {
 		t.Fatalf("unexpected v7 English token estimate: %+v", enMeasured)
 	}
 
@@ -133,7 +153,7 @@ func TestPromptTokensDeltaCalibrationAndPrefixInvalidation(t *testing.T) {
 	sys := schema.SystemAgenticMessage("Trusted system instructions.")
 	// Create a prefix whose local estimate is ~10,000 tokens (40,000 bytes), but real provider PromptTokens was 6,000.
 	user1 := schema.UserAgenticMessage(strings.Repeat("甲乙丙丁", 3300)) // 13,200 chars = 39,600 bytes -> ~9,900 local tokens
-	resp1 := assistantTextWithUsage("收到，正在处理第一阶段。", 6000, 50)
+	resp1 := anchoredAssistantTextWithUsage(t, []*schema.AgenticMessage{sys, user1}, nil, nil, "收到，正在处理第一阶段。", 6000, 50)
 	// Add a new user input of ~1,200 local tokens (4,800 bytes):
 	// Uncalibrated local total = ~9,900 + ~1,200 = ~11,100 > TriggerTokens (10,828)!
 	// Calibrated effective total = 6,000 + (~11,100 - ~9,900) = ~7,200 <= TriggerTokens (10,828)!
@@ -176,7 +196,7 @@ func TestPromptTokensDeltaCalibrationAndPrefixInvalidation(t *testing.T) {
 	// even though local tokens (~4,000) <= TriggerTokens, compaction IS triggered and invalidates the anchor!
 	p2, archive2, summary2 := testPipeline(t, 16384)
 	shortUser1 := schema.UserAgenticMessage(strings.Repeat("short history ", 200))
-	highUsageResp := assistantTextWithUsage("ack", 10500, 20)
+	highUsageResp := anchoredAssistantTextWithUsage(t, []*schema.AgenticMessage{sys, shortUser1}, nil, nil, "ack", 10500, 20)
 	run2 := &Run{ContextProfile: contextProfileV1, Inputs: inputs}
 	run2.ContextBudget, _ = NewContextBudgetSnapshot(16384)
 	ctx2 := WithRun(context.Background(), run2)
@@ -214,21 +234,20 @@ func TestToolReductionPreservesAnchorOnNoopAndUsesConsistentDeltaOnClear(t *test
 		})},
 	}
 	filler := schema.UserAgenticMessage(strings.Repeat("背景汉字内容", 2200)) // 13,200 chars = 39,600 bytes (~9,900 local tokens)
-	// Assistant response after prefix [sys, oldCall, oldResult, filler] (which has ~11,000 local tokens) reports PromptTokens = 10,500.
-	resp := assistantTextWithUsage("First tool analyzed.", 10500, 30)
 	// Add 2 recent tool-call rounds so oldCall/oldResult is outside ClearRetentionSuffixLimit (2), and total effective tokens > 10,828.
 	recent1 := schema.UserAgenticMessage(strings.Repeat("近期跟进问题一", 100))
 	recentRound1 := contextToolRound("r1", "short result 1")
 	recentRound2 := contextToolRound("r2", "short result 2")
+	prefix := append([]*schema.AgenticMessage{sys, oldCall, oldResult, filler}, recentRound1...)
+	prefix = append(prefix, recentRound2...)
+	resp := anchoredAssistantTextWithUsage(t, prefix, nil, nil, "First tool analyzed.", 10500, 30)
 
 	inputs := []Input{{EventID: "e-1", ConversationID: "c-1", MessageID: "m-1", SenderID: "u-1", SenderKind: "human", Body: "继续"}}
 	run := &Run{ContextProfile: contextProfileV1, Inputs: inputs}
 	run.ContextBudget, _ = NewContextBudgetSnapshot(16384)
 	ctx := WithRun(context.Background(), run)
 
-	msgs := append([]*schema.AgenticMessage{sys, oldCall, oldResult, filler}, recentRound1...)
-	msgs = append(msgs, recentRound2...)
-	msgs = append(msgs, resp, recent1)
+	msgs := append(append([]*schema.AgenticMessage{}, prefix...), resp, recent1)
 	msgs = append(msgs, inputMessages(inputs)...)
 	p.seedAnchorFromHistory(ctx, msgs, nil)
 	beforeMeasure, err := p.measureMainContext(ctx, msgs, nil)
@@ -248,13 +267,24 @@ func TestToolReductionPreservesAnchorOnNoopAndUsesConsistentDeltaOnClear(t *test
 	if !strings.HasPrefix(clearedText, "Archived private context: context:v1:") || len(archive.content) == 0 {
 		t.Fatalf("ToolReduction aborted valid clear when P_a < L_a: %q", clearedText)
 	}
-	// After an actual clear, the anchor must be invalidated.
+	// After an actual clear, the anchor must be invalidated both in the current Run and if reloaded in a fresh Run/ContextPipeline.
 	afterClear, err := p.measureMainContext(ctx, reduced.Messages, nil)
 	if err != nil || afterClear.CounterMode != "local" || afterClear.AnchorPromptTokens != 0 {
 		t.Fatalf("anchor remained active after ToolReduction mutated historical tool result: %+v (%v)", afterClear, err)
 	}
+	// Simulate reloading the persisted rewritten messages in a fresh Run / fresh ContextPipeline:
+	// even if an old assistant message still had Extra or PromptTokens, the prefix hash no longer matches.
+	pReload, _, _ := testPipeline(t, 16384)
+	runReload := &Run{ContextProfile: contextProfileV1, Inputs: inputs}
+	runReload.ContextBudget, _ = NewContextBudgetSnapshot(16384)
+	ctxReload := WithRun(context.Background(), runReload)
+	pReload.seedAnchorFromHistory(ctxReload, reduced.Messages, nil)
+	afterReload, err := pReload.measureMainContext(ctxReload, reduced.Messages, nil)
+	if err != nil || afterReload.CounterMode != "local" || afterReload.AnchorPromptTokens != 0 {
+		t.Fatalf("reloaded Session after prefix rewrite reconstructed a stale PromptTokens anchor: %+v (%v)", afterReload, err)
+	}
 
-	// Now test no-op clear (when tool result is < 768 bytes): anchor must remain valid!
+	// Now test no-op clear (when tool result is < 768 bytes): anchor must remain valid, including with DeferredToolInfos!
 	smallResult := &schema.AgenticMessage{
 		Role: schema.AgenticRoleTypeUser,
 		ContentBlocks: []*schema.ContentBlock{schema.NewContentBlock(&schema.FunctionToolResult{
@@ -263,27 +293,51 @@ func TestToolReductionPreservesAnchorOnNoopAndUsesConsistentDeltaOnClear(t *test
 			Content: []*schema.FunctionToolResultContentBlock{{Type: schema.FunctionToolResultContentBlockTypeText, Text: &schema.UserInputText{Text: "small result under 768 bytes"}}},
 		})},
 	}
-	respNoop := assistantTextWithUsage("Small tool analyzed.", 10500, 30)
+	deferredTools := []*schema.ToolInfo{{Name: "deferred_helper", Desc: "Deferred tool schema"}}
+	normalizedDeferred := contextToolInfos(deferredTools, p.cfg.Budget)
+	prefixNoop := append([]*schema.AgenticMessage{sys, oldCall, smallResult, filler}, recentRound1...)
+	prefixNoop = append(prefixNoop, recentRound2...)
+	respNoop := anchoredAssistantTextWithUsage(t, prefixNoop, nil, normalizedDeferred, "Small tool analyzed.", 10500, 30)
 	runNoop := &Run{ContextProfile: contextProfileV1, Inputs: inputs}
 	runNoop.ContextBudget, _ = NewContextBudgetSnapshot(16384)
 	ctxNoop := WithRun(context.Background(), runNoop)
 	pNoop, _, _ := testPipeline(t, 16384)
-	msgsNoop := append([]*schema.AgenticMessage{sys, oldCall, smallResult, filler}, recentRound1...)
-	msgsNoop = append(msgsNoop, recentRound2...)
-	msgsNoop = append(msgsNoop, respNoop, recent1)
+	msgsNoop := append(append([]*schema.AgenticMessage{}, prefixNoop...), respNoop, recent1)
 	msgsNoop = append(msgsNoop, inputMessages(inputs)...)
-	pNoop.seedAnchorFromHistory(ctxNoop, msgsNoop, nil)
-	rNoop, err := pNoop.reducer(ctxNoop, []string{"lookup"})
+	pNoop.seedAnchorFromHistory(ctxNoop, msgsNoop, nil, normalizedDeferred)
+	rNoop, err := pNoop.reducer(ctxNoop, []string{"lookup", "deferred_helper"}, normalizedDeferred)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, reducedNoop, err := rNoop.BeforeModelRewriteState(ctxNoop, &adk.TypedChatModelAgentState[*schema.AgenticMessage]{Messages: msgsNoop}, nil)
+	_, reducedNoop, err := rNoop.BeforeModelRewriteState(ctxNoop, &adk.TypedChatModelAgentState[*schema.AgenticMessage]{
+		Messages:          msgsNoop,
+		DeferredToolInfos: normalizedDeferred,
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	afterNoop, err := pNoop.measureMainContext(ctxNoop, reducedNoop.Messages, nil)
+	afterNoop, err := pNoop.measureMainContext(ctxNoop, reducedNoop.Messages, reducedNoop.ToolInfos, reducedNoop.DeferredToolInfos)
 	if err != nil || afterNoop.CounterMode != "usage_delta" || afterNoop.AnchorPromptTokens != 10500 {
-		t.Fatalf("no-op ToolReduction clear destroyed a valid PromptTokens anchor: %+v (%v)", afterNoop, err)
+		t.Fatalf("no-op ToolReduction clear or DeferredToolInfos destroyed a valid PromptTokens anchor: %+v (%v)", afterNoop, err)
+	}
+
+	// Also verify full p.BeforeModelRewriteState with DeferredToolInfos keeps calibration and skips premature compaction when P_a is 6000.
+	respDeferred := anchoredAssistantTextWithUsage(t, prefixNoop, nil, normalizedDeferred, "Deferred tool analyzed.", 6000, 30)
+	runDeferred := &Run{ContextProfile: contextProfileV1, Inputs: inputs}
+	runDeferred.ContextBudget, _ = NewContextBudgetSnapshot(16384)
+	ctxDeferred := WithRun(context.Background(), runDeferred)
+	pDeferred, _, summaryDeferred := testPipeline(t, 16384)
+	msgsDeferred := append(append([]*schema.AgenticMessage{}, prefixNoop...), respDeferred, recent1)
+	msgsDeferred = append(msgsDeferred, inputMessages(inputs)...)
+	_, outDeferred, err := pDeferred.BeforeModelRewriteState(ctxDeferred, &adk.TypedChatModelAgentState[*schema.AgenticMessage]{
+		Messages:          msgsDeferred,
+		DeferredToolInfos: deferredTools,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaryDeferred.inputs) != 0 || len(outDeferred.Messages) != len(msgsDeferred) {
+		t.Fatal("BeforeModelRewriteState dropped calibration when DeferredToolInfos were present")
 	}
 }
 
@@ -481,6 +535,17 @@ func TestContextObservabilityLogsCalibrationFieldsWithoutPrivateContent(t *testi
 			TokenUsage: &schema.TokenUsage{PromptTokens: 10600, CompletionTokens: 100, TotalTokens: 10700},
 		},
 	}
+	visBytes, pHash, err := visibleContextBytes([]*schema.AgenticMessage{sys, user1}, nil, nil, nil, &schema.AgenticToolChoice{Type: schema.ToolChoiceAllowed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachUsageAnchor(resp1, &contextUsageAnchor{
+		Step:         1,
+		MessageCount: 2,
+		PrefixHash:   pHash,
+		LocalTokens:  estimateVisibleTokensV7(visBytes),
+		PromptTokens: 10600,
+	})
 	toolRes := &schema.AgenticMessage{
 		Role: schema.AgenticRoleTypeUser,
 		ContentBlocks: []*schema.ContentBlock{schema.NewContentBlock(&schema.FunctionToolResult{
