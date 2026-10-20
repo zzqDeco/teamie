@@ -155,6 +155,7 @@ beforeEach(() => {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
+  bootstrap.conversations = [conversation];
   chatStore.begin(user.id);
   chatStore.replaceConversations([conversation]);
   vi.spyOn(api, "searchMessages").mockResolvedValue({
@@ -425,9 +426,14 @@ describe("conversation search", () => {
     expect(api.read).not.toHaveBeenCalled();
   });
   it("pauses timeline read acknowledgements while search covers unread messages", async () => {
+    const unread = { ...conversation, readSeq: 89 };
+    bootstrap.conversations = [unread];
+    chatStore.clear();
+    chatStore.begin(user.id);
+    chatStore.replaceConversations([unread]);
     await render(
       <ConversationView
-        conversation={{ ...conversation, readSeq: 0 }}
+        conversation={unread}
         members={[]}
         onMembers={vi.fn()}
         membersOpen={false}
