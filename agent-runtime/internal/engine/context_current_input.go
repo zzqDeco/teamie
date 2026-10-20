@@ -126,7 +126,7 @@ func (p *ContextPipeline) fitCurrentInputs(ctx context.Context, fixed, tail []*s
 	for _, messages := range units {
 		candidate = append(candidate, messages...)
 	}
-	measurement, err := p.cfg.Budget.measureContext(candidate, tools, p.cfg.Budget.OutputReserveTokens, false)
+	measurement, err := p.cfg.Budget.measureContext(candidate, tools, p.cfg.Budget.OutputReserveTokens, false, allDeferred)
 	if err != nil {
 		return nil, err
 	}

@@ -178,6 +178,19 @@ func TestPromptTokensDeltaCalibrationAndPrefixInvalidation(t *testing.T) {
 		t.Fatalf("expected usage_delta mode with local > trigger and effective <= trigger, got %+v", m)
 	}
 
+	// Verify that if a subsequent assistant response omits TokenUsage (PromptTokens == 0),
+	// the earlier valid anchor on resp1 remains active for the intact prefix.
+	usagelessAssistant := assistantText("Intermediate reply without usage.")
+	messagesWithUsageless := append([]*schema.AgenticMessage{sys, user1, resp1, schema.UserAgenticMessage("short follow-up"), usagelessAssistant}, inputMessages(inputs)...)
+	_, outUsageless, err := p.BeforeModelRewriteState(ctx, &adk.TypedChatModelAgentState[*schema.AgenticMessage]{Messages: messagesWithUsageless}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mUsageless, err := p.measureMainContext(ctx, outUsageless.Messages, outUsageless.ToolInfos)
+	if err != nil || mUsageless.CounterMode != "usage_delta" || mUsageless.AnchorPromptTokens != 6000 {
+		t.Fatalf("earlier valid anchor was lost after a later assistant response omitted usage: %+v (%v)", mUsageless, err)
+	}
+
 	// Also verify GatewayModel.checkContextRequest accepts a request whose local tokens > InputTokenLimit (12,032)
 	// when calibrated effective tokens <= InputTokenLimit!
 	user2Large := schema.UserAgenticMessage(strings.Repeat("补充材料", 750)) // ~9,000 bytes = ~2,250 local tokens -> total local ~12,200 > 12,032, effective ~8,250 <= 12,032

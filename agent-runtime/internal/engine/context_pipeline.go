@@ -71,7 +71,15 @@ func (p *ContextPipeline) seedAnchorFromHistory(ctx context.Context, messages []
 	allDeferred := flattenToolInfos(deferred)
 	lastIdx := -1
 	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i] != nil && messages[i].Role == schema.AgenticRoleTypeAssistant {
+		msg := messages[i]
+		if msg == nil || msg.Role != schema.AgenticRoleTypeAssistant {
+			continue
+		}
+		if msg.ResponseMeta != nil && msg.ResponseMeta.TokenUsage != nil && msg.ResponseMeta.TokenUsage.PromptTokens > 0 {
+			lastIdx = i
+			break
+		}
+		if _, ok := extractUsageAnchor(msg); ok {
 			lastIdx = i
 			break
 		}
@@ -82,6 +90,7 @@ func (p *ContextPipeline) seedAnchorFromHistory(ctx context.Context, messages []
 	}
 	assistantMsg := messages[lastIdx]
 	if assistantMsg.ResponseMeta == nil || assistantMsg.ResponseMeta.TokenUsage == nil || assistantMsg.ResponseMeta.TokenUsage.PromptTokens <= 0 {
+		clearMessageUsageAnchor(assistantMsg)
 		p.clearCurrentAnchor(ctx)
 		return
 	}
