@@ -77,6 +77,7 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 		if e != nil {
 			return nil, e
 		}
+		run.recordModelUsageAnchor(step, request, result)
 		return schema.StreamReaderFromArray([]*schema.AgenticMessage{result}), nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
@@ -246,6 +247,9 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 			stage = "persist-receipt"
 			err = m.Store.SaveModel(ctx, m.Lease, run, step, hash, b)
 			receiptSaved = err == nil
+			if receiptSaved {
+				run.recordModelUsageAnchor(step, request, result)
+			}
 		}
 		if err != nil {
 			fail(err)

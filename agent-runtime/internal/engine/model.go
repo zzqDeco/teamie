@@ -92,7 +92,11 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticM
 	cached, e := m.cachedModel(ctx, run, step, hash, messages, opts, false)
 	if e == nil {
 		phase = "receipt-replay"
-		return decodeAgenticMessage(cached)
+		result, decodeErr := decodeAgenticMessage(cached)
+		if decodeErr == nil {
+			run.recordModelUsageAnchor(step, request, result)
+		}
+		return result, decodeErr
 	}
 	if !errors.Is(e, pgx.ErrNoRows) {
 		return nil, e
@@ -140,6 +144,7 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticM
 	if e = m.Store.SaveModel(ctx, m.Lease, run, step, hash, b); e != nil {
 		return nil, e
 	}
+	run.recordModelUsageAnchor(step, request, result)
 	return result, nil
 }
 func SafeError(err error) string {
@@ -218,10 +223,11 @@ func (m *GatewayModel) checkContextRequest(ctx context.Context, run *Run, step i
 	if err != nil {
 		return err
 	}
-	measurement, err := measureContextRequest(request)
+	measurement, err := budget.measureCalibratedRequest(run.getUsageAnchor(), request)
 	if err != nil {
 		return err
 	}
+	observability.L(ctx).Info("Context request checked", append([]zap.Field{zap.String("event.action", "context-request-checked"), zap.Bool("custom.context.fits", budget.fits(measurement))}, budget.measurementLogFields(measurement, "")...)...)
 	if !budget.fits(measurement) {
 		return m.gatewayFailure(ctx, run, step, hash, streaming, "request_too_large")
 	}

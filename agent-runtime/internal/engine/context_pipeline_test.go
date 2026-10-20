@@ -139,8 +139,12 @@ func TestContextBudgetIncludesUnicodeEscapesToolsAndFrozenOutput(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if m.EstimatedTokens < 2400 || m.TransportBytes < 5000 {
-			t.Fatal("wire counter lost unicode, escaped JSON or tool schema", m)
+		if m.EstimatedTokens < 1200 || m.EstimatedTokens > 1600 || m.TransportBytes < 5000 {
+			t.Fatal("visible byte counter lost unicode, escaped JSON or tool schema, or retained non-ASCII 2x inflation", m)
+		}
+		legacy, err := measureLegacyContext([]*schema.AgenticMessage{schema.UserAgenticMessage(strings.Repeat("汉字\"\\\n", 200))}, []*schema.ToolInfo{{Name: "manifest", Desc: strings.Repeat("参数", 500)}}, b.OutputReserveTokens, false)
+		if err != nil || legacy.EstimatedTokens < 2400 || legacy.TransportBytes < 5000 {
+			t.Fatal("legacy counter changed historical v1-v6 estimate", legacy, err)
 		}
 		message := assistantText("done")
 		message.ResponseMeta = &schema.AgenticResponseMeta{TokenUsage: &schema.TokenUsage{TotalTokens: 1_000_000}}

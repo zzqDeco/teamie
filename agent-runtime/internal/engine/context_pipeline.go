@@ -6,6 +6,7 @@ import (
 	"errors"
 	"go.uber.org/zap"
 	"strings"
+	"sync"
 	"teamie/backend/pkg/observability"
 	"time"
 
@@ -31,8 +32,103 @@ type contextSummarizer interface {
 
 type ContextPipeline struct {
 	*adk.TypedBaseChatModelAgentMiddleware[*schema.AgenticMessage]
-	cfg     ContextPipelineConfig
-	summary adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]
+	cfg                 ContextPipelineConfig
+	summary             adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]
+	anchorMu            sync.Mutex
+	usageAnchor         *contextUsageAnchor
+	invalidatedAnchors  map[string]bool
+	invalidatedMessages map[*schema.AgenticMessage]bool
+}
+
+func (p *ContextPipeline) getAnchor(ctx context.Context) *contextUsageAnchor {
+	if run, err := CurrentRun(ctx); err == nil && run != nil {
+		if anchor := run.getUsageAnchor(); anchor != nil {
+			return anchor
+		}
+	}
+	p.anchorMu.Lock()
+	defer p.anchorMu.Unlock()
+	if p.usageAnchor == nil {
+		return nil
+	}
+	copy := *p.usageAnchor
+	return &copy
+}
+
+func (p *ContextPipeline) seedAnchorFromHistory(ctx context.Context, messages []*schema.AgenticMessage, tools []*schema.ToolInfo) {
+	if p.cfg.Budget.Version < 7 {
+		return
+	}
+	lastIdx := -1
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i] != nil && messages[i].Role == schema.AgenticRoleTypeAssistant {
+			lastIdx = i
+			break
+		}
+	}
+	if lastIdx <= 0 {
+		return
+	}
+	assistantMsg := messages[lastIdx]
+	if assistantMsg.ResponseMeta == nil || assistantMsg.ResponseMeta.TokenUsage == nil || assistantMsg.ResponseMeta.TokenUsage.PromptTokens <= 0 {
+		return
+	}
+	prefix := messages[:lastIdx]
+	visibleBytes, prefixHash, err := visibleContextBytes(prefix, tools, nil, nil, &schema.AgenticToolChoice{Type: schema.ToolChoiceAllowed})
+	if err != nil {
+		return
+	}
+	step := 0
+	if run, err := CurrentRun(ctx); err == nil && run != nil {
+		step = int(run.Step.Load())
+	}
+	anchor := &contextUsageAnchor{
+		Step:         step,
+		MessageCount: lastIdx,
+		PrefixHash:   prefixHash,
+		LocalTokens:  estimateVisibleTokensV7(visibleBytes),
+		PromptTokens: assistantMsg.ResponseMeta.TokenUsage.PromptTokens,
+	}
+	if run, err := CurrentRun(ctx); err == nil && run != nil {
+		run.setUsageAnchor(anchor, assistantMsg, true)
+	}
+	p.anchorMu.Lock()
+	defer p.anchorMu.Unlock()
+	if p.invalidatedAnchors[prefixHash] || p.invalidatedMessages[assistantMsg] {
+		return
+	}
+	if p.usageAnchor != nil && p.usageAnchor.PrefixHash == prefixHash {
+		return
+	}
+	copy := *anchor
+	p.usageAnchor = &copy
+}
+
+func (p *ContextPipeline) invalidateAnchor(ctx context.Context, messages []*schema.AgenticMessage) {
+	if run, err := CurrentRun(ctx); err == nil && run != nil {
+		run.invalidateUsageAnchor(messages)
+	}
+	p.anchorMu.Lock()
+	defer p.anchorMu.Unlock()
+	if p.usageAnchor != nil {
+		if p.invalidatedAnchors == nil {
+			p.invalidatedAnchors = map[string]bool{}
+		}
+		p.invalidatedAnchors[p.usageAnchor.PrefixHash] = true
+		p.usageAnchor = nil
+	}
+	for _, msg := range messages {
+		if msg != nil && msg.Role == schema.AgenticRoleTypeAssistant {
+			if p.invalidatedMessages == nil {
+				p.invalidatedMessages = map[*schema.AgenticMessage]bool{}
+			}
+			p.invalidatedMessages[msg] = true
+		}
+	}
+}
+
+func (p *ContextPipeline) measureMainContext(ctx context.Context, messages []*schema.AgenticMessage, tools []*schema.ToolInfo) (ContextMeasurement, error) {
+	return p.cfg.Budget.measureCalibratedContext(p.getAnchor(ctx), messages, tools, p.cfg.Budget.OutputReserveTokens, false)
 }
 
 func NewContextPipeline(ctx context.Context, cfg ContextPipelineConfig) (*ContextPipeline, error) {
@@ -80,6 +176,7 @@ func (p *ContextPipeline) BeforeModelRewriteState(ctx context.Context, state *ad
 	copyState.ToolInfos = contextToolInfos(state.ToolInfos, p.cfg.Budget)
 	copyState.DeferredToolInfos = contextToolInfos(state.DeferredToolInfos, p.cfg.Budget)
 	state = &copyState
+	p.seedAnchorFromHistory(ctx, state.Messages, state.ToolInfos)
 	names := []string{}
 	for _, tool := range state.ToolInfos {
 		names = append(names, tool.Name)
@@ -101,10 +198,12 @@ func (p *ContextPipeline) BeforeModelRewriteState(ctx context.Context, state *ad
 	if err != nil {
 		return ctx, nil, err
 	}
-	m, err := p.cfg.Budget.measureContext(reduced.Messages, reduced.ToolInfos, p.cfg.Budget.OutputReserveTokens, false)
+	m, err := p.measureMainContext(ctx, reduced.Messages, reduced.ToolInfos)
 	if err != nil {
 		return ctx, nil, err
 	}
+	reason := p.cfg.Budget.compactionReason(m, false)
+	observability.L(ctx).Info("Context measured", append([]zap.Field{zap.String("event.action", "context-measured"), zap.Bool("custom.context.should_compact", reason != "")}, p.cfg.Budget.measurementLogFields(m, reason)...)...)
 	if !p.cfg.Budget.shouldCompact(m) {
 		return ctx, reduced, nil
 	}
@@ -248,18 +347,25 @@ func (p *ContextPipeline) partition(messages []*schema.AgenticMessage, force boo
 }
 
 func (p *ContextPipeline) compact(ctx context.Context, messages []*schema.AgenticMessage, tools []*schema.ToolInfo, force bool) (result []*schema.AgenticMessage, failure error) {
-	ctx, operation := observability.Begin(ctx, "context-compaction", zap.Int("custom.context.messages_before", len(messages)), zap.Bool("custom.context.forced", force), zap.Int("custom.context.input_token_limit", p.cfg.Budget.InputTokenLimit))
+	initial, err := p.measureMainContext(ctx, messages, tools)
+	if err != nil {
+		return nil, err
+	}
+	p.invalidateAnchor(ctx, messages)
+	compactionFields := append([]zap.Field{zap.Int("custom.context.messages_before", len(messages)), zap.Bool("custom.context.forced", force)}, p.cfg.Budget.measurementLogFields(initial, p.cfg.Budget.compactionReason(initial, force))...)
+	ctx, operation := observability.Begin(ctx, "context-compaction", compactionFields...)
 	observability.L(ctx).Info("Context compaction started", zap.String("event.action", "context-compaction-started"))
 	defer func() { operation.End(failure, zap.Int("custom.context.messages_after", len(result))) }()
 	target := p.cfg.Budget.InputTokenLimit
-	if force {
+	shrinkLocal := force || (p.cfg.Budget.Version >= 7 && initial.CounterMode == "usage_delta" && initial.EstimatedTokens > initial.LocalTokens)
+	if shrinkLocal {
 		measurement, err := p.cfg.Budget.measureContext(messages, tools, p.cfg.Budget.OutputReserveTokens, false)
 		if err != nil {
 			return nil, err
 		}
 		target = min(target, measurement.EstimatedTokens*3/4)
 	}
-	systems, prefix, tail := p.partition(messages, force)
+	systems, prefix, tail := p.partition(messages, shrinkLocal)
 	if p.cfg.Budget.Version >= 3 {
 		pinned, err := p.currentInputSet(ctx, messages)
 		if err != nil {

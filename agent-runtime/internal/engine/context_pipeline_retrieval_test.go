@@ -152,7 +152,7 @@ func TestContextBoundedRetrievalStillHitsModelCapacityHardCheck(t *testing.T) {
 	fixture := &overflowGatewayFixture{code: "context_overflow"}
 	gateway := &GatewayModel{Store: s, Lease: lease, AgentID: lease.AgentID, Client: fixture}
 	input := []*schema.AgenticMessage{schema.SystemAgenticMessage("policy")}
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 3; i++ {
 		round := contextToolRound(fmt.Sprint(i), strings.Repeat("界", 8192/3))
 		for _, msg := range round {
 			for _, block := range msg.ContentBlocks {

@@ -14,10 +14,12 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"teamie/agent-protocol/modeltransport"
 	"teamie/backend/pkg/imtext"
 )
 
@@ -62,6 +64,94 @@ type Run struct {
 	Revision, Generation        int64
 	ContextHead, AcceptanceHead int64
 	Front                       *frontSlot
+	anchorMu                    sync.Mutex
+	usageAnchor                 *contextUsageAnchor
+	invalidatedAnchors          map[string]bool
+	invalidatedMessages         map[*schema.AgenticMessage]bool
+}
+
+func (r *Run) getUsageAnchor() *contextUsageAnchor {
+	if r == nil {
+		return nil
+	}
+	r.anchorMu.Lock()
+	defer r.anchorMu.Unlock()
+	if r.usageAnchor == nil {
+		return nil
+	}
+	copy := *r.usageAnchor
+	return &copy
+}
+
+func (r *Run) setUsageAnchor(anchor *contextUsageAnchor, msg *schema.AgenticMessage, onlyIfValid bool) {
+	if r == nil || anchor == nil || anchor.PromptTokens <= 0 || anchor.MessageCount <= 0 || anchor.PrefixHash == "" {
+		return
+	}
+	r.anchorMu.Lock()
+	defer r.anchorMu.Unlock()
+	if onlyIfValid {
+		if r.invalidatedAnchors[anchor.PrefixHash] || (msg != nil && r.invalidatedMessages[msg]) {
+			return
+		}
+		if r.usageAnchor != nil && r.usageAnchor.PrefixHash == anchor.PrefixHash {
+			return
+		}
+	}
+	copy := *anchor
+	r.usageAnchor = &copy
+}
+
+func (r *Run) invalidateUsageAnchor(messages []*schema.AgenticMessage) {
+	if r == nil {
+		return
+	}
+	r.anchorMu.Lock()
+	defer r.anchorMu.Unlock()
+	if r.usageAnchor != nil {
+		if r.invalidatedAnchors == nil {
+			r.invalidatedAnchors = map[string]bool{}
+		}
+		r.invalidatedAnchors[r.usageAnchor.PrefixHash] = true
+		r.usageAnchor = nil
+	}
+	for _, msg := range messages {
+		if msg != nil && msg.Role == schema.AgenticRoleTypeAssistant {
+			if r.invalidatedMessages == nil {
+				r.invalidatedMessages = map[*schema.AgenticMessage]bool{}
+			}
+			r.invalidatedMessages[msg] = true
+		}
+	}
+}
+
+func (r *Run) recordModelUsageAnchor(step int, request []byte, result *schema.AgenticMessage) {
+	if r == nil || contextProfile(r) != contextProfileV1 || result == nil || result.ResponseMeta == nil || result.ResponseMeta.TokenUsage == nil || result.ResponseMeta.TokenUsage.PromptTokens <= 0 {
+		return
+	}
+	budget, err := ParseContextBudgetSnapshot(r.ContextBudget)
+	if err != nil || budget.Version < 7 {
+		return
+	}
+	var envelope modeltransport.Request
+	var messages []*schema.AgenticMessage
+	var opts model.Options
+	if json.Unmarshal(request, &envelope) != nil || (&schema.HumanReadableSerializer{}).Unmarshal(envelope.Messages, &messages) != nil || json.Unmarshal(envelope.Options, &opts) != nil {
+		return
+	}
+	if isSummaryModelOptions(&opts) || len(messages) == 0 {
+		return
+	}
+	visibleBytes, prefixHash, err := visibleContextBytes(messages, opts.Tools, opts.DeferredTools, opts.Stop, opts.AgenticToolChoice)
+	if err != nil {
+		return
+	}
+	r.setUsageAnchor(&contextUsageAnchor{
+		Step:         step,
+		MessageCount: len(messages),
+		PrefixHash:   prefixHash,
+		LocalTokens:  estimateVisibleTokensV7(visibleBytes),
+		PromptTokens: result.ResponseMeta.TokenUsage.PromptTokens,
+	}, result, false)
 }
 
 func executionID(run *Run) string { return run.ID + ":" + run.Attempt }
@@ -117,7 +207,7 @@ func Open(ctx context.Context, url string) (*Store, error) {
 		err = validateRuntimeSchema(ctx, tx)
 	}
 	if err == nil {
-		_, err = tx.Exec(ctx, schemaSQL+schemaV2SQL+schemaV3SQL+contextArchiveSchemaSQL+contextRecoverySchemaSQL+schemaV4SQL+schemaV5SQL+schemaV6SQL+schemaV7SQL+schemaV8SQL+schemaV9SQL)
+		_, err = tx.Exec(ctx, schemaSQL+schemaV2SQL+schemaV3SQL+contextArchiveSchemaSQL+contextRecoverySchemaSQL+schemaV4SQL+schemaV5SQL+schemaV6SQL+schemaV7SQL+schemaV8SQL+schemaV9SQL+schemaV10SQL)
 	}
 	if err == nil {
 		err = tx.Commit(ctx)

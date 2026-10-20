@@ -12,7 +12,7 @@ import (
 func (p *ContextPipeline) summaryInput(ctx context.Context, system, instruction *schema.AgenticMessage, original []*schema.AgenticMessage) ([]*schema.AgenticMessage, error) {
 	input := append([]*schema.AgenticMessage{system}, original...)
 	input = append(input, instruction)
-	m, err := p.cfg.Budget.measureContext(input, nil, p.cfg.Budget.SummaryOutputTokens, false)
+	m, err := p.cfg.Budget.measureSummaryContext(input, p.cfg.Budget.SummaryOutputTokens, false)
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +43,7 @@ func (p *ContextPipeline) summarizePrefix(ctx context.Context, prefix []*schema.
 			units = nil
 		}
 		for _, unit := range units {
-			m, err := p.cfg.Budget.measureContext(unit, nil, p.cfg.Budget.SummaryOutputTokens, false)
+			m, err := p.cfg.Budget.measureSummaryContext(unit, p.cfg.Budget.SummaryOutputTokens, false)
 			if err != nil {
 				return "", err
 			}
@@ -55,7 +55,7 @@ func (p *ContextPipeline) summarizePrefix(ctx context.Context, prefix []*schema.
 				unit = []*schema.AgenticMessage{notice}
 			}
 			candidate := append(append([]*schema.AgenticMessage{}, chunk...), unit...)
-			m, err = p.cfg.Budget.measureContext(candidate, nil, p.cfg.Budget.SummaryOutputTokens, false)
+			m, err = p.cfg.Budget.measureSummaryContext(candidate, p.cfg.Budget.SummaryOutputTokens, false)
 			if err != nil {
 				return "", err
 			}
@@ -83,11 +83,11 @@ func (p *ContextPipeline) summarizePrefix(ctx context.Context, prefix []*schema.
 		if len(next) == 1 {
 			return agenticText(next[0]), nil
 		}
-		before, err := p.cfg.Budget.measureContext(current, nil, p.cfg.Budget.SummaryOutputTokens, false)
+		before, err := p.cfg.Budget.measureSummaryContext(current, p.cfg.Budget.SummaryOutputTokens, false)
 		if err != nil {
 			return "", err
 		}
-		after, err := p.cfg.Budget.measureContext(next, nil, p.cfg.Budget.SummaryOutputTokens, false)
+		after, err := p.cfg.Budget.measureSummaryContext(next, p.cfg.Budget.SummaryOutputTokens, false)
 		if err != nil {
 			return "", err
 		}
@@ -134,8 +134,8 @@ func (p *ContextPipeline) summarizeChunk(ctx context.Context, chunk []*schema.Ag
 	if archiveErr != nil {
 		return nil, archiveErr
 	}
-	before, _ := p.cfg.Budget.measureContext(chunk, nil, p.cfg.Budget.SummaryOutputTokens, false)
-	after, _ := p.cfg.Budget.measureContext([]*schema.AgenticMessage{notice}, nil, p.cfg.Budget.SummaryOutputTokens, false)
+	before, _ := p.cfg.Budget.measureSummaryContext(chunk, p.cfg.Budget.SummaryOutputTokens, false)
+	after, _ := p.cfg.Budget.measureSummaryContext([]*schema.AgenticMessage{notice}, p.cfg.Budget.SummaryOutputTokens, false)
 	if after.EstimatedTokens >= before.EstimatedTokens && after.TransportBytes >= before.TransportBytes {
 		return nil, err
 	}

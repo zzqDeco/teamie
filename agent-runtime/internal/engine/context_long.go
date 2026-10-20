@@ -36,7 +36,7 @@ func (p *ContextPipeline) longContextTail(units [][]*schema.AgenticMessage, limi
 func (p *ContextPipeline) longContextSummaryChunks(ctx context.Context, messages []*schema.AgenticMessage) ([][]*schema.AgenticMessage, error) {
 	units := contextUnits(messages)
 	fits := func(messages []*schema.AgenticMessage) (bool, error) {
-		measurement, err := p.cfg.Budget.measureContext(messages, nil, p.cfg.Budget.SummaryOutputTokens, false)
+		measurement, err := p.cfg.Budget.measureSummaryContext(messages, p.cfg.Budget.SummaryOutputTokens, false)
 		return measurement.EstimatedTokens <= p.cfg.Budget.InputTokenLimit/2 && measurement.TransportBytes <= p.cfg.Budget.TransportTargetBytes/2, err
 	}
 	for i, unit := range units {
