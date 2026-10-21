@@ -24,13 +24,15 @@ CREATE TABLE IF NOT EXISTS runtime_context_recoveries (
 );`
 
 type contextRecoveryDecision struct {
-	Version  int                   `json:"version"`
-	Action   string                `json:"action"`
-	Budget   ContextBudgetSnapshot `json:"budget"`
-	ConfigID string                `json:"configId,omitempty"`
+	Version           int                   `json:"version"`
+	Action            string                `json:"action"`
+	Budget            ContextBudgetSnapshot `json:"budget"`
+	ConfigID          string                `json:"configId,omitempty"`
+	AdmissionConfigID string                `json:"admissionConfigId,omitempty"`
+	CounterMode       string                `json:"counterMode,omitempty"`
 }
 
-func recoveryDecision(run *Run, configID ...string) ([]byte, error) {
+func recoveryDecision(run *Run, meta ...any) ([]byte, error) {
 	if contextProfile(run) != contextProfileV1 {
 		return nil, ErrReplayConflict
 	}
@@ -38,11 +40,31 @@ func recoveryDecision(run *Run, configID ...string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfgID := ""
-	if budget.Version >= 7 && len(configID) > 0 {
-		cfgID = strings.TrimSpace(configID[0])
+	cfgID, admID, mode := "", "", ""
+	if budget.Version >= 7 {
+		hasAdm := false
+		for _, item := range meta {
+			switch v := item.(type) {
+			case string:
+				cfgID = strings.TrimSpace(v)
+			case requestAdmissionState:
+				admID = strings.TrimSpace(v.ConfigID)
+				mode = strings.TrimSpace(v.CounterMode)
+				hasAdm = true
+			}
+		}
+		if !hasAdm {
+			admID = cfgID
+		}
 	}
-	return json.Marshal(contextRecoveryDecision{Version: 1, Action: "compact_prefix", Budget: budget, ConfigID: cfgID})
+	return json.Marshal(contextRecoveryDecision{
+		Version:           1,
+		Action:            "compact_prefix",
+		Budget:            budget,
+		ConfigID:          cfgID,
+		AdmissionConfigID: admID,
+		CounterMode:       mode,
+	})
 }
 
 func isContextOverflow(code string) bool {
@@ -68,19 +90,19 @@ func (s *Store) CachedContextRecovery(ctx context.Context, run *Run, step int, h
 	if json.Unmarshal(raw, &a) != nil || json.Unmarshal(expected, &b) != nil {
 		return nil, ErrReplayConflict
 	}
-	a.ConfigID = ""
-	b.ConfigID = ""
+	a.ConfigID, a.AdmissionConfigID, a.CounterMode = "", "", ""
+	b.ConfigID, b.AdmissionConfigID, b.CounterMode = "", "", ""
 	if old != hash || profile != contextProfile(run) || mode != streaming || version != 1 || !isContextOverflow(code) || a != b {
 		return nil, ErrReplayConflict
 	}
 	return &ModelError{Code: code}, nil
 }
 
-func (s *Store) SaveContextRecovery(ctx context.Context, lease *Lease, run *Run, step int, hash string, streaming bool, code string, configID ...string) error {
+func (s *Store) SaveContextRecovery(ctx context.Context, lease *Lease, run *Run, step int, hash string, streaming bool, code string, meta ...any) error {
 	if step < 1 || !isContextOverflow(code) {
 		return errors.New("invalid context recovery")
 	}
-	decision, err := recoveryDecision(run, configID...)
+	decision, err := recoveryDecision(run, meta...)
 	if err != nil {
 		return err
 	}
@@ -120,8 +142,8 @@ func (s *Store) SaveContextRecovery(ctx context.Context, lease *Lease, run *Run,
 		if a.ConfigID != "" && b.ConfigID != "" && a.ConfigID != b.ConfigID {
 			return ErrReplayConflict
 		}
-		a.ConfigID = ""
-		b.ConfigID = ""
+		a.ConfigID, a.AdmissionConfigID, a.CounterMode = "", "", ""
+		b.ConfigID, b.AdmissionConfigID, b.CounterMode = "", "", ""
 		if oldProfile != contextProfile(run) || oldHash != hash || oldMode != streaming || oldCode != code || oldVersion != 1 || a != b {
 			return ErrReplayConflict
 		}
@@ -143,10 +165,10 @@ func (m *GatewayModel) cachedRecovery(ctx context.Context, run *Run, step int, h
 	return failure
 }
 
-func (m *GatewayModel) gatewayFailure(ctx context.Context, run *Run, step int, hash string, streaming bool, code string, configID ...string) error {
+func (m *GatewayModel) gatewayFailure(ctx context.Context, run *Run, step int, hash string, streaming bool, code string, meta ...any) error {
 	code = safeGatewayCode(code)
 	if contextProfile(run) == contextProfileV1 && isContextOverflow(code) {
-		if err := m.Store.SaveContextRecovery(ctx, m.Lease, run, step, hash, streaming, code, configID...); err != nil {
+		if err := m.Store.SaveContextRecovery(ctx, m.Lease, run, step, hash, streaming, code, meta...); err != nil {
 			return err
 		}
 		return &ModelError{Code: code}

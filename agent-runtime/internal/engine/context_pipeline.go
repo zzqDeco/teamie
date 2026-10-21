@@ -34,6 +34,10 @@ type modelConfigIDProvider interface {
 	CurrentModelConfigID(context.Context) (string, bool)
 }
 
+type modelAdmissionStateProvider interface {
+	CurrentModelAdmissionState(context.Context) (string, string, bool)
+}
+
 type ContextPipeline struct {
 	*adk.TypedBaseChatModelAgentMiddleware[*schema.AgenticMessage]
 	cfg           ContextPipelineConfig
@@ -48,31 +52,54 @@ func (p *ContextPipeline) usageState(ctx context.Context) *usageAnchorState {
 	return &p.fallbackUsage
 }
 
-type admissionConfigKey struct{}
-
-func withAdmissionModelConfigID(ctx context.Context, configID string) context.Context {
-	return context.WithValue(ctx, admissionConfigKey{}, strings.TrimSpace(configID))
+type admissionContextState struct {
+	ConfigID    string
+	CounterMode string
 }
 
-func admissionModelConfigIDFromContext(ctx context.Context) (string, bool) {
+type admissionConfigKey struct{}
+
+func withAdmissionState(ctx context.Context, configID, counterMode string) context.Context {
+	return context.WithValue(ctx, admissionConfigKey{}, admissionContextState{
+		ConfigID:    strings.TrimSpace(configID),
+		CounterMode: strings.TrimSpace(counterMode),
+	})
+}
+
+func admissionStateFromContext(ctx context.Context) (admissionContextState, bool) {
 	if ctx == nil {
-		return "", false
+		return admissionContextState{}, false
 	}
-	id, ok := ctx.Value(admissionConfigKey{}).(string)
-	return id, ok
+	st, ok := ctx.Value(admissionConfigKey{}).(admissionContextState)
+	return st, ok
+}
+
+func (p *ContextPipeline) currentModelAdmissionState(ctx context.Context) (string, string, bool) {
+	if st, ok := admissionStateFromContext(ctx); ok {
+		return st.ConfigID, st.CounterMode, st.ConfigID != ""
+	}
+	if provider, ok := p.cfg.Model.(modelAdmissionStateProvider); ok && provider != nil {
+		return provider.CurrentModelAdmissionState(ctx)
+	}
+	if provider, ok := p.cfg.Model.(modelConfigIDProvider); ok && provider != nil {
+		id, has := provider.CurrentModelConfigID(ctx)
+		return id, "", has
+	}
+	return "", "", false
 }
 
 func (p *ContextPipeline) currentModelConfigID(ctx context.Context) (string, bool) {
-	if id, ok := admissionModelConfigIDFromContext(ctx); ok {
-		return id, id != ""
-	}
-	if provider, ok := p.cfg.Model.(modelConfigIDProvider); ok && provider != nil {
-		return provider.CurrentModelConfigID(ctx)
-	}
-	return "", false
+	id, _, has := p.currentModelAdmissionState(ctx)
+	return id, has
 }
 
 func (p *ContextPipeline) getAnchor(ctx context.Context) *contextUsageAnchor {
+	if st, ok := admissionStateFromContext(ctx); ok {
+		if st.CounterMode == "local" {
+			return nil
+		}
+		return p.usageState(ctx).getForConfig(st.ConfigID)
+	}
 	configID, _ := p.currentModelConfigID(ctx)
 	return p.usageState(ctx).getForConfig(configID)
 }
@@ -201,12 +228,11 @@ func (p *ContextPipeline) BeforeModelRewriteState(ctx context.Context, state *ad
 	copyState.DeferredToolInfos = contextToolInfos(state.DeferredToolInfos, p.cfg.Budget)
 	state = &copyState
 	usageState := p.usageState(ctx)
-	var configID string
+	var configID, recordedMode string
 	if p.cfg.Budget.Version >= 7 {
-		configID, _ = p.currentModelConfigID(ctx)
+		configID, recordedMode, _ = p.currentModelAdmissionState(ctx)
 	}
-	usageState.setAdmissionConfigID(configID)
-	rewriteCtx := withAdmissionModelConfigID(ctx, configID)
+	rewriteCtx := withAdmissionState(ctx, configID, recordedMode)
 	p.seedAnchorFromHistory(rewriteCtx, state.Messages, state.ToolInfos, state.DeferredToolInfos)
 	names := []string{}
 	for _, tool := range state.ToolInfos {
@@ -226,33 +252,44 @@ func (p *ContextPipeline) BeforeModelRewriteState(ctx context.Context, state *ad
 	}
 	r, err := p.reducer(rewriteCtx, names, state.DeferredToolInfos)
 	if err != nil {
-		usageState.setAdmissionConfigID("")
+		usageState.clearAdmissionConfig()
 		return ctx, nil, err
 	}
 	_, reduced, err := r.BeforeModelRewriteState(rewriteCtx, state, mc)
 	if err != nil {
-		usageState.setAdmissionConfigID("")
+		usageState.clearAdmissionConfig()
 		return ctx, nil, err
 	}
 	m, err := p.measureMainContext(rewriteCtx, reduced.Messages, reduced.ToolInfos, reduced.DeferredToolInfos)
 	if err != nil {
-		usageState.setAdmissionConfigID("")
+		usageState.clearAdmissionConfig()
 		return ctx, nil, err
+	}
+	if p.cfg.Budget.Version >= 7 {
+		usageState.setAdmissionConfig(configID, m.CounterMode)
 	}
 	reason := p.cfg.Budget.compactionReason(m, false)
 	observability.L(ctx).Info("Context measured", append([]zap.Field{zap.String("event.action", "context-measured"), zap.Bool("custom.context.should_compact", reason != "")}, p.cfg.Budget.measurementLogFields(m, reason)...)...)
 	if !p.cfg.Budget.shouldCompact(m) {
 		return ctx, reduced, nil
 	}
+	var stepBefore int64
+	run, _ := CurrentRun(ctx)
+	if run != nil {
+		stepBefore = run.Step.Load()
+	}
 	msgs, err := p.compact(rewriteCtx, reduced.Messages, reduced.ToolInfos, false, reduced.DeferredToolInfos)
 	if err != nil {
-		usageState.setAdmissionConfigID("")
+		usageState.clearAdmissionConfig()
 		return ctx, nil, err
+	}
+	if p.cfg.Budget.Version >= 7 && run != nil && run.Step.Load() > stepBefore && usageState.hasAdmission() {
+		usageState.setAdmissionConfig(configID, "local")
 	}
 	out := *reduced
 	out.Messages = msgs
 	if err = emitContextReplacement(ctx, msgs, "context_compacted_v1"); err != nil {
-		usageState.setAdmissionConfigID("")
+		usageState.clearAdmissionConfig()
 		return ctx, nil, err
 	}
 	return ctx, &out, nil

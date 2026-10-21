@@ -74,26 +74,31 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 	cached, err := m.cachedModel(ctx, run, step, hash, input, opts, true)
 	if err == nil {
 		phase = "receipt-replay"
-		run.consumeAdmissionConfigID(false)
+		run.consumeAdmissionConfig(false)
 		result, e := decodeAgenticMessage(cached)
 		if e != nil {
 			return nil, e
 		}
 		replayedConfigID, _ := extractRecordedModelConfigID(result)
-		run.recordModelUsageAnchor(step, request, result, replayedConfigID)
+		if replayedAdm, ok := extractRecordedAdmissionMetadata(result); ok {
+			run.recordModelUsageAnchor(step, request, result, replayedConfigID, replayedAdm)
+		} else {
+			run.recordModelUsageAnchor(step, request, result, replayedConfigID)
+		}
 		return schema.StreamReaderFromArray([]*schema.AgenticMessage{result}), nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
 	if err = m.cachedRecovery(ctx, run, step, hash, true); err != nil {
-		run.consumeAdmissionConfigID(false)
+		run.consumeAdmissionConfig(false)
 		return nil, err
 	}
-	reqConfigID, err := m.checkContextRequest(ctx, run, step, hash, request, true)
+	adm, err := m.checkContextRequest(ctx, run, step, hash, request, true)
 	if err != nil {
 		return nil, err
 	}
+	reqConfigID := adm.ConfigID
 	if m.StreamURL == "" {
 		return nil, &ModelError{Code: "gateway_stream_unavailable", Retry: true}
 	}
@@ -127,7 +132,7 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 		if errConfigID == "" {
 			errConfigID = reqConfigID
 		}
-		return nil, m.gatewayFailure(ctx, run, step, hash, true, failure.Code, errConfigID)
+		return nil, m.gatewayFailure(ctx, run, step, hash, true, failure.Code, errConfigID, adm)
 	}
 	respHeaderConfigID := strings.TrimSpace(response.Header.Get(modeltransport.ModelConfigIDHeader))
 	if respHeaderConfigID != "" && reqConfigID != "" && respHeaderConfigID != reqConfigID {
@@ -216,6 +221,8 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 				outMsg := message
 				if !anchorAttached && message.ResponseMeta != nil && message.ResponseMeta.TokenUsage != nil && message.ResponseMeta.TokenUsage.PromptTokens > 0 {
 					if anchor := run.computeRequestUsageAnchor(step, request, message, streamConfigID); anchor != nil {
+						anchor.AdmissionConfigID = strings.TrimSpace(adm.ConfigID)
+						anchor.CounterMode = strings.TrimSpace(adm.CounterMode)
 						anchorAttached = true
 						cloned := *message
 						cloned.Extra = make(map[string]any, len(message.Extra)+1)
@@ -239,7 +246,7 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 					// Never replay it as a side-effect-free overflow decision.
 					fail(&ModelError{Code: "upstream_in_stream_error"})
 				} else {
-					fail(m.gatewayFailure(ctx, run, step, hash, true, code, streamConfigID))
+					fail(m.gatewayFailure(ctx, run, step, hash, true, code, streamConfigID, adm))
 				}
 				return
 			case "done":
@@ -287,7 +294,7 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 			return
 		}
 		stage = "serialize-result"
-		run.recordModelUsageAnchor(step, request, result, streamConfigID)
+		run.recordModelUsageAnchor(step, request, result, streamConfigID, adm)
 		b, err := (&schema.HumanReadableSerializer{}).Marshal(result)
 		if err == nil && len(b) > modeltransport.MaxResponseBytes {
 			err = &ModelError{Code: "upstream_response_limit"}

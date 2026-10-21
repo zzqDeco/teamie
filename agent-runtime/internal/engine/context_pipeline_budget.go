@@ -186,41 +186,75 @@ func calibratedEffectiveTokens(promptTokens, localTokens, anchorLocalTokens int)
 }
 
 type contextUsageAnchor struct {
-	Step         int    `json:"step"`
-	ConfigID     string `json:"configId,omitempty"`
-	MessageCount int    `json:"messageCount"`
-	PrefixHash   string `json:"prefixHash"`
-	LocalTokens  int    `json:"localTokens"`
-	PromptTokens int    `json:"promptTokens"`
+	Step              int    `json:"step"`
+	ConfigID          string `json:"configId,omitempty"`
+	AdmissionConfigID string `json:"admissionConfigId,omitempty"`
+	CounterMode       string `json:"counterMode,omitempty"`
+	MessageCount      int    `json:"messageCount"`
+	PrefixHash        string `json:"prefixHash"`
+	LocalTokens       int    `json:"localTokens"`
+	PromptTokens      int    `json:"promptTokens"`
+}
+
+type requestAdmissionState struct {
+	ConfigID    string
+	CounterMode string
+	Known       bool
 }
 
 type usageAnchorState struct {
 	mu                 sync.Mutex
 	anchor             *contextUsageAnchor
 	admissionConfigID  string
+	admissionCounter   string
+	hasAdmissionConfig bool
 	invalidatedAnchors map[string]bool
 }
 
-func (s *usageAnchorState) setAdmissionConfigID(configID string) {
+func (s *usageAnchorState) setAdmissionConfig(configID, counterMode string) {
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.admissionConfigID = strings.TrimSpace(configID)
+	s.admissionCounter = strings.TrimSpace(counterMode)
+	s.hasAdmissionConfig = true
 }
 
-func (s *usageAnchorState) consumeAdmissionConfigID(preserve bool) string {
+func (s *usageAnchorState) clearAdmissionConfig() {
 	if s == nil {
-		return ""
+		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	id := s.admissionConfigID
+	s.admissionConfigID = ""
+	s.admissionCounter = ""
+	s.hasAdmissionConfig = false
+}
+
+func (s *usageAnchorState) hasAdmission() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.hasAdmissionConfig
+}
+
+func (s *usageAnchorState) consumeAdmissionConfig(preserve bool) (string, string, bool) {
+	if s == nil {
+		return "", "", false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id, mode, ok := s.admissionConfigID, s.admissionCounter, s.hasAdmissionConfig
 	if !preserve {
 		s.admissionConfigID = ""
+		s.admissionCounter = ""
+		s.hasAdmissionConfig = false
 	}
-	return id
+	return id, mode, ok
 }
 
 func (s *usageAnchorState) get() *contextUsageAnchor {
@@ -334,15 +368,25 @@ func attachUsageAnchor(msg *schema.AgenticMessage, anchor *contextUsageAnchor) {
 	msg.Extra[contextUsageAnchorExtraKey] = string(raw)
 }
 
-func attachRecordedModelConfigID(msg *schema.AgenticMessage, step int, configID string) {
+func attachRecordedStepMetadata(msg *schema.AgenticMessage, step int, configID string, adm requestAdmissionState) {
 	configID = strings.TrimSpace(configID)
-	if msg == nil || configID == "" {
+	admID := strings.TrimSpace(adm.ConfigID)
+	mode := strings.TrimSpace(adm.CounterMode)
+	if msg == nil || (configID == "" && admID == "" && mode == "") {
 		return
 	}
-	if _, ok := extractUsageAnchor(msg); ok {
+	if existing, ok := extractUsageAnchor(msg); ok {
+		existing.AdmissionConfigID = admID
+		existing.CounterMode = mode
+		attachUsageAnchor(msg, existing)
 		return
 	}
-	raw, err := json.Marshal(contextUsageAnchor{Step: step, ConfigID: configID})
+	raw, err := json.Marshal(contextUsageAnchor{
+		Step:              step,
+		ConfigID:          configID,
+		AdmissionConfigID: admID,
+		CounterMode:       mode,
+	})
 	if err != nil {
 		return
 	}
@@ -352,13 +396,13 @@ func attachRecordedModelConfigID(msg *schema.AgenticMessage, step int, configID 
 	msg.Extra[contextUsageAnchorExtraKey] = string(raw)
 }
 
-func extractRecordedModelConfigID(msg *schema.AgenticMessage) (string, bool) {
+func extractRawUsageAnchor(msg *schema.AgenticMessage) (contextUsageAnchor, bool) {
 	if msg == nil || len(msg.Extra) == 0 {
-		return "", false
+		return contextUsageAnchor{}, false
 	}
 	val, ok := msg.Extra[contextUsageAnchorExtraKey]
 	if !ok || val == nil {
-		return "", false
+		return contextUsageAnchor{}, false
 	}
 	var raw []byte
 	switch v := val.(type) {
@@ -368,11 +412,19 @@ func extractRecordedModelConfigID(msg *schema.AgenticMessage) (string, bool) {
 		var err error
 		raw, err = json.Marshal(v)
 		if err != nil {
-			return "", false
+			return contextUsageAnchor{}, false
 		}
 	}
 	var anchor contextUsageAnchor
 	if json.Unmarshal(raw, &anchor) != nil {
+		return contextUsageAnchor{}, false
+	}
+	return anchor, true
+}
+
+func extractRecordedModelConfigID(msg *schema.AgenticMessage) (string, bool) {
+	anchor, ok := extractRawUsageAnchor(msg)
+	if !ok {
 		return "", false
 	}
 	id := strings.TrimSpace(anchor.ConfigID)
@@ -382,27 +434,31 @@ func extractRecordedModelConfigID(msg *schema.AgenticMessage) (string, bool) {
 	return id, true
 }
 
+func extractRecordedAdmissionMetadata(msg *schema.AgenticMessage) (requestAdmissionState, bool) {
+	anchor, ok := extractRawUsageAnchor(msg)
+	if !ok {
+		return requestAdmissionState{}, false
+	}
+	if anchor.CounterMode != "" || anchor.AdmissionConfigID != "" {
+		id := strings.TrimSpace(anchor.AdmissionConfigID)
+		return requestAdmissionState{
+			ConfigID:    id,
+			CounterMode: strings.TrimSpace(anchor.CounterMode),
+			Known:       id != "",
+		}, true
+	}
+	if id := strings.TrimSpace(anchor.ConfigID); id != "" {
+		return requestAdmissionState{
+			ConfigID: id,
+			Known:    true,
+		}, true
+	}
+	return requestAdmissionState{}, false
+}
+
 func extractUsageAnchor(msg *schema.AgenticMessage) (*contextUsageAnchor, bool) {
-	if msg == nil || len(msg.Extra) == 0 {
-		return nil, false
-	}
-	val, ok := msg.Extra[contextUsageAnchorExtraKey]
-	if !ok || val == nil {
-		return nil, false
-	}
-	var raw []byte
-	switch v := val.(type) {
-	case string:
-		raw = []byte(v)
-	default:
-		var err error
-		raw, err = json.Marshal(v)
-		if err != nil {
-			return nil, false
-		}
-	}
-	var anchor contextUsageAnchor
-	if json.Unmarshal(raw, &anchor) != nil {
+	anchor, ok := extractRawUsageAnchor(msg)
+	if !ok {
 		return nil, false
 	}
 	if !validCalibratedTokenBounds(anchor.PromptTokens, anchor.LocalTokens) || anchor.MessageCount <= 0 || anchor.PrefixHash == "" || anchor.ConfigID == "" {
@@ -415,10 +471,20 @@ func clearMessageUsageAnchor(msg *schema.AgenticMessage) {
 	if msg == nil || len(msg.Extra) == 0 {
 		return
 	}
-	delete(msg.Extra, contextUsageAnchorExtraKey)
-	if len(msg.Extra) == 0 {
-		msg.Extra = nil
+	if _, exists := msg.Extra[contextUsageAnchorExtraKey]; !exists {
+		return
 	}
+	if len(msg.Extra) == 1 {
+		msg.Extra = nil
+		return
+	}
+	cloned := make(map[string]any, len(msg.Extra)-1)
+	for k, v := range msg.Extra {
+		if k != contextUsageAnchorExtraKey {
+			cloned[k] = v
+		}
+	}
+	msg.Extra = cloned
 }
 
 func isSummaryModelOptions(opts *model.Options) bool {

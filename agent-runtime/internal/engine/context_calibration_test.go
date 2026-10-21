@@ -1213,3 +1213,121 @@ func TestAdmissionConfigBindingAndRejectingConfigRecoveryPersistence(t *testing.
 		})
 	}
 }
+
+func TestReviewPR53UnknownAdmissionMustReplayOriginalLocalDecision(t *testing.T) {
+	for _, failPreflight := range []bool{false, true} {
+		name := "known_config_control"
+		if failPreflight {
+			name = "one_failed_config_lookup"
+		}
+		t.Run(name, func(t *testing.T) {
+			s, lease, run := contextModelRun(t)
+			budget, _ := ParseContextBudgetSnapshot(run.ContextBudget)
+			configA := modeltransport.CountingConfigID("https://provider.example/v1", "a")
+			var failOnce atomic.Bool
+			var mainCalls, summaryCalls atomic.Int32
+			round := contextToolRound("first", "short successful tool result")
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var call modeltransport.CallRequest
+				if err := json.NewDecoder(r.Body).Decode(&call); err != nil {
+					t.Error(err)
+					return
+				}
+				if expected := r.Header.Get(modeltransport.ModelConfigIDHeader); expected != "" && expected != configA {
+					t.Error("wrong expected configuration")
+					return
+				}
+				var result *schema.AgenticMessage
+				if isSummaryRequest([]byte(call.RequestJSON)) {
+					summaryCalls.Add(1)
+					result = assistantTextWithUsage("Earlier completed work summarized.", 400, 30)
+				} else if mainCalls.Add(1) == 1 {
+					result = round[0]
+					result.ContentBlocks = append([]*schema.ContentBlock{schema.NewContentBlock(&schema.AssistantGenText{Text: strings.Repeat("阶段成果", 400)})}, result.ContentBlocks...)
+					result.ResponseMeta = &schema.AgenticResponseMeta{TokenUsage: &schema.TokenUsage{PromptTokens: 6000, CompletionTokens: 1300, TotalTokens: 7300}}
+				} else {
+					result = assistantTextWithUsage("Done.", 7300, 40)
+				}
+				raw, _ := (&schema.HumanReadableSerializer{}).Marshal(result)
+				text := string(raw)
+				w.Header().Set(modeltransport.ModelConfigIDHeader, configA)
+				_ = json.NewEncoder(w).Encode(&wire.GatewayChatResponse{Ok: true, ResponseJson: &text})
+			}))
+			defer server.Close()
+			client, err := newGatewayHTTPClient(nil, server.URL+modeltransport.StreamPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			gateway := &GatewayModel{
+				Store: s, Lease: lease, AgentID: lease.AgentID, Client: client, StreamURL: server.URL + modeltransport.StreamPath,
+				ModelConfigID: func() string {
+					if failOnce.CompareAndSwap(true, false) {
+						return ""
+					}
+					return configA
+				},
+			}
+			newPipeline := func() *ContextPipeline {
+				a := &pipelineArchiveFixture{}
+				p, err := NewContextPipeline(context.Background(), ContextPipelineConfig{Model: gateway, Budget: budget, Backend: a, ArchivePath: a.path, ArchiveTranscript: a.transcript})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return p
+			}
+			tools := []*schema.ToolInfo{{Name: "lookup", Desc: "Return a short result."}}
+			prefix := append([]*schema.AgenticMessage{schema.SystemAgenticMessage("Trusted policy."), schema.UserAgenticMessage(strings.Repeat("甲乙丙丁", 3250)), assistantText("Previous task done.")}, inputMessages(run.Inputs)...)
+			ctx := WithRun(context.Background(), run)
+			p := newPipeline()
+			_, initial, err := p.BeforeModelRewriteState(ctx, &adk.TypedChatModelAgentState[*schema.AgenticMessage]{Messages: prefix, ToolInfos: tools}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			first, err := gateway.Generate(ctx, initial.Messages, model.WithTools(tools))
+			if err != nil {
+				t.Fatal(err)
+			}
+			next := append(append([]*schema.AgenticMessage{}, initial.Messages...), first)
+			next = append(next, round[1:]...)
+			before, err := p.measureMainContext(ctx, next, tools)
+			if err != nil || before.CounterMode != "usage_delta" || before.LocalTokens <= budget.TriggerTokens || before.EstimatedTokens >= budget.TriggerTokens {
+				t.Fatalf("bad threshold fixture: %+v err=%v", before, err)
+			}
+			failOnce.Store(failPreflight)
+			_, original, err := p.BeforeModelRewriteState(ctx, &adk.TypedChatModelAgentState[*schema.AgenticMessage]{Messages: next, ToolInfos: tools}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if failPreflight && summaryCalls.Load() == 0 {
+				t.Fatal("failed lookup did not choose local compaction")
+			}
+			if !failPreflight && summaryCalls.Load() != 0 {
+				t.Fatal("control unexpectedly compacted")
+			}
+			if _, err = gateway.Generate(ctx, original.Messages, model.WithTools(tools)); err != nil {
+				t.Fatal(err)
+			}
+			// Restart before the committed steps, without changing model configuration.
+			restarted := &Run{ID: run.ID, Attempt: run.Attempt, AgentID: run.AgentID, Inputs: run.Inputs, ContextProfile: run.ContextProfile, ContextBudget: run.ContextBudget, Front: run.Front}
+			rctx := WithRun(context.Background(), restarted)
+			rp := newPipeline()
+			_, rinitial, err := rp.BeforeModelRewriteState(rctx, &adk.TypedChatModelAgentState[*schema.AgenticMessage]{Messages: prefix, ToolInfos: tools}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rfirst, err := gateway.Generate(rctx, rinitial.Messages, model.WithTools(tools))
+			if err != nil {
+				t.Fatal(err)
+			}
+			rnext := append(append([]*schema.AgenticMessage{}, rinitial.Messages...), rfirst)
+			rnext = append(rnext, round[1:]...)
+			_, rsecond, err := rp.BeforeModelRewriteState(rctx, &adk.TypedChatModelAgentState[*schema.AgenticMessage]{Messages: rnext, ToolInfos: tools}, nil)
+			if err != nil {
+				t.Fatalf("cannot replay compaction: %v", err)
+			}
+			if _, err = gateway.Generate(rctx, rsecond.Messages, model.WithTools(tools)); err != nil {
+				t.Fatalf("replay changed original local admission branch: step=%d err=%v", restarted.Step.Load(), err)
+			}
+		})
+	}
+}

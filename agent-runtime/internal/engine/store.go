@@ -95,18 +95,25 @@ func (r *Run) clearUsageAnchor() {
 	r.usageState.clear()
 }
 
-func (r *Run) setAdmissionConfigID(configID string) {
+func (r *Run) setAdmissionConfig(configID, counterMode string) {
 	if r == nil {
 		return
 	}
-	r.usageState.setAdmissionConfigID(configID)
+	r.usageState.setAdmissionConfig(configID, counterMode)
 }
 
-func (r *Run) consumeAdmissionConfigID(preserve bool) string {
+func (r *Run) clearAdmissionConfig() {
 	if r == nil {
-		return ""
+		return
 	}
-	return r.usageState.consumeAdmissionConfigID(preserve)
+	r.usageState.clearAdmissionConfig()
+}
+
+func (r *Run) consumeAdmissionConfig(preserve bool) (string, string, bool) {
+	if r == nil {
+		return "", "", false
+	}
+	return r.usageState.consumeAdmissionConfig(preserve)
 }
 
 func (r *Run) invalidateUsageAnchor(messages []*schema.AgenticMessage) {
@@ -161,7 +168,7 @@ func (r *Run) computeRequestUsageAnchor(step int, request []byte, result *schema
 	}
 }
 
-func (r *Run) recordModelUsageAnchor(step int, request []byte, result *schema.AgenticMessage, configID string) {
+func (r *Run) recordModelUsageAnchor(step int, request []byte, result *schema.AgenticMessage, configID string, admission ...requestAdmissionState) {
 	if r == nil || result == nil {
 		return
 	}
@@ -170,15 +177,25 @@ func (r *Run) recordModelUsageAnchor(step int, request []byte, result *schema.Ag
 			configID = savedID
 		}
 	}
+	var adm requestAdmissionState
+	if len(admission) > 0 {
+		adm = admission[0]
+	} else if savedAdm, ok := extractRecordedAdmissionMetadata(result); ok {
+		adm = savedAdm
+	} else {
+		adm = requestAdmissionState{ConfigID: strings.TrimSpace(configID), Known: strings.TrimSpace(configID) != ""}
+	}
 	anchor := r.computeRequestUsageAnchor(step, request, result, configID)
 	if anchor == nil {
 		if contextProfile(r) == contextProfileV1 {
 			if budget, err := ParseContextBudgetSnapshot(r.ContextBudget); err == nil && budget.Version >= 7 {
-				attachRecordedModelConfigID(result, step, configID)
+				attachRecordedStepMetadata(result, step, configID, adm)
 			}
 		}
 		return
 	}
+	anchor.AdmissionConfigID = strings.TrimSpace(adm.ConfigID)
+	anchor.CounterMode = strings.TrimSpace(adm.CounterMode)
 	attachUsageAnchor(result, anchor)
 	r.setUsageAnchor(anchor, false)
 }
@@ -646,6 +663,36 @@ func (s *Store) CachedModel(ctx context.Context, r *Run, step int, hash string) 
 	return b, e
 }
 
+func (s *Store) RecordedModelStepAdmission(ctx context.Context, r *Run, step int) (string, string, bool) {
+	if s == nil || s.DB == nil || r == nil || r.ID == "" || step < 1 {
+		return "", "", false
+	}
+	var raw, decisionRaw []byte
+	err := s.DB.QueryRow(ctx, `SELECT (SELECT response FROM runtime_model_calls WHERE run_id=$1 AND step=$2), (SELECT decision_json FROM runtime_context_recoveries WHERE run_id=$1 AND model_step=$2)`, r.ID, step).Scan(&raw, &decisionRaw)
+	if err != nil || (len(raw) == 0 && len(decisionRaw) == 0) {
+		return "", "", false
+	}
+	if len(raw) > 0 {
+		if msg, decodeErr := decodeAgenticMessage(raw); decodeErr == nil {
+			if adm, ok := extractRecordedAdmissionMetadata(msg); ok {
+				return adm.ConfigID, adm.CounterMode, true
+			}
+		}
+	}
+	if len(decisionRaw) > 0 {
+		var decision contextRecoveryDecision
+		if json.Unmarshal(decisionRaw, &decision) == nil {
+			if decision.CounterMode != "" || decision.AdmissionConfigID != "" {
+				return strings.TrimSpace(decision.AdmissionConfigID), strings.TrimSpace(decision.CounterMode), true
+			}
+			if id := strings.TrimSpace(decision.ConfigID); id != "" {
+				return id, "", true
+			}
+		}
+	}
+	return "", "", true
+}
+
 func (s *Store) RecordedModelStepConfigID(ctx context.Context, r *Run, step int) (string, bool) {
 	if s == nil || s.DB == nil || r == nil || r.ID == "" || step < 1 {
 		return "", false
@@ -660,12 +707,18 @@ func (s *Store) RecordedModelStepConfigID(ctx context.Context, r *Run, step int)
 			if id, ok := extractRecordedModelConfigID(msg); ok {
 				return id, true
 			}
+			if adm, ok := extractRecordedAdmissionMetadata(msg); ok && adm.ConfigID != "" {
+				return adm.ConfigID, true
+			}
 		}
 	}
 	if len(decisionRaw) > 0 {
 		var decision contextRecoveryDecision
 		if json.Unmarshal(decisionRaw, &decision) == nil {
 			if id := strings.TrimSpace(decision.ConfigID); id != "" {
+				return id, true
+			}
+			if id := strings.TrimSpace(decision.AdmissionConfigID); id != "" {
 				return id, true
 			}
 		}
