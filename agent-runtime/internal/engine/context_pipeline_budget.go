@@ -354,6 +354,18 @@ func (s *usageAnchorState) pruneAfterCompaction(retained []*schema.AgenticMessag
 	}
 }
 
+func setMessageExtraString(msg *schema.AgenticMessage, key, value string) {
+	if msg == nil {
+		return
+	}
+	cloned := make(map[string]any, len(msg.Extra)+1)
+	for k, v := range msg.Extra {
+		cloned[k] = v
+	}
+	cloned[key] = value
+	msg.Extra = cloned
+}
+
 func attachUsageAnchor(msg *schema.AgenticMessage, anchor *contextUsageAnchor) {
 	if msg == nil || anchor == nil || !validCalibratedTokenBounds(anchor.PromptTokens, anchor.LocalTokens) || anchor.MessageCount <= 0 || anchor.PrefixHash == "" || anchor.ConfigID == "" {
 		return
@@ -362,10 +374,7 @@ func attachUsageAnchor(msg *schema.AgenticMessage, anchor *contextUsageAnchor) {
 	if err != nil {
 		return
 	}
-	if msg.Extra == nil {
-		msg.Extra = map[string]any{}
-	}
-	msg.Extra[contextUsageAnchorExtraKey] = string(raw)
+	setMessageExtraString(msg, contextUsageAnchorExtraKey, string(raw))
 }
 
 func attachRecordedStepMetadata(msg *schema.AgenticMessage, step int, configID string, adm requestAdmissionState) {
@@ -390,10 +399,7 @@ func attachRecordedStepMetadata(msg *schema.AgenticMessage, step int, configID s
 	if err != nil {
 		return
 	}
-	if msg.Extra == nil {
-		msg.Extra = map[string]any{}
-	}
-	msg.Extra[contextUsageAnchorExtraKey] = string(raw)
+	setMessageExtraString(msg, contextUsageAnchorExtraKey, string(raw))
 }
 
 func extractRawUsageAnchor(msg *schema.AgenticMessage) (contextUsageAnchor, bool) {

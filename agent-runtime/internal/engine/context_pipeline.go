@@ -35,7 +35,7 @@ type modelConfigIDProvider interface {
 }
 
 type modelAdmissionStateProvider interface {
-	CurrentModelAdmissionState(context.Context) (string, string, bool)
+	CurrentModelAdmissionState(context.Context) (string, string, bool, error)
 }
 
 type ContextPipeline struct {
@@ -74,22 +74,25 @@ func admissionStateFromContext(ctx context.Context) (admissionContextState, bool
 	return st, ok
 }
 
-func (p *ContextPipeline) currentModelAdmissionState(ctx context.Context) (string, string, bool) {
+func (p *ContextPipeline) currentModelAdmissionState(ctx context.Context) (string, string, bool, error) {
 	if st, ok := admissionStateFromContext(ctx); ok {
-		return st.ConfigID, st.CounterMode, st.ConfigID != ""
+		return st.ConfigID, st.CounterMode, st.ConfigID != "", nil
 	}
 	if provider, ok := p.cfg.Model.(modelAdmissionStateProvider); ok && provider != nil {
 		return provider.CurrentModelAdmissionState(ctx)
 	}
 	if provider, ok := p.cfg.Model.(modelConfigIDProvider); ok && provider != nil {
 		id, has := provider.CurrentModelConfigID(ctx)
-		return id, "", has
+		return id, "", has, nil
 	}
-	return "", "", false
+	return "", "", false, nil
 }
 
 func (p *ContextPipeline) currentModelConfigID(ctx context.Context) (string, bool) {
-	id, _, has := p.currentModelAdmissionState(ctx)
+	id, _, has, err := p.currentModelAdmissionState(ctx)
+	if err != nil {
+		return "", false
+	}
 	return id, has
 }
 
@@ -230,7 +233,12 @@ func (p *ContextPipeline) BeforeModelRewriteState(ctx context.Context, state *ad
 	usageState := p.usageState(ctx)
 	var configID, recordedMode string
 	if p.cfg.Budget.Version >= 7 {
-		configID, recordedMode, _ = p.currentModelAdmissionState(ctx)
+		var err error
+		configID, recordedMode, _, err = p.currentModelAdmissionState(ctx)
+		if err != nil {
+			usageState.clearAdmissionConfig()
+			return ctx, nil, err
+		}
 	}
 	rewriteCtx := withAdmissionState(ctx, configID, recordedMode)
 	p.seedAnchorFromHistory(rewriteCtx, state.Messages, state.ToolInfos, state.DeferredToolInfos)

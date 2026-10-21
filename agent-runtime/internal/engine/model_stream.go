@@ -218,19 +218,13 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 					fail(e)
 					return
 				}
-				outMsg := message
+				outMsg := cloneStreamMessage(message)
 				if !anchorAttached && message.ResponseMeta != nil && message.ResponseMeta.TokenUsage != nil && message.ResponseMeta.TokenUsage.PromptTokens > 0 {
 					if anchor := run.computeRequestUsageAnchor(step, request, message, streamConfigID); anchor != nil {
 						anchor.AdmissionConfigID = strings.TrimSpace(adm.ConfigID)
 						anchor.CounterMode = strings.TrimSpace(adm.CounterMode)
 						anchorAttached = true
-						cloned := *message
-						cloned.Extra = make(map[string]any, len(message.Extra)+1)
-						for k, v := range message.Extra {
-							cloned.Extra[k] = v
-						}
-						attachUsageAnchor(&cloned, anchor)
-						outMsg = &cloned
+						attachUsageAnchor(outMsg, anchor)
 					}
 				}
 				if writer.Send(outMsg, nil) {
@@ -441,7 +435,25 @@ func (a *modelStreamAccumulator) result() (*schema.AgenticMessage, error) {
 	if err := a.flush(); err != nil {
 		return nil, err
 	}
-	return a.concatFinal()
+	final, err := a.concatFinal()
+	if err != nil {
+		return nil, err
+	}
+	return cloneStreamMessage(final), nil
+}
+
+func cloneStreamMessage(message *schema.AgenticMessage) *schema.AgenticMessage {
+	if message == nil {
+		return nil
+	}
+	cloned := *message
+	if len(message.Extra) > 0 {
+		cloned.Extra = make(map[string]any, len(message.Extra))
+		for k, v := range message.Extra {
+			cloned.Extra[k] = v
+		}
+	}
+	return &cloned
 }
 
 func (a *modelStreamAccumulator) concatFinal() (*schema.AgenticMessage, error) {

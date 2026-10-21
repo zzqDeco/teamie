@@ -1214,7 +1214,7 @@ func TestAdmissionConfigBindingAndRejectingConfigRecoveryPersistence(t *testing.
 	}
 }
 
-func TestReviewPR53UnknownAdmissionMustReplayOriginalLocalDecision(t *testing.T) {
+func TestUnknownAdmissionReplayPreservesLocalDecisionAndFailsClosed(t *testing.T) {
 	for _, failPreflight := range []bool{false, true} {
 		name := "known_config_control"
 		if failPreflight {
@@ -1327,6 +1327,15 @@ func TestReviewPR53UnknownAdmissionMustReplayOriginalLocalDecision(t *testing.T)
 			}
 			if _, err = gateway.Generate(rctx, rsecond.Messages, model.WithTools(tools)); err != nil {
 				t.Fatalf("replay changed original local admission branch: step=%d err=%v", restarted.Step.Load(), err)
+			}
+			// If the database lookup fails during replay admission, BeforeModelRewriteState must fail closed
+			// instead of falling back to the live gateway.
+			failedReplay := &Run{ID: run.ID, Attempt: run.Attempt, AgentID: run.AgentID, Inputs: run.Inputs, ContextProfile: run.ContextProfile, ContextBudget: run.ContextBudget, Front: run.Front}
+			canceledBase, cancelBase := context.WithCancel(context.Background())
+			cancelBase()
+			fctx := WithRun(canceledBase, failedReplay)
+			if _, _, err := newPipeline().BeforeModelRewriteState(fctx, &adk.TypedChatModelAgentState[*schema.AgenticMessage]{Messages: prefix, ToolInfos: tools}, nil); err == nil {
+				t.Fatal("expected BeforeModelRewriteState to fail closed when replay admission lookup fails")
 			}
 		})
 	}

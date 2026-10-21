@@ -663,34 +663,43 @@ func (s *Store) CachedModel(ctx context.Context, r *Run, step int, hash string) 
 	return b, e
 }
 
-func (s *Store) RecordedModelStepAdmission(ctx context.Context, r *Run, step int) (string, string, bool) {
+func (s *Store) RecordedModelStepAdmission(ctx context.Context, r *Run, step int) (string, string, bool, error) {
 	if s == nil || s.DB == nil || r == nil || r.ID == "" || step < 1 {
-		return "", "", false
+		return "", "", false, nil
 	}
 	var raw, decisionRaw []byte
 	err := s.DB.QueryRow(ctx, `SELECT (SELECT response FROM runtime_model_calls WHERE run_id=$1 AND step=$2), (SELECT decision_json FROM runtime_context_recoveries WHERE run_id=$1 AND model_step=$2)`, r.ID, step).Scan(&raw, &decisionRaw)
-	if err != nil || (len(raw) == 0 && len(decisionRaw) == 0) {
-		return "", "", false
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", "", false, nil
+		}
+		return "", "", false, err
+	}
+	if len(raw) == 0 && len(decisionRaw) == 0 {
+		return "", "", false, nil
 	}
 	if len(raw) > 0 {
-		if msg, decodeErr := decodeAgenticMessage(raw); decodeErr == nil {
-			if adm, ok := extractRecordedAdmissionMetadata(msg); ok {
-				return adm.ConfigID, adm.CounterMode, true
-			}
+		msg, decodeErr := decodeAgenticMessage(raw)
+		if decodeErr != nil {
+			return "", "", false, decodeErr
+		}
+		if adm, ok := extractRecordedAdmissionMetadata(msg); ok {
+			return adm.ConfigID, adm.CounterMode, true, nil
 		}
 	}
 	if len(decisionRaw) > 0 {
 		var decision contextRecoveryDecision
-		if json.Unmarshal(decisionRaw, &decision) == nil {
-			if decision.CounterMode != "" || decision.AdmissionConfigID != "" {
-				return strings.TrimSpace(decision.AdmissionConfigID), strings.TrimSpace(decision.CounterMode), true
-			}
-			if id := strings.TrimSpace(decision.ConfigID); id != "" {
-				return id, "", true
-			}
+		if unmarshalErr := json.Unmarshal(decisionRaw, &decision); unmarshalErr != nil {
+			return "", "", false, unmarshalErr
+		}
+		if decision.CounterMode != "" || decision.AdmissionConfigID != "" {
+			return strings.TrimSpace(decision.AdmissionConfigID), strings.TrimSpace(decision.CounterMode), true, nil
+		}
+		if id := strings.TrimSpace(decision.ConfigID); id != "" {
+			return id, "", true, nil
 		}
 	}
-	return "", "", true
+	return "", "", true, nil
 }
 
 func (s *Store) RecordedModelStepConfigID(ctx context.Context, r *Run, step int) (string, bool) {

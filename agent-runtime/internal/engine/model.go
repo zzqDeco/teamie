@@ -93,22 +93,29 @@ func (m *GatewayModel) liveModelConfigID(ctx context.Context) (string, bool) {
 	return "", false
 }
 
-func (m *GatewayModel) CurrentModelAdmissionState(ctx context.Context) (string, string, bool) {
+func (m *GatewayModel) CurrentModelAdmissionState(ctx context.Context) (string, string, bool, error) {
 	if m == nil {
-		return "", "", false
+		return "", "", false, nil
 	}
 	if run, err := CurrentRun(ctx); err == nil && run != nil && m.Store != nil {
 		nextStep := int(run.Step.Load()) + 1
-		if id, mode, recorded := m.Store.RecordedModelStepAdmission(ctx, run, nextStep); recorded {
-			return id, mode, id != ""
+		id, mode, recorded, err := m.Store.RecordedModelStepAdmission(ctx, run, nextStep)
+		if err != nil {
+			return "", "", false, err
+		}
+		if recorded {
+			return id, mode, id != "", nil
 		}
 	}
 	id, ok := m.liveModelConfigID(ctx)
-	return id, "", ok
+	return id, "", ok, nil
 }
 
 func (m *GatewayModel) CurrentModelConfigID(ctx context.Context) (string, bool) {
-	id, _, ok := m.CurrentModelAdmissionState(ctx)
+	id, _, ok, err := m.CurrentModelAdmissionState(ctx)
+	if err != nil {
+		return "", false
+	}
 	return id, ok
 }
 
