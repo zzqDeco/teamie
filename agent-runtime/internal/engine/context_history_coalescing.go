@@ -69,7 +69,6 @@ func (p *ContextPipeline) coalesceHistory(ctx context.Context, policy []*schema.
 			return nil, err
 		}
 		if p.cfg.Budget.fits(measurement) {
-			p.invalidateAnchor(ctx, older)
 			return candidate, nil
 		}
 	}
