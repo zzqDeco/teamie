@@ -65,7 +65,7 @@ func safeGatewayPing(ctx context.Context, client modelgatewayservice.Client, tok
 	return client.Ping(ctx, &wire.PingRequest{ServiceToken: &token})
 }
 
-func (m *GatewayModel) CurrentModelConfigID(ctx context.Context) (string, bool) {
+func (m *GatewayModel) liveModelConfigID(ctx context.Context) (string, bool) {
 	if m == nil {
 		return "", false
 	}
@@ -85,6 +85,19 @@ func (m *GatewayModel) CurrentModelConfigID(ctx context.Context) (string, bool) 
 		}
 	}
 	return "", false
+}
+
+func (m *GatewayModel) CurrentModelConfigID(ctx context.Context) (string, bool) {
+	if m == nil {
+		return "", false
+	}
+	if run, err := CurrentRun(ctx); err == nil && run != nil && m.Store != nil {
+		nextStep := int(run.Step.Load()) + 1
+		if id, recorded := m.Store.RecordedModelStepConfigID(ctx, run, nextStep); recorded {
+			return id, id != ""
+		}
+	}
+	return m.liveModelConfigID(ctx)
 }
 
 func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticMessage, options ...model.Option) (_ *schema.AgenticMessage, failure error) {
@@ -131,10 +144,7 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticM
 		phase = "receipt-replay"
 		result, decodeErr := decodeAgenticMessage(cached)
 		if decodeErr == nil {
-			replayedConfigID := ""
-			if saved, ok := extractUsageAnchor(result); ok {
-				replayedConfigID = saved.ConfigID
-			}
+			replayedConfigID, _ := extractRecordedModelConfigID(result)
 			run.recordModelUsageAnchor(step, request, result, replayedConfigID)
 		}
 		return result, decodeErr
@@ -178,7 +188,7 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticM
 	}
 	respConfigID := strings.TrimSpace(response.GetModelConfigId())
 	if respConfigID == "" {
-		respConfigID, _ = m.CurrentModelConfigID(ctx)
+		respConfigID, _ = m.liveModelConfigID(ctx)
 	}
 	run.recordModelUsageAnchor(step, request, result, respConfigID)
 	phase = "serialize-result"
@@ -268,7 +278,7 @@ func (m *GatewayModel) checkContextRequest(ctx context.Context, run *Run, step i
 	if err != nil {
 		return err
 	}
-	configID, _ := m.CurrentModelConfigID(ctx)
+	configID, _ := m.liveModelConfigID(ctx)
 	measurement, err := budget.measureCalibratedRequest(run.getUsageAnchorForConfig(configID), request)
 	if err != nil {
 		return err

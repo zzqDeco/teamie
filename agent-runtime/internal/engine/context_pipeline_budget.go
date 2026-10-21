@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 	"sync"
 	"unicode/utf8"
 
@@ -288,6 +289,54 @@ func attachUsageAnchor(msg *schema.AgenticMessage, anchor *contextUsageAnchor) {
 		msg.Extra = map[string]any{}
 	}
 	msg.Extra[contextUsageAnchorExtraKey] = string(raw)
+}
+
+func attachRecordedModelConfigID(msg *schema.AgenticMessage, step int, configID string) {
+	configID = strings.TrimSpace(configID)
+	if msg == nil || configID == "" {
+		return
+	}
+	if _, ok := extractUsageAnchor(msg); ok {
+		return
+	}
+	raw, err := json.Marshal(contextUsageAnchor{Step: step, ConfigID: configID})
+	if err != nil {
+		return
+	}
+	if msg.Extra == nil {
+		msg.Extra = map[string]any{}
+	}
+	msg.Extra[contextUsageAnchorExtraKey] = string(raw)
+}
+
+func extractRecordedModelConfigID(msg *schema.AgenticMessage) (string, bool) {
+	if msg == nil || len(msg.Extra) == 0 {
+		return "", false
+	}
+	val, ok := msg.Extra[contextUsageAnchorExtraKey]
+	if !ok || val == nil {
+		return "", false
+	}
+	var raw []byte
+	switch v := val.(type) {
+	case string:
+		raw = []byte(v)
+	default:
+		var err error
+		raw, err = json.Marshal(v)
+		if err != nil {
+			return "", false
+		}
+	}
+	var anchor contextUsageAnchor
+	if json.Unmarshal(raw, &anchor) != nil {
+		return "", false
+	}
+	id := strings.TrimSpace(anchor.ConfigID)
+	if id == "" {
+		return "", false
+	}
+	return id, true
 }
 
 func extractUsageAnchor(msg *schema.AgenticMessage) (*contextUsageAnchor, bool) {

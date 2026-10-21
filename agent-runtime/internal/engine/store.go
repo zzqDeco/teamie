@@ -143,8 +143,19 @@ func (r *Run) computeRequestUsageAnchor(step int, request []byte, result *schema
 }
 
 func (r *Run) recordModelUsageAnchor(step int, request []byte, result *schema.AgenticMessage, configID string) {
+	if r == nil || result == nil {
+		return
+	}
+	if configID == "" {
+		if savedID, ok := extractRecordedModelConfigID(result); ok {
+			configID = savedID
+		}
+	}
 	anchor := r.computeRequestUsageAnchor(step, request, result, configID)
 	if anchor == nil {
+		if contextProfile(r) == contextProfileV1 {
+			attachRecordedModelConfigID(result, step, configID)
+		}
 		return
 	}
 	attachUsageAnchor(result, anchor)
@@ -612,6 +623,43 @@ func (s *Store) CachedModel(ctx context.Context, r *Run, step int, hash string) 
 		return nil, ErrReplayConflict
 	}
 	return b, e
+}
+
+func (s *Store) RecordedModelStepConfigID(ctx context.Context, r *Run, step int) (string, bool) {
+	if s == nil || s.DB == nil || r == nil || r.ID == "" || step < 1 {
+		return "", false
+	}
+	var raw []byte
+	var recorded bool
+	err := s.DB.QueryRow(ctx, `SELECT (SELECT response FROM runtime_model_calls WHERE run_id=$1 AND step=$2), (EXISTS(SELECT 1 FROM runtime_model_calls WHERE run_id=$1 AND step=$2) OR EXISTS(SELECT 1 FROM runtime_context_recoveries WHERE run_id=$1 AND model_step=$2))`, r.ID, step).Scan(&raw, &recorded)
+	if err != nil || !recorded {
+		return "", false
+	}
+	if len(raw) > 0 {
+		if msg, decodeErr := decodeAgenticMessage(raw); decodeErr == nil {
+			if id, ok := extractRecordedModelConfigID(msg); ok {
+				return id, true
+			}
+		}
+	}
+	rows, err := s.DB.Query(ctx, `SELECT response FROM runtime_model_calls WHERE run_id=$1 ORDER BY CASE WHEN step>=$2 THEN 0 ELSE 1 END, ABS(step-$2) ASC`, r.ID, step)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var candidate []byte
+			if rows.Scan(&candidate) == nil && len(candidate) > 0 {
+				if msg, decodeErr := decodeAgenticMessage(candidate); decodeErr == nil {
+					if id, ok := extractRecordedModelConfigID(msg); ok {
+						return id, true
+					}
+				}
+			}
+		}
+	}
+	if anchor := r.usageState.get(); anchor != nil && strings.TrimSpace(anchor.ConfigID) != "" {
+		return strings.TrimSpace(anchor.ConfigID), true
+	}
+	return "", true
 }
 func (s *Store) SaveModel(ctx context.Context, l *Lease, r *Run, step int, hash string, b []byte) error {
 	tx, e := s.DB.Begin(ctx)

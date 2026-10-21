@@ -78,10 +78,7 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 		if e != nil {
 			return nil, e
 		}
-		replayedConfigID := ""
-		if saved, ok := extractUsageAnchor(result); ok {
-			replayedConfigID = saved.ConfigID
-		}
+		replayedConfigID, _ := extractRecordedModelConfigID(result)
 		run.recordModelUsageAnchor(step, request, result, replayedConfigID)
 		return schema.StreamReaderFromArray([]*schema.AgenticMessage{result}), nil
 	}
@@ -147,7 +144,7 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 		requestID := ""
 		streamConfigID := strings.TrimSpace(response.Header.Get(modeltransport.ModelConfigIDHeader))
 		if streamConfigID == "" {
-			streamConfigID, _ = m.CurrentModelConfigID(ctx)
+			streamConfigID, _ = m.liveModelConfigID(ctx)
 		}
 		anchorAttached := false
 		total := 0

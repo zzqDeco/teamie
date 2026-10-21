@@ -875,29 +875,24 @@ func TestGatewayModelConfigIDBindsAndInvalidatesPromptTokensAnchorOnModelSwitch(
 	}
 
 	// 2. Same contextWindowTokens (16384), switch Gateway model from "model-a" to "model-b" (configBModel):
-	// Both existing Run/ContextPipeline and a freshly restarted Run/ContextPipeline must reject Model A's anchor
-	// and fall back to "local" estimation!
+	// Both existing Run/ContextPipeline (at unrecorded Step 2) and a freshly restarted Run/ContextPipeline
+	// must reject Model A's anchor and fall back to "local" estimation!
 	activeConfigID.Store(configBModel)
 	activePromptTokens.Store(7100)
 
-	mSwitchedLive, err := pRestartSameModel.measureMainContext(ctxRestartSame, historyWithRespA, nil)
+	mSwitchedLive, err := pRestartSameModel.measureMainContext(ctx1, historyWithRespA, nil)
 	if err != nil || mSwitchedLive.CounterMode != "local" || mSwitchedLive.AnchorPromptTokens != 0 || mSwitchedLive.EstimatedTokens <= budget.TriggerTokens {
 		t.Fatalf("live ContextPipeline continued using Model A anchor after gateway switched to Model B: %+v (%v)", mSwitchedLive, err)
 	}
-	if err := gwModel.checkContextRequest(ctxRestartSame, runRestartSame, 99, modelRequestHash(rawLargeReq), rawLargeReq, false); err == nil {
+	if err := gwModel.checkContextRequest(ctx1, run, 99, modelRequestHash(rawLargeReq), rawLargeReq, false); err == nil {
 		t.Fatal("checkContextRequest continued using Model A anchor after gateway switched to Model B")
 	}
 
 	runRestartSwitched := &Run{ID: run.ID, Attempt: run.Attempt, AgentID: run.AgentID, Inputs: inputs, ContextProfile: contextProfileV1, ContextBudget: run.ContextBudget, Front: run.Front}
 	ctxRestartSwitched := WithRun(context.Background(), runRestartSwitched)
-	pRestartSameModel.seedAnchorFromHistory(ctxRestartSwitched, historyWithRespA, nil)
-	mSwitchedSeeded, err := pRestartSameModel.measureMainContext(ctxRestartSwitched, historyWithRespA, nil)
-	if err != nil || mSwitchedSeeded.CounterMode != "local" || mSwitchedSeeded.AnchorPromptTokens != 0 {
-		t.Fatalf("seedAnchorFromHistory accepted Model A anchor after gateway switched to Model B: %+v (%v)", mSwitchedSeeded, err)
-	}
 
-	// Even if Step 1 is replayed from runtime_model_calls after the gateway switched to Model B,
-	// the replayed receipt retains Model A's ConfigID and must NOT enable usage_delta under Model B!
+	// When Step 1 is replayed from runtime_model_calls after the gateway switched to Model B,
+	// Step 1 replays with Model A's ConfigID, and unrecorded Step 2 must NOT enable usage_delta under Model B!
 	replayedRespA, err := gwModel.Generate(ctxRestartSwitched, step1Prefix)
 	if err != nil {
 		t.Fatal(err)
@@ -906,6 +901,7 @@ func TestGatewayModelConfigIDBindsAndInvalidatesPromptTokensAnchorOnModelSwitch(
 	if !ok || replayedAnchorA.ConfigID != configA {
 		t.Fatalf("replayed Step 1 receipt did not preserve original Model A ConfigID: %+v (ok=%v)", replayedAnchorA, ok)
 	}
+	pRestartSameModel.seedAnchorFromHistory(ctxRestartSwitched, historyWithRespA, nil)
 	mAfterReplayMismatch, err := pRestartSameModel.measureMainContext(ctxRestartSwitched, historyWithRespA, nil)
 	if err != nil || mAfterReplayMismatch.CounterMode != "local" || mAfterReplayMismatch.AnchorPromptTokens != 0 {
 		t.Fatalf("replayed Model A receipt enabled usage_delta after gateway switched to Model B: %+v (%v)", mAfterReplayMismatch, err)
@@ -943,5 +939,141 @@ func TestGatewayModelConfigIDBindsAndInvalidatesPromptTokensAnchorOnModelSwitch(
 	mUnprovable, err := pRestartSameModel.measureMainContext(ctxRestartSwitched, historyWithRespB, nil)
 	if err != nil || mUnprovable.CounterMode != "local" || mUnprovable.AnchorPromptTokens != 0 {
 		t.Fatalf("unprovable gateway config did not fall back to local estimation: %+v (%v)", mUnprovable, err)
+	}
+}
+
+func TestReviewPR53ModelConfigSwitchDoesNotChangeRecordedCompactionBranch(t *testing.T) {
+	for _, switchModel := range []bool{false, true} {
+		name := "same_config"
+		if switchModel {
+			name = "changed_config"
+		}
+		t.Run(name, func(t *testing.T) {
+			s, lease, run := contextModelRun(t)
+			budget, err := ParseContextBudgetSnapshot(run.ContextBudget)
+			if err != nil {
+				t.Fatal(err)
+			}
+			configA := modeltransport.CountingConfigID("https://provider.example/v1", "model-a")
+			configB := modeltransport.CountingConfigID("https://provider.example/v1", "model-b")
+			var activeConfig atomic.Value
+			activeConfig.Store(configA)
+			var upstreamCalls atomic.Int32
+			toolRound := contextToolRound("first", "small successful tool result")
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				call := upstreamCalls.Add(1)
+				configID := activeConfig.Load().(string)
+				msg := assistantTextWithUsage("Done.", 7300, 40)
+				if call == 1 {
+					msg = toolRound[0]
+					msg.ContentBlocks = append([]*schema.ContentBlock{
+						schema.NewContentBlock(&schema.AssistantGenText{Text: strings.Repeat("阶段成果", 400)}),
+					}, msg.ContentBlocks...)
+					msg.ResponseMeta = &schema.AgenticResponseMeta{TokenUsage: &schema.TokenUsage{PromptTokens: 6000, CompletionTokens: 1300, TotalTokens: 7300}}
+				}
+				raw, _ := (&schema.HumanReadableSerializer{}).Marshal(msg)
+				text := string(raw)
+				w.Header().Set(modeltransport.ModelConfigIDHeader, configID)
+				_ = json.NewEncoder(w).Encode(&wire.GatewayChatResponse{Ok: true, ResponseJson: &text, ModelConfigId: &configID})
+			}))
+			defer server.Close()
+			client, err := newGatewayHTTPClient(nil, server.URL+modeltransport.StreamPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			gateway := &GatewayModel{
+				Store: s, Lease: lease, AgentID: lease.AgentID,
+				Client: client, StreamURL: server.URL + modeltransport.StreamPath,
+				ModelConfigID: func() string { return activeConfig.Load().(string) },
+			}
+			newPipeline := func() *ContextPipeline {
+				archive := &pipelineArchiveFixture{}
+				p, err := NewContextPipeline(context.Background(), ContextPipelineConfig{
+					Model: gateway, Budget: budget, Backend: archive,
+					ArchivePath: archive.path, ArchiveTranscript: archive.transcript,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return p
+			}
+			tools := []*schema.ToolInfo{{Name: "lookup", Desc: "Return a short lookup result."}}
+			prefix := append([]*schema.AgenticMessage{
+				schema.SystemAgenticMessage("Trusted system instructions."),
+				schema.UserAgenticMessage(strings.Repeat("甲乙丙丁", 3250)),
+				assistantText("Earlier task completed."),
+			}, inputMessages(run.Inputs)...)
+			ctx := WithRun(context.Background(), run)
+			p := newPipeline()
+			_, initial, err := p.BeforeModelRewriteState(ctx, &adk.TypedChatModelAgentState[*schema.AgenticMessage]{Messages: prefix, ToolInfos: tools}, nil)
+			if err != nil || run.Step.Load() != 0 {
+				t.Fatalf("setup unexpectedly compacted first request: step=%d err=%v", run.Step.Load(), err)
+			}
+			first, err := gateway.Generate(ctx, initial.Messages, model.WithTools(tools))
+			if err != nil {
+				t.Fatal(err)
+			}
+			next := append(append([]*schema.AgenticMessage{}, initial.Messages...), first)
+			next = append(next, toolRound[1:]...)
+			_, original, err := p.BeforeModelRewriteState(ctx, &adk.TypedChatModelAgentState[*schema.AgenticMessage]{Messages: next, ToolInfos: tools}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			measured, err := p.measureMainContext(ctx, original.Messages, tools)
+			if err != nil || measured.CounterMode != "usage_delta" || measured.LocalTokens <= budget.TriggerTokens || measured.EstimatedTokens >= budget.TriggerTokens || run.Step.Load() != 1 {
+				t.Fatalf("setup must select uncompressed calibrated branch: %+v threshold=%d step=%d err=%v", measured, budget.TriggerTokens, run.Step.Load(), err)
+			}
+			t.Logf("original branch: mode=%s local=%d calibrated=%d trigger=%d", measured.CounterMode, measured.LocalTokens, measured.EstimatedTokens, budget.TriggerTokens)
+			if _, err = gateway.Generate(ctx, original.Messages, model.WithTools(tools)); err != nil {
+				t.Fatal(err)
+			}
+			if upstreamCalls.Load() != 2 || run.Step.Load() != 2 {
+				t.Fatal("setup did not persist two main-model receipts")
+			}
+			// Restart the same durable Run before these two accepted calls. Both
+			// recorded calls should replay without contacting any provider.
+			if switchModel {
+				activeConfig.Store(configB)
+			}
+			restarted := &Run{ID: run.ID, Attempt: run.Attempt, AgentID: run.AgentID, Inputs: run.Inputs, ContextProfile: run.ContextProfile, ContextBudget: run.ContextBudget, Front: run.Front}
+			replayCtx := WithRun(context.Background(), restarted)
+			replayPipeline := newPipeline()
+			_, replayInitial, err := replayPipeline.BeforeModelRewriteState(replayCtx, &adk.TypedChatModelAgentState[*schema.AgenticMessage]{Messages: prefix, ToolInfos: tools}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			replayedFirst, err := gateway.Generate(replayCtx, replayInitial.Messages, model.WithTools(tools))
+			if err != nil {
+				t.Fatalf("first accepted call failed replay: %v", err)
+			}
+			replayedNext := append(append([]*schema.AgenticMessage{}, replayInitial.Messages...), replayedFirst)
+			replayedNext = append(replayedNext, toolRound[1:]...)
+			replayMeasure, err := replayPipeline.measureMainContext(replayCtx, replayedNext, tools)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("replayed branch: mode=%s local=%d calibrated=%d trigger=%d", replayMeasure.CounterMode, replayMeasure.LocalTokens, replayMeasure.EstimatedTokens, budget.TriggerTokens)
+			_, replaySecond, err := replayPipeline.BeforeModelRewriteState(replayCtx, &adk.TypedChatModelAgentState[*schema.AgenticMessage]{Messages: replayedNext, ToolInfos: tools}, nil)
+			if err != nil {
+				t.Fatalf("recorded second main-model call cannot replay after config change: step=%d upstream=%d err=%v", restarted.Step.Load(), upstreamCalls.Load(), err)
+			}
+			replayedSecondResp, err := gateway.Generate(replayCtx, replaySecond.Messages, model.WithTools(tools))
+			if err != nil {
+				t.Fatalf("second accepted call failed replay: %v", err)
+			}
+			if upstreamCalls.Load() != 2 {
+				t.Fatalf("replay repeated provider calls: %d", upstreamCalls.Load())
+			}
+			// After all recorded steps have replayed (step=2, nextStep=3 is unrecorded),
+			// a switched gateway config must invalidate the old anchor for any new live step!
+			if switchModel {
+				postReplayMessages := append(append([]*schema.AgenticMessage{}, replaySecond.Messages...), replayedSecondResp, schema.UserAgenticMessage("new live step after replay"))
+				replayPipeline.seedAnchorFromHistory(replayCtx, postReplayMessages, tools)
+				liveMeasure, err := replayPipeline.measureMainContext(replayCtx, postReplayMessages, tools)
+				if err != nil || liveMeasure.CounterMode != "local" || liveMeasure.AnchorPromptTokens != 0 {
+					t.Fatalf("expected unrecorded step 3 after model switch to fall back to local, got %+v (err=%v)", liveMeasure, err)
+				}
+			}
+		})
 	}
 }
