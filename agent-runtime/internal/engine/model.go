@@ -320,28 +320,25 @@ func (m *GatewayModel) checkContextRequest(ctx context.Context, run *Run, step i
 	if err != nil {
 		return requestAdmissionState{}, err
 	}
-	var configID, counterMode string
+	var configID, entryMode string
 	var hasAdmission bool
 	if budget.Version >= 7 {
-		configID, counterMode, hasAdmission = run.consumeAdmissionConfig(isSummaryRequest(request))
+		configID, entryMode, hasAdmission = run.consumeAdmissionConfig(isSummaryRequest(request))
 		if !hasAdmission {
 			configID, _ = m.liveModelConfigID(ctx)
 		}
 	}
-	var anchor *contextUsageAnchor
-	if !hasAdmission || counterMode != "local" {
-		anchor = run.getUsageAnchorForConfig(configID)
-	}
+	anchor := run.getUsageAnchorForConfig(configID)
 	measurement, err := budget.measureCalibratedRequest(anchor, request)
 	if err != nil {
 		return requestAdmissionState{}, err
 	}
-	if counterMode == "" {
-		counterMode = measurement.CounterMode
+	if entryMode == "" {
+		entryMode = measurement.CounterMode
 	}
 	adm := requestAdmissionState{
 		ConfigID:    strings.TrimSpace(configID),
-		CounterMode: counterMode,
+		CounterMode: entryMode,
 		Known:       strings.TrimSpace(configID) != "",
 	}
 	observability.L(ctx).Info("Context request checked", append([]zap.Field{zap.String("event.action", "context-request-checked"), zap.Bool("custom.context.fits", budget.fits(measurement))}, budget.measurementLogFields(measurement, "")...)...)

@@ -242,6 +242,13 @@ func (p *ContextPipeline) BeforeModelRewriteState(ctx context.Context, state *ad
 	}
 	rewriteCtx := withAdmissionState(ctx, configID, recordedMode)
 	p.seedAnchorFromHistory(rewriteCtx, state.Messages, state.ToolInfos, state.DeferredToolInfos)
+	if p.cfg.Budget.Version >= 7 {
+		entryMode := "local"
+		if p.getAnchor(rewriteCtx) != nil {
+			entryMode = "usage_delta"
+		}
+		usageState.setAdmissionConfig(configID, entryMode)
+	}
 	names := []string{}
 	for _, tool := range state.ToolInfos {
 		names = append(names, tool.Name)
@@ -273,18 +280,10 @@ func (p *ContextPipeline) BeforeModelRewriteState(ctx context.Context, state *ad
 		usageState.clearAdmissionConfig()
 		return ctx, nil, err
 	}
-	if p.cfg.Budget.Version >= 7 {
-		usageState.setAdmissionConfig(configID, m.CounterMode)
-	}
 	reason := p.cfg.Budget.compactionReason(m, false)
 	observability.L(ctx).Info("Context measured", append([]zap.Field{zap.String("event.action", "context-measured"), zap.Bool("custom.context.should_compact", reason != "")}, p.cfg.Budget.measurementLogFields(m, reason)...)...)
 	if !p.cfg.Budget.shouldCompact(m) {
 		return ctx, reduced, nil
-	}
-	var stepBefore int64
-	run, _ := CurrentRun(ctx)
-	if run != nil {
-		stepBefore = run.Step.Load()
 	}
 	msgs, err := p.compactStage(rewriteCtx, reduced.Messages, reduced.ToolInfos, false, reduced.DeferredToolInfos)
 	if err != nil {
@@ -298,9 +297,6 @@ func (p *ContextPipeline) BeforeModelRewriteState(ctx context.Context, state *ad
 		return ctx, nil, err
 	}
 	p.commitCompaction(rewriteCtx, reduced.Messages, msgs)
-	if p.cfg.Budget.Version >= 7 && (run != nil && run.Step.Load() > stepBefore || !slices.Equal(msgs, reduced.Messages)) && usageState.hasAdmission() {
-		usageState.setAdmissionConfig(configID, "local")
-	}
 	return ctx, &out, nil
 }
 
@@ -317,25 +313,48 @@ func (p *ContextPipeline) RetryConfig() *adk.TypedModelRetryConfig[*schema.Agent
 			return nil
 		}
 		opts := model.GetCommonOptions(nil, retry.Options...)
-		msgs, err := p.compactStage(ctx, retry.InputMessages, opts.Tools, true, opts.DeferredTools)
+		usageState := p.usageState(ctx)
+		var configID, recordedMode string
+		if p.cfg.Budget.Version >= 7 {
+			var err error
+			configID, recordedMode, _, err = p.currentModelAdmissionState(ctx)
+			if err != nil {
+				usageState.clearAdmissionConfig()
+				return &adk.TypedRetryDecision[*schema.AgenticMessage]{RewriteError: err}
+			}
+		}
+		retryCtx := withAdmissionState(ctx, configID, recordedMode)
+		if p.cfg.Budget.Version >= 7 {
+			entryMode := "local"
+			if p.getAnchor(retryCtx) != nil {
+				entryMode = "usage_delta"
+			}
+			usageState.setAdmissionConfig(configID, entryMode)
+		}
+		msgs, err := p.compactStage(retryCtx, retry.InputMessages, opts.Tools, true, opts.DeferredTools)
 		if err != nil {
+			usageState.clearAdmissionConfig()
 			return &adk.TypedRetryDecision[*schema.AgenticMessage]{RewriteError: err}
 		}
 		before, err := p.cfg.Budget.measureContext(retry.InputMessages, opts.Tools, p.cfg.Budget.OutputReserveTokens, false, opts.DeferredTools)
 		if err != nil {
+			usageState.clearAdmissionConfig()
 			return &adk.TypedRetryDecision[*schema.AgenticMessage]{RewriteError: err}
 		}
 		after, err := p.cfg.Budget.measureContext(msgs, opts.Tools, p.cfg.Budget.OutputReserveTokens, false, opts.DeferredTools)
 		if err != nil {
+			usageState.clearAdmissionConfig()
 			return &adk.TypedRetryDecision[*schema.AgenticMessage]{RewriteError: err}
 		}
 		if !p.cfg.Budget.fits(after) || (after.EstimatedTokens >= before.EstimatedTokens && after.TransportBytes >= before.TransportBytes) {
+			usageState.clearAdmissionConfig()
 			return &adk.TypedRetryDecision[*schema.AgenticMessage]{RewriteError: &ModelError{Code: "context_unrecoverable"}}
 		}
 		if err = emitContextReplacement(ctx, msgs, "context_overflow_recovered_v1"); err != nil {
+			usageState.clearAdmissionConfig()
 			return &adk.TypedRetryDecision[*schema.AgenticMessage]{RewriteError: err}
 		}
-		p.commitCompaction(ctx, retry.InputMessages, msgs)
+		p.commitCompaction(retryCtx, retry.InputMessages, msgs)
 		return &adk.TypedRetryDecision[*schema.AgenticMessage]{Retry: true, ModifiedInputMessages: msgs, PersistModifiedInputMessages: true, RejectReason: "context_overflow"}
 	}}
 }
