@@ -33,9 +33,11 @@ func (s *Service) generateHTTP(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	out := s.call(r.Context(), in.OwnerID, in.AgentID, in.SessionID, in.RunID, in.RequestJSON, in.InputMessageLimit())
+	ctx := withExpectedModelConfigID(r.Context(), r.Header.Get(modeltransport.ModelConfigIDHeader))
+	out := s.call(ctx, in.OwnerID, in.AgentID, in.SessionID, in.RunID, in.RequestJSON, in.InputMessageLimit())
 	if out.GetModelConfigId() != "" {
 		w.Header().Set(modeltransport.ModelConfigIDHeader, out.GetModelConfigId())
+		out.ModelConfigId = nil
 	}
 	api.Write(w, 200, out)
 }

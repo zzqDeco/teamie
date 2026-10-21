@@ -197,7 +197,30 @@ type contextUsageAnchor struct {
 type usageAnchorState struct {
 	mu                 sync.Mutex
 	anchor             *contextUsageAnchor
+	admissionConfigID  string
 	invalidatedAnchors map[string]bool
+}
+
+func (s *usageAnchorState) setAdmissionConfigID(configID string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.admissionConfigID = strings.TrimSpace(configID)
+}
+
+func (s *usageAnchorState) consumeAdmissionConfigID(preserve bool) string {
+	if s == nil {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id := s.admissionConfigID
+	if !preserve {
+		s.admissionConfigID = ""
+	}
+	return id
 }
 
 func (s *usageAnchorState) get() *contextUsageAnchor {
@@ -401,6 +424,15 @@ func clearMessageUsageAnchor(msg *schema.AgenticMessage) {
 func isSummaryModelOptions(opts *model.Options) bool {
 	return opts != nil && len(opts.Tools) == 0 && len(opts.DeferredTools) == 0 &&
 		opts.AgenticToolChoice != nil && opts.AgenticToolChoice.Type == schema.ToolChoiceForbidden
+}
+
+func isSummaryRequest(request []byte) bool {
+	var envelope modeltransport.Request
+	var opts model.Options
+	if json.Unmarshal(request, &envelope) != nil || json.Unmarshal(envelope.Options, &opts) != nil {
+		return false
+	}
+	return isSummaryModelOptions(&opts)
 }
 
 func (b ContextBudgetSnapshot) measureCalibratedContext(anchor *contextUsageAnchor, messages []*schema.AgenticMessage, tools []*schema.ToolInfo, output int, streaming bool, deferred ...[]*schema.ToolInfo) (ContextMeasurement, error) {

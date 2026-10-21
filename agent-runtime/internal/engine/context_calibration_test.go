@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -206,7 +207,7 @@ func TestPromptTokensDeltaCalibrationAndPrefixInvalidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	gw := &GatewayModel{ModelConfigID: func() string { return testModelConfigID }}
-	if err := gw.checkContextRequest(ctx, run, 2, modelRequestHash(rawReq), rawReq, false); err != nil {
+	if _, err := gw.checkContextRequest(ctx, run, 2, modelRequestHash(rawReq), rawReq, false); err != nil {
 		t.Fatalf("checkContextRequest rejected a request that fits under calibrated PromptTokens: %v", err)
 	}
 
@@ -443,8 +444,7 @@ func TestGatewayModelAnchorPersistsAndReplaysDeterministically(t *testing.T) {
 					_ = json.NewEncoder(w).Encode(map[string]string{"type": "done", "modelConfigId": testModelConfigID})
 				} else {
 					text := string(payload)
-					id := testModelConfigID
-					_ = json.NewEncoder(w).Encode(&wire.GatewayChatResponse{Ok: true, ResponseJson: &text, ModelConfigId: &id})
+					_ = json.NewEncoder(w).Encode(&wire.GatewayChatResponse{Ok: true, ResponseJson: &text})
 				}
 			}))
 			defer fixture.Close()
@@ -802,11 +802,7 @@ func TestGatewayModelConfigIDBindsAndInvalidatesPromptTokensAnchorOnModelSwitch(
 		if cfgID != "" {
 			w.Header().Set(modeltransport.ModelConfigIDHeader, cfgID)
 		}
-		var idPtr *string
-		if cfgID != "" {
-			idPtr = &cfgID
-		}
-		_ = json.NewEncoder(w).Encode(&wire.GatewayChatResponse{Ok: true, ResponseJson: &text, ModelConfigId: idPtr})
+		_ = json.NewEncoder(w).Encode(&wire.GatewayChatResponse{Ok: true, ResponseJson: &text})
 	}))
 	defer gatewayServer.Close()
 
@@ -870,7 +866,7 @@ func TestGatewayModelConfigIDBindsAndInvalidatesPromptTokensAnchorOnModelSwitch(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := gwModel.checkContextRequest(ctxRestartSame, runRestartSame, 2, modelRequestHash(rawLargeReq), rawLargeReq, false); err != nil {
+	if _, err := gwModel.checkContextRequest(ctxRestartSame, runRestartSame, 2, modelRequestHash(rawLargeReq), rawLargeReq, false); err != nil {
 		t.Fatalf("same-model checkContextRequest rejected request fitting under Model A calibration: %v", err)
 	}
 
@@ -884,7 +880,7 @@ func TestGatewayModelConfigIDBindsAndInvalidatesPromptTokensAnchorOnModelSwitch(
 	if err != nil || mSwitchedLive.CounterMode != "local" || mSwitchedLive.AnchorPromptTokens != 0 || mSwitchedLive.EstimatedTokens <= budget.TriggerTokens {
 		t.Fatalf("live ContextPipeline continued using Model A anchor after gateway switched to Model B: %+v (%v)", mSwitchedLive, err)
 	}
-	if err := gwModel.checkContextRequest(ctx1, run, 99, modelRequestHash(rawLargeReq), rawLargeReq, false); err == nil {
+	if _, err := gwModel.checkContextRequest(ctx1, run, 99, modelRequestHash(rawLargeReq), rawLargeReq, false); err == nil {
 		t.Fatal("checkContextRequest continued using Model A anchor after gateway switched to Model B")
 	}
 
@@ -974,7 +970,7 @@ func TestReviewPR53ModelConfigSwitchDoesNotChangeRecordedCompactionBranch(t *tes
 				raw, _ := (&schema.HumanReadableSerializer{}).Marshal(msg)
 				text := string(raw)
 				w.Header().Set(modeltransport.ModelConfigIDHeader, configID)
-				_ = json.NewEncoder(w).Encode(&wire.GatewayChatResponse{Ok: true, ResponseJson: &text, ModelConfigId: &configID})
+				_ = json.NewEncoder(w).Encode(&wire.GatewayChatResponse{Ok: true, ResponseJson: &text})
 			}))
 			defer server.Close()
 			client, err := newGatewayHTTPClient(nil, server.URL+modeltransport.StreamPath)
@@ -1073,6 +1069,146 @@ func TestReviewPR53ModelConfigSwitchDoesNotChangeRecordedCompactionBranch(t *tes
 				if err != nil || liveMeasure.CounterMode != "local" || liveMeasure.AnchorPromptTokens != 0 {
 					t.Fatalf("expected unrecorded step 3 after model switch to fall back to local, got %+v (err=%v)", liveMeasure, err)
 				}
+			}
+		})
+	}
+}
+
+func TestAdmissionConfigBindingAndRejectingConfigRecoveryPersistence(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		mode := "unary"
+		if streaming {
+			mode = "stream"
+		}
+		t.Run(mode, func(t *testing.T) {
+			s, lease, run := contextModelRun(t)
+			budget, err := ParseContextBudgetSnapshot(run.ContextBudget)
+			if err != nil {
+				t.Fatal(err)
+			}
+			configA := modeltransport.CountingConfigID("https://provider.example/v1", "model-a")
+			configB := modeltransport.CountingConfigID("https://provider.example/v1", "model-b")
+			var pingConfig atomic.Value
+			pingConfig.Store(configA)
+			var serverConfig atomic.Value
+			serverConfig.Store(configA)
+			var rejectOverflow atomic.Bool
+			var lastRequestHeader atomic.Value
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				reqCfg := strings.TrimSpace(r.Header.Get(modeltransport.ModelConfigIDHeader))
+				lastRequestHeader.Store(reqCfg)
+				actualCfg := serverConfig.Load().(string)
+				w.Header().Set(modeltransport.ModelConfigIDHeader, actualCfg)
+				// Rotate pingConfig right when the server handles the request so any post-failure Ping
+				// would observe configB instead of actualCfg (configA).
+				if rejectOverflow.Load() {
+					pingConfig.Store(configB)
+					code := "context_overflow"
+					if streaming {
+						_ = json.NewEncoder(w).Encode(map[string]any{"type": "error", "errorCode": code, "statusCode": 400, "modelConfigId": actualCfg})
+					} else {
+						status := int32(400)
+						_ = json.NewEncoder(w).Encode(&wire.GatewayChatResponse{Ok: false, ErrorCode: &code, StatusCode: &status})
+					}
+					return
+				}
+				if reqCfg != "" && reqCfg != actualCfg {
+					code := "gateway_unavailable"
+					if streaming {
+						_ = json.NewEncoder(w).Encode(map[string]any{"type": "error", "errorCode": code, "statusCode": 409, "modelConfigId": actualCfg})
+					} else {
+						status := int32(409)
+						_ = json.NewEncoder(w).Encode(&wire.GatewayChatResponse{Ok: false, ErrorCode: &code, StatusCode: &status})
+					}
+					return
+				}
+				msg := assistantTextWithUsage("ok", 500, 10)
+				raw, _ := (&schema.HumanReadableSerializer{}).Marshal(msg)
+				text := string(raw)
+				if streaming {
+					_ = json.NewEncoder(w).Encode(map[string]string{"type": "chunk", "responseJson": text})
+					_ = json.NewEncoder(w).Encode(map[string]string{"type": "done", "modelConfigId": actualCfg})
+				} else {
+					_ = json.NewEncoder(w).Encode(&wire.GatewayChatResponse{Ok: true, ResponseJson: &text})
+				}
+			}))
+			defer server.Close()
+
+			client, err := newGatewayHTTPClient(nil, server.URL+modeltransport.StreamPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			gateway := &GatewayModel{
+				Store:         s,
+				Lease:         lease,
+				AgentID:       lease.AgentID,
+				Client:        client,
+				StreamURL:     server.URL + modeltransport.StreamPath,
+				ModelConfigID: func() string { return pingConfig.Load().(string) },
+			}
+			archive := &pipelineArchiveFixture{}
+			p, err := NewContextPipeline(context.Background(), ContextPipelineConfig{
+				Model: gateway, Budget: budget, Backend: archive, ArchivePath: archive.path, ArchiveTranscript: archive.transcript,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			callModel := func(ctx context.Context, msgs []*schema.AgenticMessage) error {
+				if streaming {
+					sr, err := gateway.Stream(ctx, msgs)
+					if err != nil {
+						return err
+					}
+					defer sr.Close()
+					for {
+						if _, err := sr.Recv(); err != nil {
+							if err == io.EOF {
+								return nil
+							}
+							return err
+						}
+					}
+				}
+				_, err := gateway.Generate(ctx, msgs)
+				return err
+			}
+
+			// 1. TOCTOU between BeforeModelRewriteState (admitted under configA) and generation (gateway rotated to configB):
+			// Generation request must carry X-Teamie-Model-Config-Id: configA and fail with retryable gateway_unavailable.
+			msgs := []*schema.AgenticMessage{schema.SystemAgenticMessage("System"), schema.UserAgenticMessage("Hello")}
+			ctx := WithRun(context.Background(), run)
+			_, rewritten, err := p.BeforeModelRewriteState(ctx, &adk.TypedChatModelAgentState[*schema.AgenticMessage]{Messages: msgs}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			serverConfig.Store(configB)
+			err = callModel(ctx, rewritten.Messages)
+			var modelErr *ModelError
+			if !errors.As(err, &modelErr) || modelErr.Code != "gateway_unavailable" || !modelErr.Retry {
+				t.Fatalf("expected retryable gateway_unavailable on config rotation race, got %v", err)
+			}
+			if got, _ := lastRequestHeader.Load().(string); got != configA {
+				t.Fatalf("generation request did not carry admission config ID %q: got %q", configA, got)
+			}
+
+			// 2. When the gateway rejects a request with context_overflow under configA and an admin rotates
+			// pingConfig to configB before gatewayFailure finishes, runtime_context_recoveries must persist configA.
+			serverConfig.Store(configA)
+			pingConfig.Store(configA)
+			rejectOverflow.Store(true)
+			_, rewritten2, err := p.BeforeModelRewriteState(ctx, &adk.TypedChatModelAgentState[*schema.AgenticMessage]{Messages: msgs}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = callModel(ctx, rewritten2.Messages)
+			if !errors.As(err, &modelErr) || modelErr.Code != "context_overflow" {
+				t.Fatalf("expected context_overflow, got %v", err)
+			}
+			recordedCfg, recorded := s.RecordedModelStepConfigID(ctx, run, int(run.Step.Load()))
+			if !recorded || recordedCfg != configA {
+				t.Fatalf("recovery receipt recorded wrong config ID after post-failure rotation: got %q (recorded=%v), want %q", recordedCfg, recorded, configA)
 			}
 		})
 	}

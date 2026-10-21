@@ -48,7 +48,24 @@ func (p *ContextPipeline) usageState(ctx context.Context) *usageAnchorState {
 	return &p.fallbackUsage
 }
 
+type admissionConfigKey struct{}
+
+func withAdmissionModelConfigID(ctx context.Context, configID string) context.Context {
+	return context.WithValue(ctx, admissionConfigKey{}, strings.TrimSpace(configID))
+}
+
+func admissionModelConfigIDFromContext(ctx context.Context) (string, bool) {
+	if ctx == nil {
+		return "", false
+	}
+	id, ok := ctx.Value(admissionConfigKey{}).(string)
+	return id, ok
+}
+
 func (p *ContextPipeline) currentModelConfigID(ctx context.Context) (string, bool) {
+	if id, ok := admissionModelConfigIDFromContext(ctx); ok {
+		return id, id != ""
+	}
 	if provider, ok := p.cfg.Model.(modelConfigIDProvider); ok && provider != nil {
 		return provider.CurrentModelConfigID(ctx)
 	}
@@ -183,7 +200,14 @@ func (p *ContextPipeline) BeforeModelRewriteState(ctx context.Context, state *ad
 	copyState.ToolInfos = contextToolInfos(state.ToolInfos, p.cfg.Budget)
 	copyState.DeferredToolInfos = contextToolInfos(state.DeferredToolInfos, p.cfg.Budget)
 	state = &copyState
-	p.seedAnchorFromHistory(ctx, state.Messages, state.ToolInfos, state.DeferredToolInfos)
+	usageState := p.usageState(ctx)
+	var configID string
+	if p.cfg.Budget.Version >= 7 {
+		configID, _ = p.currentModelConfigID(ctx)
+	}
+	usageState.setAdmissionConfigID(configID)
+	rewriteCtx := withAdmissionModelConfigID(ctx, configID)
+	p.seedAnchorFromHistory(rewriteCtx, state.Messages, state.ToolInfos, state.DeferredToolInfos)
 	names := []string{}
 	for _, tool := range state.ToolInfos {
 		names = append(names, tool.Name)
@@ -200,16 +224,19 @@ func (p *ContextPipeline) BeforeModelRewriteState(ctx context.Context, state *ad
 			}
 		}
 	}
-	r, err := p.reducer(ctx, names, state.DeferredToolInfos)
+	r, err := p.reducer(rewriteCtx, names, state.DeferredToolInfos)
 	if err != nil {
+		usageState.setAdmissionConfigID("")
 		return ctx, nil, err
 	}
-	ctx, reduced, err := r.BeforeModelRewriteState(ctx, state, mc)
+	_, reduced, err := r.BeforeModelRewriteState(rewriteCtx, state, mc)
 	if err != nil {
+		usageState.setAdmissionConfigID("")
 		return ctx, nil, err
 	}
-	m, err := p.measureMainContext(ctx, reduced.Messages, reduced.ToolInfos, reduced.DeferredToolInfos)
+	m, err := p.measureMainContext(rewriteCtx, reduced.Messages, reduced.ToolInfos, reduced.DeferredToolInfos)
 	if err != nil {
+		usageState.setAdmissionConfigID("")
 		return ctx, nil, err
 	}
 	reason := p.cfg.Budget.compactionReason(m, false)
@@ -217,13 +244,15 @@ func (p *ContextPipeline) BeforeModelRewriteState(ctx context.Context, state *ad
 	if !p.cfg.Budget.shouldCompact(m) {
 		return ctx, reduced, nil
 	}
-	msgs, err := p.compact(ctx, reduced.Messages, reduced.ToolInfos, false, reduced.DeferredToolInfos)
+	msgs, err := p.compact(rewriteCtx, reduced.Messages, reduced.ToolInfos, false, reduced.DeferredToolInfos)
 	if err != nil {
+		usageState.setAdmissionConfigID("")
 		return ctx, nil, err
 	}
 	out := *reduced
 	out.Messages = msgs
 	if err = emitContextReplacement(ctx, msgs, "context_compacted_v1"); err != nil {
+		usageState.setAdmissionConfigID("")
 		return ctx, nil, err
 	}
 	return ctx, &out, nil

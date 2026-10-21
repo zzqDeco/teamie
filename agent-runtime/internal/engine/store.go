@@ -95,6 +95,20 @@ func (r *Run) clearUsageAnchor() {
 	r.usageState.clear()
 }
 
+func (r *Run) setAdmissionConfigID(configID string) {
+	if r == nil {
+		return
+	}
+	r.usageState.setAdmissionConfigID(configID)
+}
+
+func (r *Run) consumeAdmissionConfigID(preserve bool) string {
+	if r == nil {
+		return ""
+	}
+	return r.usageState.consumeAdmissionConfigID(preserve)
+}
+
 func (r *Run) invalidateUsageAnchor(messages []*schema.AgenticMessage) {
 	if r == nil {
 		return

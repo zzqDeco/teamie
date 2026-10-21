@@ -6,6 +6,7 @@ import (
 	"errors"
 	"go.uber.org/zap"
 	"net/http"
+	"strings"
 	"teamie/backend/pkg/observability"
 	"time"
 
@@ -72,7 +73,7 @@ func (s *Service) streamHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		failed := failed(e)
-		_ = emit(StreamEvent{Type: "error", ErrorCode: failed.GetErrorCode(), ErrorMessage: failed.GetErrorMessage(), StatusCode: int(failed.GetStatusCode())})
+		_ = emit(StreamEvent{Type: "error", ErrorCode: failed.GetErrorCode(), ErrorMessage: failed.GetErrorMessage(), StatusCode: int(failed.GetStatusCode()), ModelConfigID: configID})
 	}
 	c, e := s.Store.Load(r.Context())
 	if e != nil {
@@ -90,6 +91,10 @@ func (s *Service) streamHTTP(w http.ResponseWriter, r *http.Request) {
 	configID = c.CountingConfigID()
 	if configID != "" {
 		w.Header().Set(modeltransport.ModelConfigIDHeader, configID)
+	}
+	if expected := strings.TrimSpace(r.Header.Get(modeltransport.ModelConfigIDHeader)); expected != "" && expected != configID {
+		terminal(api.Err(409, "gateway_unavailable", "Model gateway configuration changed"))
+		return
 	}
 	select {
 	case s.slots <- struct{}{}:

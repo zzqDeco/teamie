@@ -74,6 +74,7 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 	cached, err := m.cachedModel(ctx, run, step, hash, input, opts, true)
 	if err == nil {
 		phase = "receipt-replay"
+		run.consumeAdmissionConfigID(false)
 		result, e := decodeAgenticMessage(cached)
 		if e != nil {
 			return nil, e
@@ -86,9 +87,11 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 		return nil, err
 	}
 	if err = m.cachedRecovery(ctx, run, step, hash, true); err != nil {
+		run.consumeAdmissionConfigID(false)
 		return nil, err
 	}
-	if err = m.checkContextRequest(ctx, run, step, hash, request, true); err != nil {
+	reqConfigID, err := m.checkContextRequest(ctx, run, step, hash, request, true)
+	if err != nil {
 		return nil, err
 	}
 	if m.StreamURL == "" {
@@ -104,6 +107,9 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 	}
 	req.Header.Set("Authorization", "Bearer "+m.Token)
 	req.Header.Set("Content-Type", "application/json")
+	if reqConfigID != "" {
+		req.Header.Set(modeltransport.ModelConfigIDHeader, reqConfigID)
+	}
 	client := m.HTTP
 	if client == nil {
 		client = gatewayStreamHTTP
@@ -117,7 +123,17 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 		failure := readGatewayHTTPFailure(response)
 		response.Body.Close()
 		cancel()
-		return nil, m.gatewayFailure(ctx, run, step, hash, true, failure.Code)
+		errConfigID := strings.TrimSpace(failure.ConfigID)
+		if errConfigID == "" {
+			errConfigID = reqConfigID
+		}
+		return nil, m.gatewayFailure(ctx, run, step, hash, true, failure.Code, errConfigID)
+	}
+	respHeaderConfigID := strings.TrimSpace(response.Header.Get(modeltransport.ModelConfigIDHeader))
+	if respHeaderConfigID != "" && reqConfigID != "" && respHeaderConfigID != reqConfigID {
+		response.Body.Close()
+		cancel()
+		return nil, &ModelError{Code: "gateway_unavailable", Retry: true}
 	}
 	reader, writer := schema.Pipe[*schema.AgenticMessage](8)
 	output, bridgeDone := cancelStreamOnClose(reader, cancel)
@@ -142,9 +158,9 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 		scanner.Buffer(make([]byte, 4096), modeltransport.MaxHTTPStreamFrameBytes)
 		chunks := &modelStreamAccumulator{}
 		requestID := ""
-		streamConfigID := strings.TrimSpace(response.Header.Get(modeltransport.ModelConfigIDHeader))
+		streamConfigID := respHeaderConfigID
 		if streamConfigID == "" {
-			streamConfigID, _ = m.liveModelConfigID(ctx)
+			streamConfigID = reqConfigID
 		}
 		anchorAttached := false
 		total := 0
@@ -172,6 +188,10 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 			}
 			switch frame.Type {
 			case "chunk":
+				if reqConfigID != "" && streamConfigID != "" && streamConfigID != reqConfigID {
+					fail(&ModelError{Code: "gateway_unavailable", Retry: true})
+					return
+				}
 				if len(frame.ResponseJSON) > modeltransport.MaxResponseBytes {
 					fail(&ModelError{Code: "upstream_response_limit"})
 					return
@@ -219,10 +239,14 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 					// Never replay it as a side-effect-free overflow decision.
 					fail(&ModelError{Code: "upstream_in_stream_error"})
 				} else {
-					fail(m.gatewayFailure(ctx, run, step, hash, true, code))
+					fail(m.gatewayFailure(ctx, run, step, hash, true, code, streamConfigID))
 				}
 				return
 			case "done":
+				if reqConfigID != "" && streamConfigID != "" && streamConfigID != reqConfigID {
+					fail(&ModelError{Code: "gateway_unavailable", Retry: true})
+					return
+				}
 				done = true
 				receivedDone = true
 			default:

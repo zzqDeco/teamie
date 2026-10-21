@@ -27,6 +27,7 @@ type ModelError struct {
 	// Private diagnostics never change Error(), public safe codes, hashes or
 	// durable model/tool receipts. The native cause remains available internally.
 	Stage, Reason                string
+	ConfigID                     string
 	ExpectedBlocks, ActualBlocks int
 	Cause                        error
 }
@@ -147,6 +148,7 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticM
 	cached, e := m.cachedModel(ctx, run, step, hash, messages, opts, false)
 	if e == nil {
 		phase = "receipt-replay"
+		run.consumeAdmissionConfigID(false)
 		result, decodeErr := decodeAgenticMessage(cached)
 		if decodeErr == nil {
 			replayedConfigID, _ := extractRecordedModelConfigID(result)
@@ -158,17 +160,23 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticM
 		return nil, e
 	}
 	if e = m.cachedRecovery(ctx, run, step, hash, false); e != nil {
+		run.consumeAdmissionConfigID(false)
 		return nil, e
 	}
-	if e = m.checkContextRequest(ctx, run, step, hash, request, false); e != nil {
+	reqConfigID, e := m.checkContextRequest(ctx, run, step, hash, request, false)
+	if e != nil {
 		return nil, e
 	}
 	phase = "gateway-request"
-	response, e := m.Client.Chat(ctx, &wire.GatewayChatRequest{ServiceToken: m.Token, OwnerId: m.OwnerID, AgentId: m.AgentID, SessionId: "agent:" + m.AgentID, RunId: executionID(run), RequestJson: string(request)})
+	response, e := m.Client.Chat(withExpectedModelConfigID(ctx, reqConfigID), &wire.GatewayChatRequest{ServiceToken: m.Token, OwnerId: m.OwnerID, AgentId: m.AgentID, SessionId: "agent:" + m.AgentID, RunId: executionID(run), RequestJson: string(request)})
 	if e != nil {
 		var gatewayError *ModelError
 		if errors.As(e, &gatewayError) {
-			return nil, m.gatewayFailure(ctx, run, step, hash, false, gatewayError.Code)
+			errConfigID := strings.TrimSpace(gatewayError.ConfigID)
+			if errConfigID == "" {
+				errConfigID = reqConfigID
+			}
+			return nil, m.gatewayFailure(ctx, run, step, hash, false, gatewayError.Code, errConfigID)
 		}
 		return nil, &ModelError{Code: "gateway_unavailable", Retry: true}
 	}
@@ -177,7 +185,11 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticM
 		if code == "" {
 			code = "gateway_error"
 		}
-		return nil, m.gatewayFailure(ctx, run, step, hash, false, code)
+		errConfigID := strings.TrimSpace(response.GetModelConfigId())
+		if errConfigID == "" {
+			errConfigID = reqConfigID
+		}
+		return nil, m.gatewayFailure(ctx, run, step, hash, false, code, errConfigID)
 	}
 	if len(response.GetResponseJson()) > modeltransport.MaxResponseBytes {
 		return nil, &ModelError{Code: "upstream_response_limit"}
@@ -192,8 +204,11 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticM
 		return nil, e
 	}
 	respConfigID := strings.TrimSpace(response.GetModelConfigId())
+	if respConfigID != "" && reqConfigID != "" && respConfigID != reqConfigID {
+		return nil, &ModelError{Code: "gateway_unavailable", Retry: true}
+	}
 	if respConfigID == "" {
-		respConfigID, _ = m.liveModelConfigID(ctx)
+		respConfigID = reqConfigID
 	}
 	run.recordModelUsageAnchor(step, request, result, respConfigID)
 	phase = "serialize-result"
@@ -278,24 +293,30 @@ func (m *GatewayModel) capRunOutput(run *Run, opts *model.Options) error {
 	return nil
 }
 
-func (m *GatewayModel) checkContextRequest(ctx context.Context, run *Run, step int, hash string, request []byte, streaming bool) error {
+func (m *GatewayModel) checkContextRequest(ctx context.Context, run *Run, step int, hash string, request []byte, streaming bool) (string, error) {
 	if contextProfile(run) != contextProfileV1 {
-		return nil
+		return "", nil
 	}
 	budget, err := ParseContextBudgetSnapshot(run.ContextBudget)
 	if err != nil {
-		return err
+		return "", err
 	}
-	configID, _ := m.liveModelConfigID(ctx)
+	var configID string
+	if budget.Version >= 7 {
+		configID = run.consumeAdmissionConfigID(isSummaryRequest(request))
+		if configID == "" {
+			configID, _ = m.liveModelConfigID(ctx)
+		}
+	}
 	measurement, err := budget.measureCalibratedRequest(run.getUsageAnchorForConfig(configID), request)
 	if err != nil {
-		return err
+		return "", err
 	}
 	observability.L(ctx).Info("Context request checked", append([]zap.Field{zap.String("event.action", "context-request-checked"), zap.Bool("custom.context.fits", budget.fits(measurement))}, budget.measurementLogFields(measurement, "")...)...)
 	if !budget.fits(measurement) {
-		return m.gatewayFailure(ctx, run, step, hash, streaming, "request_too_large")
+		return configID, m.gatewayFailure(ctx, run, step, hash, streaming, "request_too_large", configID)
 	}
-	return nil
+	return configID, nil
 }
 
 func (m *GatewayModel) capOutput(opts *model.Options) {

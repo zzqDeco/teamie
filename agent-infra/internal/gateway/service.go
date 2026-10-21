@@ -62,6 +62,20 @@ func (s *Service) Chat(ctx context.Context, r *agent.GatewayChatRequest) (*agent
 	// provider call here could orphan the single model slot indefinitely.
 	return failed(api.Err(400, "protocol_unsupported", "Model generation requires the private HTTP transport")), nil
 }
+type expectedConfigIDKey struct{}
+
+func withExpectedModelConfigID(ctx context.Context, configID string) context.Context {
+	return context.WithValue(ctx, expectedConfigIDKey{}, strings.TrimSpace(configID))
+}
+
+func expectedModelConfigID(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	id, _ := ctx.Value(expectedConfigIDKey{}).(string)
+	return id
+}
+
 func (s *Service) call(ctx context.Context, owner, id, session, run, raw string, messageLimits ...int) (result *agent.GatewayChatResponse) {
 	ctx, operation := gatewayOperation(ctx, id, session, run, false)
 	var callFailure error
@@ -81,15 +95,27 @@ func (s *Service) call(ctx context.Context, owner, id, session, run, raw string,
 	if !c.Enabled {
 		return fail(api.Err(409, "model_disabled", "The model gateway is disabled"))
 	}
+	var configID *string
+	if id := c.CountingConfigID(); id != "" {
+		configID = &id
+	}
+	failWithConfig := func(err error) *agent.GatewayChatResponse {
+		res := fail(err)
+		res.ModelConfigId = configID
+		return res
+	}
+	if expected := expectedModelConfigID(ctx); expected != "" && expected != c.CountingConfigID() {
+		return failWithConfig(api.Err(409, "gateway_unavailable", "Model gateway configuration changed"))
+	}
 	select {
 	case s.slots <- struct{}{}:
 		defer func() { <-s.slots }()
 	default:
-		return fail(api.Err(429, "gateway_busy", "The model gateway is busy"))
+		return failWithConfig(api.Err(429, "gateway_busy", "The model gateway is busy"))
 	}
 	key, e := s.Cipher.Decrypt(c.CipherKey)
 	if e != nil {
-		return fail(&api.Error{Status: 503, Code: "credential_unavailable", Message: "Saved model credential could not be decrypted", Cause: e})
+		return failWithConfig(&api.Error{Status: 503, Code: "credential_unavailable", Message: "Saved model credential could not be decrypted", Cause: e})
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -110,12 +136,9 @@ func (s *Service) call(ctx context.Context, owner, id, session, run, raw string,
 	if e != nil {
 		callFailure = e
 		response = failed(e)
+		response.ModelConfigId = configID
 		status = response.GetErrorCode()
 	} else {
-		var configID *string
-		if id := c.CountingConfigID(); id != "" {
-			configID = &id
-		}
 		response = &agent.GatewayChatResponse{Ok: true, ResponseJson: &body, StatusCode: ptr(int32(200)), ModelConfigId: configID}
 		phase = "usage-persist"
 	}
@@ -123,7 +146,7 @@ func (s *Service) call(ctx context.Context, owner, id, session, run, raw string,
 	defer auditCancel()
 	if auditErr := s.Store.Record(auditCtx, Usage{OwnerID: owner, AgentID: id, SessionID: session, RunID: run, Status: status, PromptTokens: prompt, CompletionTokens: completion, LatencyMS: time.Since(start).Milliseconds()}); auditErr != nil {
 		phase = "usage-persist"
-		return fail(&api.Error{Status: 503, Code: "usage_unavailable", Message: "Model usage could not be recorded", Cause: auditErr})
+		return failWithConfig(&api.Error{Status: 503, Code: "usage_unavailable", Message: "Model usage could not be recorded", Cause: auditErr})
 	}
 	return response
 }

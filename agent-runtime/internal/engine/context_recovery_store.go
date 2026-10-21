@@ -143,11 +143,10 @@ func (m *GatewayModel) cachedRecovery(ctx context.Context, run *Run, step int, h
 	return failure
 }
 
-func (m *GatewayModel) gatewayFailure(ctx context.Context, run *Run, step int, hash string, streaming bool, code string) error {
+func (m *GatewayModel) gatewayFailure(ctx context.Context, run *Run, step int, hash string, streaming bool, code string, configID ...string) error {
 	code = safeGatewayCode(code)
 	if contextProfile(run) == contextProfileV1 && isContextOverflow(code) {
-		cfgID, _ := m.liveModelConfigID(ctx)
-		if err := m.Store.SaveContextRecovery(ctx, m.Lease, run, step, hash, streaming, code, cfgID); err != nil {
+		if err := m.Store.SaveContextRecovery(ctx, m.Lease, run, step, hash, streaming, code, configID...); err != nil {
 			return err
 		}
 		return &ModelError{Code: code}
