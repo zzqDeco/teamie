@@ -37,6 +37,7 @@ struct PingResponse {
   2: optional bool configured
   3: optional bool enabled
   4: optional i64 contextWindowTokens
+  5: optional string modelConfigId
 }
 service AgentControlService {
   AgentListResponse ListAgents(1: AgentListRequest request)
@@ -87,6 +88,7 @@ struct GatewayChatResponse {
   3: optional string errorCode
   4: optional string errorMessage
   5: optional i32 statusCode
+  6: optional string modelConfigId
 }
 service ModelGatewayService {
   GatewayChatResponse Chat(1: GatewayChatRequest request)

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 	"teamie/backend/pkg/observability"
 	"time"
@@ -73,9 +74,16 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 	cached, err := m.cachedModel(ctx, run, step, hash, input, opts, true)
 	if err == nil {
 		phase = "receipt-replay"
+		run.consumeAdmissionConfig(false)
 		result, e := decodeAgenticMessage(cached)
 		if e != nil {
 			return nil, e
+		}
+		replayedConfigID, _ := extractRecordedModelConfigID(result)
+		if replayedAdm, ok := extractRecordedAdmissionMetadata(result); ok {
+			run.recordModelUsageAnchor(step, request, result, replayedConfigID, replayedAdm)
+		} else {
+			run.recordModelUsageAnchor(step, request, result, replayedConfigID)
 		}
 		return schema.StreamReaderFromArray([]*schema.AgenticMessage{result}), nil
 	}
@@ -83,11 +91,14 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 		return nil, err
 	}
 	if err = m.cachedRecovery(ctx, run, step, hash, true); err != nil {
+		run.consumeAdmissionConfig(false)
 		return nil, err
 	}
-	if err = m.checkContextRequest(ctx, run, step, hash, request, true); err != nil {
+	adm, err := m.checkContextRequest(ctx, run, step, hash, request, true)
+	if err != nil {
 		return nil, err
 	}
+	reqConfigID := adm.ConfigID
 	if m.StreamURL == "" {
 		return nil, &ModelError{Code: "gateway_stream_unavailable", Retry: true}
 	}
@@ -101,6 +112,9 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 	}
 	req.Header.Set("Authorization", "Bearer "+m.Token)
 	req.Header.Set("Content-Type", "application/json")
+	if reqConfigID != "" {
+		req.Header.Set(modeltransport.ModelConfigIDHeader, reqConfigID)
+	}
 	client := m.HTTP
 	if client == nil {
 		client = gatewayStreamHTTP
@@ -114,7 +128,17 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 		failure := readGatewayHTTPFailure(response)
 		response.Body.Close()
 		cancel()
-		return nil, m.gatewayFailure(ctx, run, step, hash, true, failure.Code)
+		errConfigID := strings.TrimSpace(failure.ConfigID)
+		if errConfigID == "" {
+			errConfigID = reqConfigID
+		}
+		return nil, m.gatewayFailure(ctx, run, step, hash, true, failure.Code, errConfigID, adm)
+	}
+	respHeaderConfigID := strings.TrimSpace(response.Header.Get(modeltransport.ModelConfigIDHeader))
+	if respHeaderConfigID != "" && reqConfigID != "" && respHeaderConfigID != reqConfigID {
+		response.Body.Close()
+		cancel()
+		return nil, &ModelError{Code: "gateway_unavailable", Retry: true}
 	}
 	reader, writer := schema.Pipe[*schema.AgenticMessage](8)
 	output, bridgeDone := cancelStreamOnClose(reader, cancel)
@@ -139,6 +163,11 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 		scanner.Buffer(make([]byte, 4096), modeltransport.MaxHTTPStreamFrameBytes)
 		chunks := &modelStreamAccumulator{}
 		requestID := ""
+		streamConfigID := respHeaderConfigID
+		if streamConfigID == "" {
+			streamConfigID = reqConfigID
+		}
+		anchorAttached := false
 		total := 0
 		done := false
 		for scanner.Scan() {
@@ -149,17 +178,25 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 				return
 			}
 			var frame struct {
-				Type         string `json:"type"`
-				ResponseJSON string `json:"responseJson"`
-				ErrorCode    string `json:"errorCode"`
+				Type          string `json:"type"`
+				ResponseJSON  string `json:"responseJson"`
+				ErrorCode     string `json:"errorCode"`
+				ModelConfigID string `json:"modelConfigId"`
 			}
 			stage = "frame-decode"
 			if decodeErr := json.Unmarshal(scanner.Bytes(), &frame); decodeErr != nil {
 				fail(modelDiagnostic(stage, "invalid_transport_frame", decodeErr))
 				return
 			}
+			if id := strings.TrimSpace(frame.ModelConfigID); id != "" {
+				streamConfigID = id
+			}
 			switch frame.Type {
 			case "chunk":
+				if reqConfigID != "" && streamConfigID != "" && streamConfigID != reqConfigID {
+					fail(&ModelError{Code: "gateway_unavailable", Retry: true})
+					return
+				}
 				if len(frame.ResponseJSON) > modeltransport.MaxResponseBytes {
 					fail(&ModelError{Code: "upstream_response_limit"})
 					return
@@ -181,7 +218,16 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 					fail(e)
 					return
 				}
-				if writer.Send(message, nil) {
+				outMsg := cloneStreamMessage(message)
+				if !anchorAttached && message.ResponseMeta != nil && message.ResponseMeta.TokenUsage != nil && message.ResponseMeta.TokenUsage.PromptTokens > 0 {
+					if anchor := run.computeRequestUsageAnchor(step, request, message, streamConfigID); anchor != nil {
+						anchor.AdmissionConfigID = strings.TrimSpace(adm.ConfigID)
+						anchor.CounterMode = strings.TrimSpace(adm.CounterMode)
+						anchorAttached = true
+						attachUsageAnchor(outMsg, anchor)
+					}
+				}
+				if writer.Send(outMsg, nil) {
 					streamFailure = observability.Diagnostic("stream_consumer_closed", requestCtx.Err())
 					stage = "consumer-closed"
 					return
@@ -194,10 +240,14 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 					// Never replay it as a side-effect-free overflow decision.
 					fail(&ModelError{Code: "upstream_in_stream_error"})
 				} else {
-					fail(m.gatewayFailure(ctx, run, step, hash, true, code))
+					fail(m.gatewayFailure(ctx, run, step, hash, true, code, streamConfigID, adm))
 				}
 				return
 			case "done":
+				if reqConfigID != "" && streamConfigID != "" && streamConfigID != reqConfigID {
+					fail(&ModelError{Code: "gateway_unavailable", Retry: true})
+					return
+				}
 				done = true
 				receivedDone = true
 			default:
@@ -238,6 +288,7 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 			return
 		}
 		stage = "serialize-result"
+		run.recordModelUsageAnchor(step, request, result, streamConfigID, adm)
 		b, err := (&schema.HumanReadableSerializer{}).Marshal(result)
 		if err == nil && len(b) > modeltransport.MaxResponseBytes {
 			err = &ModelError{Code: "upstream_response_limit"}
@@ -384,7 +435,25 @@ func (a *modelStreamAccumulator) result() (*schema.AgenticMessage, error) {
 	if err := a.flush(); err != nil {
 		return nil, err
 	}
-	return a.concatFinal()
+	final, err := a.concatFinal()
+	if err != nil {
+		return nil, err
+	}
+	return cloneStreamMessage(final), nil
+}
+
+func cloneStreamMessage(message *schema.AgenticMessage) *schema.AgenticMessage {
+	if message == nil {
+		return nil
+	}
+	cloned := *message
+	if len(message.Extra) > 0 {
+		cloned.Extra = make(map[string]any, len(message.Extra))
+		for k, v := range message.Extra {
+			cloned.Extra[k] = v
+		}
+	}
+	return &cloned
 }
 
 func (a *modelStreamAccumulator) concatFinal() (*schema.AgenticMessage, error) {

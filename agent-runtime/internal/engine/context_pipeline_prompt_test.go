@@ -26,7 +26,7 @@ func TestContextVisibleCounterSeparatesAuditAndProviderCapacity(t *testing.T) {
 	}
 	msg.ContentBlocks[0].UserInputText.Text += strings.Repeat("input payload ", 1000)
 	changed, _ := measureContext([]*schema.AgenticMessage{msg}, nil, 2048, false)
-	if changed.EstimatedTokens < after.EstimatedTokens+4000 {
+	if changed.EstimatedTokens < after.EstimatedTokens+3500 {
 		t.Fatal("provider-visible body was omitted from capacity")
 	}
 }

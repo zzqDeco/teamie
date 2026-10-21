@@ -16,7 +16,7 @@ func fragmentedHistoryFixture(t *testing.T) (*ContextPipeline, []*schema.Agentic
 	for i := 0; i < 30; i++ {
 		message := schema.UserAgenticMessage(fmt.Sprintf("older-message-%02d: %s", i, strings.Repeat("A small immutable observation. ", 18)))
 		message.Extra = map[string]any{"teamie_context_data": contextProfileV1, "teamie_context_sources": contextSourceValue([]InputSource{{ConversationID: "older-conversation", MessageID: fmt.Sprintf("older-message-%02d", i), EventID: fmt.Sprint(i)}})}
-		measurement, err := measureContext([]*schema.AgenticMessage{message}, nil, p.cfg.Budget.OutputReserveTokens, false)
+		measurement, err := p.cfg.Budget.measureContext([]*schema.AgenticMessage{message}, nil, p.cfg.Budget.OutputReserveTokens, false)
 		if err != nil || measurement.EstimatedTokens >= 384 {
 			t.Fatal("fixture does not reproduce individually small history", measurement, err)
 		}
@@ -31,7 +31,7 @@ func fragmentedHistoryFixture(t *testing.T) (*ContextPipeline, []*schema.Agentic
 func TestFragmentedHistoryFitsWithoutLosingCurrentWorkOrRecentToolResults(t *testing.T) {
 	p, messages, tools := fragmentedHistoryFixture(t)
 	_, ctx, _, _ := currentInputFixture(t)
-	before, err := measureContext(messages, tools, p.cfg.Budget.OutputReserveTokens, false)
+	before, err := p.cfg.Budget.measureContext(messages, tools, p.cfg.Budget.OutputReserveTokens, false)
 	if err != nil || p.cfg.Budget.fits(before) {
 		t.Fatal("fixture must exceed model capacity", before, err)
 	}
@@ -39,7 +39,7 @@ func TestFragmentedHistoryFitsWithoutLosingCurrentWorkOrRecentToolResults(t *tes
 	if err != nil {
 		t.Fatal("small historical fragments stopped the continuous Session", err)
 	}
-	after, err := measureContext(out, tools, p.cfg.Budget.OutputReserveTokens, false)
+	after, err := p.cfg.Budget.measureContext(out, tools, p.cfg.Budget.OutputReserveTokens, false)
 	if err != nil || !p.cfg.Budget.fits(after) || after.EstimatedTokens >= before.EstimatedTokens {
 		t.Fatal("history did not shrink to real capacity", before, after, err)
 	}
@@ -76,7 +76,7 @@ func TestFragmentedHistoryTransportPressureIsAlsoRecoverable(t *testing.T) {
 	for _, message := range messages[1:31] {
 		message.Extra["receipt_metadata"] = strings.Repeat("opaque", 3000)
 	}
-	before, err := measureContext(messages, nil, p.cfg.Budget.OutputReserveTokens, false)
+	before, err := p.cfg.Budget.measureContext(messages, nil, p.cfg.Budget.OutputReserveTokens, false)
 	if err != nil || before.EstimatedTokens > p.cfg.Budget.InputTokenLimit || before.TransportBytes <= p.cfg.Budget.TransportLimitBytes {
 		t.Fatal("fixture must reproduce transport-only pressure", before, err)
 	}
@@ -84,7 +84,7 @@ func TestFragmentedHistoryTransportPressureIsAlsoRecoverable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	after, err := measureContext(out, nil, p.cfg.Budget.OutputReserveTokens, false)
+	after, err := p.cfg.Budget.measureContext(out, nil, p.cfg.Budget.OutputReserveTokens, false)
 	if err != nil || !p.cfg.Budget.fits(after) {
 		t.Fatal("coalesced transport still exceeds capacity", after, err)
 	}

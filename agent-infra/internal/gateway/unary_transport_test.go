@@ -42,6 +42,9 @@ func fixtureHTTPChat(t *testing.T, s *Service, ctx context.Context, in *agent.Ga
 	}
 	var out agent.GatewayChatResponse
 	err := json.Unmarshal(w.Body.Bytes(), &out)
+	if hdr := strings.TrimSpace(w.Header().Get(modeltransport.ModelConfigIDHeader)); hdr != "" {
+		out.ModelConfigId = &hdr
+	}
 	return &out, err
 }
 
@@ -230,5 +233,91 @@ func TestPrivateGenerationRequiresServiceBearerRatherThanBrowserCredentials(t *t
 	}
 	if calls.Load() != 0 || len(s.slots) != 0 {
 		t.Fatal("unauthorized browser call reached model capacity")
+	}
+}
+
+func TestGatewayExposesAndRotatesModelConfigIDAcrossUnaryStreamAndPing(t *testing.T) {
+	var providerCalls atomic.Int32
+	s, provider := streamFixtureService(t, func(w http.ResponseWriter, r *http.Request) {
+		providerCalls.Add(1)
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, lifetimeCompletion)
+	})
+	defer provider.Close()
+
+	pingA, err := s.Ping(context.Background(), &agent.PingRequest{ServiceToken: &s.Token})
+	if err != nil || !pingA.Ready || pingA.GetModelConfigId() == "" {
+		t.Fatalf("gateway Ping did not expose opaque ModelConfigId: %+v (%v)", pingA, err)
+	}
+	configA := pingA.GetModelConfigId()
+	if strings.Contains(configA, provider.URL) || strings.Contains(configA, "fixture") {
+		t.Fatalf("ModelConfigId leaked raw URL or model name: %q", configA)
+	}
+
+	// Verify unary POST response carries X-Teamie-Model-Config-Id header while keeping the JSON body compatible with older DisallowUnknownFields decoders.
+	rawCall, _ := json.Marshal(modeltransport.CallRequest{
+		OwnerID:     "o",
+		AgentID:     "a",
+		SessionID:   "s",
+		RunID:       "r-1",
+		RequestJSON: fixtureNativeRequest(`{"messages":[{"role":"user","content":"hello"}]}`, false),
+	})
+	postReq, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, modeltransport.GeneratePath, bytes.NewReader(rawCall))
+	postReq.Header.Set("Authorization", "Bearer "+testToken)
+	postReq.Header.Set(modeltransport.ModelConfigIDHeader, configA)
+	postRec := httptest.NewRecorder()
+	s.Routes(api.AdminAuth{}).ServeHTTP(postRec, postReq)
+	var legacyOut struct {
+		Ok           bool    `json:"ok"`
+		ResponseJson *string `json:"responseJson,omitempty"`
+		ErrorCode    *string `json:"errorCode,omitempty"`
+		ErrorMessage *string `json:"errorMessage,omitempty"`
+		StatusCode   *int32  `json:"statusCode,omitempty"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(postRec.Body.Bytes()))
+	dec.DisallowUnknownFields()
+	if postRec.Code != 200 || dec.Decode(&legacyOut) != nil || !legacyOut.Ok || postRec.Header().Get(modeltransport.ModelConfigIDHeader) != configA || strings.Contains(postRec.Body.String(), "modelConfigId") {
+		t.Fatalf("unary response incompatible or missing header: header=%q body=%s", postRec.Header().Get(modeltransport.ModelConfigIDHeader), postRec.Body.String())
+	}
+
+	// Rotate model in store while keeping ContextWindowTokens unchanged -> ModelConfigId must change.
+	cfg, err := s.Store.Load(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Model = "rotated-model-b"
+	if _, err := s.Store.Save(context.Background(), cfg, nil, false, s.Cipher); err != nil {
+		t.Fatal(err)
+	}
+	pingB, err := s.Ping(context.Background(), &agent.PingRequest{ServiceToken: &s.Token})
+	if err != nil || !pingB.Ready || pingB.GetModelConfigId() == "" || pingB.GetModelConfigId() == configA {
+		t.Fatalf("rotating model under same window did not rotate ModelConfigId: before=%q after=%+v", configA, pingB)
+	}
+	configB := pingB.GetModelConfigId()
+
+	// Requests bound to stale configA must be rejected before reaching the provider.
+	callsBefore := providerCalls.Load()
+	staleUnaryReq, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, modeltransport.GeneratePath, bytes.NewReader(rawCall))
+	staleUnaryReq.Header.Set("Authorization", "Bearer "+testToken)
+	staleUnaryReq.Header.Set(modeltransport.ModelConfigIDHeader, configA)
+	staleUnaryRec := httptest.NewRecorder()
+	s.Routes(api.AdminAuth{}).ServeHTTP(staleUnaryRec, staleUnaryReq)
+	var staleOut agent.GatewayChatResponse
+	if staleUnaryRec.Code != 200 || json.Unmarshal(staleUnaryRec.Body.Bytes(), &staleOut) != nil || staleOut.Ok || staleOut.GetErrorCode() != "gateway_unavailable" || staleUnaryRec.Header().Get(modeltransport.ModelConfigIDHeader) != configB {
+		t.Fatalf("stale unary request was not rejected with active config header: header=%q out=%+v", staleUnaryRec.Header().Get(modeltransport.ModelConfigIDHeader), staleOut)
+	}
+
+	staleStreamReq, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, modeltransport.StreamPath, bytes.NewReader(rawCall))
+	staleStreamReq.Header.Set("Authorization", "Bearer "+testToken)
+	staleStreamReq.Header.Set(modeltransport.ModelConfigIDHeader, configA)
+	staleStreamRec := httptest.NewRecorder()
+	s.Routes(api.AdminAuth{}).ServeHTTP(staleStreamRec, staleStreamReq)
+	var staleStreamEvent StreamEvent
+	if staleStreamRec.Code != 200 || json.Unmarshal(staleStreamRec.Body.Bytes(), &staleStreamEvent) != nil || staleStreamEvent.Type != "error" || staleStreamEvent.ErrorCode != "gateway_unavailable" || staleStreamRec.Header().Get(modeltransport.ModelConfigIDHeader) != configB {
+		t.Fatalf("stale stream request was not rejected before provider: header=%q event=%+v", staleStreamRec.Header().Get(modeltransport.ModelConfigIDHeader), staleStreamEvent)
+	}
+	if providerCalls.Load() != callsBefore {
+		t.Fatalf("stale config requests reached upstream provider: before=%d after=%d", callsBefore, providerCalls.Load())
 	}
 }

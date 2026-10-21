@@ -49,6 +49,7 @@ func TestEventDrivenSelectionPreservesHistoricalSnapshotsAndCheckpoints(t *testi
 		"ce2447fcc25cecdc6c40859a0e098e29618b91f3f839a7f255ad69ea62041dbf",
 		"5758e020d4d5fb67c821a0b043093cc02ac4c5e44f0c5f6a649e863c95386a69",
 		"a7b2237805e78139ce23681417ab16c608a2021781581e6fa7d5f17cfcf15f04",
+		"6bca100c9d216253cbe7ea092924624b7140e9c6b0b3397d08f14f8409e8fe24",
 	}
 	for version := 1; version <= contextBudgetVersion; version++ {
 		t.Run(fmt.Sprint(version), func(t *testing.T) {
@@ -72,7 +73,7 @@ func TestEventDrivenSelectionPreservesHistoricalSnapshotsAndCheckpoints(t *testi
 			run := &Run{ID: uuid.NewString(), Attempt: uuid.NewString(), toolProfile: currentToolProfile, ContextProfile: contextProfileV1, ContextBudget: canonical}
 			recovery, err := recoveryDecision(run)
 			if err != nil || digest(recovery) != oldRecoveryHashes[version-1] {
-				t.Fatal("nested recovery budget bytes changed", err)
+				t.Fatalf("nested recovery budget bytes changed for v%d: got %s, want %s (%v)", version, digest(recovery), oldRecoveryHashes[version-1], err)
 			}
 			metadata := &checkpointMetadata{Version: nativeRuntimeVersion, Revision: 1, RunID: run.ID, Attempt: run.Attempt, Targets: []string{"model"}, ToolProfile: currentToolProfile, ContextProfile: contextProfileV1, ContextBudgetHash: digest(previousBytes)}
 			if !resumeCompatibleForRun(metadata, 1, run) {

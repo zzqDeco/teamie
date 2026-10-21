@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"teamie/backend/pkg/observability"
+	"time"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
@@ -26,6 +27,7 @@ type ModelError struct {
 	// Private diagnostics never change Error(), public safe codes, hashes or
 	// durable model/tool receipts. The native cause remains available internally.
 	Stage, Reason                string
+	ConfigID                     string
 	ExpectedBlocks, ActualBlocks int
 	Cause                        error
 }
@@ -44,10 +46,77 @@ type GatewayModel struct {
 	Token, OwnerID, AgentID string
 	StreamURL               string
 	ContextWindow           func() int
+	ModelConfigID           func() string
 	HTTP                    *http.Client
 	Store                   *Store
 	Lease                   *Lease
 	Authorize               func(context.Context) error
+}
+
+func safeGatewayPing(ctx context.Context, client modelgatewayservice.Client, token string) (resp *wire.PingResponse, err error) {
+	if client == nil {
+		return nil, errors.New("nil gateway client")
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			resp = nil
+			err = errors.New("gateway ping unimplemented")
+		}
+	}()
+	return client.Ping(ctx, &wire.PingRequest{ServiceToken: &token})
+}
+
+func (m *GatewayModel) liveModelConfigID(ctx context.Context) (string, bool) {
+	if m == nil {
+		return "", false
+	}
+	hasRPC := m.Client != nil
+	if gh, ok := m.Client.(*gatewayHTTPClient); ok && gh != nil && gh.Client == nil {
+		hasRPC = false
+	}
+	if hasRPC {
+		pc, cancel := context.WithTimeout(ctx, 2*time.Second)
+		ping, err := safeGatewayPing(pc, m.Client, m.Token)
+		cancel()
+		if err == nil && ping != nil && ping.Ready && ping.GetConfigured() && ping.GetEnabled() {
+			if id := strings.TrimSpace(ping.GetModelConfigId()); id != "" {
+				return id, true
+			}
+		}
+		return "", false
+	}
+	if m.ModelConfigID != nil {
+		if id := strings.TrimSpace(m.ModelConfigID()); id != "" {
+			return id, true
+		}
+	}
+	return "", false
+}
+
+func (m *GatewayModel) CurrentModelAdmissionState(ctx context.Context) (string, string, bool, error) {
+	if m == nil {
+		return "", "", false, nil
+	}
+	if run, err := CurrentRun(ctx); err == nil && run != nil && m.Store != nil {
+		nextStep := int(run.Step.Load()) + 1
+		id, mode, recorded, err := m.Store.RecordedModelStepAdmission(ctx, run, nextStep)
+		if err != nil {
+			return "", "", false, err
+		}
+		if recorded {
+			return id, mode, id != "", nil
+		}
+	}
+	id, ok := m.liveModelConfigID(ctx)
+	return id, "", ok, nil
+}
+
+func (m *GatewayModel) CurrentModelConfigID(ctx context.Context) (string, bool) {
+	id, _, ok, err := m.CurrentModelAdmissionState(ctx)
+	if err != nil {
+		return "", false
+	}
+	return id, ok
 }
 
 func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticMessage, options ...model.Option) (_ *schema.AgenticMessage, failure error) {
@@ -92,23 +161,41 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticM
 	cached, e := m.cachedModel(ctx, run, step, hash, messages, opts, false)
 	if e == nil {
 		phase = "receipt-replay"
-		return decodeAgenticMessage(cached)
+		run.consumeAdmissionConfig(false)
+		result, decodeErr := decodeAgenticMessage(cached)
+		if decodeErr == nil {
+			replayedConfigID, _ := extractRecordedModelConfigID(result)
+			replayedAdm, ok := extractRecordedAdmissionMetadata(result)
+			if ok {
+				run.recordModelUsageAnchor(step, request, result, replayedConfigID, replayedAdm)
+			} else {
+				run.recordModelUsageAnchor(step, request, result, replayedConfigID)
+			}
+		}
+		return result, decodeErr
 	}
 	if !errors.Is(e, pgx.ErrNoRows) {
 		return nil, e
 	}
 	if e = m.cachedRecovery(ctx, run, step, hash, false); e != nil {
+		run.consumeAdmissionConfig(false)
 		return nil, e
 	}
-	if e = m.checkContextRequest(ctx, run, step, hash, request, false); e != nil {
+	adm, e := m.checkContextRequest(ctx, run, step, hash, request, false)
+	if e != nil {
 		return nil, e
 	}
+	reqConfigID := adm.ConfigID
 	phase = "gateway-request"
-	response, e := m.Client.Chat(ctx, &wire.GatewayChatRequest{ServiceToken: m.Token, OwnerId: m.OwnerID, AgentId: m.AgentID, SessionId: "agent:" + m.AgentID, RunId: executionID(run), RequestJson: string(request)})
+	response, e := m.Client.Chat(withExpectedModelConfigID(ctx, reqConfigID), &wire.GatewayChatRequest{ServiceToken: m.Token, OwnerId: m.OwnerID, AgentId: m.AgentID, SessionId: "agent:" + m.AgentID, RunId: executionID(run), RequestJson: string(request)})
 	if e != nil {
 		var gatewayError *ModelError
 		if errors.As(e, &gatewayError) {
-			return nil, m.gatewayFailure(ctx, run, step, hash, false, gatewayError.Code)
+			errConfigID := strings.TrimSpace(gatewayError.ConfigID)
+			if errConfigID == "" {
+				errConfigID = reqConfigID
+			}
+			return nil, m.gatewayFailure(ctx, run, step, hash, false, gatewayError.Code, errConfigID, adm)
 		}
 		return nil, &ModelError{Code: "gateway_unavailable", Retry: true}
 	}
@@ -117,7 +204,11 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticM
 		if code == "" {
 			code = "gateway_error"
 		}
-		return nil, m.gatewayFailure(ctx, run, step, hash, false, code)
+		errConfigID := strings.TrimSpace(response.GetModelConfigId())
+		if errConfigID == "" {
+			errConfigID = reqConfigID
+		}
+		return nil, m.gatewayFailure(ctx, run, step, hash, false, code, errConfigID, adm)
 	}
 	if len(response.GetResponseJson()) > modeltransport.MaxResponseBytes {
 		return nil, &ModelError{Code: "upstream_response_limit"}
@@ -131,10 +222,21 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticM
 	if e = validateModelResult(result, modelResultByteLimit(run)); e != nil {
 		return nil, e
 	}
+	respConfigID := strings.TrimSpace(response.GetModelConfigId())
+	if respConfigID != "" && reqConfigID != "" && respConfigID != reqConfigID {
+		return nil, &ModelError{Code: "gateway_unavailable", Retry: true}
+	}
+	if respConfigID == "" {
+		respConfigID = reqConfigID
+	}
+	run.recordModelUsageAnchor(step, request, result, respConfigID, adm)
 	phase = "serialize-result"
 	b, e := (&schema.HumanReadableSerializer{}).Marshal(result)
 	if e != nil {
 		return nil, e
+	}
+	if len(b) > modeltransport.MaxResponseBytes {
+		return nil, &ModelError{Code: "upstream_response_limit"}
 	}
 	phase = "persist-receipt"
 	if e = m.Store.SaveModel(ctx, m.Lease, run, step, hash, b); e != nil {
@@ -210,22 +312,40 @@ func (m *GatewayModel) capRunOutput(run *Run, opts *model.Options) error {
 	return nil
 }
 
-func (m *GatewayModel) checkContextRequest(ctx context.Context, run *Run, step int, hash string, request []byte, streaming bool) error {
+func (m *GatewayModel) checkContextRequest(ctx context.Context, run *Run, step int, hash string, request []byte, streaming bool) (requestAdmissionState, error) {
 	if contextProfile(run) != contextProfileV1 {
-		return nil
+		return requestAdmissionState{}, nil
 	}
 	budget, err := ParseContextBudgetSnapshot(run.ContextBudget)
 	if err != nil {
-		return err
+		return requestAdmissionState{}, err
 	}
-	measurement, err := measureContextRequest(request)
+	var configID, entryMode string
+	var hasAdmission bool
+	if budget.Version >= 7 {
+		configID, entryMode, hasAdmission = run.consumeAdmissionConfig(isSummaryRequest(request))
+		if !hasAdmission {
+			configID, _ = m.liveModelConfigID(ctx)
+		}
+	}
+	anchor := run.getUsageAnchorForConfig(configID)
+	measurement, err := budget.measureCalibratedRequest(anchor, request)
 	if err != nil {
-		return err
+		return requestAdmissionState{}, err
 	}
+	if entryMode == "" {
+		entryMode = measurement.CounterMode
+	}
+	adm := requestAdmissionState{
+		ConfigID:    strings.TrimSpace(configID),
+		CounterMode: entryMode,
+		Known:       strings.TrimSpace(configID) != "",
+	}
+	observability.L(ctx).Info("Context request checked", append([]zap.Field{zap.String("event.action", "context-request-checked"), zap.Bool("custom.context.fits", budget.fits(measurement))}, budget.measurementLogFields(measurement, "")...)...)
 	if !budget.fits(measurement) {
-		return m.gatewayFailure(ctx, run, step, hash, streaming, "request_too_large")
+		return adm, m.gatewayFailure(ctx, run, step, hash, streaming, "request_too_large", adm.ConfigID, adm)
 	}
-	return nil
+	return adm, nil
 }
 
 func (m *GatewayModel) capOutput(opts *model.Options) {
@@ -338,6 +458,7 @@ func modelRequestHash(raw []byte) string {
 		var extra map[string]json.RawMessage
 		if json.Unmarshal(message["extra"], &extra) == nil {
 			delete(extra, "_eino_msg_id")
+			delete(extra, contextUsageAnchorExtraKey)
 			if len(extra) == 0 {
 				delete(message, "extra")
 			} else {

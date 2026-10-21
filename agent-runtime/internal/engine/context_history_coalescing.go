@@ -10,7 +10,8 @@ import (
 // together. Coalesce older complete units before sacrificing recent results;
 // otherwise an Agent can repeatedly read a file whose result is immediately
 // archived again. Current source inputs never enter the historical archive.
-func (p *ContextPipeline) coalesceHistory(ctx context.Context, policy []*schema.AgenticMessage, units [][]*schema.AgenticMessage, pinned map[*schema.AgenticMessage]bool, tools []*schema.ToolInfo) ([]*schema.AgenticMessage, error) {
+func (p *ContextPipeline) coalesceHistory(ctx context.Context, policy []*schema.AgenticMessage, units [][]*schema.AgenticMessage, pinned map[*schema.AgenticMessage]bool, tools []*schema.ToolInfo, deferred ...[]*schema.ToolInfo) ([]*schema.AgenticMessage, error) {
+	allDeferred := flattenToolInfos(deferred)
 	indices := []int{}
 	for index, unit := range units {
 		protected := false
@@ -63,7 +64,7 @@ func (p *ContextPipeline) coalesceHistory(ctx context.Context, policy []*schema.
 				candidate = append(candidate, unit...)
 			}
 		}
-		measurement, err := p.cfg.Budget.measureContext(candidate, tools, p.cfg.Budget.OutputReserveTokens, false)
+		measurement, err := p.cfg.Budget.measureContext(candidate, tools, p.cfg.Budget.OutputReserveTokens, false, allDeferred)
 		if err != nil {
 			return nil, err
 		}

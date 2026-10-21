@@ -126,20 +126,34 @@ func (*fixtureSandbox) Cancel(context.Context, *wire.CancelRequest, ...callopt.O
 	return &wire.Ack{Ok: true}, nil
 }
 
+const defaultFixtureModelConfigID = "modelcfg:v1:0123456789abcdef0123456789abcdef"
+
 type fixtureGateway struct {
 	modelgatewayservice.Client
-	mu           sync.Mutex
-	ready        bool
-	calls        int
-	requests     [][]byte
-	summaryCalls int
+	mu            sync.Mutex
+	ready         bool
+	modelConfigID string
+	calls         int
+	requests      [][]byte
+	summaryCalls  int
+}
+
+func (f *fixtureGateway) configIDLocked() *string {
+	if !f.ready {
+		return nil
+	}
+	id := f.modelConfigID
+	if id == "" {
+		id = defaultFixtureModelConfigID
+	}
+	return &id
 }
 
 func (f *fixtureGateway) Ping(context.Context, *wire.PingRequest, ...callopt.Option) (*wire.PingResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	enabled := f.ready
-	return &wire.PingResponse{Ready: true, Configured: &enabled, Enabled: &enabled}, nil
+	return &wire.PingResponse{Ready: true, Configured: &enabled, Enabled: &enabled, ModelConfigId: f.configIDLocked()}, nil
 }
 func (*fixtureGateway) Cancel(context.Context, *wire.CancelRequest, ...callopt.Option) (*wire.Ack, error) {
 	return &wire.Ack{Ok: true}, nil
@@ -176,7 +190,7 @@ func (f *fixtureGateway) Chat(_ context.Context, r *wire.GatewayChatRequest, _ .
 	}
 	b, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"message": result, "finish_reason": "stop"}}, "usage": map[string]int{"prompt_tokens": 20, "completion_tokens": 5, "total_tokens": 25}})
 	raw := string(b)
-	return &wire.GatewayChatResponse{Ok: true, ResponseJson: modelFixtureResponse(raw)}, nil
+	return &wire.GatewayChatResponse{Ok: true, ResponseJson: modelFixtureResponse(raw), ModelConfigId: f.configIDLocked()}, nil
 }
 
 type fixtureIM struct {

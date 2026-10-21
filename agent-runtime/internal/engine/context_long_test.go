@@ -26,7 +26,7 @@ func TestMillionTokenHistoryIsNotReducedByTheFormerTransportCeiling(t *testing.T
 	p, archive, summary := testPipeline(t, 1_000_000)
 	inputs := []Input{{EventID: "fresh", ConversationID: "conversation", MessageID: "request", SenderID: "requester", SenderKind: "human", Body: "Continue the current task and preserve its source."}}
 	ctx := WithRun(context.Background(), &Run{Inputs: inputs})
-	for _, count := range []int{300, 600} {
+	for _, count := range []int{300, 600, 800} {
 		t.Run(fmt.Sprint(count), func(t *testing.T) {
 			messages := []*schema.AgenticMessage{schema.SystemAgenticMessage("Keep trusted system behavior and source audience.")}
 			for i := 0; i < count; i++ {
@@ -41,7 +41,7 @@ func TestMillionTokenHistoryIsNotReducedByTheFormerTransportCeiling(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			if count == 300 {
+			if count <= 600 {
 				if len(out.Messages) != len(messages) || len(summary.inputs) != 0 || len(archive.content) != 0 {
 					t.Fatal("well-fitting million-token context was summarized or archived early")
 				}
@@ -62,7 +62,7 @@ func TestMillionTokenHistoryIsNotReducedByTheFormerTransportCeiling(t *testing.T
 
 func TestLongContextOutputEncodingPreservesAllHistoricalRunCaps(t *testing.T) {
 	messages := []*schema.AgenticMessage{schema.UserAgenticMessage("preserve the request identity")}
-	for version := 1; version <= 6; version++ {
+	for version := 1; version <= contextBudgetVersion; version++ {
 		budget, err := makeContextBudgetSnapshotVersion(1_000_000, version)
 		if err != nil {
 			t.Fatal(err)
@@ -98,7 +98,7 @@ func TestLongContextOutputEncodingPreservesAllHistoricalRunCaps(t *testing.T) {
 			t.Fatal("new Run retained the old 4K output clamp")
 		}
 		measured, _ := budget.measureContext(messages, nil, budget.OutputReserveTokens, false)
-		wire, _ := measureContextRequest(actual)
+		wire, _ := budget.measureContextRequest(actual)
 		if measured != wire {
 			t.Fatal("preflight omitted the actual long-output request encoding", measured, wire)
 		}
@@ -203,14 +203,16 @@ func TestLongContextStreamCompactsFramingWithoutRejectingValidContent(t *testing
 }
 
 func TestRestoreFixtureContainsMillionTokenPolicy(t *testing.T) {
-	raw, err := os.ReadFile("../../../ops/fixtures/runtime-context-budget-v6.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := ParseContextBudgetSnapshot(raw)
-	want, makeErr := makeContextBudgetSnapshot(1_000_000)
-	if err != nil || makeErr != nil || got != want || got.InputTokenLimit+got.OutputReserveTokens+256 != 1_000_000 {
-		t.Fatal("long-context restore fixture is incomplete or admission exceeds the declared model window", err, makeErr)
+	for _, version := range []int{6, 7} {
+		raw, err := os.ReadFile(fmt.Sprintf("../../../ops/fixtures/runtime-context-budget-v%d.json", version))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := ParseContextBudgetSnapshot(raw)
+		want, makeErr := makeContextBudgetSnapshotVersion(1_000_000, version)
+		if err != nil || makeErr != nil || got != want || got.InputTokenLimit+got.OutputReserveTokens+256 != 1_000_000 {
+			t.Fatal("long-context restore fixture is incomplete or admission exceeds the declared model window", version, err, makeErr)
+		}
 	}
 }
 

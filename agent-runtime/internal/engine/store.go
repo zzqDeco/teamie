@@ -14,10 +14,12 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"teamie/agent-protocol/modeltransport"
 	"teamie/backend/pkg/imtext"
 )
 
@@ -62,6 +64,140 @@ type Run struct {
 	Revision, Generation        int64
 	ContextHead, AcceptanceHead int64
 	Front                       *frontSlot
+	usageState                  usageAnchorState
+}
+
+func (r *Run) getUsageAnchor() *contextUsageAnchor {
+	if r == nil {
+		return nil
+	}
+	return r.usageState.get()
+}
+
+func (r *Run) getUsageAnchorForConfig(configID string) *contextUsageAnchor {
+	if r == nil {
+		return nil
+	}
+	return r.usageState.getForConfig(configID)
+}
+
+func (r *Run) setUsageAnchor(anchor *contextUsageAnchor, onlyIfValid bool) {
+	if r == nil {
+		return
+	}
+	r.usageState.set(anchor, onlyIfValid)
+}
+
+func (r *Run) clearUsageAnchor() {
+	if r == nil {
+		return
+	}
+	r.usageState.clear()
+}
+
+func (r *Run) setAdmissionConfig(configID, counterMode string) {
+	if r == nil {
+		return
+	}
+	r.usageState.setAdmissionConfig(configID, counterMode)
+}
+
+func (r *Run) clearAdmissionConfig() {
+	if r == nil {
+		return
+	}
+	r.usageState.clearAdmissionConfig()
+}
+
+func (r *Run) consumeAdmissionConfig(preserve bool) (string, string, bool) {
+	if r == nil {
+		return "", "", false
+	}
+	return r.usageState.consumeAdmissionConfig(preserve)
+}
+
+func (r *Run) invalidateUsageAnchor(messages []*schema.AgenticMessage) {
+	if r == nil {
+		return
+	}
+	r.usageState.invalidate(messages)
+}
+
+func (r *Run) computeRequestUsageAnchor(step int, request []byte, result *schema.AgenticMessage, configID string) *contextUsageAnchor {
+	if r == nil || contextProfile(r) != contextProfileV1 || result == nil || result.ResponseMeta == nil || result.ResponseMeta.TokenUsage == nil || result.ResponseMeta.TokenUsage.PromptTokens <= 0 {
+		return nil
+	}
+	budget, err := ParseContextBudgetSnapshot(r.ContextBudget)
+	if err != nil || budget.Version < 7 {
+		return nil
+	}
+	configID = strings.TrimSpace(configID)
+	if configID == "" {
+		if saved, ok := extractUsageAnchor(result); ok {
+			configID = saved.ConfigID
+		}
+	}
+	if configID == "" {
+		return nil
+	}
+	var envelope modeltransport.Request
+	var messages []*schema.AgenticMessage
+	var opts model.Options
+	if json.Unmarshal(request, &envelope) != nil || (&schema.HumanReadableSerializer{}).Unmarshal(envelope.Messages, &messages) != nil || json.Unmarshal(envelope.Options, &opts) != nil {
+		return nil
+	}
+	if isSummaryModelOptions(&opts) || len(messages) == 0 {
+		return nil
+	}
+	visibleBytes, prefixHash, err := visibleContextBytes(messages, opts.Tools, opts.DeferredTools, opts.Stop, opts.AgenticToolChoice)
+	if err != nil {
+		return nil
+	}
+	localTokens := estimateVisibleTokensV7(visibleBytes)
+	promptTokens := result.ResponseMeta.TokenUsage.PromptTokens
+	if !validCalibratedTokenBounds(promptTokens, localTokens) {
+		return nil
+	}
+	return &contextUsageAnchor{
+		Step:         step,
+		ConfigID:     configID,
+		MessageCount: len(messages),
+		PrefixHash:   prefixHash,
+		LocalTokens:  localTokens,
+		PromptTokens: promptTokens,
+	}
+}
+
+func (r *Run) recordModelUsageAnchor(step int, request []byte, result *schema.AgenticMessage, configID string, admission ...requestAdmissionState) {
+	if r == nil || result == nil {
+		return
+	}
+	if configID == "" {
+		if savedID, ok := extractRecordedModelConfigID(result); ok {
+			configID = savedID
+		}
+	}
+	var adm requestAdmissionState
+	if len(admission) > 0 {
+		adm = admission[0]
+	} else if savedAdm, ok := extractRecordedAdmissionMetadata(result); ok {
+		adm = savedAdm
+	} else {
+		adm = requestAdmissionState{ConfigID: strings.TrimSpace(configID), Known: strings.TrimSpace(configID) != ""}
+	}
+	anchor := r.computeRequestUsageAnchor(step, request, result, configID)
+	if anchor == nil {
+		if contextProfile(r) == contextProfileV1 {
+			if budget, err := ParseContextBudgetSnapshot(r.ContextBudget); err == nil && budget.Version >= 7 {
+				attachRecordedStepMetadata(result, step, configID, adm)
+			}
+		}
+		return
+	}
+	anchor.AdmissionConfigID = strings.TrimSpace(adm.ConfigID)
+	anchor.CounterMode = strings.TrimSpace(adm.CounterMode)
+	attachUsageAnchor(result, anchor)
+	r.setUsageAnchor(anchor, false)
 }
 
 func executionID(run *Run) string { return run.ID + ":" + run.Attempt }
@@ -117,7 +253,7 @@ func Open(ctx context.Context, url string) (*Store, error) {
 		err = validateRuntimeSchema(ctx, tx)
 	}
 	if err == nil {
-		_, err = tx.Exec(ctx, schemaSQL+schemaV2SQL+schemaV3SQL+contextArchiveSchemaSQL+contextRecoverySchemaSQL+schemaV4SQL+schemaV5SQL+schemaV6SQL+schemaV7SQL+schemaV8SQL+schemaV9SQL)
+		_, err = tx.Exec(ctx, schemaSQL+schemaV2SQL+schemaV3SQL+contextArchiveSchemaSQL+contextRecoverySchemaSQL+schemaV4SQL+schemaV5SQL+schemaV6SQL+schemaV7SQL+schemaV8SQL+schemaV9SQL+schemaV10SQL)
 	}
 	if err == nil {
 		err = tx.Commit(ctx)
@@ -525,6 +661,78 @@ func (s *Store) CachedModel(ctx context.Context, r *Run, step int, hash string) 
 		return nil, ErrReplayConflict
 	}
 	return b, e
+}
+
+func (s *Store) RecordedModelStepAdmission(ctx context.Context, r *Run, step int) (string, string, bool, error) {
+	if s == nil || s.DB == nil || r == nil || r.ID == "" || step < 1 {
+		return "", "", false, nil
+	}
+	var raw, decisionRaw []byte
+	err := s.DB.QueryRow(ctx, `SELECT (SELECT response FROM runtime_model_calls WHERE run_id=$1 AND step=$2), (SELECT decision_json FROM runtime_context_recoveries WHERE run_id=$1 AND model_step=$2)`, r.ID, step).Scan(&raw, &decisionRaw)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", "", false, nil
+		}
+		return "", "", false, err
+	}
+	if len(raw) == 0 && len(decisionRaw) == 0 {
+		return "", "", false, nil
+	}
+	if len(raw) > 0 {
+		msg, decodeErr := decodeAgenticMessage(raw)
+		if decodeErr != nil {
+			return "", "", false, decodeErr
+		}
+		if adm, ok := extractRecordedAdmissionMetadata(msg); ok {
+			return adm.ConfigID, adm.CounterMode, true, nil
+		}
+	}
+	if len(decisionRaw) > 0 {
+		var decision contextRecoveryDecision
+		if unmarshalErr := json.Unmarshal(decisionRaw, &decision); unmarshalErr != nil {
+			return "", "", false, unmarshalErr
+		}
+		if decision.CounterMode != "" || decision.AdmissionConfigID != "" {
+			return strings.TrimSpace(decision.AdmissionConfigID), strings.TrimSpace(decision.CounterMode), true, nil
+		}
+		if id := strings.TrimSpace(decision.ConfigID); id != "" {
+			return id, "", true, nil
+		}
+	}
+	return "", "", true, nil
+}
+
+func (s *Store) RecordedModelStepConfigID(ctx context.Context, r *Run, step int) (string, bool) {
+	if s == nil || s.DB == nil || r == nil || r.ID == "" || step < 1 {
+		return "", false
+	}
+	var raw, decisionRaw []byte
+	err := s.DB.QueryRow(ctx, `SELECT (SELECT response FROM runtime_model_calls WHERE run_id=$1 AND step=$2), (SELECT decision_json FROM runtime_context_recoveries WHERE run_id=$1 AND model_step=$2)`, r.ID, step).Scan(&raw, &decisionRaw)
+	if err != nil || (len(raw) == 0 && len(decisionRaw) == 0) {
+		return "", false
+	}
+	if len(raw) > 0 {
+		if msg, decodeErr := decodeAgenticMessage(raw); decodeErr == nil {
+			if id, ok := extractRecordedModelConfigID(msg); ok {
+				return id, true
+			}
+			if adm, ok := extractRecordedAdmissionMetadata(msg); ok && adm.ConfigID != "" {
+				return adm.ConfigID, true
+			}
+		}
+	}
+	if len(decisionRaw) > 0 {
+		var decision contextRecoveryDecision
+		if json.Unmarshal(decisionRaw, &decision) == nil {
+			if id := strings.TrimSpace(decision.ConfigID); id != "" {
+				return id, true
+			}
+			if id := strings.TrimSpace(decision.AdmissionConfigID); id != "" {
+				return id, true
+			}
+		}
+	}
+	return "", true
 }
 func (s *Store) SaveModel(ctx context.Context, l *Lease, r *Run, step int, hash string, b []byte) error {
 	tx, e := s.DB.Begin(ctx)

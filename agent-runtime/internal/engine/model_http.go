@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/cloudwego/kitex/client/callopt"
 	wire "teamie/agent-protocol/kitex_gen/agent"
@@ -33,6 +34,27 @@ func newGatewayHTTPClient(rpc modelgatewayservice.Client, streamURL string) (*ga
 	return &gatewayHTTPClient{Client: rpc, url: u.String(), http: gatewayStreamHTTP}, nil
 }
 
+func (c *gatewayHTTPClient) Ping(ctx context.Context, in *wire.PingRequest, opts ...callopt.Option) (*wire.PingResponse, error) {
+	if c == nil || c.Client == nil {
+		return nil, errors.New("gateway RPC client not configured")
+	}
+	return c.Client.Ping(ctx, in, opts...)
+}
+
+type expectedModelConfigIDKey struct{}
+
+func withExpectedModelConfigID(ctx context.Context, configID string) context.Context {
+	return context.WithValue(ctx, expectedModelConfigIDKey{}, strings.TrimSpace(configID))
+}
+
+func expectedModelConfigIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	id, _ := ctx.Value(expectedModelConfigIDKey{}).(string)
+	return id
+}
+
 func (c *gatewayHTTPClient) Chat(ctx context.Context, in *wire.GatewayChatRequest, _ ...callopt.Option) (*wire.GatewayChatResponse, error) {
 	if in == nil {
 		return nil, errors.New("invalid gateway request")
@@ -51,6 +73,9 @@ func (c *gatewayHTTPClient) Chat(ctx context.Context, in *wire.GatewayChatReques
 	}
 	req.Header.Set("Authorization", "Bearer "+in.ServiceToken)
 	req.Header.Set("Content-Type", "application/json")
+	if expectedConfigID := expectedModelConfigIDFromContext(ctx); expectedConfigID != "" {
+		req.Header.Set(modeltransport.ModelConfigIDHeader, expectedConfigID)
+	}
 	response, err := observability.Client(c.http, "teamie.llm-gateway").Do(req)
 	if err != nil {
 		return nil, err
@@ -72,12 +97,18 @@ func (c *gatewayHTTPClient) Chat(ctx context.Context, in *wire.GatewayChatReques
 	if dec.Decode(&output) != nil || dec.Decode(new(any)) != io.EOF {
 		return nil, errors.New("invalid gateway HTTP response")
 	}
+	if !output.IsSetModelConfigId() {
+		if hdr := strings.TrimSpace(response.Header.Get(modeltransport.ModelConfigIDHeader)); hdr != "" {
+			output.ModelConfigId = &hdr
+		}
+	}
 	return &output, nil
 }
 
 // Only consume the gateway's bounded, structured error envelope. Provider
 // messages and bodies are neither retained in failure decisions nor exposed.
 func readGatewayHTTPFailure(response *http.Response) *ModelError {
+	configID := strings.TrimSpace(response.Header.Get(modeltransport.ModelConfigIDHeader))
 	var body struct {
 		OK           bool   `json:"ok"`
 		ErrorCode    string `json:"errorCode"`
@@ -97,11 +128,11 @@ func readGatewayHTTPFailure(response *http.Response) *ModelError {
 				body.ErrorCode = body.Error.Code
 			}
 			if body.ErrorCode == "" {
-				return &ModelError{Code: "gateway_unavailable", Retry: true}
+				return &ModelError{Code: "gateway_unavailable", Retry: true, ConfigID: configID}
 			}
 			code := safeGatewayCode(body.ErrorCode)
-			return &ModelError{Code: code, Retry: code != "invalid_request" && !isContextOverflow(code)}
+			return &ModelError{Code: code, Retry: code != "invalid_request" && !isContextOverflow(code), ConfigID: configID}
 		}
 	}
-	return &ModelError{Code: "gateway_unavailable", Retry: true}
+	return &ModelError{Code: "gateway_unavailable", Retry: true, ConfigID: configID}
 }

@@ -467,10 +467,11 @@ var fieldIDToName_PingRequest = map[int16]string{
 }
 
 type PingResponse struct {
-	Ready               bool   `thrift:"ready,1,required" frugal:"1,required,bool" json:"ready"`
-	Configured          *bool  `thrift:"configured,2,optional" frugal:"2,optional,bool" json:"configured,omitempty"`
-	Enabled             *bool  `thrift:"enabled,3,optional" frugal:"3,optional,bool" json:"enabled,omitempty"`
-	ContextWindowTokens *int64 `thrift:"contextWindowTokens,4,optional" frugal:"4,optional,i64" json:"contextWindowTokens,omitempty"`
+	Ready               bool    `thrift:"ready,1,required" frugal:"1,required,bool" json:"ready"`
+	Configured          *bool   `thrift:"configured,2,optional" frugal:"2,optional,bool" json:"configured,omitempty"`
+	Enabled             *bool   `thrift:"enabled,3,optional" frugal:"3,optional,bool" json:"enabled,omitempty"`
+	ContextWindowTokens *int64  `thrift:"contextWindowTokens,4,optional" frugal:"4,optional,i64" json:"contextWindowTokens,omitempty"`
+	ModelConfigId       *string `thrift:"modelConfigId,5,optional" frugal:"5,optional,string" json:"modelConfigId,omitempty"`
 }
 
 func NewPingResponse() *PingResponse {
@@ -510,6 +511,15 @@ func (p *PingResponse) GetContextWindowTokens() (v int64) {
 	}
 	return *p.ContextWindowTokens
 }
+
+var PingResponse_ModelConfigId_DEFAULT string
+
+func (p *PingResponse) GetModelConfigId() (v string) {
+	if !p.IsSetModelConfigId() {
+		return PingResponse_ModelConfigId_DEFAULT
+	}
+	return *p.ModelConfigId
+}
 func (p *PingResponse) SetReady(val bool) {
 	p.Ready = val
 }
@@ -521,6 +531,9 @@ func (p *PingResponse) SetEnabled(val *bool) {
 }
 func (p *PingResponse) SetContextWindowTokens(val *int64) {
 	p.ContextWindowTokens = val
+}
+func (p *PingResponse) SetModelConfigId(val *string) {
+	p.ModelConfigId = val
 }
 
 func (p *PingResponse) IsSetConfigured() bool {
@@ -535,6 +548,10 @@ func (p *PingResponse) IsSetContextWindowTokens() bool {
 	return p.ContextWindowTokens != nil
 }
 
+func (p *PingResponse) IsSetModelConfigId() bool {
+	return p.ModelConfigId != nil
+}
+
 func (p *PingResponse) String() string {
 	if p == nil {
 		return "<nil>"
@@ -547,6 +564,7 @@ var fieldIDToName_PingResponse = map[int16]string{
 	2: "configured",
 	3: "enabled",
 	4: "contextWindowTokens",
+	5: "modelConfigId",
 }
 
 type RuntimeRequest struct {
@@ -826,11 +844,12 @@ var fieldIDToName_GatewayChatRequest = map[int16]string{
 }
 
 type GatewayChatResponse struct {
-	Ok           bool    `thrift:"ok,1,required" frugal:"1,required,bool" json:"ok"`
-	ResponseJson *string `thrift:"responseJson,2,optional" frugal:"2,optional,string" json:"responseJson,omitempty"`
-	ErrorCode    *string `thrift:"errorCode,3,optional" frugal:"3,optional,string" json:"errorCode,omitempty"`
-	ErrorMessage *string `thrift:"errorMessage,4,optional" frugal:"4,optional,string" json:"errorMessage,omitempty"`
-	StatusCode   *int32  `thrift:"statusCode,5,optional" frugal:"5,optional,i32" json:"statusCode,omitempty"`
+	Ok            bool    `thrift:"ok,1,required" frugal:"1,required,bool" json:"ok"`
+	ResponseJson  *string `thrift:"responseJson,2,optional" frugal:"2,optional,string" json:"responseJson,omitempty"`
+	ErrorCode     *string `thrift:"errorCode,3,optional" frugal:"3,optional,string" json:"errorCode,omitempty"`
+	ErrorMessage  *string `thrift:"errorMessage,4,optional" frugal:"4,optional,string" json:"errorMessage,omitempty"`
+	StatusCode    *int32  `thrift:"statusCode,5,optional" frugal:"5,optional,i32" json:"statusCode,omitempty"`
+	ModelConfigId *string `thrift:"modelConfigId,6,optional" frugal:"6,optional,string" json:"modelConfigId,omitempty"`
 }
 
 func NewGatewayChatResponse() *GatewayChatResponse {
@@ -879,6 +898,15 @@ func (p *GatewayChatResponse) GetStatusCode() (v int32) {
 	}
 	return *p.StatusCode
 }
+
+var GatewayChatResponse_ModelConfigId_DEFAULT string
+
+func (p *GatewayChatResponse) GetModelConfigId() (v string) {
+	if !p.IsSetModelConfigId() {
+		return GatewayChatResponse_ModelConfigId_DEFAULT
+	}
+	return *p.ModelConfigId
+}
 func (p *GatewayChatResponse) SetOk(val bool) {
 	p.Ok = val
 }
@@ -893,6 +921,9 @@ func (p *GatewayChatResponse) SetErrorMessage(val *string) {
 }
 func (p *GatewayChatResponse) SetStatusCode(val *int32) {
 	p.StatusCode = val
+}
+func (p *GatewayChatResponse) SetModelConfigId(val *string) {
+	p.ModelConfigId = val
 }
 
 func (p *GatewayChatResponse) IsSetResponseJson() bool {
@@ -911,6 +942,10 @@ func (p *GatewayChatResponse) IsSetStatusCode() bool {
 	return p.StatusCode != nil
 }
 
+func (p *GatewayChatResponse) IsSetModelConfigId() bool {
+	return p.ModelConfigId != nil
+}
+
 func (p *GatewayChatResponse) String() string {
 	if p == nil {
 		return "<nil>"
@@ -924,6 +959,7 @@ var fieldIDToName_GatewayChatResponse = map[int16]string{
 	3: "errorCode",
 	4: "errorMessage",
 	5: "statusCode",
+	6: "modelConfigId",
 }
 
 type SandboxExecRequest struct {

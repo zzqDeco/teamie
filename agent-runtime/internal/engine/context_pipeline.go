@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"go.uber.org/zap"
+	"slices"
 	"strings"
 	"teamie/backend/pkg/observability"
 	"time"
@@ -29,10 +30,159 @@ type contextSummarizer interface {
 	Summarize(context.Context, *adk.TypedChatModelAgentState[*schema.AgenticMessage]) ([]*schema.AgenticMessage, error)
 }
 
+type modelConfigIDProvider interface {
+	CurrentModelConfigID(context.Context) (string, bool)
+}
+
+type modelAdmissionStateProvider interface {
+	CurrentModelAdmissionState(context.Context) (string, string, bool, error)
+}
+
 type ContextPipeline struct {
 	*adk.TypedBaseChatModelAgentMiddleware[*schema.AgenticMessage]
-	cfg     ContextPipelineConfig
-	summary adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]
+	cfg           ContextPipelineConfig
+	summary       adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]
+	fallbackUsage usageAnchorState
+}
+
+func (p *ContextPipeline) usageState(ctx context.Context) *usageAnchorState {
+	if run, err := CurrentRun(ctx); err == nil && run != nil {
+		return &run.usageState
+	}
+	return &p.fallbackUsage
+}
+
+type admissionContextState struct {
+	ConfigID    string
+	CounterMode string
+}
+
+type admissionConfigKey struct{}
+
+func withAdmissionState(ctx context.Context, configID, counterMode string) context.Context {
+	return context.WithValue(ctx, admissionConfigKey{}, admissionContextState{
+		ConfigID:    strings.TrimSpace(configID),
+		CounterMode: strings.TrimSpace(counterMode),
+	})
+}
+
+func admissionStateFromContext(ctx context.Context) (admissionContextState, bool) {
+	if ctx == nil {
+		return admissionContextState{}, false
+	}
+	st, ok := ctx.Value(admissionConfigKey{}).(admissionContextState)
+	return st, ok
+}
+
+func (p *ContextPipeline) currentModelAdmissionState(ctx context.Context) (string, string, bool, error) {
+	if st, ok := admissionStateFromContext(ctx); ok {
+		return st.ConfigID, st.CounterMode, st.ConfigID != "", nil
+	}
+	if provider, ok := p.cfg.Model.(modelAdmissionStateProvider); ok && provider != nil {
+		return provider.CurrentModelAdmissionState(ctx)
+	}
+	if provider, ok := p.cfg.Model.(modelConfigIDProvider); ok && provider != nil {
+		id, has := provider.CurrentModelConfigID(ctx)
+		return id, "", has, nil
+	}
+	return "", "", false, nil
+}
+
+func (p *ContextPipeline) currentModelConfigID(ctx context.Context) (string, bool) {
+	id, _, has, err := p.currentModelAdmissionState(ctx)
+	if err != nil {
+		return "", false
+	}
+	return id, has
+}
+
+func (p *ContextPipeline) getAnchor(ctx context.Context) *contextUsageAnchor {
+	if st, ok := admissionStateFromContext(ctx); ok {
+		if st.CounterMode == "local" {
+			return nil
+		}
+		return p.usageState(ctx).getForConfig(st.ConfigID)
+	}
+	configID, _ := p.currentModelConfigID(ctx)
+	return p.usageState(ctx).getForConfig(configID)
+}
+
+func (p *ContextPipeline) clearCurrentAnchor(ctx context.Context) {
+	p.usageState(ctx).clear()
+}
+
+func (p *ContextPipeline) seedAnchorFromHistory(ctx context.Context, messages []*schema.AgenticMessage, tools []*schema.ToolInfo, deferred ...[]*schema.ToolInfo) {
+	if p.cfg.Budget.Version < 7 {
+		return
+	}
+	state := p.usageState(ctx)
+	currentConfigID, hasConfig := p.currentModelConfigID(ctx)
+	allDeferred := flattenToolInfos(deferred)
+	lastIdx := -1
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg == nil || msg.Role != schema.AgenticRoleTypeAssistant {
+			continue
+		}
+		if msg.ResponseMeta != nil && msg.ResponseMeta.TokenUsage != nil && msg.ResponseMeta.TokenUsage.PromptTokens > 0 {
+			lastIdx = i
+			break
+		}
+		if _, ok := extractUsageAnchor(msg); ok {
+			lastIdx = i
+			break
+		}
+	}
+	if lastIdx <= 0 {
+		state.clear()
+		return
+	}
+	assistantMsg := messages[lastIdx]
+	if assistantMsg.ResponseMeta == nil || assistantMsg.ResponseMeta.TokenUsage == nil || assistantMsg.ResponseMeta.TokenUsage.PromptTokens <= 0 {
+		clearMessageUsageAnchor(assistantMsg)
+		state.clear()
+		return
+	}
+	savedAnchor, ok := extractUsageAnchor(assistantMsg)
+	if !ok || !hasConfig || currentConfigID == "" || savedAnchor.ConfigID != currentConfigID {
+		state.clear()
+		return
+	}
+	prefix := messages[:lastIdx]
+	visibleBytes, prefixHash, err := visibleContextBytes(prefix, tools, allDeferred, nil, &schema.AgenticToolChoice{Type: schema.ToolChoiceAllowed})
+	if err != nil || lastIdx != savedAnchor.MessageCount || prefixHash != savedAnchor.PrefixHash || estimateVisibleTokensV7(visibleBytes) != savedAnchor.LocalTokens || assistantMsg.ResponseMeta.TokenUsage.PromptTokens != savedAnchor.PromptTokens {
+		clearMessageUsageAnchor(assistantMsg)
+		p.invalidateAnchor(ctx, messages)
+		return
+	}
+	if state.isInvalidated(prefixHash) {
+		clearMessageUsageAnchor(assistantMsg)
+		state.clear()
+		return
+	}
+	step := savedAnchor.Step
+	if step <= 0 {
+		if run, err := CurrentRun(ctx); err == nil && run != nil {
+			step = int(run.Step.Load())
+		}
+	}
+	anchor := &contextUsageAnchor{
+		Step:         step,
+		ConfigID:     savedAnchor.ConfigID,
+		MessageCount: savedAnchor.MessageCount,
+		PrefixHash:   savedAnchor.PrefixHash,
+		LocalTokens:  savedAnchor.LocalTokens,
+		PromptTokens: savedAnchor.PromptTokens,
+	}
+	state.set(anchor, true)
+}
+
+func (p *ContextPipeline) invalidateAnchor(ctx context.Context, messages []*schema.AgenticMessage) {
+	p.usageState(ctx).invalidate(messages)
+}
+
+func (p *ContextPipeline) measureMainContext(ctx context.Context, messages []*schema.AgenticMessage, tools []*schema.ToolInfo, deferred ...[]*schema.ToolInfo) (ContextMeasurement, error) {
+	return p.cfg.Budget.measureCalibratedContext(p.getAnchor(ctx), messages, tools, p.cfg.Budget.OutputReserveTokens, false, deferred...)
 }
 
 func NewContextPipeline(ctx context.Context, cfg ContextPipelineConfig) (*ContextPipeline, error) {
@@ -80,8 +230,30 @@ func (p *ContextPipeline) BeforeModelRewriteState(ctx context.Context, state *ad
 	copyState.ToolInfos = contextToolInfos(state.ToolInfos, p.cfg.Budget)
 	copyState.DeferredToolInfos = contextToolInfos(state.DeferredToolInfos, p.cfg.Budget)
 	state = &copyState
+	usageState := p.usageState(ctx)
+	var configID, recordedMode string
+	if p.cfg.Budget.Version >= 7 {
+		var err error
+		configID, recordedMode, _, err = p.currentModelAdmissionState(ctx)
+		if err != nil {
+			usageState.clearAdmissionConfig()
+			return ctx, nil, err
+		}
+	}
+	rewriteCtx := withAdmissionState(ctx, configID, recordedMode)
+	p.seedAnchorFromHistory(rewriteCtx, state.Messages, state.ToolInfos, state.DeferredToolInfos)
+	if p.cfg.Budget.Version >= 7 {
+		entryMode := "local"
+		if p.getAnchor(rewriteCtx) != nil {
+			entryMode = "usage_delta"
+		}
+		usageState.setAdmissionConfig(configID, entryMode)
+	}
 	names := []string{}
 	for _, tool := range state.ToolInfos {
+		names = append(names, tool.Name)
+	}
+	for _, tool := range state.DeferredToolInfos {
 		names = append(names, tool.Name)
 	}
 	for _, msg := range state.Messages {
@@ -93,30 +265,38 @@ func (p *ContextPipeline) BeforeModelRewriteState(ctx context.Context, state *ad
 			}
 		}
 	}
-	r, err := p.reducer(ctx, names)
+	r, err := p.reducer(rewriteCtx, names, state.DeferredToolInfos)
 	if err != nil {
+		usageState.clearAdmissionConfig()
 		return ctx, nil, err
 	}
-	ctx, reduced, err := r.BeforeModelRewriteState(ctx, state, mc)
+	_, reduced, err := r.BeforeModelRewriteState(rewriteCtx, state, mc)
 	if err != nil {
+		usageState.clearAdmissionConfig()
 		return ctx, nil, err
 	}
-	m, err := p.cfg.Budget.measureContext(reduced.Messages, reduced.ToolInfos, p.cfg.Budget.OutputReserveTokens, false)
+	m, err := p.measureMainContext(rewriteCtx, reduced.Messages, reduced.ToolInfos, reduced.DeferredToolInfos)
 	if err != nil {
+		usageState.clearAdmissionConfig()
 		return ctx, nil, err
 	}
+	reason := p.cfg.Budget.compactionReason(m, false)
+	observability.L(ctx).Info("Context measured", append([]zap.Field{zap.String("event.action", "context-measured"), zap.Bool("custom.context.should_compact", reason != "")}, p.cfg.Budget.measurementLogFields(m, reason)...)...)
 	if !p.cfg.Budget.shouldCompact(m) {
 		return ctx, reduced, nil
 	}
-	msgs, err := p.compact(ctx, reduced.Messages, reduced.ToolInfos, false)
+	msgs, err := p.compactStage(rewriteCtx, reduced.Messages, reduced.ToolInfos, false, reduced.DeferredToolInfos)
 	if err != nil {
+		usageState.clearAdmissionConfig()
 		return ctx, nil, err
 	}
 	out := *reduced
 	out.Messages = msgs
 	if err = emitContextReplacement(ctx, msgs, "context_compacted_v1"); err != nil {
+		usageState.clearAdmissionConfig()
 		return ctx, nil, err
 	}
+	p.commitCompaction(rewriteCtx, reduced.Messages, msgs)
 	return ctx, &out, nil
 }
 
@@ -133,24 +313,48 @@ func (p *ContextPipeline) RetryConfig() *adk.TypedModelRetryConfig[*schema.Agent
 			return nil
 		}
 		opts := model.GetCommonOptions(nil, retry.Options...)
-		msgs, err := p.compact(ctx, retry.InputMessages, opts.Tools, true)
+		usageState := p.usageState(ctx)
+		var configID, recordedMode string
+		if p.cfg.Budget.Version >= 7 {
+			var err error
+			configID, recordedMode, _, err = p.currentModelAdmissionState(ctx)
+			if err != nil {
+				usageState.clearAdmissionConfig()
+				return &adk.TypedRetryDecision[*schema.AgenticMessage]{RewriteError: err}
+			}
+		}
+		retryCtx := withAdmissionState(ctx, configID, recordedMode)
+		if p.cfg.Budget.Version >= 7 {
+			entryMode := "local"
+			if p.getAnchor(retryCtx) != nil {
+				entryMode = "usage_delta"
+			}
+			usageState.setAdmissionConfig(configID, entryMode)
+		}
+		msgs, err := p.compactStage(retryCtx, retry.InputMessages, opts.Tools, true, opts.DeferredTools)
 		if err != nil {
+			usageState.clearAdmissionConfig()
 			return &adk.TypedRetryDecision[*schema.AgenticMessage]{RewriteError: err}
 		}
-		before, err := p.cfg.Budget.measureContext(retry.InputMessages, opts.Tools, p.cfg.Budget.OutputReserveTokens, false)
+		before, err := p.cfg.Budget.measureContext(retry.InputMessages, opts.Tools, p.cfg.Budget.OutputReserveTokens, false, opts.DeferredTools)
 		if err != nil {
+			usageState.clearAdmissionConfig()
 			return &adk.TypedRetryDecision[*schema.AgenticMessage]{RewriteError: err}
 		}
-		after, err := p.cfg.Budget.measureContext(msgs, opts.Tools, p.cfg.Budget.OutputReserveTokens, false)
+		after, err := p.cfg.Budget.measureContext(msgs, opts.Tools, p.cfg.Budget.OutputReserveTokens, false, opts.DeferredTools)
 		if err != nil {
+			usageState.clearAdmissionConfig()
 			return &adk.TypedRetryDecision[*schema.AgenticMessage]{RewriteError: err}
 		}
 		if !p.cfg.Budget.fits(after) || (after.EstimatedTokens >= before.EstimatedTokens && after.TransportBytes >= before.TransportBytes) {
+			usageState.clearAdmissionConfig()
 			return &adk.TypedRetryDecision[*schema.AgenticMessage]{RewriteError: &ModelError{Code: "context_unrecoverable"}}
 		}
 		if err = emitContextReplacement(ctx, msgs, "context_overflow_recovered_v1"); err != nil {
+			usageState.clearAdmissionConfig()
 			return &adk.TypedRetryDecision[*schema.AgenticMessage]{RewriteError: err}
 		}
+		p.commitCompaction(retryCtx, retry.InputMessages, msgs)
 		return &adk.TypedRetryDecision[*schema.AgenticMessage]{Retry: true, ModifiedInputMessages: msgs, PersistModifiedInputMessages: true, RejectReason: "context_overflow"}
 	}}
 }
@@ -247,19 +451,46 @@ func (p *ContextPipeline) partition(messages []*schema.AgenticMessage, force boo
 	return
 }
 
-func (p *ContextPipeline) compact(ctx context.Context, messages []*schema.AgenticMessage, tools []*schema.ToolInfo, force bool) (result []*schema.AgenticMessage, failure error) {
-	ctx, operation := observability.Begin(ctx, "context-compaction", zap.Int("custom.context.messages_before", len(messages)), zap.Bool("custom.context.forced", force), zap.Int("custom.context.input_token_limit", p.cfg.Budget.InputTokenLimit))
+func (p *ContextPipeline) commitCompaction(ctx context.Context, original, compacted []*schema.AgenticMessage) {
+	if !slices.Equal(compacted, original) {
+		p.invalidateAnchor(ctx, original)
+		p.usageState(ctx).pruneAfterCompaction(compacted)
+	}
+}
+
+func (p *ContextPipeline) compact(ctx context.Context, messages []*schema.AgenticMessage, tools []*schema.ToolInfo, force bool, deferred ...[]*schema.ToolInfo) ([]*schema.AgenticMessage, error) {
+	result, err := p.compactStage(ctx, messages, tools, force, deferred...)
+	if err == nil {
+		p.commitCompaction(ctx, messages, result)
+	}
+	return result, err
+}
+
+func (p *ContextPipeline) compactStage(ctx context.Context, messages []*schema.AgenticMessage, tools []*schema.ToolInfo, force bool, deferred ...[]*schema.ToolInfo) (result []*schema.AgenticMessage, failure error) {
+	allDeferred := flattenToolInfos(deferred)
+	initial, err := p.measureMainContext(ctx, messages, tools, allDeferred)
+	if err != nil {
+		return nil, err
+	}
+	compactionFields := append([]zap.Field{zap.Int("custom.context.messages_before", len(messages)), zap.Bool("custom.context.forced", force)}, p.cfg.Budget.measurementLogFields(initial, p.cfg.Budget.compactionReason(initial, force))...)
+	ctx, operation := observability.Begin(ctx, "context-compaction", compactionFields...)
 	observability.L(ctx).Info("Context compaction started", zap.String("event.action", "context-compaction-started"))
-	defer func() { operation.End(failure, zap.Int("custom.context.messages_after", len(result))) }()
+	defer func() {
+		if failure == nil && !slices.Equal(result, messages) {
+			result = stripRetainedUsageAnchors(result)
+		}
+		operation.End(failure, zap.Int("custom.context.messages_after", len(result)))
+	}()
 	target := p.cfg.Budget.InputTokenLimit
-	if force {
-		measurement, err := p.cfg.Budget.measureContext(messages, tools, p.cfg.Budget.OutputReserveTokens, false)
+	shrinkLocal := force || (p.cfg.Budget.Version >= 7 && initial.CounterMode == "usage_delta" && initial.EstimatedTokens > initial.LocalTokens)
+	if shrinkLocal {
+		measurement, err := p.cfg.Budget.measureContext(messages, tools, p.cfg.Budget.OutputReserveTokens, false, allDeferred)
 		if err != nil {
 			return nil, err
 		}
 		target = min(target, measurement.EstimatedTokens*3/4)
 	}
-	systems, prefix, tail := p.partition(messages, force)
+	systems, prefix, tail := p.partition(messages, shrinkLocal)
 	if p.cfg.Budget.Version >= 3 {
 		pinned, err := p.currentInputSet(ctx, messages)
 		if err != nil {
@@ -276,7 +507,7 @@ func (p *ContextPipeline) compact(ctx context.Context, messages []*schema.Agenti
 		prefix, tail = older, append(kept, tail...)
 	}
 	if len(prefix) == 0 {
-		return p.fitTailTo(ctx, systems, tail, tools, target)
+		return p.fitTailTo(ctx, systems, tail, tools, target, allDeferred)
 	}
 	ref, err := p.cfg.ArchiveTranscript(ctx, prefix)
 	if err != nil {
@@ -294,7 +525,7 @@ func (p *ContextPipeline) compact(ctx context.Context, messages []*schema.Agenti
 	}
 	summary := schema.UserAgenticMessage(summaryText)
 	summary.Extra = map[string]any{"teamie_context_summary": contextProfileV1, "teamie_context_sources": contextSourceValue(sources), "teamie_context_archive_ref": ref}
-	return p.fitTailTo(ctx, append(append([]*schema.AgenticMessage{}, systems...), summary), tail, tools, target)
+	return p.fitTailTo(ctx, append(append([]*schema.AgenticMessage{}, systems...), summary), tail, tools, target, allDeferred)
 }
 
 func contextSourceValue(sources []InputSource) any {
