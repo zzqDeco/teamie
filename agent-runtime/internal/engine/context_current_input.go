@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"slices"
 
 	"github.com/cloudwego/eino/schema"
 )
@@ -80,6 +81,9 @@ func (p *ContextPipeline) fitCurrentInputs(ctx context.Context, fixed, tail []*s
 	target = max(target, minimum.EstimatedTokens)
 	fits := func(messages []*schema.AgenticMessage) (bool, error) {
 		measurement, err := p.cfg.Budget.measureContext(messages, tools, p.cfg.Budget.OutputReserveTokens, false, allDeferred)
+		if slices.Equal(messages, out) {
+			measurement, err = p.measureMainContext(ctx, messages, tools, allDeferred)
+		}
 		return err == nil && p.cfg.Budget.fits(measurement) && measurement.EstimatedTokens <= target, err
 	}
 	if ok, err := fits(out); ok || err != nil {
@@ -127,6 +131,9 @@ func (p *ContextPipeline) fitCurrentInputs(ctx context.Context, fixed, tail []*s
 		candidate = append(candidate, messages...)
 	}
 	measurement, err := p.cfg.Budget.measureContext(candidate, tools, p.cfg.Budget.OutputReserveTokens, false, allDeferred)
+	if slices.Equal(candidate, out) {
+		measurement, err = p.measureMainContext(ctx, candidate, tools, allDeferred)
+	}
 	if err != nil {
 		return nil, err
 	}

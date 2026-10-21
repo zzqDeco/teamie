@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"go.uber.org/zap"
+	"slices"
 	"strings"
 	"teamie/backend/pkg/observability"
 	"time"
@@ -361,12 +362,12 @@ func (p *ContextPipeline) compact(ctx context.Context, messages []*schema.Agenti
 	if err != nil {
 		return nil, err
 	}
-	p.invalidateAnchor(ctx, messages)
 	compactionFields := append([]zap.Field{zap.Int("custom.context.messages_before", len(messages)), zap.Bool("custom.context.forced", force)}, p.cfg.Budget.measurementLogFields(initial, p.cfg.Budget.compactionReason(initial, force))...)
 	ctx, operation := observability.Begin(ctx, "context-compaction", compactionFields...)
 	observability.L(ctx).Info("Context compaction started", zap.String("event.action", "context-compaction-started"))
 	defer func() {
-		if failure == nil {
+		if failure == nil && !slices.Equal(result, messages) {
+			p.invalidateAnchor(ctx, messages)
 			p.usageState(ctx).pruneAfterCompaction(result)
 		}
 		operation.End(failure, zap.Int("custom.context.messages_after", len(result)))
