@@ -257,10 +257,26 @@ class AgentManifestTest(unittest.TestCase):
         current=copy.deepcopy(previous)
         current["version"]="v0.3.16"
         current["source"]["ref"]="refs/heads/release/v0.3.16"
-        current["schema"]=dict(manifest.SCHEMA_V2)
+        current["schema"]={"identity":3,"chat":5,"agent_control":1,"agent_runtime":9,"gateway":2}
         self.assertEqual(current["schema"]["agent_runtime"],9)
         self.assertEqual(current["featureFlags"],previous["featureFlags"])
         self.assertEqual(current["storage"],previous["storage"])
+        manifest.check_transition(current,previous,previous)
+        with self.assertRaisesRegex(ValueError,"identical schema versions"):
+            manifest.check_transition(previous,current,rollback=True)
+        with self.assertRaisesRegex(ValueError,"identical schema versions"):
+            manifest.compatible(current,previous)
+
+    def test_calibrated_context_schema_rejects_old_writer_rollback(self):
+        previous=self.modern()
+        previous["version"]="v0.3.20"
+        previous["source"]["ref"]="refs/heads/release/v0.3.20"
+        previous["schema"]={"identity":3,"chat":5,"agent_control":1,"agent_runtime":9,"gateway":2}
+        current=self.modern()
+        current["version"]="v0.3.22"
+        current["source"]["ref"]="refs/heads/release/v0.3.22"
+        self.assertEqual(current["schema"]["agent_runtime"],10)
+        manifest.validate(previous)
         manifest.check_transition(current,previous,previous)
         with self.assertRaisesRegex(ValueError,"identical schema versions"):
             manifest.check_transition(previous,current,rollback=True)
