@@ -10,11 +10,9 @@ pg=(docker exec -i "$POSTGRES_CONTAINER_ID")
   POSTGRES_AGENT_RUNTIME_PASSWORD=ci-runtime-disposable-password POSTGRES_GATEWAY_PASSWORD=ci-gateway-disposable-password \
   bash -s < deploy/postgres/01-databases.sh
 for suffix in identity chat agent_control agent_runtime gateway; do
-  version=1
-  if [[ $suffix == identity || $suffix == chat || $suffix == agent_runtime || $suffix == gateway ]]; then version=2; fi
-  if [[ $suffix == identity || $suffix == chat || $suffix == agent_runtime ]]; then version=3; fi
-  if [[ $suffix == agent_runtime ]]; then version=10; fi
-  if [[ $suffix == chat ]]; then version=5; fi
+  # Compare the real restored migration ledger with the generated release
+  # contract, so updating a migration without its manifest fails before deploy.
+  version=$(python3 -c 'import sys; from ops.manifest import SCHEMA_V2; print(SCHEMA_V2[sys.argv[1]])' "$suffix")
   # Identity's real schema creates its complete production migration ledger.
   if [[ $suffix != identity && $suffix != agent_runtime && $suffix != chat ]]; then
     "${pg[@]}" psql -U postgres -d "teamie_$suffix" -v ON_ERROR_STOP=1 -v ledger="${suffix}_schema_migrations" -v version="$version" <<'SQL'
