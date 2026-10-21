@@ -629,10 +629,9 @@ func (s *Store) RecordedModelStepConfigID(ctx context.Context, r *Run, step int)
 	if s == nil || s.DB == nil || r == nil || r.ID == "" || step < 1 {
 		return "", false
 	}
-	var raw []byte
-	var recorded bool
-	err := s.DB.QueryRow(ctx, `SELECT (SELECT response FROM runtime_model_calls WHERE run_id=$1 AND step=$2), (EXISTS(SELECT 1 FROM runtime_model_calls WHERE run_id=$1 AND step=$2) OR EXISTS(SELECT 1 FROM runtime_context_recoveries WHERE run_id=$1 AND model_step=$2))`, r.ID, step).Scan(&raw, &recorded)
-	if err != nil || !recorded {
+	var raw, decisionRaw []byte
+	err := s.DB.QueryRow(ctx, `SELECT (SELECT response FROM runtime_model_calls WHERE run_id=$1 AND step=$2), (SELECT decision_json FROM runtime_context_recoveries WHERE run_id=$1 AND model_step=$2)`, r.ID, step).Scan(&raw, &decisionRaw)
+	if err != nil || (len(raw) == 0 && len(decisionRaw) == 0) {
 		return "", false
 	}
 	if len(raw) > 0 {
@@ -642,22 +641,13 @@ func (s *Store) RecordedModelStepConfigID(ctx context.Context, r *Run, step int)
 			}
 		}
 	}
-	rows, err := s.DB.Query(ctx, `SELECT response FROM runtime_model_calls WHERE run_id=$1 ORDER BY CASE WHEN step>=$2 THEN 0 ELSE 1 END, ABS(step-$2) ASC`, r.ID, step)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var candidate []byte
-			if rows.Scan(&candidate) == nil && len(candidate) > 0 {
-				if msg, decodeErr := decodeAgenticMessage(candidate); decodeErr == nil {
-					if id, ok := extractRecordedModelConfigID(msg); ok {
-						return id, true
-					}
-				}
+	if len(decisionRaw) > 0 {
+		var decision contextRecoveryDecision
+		if json.Unmarshal(decisionRaw, &decision) == nil {
+			if id := strings.TrimSpace(decision.ConfigID); id != "" {
+				return id, true
 			}
 		}
-	}
-	if anchor := r.usageState.get(); anchor != nil && strings.TrimSpace(anchor.ConfigID) != "" {
-		return strings.TrimSpace(anchor.ConfigID), true
 	}
 	return "", true
 }
