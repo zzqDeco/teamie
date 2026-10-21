@@ -473,6 +473,31 @@ func extractUsageAnchor(msg *schema.AgenticMessage) (*contextUsageAnchor, bool) 
 	return &anchor, true
 }
 
+func stripRetainedUsageAnchors(messages []*schema.AgenticMessage) []*schema.AgenticMessage {
+	if len(messages) == 0 {
+		return messages
+	}
+	var out []*schema.AgenticMessage
+	for i, msg := range messages {
+		if msg == nil || msg.Role != schema.AgenticRoleTypeAssistant || len(msg.Extra) == 0 {
+			continue
+		}
+		if _, exists := msg.Extra[contextUsageAnchorExtraKey]; !exists {
+			continue
+		}
+		if out == nil {
+			out = append([]*schema.AgenticMessage(nil), messages...)
+		}
+		cloned := *msg
+		clearMessageUsageAnchor(&cloned)
+		out[i] = &cloned
+	}
+	if out != nil {
+		return out
+	}
+	return messages
+}
+
 func clearMessageUsageAnchor(msg *schema.AgenticMessage) {
 	if msg == nil || len(msg.Extra) == 0 {
 		return

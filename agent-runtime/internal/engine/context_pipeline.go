@@ -286,19 +286,20 @@ func (p *ContextPipeline) BeforeModelRewriteState(ctx context.Context, state *ad
 	if run != nil {
 		stepBefore = run.Step.Load()
 	}
-	msgs, err := p.compact(rewriteCtx, reduced.Messages, reduced.ToolInfos, false, reduced.DeferredToolInfos)
+	msgs, err := p.compactStage(rewriteCtx, reduced.Messages, reduced.ToolInfos, false, reduced.DeferredToolInfos)
 	if err != nil {
 		usageState.clearAdmissionConfig()
 		return ctx, nil, err
-	}
-	if p.cfg.Budget.Version >= 7 && run != nil && run.Step.Load() > stepBefore && usageState.hasAdmission() {
-		usageState.setAdmissionConfig(configID, "local")
 	}
 	out := *reduced
 	out.Messages = msgs
 	if err = emitContextReplacement(ctx, msgs, "context_compacted_v1"); err != nil {
 		usageState.clearAdmissionConfig()
 		return ctx, nil, err
+	}
+	p.commitCompaction(rewriteCtx, reduced.Messages, msgs)
+	if p.cfg.Budget.Version >= 7 && (run != nil && run.Step.Load() > stepBefore || !slices.Equal(msgs, reduced.Messages)) && usageState.hasAdmission() {
+		usageState.setAdmissionConfig(configID, "local")
 	}
 	return ctx, &out, nil
 }
@@ -316,7 +317,7 @@ func (p *ContextPipeline) RetryConfig() *adk.TypedModelRetryConfig[*schema.Agent
 			return nil
 		}
 		opts := model.GetCommonOptions(nil, retry.Options...)
-		msgs, err := p.compact(ctx, retry.InputMessages, opts.Tools, true, opts.DeferredTools)
+		msgs, err := p.compactStage(ctx, retry.InputMessages, opts.Tools, true, opts.DeferredTools)
 		if err != nil {
 			return &adk.TypedRetryDecision[*schema.AgenticMessage]{RewriteError: err}
 		}
@@ -334,6 +335,7 @@ func (p *ContextPipeline) RetryConfig() *adk.TypedModelRetryConfig[*schema.Agent
 		if err = emitContextReplacement(ctx, msgs, "context_overflow_recovered_v1"); err != nil {
 			return &adk.TypedRetryDecision[*schema.AgenticMessage]{RewriteError: err}
 		}
+		p.commitCompaction(ctx, retry.InputMessages, msgs)
 		return &adk.TypedRetryDecision[*schema.AgenticMessage]{Retry: true, ModifiedInputMessages: msgs, PersistModifiedInputMessages: true, RejectReason: "context_overflow"}
 	}}
 }
@@ -430,7 +432,22 @@ func (p *ContextPipeline) partition(messages []*schema.AgenticMessage, force boo
 	return
 }
 
-func (p *ContextPipeline) compact(ctx context.Context, messages []*schema.AgenticMessage, tools []*schema.ToolInfo, force bool, deferred ...[]*schema.ToolInfo) (result []*schema.AgenticMessage, failure error) {
+func (p *ContextPipeline) commitCompaction(ctx context.Context, original, compacted []*schema.AgenticMessage) {
+	if !slices.Equal(compacted, original) {
+		p.invalidateAnchor(ctx, original)
+		p.usageState(ctx).pruneAfterCompaction(compacted)
+	}
+}
+
+func (p *ContextPipeline) compact(ctx context.Context, messages []*schema.AgenticMessage, tools []*schema.ToolInfo, force bool, deferred ...[]*schema.ToolInfo) ([]*schema.AgenticMessage, error) {
+	result, err := p.compactStage(ctx, messages, tools, force, deferred...)
+	if err == nil {
+		p.commitCompaction(ctx, messages, result)
+	}
+	return result, err
+}
+
+func (p *ContextPipeline) compactStage(ctx context.Context, messages []*schema.AgenticMessage, tools []*schema.ToolInfo, force bool, deferred ...[]*schema.ToolInfo) (result []*schema.AgenticMessage, failure error) {
 	allDeferred := flattenToolInfos(deferred)
 	initial, err := p.measureMainContext(ctx, messages, tools, allDeferred)
 	if err != nil {
@@ -441,8 +458,7 @@ func (p *ContextPipeline) compact(ctx context.Context, messages []*schema.Agenti
 	observability.L(ctx).Info("Context compaction started", zap.String("event.action", "context-compaction-started"))
 	defer func() {
 		if failure == nil && !slices.Equal(result, messages) {
-			p.invalidateAnchor(ctx, messages)
-			p.usageState(ctx).pruneAfterCompaction(result)
+			result = stripRetainedUsageAnchors(result)
 		}
 		operation.End(failure, zap.Int("custom.context.messages_after", len(result)))
 	}()

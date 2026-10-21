@@ -157,7 +157,6 @@ func (p *ContextPipeline) reducer(ctx context.Context, names []string, deferred 
 		res, err := p.clearTool(clearCtx, detail)
 		if err == nil && res != nil && res.NeedClear {
 			didClear = true
-			p.invalidateAnchor(clearCtx, initialMsgs)
 		}
 		return res, err
 	}
@@ -171,8 +170,11 @@ func (p *ContextPipeline) reducer(ctx context.Context, names []string, deferred 
 		config[name] = entry
 	}
 	return reduction.NewTyped(ctx, &reduction.TypedConfig[*schema.AgenticMessage]{Backend: p.cfg.Backend, ReadFileToolName: "context_read", TruncExcludeTools: []string{"context_read", "context_search", "workspace_read_page"}, MaxLengthForTrunc: p.cfg.Budget.ToolResultByteLimit, MaxTokensForClear: int64(p.cfg.Budget.TriggerTokens), ClearRetentionSuffixLimit: 2, ClearAtLeastTokens: 1, ToolConfig: config, ClearPostProcess: func(postCtx context.Context, state *adk.TypedChatModelAgentState[*schema.AgenticMessage]) context.Context {
-		if didClear && state != nil {
-			p.invalidateAnchor(postCtx, state.Messages)
+		if didClear {
+			p.invalidateAnchor(postCtx, initialMsgs)
+			if state != nil {
+				p.usageState(postCtx).pruneAfterCompaction(state.Messages)
+			}
 		}
 		return postCtx
 	}, TokenCounter: func(counterCtx context.Context, msgs []*schema.AgenticMessage, tools []*schema.ToolInfo) (int64, error) {
