@@ -164,6 +164,26 @@ func (b ContextBudgetSnapshot) measureContextRequest(request []byte) (ContextMea
 }
 
 const contextUsageAnchorExtraKey = "_teamie_usage_anchor"
+const maxCalibratedPromptTokens = 100_000_000
+
+func validCalibratedTokenBounds(promptTokens, localTokens int) bool {
+	return promptTokens > 0 && promptTokens <= maxCalibratedPromptTokens && localTokens > 0 && localTokens <= maxCalibratedPromptTokens
+}
+
+func calibratedEffectiveTokens(promptTokens, localTokens, anchorLocalTokens int) (int, bool) {
+	if !validCalibratedTokenBounds(promptTokens, anchorLocalTokens) || localTokens <= 0 || localTokens > maxCalibratedPromptTokens {
+		return 0, false
+	}
+	delta := int64(localTokens) - int64(anchorLocalTokens)
+	effective := int64(promptTokens) + delta
+	if effective < 1 {
+		effective = 1
+	}
+	if effective > maxCalibratedPromptTokens {
+		return 0, false
+	}
+	return int(effective), true
+}
 
 type contextUsageAnchor struct {
 	Step         int    `json:"step"`
@@ -202,7 +222,7 @@ func (s *usageAnchorState) getForConfig(configID string) *contextUsageAnchor {
 }
 
 func (s *usageAnchorState) set(anchor *contextUsageAnchor, onlyIfValid bool) {
-	if s == nil || anchor == nil || anchor.PromptTokens <= 0 || anchor.MessageCount <= 0 || anchor.PrefixHash == "" || anchor.ConfigID == "" {
+	if s == nil || anchor == nil || !validCalibratedTokenBounds(anchor.PromptTokens, anchor.LocalTokens) || anchor.MessageCount <= 0 || anchor.PrefixHash == "" || anchor.ConfigID == "" {
 		return
 	}
 	s.mu.Lock()
@@ -278,7 +298,7 @@ func (s *usageAnchorState) pruneAfterCompaction(retained []*schema.AgenticMessag
 }
 
 func attachUsageAnchor(msg *schema.AgenticMessage, anchor *contextUsageAnchor) {
-	if msg == nil || anchor == nil || anchor.PromptTokens <= 0 || anchor.MessageCount <= 0 || anchor.PrefixHash == "" || anchor.LocalTokens <= 0 || anchor.ConfigID == "" {
+	if msg == nil || anchor == nil || !validCalibratedTokenBounds(anchor.PromptTokens, anchor.LocalTokens) || anchor.MessageCount <= 0 || anchor.PrefixHash == "" || anchor.ConfigID == "" {
 		return
 	}
 	raw, err := json.Marshal(anchor)
@@ -362,7 +382,7 @@ func extractUsageAnchor(msg *schema.AgenticMessage) (*contextUsageAnchor, bool) 
 	if json.Unmarshal(raw, &anchor) != nil {
 		return nil, false
 	}
-	if anchor.PromptTokens <= 0 || anchor.MessageCount <= 0 || anchor.PrefixHash == "" || anchor.LocalTokens <= 0 || anchor.ConfigID == "" {
+	if !validCalibratedTokenBounds(anchor.PromptTokens, anchor.LocalTokens) || anchor.MessageCount <= 0 || anchor.PrefixHash == "" || anchor.ConfigID == "" {
 		return nil, false
 	}
 	return &anchor, true
@@ -386,14 +406,17 @@ func isSummaryModelOptions(opts *model.Options) bool {
 func (b ContextBudgetSnapshot) measureCalibratedContext(anchor *contextUsageAnchor, messages []*schema.AgenticMessage, tools []*schema.ToolInfo, output int, streaming bool, deferred ...[]*schema.ToolInfo) (ContextMeasurement, error) {
 	allDeferred := flattenToolInfos(deferred)
 	base, err := b.measureContext(messages, tools, output, streaming, allDeferred)
-	if err != nil || b.Version < 7 || anchor == nil || anchor.ConfigID == "" || anchor.PromptTokens <= 0 || anchor.MessageCount <= 0 || len(messages) < anchor.MessageCount {
+	if err != nil || b.Version < 7 || anchor == nil || anchor.ConfigID == "" || !validCalibratedTokenBounds(anchor.PromptTokens, anchor.LocalTokens) || anchor.MessageCount <= 0 || len(messages) < anchor.MessageCount {
 		return base, err
 	}
 	_, prefixHash, err := visibleContextBytes(messages[:anchor.MessageCount], tools, allDeferred, nil, &schema.AgenticToolChoice{Type: schema.ToolChoiceAllowed})
 	if err != nil || prefixHash != anchor.PrefixHash {
 		return base, nil
 	}
-	effective := max(1, anchor.PromptTokens+base.LocalTokens-anchor.LocalTokens)
+	effective, ok := calibratedEffectiveTokens(anchor.PromptTokens, base.LocalTokens, anchor.LocalTokens)
+	if !ok {
+		return base, nil
+	}
 	return ContextMeasurement{
 		EstimatedTokens:    effective,
 		LocalTokens:        base.LocalTokens,
@@ -407,7 +430,7 @@ func (b ContextBudgetSnapshot) measureCalibratedContext(anchor *contextUsageAnch
 
 func (b ContextBudgetSnapshot) measureCalibratedRequest(anchor *contextUsageAnchor, request []byte) (ContextMeasurement, error) {
 	base, err := b.measureContextRequest(request)
-	if err != nil || b.Version < 7 || anchor == nil || anchor.ConfigID == "" || anchor.PromptTokens <= 0 || anchor.MessageCount <= 0 {
+	if err != nil || b.Version < 7 || anchor == nil || anchor.ConfigID == "" || !validCalibratedTokenBounds(anchor.PromptTokens, anchor.LocalTokens) || anchor.MessageCount <= 0 {
 		return base, err
 	}
 	var envelope modeltransport.Request
@@ -423,7 +446,10 @@ func (b ContextBudgetSnapshot) measureCalibratedRequest(anchor *contextUsageAnch
 	if err != nil || prefixHash != anchor.PrefixHash {
 		return base, nil
 	}
-	effective := max(1, anchor.PromptTokens+base.LocalTokens-anchor.LocalTokens)
+	effective, ok := calibratedEffectiveTokens(anchor.PromptTokens, base.LocalTokens, anchor.LocalTokens)
+	if !ok {
+		return base, nil
+	}
 	return ContextMeasurement{
 		EstimatedTokens:    effective,
 		LocalTokens:        base.LocalTokens,

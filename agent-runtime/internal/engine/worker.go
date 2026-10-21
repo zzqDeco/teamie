@@ -277,11 +277,10 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 	}
 	var contextWindow atomic.Int64
 	contextWindow.Store(16384)
-	var modelConfigID atomic.Value
 	// Typing and normal IM calls share credentials: issuance rotates the
 	// principal's single token and must never create competing token caches.
 	imc := &IM{BaseURL: e.Config.IMURL, RealtimeURL: e.Config.IMRealtimeURL, ServiceKey: e.Config.IMToken, AgentID: def.Id, Identity: e.Identity}
-	gatewayModel := &GatewayModel{Client: e.Gateway, Token: e.Config.GatewayToken, OwnerID: def.OwnerId, AgentID: def.Id, Store: e.Store, Lease: lease, Authorize: authorize, StreamURL: e.Config.GatewayStreamURL, ContextWindow: func() int { return int(contextWindow.Load()) }, ModelConfigID: func() string { id, _ := modelConfigID.Load().(string); return id }}
+	gatewayModel := &GatewayModel{Client: e.Gateway, Token: e.Config.GatewayToken, OwnerID: def.OwnerId, AgentID: def.Id, Store: e.Store, Lease: lease, Authorize: authorize, StreamURL: e.Config.GatewayStreamURL, ContextWindow: func() int { return int(contextWindow.Load()) }}
 	tools, err := (&Tools{Store: e.Store, Lease: lease, IM: imc, Sandbox: e.Sandbox, SandboxToken: e.Config.SandboxToken, Authorize: authorize}).BuildIM()
 	if err != nil {
 		e.report(ctx, def.Id, "error", "tool_failed", false)
@@ -768,11 +767,6 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		ping, err := e.Gateway.Ping(pc, &wire.PingRequest{ServiceToken: &e.Config.GatewayToken})
 		c()
 		ready := err == nil && ping.Ready && ping.GetConfigured() && ping.GetEnabled()
-		if ready {
-			modelConfigID.Store(ping.GetModelConfigId())
-		} else {
-			modelConfigID.Store("")
-		}
 		if ready && ping.ContextWindowTokens != nil && ping.GetContextWindowTokens() >= 4096 {
 			contextWindow.Store(ping.GetContextWindowTokens())
 		}

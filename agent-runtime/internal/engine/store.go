@@ -132,13 +132,18 @@ func (r *Run) computeRequestUsageAnchor(step int, request []byte, result *schema
 	if err != nil {
 		return nil
 	}
+	localTokens := estimateVisibleTokensV7(visibleBytes)
+	promptTokens := result.ResponseMeta.TokenUsage.PromptTokens
+	if !validCalibratedTokenBounds(promptTokens, localTokens) {
+		return nil
+	}
 	return &contextUsageAnchor{
 		Step:         step,
 		ConfigID:     configID,
 		MessageCount: len(messages),
 		PrefixHash:   prefixHash,
-		LocalTokens:  estimateVisibleTokensV7(visibleBytes),
-		PromptTokens: result.ResponseMeta.TokenUsage.PromptTokens,
+		LocalTokens:  localTokens,
+		PromptTokens: promptTokens,
 	}
 }
 
@@ -154,7 +159,9 @@ func (r *Run) recordModelUsageAnchor(step int, request []byte, result *schema.Ag
 	anchor := r.computeRequestUsageAnchor(step, request, result, configID)
 	if anchor == nil {
 		if contextProfile(r) == contextProfileV1 {
-			attachRecordedModelConfigID(result, step, configID)
+			if budget, err := ParseContextBudgetSnapshot(r.ContextBudget); err == nil && budget.Version >= 7 {
+				attachRecordedModelConfigID(result, step, configID)
+			}
 		}
 		return
 	}

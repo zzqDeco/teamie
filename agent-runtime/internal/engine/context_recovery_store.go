@@ -39,7 +39,7 @@ func recoveryDecision(run *Run, configID ...string) ([]byte, error) {
 		return nil, err
 	}
 	cfgID := ""
-	if len(configID) > 0 {
+	if budget.Version >= 7 && len(configID) > 0 {
 		cfgID = strings.TrimSpace(configID[0])
 	}
 	return json.Marshal(contextRecoveryDecision{Version: 1, Action: "compact_prefix", Budget: budget, ConfigID: cfgID})

@@ -69,7 +69,11 @@ func (m *GatewayModel) liveModelConfigID(ctx context.Context) (string, bool) {
 	if m == nil {
 		return "", false
 	}
-	if m.Client != nil {
+	hasRPC := m.Client != nil
+	if gh, ok := m.Client.(*gatewayHTTPClient); ok && gh != nil && gh.Client == nil {
+		hasRPC = false
+	}
+	if hasRPC {
 		pc, cancel := context.WithTimeout(ctx, 2*time.Second)
 		ping, err := safeGatewayPing(pc, m.Client, m.Token)
 		cancel()
@@ -78,6 +82,7 @@ func (m *GatewayModel) liveModelConfigID(ctx context.Context) (string, bool) {
 				return id, true
 			}
 		}
+		return "", false
 	}
 	if m.ModelConfigID != nil {
 		if id := strings.TrimSpace(m.ModelConfigID()); id != "" {
@@ -195,6 +200,9 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticM
 	b, e := (&schema.HumanReadableSerializer{}).Marshal(result)
 	if e != nil {
 		return nil, e
+	}
+	if len(b) > modeltransport.MaxResponseBytes {
+		return nil, &ModelError{Code: "upstream_response_limit"}
 	}
 	phase = "persist-receipt"
 	if e = m.Store.SaveModel(ctx, m.Lease, run, step, hash, b); e != nil {

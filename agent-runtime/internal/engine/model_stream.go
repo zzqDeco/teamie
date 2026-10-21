@@ -263,13 +263,10 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 			return
 		}
 		stage = "serialize-result"
+		run.recordModelUsageAnchor(step, request, result, streamConfigID)
 		b, err := (&schema.HumanReadableSerializer{}).Marshal(result)
 		if err == nil && len(b) > modeltransport.MaxResponseBytes {
 			err = &ModelError{Code: "upstream_response_limit"}
-		}
-		if err == nil {
-			run.recordModelUsageAnchor(step, request, result, streamConfigID)
-			b, err = (&schema.HumanReadableSerializer{}).Marshal(result)
 		}
 		if err == nil {
 			stage = "persist-receipt"
