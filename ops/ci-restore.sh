@@ -70,8 +70,8 @@ from pathlib import Path
 import re
 root=Path('agent-runtime/internal/engine')
 sources='\n'.join(p.read_text() for p in root.glob('*.go') if not p.name.endswith('_test.go'))
-print("SET teamie.runtime_writer_schema='11';")
-for name in ('schemaSQL','schemaV2SQL','schemaV3SQL','contextArchiveSchemaSQL','contextRecoverySchemaSQL','schemaV4SQL','schemaV5SQL','schemaV6SQL','schemaV7SQL','schemaV8SQL','schemaV9SQL','schemaV10SQL','schemaV11SQL'):
+print("SET teamie.runtime_writer_schema='12';")
+for name in ('schemaSQL','schemaV2SQL','schemaV3SQL','contextArchiveSchemaSQL','contextRecoverySchemaSQL','schemaV4SQL','schemaV5SQL','schemaV6SQL','schemaV7SQL','schemaV8SQL','schemaV9SQL','schemaV10SQL','schemaV11SQL','schemaV12SQL'):
     match=re.search(r'const\s+'+name+r'\s*=\s*`([^`]+)`',sources,re.S)
     if match is None:
         raise SystemExit('missing actual runtime migration: '+name)
@@ -86,7 +86,8 @@ PY
     runtime_calibrated_budget=$(cat ops/fixtures/runtime-context-budget-v7.json)
     runtime_event_driven_budget=$(cat ops/fixtures/runtime-context-budget-event-driven-v1.json)
     runtime_web_budget=$(cat ops/fixtures/runtime-context-budget-web-v1.json)
-    "${pg[@]}" psql -U postgres -d teamie_agent_runtime -v ON_ERROR_STOP=1 -v frozen_budget="$runtime_context_budget" -v output_budget="$runtime_output_budget" -v current_budget="$runtime_current_budget" -v history_budget="$runtime_history_budget" -v notification_budget="$runtime_notification_budget" -v long_budget="$runtime_long_budget" -v calibrated_budget="$runtime_calibrated_budget" -v event_driven_budget="$runtime_event_driven_budget" -v web_budget="$runtime_web_budget" <<'SQL'
+    runtime_schedule_budget=$(cat ops/fixtures/runtime-context-budget-schedule-v1.json)
+    "${pg[@]}" psql -U postgres -d teamie_agent_runtime -v ON_ERROR_STOP=1 -v frozen_budget="$runtime_context_budget" -v output_budget="$runtime_output_budget" -v current_budget="$runtime_current_budget" -v history_budget="$runtime_history_budget" -v notification_budget="$runtime_notification_budget" -v long_budget="$runtime_long_budget" -v calibrated_budget="$runtime_calibrated_budget" -v event_driven_budget="$runtime_event_driven_budget" -v web_budget="$runtime_web_budget" -v schedule_budget="$runtime_schedule_budget" <<'SQL'
 INSERT INTO runtime_agents(agent_id,cursor) VALUES('10000000-0000-4000-8000-000000000001',42);
 INSERT INTO runtime_runs(id,agent_id,input_key,input_json,attempt_id,context_profile,context_budget,context_head,acceptance_head)
 VALUES('20000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','restore-context','[]',
@@ -118,6 +119,11 @@ VALUES('20000000-0000-4000-8000-000000000009','10000000-0000-4000-8000-000000000
 INSERT INTO runtime_runs(id,agent_id,input_key,input_json,attempt_id,context_profile,context_budget,context_head,acceptance_head)
 VALUES('20000000-0000-4000-8000-000000000010','10000000-0000-4000-8000-000000000001','restore-web-policy','[]',
        '30000000-0000-4000-8000-000000000010','teamie-context-v038',:'web_budget'::jsonb,0,0);
+INSERT INTO runtime_runs(id,agent_id,input_key,input_json,attempt_id,context_profile,context_budget,context_head,acceptance_head)
+VALUES('20000000-0000-4000-8000-000000000011','10000000-0000-4000-8000-000000000001','restore-schedule-policy','[]',
+       '30000000-0000-4000-8000-000000000011','teamie-context-v038',:'schedule_budget'::jsonb,0,0);
+INSERT INTO runtime_schedules(id,agent_id,created_run_id,kind,interval_seconds,cron_expr,timezone,prompt,status,max_runs,run_count,next_run_at,source_refs,source_overflow)
+VALUES('sched-restore-fixture','10000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000011','interval',60,'','UTC','Heartbeat check','active',3,1,'2026-10-22T12:00:00Z','[{"eventId":"42","conversationId":"40000000-0000-4000-8000-000000000001","messageId":"50000000-0000-4000-8000-000000000001"}]'::jsonb,false);
 INSERT INTO runtime_context_artifacts(agent_id,run_id,attempt_id,artifact_key,kind,content,content_hash,sources,source_event_seq)
 VALUES('10000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001',
        'transcript:restore','transcript',decode('00fffe80890a0d','hex'),repeat('a',64),
@@ -150,7 +156,7 @@ SQL
 SELECT (SELECT string_agg(version::text,',' ORDER BY version) FROM agent_runtime_schema_migrations)||':'||r.context_profile||':'||(r.context_budget=:'frozen_budget'::jsonb)::text||':'||encode(a.content,'hex')||':'||(a.sources->0->>'eventId')||':'||a.source_event_seq||':'||c.model_step||':'||c.error_code||':'||c.streaming::text||':'||(c.decision_json=jsonb_build_object('version',1,'action','compact_prefix','budget',:'frozen_budget'::jsonb))::text FROM runtime_runs r JOIN runtime_context_artifacts a ON a.run_id=r.id JOIN runtime_context_recoveries c ON c.run_id=r.id WHERE r.id='20000000-0000-4000-8000-000000000001';
 SQL
 )
-    [[ $actual == '1,2,3,4,5,6,7,8,9,10,11:teamie-context-v038:true:00fffe80890a0d:42:42:2:context_overflow:true:true' ]] || { echo 'Runtime frozen policy, context archive, source references and recovery tape restore failed.' >&2; exit 1; }
+    [[ $actual == '1,2,3,4,5,6,7,8,9,10,11,12:teamie-context-v038:true:00fffe80890a0d:42:42:2:context_overflow:true:true' ]] || { echo 'Runtime frozen policy, context archive, source references and recovery tape restore failed.' >&2; exit 1; }
     actual=$("${pg[@]}" psql -U postgres -d restore_agent_runtime -At -v ON_ERROR_STOP=1 -v frozen_budget="$runtime_context_budget" <<'SQL'
 SELECT context_budget=(:'frozen_budget'::jsonb||'{"fileDelivery":true,"structuredMentions":true}'::jsonb) FROM runtime_runs WHERE input_key='restore-file-policy';
 SQL
@@ -196,6 +202,11 @@ SELECT context_budget=:'web_budget'::jsonb AND context_budget->>'webSearch'='tru
 SQL
 )
     [[ $actual == t ]] || { echo 'Runtime web search policy restore failed.' >&2; exit 1; }
+    actual=$("${pg[@]}" psql -U postgres -d restore_agent_runtime -At -v ON_ERROR_STOP=1 -v schedule_budget="$runtime_schedule_budget" <<'SQL'
+SELECT (SELECT context_budget=:'schedule_budget'::jsonb AND context_budget->>'scheduledWakeups'='true' FROM runtime_runs WHERE input_key='restore-schedule-policy') AND (SELECT kind='interval' AND interval_seconds=60 AND run_count=1 AND status='active' FROM runtime_schedules WHERE id='sched-restore-fixture');
+SQL
+)
+    [[ $actual == t ]] || { echo 'Runtime scheduled wakeups policy and schedule table restore failed.' >&2; exit 1; }
 
   fi
   # Ordinary owners may not connect to another service's database.

@@ -235,6 +235,7 @@ type Tools struct {
 	GatewayHTTP      *http.Client
 	OwnerID          string
 	AgentID          string
+	FlagsFile        string
 	Authorize        func(context.Context) error
 }
 type Observation struct {

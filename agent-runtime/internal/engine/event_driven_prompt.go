@@ -18,6 +18,7 @@ func newRunContextBudget(window int, files, mentions bool, webSearch ...bool) (j
 	budget.StructuredMentions = mentions
 	budget.EventDrivenInputs = true
 	budget.WebSearch = len(webSearch) > 0 && webSearch[0]
+	budget.ScheduledWakeups = len(webSearch) > 1 && webSearch[1]
 	return json.Marshal(budget)
 }
 
