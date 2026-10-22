@@ -354,6 +354,7 @@ func (w *workerTasks) notifications(ctx context.Context, l *Lease) (failure erro
 	return nil
 }
 func (e *Engine) cancelAgentTasks(ctx context.Context, id string) {
+	_, _ = e.Store.DB.Exec(ctx, `UPDATE runtime_schedules SET status='canceled',updated_at=now() WHERE agent_id=$1 AND status='active'`, id)
 	s := &TaskStore{Store: e.Store, AgentID: id}
 	// An executor may fail on principal revocation before cancellation reaches
 	// the daemon. Failed/canceled SDK state is not proof that its child stopped.

@@ -25,18 +25,19 @@ func (p *ContextPipeline) currentInputSet(ctx context.Context, messages []*schem
 	wanted := map[string]bool{}
 	required := map[string]bool{}
 	for index, message := range inputMessages(run.Inputs) {
-		// Managed task notifications are durable machine observations, not new
-		// IM bodies. A completed batch can fill the entire window if every
-		// repeated source envelope is pinned. Keep its complete archive and
-		// provenance, while allowing normal history reduction to shrink it.
-		if p.cfg.Budget.Version >= 5 && run.Inputs[index].Kind == "task.notification" {
+		// Managed task notifications and scheduled wakeups are durable machine
+		// observations, not new IM bodies. A completed batch can fill the
+		// entire window if every repeated source envelope is pinned. Keep its
+		// complete archive and provenance, while allowing normal history
+		// reduction to shrink it.
+		if p.cfg.Budget.Version >= 5 && (run.Inputs[index].Kind == "task.notification" || run.Inputs[index].Kind == "schedule.wakeup") {
 			continue
 		}
 		text := agenticText(message)
 		wanted[text] = false
 		// A native managed-task checkpoint can consume its notification by
 		// resuming the suspended tool instead of appending another user block.
-		required[text] = run.Inputs[index].Kind != "task.notification"
+		required[text] = run.Inputs[index].Kind != "task.notification" && run.Inputs[index].Kind != "schedule.wakeup"
 	}
 	for _, message := range messages {
 		if message == nil || message.Role != schema.AgenticRoleTypeUser || hasToolResults(message) || isContextSummary(message) || message.Extra["teamie_context_data"] == contextProfileV1 {

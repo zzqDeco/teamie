@@ -24,6 +24,7 @@
     "agents.tasks.execute": true,
     "im.message.mentions": true,
     "agents.mentions.v1": true,
-    "agents.web.v1": true
+    "agents.web.v1": true,
+    "agents.schedule.v1": true
   }
 }

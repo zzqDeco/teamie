@@ -47,6 +47,7 @@ type Input struct {
 	CreatedAt      string           `json:"createdAt"`
 	Kind           string           `json:"kind,omitempty"`
 	TaskID         string           `json:"taskId,omitempty"`
+	ScheduleID     string           `json:"scheduleId,omitempty"`
 	NotificationID string           `json:"notificationId,omitempty"`
 	Status         string           `json:"status,omitempty"`
 	ParentRunID    string           `json:"parentRunId,omitempty"`
@@ -253,7 +254,7 @@ func Open(ctx context.Context, url string) (*Store, error) {
 		err = validateRuntimeSchema(ctx, tx)
 	}
 	if err == nil {
-		_, err = tx.Exec(ctx, schemaSQL+schemaV2SQL+schemaV3SQL+contextArchiveSchemaSQL+contextRecoverySchemaSQL+schemaV4SQL+schemaV5SQL+schemaV6SQL+schemaV7SQL+schemaV8SQL+schemaV9SQL+schemaV10SQL+schemaV11SQL)
+		_, err = tx.Exec(ctx, schemaSQL+schemaV2SQL+schemaV3SQL+contextArchiveSchemaSQL+contextRecoverySchemaSQL+schemaV4SQL+schemaV5SQL+schemaV6SQL+schemaV7SQL+schemaV8SQL+schemaV9SQL+schemaV10SQL+schemaV11SQL+schemaV12SQL)
 	}
 	if err == nil {
 		err = tx.Commit(ctx)

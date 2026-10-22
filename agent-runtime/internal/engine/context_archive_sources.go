@@ -39,6 +39,14 @@ func contextArgumentHashes(name, argument string) []string {
 		parsers = []any{&webSearchArgs{}}
 	case "web_fetch":
 		parsers = []any{&webFetchArgs{}}
+	case "runtime_clock":
+		parsers = []any{&runtimeClockArgs{}}
+	case "schedule_create":
+		parsers = []any{&scheduleCreateArgs{}}
+	case "schedule_list":
+		parsers = []any{&scheduleListArgs{}}
+	case "schedule_cancel":
+		parsers = []any{&scheduleCancelArgs{}}
 	}
 	for _, parsed := range parsers {
 		if json.Unmarshal([]byte(argument), parsed) == nil {
@@ -222,6 +230,8 @@ func (a *ContextArchive) inputMessageSources(ctx context.Context, r *Run, messag
 	prefix := "TEAMIE_NEW_MESSAGE "
 	if strings.HasPrefix(text, "TEAMIE_TASK_NOTIFICATION ") {
 		prefix = "TEAMIE_TASK_NOTIFICATION "
+	} else if strings.HasPrefix(text, "TEAMIE_SCHEDULE_WAKEUP ") {
+		prefix = "TEAMIE_SCHEDULE_WAKEUP "
 	}
 	if !strings.HasPrefix(text, prefix) {
 		return nil, false, nil
@@ -254,7 +264,7 @@ func (a *ContextArchive) inputMessageSources(ctx context.Context, r *Run, messag
 		return nil, false, nil
 	}
 	refs, overflow := inputSources([]Input{actual})
-	if overflow || actual.Kind == "task.notification" {
+	if overflow || actual.Kind == "task.notification" || actual.Kind == "schedule.wakeup" {
 		refs, err = a.runSources(ctx, runID)
 	} else {
 		refs, err = canonicalContextSources(refs)

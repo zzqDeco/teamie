@@ -235,6 +235,7 @@ type Tools struct {
 	GatewayHTTP      *http.Client
 	OwnerID          string
 	AgentID          string
+	FlagsFile        string
 	Authorize        func(context.Context) error
 }
 type Observation struct {
@@ -343,6 +344,12 @@ func (t *Tools) execute(ctx context.Context, name string, args any, fn func(cont
 			}
 			archive := &ContextArchive{Store: t.Store, Lease: t.Lease, IM: t.IM, Authorize: t.Authorize}
 			if e = archive.authorizeSources(ctx, []InputSource{contextMessageSource(receipt.Data)}); e != nil {
+				return nil, e
+			}
+		}
+		if name == "schedule_list" && out.OK {
+			archive := &ContextArchive{Store: t.Store, Lease: t.Lease, IM: t.IM, Authorize: t.Authorize}
+			if e = archive.authorizeScheduleListReceipt(ctx, run.AgentID, cached); e != nil {
 				return nil, e
 			}
 		}

@@ -165,6 +165,8 @@ func inputMessages(inputs []Input) []*schema.AgenticMessage {
 		prefix := "TEAMIE_NEW_MESSAGE "
 		if in.Kind == "task.notification" {
 			prefix = "TEAMIE_TASK_NOTIFICATION "
+		} else if in.Kind == "schedule.wakeup" {
+			prefix = "TEAMIE_SCHEDULE_WAKEUP "
 		}
 		out = append(out, schema.UserAgenticMessage(prefix+string(b)))
 	}
@@ -174,7 +176,7 @@ func relevantInput(in Input, tc *adk.TurnContext[Input, *schema.AgenticMessage])
 	if tc == nil {
 		return false
 	}
-	if in.Kind == "task.notification" {
+	if in.Kind == "task.notification" || in.Kind == "schedule.wakeup" {
 		return false
 	}
 	for _, old := range tc.Consumed {

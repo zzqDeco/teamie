@@ -41,6 +41,7 @@ type ContextBudgetSnapshot struct {
 	StructuredMentions   bool   `json:"structuredMentions,omitempty"`
 	EventDrivenInputs    bool   `json:"eventDrivenInputs,omitempty"`
 	WebSearch            bool   `json:"webSearch,omitempty"`
+	ScheduledWakeups     bool   `json:"scheduledWakeups,omitempty"`
 }
 
 func makeContextBudgetSnapshot(window int) (ContextBudgetSnapshot, error) {
@@ -109,6 +110,7 @@ func ParseContextBudgetSnapshot(raw json.RawMessage) (ContextBudgetSnapshot, err
 	expected.StructuredMentions = budget.StructuredMentions
 	expected.EventDrivenInputs = budget.EventDrivenInputs
 	expected.WebSearch = budget.WebSearch
+	expected.ScheduledWakeups = budget.ScheduledWakeups
 	if err != nil || budget != expected {
 		return budget, errors.New("unsupported context budget snapshot")
 	}

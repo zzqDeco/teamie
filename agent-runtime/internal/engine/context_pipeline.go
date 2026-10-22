@@ -560,7 +560,7 @@ func contextSources(messages []*schema.AgenticMessage) []InputSource {
 			continue
 		}
 		text := agenticText(msg)
-		for _, marker := range []string{"TEAMIE_NEW_MESSAGE ", "TEAMIE_TASK_NOTIFICATION "} {
+		for _, marker := range []string{"TEAMIE_NEW_MESSAGE ", "TEAMIE_TASK_NOTIFICATION ", "TEAMIE_SCHEDULE_WAKEUP "} {
 			if strings.HasPrefix(text, marker) {
 				var in Input
 				if json.Unmarshal([]byte(strings.TrimPrefix(text, marker)), &in) == nil {

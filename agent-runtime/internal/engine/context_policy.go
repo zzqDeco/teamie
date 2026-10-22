@@ -89,7 +89,7 @@ func inputSources(inputs []Input) ([]InputSource, bool) {
 		if in.SourceOverflow {
 			overflow = true
 		}
-		if in.Kind != "task.notification" {
+		if in.Kind != "task.notification" && in.Kind != "schedule.wakeup" {
 			ref := InputSource{EventID: in.EventID, WorkspaceID: in.WorkspaceID, ConversationID: in.ConversationID, MessageID: in.MessageID, ReplyToID: in.ReplyToID, SenderID: in.SenderID, SenderKind: in.SenderKind}
 			for _, attachment := range in.Attachments {
 				ref.AttachmentIDs = append(ref.AttachmentIDs, attachment.ID)

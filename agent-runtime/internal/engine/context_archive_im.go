@@ -17,7 +17,7 @@ const contextIMArgumentsKey = "context-im-arguments-v1"
 
 func contextIMTool(name string) bool {
 	switch name {
-	case "im_get_message", "im_list_messages", "im_list_conversations", "im_send_message", "im_get_attachment", "im_upload_file":
+	case "im_get_message", "im_list_messages", "im_list_conversations", "im_send_message", "im_get_attachment", "im_upload_file", "schedule_create", "schedule_list", "schedule_cancel":
 		return true
 	}
 	return false
@@ -143,6 +143,56 @@ func (a *ContextArchive) imReceiptSources(ctx context.Context, runID, call, name
 		refs = append(refs, InputSource{ConversationID: source.ConversationID, MessageID: source.MessageID, AttachmentIDs: []string{source.AttachmentID}})
 	case "im_upload_file":
 		actual, err := a.uploadedFileSources(ctx, runID, call)
+		if err != nil {
+			return nil, err
+		}
+		refs = append(refs, actual...)
+	case "schedule_create":
+		var created struct {
+			Schedule scheduleView `json:"schedule"`
+		}
+		if json.Unmarshal(observation.Data, &created) != nil || created.Schedule.ScheduleID == "" {
+			return nil, errContextUnavailable
+		}
+		agentID := ""
+		if a.Lease != nil {
+			agentID = a.Lease.AgentID
+		}
+		actual, err := a.scheduleSourcesByID(ctx, agentID, created.Schedule.ScheduleID)
+		if err != nil {
+			return nil, err
+		}
+		refs = append(refs, actual...)
+	case "schedule_list":
+		var page struct {
+			Schedules []scheduleView `json:"schedules"`
+		}
+		if json.Unmarshal(observation.Data, &page) != nil || page.Schedules == nil {
+			return nil, errContextUnavailable
+		}
+		agentID := ""
+		if a.Lease != nil {
+			agentID = a.Lease.AgentID
+		}
+		for _, item := range page.Schedules {
+			actual, err := a.scheduleSourcesByID(ctx, agentID, item.ScheduleID)
+			if err != nil {
+				return nil, err
+			}
+			refs = append(refs, actual...)
+		}
+	case "schedule_cancel":
+		var canceled struct {
+			ScheduleID string `json:"scheduleId"`
+		}
+		if json.Unmarshal(observation.Data, &canceled) != nil || canceled.ScheduleID == "" {
+			return nil, errContextUnavailable
+		}
+		agentID := ""
+		if a.Lease != nil {
+			agentID = a.Lease.AgentID
+		}
+		actual, err := a.scheduleSourcesByID(ctx, agentID, canceled.ScheduleID)
 		if err != nil {
 			return nil, err
 		}

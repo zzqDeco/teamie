@@ -369,6 +369,13 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 				}
 				activeTools = append(activeTools, webTools...)
 			}
+			if budget.ScheduledWakeups {
+				scheduleTools, err := (&Tools{Store: e.Store, Lease: lease, IM: imc, OwnerID: def.OwnerId, AgentID: def.Id, FlagsFile: e.Config.FlagsFile, Authorize: authorize}).BuildScheduleTools()
+				if err != nil {
+					return nil, err
+				}
+				activeTools = append(activeTools, scheduleTools...)
+			}
 			pipeline, err := NewContextPipeline(ctx, ContextPipelineConfig{Model: gatewayModel, Budget: budget, Backend: archive, ArchivePath: archive.Path, ArchiveToolPath: archive.ArchiveToolPath, ArchiveTranscript: archive.ArchiveTranscript})
 			if err != nil {
 				return nil, err
@@ -383,6 +390,9 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 			}
 			if budget.WebSearch {
 				instruction += webSearchGuidance
+			}
+			if budget.ScheduledWakeups {
+				instruction += scheduleWakeupGuidance
 			}
 			return adk.NewTypedChatModelAgent(ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{Name: "teamie_agent", Description: "A user-owned Teamie participant", Instruction: instruction, Model: gatewayModel, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: activeTools, ExecuteSequentially: true}}, MaxIterations: math.MaxInt, Handlers: handlers, ModelRetryConfig: pipeline.RetryConfig()})
 		}
@@ -413,6 +423,22 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		valid := []Input{}
 		for _, in := range inputs {
 			if in.Kind == "task.notification" {
+				valid = append(valid, in)
+				continue
+			}
+			if in.Kind == "schedule.wakeup" {
+				if err := e.authorizeScheduleInput(ctx, imc, lease, in); err != nil {
+					if errors.Is(err, errContextUnavailable) {
+						if in.ScheduleID != "" {
+							_, _ = e.Store.DB.Exec(ctx, `UPDATE runtime_schedules SET status='canceled',updated_at=now() WHERE id=$1 AND agent_id=$2 AND status='active'`, in.ScheduleID, lease.AgentID)
+						}
+						if err = e.Store.Skip(ctx, lease, in.EventID); err != nil {
+							return nil, err
+						}
+						continue
+					}
+					return nil, err
+				}
 				valid = append(valid, in)
 				continue
 			}
@@ -482,7 +508,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		// their persisted selection even when the flag or gateway changes.
 		if e.Config.FlagsFile != "" && runtimeFlag(e.Config.FlagsFile, "agents.context.v1") {
 			profile = contextProfileV1
-			budget, err = newRunContextBudget(int(contextWindow.Load()), runtimeFlag(e.Config.FlagsFile, "agents.files.deliver.v1"), runtimeFlag(e.Config.FlagsFile, "agents.mentions.v1"), runtimeFlag(e.Config.FlagsFile, "agents.web.v1"))
+			budget, err = newRunContextBudget(int(contextWindow.Load()), runtimeFlag(e.Config.FlagsFile, "agents.files.deliver.v1"), runtimeFlag(e.Config.FlagsFile, "agents.mentions.v1"), runtimeFlag(e.Config.FlagsFile, "agents.web.v1"), runtimeFlag(e.Config.FlagsFile, "agents.schedule.v1"))
 			if err != nil {
 				return nil, nil, nil, err
 			}
@@ -494,6 +520,20 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		invalid := []string{}
 		for _, in := range run.Inputs {
 			if in.Kind == "task.notification" {
+				continue
+			}
+			if in.Kind == "schedule.wakeup" {
+				if readErr := e.authorizeScheduleInput(ctx, imc, lease, in); readErr != nil {
+					if errors.Is(readErr, errContextUnavailable) {
+						if in.ScheduleID != "" {
+							_, _ = e.Store.DB.Exec(ctx, `UPDATE runtime_schedules SET status='canceled',updated_at=now() WHERE id=$1 AND agent_id=$2 AND status='active'`, in.ScheduleID, lease.AgentID)
+						}
+						invalid = append(invalid, in.EventID)
+						continue
+					}
+					_ = e.Store.FinishRun(ctx, lease, run, "retry", "im_unavailable", true)
+					return nil, nil, nil, &ModelError{Code: "im_unavailable", Retry: true}
+				}
 				continue
 			}
 			m, readErr := imc.Message(ctx, in.ConversationID, in.MessageID)
@@ -747,6 +787,9 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 			return true
 		}
 		if err := tasks.notifications(ctx, lease); errors.Is(err, ErrLeaseLost) {
+			return false
+		}
+		if err := e.drainSchedules(ctx, lease); errors.Is(err, ErrLeaseLost) {
 			return false
 		}
 		if loop != nil {

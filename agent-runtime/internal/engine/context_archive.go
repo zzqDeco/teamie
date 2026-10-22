@@ -228,7 +228,7 @@ func (a *ContextArchive) runSources(ctx context.Context, runID string) ([]InputS
 			return errContextUnavailable
 		}
 		for _, in := range inputs {
-			if in.Kind != "task.notification" && in.ConversationID != "" && in.MessageID != "" {
+			if in.Kind != "task.notification" && in.Kind != "schedule.wakeup" && in.ConversationID != "" && in.MessageID != "" {
 				ref := InputSource{EventID: in.EventID, WorkspaceID: in.WorkspaceID, ConversationID: in.ConversationID, MessageID: in.MessageID, ReplyToID: in.ReplyToID, SenderID: in.SenderID, SenderKind: in.SenderKind}
 				for _, attachment := range in.Attachments {
 					ref.AttachmentIDs = append(ref.AttachmentIDs, attachment.ID)
@@ -243,6 +243,16 @@ func (a *ContextArchive) runSources(ctx context.Context, runID string) ([]InputS
 				}
 				var storedParent *string
 				if err := a.Store.DB.QueryRow(ctx, `SELECT run_id::text FROM runtime_tasks WHERE id=$1 AND agent_id=$2`, in.TaskID, a.Lease.AgentID).Scan(&storedParent); err != nil || storedParent == nil {
+					return errContextUnavailable
+				}
+				parent = *storedParent
+			}
+			if parent == "" && in.Kind == "schedule.wakeup" && len(in.SourceRefs) == 0 {
+				if in.ScheduleID == "" {
+					return errContextUnavailable
+				}
+				var storedParent *string
+				if err := a.Store.DB.QueryRow(ctx, `SELECT created_run_id::text FROM runtime_schedules WHERE id=$1 AND agent_id=$2`, in.ScheduleID, a.Lease.AgentID).Scan(&storedParent); err != nil || storedParent == nil {
 					return errContextUnavailable
 				}
 				parent = *storedParent
