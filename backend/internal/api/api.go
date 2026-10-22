@@ -36,6 +36,8 @@ type Error struct {
 }
 
 func (e *Error) Error() string                   { return e.Message }
+func (e *Error) StatusCode() int                 { return e.Status }
+func (e *Error) ErrorCode() string               { return e.Code }
 func (e *Error) DiagnosticMessage() string       { return e.Code + ": " + e.Message }
 func Err(status int, code, message string) error { return &Error{status, code, message} }
 func Write(w http.ResponseWriter, status int, value any) {
@@ -48,10 +50,20 @@ func Write(w http.ResponseWriter, status int, value any) {
 func Fail(w http.ResponseWriter, err error) {
 	observability.RecordError(w, err)
 	var ae *Error
-	if !errors.As(err, &ae) {
-		ae = &Error{500, "internal_error", "The request could not be completed"}
+	if errors.As(err, &ae) {
+		Write(w, ae.Status, map[string]any{"error": map[string]string{"code": ae.Code, "message": ae.Message}})
+		return
 	}
-	Write(w, ae.Status, map[string]any{"error": map[string]string{"code": ae.Code, "message": ae.Message}})
+	var coded interface {
+		error
+		StatusCode() int
+		ErrorCode() string
+	}
+	if errors.As(err, &coded) {
+		Write(w, coded.StatusCode(), map[string]any{"error": map[string]string{"code": coded.ErrorCode(), "message": coded.Error()}})
+		return
+	}
+	Write(w, 500, map[string]any{"error": map[string]string{"code": "internal_error", "message": "The request could not be completed"}})
 }
 func Decode(w http.ResponseWriter, r *http.Request, v any) error {
 	r.Body = http.MaxBytesReader(w, r.Body, 131072)

@@ -5,11 +5,10 @@ import (
 	_ "embed"
 	"errors"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"slices"
 	"strings"
-	"time"
+	"teamie/backend/pkg/postgres"
 )
 
 //go:embed schema.sql
@@ -23,17 +22,7 @@ type Store struct {
 }
 
 func Open(ctx context.Context, url string, im Authority, flags Flags) (*Store, error) {
-	cfg, e := pgxpool.ParseConfig(url)
-	if e != nil {
-		return nil, e
-	}
-	cfg.ConnConfig.RuntimeParams["timezone"] = "UTC"
-	cfg.ConnConfig.ConnectTimeout = 5 * time.Second
-	cfg.AfterConnect = func(ctx context.Context, c *pgx.Conn) error {
-		c.TypeMap().RegisterType(&pgtype.Type{Name: "timestamptz", OID: pgtype.TimestamptzOID, Codec: &pgtype.TimestamptzCodec{ScanLocation: time.UTC}})
-		return nil
-	}
-	db, e := pgxpool.NewWithConfig(ctx, cfg)
+	db, e := postgres.Open(ctx, url)
 	if e != nil {
 		return nil, e
 	}
