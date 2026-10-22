@@ -347,6 +347,12 @@ func (t *Tools) execute(ctx context.Context, name string, args any, fn func(cont
 				return nil, e
 			}
 		}
+		if name == "schedule_list" && out.OK {
+			archive := &ContextArchive{Store: t.Store, Lease: t.Lease, IM: t.IM, Authorize: t.Authorize}
+			if e = archive.authorizeScheduleListReceipt(ctx, run.AgentID, cached); e != nil {
+				return nil, e
+			}
+		}
 		out.raw, e = t.Store.replayToolWire(ctx, run, callID, name, cached)
 		if e != nil {
 			return nil, e

@@ -768,4 +768,163 @@ func TestWorkerScheduleToolsAndRevokedWakeupEndToEnd(t *testing.T) {
 	}
 }
 
+func review59StartScheduleRun(t *testing.T, s *Store, l *Lease, in Input) *Run {
+	t.Helper()
+	ctx := context.Background()
+	if err := s.Ingest(ctx, l, in.EventID, []Input{in}); err != nil {
+		t.Fatal(err)
+	}
+	budget, err := newRunContextBudget(128000, false, false, false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := s.StartRunWithContextPolicy(ctx, l, []Input{in}, contextProfileV1, budget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.configureRun(ctx, l, run, 1, 1, nil); err != nil {
+		t.Fatal(err)
+	}
+	return run
+}
+
+func review59InvokeSchedule(t *testing.T, node *compose.ToolsNode, run *Run, call, name string, args any) (string, error) {
+	t.Helper()
+	raw, err := json.Marshal(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := node.Invoke(WithRun(context.Background(), run), &schema.Message{Role: schema.Assistant, ToolCalls: []schema.ToolCall{{ID: call, Type: "function", Function: schema.FunctionCall{Name: name, Arguments: string(raw)}}}})
+	if err != nil {
+		return "", err
+	}
+	return out[0].Content, nil
+}
+
+func TestReview59CreateReceiptWriteFailureRecovery(t *testing.T) {
+	ctx := context.Background()
+	s := testStore(t)
+	l, err := s.Acquire(ctx, uuid.NewString(), "review59-receipt-failure")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := Input{EventID: "1", WorkspaceID: uuid.NewString(), ConversationID: uuid.NewString(), MessageID: uuid.NewString(), SenderID: uuid.NewString(), SenderKind: "human", Body: "Schedule a future check", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	run := review59StartScheduleRun(t, s, l, in)
+	available, err := (&Tools{Store: s, Lease: l, AgentID: l.AgentID}).BuildScheduleTools()
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := compose.NewToolNode(ctx, &compose.ToolsNodeConfig{Tools: available, ExecuteSequentially: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The schedule transaction commits, but the following ToolResult UPDATE fails.
+	// This is the same durable state as a process stopping between those commits.
+	_, err = s.DB.Exec(ctx, `CREATE FUNCTION review59_fail_receipt() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.name='schedule_create' AND OLD.result IS NULL AND NEW.result IS NOT NULL THEN RAISE EXCEPTION 'injected receipt write failure'; END IF; RETURN NEW; END; $$; CREATE TRIGGER review59_fail_receipt BEFORE UPDATE ON runtime_tool_calls FOR EACH ROW EXECUTE FUNCTION review59_fail_receipt();`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	due := time.Now().UTC().Add(150 * time.Millisecond)
+	args := scheduleCreateArgs{Kind: "once", RunAt: due.Format(time.RFC3339Nano), Prompt: "Receipt recovery fixture"}
+	_, err = review59InvokeSchedule(t, node, run, "absolute-time-call", "schedule_create", args)
+	if err == nil {
+		t.Fatal("expected injected ToolResult failure")
+	}
+	if count(t, s, `SELECT count(*) FROM runtime_schedules WHERE agent_id=$1`, l.AgentID) != 1 || count(t, s, `SELECT count(*) FROM runtime_tool_calls WHERE run_id=$1 AND call_id='absolute-time-call' AND result IS NULL`, run.ID) != 1 {
+		t.Fatal("fault injection did not reach the post-effect/pre-receipt state")
+	}
+	if _, err = s.DB.Exec(ctx, `DROP TRIGGER review59_fail_receipt ON runtime_tool_calls; DROP FUNCTION review59_fail_receipt();`); err != nil {
+		t.Fatal(err)
+	}
+	if delay := time.Until(due.Add(25 * time.Millisecond)); delay > 0 {
+		time.Sleep(delay)
+	}
+	out, err := review59InvokeSchedule(t, node, run, "absolute-time-call", "schedule_create", args)
+	if err != nil || !strings.Contains(out, `"ok":true`) {
+		t.Fatalf("committed schedule recovered as failure: response=%s err=%v schedules=%d", out, err, count(t, s, `SELECT count(*) FROM runtime_schedules WHERE agent_id=$1 AND status='active'`, l.AgentID))
+	}
+}
+
+func TestReview59ScheduleListRechecksRevokedSources(t *testing.T) {
+	ctx := context.Background()
+	s := testStore(t)
+	f, server := newFixtureIM(t)
+	l, err := s.Acquire(ctx, f.agent, "review59-schedule-list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	imc := &IM{BaseURL: server.URL, ServiceKey: "fixture-im-secret", AgentID: f.agent, HTTP: server.Client(), token: strings.Repeat("a", 64), expiry: time.Now().Add(time.Hour)}
+	available, err := (&Tools{Store: s, Lease: l, AgentID: f.agent, IM: imc}).BuildScheduleTools()
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := compose.NewToolNode(ctx, &compose.ToolsNodeConfig{Tools: available, ExecuteSequentially: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	toInput := func(id string, msg Message) Input {
+		return Input{EventID: id, WorkspaceID: f.workspace, ConversationID: msg.ConversationID, MessageID: msg.ID, SenderID: msg.SenderID, SenderKind: msg.SenderKind, Body: msg.Body, CreatedAt: msg.CreatedAt}
+	}
+	sourceA := behaviorSource(t, f, "Private source A", "", "")
+	runA := review59StartScheduleRun(t, s, l, toInput("1", sourceA))
+	out, err := review59InvokeSchedule(t, node, runA, "schedule-a", "schedule_create", scheduleCreateArgs{Kind: "once", DelaySeconds: 3600, Prompt: "PRIVATE_FROM_REVOKED_SOURCE_A"})
+	if err != nil || !strings.Contains(out, `"ok":true`) {
+		t.Fatalf("create fixture: %s %v", out, err)
+	}
+	if err = s.FinishRun(ctx, l, runA, "completed", "", false); err != nil {
+		t.Fatal(err)
+	}
+	sourceB := behaviorSource(t, f, "Allowed source B", uuid.NewString(), "")
+	runB := review59StartScheduleRun(t, s, l, toInput("2", sourceB))
+	out, err = review59InvokeSchedule(t, node, runB, "list-before-revocation", "schedule_list", scheduleListArgs{})
+	if err != nil || !strings.Contains(out, "PRIVATE_FROM_REVOKED_SOURCE_A") {
+		t.Fatal("initial list fixture did not expose its authorized schedule", err)
+	}
+	// Also archive the schedule_list output into ContextArchive under runB and verify it retains sourceA's provenance.
+	archive := &ContextArchive{Store: s, Lease: l, IM: imc}
+	archivedRef, err := archive.ArchiveToolPath(WithRun(ctx, runB), "tool_trunc", contextRealIMDetail("schedule_list", "list-before-revocation", scheduleListArgs{}, out), out)
+	if err != nil {
+		t.Fatalf("ArchiveToolPath for schedule_list failed: %v", err)
+	}
+
+	f.mu.Lock()
+	delete(f.messages, sourceA.ID)
+	readsBefore := f.reads
+	f.mu.Unlock()
+	if _, err = imc.Message(ctx, sourceA.ConversationID, sourceA.ID); err == nil {
+		t.Fatal("source A was not revoked")
+	}
+	if _, err = imc.Message(ctx, sourceB.ConversationID, sourceB.ID); err != nil {
+		t.Fatal("source B should remain accessible", err)
+	}
+	f.mu.Lock()
+	readsBefore = f.reads
+	f.mu.Unlock()
+	for _, call := range []string{"fresh-list-after-revocation", "list-before-revocation"} {
+		f.mu.Lock()
+		callReadsBefore := f.reads
+		f.mu.Unlock()
+		out, err = review59InvokeSchedule(t, node, runB, call, "schedule_list", scheduleListArgs{})
+		f.mu.Lock()
+		callReads := f.reads - callReadsBefore
+		f.mu.Unlock()
+		if callReads == 0 {
+			t.Errorf("call=%s did not query IM source permissions", call)
+		}
+		if err != nil {
+			continue
+		}
+		if strings.Contains(out, "PRIVATE_FROM_REVOKED_SOURCE_A") {
+			f.mu.Lock()
+			reads := f.reads - readsBefore
+			f.mu.Unlock()
+			t.Errorf("call=%s returned revoked schedule prompt; IM source reads=%d", call, reads)
+		}
+	}
+	if _, err = archive.Read(WithRun(ctx, runB), archivedRef, 0, 1024); !errors.Is(err, errContextUnavailable) {
+		t.Fatalf("expected ContextArchive.Read on archived schedule_list from revoked sourceA to fail with errContextUnavailable, got %v", err)
+	}
+}
+
+
 

@@ -113,7 +113,7 @@ jobs:
           DATABASE_URL_TEST: postgres://postgres:ci-only-postgres@127.0.0.1:5432/teamie_test?sslmode=disable
         run: |
           for module in agent-protocol agent-control agent-runtime agent-infra; do
-            (cd "$module" && go test -race -timeout 180s ./... && go vet ./... && go build ./...)
+            (cd "$module" && go test -race -timeout 300s ./... && go vet ./... && go build ./...)
           done
       - name: Agent profile privacy and IM acceptance against fresh disposable processes
         run: bash ops/ci-agent-acceptance.sh

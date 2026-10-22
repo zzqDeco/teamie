@@ -382,6 +382,29 @@ func (t *Tools) BuildScheduleTools() ([]tool.BaseTool, error) {
 			if err = checkLease(ctx, tx, t.Lease); err != nil {
 				return nil, err
 			}
+			callID := compose.GetToolCallID(ctx)
+			schedID := stableScheduleID(run, callID)
+			var savedSnapshot []byte
+			if obsErr := tx.QueryRow(ctx, `SELECT response FROM runtime_tool_observations WHERE run_id=$1 AND call_id=$2 AND observation_key='schedule-create-v1'`, run.ID, callID).Scan(&savedSnapshot); obsErr == nil {
+				var recovered scheduleView
+				if json.Unmarshal(savedSnapshot, &recovered) == nil && recovered.ScheduleID == schedID {
+					if err = tx.Commit(ctx); err != nil {
+						return nil, err
+					}
+					return &Observation{OK: true, Data: map[string]any{"schedule": recovered}}, nil
+				}
+			}
+			existing, getErr := scanScheduleView(tx.QueryRow(ctx, `SELECT id,kind,interval_seconds,cron_expr,timezone,prompt,status,max_runs,run_count,next_run_at,last_run_at,created_at FROM runtime_schedules WHERE id=$1 AND agent_id=$2`, schedID, run.AgentID))
+			if getErr == nil {
+				if err = tx.Commit(ctx); err != nil {
+					return nil, err
+				}
+				return &Observation{OK: true, Data: map[string]any{"schedule": existing}}, nil
+			}
+			if !errors.Is(getErr, pgx.ErrNoRows) {
+				return nil, getErr
+			}
+
 			var now time.Time
 			if err = tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
 				return nil, err
@@ -441,19 +464,6 @@ func (t *Tools) BuildScheduleTools() ([]tool.BaseTool, error) {
 			default:
 				return &Observation{Error: "invalid_arguments"}, nil
 			}
-
-			callID := compose.GetToolCallID(ctx)
-			schedID := stableScheduleID(run, callID)
-			existing, getErr := scanScheduleView(tx.QueryRow(ctx, `SELECT id,kind,interval_seconds,cron_expr,timezone,prompt,status,max_runs,run_count,next_run_at,last_run_at,created_at FROM runtime_schedules WHERE id=$1 AND agent_id=$2`, schedID, run.AgentID))
-			if getErr == nil {
-				if err = tx.Commit(ctx); err != nil {
-					return nil, err
-				}
-				return &Observation{OK: true, Data: map[string]any{"schedule": existing}}, nil
-			}
-			if !errors.Is(getErr, pgx.ErrNoRows) {
-				return nil, getErr
-			}
 			var activeCount int
 			if err = tx.QueryRow(ctx, `SELECT count(*) FROM runtime_schedules WHERE agent_id=$1 AND status='active'`, run.AgentID).Scan(&activeCount); err != nil {
 				return nil, err
@@ -473,6 +483,10 @@ func (t *Tools) BuildScheduleTools() ([]tool.BaseTool, error) {
 				schedID, run.AgentID, run.ID, kind, intervalSeconds, cronExpr, tzName, prompt, maxRuns, nextRunAt, refsJSON, overflow, now.UTC(),
 			))
 			if err != nil {
+				return nil, err
+			}
+			snapJSON, _ := json.Marshal(created)
+			if _, err = tx.Exec(ctx, `INSERT INTO runtime_tool_observations(run_id,call_id,observation_key,response) VALUES($1,$2,'schedule-create-v1',$3) ON CONFLICT DO NOTHING`, run.ID, callID, snapJSON); err != nil {
 				return nil, err
 			}
 			if err = tx.Commit(ctx); err != nil {
@@ -497,15 +511,20 @@ func (t *Tools) BuildScheduleTools() ([]tool.BaseTool, error) {
 			if t.FlagsFile != "" && !runtimeFlag(t.FlagsFile, "agents.schedule.v1") {
 				return &Observation{Error: "schedule_disabled"}, nil
 			}
-			rows, err := t.Store.DB.Query(ctx, `SELECT id,kind,interval_seconds,cron_expr,timezone,prompt,status,max_runs,run_count,next_run_at,last_run_at,created_at FROM runtime_schedules WHERE agent_id=$1 AND status='active' ORDER BY next_run_at ASC, id ASC LIMIT $2`, run.AgentID, maxActiveSchedulesPerAgent)
+			rows, err := t.Store.DB.Query(ctx, `SELECT id,COALESCE(created_run_id::text,''),kind,interval_seconds,cron_expr,timezone,prompt,status,max_runs,run_count,next_run_at,last_run_at,source_refs,source_overflow,created_at FROM runtime_schedules WHERE agent_id=$1 AND status='active' ORDER BY next_run_at ASC, id ASC LIMIT $2`, run.AgentID, maxActiveSchedulesPerAgent)
 			if err != nil {
 				return nil, err
 			}
-			defer rows.Close()
-			schedules := []scheduleView{}
+			type scheduleCandidate struct {
+				view           scheduleView
+				createdRunID   string
+				sourceRefsJSON []byte
+				sourceOverflow bool
+			}
+			candidates := []scheduleCandidate{}
 			for rows.Next() {
 				var (
-					v               scheduleView
+					cand            scheduleCandidate
 					intervalSeconds *int64
 					cronExpr        string
 					maxRuns         *int
@@ -513,22 +532,41 @@ func (t *Tools) BuildScheduleTools() ([]tool.BaseTool, error) {
 					lastRunAt       *time.Time
 					createdAt       time.Time
 				)
-				if err = rows.Scan(&v.ScheduleID, &v.Kind, &intervalSeconds, &cronExpr, &v.Timezone, &v.Prompt, &v.Status, &maxRuns, &v.RunCount, &nextRunAt, &lastRunAt, &createdAt); err != nil {
+				if err = rows.Scan(&cand.view.ScheduleID, &cand.createdRunID, &cand.view.Kind, &intervalSeconds, &cronExpr, &cand.view.Timezone, &cand.view.Prompt, &cand.view.Status, &maxRuns, &cand.view.RunCount, &nextRunAt, &lastRunAt, &cand.sourceRefsJSON, &cand.sourceOverflow, &createdAt); err != nil {
+					rows.Close()
 					return nil, err
 				}
-				v.IntervalSeconds = intervalSeconds
-				v.CronExpr = cronExpr
-				v.MaxRuns = maxRuns
-				v.NextRunAt = nextRunAt.UTC().Format(time.RFC3339)
+				cand.view.IntervalSeconds = intervalSeconds
+				cand.view.CronExpr = cronExpr
+				cand.view.MaxRuns = maxRuns
+				cand.view.NextRunAt = nextRunAt.UTC().Format(time.RFC3339)
 				if lastRunAt != nil {
 					formatted := lastRunAt.UTC().Format(time.RFC3339)
-					v.LastRunAt = &formatted
+					cand.view.LastRunAt = &formatted
 				}
-				v.CreatedAt = createdAt.UTC().Format(time.RFC3339)
-				schedules = append(schedules, v)
+				cand.view.CreatedAt = createdAt.UTC().Format(time.RFC3339)
+				candidates = append(candidates, cand)
 			}
-			if err = rows.Err(); err != nil {
+			err = rows.Err()
+			rows.Close()
+			if err != nil {
 				return nil, err
+			}
+			archive := &ContextArchive{Store: t.Store, Lease: t.Lease, IM: t.IM, Authorize: t.Authorize}
+			schedules := []scheduleView{}
+			for _, cand := range candidates {
+				refs, srcErr := archive.scheduleRowSources(ctx, cand.createdRunID, cand.sourceRefsJSON, cand.sourceOverflow)
+				if srcErr == nil {
+					srcErr = archive.authorizeSources(ctx, refs)
+				}
+				if srcErr != nil {
+					if errors.Is(srcErr, errContextUnavailable) {
+						_, _ = t.Store.DB.Exec(ctx, `UPDATE runtime_schedules SET status='canceled',updated_at=now() WHERE id=$1 AND agent_id=$2 AND status='active'`, cand.view.ScheduleID, run.AgentID)
+						continue
+					}
+					return nil, srcErr
+				}
+				schedules = append(schedules, cand.view)
 			}
 			return &Observation{OK: true, Data: map[string]any{"schedules": schedules}}, nil
 		})
@@ -774,4 +812,80 @@ func (e *Engine) authorizeScheduleInput(ctx context.Context, imc *IM, lease *Lea
 		return errContextUnavailable
 	}
 	return archive.authorizeSources(ctx, refs)
+}
+
+func (a *ContextArchive) scheduleRowSources(ctx context.Context, createdRunID string, sourceRefsJSON []byte, sourceOverflow bool) ([]InputSource, error) {
+	var refs []InputSource
+	if len(sourceRefsJSON) > 0 {
+		if json.Unmarshal(sourceRefsJSON, &refs) != nil {
+			return nil, ErrReplayConflict
+		}
+	}
+	if sourceOverflow || len(refs) == 0 {
+		if !validUUID(createdRunID) {
+			return nil, errContextUnavailable
+		}
+		return a.runSources(ctx, createdRunID)
+	}
+	canonical, err := canonicalContextSources(refs)
+	if err != nil {
+		return nil, err
+	}
+	if len(canonical) == 0 {
+		if !validUUID(createdRunID) {
+			return nil, errContextUnavailable
+		}
+		return a.runSources(ctx, createdRunID)
+	}
+	return canonical, nil
+}
+
+func (a *ContextArchive) scheduleSourcesByID(ctx context.Context, agentID, scheduleID string) ([]InputSource, error) {
+	if scheduleID == "" || !validUUID(agentID) {
+		return nil, errContextUnavailable
+	}
+	var (
+		createdRunID   string
+		sourceRefsJSON []byte
+		sourceOverflow bool
+	)
+	err := a.Store.DB.QueryRow(ctx, `SELECT COALESCE(created_run_id::text,''),source_refs,source_overflow FROM runtime_schedules WHERE id=$1 AND agent_id=$2`, scheduleID, agentID).Scan(&createdRunID, &sourceRefsJSON, &sourceOverflow)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, errContextUnavailable
+	}
+	if err != nil {
+		return nil, err
+	}
+	return a.scheduleRowSources(ctx, createdRunID, sourceRefsJSON, sourceOverflow)
+}
+
+func (a *ContextArchive) authorizeScheduleListReceipt(ctx context.Context, agentID string, cached []byte) error {
+	var receipt struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Schedules []scheduleView `json:"schedules"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(cached, &receipt) != nil {
+		return ErrReplayConflict
+	}
+	if !receipt.OK {
+		return nil
+	}
+	if receipt.Data.Schedules == nil {
+		return errContextUnavailable
+	}
+	for _, item := range receipt.Data.Schedules {
+		refs, err := a.scheduleSourcesByID(ctx, agentID, item.ScheduleID)
+		if err == nil {
+			err = a.authorizeSources(ctx, refs)
+		}
+		if err != nil {
+			if errors.Is(err, errContextUnavailable) {
+				_, _ = a.Store.DB.Exec(ctx, `UPDATE runtime_schedules SET status='canceled',updated_at=now() WHERE id=$1 AND agent_id=$2 AND status='active'`, item.ScheduleID, agentID)
+			}
+			return err
+		}
+	}
+	return nil
 }
