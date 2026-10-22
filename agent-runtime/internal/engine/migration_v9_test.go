@@ -74,7 +74,7 @@ func TestRuntimeV9PreservesV8ExecutionAndRejectsV8Startup(t *testing.T) {
 		t.Fatal("writer fence migration changed old Run, input, receipt or checkpoint bytes")
 	}
 	var ledger, protocol string
-	if err = current.DB.QueryRow(ctx, `SELECT string_agg(version::text,',' ORDER BY version),current_setting('teamie.runtime_writer_schema') FROM agent_runtime_schema_migrations`).Scan(&ledger, &protocol); err != nil || ledger != "1,2,3,4,5,6,7,8,9,10" || protocol != "10" {
+	if err = current.DB.QueryRow(ctx, `SELECT string_agg(version::text,',' ORDER BY version),current_setting('teamie.runtime_writer_schema') FROM agent_runtime_schema_migrations`).Scan(&ledger, &protocol); err != nil || ledger != "1,2,3,4,5,6,7,8,9,10,11" || protocol != "11" {
 		t.Fatal("schema-8 reader was not fenced by the new ledger/protocol", ledger, protocol, err)
 	}
 	oldRun := &Run{ID: runID, toolProfile: currentToolProfile, ContextProfile: contextProfileV1, ContextBudget: canonical}
