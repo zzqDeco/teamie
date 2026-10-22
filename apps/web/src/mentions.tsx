@@ -80,7 +80,8 @@ export function MentionText({
       <Fragment key={`${m.start}-${m.end}`}>
         {body.slice(end, m.start)}
         <span
-          className={`message-mention ${m.userId === userId ? "mention-self" : ""}`}
+          className={`message-mention mention-pill${m.userId === userId ? " mention-self" : ""}`}
+          data-user-id={m.userId}
         >
           {body.slice(m.start, m.end)}
         </span>
