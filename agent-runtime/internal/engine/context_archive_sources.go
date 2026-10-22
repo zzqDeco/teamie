@@ -35,6 +35,10 @@ func contextArgumentHashes(name, argument string) []string {
 		parsers = []any{&getAttachmentArgs{}}
 	case "im_upload_file":
 		parsers = []any{&uploadFileArgs{}}
+	case "web_search":
+		parsers = []any{&webSearchArgs{}}
+	case "web_fetch":
+		parsers = []any{&webFetchArgs{}}
 	}
 	for _, parsed := range parsers {
 		if json.Unmarshal([]byte(argument), parsed) == nil {

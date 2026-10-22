@@ -214,6 +214,34 @@ describe("write-only gateway credentials", () => {
         clearApiKey: true,
       }),
     ).toThrow();
+    expect(
+      modelGatewayInput({
+        ...value,
+        webSearchEnabled: true,
+        webSearchApiKey: "  tvly-secret  ",
+      }),
+    ).toMatchObject({
+      webSearchEnabled: true,
+      webSearchApiKey: "tvly-secret",
+    });
+    expect(
+      modelGatewayInput({
+        ...value,
+        webSearchEnabled: false,
+        webSearchApiKey: "",
+        clearWebSearchApiKey: true,
+      }),
+    ).toMatchObject({
+      webSearchEnabled: false,
+      clearWebSearchApiKey: true,
+    });
+    expect(() =>
+      modelGatewayInput({
+        ...value,
+        webSearchApiKey: "tvly-secret",
+        clearWebSearchApiKey: true,
+      }),
+    ).toThrow();
   });
   it("rejects credentials or tokens placed in provider URLs", () => {
     for (const baseUrl of [
@@ -244,12 +272,20 @@ describe("write-only gateway credentials", () => {
           model: "model-id",
           hasApiKey: true,
           enabled: true,
+          webSearch: {
+            provider: "tavily",
+            hasApiKey: true,
+            enabled: true,
+            configured: true,
+          },
         }}
         onSave={async () => {}}
       />,
     );
     expect(html).toContain('type="password"');
     expect(html).toContain('name="gatewayApiKey"');
+    expect(html).toContain('name="gatewayWebSearchApiKey"');
+    expect(html).toContain('name="gatewayClearWebSearchApiKey"');
     expect(html).not.toContain(secret);
     expect(html).toContain("留空保留");
   });

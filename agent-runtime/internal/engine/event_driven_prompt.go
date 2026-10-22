@@ -9,7 +9,7 @@ import (
 
 // Only the new-Run admission path selects this guidance. Missing/false in a
 // persisted snapshot keeps every previous prompt and tool description intact.
-func newRunContextBudget(window int, files, mentions bool) (json.RawMessage, error) {
+func newRunContextBudget(window int, files, mentions bool, webSearch ...bool) (json.RawMessage, error) {
 	budget, err := makeContextBudgetSnapshot(window)
 	if err != nil {
 		return nil, err
@@ -17,6 +17,7 @@ func newRunContextBudget(window int, files, mentions bool) (json.RawMessage, err
 	budget.FileDelivery = files
 	budget.StructuredMentions = mentions
 	budget.EventDrivenInputs = true
+	budget.WebSearch = len(webSearch) > 0 && webSearch[0]
 	return json.Marshal(budget)
 }
 

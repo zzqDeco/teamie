@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { Bot, Check, CirclePause, Eye, LockKeyhole } from "lucide-react";
-import type { Workspace } from "@teamie/api-client";
+import type { WebSearchGatewayConfig, Workspace } from "@teamie/api-client";
 import { Button, Notice } from "./ui";
 import { ICON } from "./icons";
 
@@ -112,6 +112,9 @@ export type GatewayFormValue = {
   enabled: boolean;
   clearApiKey?: boolean;
   contextWindowTokens?: number;
+  webSearchEnabled?: boolean;
+  webSearchApiKey?: string;
+  clearWebSearchApiKey?: boolean;
 };
 export function GatewayConfigurationFields({
   initial,
@@ -120,14 +123,23 @@ export function GatewayConfigurationFields({
   error = "",
   busy = false,
 }: {
-  initial: Omit<GatewayFormValue, "apiKey" | "clearApiKey"> & {
+  initial: Omit<
+    GatewayFormValue,
+    | "apiKey"
+    | "clearApiKey"
+    | "webSearchEnabled"
+    | "webSearchApiKey"
+    | "clearWebSearchApiKey"
+  > & {
     hasApiKey: boolean;
+    webSearch?: WebSearchGatewayConfig;
   };
   onSave: (value: GatewayFormValue) => Promise<void>;
   onTest?: () => Promise<void>;
   error?: string;
   busy?: boolean;
 }) {
+  const hasWebSearchKey = initial.webSearch?.hasApiKey ?? false;
   const [baseUrl, setBaseUrl] = useState(initial.baseUrl),
     [model, setModel] = useState(initial.model),
     [apiKey, setApiKey] = useState(""),
@@ -135,7 +147,12 @@ export function GatewayConfigurationFields({
     [clearApiKey, setClearApiKey] = useState(false),
     [contextWindowTokens, setContextWindowTokens] = useState(
       initial.contextWindowTokens ?? 16384,
-    );
+    ),
+    [webSearchEnabled, setWebSearchEnabled] = useState(
+      initial.webSearch?.enabled ?? false,
+    ),
+    [webSearchApiKey, setWebSearchApiKey] = useState(""),
+    [clearWebSearchApiKey, setClearWebSearchApiKey] = useState(false);
   async function submit(event: FormEvent) {
     event.preventDefault();
     try {
@@ -145,10 +162,14 @@ export function GatewayConfigurationFields({
         apiKey,
         enabled,
         contextWindowTokens,
+        webSearchEnabled,
+        webSearchApiKey,
         ...(clearApiKey ? { clearApiKey: true } : {}),
+        ...(clearWebSearchApiKey ? { clearWebSearchApiKey: true } : {}),
       });
     } finally {
       setApiKey("");
+      setWebSearchApiKey("");
     }
   }
   return (
@@ -232,6 +253,58 @@ export function GatewayConfigurationFields({
         </span>
         <i />
       </label>
+      <label className="agent-enabled-switch">
+        <input
+          type="checkbox"
+          name="gatewayWebSearchEnabled"
+          checked={webSearchEnabled}
+          onChange={(event) => setWebSearchEnabled(event.target.checked)}
+        />
+        <span>
+          <b>启用联网搜索与网页提取（Tavily）</b>
+          <small>启用后，Agent 可使用 web_search 搜索公开网页并通过 web_fetch 提取 Markdown 正文。</small>
+        </span>
+        <i />
+      </label>
+      <label>
+        Tavily API Key{" "}
+        <span className="optional">
+          {hasWebSearchKey ? "已有密钥 · 留空保留" : "尚未配置"}
+        </span>
+        <input
+          type="password"
+          name="gatewayWebSearchApiKey"
+          value={webSearchApiKey}
+          onChange={(event) => setWebSearchApiKey(event.target.value)}
+          placeholder={
+            hasWebSearchKey
+              ? "留空保留已有 Tavily 密钥，填写以替换"
+              : "输入 Tavily API Key（tvly-...）"
+          }
+          autoComplete="new-password"
+          spellCheck={false}
+          required={!hasWebSearchKey && webSearchEnabled && !clearWebSearchApiKey}
+          disabled={clearWebSearchApiKey || busy}
+        />
+        <small className="field-help">仅存于网关加密存储，不对 Agent 所有者或沙箱暴露。</small>
+      </label>
+      {hasWebSearchKey && (
+        <label className="gateway-clear-key">
+          <input
+            type="checkbox"
+            name="gatewayClearWebSearchApiKey"
+            checked={clearWebSearchApiKey}
+            onChange={(event) => {
+              setClearWebSearchApiKey(event.target.checked);
+              setWebSearchApiKey("");
+            }}
+          />
+          <span>
+            清除已保存的 Tavily API Key
+            <small>保存后，联网搜索与网页提取将暂停直至重新配置。</small>
+          </span>
+        </label>
+      )}
       <details className="gateway-advanced">
         <summary>高级设置</summary>
         <label>

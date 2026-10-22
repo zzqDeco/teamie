@@ -110,6 +110,12 @@ function publicAgentProfile(
     ...(value.enabled === undefined ? {} : { enabled: value.enabled }),
   };
 }
+export type WebSearchGatewayConfig = {
+  provider: string;
+  hasApiKey: boolean;
+  enabled: boolean;
+  configured: boolean;
+};
 export type ModelGatewayConfig = {
   baseUrl: string;
   model: string;
@@ -118,6 +124,7 @@ export type ModelGatewayConfig = {
   configured: boolean;
   updatedAt: string;
   contextWindowTokens?: number;
+  webSearch?: WebSearchGatewayConfig;
 };
 export type ModelGateway = {
   config: ModelGatewayConfig;
@@ -130,6 +137,9 @@ export type ModelGatewayInput = {
   enabled: boolean;
   clearApiKey?: boolean;
   contextWindowTokens?: number;
+  webSearchEnabled?: boolean;
+  webSearchApiKey?: string;
+  clearWebSearchApiKey?: boolean;
 };
 function publicModelGateway(value: ModelGateway): ModelGateway {
   // Project only public metadata even if a server accidentally adds a secret field.
@@ -144,6 +154,16 @@ function publicModelGateway(value: ModelGateway): ModelGateway {
       ...(value.config.contextWindowTokens === undefined
         ? {}
         : { contextWindowTokens: value.config.contextWindowTokens }),
+      ...(value.config.webSearch === undefined
+        ? {}
+        : {
+            webSearch: {
+              provider: value.config.webSearch.provider,
+              hasApiKey: value.config.webSearch.hasApiKey,
+              enabled: value.config.webSearch.enabled,
+              configured: value.config.webSearch.configured,
+            },
+          }),
     },
     status: value.status,
   };

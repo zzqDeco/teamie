@@ -225,12 +225,17 @@ func (imc *IM) Message(ctx context.Context, c, m string) (*Message, error) {
 }
 
 type Tools struct {
-	Store        *Store
-	Lease        *Lease
-	IM           *IM
-	Sandbox      sandboxservice.Client
-	SandboxToken string
-	Authorize    func(context.Context) error
+	Store            *Store
+	Lease            *Lease
+	IM               *IM
+	Sandbox          sandboxservice.Client
+	SandboxToken     string
+	GatewayStreamURL string
+	GatewayToken     string
+	GatewayHTTP      *http.Client
+	OwnerID          string
+	AgentID          string
+	Authorize        func(context.Context) error
 }
 type Observation struct {
 	OK    bool   `json:"ok"`

@@ -272,15 +272,33 @@ class AgentManifestTest(unittest.TestCase):
         previous["version"]="v0.3.20"
         previous["source"]["ref"]="refs/heads/release/v0.3.20"
         previous["schema"]={"identity":3,"chat":5,"agent_control":1,"agent_runtime":9,"gateway":2}
-        current=self.modern()
+        current=copy.deepcopy(previous)
         current["version"]="v0.3.22"
         current["source"]["ref"]="refs/heads/release/v0.3.22"
+        current["schema"]={"identity":3,"chat":5,"agent_control":1,"agent_runtime":10,"gateway":2}
         self.assertEqual(current["schema"]["agent_runtime"],10)
         manifest.validate(previous)
         manifest.check_transition(current,previous,previous)
         with self.assertRaisesRegex(ValueError,"identical schema versions"):
             manifest.check_transition(previous,current,rollback=True)
         # deploy.sh restore_previous uses this same compatibility entry point.
+        with self.assertRaisesRegex(ValueError,"identical schema versions"):
+            manifest.compatible(current,previous)
+
+    def test_web_search_schema_rejects_old_writer_and_gateway_rollback(self):
+        previous=self.modern()
+        previous["version"]="v0.3.22"
+        previous["source"]["ref"]="refs/heads/release/v0.3.22"
+        previous["schema"]={"identity":3,"chat":5,"agent_control":1,"agent_runtime":10,"gateway":2}
+        current=self.modern()
+        current["version"]="v0.3.23"
+        current["source"]["ref"]="refs/heads/release/v0.3.23"
+        self.assertEqual(current["schema"]["agent_runtime"],11)
+        self.assertEqual(current["schema"]["gateway"],3)
+        manifest.validate(previous)
+        manifest.check_transition(current,previous,previous)
+        with self.assertRaisesRegex(ValueError,"identical schema versions"):
+            manifest.check_transition(previous,current,rollback=True)
         with self.assertRaisesRegex(ValueError,"identical schema versions"):
             manifest.compatible(current,previous)
 
