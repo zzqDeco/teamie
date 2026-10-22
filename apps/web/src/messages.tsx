@@ -45,9 +45,10 @@ import { chatStore, reconcileMessages } from "./store";
 import {
   isComposingKey,
   MentionInput,
-  MentionText,
   trimMentionDraft,
 } from "./mentions";
+import { MessageBody } from "./markdown";
+export { MessageBody };
 import type { LocalMessage } from "./store";
 import { Avatar, Button, date, IconButton, Modal, Notice, time } from "./ui";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
@@ -1455,11 +1456,11 @@ export function ConversationView({
                       </div>
                     </form>
                   ) : (
-                    <p className="message-text">
+                    <div className="message-text message-body">
                       {message.retractedAt ? (
                         "这条消息已撤回"
                       ) : (
-                        <MentionText
+                        <MessageBody
                           body={message.body}
                           mentions={message.mentions}
                           userId={user!.id}
@@ -1468,7 +1469,7 @@ export function ConversationView({
                       {message.editedAt && !message.retractedAt && (
                         <span className="edited-label">（已编辑）</span>
                       )}
-                    </p>
+                    </div>
                   )}
                   {!message.retractedAt && !!message.attachments?.length && (
                     <MessageAttachments
