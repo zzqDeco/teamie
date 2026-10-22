@@ -21,6 +21,8 @@ const ESCAPABLE_PUNCTUATION = new Set(
   '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~'.split(""),
 );
 export const KATEX_DISPLAY_CLASS = "katex-display";
+const MAX_BLOCK_DEPTH = 16;
+const MAX_INLINE_DEPTH = 16;
 
 export function sanitizeLinkUrl(raw: string): string | null {
   const cleaned = raw.trim();
@@ -417,7 +419,59 @@ function matchMarkdownLink(
   return { label, url, end: j + 1 };
 }
 
-function renderInline(text: string, ctx: ParseContext): ReactNode[] {
+function renderPlainWithMentions(
+  text: string,
+  ctx: ParseContext,
+): ReactNode[] {
+  if (!ctx.mentions.length || !text.includes(ctx.mentionPrefix)) {
+    return text ? [text] : [];
+  }
+  const nodes: ReactNode[] = [];
+  let pos = 0;
+  let buffer = "";
+  while (pos < text.length) {
+    if (text.startsWith(ctx.mentionPrefix, pos)) {
+      const afterPrefix = pos + ctx.mentionPrefix.length;
+      const endSentinel = text.indexOf("\uE001", afterPrefix);
+      if (endSentinel !== -1) {
+        const idStr = text.slice(afterPrefix, endSentinel);
+        if (/^\d+$/.test(idStr)) {
+          const mention = ctx.mentions[Number(idStr)];
+          if (mention) {
+            if (buffer) {
+              nodes.push(buffer);
+              buffer = "";
+            }
+            nodes.push(
+              <span
+                key={ctx.nextKey()}
+                className={`message-mention mention-pill${mention.userId === ctx.userId ? " mention-self" : ""}`}
+                data-user-id={mention.userId}
+              >
+                {mention.text}
+              </span>,
+            );
+            pos = endSentinel + 1;
+            continue;
+          }
+        }
+      }
+    }
+    buffer += text[pos];
+    pos++;
+  }
+  if (buffer) nodes.push(buffer);
+  return nodes;
+}
+
+function renderInline(
+  text: string,
+  ctx: ParseContext,
+  depth = 0,
+): ReactNode[] {
+  if (depth >= MAX_INLINE_DEPTH) {
+    return renderPlainWithMentions(text, ctx);
+  }
   const nodes: ReactNode[] = [];
   let buffer = "";
   let pos = 0;
@@ -522,13 +576,13 @@ function renderInline(text: string, ctx: ParseContext): ReactNode[] {
               target="_blank"
               rel="noopener noreferrer"
             >
-              {renderInline(linkMatch.label, ctx)}
+              {renderInline(linkMatch.label, ctx, depth + 1)}
             </a>,
           );
         } else {
           nodes.push(
             <Fragment key={ctx.nextKey()}>
-              {renderInline(linkMatch.label, ctx)}
+              {renderInline(linkMatch.label, ctx, depth + 1)}
             </Fragment>,
           );
         }
@@ -574,7 +628,11 @@ function renderInline(text: string, ctx: ParseContext): ReactNode[] {
       if (closeIdx !== -1 && closeIdx > pos + 2) {
         flushText();
         const inner = text.slice(pos + 2, closeIdx);
-        nodes.push(<del key={ctx.nextKey()}>{renderInline(inner, ctx)}</del>);
+        nodes.push(
+          <del key={ctx.nextKey()}>
+            {renderInline(inner, ctx, depth + 1)}
+          </del>,
+        );
         pos = closeIdx + 2;
         continue;
       }
@@ -601,7 +659,7 @@ function renderInline(text: string, ctx: ParseContext): ReactNode[] {
             const inner = text.slice(pos + 3, closeIdx);
             nodes.push(
               <strong key={ctx.nextKey()}>
-                <em>{renderInline(inner, ctx)}</em>
+                <em>{renderInline(inner, ctx, depth + 1)}</em>
               </strong>,
             );
             pos = closeIdx + 3;
@@ -619,7 +677,9 @@ function renderInline(text: string, ctx: ParseContext): ReactNode[] {
             flushText();
             const inner = text.slice(pos + 2, closeIdx);
             nodes.push(
-              <strong key={ctx.nextKey()}>{renderInline(inner, ctx)}</strong>,
+              <strong key={ctx.nextKey()}>
+                {renderInline(inner, ctx, depth + 1)}
+              </strong>,
             );
             pos = closeIdx + 2;
             continue;
@@ -631,7 +691,11 @@ function renderInline(text: string, ctx: ParseContext): ReactNode[] {
           if (closeIdx !== -1 && closeIdx > pos + 1) {
             flushText();
             const inner = text.slice(pos + 1, closeIdx);
-            nodes.push(<em key={ctx.nextKey()}>{renderInline(inner, ctx)}</em>);
+            nodes.push(
+              <em key={ctx.nextKey()}>
+                {renderInline(inner, ctx, depth + 1)}
+              </em>,
+            );
             pos = closeIdx + 1;
             continue;
           }
@@ -718,12 +782,19 @@ function isHorizontalRule(line: string): boolean {
 }
 
 function matchHeading(line: string): { level: number; text: string } | null {
-  const m = /^ {0,3}(#{1,6})(?:\s+(.*?))?\s*#*\s*$/.exec(line);
+  const m = /^ {0,3}(#{1,6})(.*)$/.exec(line);
   if (!m) return null;
-  // Require space after # unless the line is only #s
-  const rest = line.trim().slice(m[1].length);
-  if (rest.length > 0 && !/^\s/.test(rest)) return null;
-  return { level: m[1].length, text: m[2] ?? "" };
+  const rawRest = m[2];
+  // Require space/tab after # unless the line has nothing after the opening #s
+  if (rawRest.length > 0 && !/^[ \t]/.test(rawRest)) return null;
+  let content = rawRest.trim();
+  // CommonMark §4.2: closing # sequence is stripped only when preceded by whitespace or when the whole body is #s
+  if (/^#+$/.test(content)) {
+    content = "";
+  } else {
+    content = content.replace(/[ \t]+#+$/, "").trimEnd();
+  }
+  return { level: m[1].length, text: content };
 }
 
 function matchFenceOpen(
@@ -765,63 +836,78 @@ function matchListItem(
 function matchDisplayMathBlock(
   lines: string[],
   startIndex: number,
-): { formula: string; nextIndex: number } | null {
+): { formula: string; nextIndex: number; trailingText?: string } | null {
   const line = lines[startIndex];
-  const trimmed = line.trim();
 
-  // Single-line $$...$$
-  if (trimmed.startsWith("$$") && trimmed.endsWith("$$") && trimmed.length > 4) {
-    const inner = trimmed.slice(2, -2);
-    if (!inner.includes("$$") && inner.trim().length > 0) {
-      return { formula: inner, nextIndex: startIndex + 1 };
-    }
-  }
-
-  // Single-line \[...\]
-  if (trimmed.startsWith("\\[") && trimmed.endsWith("\\]") && trimmed.length > 4) {
-    const inner = trimmed.slice(2, -2);
-    if (!inner.includes("\\]") && inner.trim().length > 0) {
-      return { formula: inner, nextIndex: startIndex + 1 };
-    }
-  }
-
-  // Multi-line $$...$$
+  // Single-line or multi-line $$...$$ starting at beginning of line
   if (/^ {0,3}\$\$/.test(line)) {
     const firstRest = line.replace(/^ {0,3}\$\$/, "");
-    if (!firstRest.includes("$$")) {
-      const collected: string[] = [firstRest];
-      for (let j = startIndex + 1; j < lines.length; j++) {
-        const closePos = lines[j].indexOf("$$");
-        if (closePos !== -1) {
-          collected.push(lines[j].slice(0, closePos));
-          const formula = collected.join("\n");
-          if (formula.trim().length > 0) {
-            return { formula, nextIndex: j + 1 };
-          }
-          break;
-        }
-        collected.push(lines[j]);
+    const sameLineClose = firstRest.indexOf("$$");
+    if (sameLineClose !== -1) {
+      const inner = firstRest.slice(0, sameLineClose);
+      const after = firstRest.slice(sameLineClose + 2);
+      if (inner.trim().length > 0 && !after.includes("$$")) {
+        return {
+          formula: inner,
+          nextIndex: startIndex + 1,
+          trailingText: after.trim() ? after.trimStart() : undefined,
+        };
       }
+      return null;
+    }
+    const collected: string[] = [firstRest];
+    for (let j = startIndex + 1; j < lines.length; j++) {
+      const closePos = lines[j].indexOf("$$");
+      if (closePos !== -1) {
+        collected.push(lines[j].slice(0, closePos));
+        const after = lines[j].slice(closePos + 2);
+        const formula = collected.join("\n");
+        if (formula.trim().length > 0) {
+          return {
+            formula,
+            nextIndex: j + 1,
+            trailingText: after.trim() ? after.trimStart() : undefined,
+          };
+        }
+        break;
+      }
+      collected.push(lines[j]);
     }
   }
 
-  // Multi-line \[...\]
+  // Single-line or multi-line \[...\] starting at beginning of line
   if (/^ {0,3}\\\[/.test(line)) {
     const firstRest = line.replace(/^ {0,3}\\\[/, "");
-    if (!firstRest.includes("\\]")) {
-      const collected: string[] = [firstRest];
-      for (let j = startIndex + 1; j < lines.length; j++) {
-        const closePos = lines[j].indexOf("\\]");
-        if (closePos !== -1) {
-          collected.push(lines[j].slice(0, closePos));
-          const formula = collected.join("\n");
-          if (formula.trim().length > 0) {
-            return { formula, nextIndex: j + 1 };
-          }
-          break;
-        }
-        collected.push(lines[j]);
+    const sameLineClose = firstRest.indexOf("\\]");
+    if (sameLineClose !== -1) {
+      const inner = firstRest.slice(0, sameLineClose);
+      const after = firstRest.slice(sameLineClose + 2);
+      if (inner.trim().length > 0 && !after.includes("\\[")) {
+        return {
+          formula: inner,
+          nextIndex: startIndex + 1,
+          trailingText: after.trim() ? after.trimStart() : undefined,
+        };
       }
+      return null;
+    }
+    const collected: string[] = [firstRest];
+    for (let j = startIndex + 1; j < lines.length; j++) {
+      const closePos = lines[j].indexOf("\\]");
+      if (closePos !== -1) {
+        collected.push(lines[j].slice(0, closePos));
+        const after = lines[j].slice(closePos + 2);
+        const formula = collected.join("\n");
+        if (formula.trim().length > 0) {
+          return {
+            formula,
+            nextIndex: j + 1,
+            trailingText: after.trim() ? after.trimStart() : undefined,
+          };
+        }
+        break;
+      }
+      collected.push(lines[j]);
     }
   }
 
@@ -851,6 +937,7 @@ function parseListBlock(
   lines: string[],
   startIndex: number,
   ctx: ParseContext,
+  depth = 0,
 ): { node: ReactNode; nextIndex: number } {
   const firstMatch = matchListItem(lines[startIndex])!;
   const baseIndent = firstMatch.indent;
@@ -879,11 +966,15 @@ function parseListBlock(
     const itemMatch = matchListItem(lines[i]);
     if (!itemMatch) break;
     if (itemMatch.indent < baseIndent) break;
-    if (itemMatch.indent === baseIndent && itemMatch.ordered !== ordered) break;
+    if (
+      itemMatch.indent === baseIndent &&
+      itemMatch.ordered !== ordered
+    )
+      break;
 
-    if (itemMatch.indent > baseIndent) {
+    if (itemMatch.indent > baseIndent && depth < MAX_BLOCK_DEPTH) {
       // Nested list when encountered directly
-      const nested = parseListBlock(lines, i, ctx);
+      const nested = parseListBlock(lines, i, ctx, depth + 1);
       items.push(<li key={ctx.nextKey()}>{nested.node}</li>);
       i = nested.nextIndex;
       continue;
@@ -897,8 +988,8 @@ function parseListBlock(
       if (lines[i].trim() === "") break;
       const subItem = matchListItem(lines[i]);
       if (subItem) {
-        if (subItem.indent > baseIndent) {
-          const nested = parseListBlock(lines, i, ctx);
+        if (subItem.indent > baseIndent && depth < MAX_BLOCK_DEPTH) {
+          const nested = parseListBlock(lines, i, ctx, depth + 1);
           nestedNodes.push(nested.node);
           i = nested.nextIndex;
           continue;
@@ -966,7 +1057,19 @@ function parseListBlock(
   };
 }
 
-function parseBlocks(text: string, ctx: ParseContext): ReactNode[] {
+function parseBlocks(
+  text: string,
+  ctx: ParseContext,
+  depth = 0,
+): ReactNode[] {
+  if (depth >= MAX_BLOCK_DEPTH) {
+    const flattened = text.replace(/^(?: {0,3}> ?)+/gm, "");
+    return [
+      <p key={ctx.nextKey()} className="markdown-paragraph">
+        {renderInline(flattened, ctx)}
+      </p>,
+    ];
+  }
   const lines = text.split("\n");
   const blocks: ReactNode[] = [];
   let i = 0;
@@ -1017,7 +1120,12 @@ function parseBlocks(text: string, ctx: ParseContext): ReactNode[] {
           {renderMathNode(mathBlock.formula, true, ctx)}
         </div>,
       );
-      i = mathBlock.nextIndex;
+      if (mathBlock.trailingText) {
+        lines[mathBlock.nextIndex - 1] = mathBlock.trailingText;
+        i = mathBlock.nextIndex - 1;
+      } else {
+        i = mathBlock.nextIndex;
+      }
       continue;
     }
 
@@ -1050,13 +1158,18 @@ function parseBlocks(text: string, ctx: ParseContext): ReactNode[] {
     // 5. Blockquote
     if (/^ {0,3}>/.test(line)) {
       const quoteLines: string[] = [];
+      const atMaxDepth = depth + 1 >= MAX_BLOCK_DEPTH;
       while (i < lines.length && /^ {0,3}>/.test(lines[i])) {
-        quoteLines.push(lines[i].replace(/^ {0,3}> ?/, ""));
+        quoteLines.push(
+          atMaxDepth
+            ? lines[i].replace(/^(?: {0,3}> ?)+/, "")
+            : lines[i].replace(/^ {0,3}> ?/, ""),
+        );
         i++;
       }
       blocks.push(
         <blockquote key={ctx.nextKey()} className="markdown-blockquote">
-          {parseBlocks(quoteLines.join("\n"), ctx)}
+          {parseBlocks(quoteLines.join("\n"), ctx, depth + 1)}
         </blockquote>,
       );
       continue;
@@ -1128,7 +1241,7 @@ function parseBlocks(text: string, ctx: ParseContext): ReactNode[] {
 
     // 7. Lists (ordered, unordered, task lists)
     if (matchListItem(line)) {
-      const listResult = parseListBlock(lines, i, ctx);
+      const listResult = parseListBlock(lines, i, ctx, depth);
       blocks.push(listResult.node);
       i = listResult.nextIndex;
       continue;
@@ -1151,16 +1264,11 @@ function parseBlocks(text: string, ctx: ParseContext): ReactNode[] {
   return blocks;
 }
 
-export function MessageBody({
-  body,
-  mentions = [],
-  userId,
-}: {
-  body: string;
-  mentions?: Mention[];
-  userId: string;
-}) {
-  if (!body) return null;
+function renderMarkdownNodes(
+  body: string,
+  mentions: Mention[],
+  userId: string,
+): ReactNode[] {
   const mentionPrefix = createMentionSentinelPrefix(body);
   const { annotated, validMentions } = injectMentions(
     body,
@@ -1175,5 +1283,22 @@ export function MessageBody({
     mentionPrefix,
     nextKey: () => `md-${++keyCounter}`,
   };
-  return <>{parseBlocks(normalized, ctx)}</>;
+  try {
+    return parseBlocks(normalized, ctx, 0);
+  } catch {
+    return renderPlainWithMentions(normalized, ctx);
+  }
+}
+
+export function MessageBody({
+  body,
+  mentions = [],
+  userId,
+}: {
+  body: string;
+  mentions?: Mention[];
+  userId: string;
+}) {
+  if (!body) return null;
+  return <>{renderMarkdownNodes(body, mentions, userId)}</>;
 }

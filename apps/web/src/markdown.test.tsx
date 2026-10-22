@@ -409,4 +409,100 @@ describe("Combined @mention pills, Markdown, and KaTeX in IM messages", () => {
     // 4. Edited label preserved
     expect(bodyEl.querySelector(".edited-label")?.textContent).toBe("（已编辑）");
   });
+
+  it("handles pathological 7,900+ deeply nested blockquotes and inline markers without stack overflow", async () => {
+    const quotes = ">".repeat(7900);
+    const mentionLabel = "@林舟";
+    const body = `${quotes} ${mentionLabel} deep quote`;
+    const start = quotes.length + 1;
+    const end = start + mentionLabel.length;
+
+    const deepMessage: Message = {
+      id: "msg-deep-1",
+      clientMessageId: "client-deep-1",
+      conversationId: conversation.id,
+      senderId: "human-two",
+      senderName: "陈默",
+      senderKind: "human",
+      seq: 10,
+      body,
+      mentions: [{ userId: user.id, start, end }],
+      createdAt: user.createdAt,
+    };
+
+    vi.mocked(api.messages).mockResolvedValue({
+      messages: [deepMessage],
+      hasMore: false,
+    });
+
+    await render(
+      <ConversationView
+        conversation={conversation}
+        members={members}
+        onMembers={vi.fn()}
+        membersOpen={false}
+        onMenu={vi.fn()}
+      />,
+    );
+
+    const bodyEl = host.querySelector("#message-msg-deep-1 .message-body")!;
+    expect(bodyEl).not.toBeNull();
+    expect(bodyEl.textContent).toContain("deep quote");
+    expect(bodyEl.querySelector(".mention-self")?.textContent).toBe("@林舟");
+    expect(
+      bodyEl.querySelectorAll("blockquote.markdown-blockquote").length,
+    ).toBeLessThanOrEqual(16);
+
+    // Also verify deeply nested inline delimiters
+    const deepInline =
+      "**".repeat(40) + "inner @林舟 text" + "**".repeat(40);
+    await render(
+      <MessageBody
+        body={deepInline}
+        mentions={[{ userId: user.id, start: 86, end: 89 }]}
+        userId={user.id}
+      />,
+    );
+    expect(host.textContent).toContain("inner @林舟 text");
+    expect(host.querySelector(".mention-self")?.textContent).toBe("@林舟");
+  });
+
+  it("preserves trailing text on the closing line of multi-line and single-line display math blocks", async () => {
+    const body = [
+      "$$",
+      "a + b = c",
+      "$$ 同一行的说明文字一",
+      "",
+      "\\[",
+      "x^2 + y^2 = z^2",
+      "\\] 同一行的说明文字二",
+    ].join("\n");
+
+    await render(<MessageBody body={body} userId={user.id} />);
+
+    const displayMath = host.querySelectorAll(".katex-display");
+    expect(displayMath).toHaveLength(2);
+    expect(displayMath[0].textContent).toContain("a + b = c");
+    expect(displayMath[1].textContent).toContain("x^2 + y^2 = z^2");
+    expect(host.textContent).toContain("同一行的说明文字一");
+    expect(host.textContent).toContain("同一行的说明文字二");
+  });
+
+  it("preserves non-whitespace trailing # in ATX headings (# C#, ## F#) while stripping whitespace-preceded closing #", async () => {
+    const body = [
+      "# C#",
+      "## F# Programming",
+      "### C###",
+      "#### Heading ####",
+      "##### #####",
+    ].join("\n");
+
+    await render(<MessageBody body={body} userId={user.id} />);
+
+    expect(host.querySelector("h1")?.textContent).toBe("C#");
+    expect(host.querySelector("h2")?.textContent).toBe("F# Programming");
+    expect(host.querySelector("h3")?.textContent).toBe("C###");
+    expect(host.querySelector("h4")?.textContent).toBe("Heading");
+    expect(host.querySelector("h5")?.textContent).toBe("");
+  });
 });
