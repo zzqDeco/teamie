@@ -17,6 +17,11 @@ type Config struct {
 	Enabled             bool      `json:"enabled"`
 	UpdatedAt           time.Time `json:"updatedAt"`
 	ContextWindowTokens int64     `json:"contextWindowTokens"`
+	WebSearchCipherKey  []byte    `json:"-"`
+	WebSearchEnabled    bool      `json:"webSearchEnabled"`
+	WebSearchEnabledSet bool      `json:"-"`
+	WebSearchAPIKey     *string   `json:"-"`
+	ClearWebSearchKey   bool      `json:"-"`
 }
 
 func (c Config) ContextWindow() int64 {
@@ -26,7 +31,8 @@ func (c Config) ContextWindow() int64 {
 	return c.ContextWindowTokens
 }
 
-func (c Config) Configured() bool { return c.BaseURL != "" && c.Model != "" && len(c.CipherKey) > 0 }
+func (c Config) Configured() bool          { return c.BaseURL != "" && c.Model != "" && len(c.CipherKey) > 0 }
+func (c Config) WebSearchConfigured() bool { return len(c.WebSearchCipherKey) > 0 }
 func (c Config) CountingConfigID() string {
 	if !c.Configured() {
 		return ""
@@ -41,7 +47,24 @@ func (c Config) View() map[string]any {
 			status = "ready"
 		}
 	}
-	return map[string]any{"config": map[string]any{"baseUrl": c.BaseURL, "model": c.Model, "contextWindowTokens": c.ContextWindow(), "hasApiKey": len(c.CipherKey) > 0, "enabled": c.Enabled, "configured": c.Configured(), "updatedAt": c.UpdatedAt}, "status": status}
+	return map[string]any{
+		"config": map[string]any{
+			"baseUrl":             c.BaseURL,
+			"model":               c.Model,
+			"contextWindowTokens": c.ContextWindow(),
+			"hasApiKey":           len(c.CipherKey) > 0,
+			"enabled":             c.Enabled,
+			"configured":          c.Configured(),
+			"webSearch": map[string]any{
+				"provider":   "tavily",
+				"enabled":    c.WebSearchEnabled,
+				"hasApiKey":  len(c.WebSearchCipherKey) > 0,
+				"configured": c.WebSearchConfigured(),
+			},
+			"updatedAt": c.UpdatedAt,
+		},
+		"status": status,
+	}
 }
 
 type Usage struct {
@@ -81,6 +104,9 @@ func Open(ctx context.Context, url string) (*PGStore, error) {
 		_, e = tx.Exec(ctx, `ALTER TABLE gateway_config ADD COLUMN IF NOT EXISTS context_window_tokens BIGINT NOT NULL DEFAULT 16384 CHECK(context_window_tokens BETWEEN 4096 AND 2000000); INSERT INTO gateway_schema_migrations(version)VALUES(2)ON CONFLICT DO NOTHING;`)
 	}
 	if e == nil {
+		_, e = tx.Exec(ctx, `ALTER TABLE gateway_config ADD COLUMN IF NOT EXISTS web_search_encrypted_key BYTEA, ADD COLUMN IF NOT EXISTS web_search_enabled BOOLEAN NOT NULL DEFAULT false; INSERT INTO gateway_schema_migrations(version)VALUES(3)ON CONFLICT DO NOTHING;`)
+	}
+	if e == nil {
 		e = tx.Commit(ctx)
 	}
 	if e != nil {
@@ -91,23 +117,20 @@ func Open(ctx context.Context, url string) (*PGStore, error) {
 }
 func (s *PGStore) Ready(ctx context.Context) error { return s.DB.Ping(ctx) }
 func scan(row pgx.Row) (c Config, e error) {
-	e = row.Scan(&c.BaseURL, &c.Model, &c.CipherKey, &c.Enabled, &c.UpdatedAt, &c.ContextWindowTokens)
+	e = row.Scan(&c.BaseURL, &c.Model, &c.CipherKey, &c.Enabled, &c.UpdatedAt, &c.ContextWindowTokens, &c.WebSearchCipherKey, &c.WebSearchEnabled)
 	return
 }
 func (s *PGStore) Load(ctx context.Context) (Config, error) {
-	return scan(s.DB.QueryRow(ctx, `SELECT base_url,model,encrypted_key,enabled,updated_at,context_window_tokens FROM gateway_config WHERE id`))
+	return scan(s.DB.QueryRow(ctx, `SELECT base_url,model,encrypted_key,enabled,updated_at,context_window_tokens,web_search_encrypted_key,web_search_enabled FROM gateway_config WHERE id`))
 }
-func (s *PGStore) Save(ctx context.Context, c Config, key *string, clear bool, crypto Cipher) (Config, error) {
-	tx, e := s.DB.Begin(ctx)
-	if e != nil {
-		return Config{}, e
-	}
-	defer tx.Rollback(ctx)
-	old, e := scan(tx.QueryRow(ctx, `SELECT base_url,model,encrypted_key,enabled,updated_at,context_window_tokens FROM gateway_config WHERE id FOR UPDATE`))
-	if e != nil {
-		return Config{}, e
-	}
+
+func mergeSavedConfig(old, c Config, key *string, clear bool, crypto Cipher) (Config, error) {
+	var e error
 	c.CipherKey = old.CipherKey
+	c.WebSearchCipherKey = old.WebSearchCipherKey
+	if !c.WebSearchEnabledSet && !c.WebSearchEnabled {
+		c.WebSearchEnabled = old.WebSearchEnabled
+	}
 	if c.ContextWindowTokens == 0 {
 		c.ContextWindowTokens = old.ContextWindow()
 	}
@@ -123,7 +146,33 @@ func (s *PGStore) Save(ctx context.Context, c Config, key *string, clear bool, c
 			return Config{}, e
 		}
 	}
-	c, e = scan(tx.QueryRow(ctx, `UPDATE gateway_config SET base_url=$1,model=$2,encrypted_key=$3,enabled=$4,context_window_tokens=$5,updated_at=now() WHERE id RETURNING base_url,model,encrypted_key,enabled,updated_at,context_window_tokens`, c.BaseURL, c.Model, c.CipherKey, c.Enabled, c.ContextWindowTokens))
+	if c.ClearWebSearchKey {
+		c.WebSearchCipherKey = nil
+	}
+	if c.WebSearchAPIKey != nil {
+		c.WebSearchCipherKey, e = crypto.Encrypt(*c.WebSearchAPIKey)
+		if e != nil {
+			return Config{}, e
+		}
+	}
+	return c, nil
+}
+
+func (s *PGStore) Save(ctx context.Context, c Config, key *string, clear bool, crypto Cipher) (Config, error) {
+	tx, e := s.DB.Begin(ctx)
+	if e != nil {
+		return Config{}, e
+	}
+	defer tx.Rollback(ctx)
+	old, e := scan(tx.QueryRow(ctx, `SELECT base_url,model,encrypted_key,enabled,updated_at,context_window_tokens,web_search_encrypted_key,web_search_enabled FROM gateway_config WHERE id FOR UPDATE`))
+	if e != nil {
+		return Config{}, e
+	}
+	c, e = mergeSavedConfig(old, c, key, clear, crypto)
+	if e != nil {
+		return Config{}, e
+	}
+	c, e = scan(tx.QueryRow(ctx, `UPDATE gateway_config SET base_url=$1,model=$2,encrypted_key=$3,enabled=$4,context_window_tokens=$5,web_search_encrypted_key=$6,web_search_enabled=$7,updated_at=now() WHERE id RETURNING base_url,model,encrypted_key,enabled,updated_at,context_window_tokens,web_search_encrypted_key,web_search_enabled`, c.BaseURL, c.Model, c.CipherKey, c.Enabled, c.ContextWindowTokens, c.WebSearchCipherKey, c.WebSearchEnabled))
 	if e != nil {
 		return Config{}, e
 	}

@@ -82,6 +82,7 @@ export function agentFailureText(error: unknown): string {
 }
 export function modelGatewayInput(value: GatewayFormValue): ModelGatewayInput {
   const key = value.apiKey.trim();
+  const webKey = (value.webSearchApiKey ?? "").trim();
   const baseUrl = value.baseUrl.trim();
   const url = new URL(baseUrl);
   if (
@@ -94,6 +95,8 @@ export function modelGatewayInput(value: GatewayFormValue): ModelGatewayInput {
     throw new Error("服务地址不得包含密钥、认证信息或查询参数。");
   if (value.clearApiKey && key)
     throw new Error("清除密钥和填写新密钥不能同时进行。");
+  if (value.clearWebSearchApiKey && webKey)
+    throw new Error("清除联网搜索密钥和填写新密钥不能同时进行。");
   if (
     value.contextWindowTokens !== undefined &&
     (!Number.isInteger(value.contextWindowTokens) ||
@@ -110,6 +113,11 @@ export function modelGatewayInput(value: GatewayFormValue): ModelGatewayInput {
       : { contextWindowTokens: value.contextWindowTokens }),
     ...(key ? { apiKey: key } : {}),
     ...(value.clearApiKey ? { clearApiKey: true } : {}),
+    ...(value.webSearchEnabled === undefined
+      ? {}
+      : { webSearchEnabled: value.webSearchEnabled }),
+    ...(webKey ? { webSearchApiKey: webKey } : {}),
+    ...(value.clearWebSearchApiKey ? { clearWebSearchApiKey: true } : {}),
   };
 }
 export function gatewayFailureText(error: unknown): string {

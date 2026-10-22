@@ -253,7 +253,7 @@ func Open(ctx context.Context, url string) (*Store, error) {
 		err = validateRuntimeSchema(ctx, tx)
 	}
 	if err == nil {
-		_, err = tx.Exec(ctx, schemaSQL+schemaV2SQL+schemaV3SQL+contextArchiveSchemaSQL+contextRecoverySchemaSQL+schemaV4SQL+schemaV5SQL+schemaV6SQL+schemaV7SQL+schemaV8SQL+schemaV9SQL+schemaV10SQL)
+		_, err = tx.Exec(ctx, schemaSQL+schemaV2SQL+schemaV3SQL+contextArchiveSchemaSQL+contextRecoverySchemaSQL+schemaV4SQL+schemaV5SQL+schemaV6SQL+schemaV7SQL+schemaV8SQL+schemaV9SQL+schemaV10SQL+schemaV11SQL)
 	}
 	if err == nil {
 		err = tx.Commit(ctx)

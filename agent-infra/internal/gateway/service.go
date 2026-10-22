@@ -17,18 +17,21 @@ import (
 )
 
 type Service struct {
-	Store    Store
-	Cipher   Cipher
-	Provider Provider
-	Token    string
-	slots    chan struct{}
-	mu       sync.Mutex
-	active   map[string]context.CancelFunc
-	canceled map[string]time.Time
+	Store        Store
+	Cipher       Cipher
+	Provider     Provider
+	Token        string
+	WebSearchURL string
+	slots        chan struct{}
+	webSlots     chan struct{}
+	mu           sync.Mutex
+	webSeq       uint64
+	active       map[string]context.CancelFunc
+	canceled     map[string]time.Time
 }
 
 func New(store Store, cipher Cipher, token string) *Service {
-	return &Service{Store: store, Cipher: cipher, Provider: Provider{NewHTTPClient()}, Token: token, slots: make(chan struct{}, 1), active: make(map[string]context.CancelFunc), canceled: make(map[string]time.Time)}
+	return &Service{Store: store, Cipher: cipher, Provider: Provider{NewHTTPClient()}, Token: token, WebSearchURL: defaultTavilyBaseURL, slots: make(chan struct{}, 1), webSlots: make(chan struct{}, 4), active: make(map[string]context.CancelFunc), canceled: make(map[string]time.Time)}
 }
 func (s *Service) Ping(ctx context.Context, r *agent.PingRequest) (*agent.PingResponse, error) {
 	if r == nil || !api.EqualSecret(r.GetServiceToken(), s.Token) {
@@ -171,9 +174,18 @@ func (s *Service) CancelRun(id, run string) {
 		delete(s.canceled, oldestKey)
 	}
 	s.canceled[index] = now
-	cancel := s.active[index]
+	var cancels []context.CancelFunc
+	if cancel := s.active[index]; cancel != nil {
+		cancels = append(cancels, cancel)
+	}
+	prefix := index + "/web/"
+	for key, cancel := range s.active {
+		if strings.HasPrefix(key, prefix) && cancel != nil {
+			cancels = append(cancels, cancel)
+		}
+	}
 	s.mu.Unlock()
-	if cancel != nil {
+	for _, cancel := range cancels {
 		cancel()
 	}
 }
@@ -182,6 +194,8 @@ func (s *Service) Routes(auth api.AdminAuth) http.Handler {
 	api.Operations(m, s.Store.Ready)
 	m.HandleFunc("POST "+modeltransport.GeneratePath, s.generateHTTP)
 	m.HandleFunc("POST "+modeltransport.StreamPath, s.streamHTTP)
+	m.HandleFunc("POST "+modeltransport.WebSearchPath, s.webSearchHTTP)
+	m.HandleFunc("POST "+modeltransport.WebExtractPath, s.webExtractHTTP)
 	wrap := func(fn func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			u, e := auth.Require(r)
@@ -203,12 +217,15 @@ func (s *Service) Routes(auth api.AdminAuth) http.Handler {
 	}))
 	m.HandleFunc("PUT /api/v1/admin/model-gateway", wrap(func(w http.ResponseWriter, r *http.Request, _ string) {
 		var in struct {
-			BaseURL             string  `json:"baseUrl"`
-			Model               string  `json:"model"`
-			APIKey              *string `json:"apiKey"`
-			Enabled             bool    `json:"enabled"`
-			Clear               bool    `json:"clearApiKey"`
-			ContextWindowTokens *int64  `json:"contextWindowTokens"`
+			BaseURL              string  `json:"baseUrl"`
+			Model                string  `json:"model"`
+			APIKey               *string `json:"apiKey"`
+			Enabled              bool    `json:"enabled"`
+			Clear                bool    `json:"clearApiKey"`
+			ContextWindowTokens  *int64  `json:"contextWindowTokens"`
+			WebSearchEnabled     *bool   `json:"webSearchEnabled"`
+			WebSearchAPIKey      *string `json:"webSearchApiKey"`
+			ClearWebSearchAPIKey bool    `json:"clearWebSearchApiKey"`
 		}
 		if e := api.Decode(w, r, &in); e != nil {
 			api.Fail(w, e)
@@ -218,6 +235,10 @@ func (s *Service) Routes(auth api.AdminAuth) http.Handler {
 		in.Model = strings.TrimSpace(in.Model)
 		if len(in.Model) > 160 || strings.ContainsAny(in.Model, "\r\n\x00") || in.APIKey != nil && (in.Clear || len(*in.APIKey) == 0 || len(*in.APIKey) > 16384 || strings.ContainsAny(*in.APIKey, "\r\n\x00")) {
 			api.Fail(w, api.Err(400, "invalid_request", "Invalid model configuration"))
+			return
+		}
+		if in.WebSearchAPIKey != nil && (in.ClearWebSearchAPIKey || len(*in.WebSearchAPIKey) == 0 || len(*in.WebSearchAPIKey) > 16384 || strings.ContainsAny(*in.WebSearchAPIKey, "\r\n\x00")) {
+			api.Fail(w, api.Err(400, "invalid_request", "Invalid web search configuration"))
 			return
 		}
 		if in.ContextWindowTokens != nil && (*in.ContextWindowTokens < 4096 || *in.ContextWindowTokens > 2000000) {
@@ -230,7 +251,11 @@ func (s *Service) Routes(auth api.AdminAuth) http.Handler {
 			api.Fail(w, e)
 			return
 		}
-		c := Config{BaseURL: in.BaseURL, Model: in.Model, Enabled: in.Enabled}
+		c := Config{BaseURL: in.BaseURL, Model: in.Model, Enabled: in.Enabled, WebSearchAPIKey: in.WebSearchAPIKey, ClearWebSearchKey: in.ClearWebSearchAPIKey}
+		if in.WebSearchEnabled != nil {
+			c.WebSearchEnabled = *in.WebSearchEnabled
+			c.WebSearchEnabledSet = true
+		}
 		if in.ContextWindowTokens != nil {
 			c.ContextWindowTokens = *in.ContextWindowTokens
 		}
@@ -239,10 +264,13 @@ func (s *Service) Routes(auth api.AdminAuth) http.Handler {
 			api.Fail(w, e)
 			return
 		}
-		if !c.Enabled || !c.Configured() {
+		if !c.Enabled || !c.Configured() || !c.WebSearchEnabled || !c.WebSearchConfigured() {
 			s.mu.Lock()
-			for _, cancel := range s.active {
-				cancel()
+			for key, cancel := range s.active {
+				isWeb := strings.Contains(key, "/web/")
+				if (!isWeb && (!c.Enabled || !c.Configured())) || (isWeb && (!c.WebSearchEnabled || !c.WebSearchConfigured())) {
+					cancel()
+				}
 			}
 			s.mu.Unlock()
 		}

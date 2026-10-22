@@ -31,19 +31,12 @@ func (m *memoryStore) Load(context.Context) (Config, error) {
 func (m *memoryStore) Save(_ context.Context, c Config, key *string, clear bool, crypto Cipher) (Config, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	c.CipherKey = m.c.CipherKey
-	if clear {
-		c.CipherKey = nil
+	merged, e := mergeSavedConfig(m.c, c, key, clear, crypto)
+	if e != nil {
+		return Config{}, e
 	}
-	if key != nil {
-		var e error
-		c.CipherKey, e = crypto.Encrypt(*key)
-		if e != nil {
-			return Config{}, e
-		}
-	}
-	m.c = c
-	return c, nil
+	m.c = merged
+	return merged, nil
 }
 func (m *memoryStore) Record(_ context.Context, u Usage) error {
 	m.mu.Lock()

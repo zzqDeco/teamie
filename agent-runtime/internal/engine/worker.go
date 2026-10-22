@@ -362,6 +362,13 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 			}
 			activeTools = append(activeTools, contextTools...)
 			activeTools = append(activeTools, pageTool)
+			if budget.WebSearch {
+				webTools, err := (&Tools{Store: e.Store, Lease: lease, IM: imc, Sandbox: e.Sandbox, SandboxToken: e.Config.SandboxToken, GatewayStreamURL: e.Config.GatewayStreamURL, GatewayToken: e.Config.GatewayToken, OwnerID: def.OwnerId, AgentID: def.Id, Authorize: authorize}).BuildWebTools()
+				if err != nil {
+					return nil, err
+				}
+				activeTools = append(activeTools, webTools...)
+			}
 			pipeline, err := NewContextPipeline(ctx, ContextPipelineConfig{Model: gatewayModel, Budget: budget, Backend: archive, ArchivePath: archive.Path, ArchiveToolPath: archive.ArchiveToolPath, ArchiveTranscript: archive.ArchiveTranscript})
 			if err != nil {
 				return nil, err
@@ -373,6 +380,9 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 			}
 			if budget.StructuredMentions {
 				instruction += mentionGuidance
+			}
+			if budget.WebSearch {
+				instruction += webSearchGuidance
 			}
 			return adk.NewTypedChatModelAgent(ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{Name: "teamie_agent", Description: "A user-owned Teamie participant", Instruction: instruction, Model: gatewayModel, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: activeTools, ExecuteSequentially: true}}, MaxIterations: math.MaxInt, Handlers: handlers, ModelRetryConfig: pipeline.RetryConfig()})
 		}
@@ -472,7 +482,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		// their persisted selection even when the flag or gateway changes.
 		if e.Config.FlagsFile != "" && runtimeFlag(e.Config.FlagsFile, "agents.context.v1") {
 			profile = contextProfileV1
-			budget, err = newRunContextBudget(int(contextWindow.Load()), runtimeFlag(e.Config.FlagsFile, "agents.files.deliver.v1"), runtimeFlag(e.Config.FlagsFile, "agents.mentions.v1"))
+			budget, err = newRunContextBudget(int(contextWindow.Load()), runtimeFlag(e.Config.FlagsFile, "agents.files.deliver.v1"), runtimeFlag(e.Config.FlagsFile, "agents.mentions.v1"), runtimeFlag(e.Config.FlagsFile, "agents.web.v1"))
 			if err != nil {
 				return nil, nil, nil, err
 			}

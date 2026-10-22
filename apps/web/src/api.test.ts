@@ -506,6 +506,13 @@ describe("Agent and model gateway boundaries", () => {
         enabled: true,
         configured: true,
         updatedAt: "2026-10-16T07:00:00Z",
+        webSearch: {
+          provider: "tavily",
+          hasApiKey: true,
+          enabled: true,
+          configured: true,
+          apiKey: "example-never-returned-tavily-key",
+        },
       },
       status: "ready",
       apiKey: "example-top-level-secret",
@@ -524,12 +531,21 @@ describe("Agent and model gateway boundaries", () => {
       model: response.config.model,
       apiKey: "example-request-key",
       enabled: true,
+      webSearchEnabled: true,
+      webSearchApiKey: "example-tavily-request-key",
     });
     for (const value of [read, saved]) {
       expect(JSON.stringify(value)).not.toContain("example-never-returned-key");
+      expect(JSON.stringify(value)).not.toContain("example-never-returned-tavily-key");
       expect(JSON.stringify(value)).not.toContain("example-ciphertext");
       expect(JSON.stringify(value)).not.toContain("example-top-level-secret");
       expect(value.config).not.toHaveProperty("apiKey");
+      expect(value.config.webSearch).toEqual({
+        provider: "tavily",
+        hasApiKey: true,
+        enabled: true,
+        configured: true,
+      });
     }
     expect(fetch.mock.calls[1][0]).toBe("/api/v1/admin/model-gateway");
     expect(fetch.mock.calls[1][0]).not.toContain("example-request-key");

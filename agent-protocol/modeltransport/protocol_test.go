@@ -37,3 +37,19 @@ func TestCountingConfigIDNormalizesAndStaysOpaque(t *testing.T) {
 		t.Fatalf("CountingConfigID did not distinguish model or baseURL changes: %q %q %q", idA, idBModel, idBURL)
 	}
 }
+
+func TestWebTransportEnvelopeSerialization(t *testing.T) {
+	if WebSearchPath != "/internal/v1/web/search" || WebExtractPath != "/internal/v1/web/extract" {
+		t.Fatalf("unexpected web paths: %s %s", WebSearchPath, WebExtractPath)
+	}
+	searchReq := WebSearchRequest{OwnerID: "o", AgentID: "a", SessionID: "s", RunID: "r", Query: "teamie"}
+	raw, err := json.Marshal(searchReq)
+	if err != nil || strings.Contains(string(raw), "includeDomains") {
+		t.Fatalf("unexpected search request JSON: %s %v", raw, err)
+	}
+	extractRes := WebExtractResponse{OK: true, Results: []WebExtractResult{{URL: "https://example.com", Content: "# Title"}}}
+	raw, err = json.Marshal(extractRes)
+	if err != nil || strings.Contains(string(raw), "failedResults") {
+		t.Fatalf("unexpected extract response JSON: %s %v", raw, err)
+	}
+}

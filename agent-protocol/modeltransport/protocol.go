@@ -14,6 +14,9 @@ const ModelConfigIDHeader = "X-Teamie-Model-Config-Id"
 
 const GeneratePath = "/internal/v1/chat"
 const StreamPath = GeneratePath + "/stream"
+const WebSearchPath = "/internal/v1/web/search"
+const WebExtractPath = "/internal/v1/web/extract"
+const MaxWebResponseBytes = 1 << 20
 
 // These private transport ceilings accommodate million-token model windows.
 // Token admission remains the runtime's frozen per-Run policy. Streaming wire
@@ -77,4 +80,59 @@ func CountingConfigID(baseURL, modelName string) string {
 	})
 	sum := sha256.Sum256(payload)
 	return "modelcfg:v1:" + hex.EncodeToString(sum[:16])
+}
+
+type WebSearchRequest struct {
+	OwnerID        string   `json:"ownerId"`
+	AgentID        string   `json:"agentId"`
+	SessionID      string   `json:"sessionId"`
+	RunID          string   `json:"runId"`
+	Query          string   `json:"query"`
+	MaxResults     int      `json:"maxResults,omitempty"`
+	TimeRange      string   `json:"timeRange,omitempty"`
+	IncludeDomains []string `json:"includeDomains,omitempty"`
+	ExcludeDomains []string `json:"excludeDomains,omitempty"`
+}
+
+type WebSearchResult struct {
+	Title         string  `json:"title"`
+	URL           string  `json:"url"`
+	Snippet       string  `json:"snippet"`
+	PublishedDate string  `json:"publishedDate,omitempty"`
+	Score         float64 `json:"score,omitempty"`
+}
+
+type WebSearchResponse struct {
+	OK           bool              `json:"ok"`
+	Results      []WebSearchResult `json:"results,omitempty"`
+	ErrorCode    string            `json:"errorCode,omitempty"`
+	ErrorMessage string            `json:"errorMessage,omitempty"`
+	StatusCode   int               `json:"statusCode,omitempty"`
+}
+
+type WebExtractRequest struct {
+	OwnerID   string   `json:"ownerId"`
+	AgentID   string   `json:"agentId"`
+	SessionID string   `json:"sessionId"`
+	RunID     string   `json:"runId"`
+	URLs      []string `json:"urls"`
+}
+
+type WebExtractResult struct {
+	URL     string `json:"url"`
+	Content string `json:"content"`
+}
+
+type WebExtractFailure struct {
+	URL   string `json:"url"`
+	Error string `json:"error,omitempty"`
+}
+
+type WebExtractResponse struct {
+	OK            bool                `json:"ok"`
+	Results       []WebExtractResult  `json:"results,omitempty"`
+	FailedResults []WebExtractFailure `json:"failedResults,omitempty"`
+	ErrorCode     string              `json:"errorCode,omitempty"`
+	ErrorMessage  string              `json:"errorMessage,omitempty"`
+	StatusCode    int                 `json:"statusCode,omitempty"`
 }

@@ -1,0 +1,17 @@
+{
+  "version": 7,
+  "counterVersion": "teamie-visible-bytes-div4-v1",
+  "contextWindowTokens": 1000000,
+  "inputTokenLimit": 868672,
+  "triggerTokens": 781804,
+  "outputReserveTokens": 131072,
+  "summaryOutputTokens": 8192,
+  "transportLimitBytes": 16777216,
+  "transportTargetBytes": 12582912,
+  "tailTokenLimit": 262144,
+  "toolResultByteLimit": 217168,
+  "fileDelivery": true,
+  "structuredMentions": true,
+  "eventDrivenInputs": true,
+  "webSearch": true
+}
