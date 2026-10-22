@@ -18,6 +18,25 @@ import (
 	"teamie/agent-protocol/modeltransport"
 )
 
+// Exercise the same receipt middleware boundary used by the production agent,
+// including the compose call ID that the web tool uses for its own receipt.
+type receiptWrappedWebTool struct {
+	tool.InvokableTool
+	receipts *nativeToolReceipts
+}
+
+func (t receiptWrappedWebTool) InvokableRun(ctx context.Context, args string, opts ...tool.Option) (string, error) {
+	info, err := t.Info(ctx)
+	if err != nil {
+		return "", err
+	}
+	endpoint, err := t.receipts.WrapInvokableToolCall(ctx, t.InvokableTool.InvokableRun, &adk.ToolContext{Name: info.Name, CallID: compose.GetToolCallID(ctx)})
+	if err != nil {
+		return "", err
+	}
+	return endpoint(ctx, args, opts...)
+}
+
 func TestWebToolsReceiptReplayAndContextArchiveIntegration(t *testing.T) {
 	ctx := context.Background()
 	s := testStore(t)
@@ -164,6 +183,10 @@ func TestWebToolsReceiptReplayAndContextArchiveIntegration(t *testing.T) {
 	if err != nil || len(webTools) != 2 {
 		t.Fatalf("BuildWebTools failed: %v len=%d", err, len(webTools))
 	}
+	receipts := &nativeToolReceipts{Store: s, Lease: lease, IM: imc}
+	for i, item := range webTools {
+		webTools[i] = receiptWrappedWebTool{InvokableTool: item.(tool.InvokableTool), receipts: receipts}
+	}
 	node, err := compose.NewToolNode(ctx, &compose.ToolsNodeConfig{Tools: webTools, ExecuteSequentially: true})
 	if err != nil {
 		t.Fatal(err)
@@ -215,6 +238,15 @@ func TestWebToolsReceiptReplayAndContextArchiveIntegration(t *testing.T) {
 	fetchReplay, err := invokeWeb("call-fetch-large", "web_fetch", fetchArgsJSON)
 	if err != nil || fetchReplay != fetchOut || extractCalls.Load() != 2 {
 		t.Fatalf("web_fetch replay did not reuse durable receipt: calls=%d err=%v", extractCalls.Load(), err)
+	}
+	if got := count(t, s, `SELECT count(*) FROM runtime_tool_calls WHERE run_id=$1 AND name IN ('native:web_search','native:web_fetch')`, run.ID); got != 0 {
+		t.Fatalf("web tools must not create a second native receipt: %d", got)
+	}
+	for i := 0; i < 2; i++ {
+		out, err := invokeWeb("call-search-unconfigured", "web_search", `{"query":"unconfigured-check"}`)
+		if err != nil || !strings.Contains(out, `"error":"web_search_unconfigured"`) || searchCalls.Load() != 2 {
+			t.Fatalf("unconfigured observation must be committed and replayable: calls=%d out=%s err=%v", searchCalls.Load(), out, err)
+		}
 	}
 
 	budget, err := ParseContextBudgetSnapshot(budgetRaw)
