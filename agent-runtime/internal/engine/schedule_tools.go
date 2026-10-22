@@ -235,19 +235,27 @@ func nextCronTime(expr, tzName string, after time.Time) (time.Time, error) {
 	if err != nil {
 		return time.Time{}, err
 	}
-	t := after.In(loc).Truncate(time.Minute).Add(time.Minute)
+	t := after.UTC().Truncate(time.Minute).Add(time.Minute).In(loc)
 	limit := t.AddDate(5, 0, 0)
 	for !t.After(limit) {
 		if !spec.month[int(t.Month())] {
-			t = time.Date(t.Year(), t.Month()+1, 1, 0, 0, 0, 0, loc)
+			next := time.Date(t.Year(), t.Month()+1, 1, 0, 0, 0, 0, loc)
+			if !next.After(t) {
+				next = t.Add(time.Duration(60-t.Minute()) * time.Minute)
+			}
+			t = next
 			continue
 		}
 		if !matchCronDay(spec, t.Day(), int(t.Weekday())) {
-			t = time.Date(t.Year(), t.Month(), t.Day()+1, 0, 0, 0, 0, loc)
+			next := time.Date(t.Year(), t.Month(), t.Day()+1, 0, 0, 0, 0, loc)
+			if !next.After(t) {
+				next = t.Add(time.Duration(60-t.Minute()) * time.Minute)
+			}
+			t = next
 			continue
 		}
 		if !spec.hour[t.Hour()] {
-			t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, loc).Add(time.Hour)
+			t = t.Add(time.Duration(60-t.Minute()) * time.Minute)
 			continue
 		}
 		if !spec.minute[t.Minute()] {
@@ -454,6 +462,12 @@ func (t *Tools) BuildScheduleTools() ([]tool.BaseTool, error) {
 				return &Observation{Error: "schedule_limit_exceeded"}, nil
 			}
 			refs, overflow := inputSources(run.Inputs)
+			if overflow || len(refs) == 0 {
+				resolved, srcErr := (&ContextArchive{Store: t.Store, Lease: t.Lease, IM: t.IM, Authorize: t.Authorize}).runSources(ctx, run.ID)
+				if srcErr == nil && len(resolved) > 0 {
+					refs, overflow = resolved, false
+				}
+			}
 			refsJSON, _ := json.Marshal(refs)
 			created, err := scanScheduleView(tx.QueryRow(ctx, `INSERT INTO runtime_schedules(id,agent_id,created_run_id,kind,interval_seconds,cron_expr,timezone,prompt,status,max_runs,run_count,next_run_at,source_refs,source_overflow,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'active',$9,0,$10,$11,$12,$13,$13) RETURNING id,kind,interval_seconds,cron_expr,timezone,prompt,status,max_runs,run_count,next_run_at,last_run_at,created_at`,
 				schedID, run.AgentID, run.ID, kind, intervalSeconds, cronExpr, tzName, prompt, maxRuns, nextRunAt, refsJSON, overflow, now.UTC(),
@@ -717,4 +731,47 @@ func (e *Engine) drainSchedules(ctx context.Context, l *Lease) (failure error) {
 		)
 	}
 	return nil
+}
+
+func (e *Engine) authorizeScheduleInput(ctx context.Context, imc *IM, lease *Lease, in Input) error {
+	if strings.TrimSpace(in.Body) == "" {
+		return errContextUnavailable
+	}
+	if in.ScheduleID != "" {
+		var status string
+		err := e.Store.DB.QueryRow(ctx, `SELECT status FROM runtime_schedules WHERE id=$1 AND agent_id=$2`, in.ScheduleID, lease.AgentID).Scan(&status)
+		if err == nil && status == "canceled" {
+			return errContextUnavailable
+		}
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+	}
+	archive := &ContextArchive{Store: e.Store, Lease: lease, IM: imc}
+	var (
+		refs []InputSource
+		err  error
+	)
+	if !in.SourceOverflow && len(in.SourceRefs) > 0 {
+		refs, err = canonicalContextSources(in.SourceRefs)
+	} else {
+		parent := in.ParentRunID
+		if parent == "" && in.ScheduleID != "" {
+			var storedParent *string
+			if qErr := e.Store.DB.QueryRow(ctx, `SELECT created_run_id::text FROM runtime_schedules WHERE id=$1 AND agent_id=$2`, in.ScheduleID, lease.AgentID).Scan(&storedParent); qErr == nil && storedParent != nil {
+				parent = *storedParent
+			}
+		}
+		if parent == "" {
+			return errContextUnavailable
+		}
+		refs, err = archive.runSources(ctx, parent)
+	}
+	if err != nil {
+		return err
+	}
+	if len(refs) == 0 {
+		return errContextUnavailable
+	}
+	return archive.authorizeSources(ctx, refs)
 }

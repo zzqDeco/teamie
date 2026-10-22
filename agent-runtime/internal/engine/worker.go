@@ -422,7 +422,23 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 	validate := func(ctx context.Context, inputs []Input) ([]Input, error) {
 		valid := []Input{}
 		for _, in := range inputs {
-			if in.Kind == "task.notification" || in.Kind == "schedule.wakeup" {
+			if in.Kind == "task.notification" {
+				valid = append(valid, in)
+				continue
+			}
+			if in.Kind == "schedule.wakeup" {
+				if err := e.authorizeScheduleInput(ctx, imc, lease, in); err != nil {
+					if errors.Is(err, errContextUnavailable) {
+						if in.ScheduleID != "" {
+							_, _ = e.Store.DB.Exec(ctx, `UPDATE runtime_schedules SET status='canceled',updated_at=now() WHERE id=$1 AND agent_id=$2 AND status='active'`, in.ScheduleID, lease.AgentID)
+						}
+						if err = e.Store.Skip(ctx, lease, in.EventID); err != nil {
+							return nil, err
+						}
+						continue
+					}
+					return nil, err
+				}
 				valid = append(valid, in)
 				continue
 			}
@@ -503,7 +519,21 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		}
 		invalid := []string{}
 		for _, in := range run.Inputs {
-			if in.Kind == "task.notification" || in.Kind == "schedule.wakeup" {
+			if in.Kind == "task.notification" {
+				continue
+			}
+			if in.Kind == "schedule.wakeup" {
+				if readErr := e.authorizeScheduleInput(ctx, imc, lease, in); readErr != nil {
+					if errors.Is(readErr, errContextUnavailable) {
+						if in.ScheduleID != "" {
+							_, _ = e.Store.DB.Exec(ctx, `UPDATE runtime_schedules SET status='canceled',updated_at=now() WHERE id=$1 AND agent_id=$2 AND status='active'`, in.ScheduleID, lease.AgentID)
+						}
+						invalid = append(invalid, in.EventID)
+						continue
+					}
+					_ = e.Store.FinishRun(ctx, lease, run, "retry", "im_unavailable", true)
+					return nil, nil, nil, &ModelError{Code: "im_unavailable", Retry: true}
+				}
 				continue
 			}
 			m, readErr := imc.Message(ctx, in.ConversationID, in.MessageID)
