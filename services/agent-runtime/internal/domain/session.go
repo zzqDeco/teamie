@@ -25,11 +25,14 @@ var (
 	ErrContextArguments        = errors.New("invalid_context_arguments")
 )
 
-// Error represents a coded domain error with an optional HTTP/RPC status and retry classification.
+// Error represents a coded domain error with an optional HTTP/RPC status, diagnostic stage/reason, internal cause, and retry classification.
 type Error struct {
 	Status  int
 	Code    string
+	Stage   string
+	Reason  string
 	Message string
+	Cause   error
 	Retry   bool
 }
 

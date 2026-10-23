@@ -482,10 +482,32 @@ func (a *Adapter) GetMessage(ctx context.Context, req *chatgen.GetMessageReq) (*
 	return &chatgen.MessageResp{Message: toMessageDTO(m)}, nil
 }
 
+type responseStatusSinkKey struct{}
+
+func withResponseStatusSink(ctx context.Context, dst *int) context.Context {
+	return context.WithValue(ctx, responseStatusSinkKey{}, dst)
+}
+
+func recordResponseStatus(ctx context.Context, status int) {
+	if dst, ok := ctx.Value(responseStatusSinkKey{}).(*int); ok && dst != nil {
+		*dst = status
+	}
+}
+
+func responseStatusFromContext(ctx context.Context, fallback int) int {
+	if dst, ok := ctx.Value(responseStatusSinkKey{}).(*int); ok && dst != nil && *dst > 0 {
+		return *dst
+	}
+	return fallback
+}
+
 func (a *Adapter) SendMessage(ctx context.Context, req *chatgen.SendMessageReq) (*chatgen.MessageResp, error) {
-	msg, _, err := a.sendMessage(ctx, req)
+	msg, created, err := a.sendMessage(ctx, req)
 	if err != nil {
 		return nil, err
+	}
+	if !created {
+		recordResponseStatus(ctx, http.StatusOK)
 	}
 	return &chatgen.MessageResp{Message: toMessageDTO(msg)}, nil
 }
@@ -688,12 +710,17 @@ type chatResponder struct {
 	withAuth func(next func(w http.ResponseWriter, r *http.Request, ctx context.Context, s httpx.Session) error) http.HandlerFunc
 }
 
+func (chatResponder) WriteOKHTTP(w http.ResponseWriter, r *http.Request, status int, resp any) {
+	httpx.WriteJSON(w, responseStatusFromContext(r.Context(), status), resp)
+}
+
 func (cr chatResponder) WrapRoute(route chatgen.RouteSpec, next http.HandlerFunc) http.HandlerFunc {
 	if route.Name == "GetInvite" {
 		return next
 	}
 	return cr.withAuth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ httpx.Session) error {
-		next(w, r.WithContext(ctx))
+		var statusOverride int
+		next(w, r.WithContext(withResponseStatusSink(ctx, &statusOverride)))
 		return nil
 	})
 }
@@ -722,23 +749,6 @@ func (a *Adapter) Routes() http.Handler {
 	}
 
 	chatgen.RegisterChatHTTPServer(m, a, chatResponder{withAuth: withAuth}, chatgen.ChatHTTPServiceRouteHandlers{
-		SendMessage: withAuth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ httpx.Session) error {
-			var req chatgen.SendMessageReq
-			if err := httpx.DecodeJSON(w, r, &req); err != nil {
-				return err
-			}
-			req.ID = r.PathValue("id")
-			msg, created, err := a.sendMessage(ctx, &req)
-			if err != nil {
-				return err
-			}
-			status := http.StatusOK
-			if created {
-				status = http.StatusCreated
-			}
-			httpx.WriteJSON(w, status, &chatgen.MessageResp{Message: toMessageDTO(msg)})
-			return nil
-		}),
 		UploadAttachment: withAuth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, s httpx.Session) error {
 			key := r.Header.Get("Idempotency-Key")
 			if key == "" {

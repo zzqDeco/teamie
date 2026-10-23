@@ -190,3 +190,24 @@ type SandboxGateway interface {
 type TurnExecutor interface {
 	ExecuteTurn(ctx context.Context, agentID string, inputs []Input) error
 }
+
+// ScheduleCoordinator defines the application-level use-case boundary for schedule creation,
+// wakeup input authorization, active schedule ACL filtering, and provenance row-source resolution.
+type ScheduleCoordinator interface {
+	ResolveScheduleRowSources(ctx context.Context, agentID, createdRunID string, sourceRefsJSON []byte, sourceOverflow bool) ([]InputSource, error)
+	AuthorizeScheduleInput(ctx context.Context, lease *Lease, in Input) error
+	FilterAuthorizedSchedules(ctx context.Context, agentID string, candidates []ScheduleCandidate) ([]ScheduleItem, error)
+	AuthorizeScheduleListReceipt(ctx context.Context, agentID string, cached []byte) error
+	EvaluateScheduleCreation(ctx context.Context, lease *Lease, runID, callID string, runInputs []Input, spec ScheduleSpec) (*ScheduleItem, string, error)
+}
+
+// DefaultScheduleCoordinator is registered by the application layer to construct a ScheduleCoordinator
+// over outbound repository and gateway ports.
+var DefaultScheduleCoordinator func(
+	tx TxManager,
+	sessions SessionRepository,
+	schedules ScheduleRepository,
+	archive ArchiveRepository,
+	receipts ToolReceiptRepository,
+	im IMGateway,
+) ScheduleCoordinator

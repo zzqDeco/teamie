@@ -425,6 +425,7 @@ func (a *Adapter) streamHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 type gatewayResponder struct {
+	httpx.Responder
 	adapter *Adapter
 	auth    AdminAuthorizer
 }

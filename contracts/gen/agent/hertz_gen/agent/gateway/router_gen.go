@@ -2,10 +2,19 @@
 
 package gateway
 
-import "net/http"
+import (
+	"context"
+	"net/http"
+
+	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/route"
+)
 
 // HTTPResponder abstracts stateless request binding and domain error serialization (implemented by httpx.Responder).
 type HTTPResponder interface {
+	WriteBindError(ctx context.Context, c *app.RequestContext, err error)
+	WriteDomainError(ctx context.Context, c *app.RequestContext, err error)
+	WriteOK(ctx context.Context, c *app.RequestContext, resp any)
 	DecodeRequest(w http.ResponseWriter, r *http.Request, dst any) error
 	WriteBindErrorHTTP(w http.ResponseWriter, r *http.Request, err error)
 	WriteDomainErrorHTTP(w http.ResponseWriter, r *http.Request, err error)
@@ -93,6 +102,101 @@ func RegisterModelGatewayHTTPServiceRoutes(mux *http.ServeMux, h ModelGatewayHTT
 		panic("ModelGatewayHTTPServiceRouteHandlers.WebExtract (" + PatternWebExtract + ") is nil")
 	}
 	mux.HandleFunc(PatternWebExtract, h.WebExtract)
+}
+
+// RegisterModelGatewayHTTPServiceHertzServer registers ModelGatewayHTTPServer endpoints on a native Hertz route.RouterGroup.
+func RegisterModelGatewayHTTPServiceHertzServer(r *route.RouterGroup, srv ModelGatewayHTTPServer, m HTTPResponder) {
+	r.GET("/api/v1/admin/model-gateway", func(ctx context.Context, c *app.RequestContext) {
+		var req GetAdminModelConfigReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.GetAdminModelConfig(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.PUT("/api/v1/admin/model-gateway", func(ctx context.Context, c *app.RequestContext) {
+		var req UpdateAdminModelConfigReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.UpdateAdminModelConfig(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.POST("/api/v1/admin/model-gateway/test", func(ctx context.Context, c *app.RequestContext) {
+		var req TestAdminModelConfigReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.TestAdminModelConfig(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.POST("/internal/v1/chat", func(ctx context.Context, c *app.RequestContext) {
+		var req ChatCallReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.GenerateChat(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.POST("/internal/v1/chat/stream", func(ctx context.Context, c *app.RequestContext) {
+		var req ChatCallReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.StreamChat(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.POST("/internal/v1/web/search", func(ctx context.Context, c *app.RequestContext) {
+		var req WebSearchReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.WebSearch(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.POST("/internal/v1/web/extract", func(ctx context.Context, c *app.RequestContext) {
+		var req WebExtractReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.WebExtract(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
 }
 
 // RegisterModelGatewayHTTPServer binds ModelGatewayHTTPServer methods using HTTPResponder with optional per-route handler overrides.

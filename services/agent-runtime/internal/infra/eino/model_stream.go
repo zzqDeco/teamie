@@ -171,11 +171,19 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 		total := 0
 		done := false
 		for scanner.Scan() {
-			total += len(scanner.Bytes())
+			rawLine := scanner.Bytes()
+			total += len(rawLine)
 			totalBytes = total
 			if total > modeltransport.MaxHTTPStreamBytes {
 				fail(&ModelError{Code: "upstream_response_limit"})
 				return
+			}
+			trimmedLine := bytes.TrimSpace(rawLine)
+			if len(trimmedLine) == 0 || bytes.HasPrefix(trimmedLine, []byte("event:")) || bytes.HasPrefix(trimmedLine, []byte(":")) {
+				continue
+			}
+			if bytes.HasPrefix(trimmedLine, []byte("data:")) {
+				trimmedLine = bytes.TrimSpace(bytes.TrimPrefix(trimmedLine, []byte("data:")))
 			}
 			var frame struct {
 				Type          string `json:"type"`
@@ -184,7 +192,7 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 				ModelConfigID string `json:"modelConfigId"`
 			}
 			stage = "frame-decode"
-			if decodeErr := json.Unmarshal(scanner.Bytes(), &frame); decodeErr != nil {
+			if decodeErr := json.Unmarshal(trimmedLine, &frame); decodeErr != nil {
 				fail(modelDiagnostic(stage, "invalid_transport_frame", decodeErr))
 				return
 			}

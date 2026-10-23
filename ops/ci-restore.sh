@@ -65,18 +65,10 @@ SQL
   fi
   if [[ $suffix == agent_runtime ]]; then
     # Exercise the actual embedded forward migrations, not a synthetic ledger.
-    python3 - <<'PY' | "${pg[@]}" psql -U postgres -d teamie_agent_runtime -v ON_ERROR_STOP=1 >/dev/null
-from pathlib import Path
-import re
-root=Path('services/agent-runtime/internal/infra/pg')
-sources='\n'.join(p.read_text() for p in root.glob('*.go') if not p.name.endswith('_test.go'))
-print("SET teamie.runtime_writer_schema='12';")
-for name in ('schemaSQL','schemaV2SQL','schemaV3SQL','contextArchiveSchemaSQL','contextRecoverySchemaSQL','schemaV4SQL','schemaV5SQL','schemaV6SQL','schemaV7SQL','schemaV8SQL','schemaV9SQL','schemaV10SQL','schemaV11SQL','schemaV12SQL'):
-    match=re.search(r'const\s+'+name+r'\s*=\s*`([^`]+)`',sources,re.S)
-    if match is None:
-        raise SystemExit('missing actual runtime migration: '+name)
-    print(match[1])
-PY
+    {
+      echo "SET teamie.runtime_writer_schema='12';"
+      cat services/agent-runtime/internal/infra/pg/migrations/*.sql
+    } | "${pg[@]}" psql -U postgres -d teamie_agent_runtime -v ON_ERROR_STOP=1 >/dev/null
     runtime_context_budget=$(cat ops/fixtures/runtime-context-budget-v1.json)
     runtime_output_budget=$(cat ops/fixtures/runtime-context-budget-v2.json)
     runtime_current_budget=$(cat ops/fixtures/runtime-context-budget-v3.json)

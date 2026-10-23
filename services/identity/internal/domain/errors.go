@@ -4,17 +4,23 @@
 package domain
 
 // Error represents a domain-level business rule violation with a canonical
-// status classification and machine-readable error code.
+// status classification, safe code, diagnostic stage/reason, and internal cause.
 type Error struct {
 	Status  int
 	Code    string
+	Stage   string
+	Reason  string
 	Message string
+	Cause   error
 }
 
 func (e *Error) Error() string             { return e.Message }
 func (e *Error) StatusCode() int           { return e.Status }
 func (e *Error) ErrorCode() string         { return e.Code }
+func (e *Error) DiagnosticStage() string   { return e.Stage }
+func (e *Error) DiagnosticReason() string  { return e.Reason }
 func (e *Error) DiagnosticMessage() string { return e.Code + ": " + e.Message }
+func (e *Error) Unwrap() error             { return e.Cause }
 
 // Err creates a new domain Error.
 func Err(status int, code, message string) *Error {

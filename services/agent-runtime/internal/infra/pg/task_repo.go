@@ -60,57 +60,54 @@ func lifecycle(v bg.Status) bg.NotificationKind {
 	return ""
 }
 
-// Begin starts a transaction fenced by s.Lease if present.
-func (s *TaskStore) Begin(ctx context.Context) (pgx.Tx, error) {
-	tx, err := s.Repo.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if s.Lease != nil {
-		if err = CheckLeaseTx(ctx, tx, s.Lease); err != nil {
-			_ = tx.Rollback(ctx)
-			return nil, err
+// withFencedTx runs fn inside a database transaction fenced by s.Lease if present.
+func (s *TaskStore) withFencedTx(ctx context.Context, fn func(txCtx context.Context) error) error {
+	return s.Repo.WithinTx(ctx, func(txCtx context.Context) error {
+		if s.Lease != nil {
+			if err := s.Repo.CheckLeaseForUpdate(txCtx, s.Lease); err != nil {
+				return err
+			}
 		}
-	}
-	return tx, nil
+		return fn(txCtx)
+	})
 }
 
-func (s *TaskStore) save(ctx context.Context, tx pgx.Tx, t *bg.Task, until *time.Time) error {
+func (s *TaskStore) save(ctx context.Context, t *bg.Task, until *time.Time) error {
 	b, err := json.Marshal(t)
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `UPDATE runtime_tasks SET snapshot=$3,lease_until=$4 WHERE id=$1 AND agent_id=$2`, t.Spec.ID, s.AgentID, b, until)
+	_, err = s.Repo.db.Conn(ctx).Exec(ctx, `UPDATE runtime_tasks SET snapshot=$3,lease_until=$4 WHERE id=$1 AND agent_id=$2`, t.Spec.ID, s.AgentID, b, until)
 	return err
 }
 
-func (s *TaskStore) enqueue(ctx context.Context, tx pgx.Tx, t *bg.Task, k bg.NotificationKind) error {
+func (s *TaskStore) enqueue(ctx context.Context, t *bg.Task, k bg.NotificationKind) error {
 	if k == "" || t.Spec.SessionID == "" || (k != bg.NotificationTaskCreated && !t.Spec.NotifySession) {
 		return nil
 	}
 	n := bg.Notification{ID: fmt.Sprintf("%s:%d:%s", t.Spec.ID, t.Version, k), TaskID: t.Spec.ID, SessionID: t.Spec.SessionID, Version: t.Version, Kind: k, CreatedAt: t.UpdatedAt}
-	return s.insertNotification(ctx, tx, n)
+	return s.insertNotification(ctx, n)
 }
 
-func (s *TaskStore) insertNotification(ctx context.Context, tx pgx.Tx, n bg.Notification) error {
+func (s *TaskStore) insertNotification(ctx context.Context, n bg.Notification) error {
 	b, err := json.Marshal(n)
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO runtime_task_notifications(id,agent_id,task_id,snapshot) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, n.ID, s.AgentID, n.TaskID, b)
+	_, err = s.Repo.db.Conn(ctx).Exec(ctx, `INSERT INTO runtime_task_notifications(id,agent_id,task_id,snapshot) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, n.ID, s.AgentID, n.TaskID, b)
 	return err
 }
 
-func (s *TaskStore) public(ctx context.Context, tx pgx.Tx, t *bg.Task) error {
-	_, err := tx.Exec(ctx, `INSERT INTO runtime_public_events(agent_id,type,run_id,task_id,status) SELECT agent_id,'task.status',run_id,id,$3 FROM runtime_tasks WHERE id=$1 AND agent_id=$2`, t.Spec.ID, s.AgentID, string(t.Status))
+func (s *TaskStore) public(ctx context.Context, t *bg.Task) error {
+	_, err := s.Repo.db.Conn(ctx).Exec(ctx, `INSERT INTO runtime_public_events(agent_id,type,run_id,task_id,status) SELECT agent_id,'task.status',run_id,id,$3 FROM runtime_tasks WHERE id=$1 AND agent_id=$2`, t.Spec.ID, s.AgentID, string(t.Status))
 	return err
 }
 
-func (s *TaskStore) load(ctx context.Context, tx pgx.Tx, id string) (*bg.Task, *time.Time, time.Time, error) {
+func (s *TaskStore) load(ctx context.Context, id string) (*bg.Task, *time.Time, time.Time, error) {
 	var b []byte
 	var until *time.Time
 	var now time.Time
-	err := tx.QueryRow(ctx, `SELECT snapshot,lease_until,clock_timestamp() FROM runtime_tasks WHERE id=$1 AND agent_id=$2 FOR UPDATE`, id, s.AgentID).Scan(&b, &until, &now)
+	err := s.Repo.db.Conn(ctx).QueryRow(ctx, `SELECT snapshot,lease_until,clock_timestamp() FROM runtime_tasks WHERE id=$1 AND agent_id=$2 FOR UPDATE`, id, s.AgentID).Scan(&b, &until, &now)
 	if errors.Is(err, pgx.ErrNoRows) {
 		err = bg.ErrNotFound
 	}
@@ -140,11 +137,11 @@ func (s *TaskStore) load(ctx context.Context, tx pgx.Tx, id string) (*bg.Task, *
 			t.PendingResume = nil
 			t.DoneAt = &now
 		}
-		if err = s.save(ctx, tx, t, until); err == nil {
-			err = s.enqueue(ctx, tx, t, lifecycle(t.Status))
+		if err = s.save(ctx, t, until); err == nil {
+			err = s.enqueue(ctx, t, lifecycle(t.Status))
 		}
 		if err == nil {
-			err = s.public(ctx, tx, t)
+			err = s.public(ctx, t)
 		}
 		if err != nil {
 			return nil, nil, now, err
@@ -167,37 +164,35 @@ func (s *TaskStore) Create(ctx context.Context, r *bg.CreateTaskRequest) (*bg.Ta
 			return nil, err
 		}
 	}
-	tx, err := s.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback(ctx)
-	var now time.Time
-	if err = tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
-		return nil, err
-	}
-	t := &bg.Task{Spec: r.Spec, LeaseExpiryPolicy: r.LeaseExpiryPolicy, Checkpoint: r.Checkpoint, ContextSnapshot: r.ContextSnapshot, Status: bg.StatusPending, Version: 1, CreatedAt: now, UpdatedAt: now}
-	b, err := json.Marshal(t)
-	if err != nil {
-		return nil, err
-	}
-	var runID *string
-	if s.CurrentRunID != nil {
-		runID = s.CurrentRunID(ctx)
-	}
-	tag, err := tx.Exec(ctx, `INSERT INTO runtime_tasks(id,agent_id,run_id,snapshot) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, r.Spec.ID, s.AgentID, runID, b)
-	if err != nil {
-		return nil, err
-	}
-	if tag.RowsAffected() != 1 {
-		return nil, bg.ErrAlreadyExists
-	}
-	if err = s.enqueue(ctx, tx, t, bg.NotificationTaskCreated); err == nil {
-		err = s.public(ctx, tx, t)
-	}
-	if err == nil {
-		err = tx.Commit(ctx)
-	}
+	var b []byte
+	err := s.withFencedTx(ctx, func(txCtx context.Context) error {
+		conn := s.Repo.db.Conn(txCtx)
+		var now time.Time
+		if err := conn.QueryRow(txCtx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
+			return err
+		}
+		t := &bg.Task{Spec: r.Spec, LeaseExpiryPolicy: r.LeaseExpiryPolicy, Checkpoint: r.Checkpoint, ContextSnapshot: r.ContextSnapshot, Status: bg.StatusPending, Version: 1, CreatedAt: now, UpdatedAt: now}
+		var err error
+		b, err = json.Marshal(t)
+		if err != nil {
+			return err
+		}
+		var runID *string
+		if s.CurrentRunID != nil {
+			runID = s.CurrentRunID(txCtx)
+		}
+		tag, err := conn.Exec(txCtx, `INSERT INTO runtime_tasks(id,agent_id,run_id,snapshot) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, r.Spec.ID, s.AgentID, runID, b)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return bg.ErrAlreadyExists
+		}
+		if err = s.enqueue(txCtx, t, bg.NotificationTaskCreated); err == nil {
+			err = s.public(txCtx, t)
+		}
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -207,50 +202,51 @@ func (s *TaskStore) Create(ctx context.Context, r *bg.CreateTaskRequest) (*bg.Ta
 }
 
 func (s *TaskStore) Get(ctx context.Context, id string) (*bg.Task, error) {
-	tx, err := s.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback(ctx)
-	t, _, _, err := s.load(ctx, tx, id)
-	if err == nil {
-		err = tx.Commit(ctx)
-	}
+	var t *bg.Task
+	err := s.withFencedTx(ctx, func(txCtx context.Context) error {
+		var loadErr error
+		t, _, _, loadErr = s.load(txCtx, id)
+		return loadErr
+	})
 	return t, err
 }
 
 func (s *TaskStore) transition(ctx context.Context, id string, version int64, active, uncanceled bool, fn func(*bg.Task, *time.Time, time.Time) (*time.Time, error)) (*bg.Task, error) {
-	tx, err := s.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback(ctx)
-	t, until, now, err := s.load(ctx, tx, id)
-	if err != nil {
-		return nil, err
-	}
-	var opErr error
-	if t.Version != version {
-		opErr = bg.ErrVersionConflict
-	} else if active && (t.Status != bg.StatusRunning || until == nil || !now.Before(*until)) {
-		opErr = bg.ErrLeaseLost
-	} else if uncanceled && t.CancelRequestedAt != nil {
-		opErr = bg.ErrLeaseLost
-	} else {
-		until, opErr = fn(t, until, now)
-	}
-	if opErr == nil {
-		err = s.save(ctx, tx, t, until)
-		if err == nil {
-			err = s.enqueue(ctx, tx, t, lifecycle(t.Status))
+	var (
+		t     *bg.Task
+		opErr error
+	)
+	err := s.withFencedTx(ctx, func(txCtx context.Context) error {
+		var (
+			until   *time.Time
+			now     time.Time
+			loadErr error
+		)
+		t, until, now, loadErr = s.load(txCtx, id)
+		if loadErr != nil {
+			return loadErr
 		}
-		if err == nil {
-			err = s.public(ctx, tx, t)
+		if t.Version != version {
+			opErr = bg.ErrVersionConflict
+		} else if active && (t.Status != bg.StatusRunning || until == nil || !now.Before(*until)) {
+			opErr = bg.ErrLeaseLost
+		} else if uncanceled && t.CancelRequestedAt != nil {
+			opErr = bg.ErrLeaseLost
+		} else {
+			until, opErr = fn(t, until, now)
 		}
-	}
-	if err == nil {
-		err = tx.Commit(ctx)
-	}
+		if opErr != nil {
+			return nil
+		}
+		saveErr := s.save(txCtx, t, until)
+		if saveErr == nil {
+			saveErr = s.enqueue(txCtx, t, lifecycle(t.Status))
+		}
+		if saveErr == nil {
+			saveErr = s.public(txCtx, t)
+		}
+		return saveErr
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -637,32 +633,38 @@ func (s *TaskStore) AppendTaskEvent(ctx context.Context, r *bg.AppendTaskEventRe
 	if err := taskBound(r.Data); err != nil {
 		return nil, err
 	}
-	tx, err := s.Begin(ctx)
-	if err != nil {
+	var out *bg.AppendTaskEventResult
+	var opErr error
+	if err := s.withFencedTx(ctx, func(txCtx context.Context) error {
+		conn := s.Repo.db.Conn(txCtx)
+		t, u, n, err := s.load(txCtx, r.TaskID)
+		if err == nil {
+			err = s.authorizeOutput(t, u, n, r.Attempt)
+		}
+		if err != nil {
+			opErr = err
+			return nil
+		}
+		tag, err := conn.Exec(txCtx, `INSERT INTO runtime_task_events(task_id,event_id,payload) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, r.TaskID, r.EventID, nonnilBytes(r.Data))
+		if err != nil {
+			return err
+		}
+		res := &bg.AppendTaskEventResult{Inserted: tag.RowsAffected() == 1, Event: &bg.TaskEvent{TaskID: r.TaskID, EventID: r.EventID}}
+		if err = conn.QueryRow(txCtx, `SELECT payload,created_at FROM runtime_task_events WHERE task_id=$1 AND event_id=$2`, r.TaskID, r.EventID).Scan(&res.Event.Data, &res.Event.CreatedAt); err != nil {
+			return err
+		}
+		if !bytes.Equal(r.Data, res.Event.Data) {
+			return bg.ErrTaskEventIDConflict
+		}
+		out = res
+		return nil
+	}); err != nil {
 		return nil, err
 	}
-	defer tx.Rollback(ctx)
-	t, u, n, err := s.load(ctx, tx, r.TaskID)
-	if err == nil {
-		err = s.authorizeOutput(t, u, n, r.Attempt)
+	if opErr != nil {
+		return nil, opErr
 	}
-	if err != nil {
-		_ = tx.Commit(ctx)
-		return nil, err
-	}
-	tag, err := tx.Exec(ctx, `INSERT INTO runtime_task_events(task_id,event_id,payload) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, r.TaskID, r.EventID, nonnilBytes(r.Data))
-	if err != nil {
-		return nil, err
-	}
-	out := &bg.AppendTaskEventResult{Inserted: tag.RowsAffected() == 1, Event: &bg.TaskEvent{TaskID: r.TaskID, EventID: r.EventID}}
-	if err = tx.QueryRow(ctx, `SELECT payload,created_at FROM runtime_task_events WHERE task_id=$1 AND event_id=$2`, r.TaskID, r.EventID).Scan(&out.Event.Data, &out.Event.CreatedAt); err != nil {
-		return nil, err
-	}
-	if !bytes.Equal(r.Data, out.Event.Data) {
-		return nil, bg.ErrTaskEventIDConflict
-	}
-	err = tx.Commit(ctx)
-	return out, err
+	return out, nil
 }
 
 type progressCursor struct {
@@ -731,42 +733,40 @@ func (s *TaskStore) EnqueueTaskNotification(ctx context.Context, id string, atte
 	if r == nil || r.EventID == "" || len(r.EventID) > 1024 || r.Kind == "" || len(r.Kind) > 64 || len(r.Data) > 256<<10 || strings.HasPrefix(string(r.Kind), "eino.") || slices.Contains([]bg.NotificationKind{bg.NotificationTaskCreated, bg.NotificationWaitingInput, bg.NotificationCompleted, bg.NotificationFailed, bg.NotificationCanceled}, r.Kind) {
 		return errors.New("invalid task notification")
 	}
-	tx, err := s.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	t, u, n, err := s.load(ctx, tx, id)
-	if err == nil {
-		err = s.authorizeOutput(t, u, n, attempt)
-	}
-	if err != nil {
-		_ = tx.Commit(ctx)
-		return err
-	}
-	if t.Spec.SessionID == "" {
-		return bg.ErrNotificationUnavailable
-	}
-	tag, err := tx.Exec(ctx, `INSERT INTO runtime_custom_notifications(task_id,event_id,kind,data) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, id, r.EventID, string(r.Kind), nonnilBytes(r.Data))
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		var k string
-		var b []byte
-		if err = tx.QueryRow(ctx, `SELECT kind,data FROM runtime_custom_notifications WHERE task_id=$1 AND event_id=$2`, id, r.EventID).Scan(&k, &b); err != nil {
+	var opErr error
+	if err := s.withFencedTx(ctx, func(txCtx context.Context) error {
+		conn := s.Repo.db.Conn(txCtx)
+		t, u, n, err := s.load(txCtx, id)
+		if err == nil {
+			err = s.authorizeOutput(t, u, n, attempt)
+		}
+		if err != nil {
+			opErr = err
+			return nil
+		}
+		if t.Spec.SessionID == "" {
+			return bg.ErrNotificationUnavailable
+		}
+		tag, err := conn.Exec(txCtx, `INSERT INTO runtime_custom_notifications(task_id,event_id,kind,data) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, id, r.EventID, string(r.Kind), nonnilBytes(r.Data))
+		if err != nil {
 			return err
 		}
-		if k != string(r.Kind) || !bytes.Equal(b, r.Data) {
-			return bg.ErrNotificationEventIDConflict
+		if tag.RowsAffected() == 0 {
+			var k string
+			var b []byte
+			if err = conn.QueryRow(txCtx, `SELECT kind,data FROM runtime_custom_notifications WHERE task_id=$1 AND event_id=$2`, id, r.EventID).Scan(&k, &b); err != nil {
+				return err
+			}
+			if k != string(r.Kind) || !bytes.Equal(b, r.Data) {
+				return bg.ErrNotificationEventIDConflict
+			}
+			return nil
 		}
-		return tx.Commit(ctx)
+		return s.insertNotification(txCtx, bg.Notification{ID: "custom:" + domain.Digest([]byte(id+"\x00"+r.EventID)), TaskID: id, SessionID: t.Spec.SessionID, Version: t.Version, Kind: r.Kind, Data: r.Data, CreatedAt: n})
+	}); err != nil {
+		return err
 	}
-	err = s.insertNotification(ctx, tx, bg.Notification{ID: "custom:" + domain.Digest([]byte(id+"\x00"+r.EventID)), TaskID: id, SessionID: t.Spec.SessionID, Version: t.Version, Kind: r.Kind, Data: r.Data, CreatedAt: n})
-	if err == nil {
-		err = tx.Commit(ctx)
-	}
-	return err
+	return opErr
 }
 
 func (s *TaskStore) Receive(ctx context.Context, r *bg.ReceiveNotificationsRequest) (*bg.ReceiveNotificationsResult, error) {
@@ -780,39 +780,41 @@ func (s *TaskStore) Receive(ctx context.Context, r *bg.ReceiveNotificationsReque
 	if limit > 1000 {
 		limit = 1000
 	}
-	tx, err := s.Begin(ctx)
-	if err != nil {
+	var out *bg.ReceiveNotificationsResult
+	if err := s.withFencedTx(ctx, func(txCtx context.Context) error {
+		conn := s.Repo.db.Conn(txCtx)
+		rows, err := conn.Query(txCtx, `SELECT id,snapshot FROM runtime_task_notifications WHERE agent_id=$1 AND NOT acked AND (lease_until IS NULL OR lease_until<=clock_timestamp()) ORDER BY seq FOR UPDATE SKIP LOCKED LIMIT $2`, s.AgentID, limit)
+		if err != nil {
+			return err
+		}
+		res := &bg.ReceiveNotificationsResult{Deliveries: []bg.NotificationDelivery{}}
+		for rows.Next() {
+			var id string
+			var b []byte
+			if err = rows.Scan(&id, &b); err != nil {
+				break
+			}
+			var n bg.Notification
+			if err = json.Unmarshal(b, &n); err != nil {
+				break
+			}
+			res.Deliveries = append(res.Deliveries, bg.NotificationDelivery{Record: n, Receipt: []byte(uuid.NewString())})
+		}
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		for _, d := range res.Deliveries {
+			if _, err = conn.Exec(txCtx, `UPDATE runtime_task_notifications SET receipt=$2,lease_until=clock_timestamp()+$3*interval '1 second' WHERE id=$1`, d.Record.ID, []byte(d.Receipt), r.LeaseDuration.Seconds()); err != nil {
+				return err
+			}
+		}
+		out = res
+		return nil
+	}); err != nil {
 		return nil, err
 	}
-	defer tx.Rollback(ctx)
-	rows, err := tx.Query(ctx, `SELECT id,snapshot FROM runtime_task_notifications WHERE agent_id=$1 AND NOT acked AND (lease_until IS NULL OR lease_until<=clock_timestamp()) ORDER BY seq FOR UPDATE SKIP LOCKED LIMIT $2`, s.AgentID, limit)
-	if err != nil {
-		return nil, err
-	}
-	out := &bg.ReceiveNotificationsResult{Deliveries: []bg.NotificationDelivery{}}
-	for rows.Next() {
-		var id string
-		var b []byte
-		if err = rows.Scan(&id, &b); err != nil {
-			break
-		}
-		var n bg.Notification
-		if err = json.Unmarshal(b, &n); err != nil {
-			break
-		}
-		out.Deliveries = append(out.Deliveries, bg.NotificationDelivery{Record: n, Receipt: []byte(uuid.NewString())})
-	}
-	rows.Close()
-	if err != nil {
-		return nil, err
-	}
-	for _, d := range out.Deliveries {
-		if _, err = tx.Exec(ctx, `UPDATE runtime_task_notifications SET receipt=$2,lease_until=clock_timestamp()+$3*interval '1 second' WHERE id=$1`, d.Record.ID, []byte(d.Receipt), r.LeaseDuration.Seconds()); err != nil {
-			return nil, err
-		}
-	}
-	err = tx.Commit(ctx)
-	return out, err
+	return out, nil
 }
 
 func (s *TaskStore) Ack(ctx context.Context, r bg.NotificationReceipt) error {
@@ -830,45 +832,44 @@ func (s *TaskStore) PersistNotificationInput(
 	agentID, taskID, notificationID, status, createdAt string,
 	extractSources func(rawInputs []byte) ([]domain.InputSource, bool, error),
 ) (seq, parentRunID string, inserted bool, err error) {
-	tx, err := s.Begin(ctx)
+	err = s.withFencedTx(ctx, func(txCtx context.Context) error {
+		conn := s.Repo.db.Conn(txCtx)
+		var raw []byte
+		if qErr := conn.QueryRow(txCtx, `SELECT (90000000000000000000::numeric+nextval('runtime_notification_input_seq'))::text`).Scan(&seq); qErr != nil {
+			return qErr
+		}
+		if qErr := conn.QueryRow(txCtx, `SELECT COALESCE(t.run_id::text,''),COALESCE(r.input_json,'[]'::jsonb)
+FROM runtime_tasks t LEFT JOIN runtime_runs r ON r.id=t.run_id AND r.agent_id=t.agent_id
+WHERE t.agent_id=$1 AND t.id=$2`, agentID, taskID).Scan(&parentRunID, &raw); qErr != nil {
+			return qErr
+		}
+		refs, overflow, qErr := extractSources(raw)
+		if qErr != nil {
+			return qErr
+		}
+		in := domain.Input{
+			EventID:        seq,
+			Kind:           "task.notification",
+			TaskID:         taskID,
+			NotificationID: notificationID,
+			Status:         status,
+			CreatedAt:      createdAt,
+			ParentRunID:    parentRunID,
+			SourceRefs:     refs,
+			SourceOverflow: overflow,
+		}
+		b, _ := json.Marshal(in)
+		tag, insertErr := conn.Exec(txCtx, `INSERT INTO runtime_inputs(agent_id,event_id,payload,notification_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, agentID, seq, b, notificationID)
+		if insertErr != nil {
+			return insertErr
+		}
+		inserted = tag.RowsAffected() > 0
+		return nil
+	})
 	if err != nil {
 		return "", "", false, err
 	}
-	var raw []byte
-	err = tx.QueryRow(ctx, `SELECT (90000000000000000000::numeric+nextval('runtime_notification_input_seq'))::text`).Scan(&seq)
-	if err == nil {
-		err = tx.QueryRow(ctx, `SELECT COALESCE(t.run_id::text,''),COALESCE(r.input_json,'[]'::jsonb)
-FROM runtime_tasks t LEFT JOIN runtime_runs r ON r.id=t.run_id AND r.agent_id=t.agent_id
-WHERE t.agent_id=$1 AND t.id=$2`, agentID, taskID).Scan(&parentRunID, &raw)
-	}
-	var refs []domain.InputSource
-	var overflow bool
-	if err == nil {
-		refs, overflow, err = extractSources(raw)
-	}
-	in := domain.Input{
-		EventID:        seq,
-		Kind:           "task.notification",
-		TaskID:         taskID,
-		NotificationID: notificationID,
-		Status:         status,
-		CreatedAt:      createdAt,
-		ParentRunID:    parentRunID,
-		SourceRefs:     refs,
-		SourceOverflow: overflow,
-	}
-	b, _ := json.Marshal(in)
-	if err == nil {
-		tag, insertErr := tx.Exec(ctx, `INSERT INTO runtime_inputs(agent_id,event_id,payload,notification_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, agentID, seq, b, notificationID)
-		err = insertErr
-		inserted = tag.RowsAffected() > 0
-	}
-	if err == nil {
-		err = tx.Commit(ctx)
-	} else {
-		_ = tx.Rollback(ctx)
-	}
-	return seq, parentRunID, inserted, err
+	return seq, parentRunID, inserted, nil
 }
 
 // ListIncompleteAgentTaskIDs returns IDs of non-completed tasks for agentID.

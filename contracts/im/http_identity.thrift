@@ -146,10 +146,10 @@ service IdentityHTTPService {
   EmptyResp ChangePassword(1: ChangePasswordReq req) (api.post="/api/v1/auth/password")
   UpdateProfileResp UpdateProfile(1: UpdateProfileReq req) (api.patch="/api/v1/auth/profile")
   ListInvitesResp ListInvites(1: ListInvitesReq req) (api.get="/api/v1/auth/admin/invites")
-  CreateInviteResp CreateInvite(1: CreateInviteReq req) (api.post="/api/v1/auth/admin/invites", api.status="201")
+  CreateInviteResp CreateInvite(1: CreateInviteReq req) (api.post="/api/v1/auth/admin/invites", api.status="201", api.body="json")
   EmptyResp RevokeInvite(1: RevokeInviteReq req) (api.delete="/api/v1/auth/admin/invites/:id")
   AdminUserPageResp ListAdminUsers(1: ListAdminUsersReq req) (api.get="/api/v1/auth/admin/users")
-  CreatePasswordResetLinkResp CreatePasswordResetLink(1: CreatePasswordResetLinkReq req) (api.post="/api/v1/auth/admin/users/:id/password-reset-links", api.status="201")
+  CreatePasswordResetLinkResp CreatePasswordResetLink(1: CreatePasswordResetLinkReq req) (api.post="/api/v1/auth/admin/users/:id/password-reset-links", api.status="201", api.body="json")
   PasswordResetInspectionResp InspectPasswordReset(1: InspectPasswordResetReq req) (api.post="/api/v1/auth/password-reset/inspect")
   EmptyResp ResetPassword(1: ResetPasswordReq req) (api.post="/api/v1/auth/password-reset")
 }

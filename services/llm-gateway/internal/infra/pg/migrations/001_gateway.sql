@@ -1,4 +1,3 @@
-SELECT pg_advisory_xact_lock(7463260102);
 CREATE TABLE IF NOT EXISTS gateway_schema_migrations(version INTEGER PRIMARY KEY,applied_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS gateway_config(id BOOLEAN PRIMARY KEY DEFAULT true CHECK(id),base_url TEXT NOT NULL DEFAULT '',model TEXT NOT NULL DEFAULT '',encrypted_key BYTEA,enabled BOOLEAN NOT NULL DEFAULT false,updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
 INSERT INTO gateway_config(id)VALUES(true)ON CONFLICT DO NOTHING;

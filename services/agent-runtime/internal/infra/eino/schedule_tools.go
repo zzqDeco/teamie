@@ -135,7 +135,7 @@ func (t *Tools) BuildScheduleTools() ([]tool.BaseTool, error) {
 			}
 			archive := &ContextArchive{Store: t.Store, Lease: t.Lease, IM: t.IM, Authorize: t.Authorize}
 			callID := compose.GetToolCallID(ctx)
-			created, code, err := t.Store.Policy(archive).EvaluateScheduleCreation(ctx, &domain.Lease{
+			created, code, err := t.Store.ScheduleCoordinator(archive).EvaluateScheduleCreation(ctx, &domain.Lease{
 				AgentID: run.AgentID,
 				Owner:   t.Lease.Owner,
 				Fence:   t.Lease.Fence,
@@ -170,7 +170,7 @@ func (t *Tools) BuildScheduleTools() ([]tool.BaseTool, error) {
 				return nil, err
 			}
 			archive := &ContextArchive{Store: t.Store, Lease: t.Lease, IM: t.IM, Authorize: t.Authorize}
-			schedules, err := t.Store.Policy(archive).FilterAuthorizedSchedules(ctx, run.AgentID, candidates)
+			schedules, err := t.Store.ScheduleCoordinator(archive).FilterAuthorizedSchedules(ctx, run.AgentID, candidates)
 			if err != nil {
 				return nil, err
 			}
@@ -247,11 +247,11 @@ func (e *Engine) drainSchedules(ctx context.Context, l *Lease) (failure error) {
 
 func (e *Engine) authorizeScheduleInput(ctx context.Context, imc *IM, lease *Lease, in Input) error {
 	archive := &ContextArchive{Store: e.Store, Lease: lease, IM: imc}
-	return e.Store.Policy(archive).AuthorizeScheduleInput(ctx, lease, toDomainInput(in))
+	return e.Store.ScheduleCoordinator(archive).AuthorizeScheduleInput(ctx, lease, toDomainInput(in))
 }
 
 func (a *ContextArchive) scheduleRowSources(ctx context.Context, createdRunID string, sourceRefsJSON []byte, sourceOverflow bool) ([]InputSource, error) {
-	return a.Store.Policy(a).ResolveScheduleRowSources(ctx, a.Lease.AgentID, createdRunID, sourceRefsJSON, sourceOverflow)
+	return a.Store.ScheduleCoordinator(a).ResolveScheduleRowSources(ctx, a.Lease.AgentID, createdRunID, sourceRefsJSON, sourceOverflow)
 }
 
 func (a *ContextArchive) scheduleSourcesByID(ctx context.Context, agentID, scheduleID string) ([]InputSource, error) {
@@ -269,5 +269,5 @@ func (a *ContextArchive) scheduleSourcesByID(ctx context.Context, agentID, sched
 }
 
 func (a *ContextArchive) authorizeScheduleListReceipt(ctx context.Context, agentID string, cached []byte) error {
-	return a.Store.Policy(a).AuthorizeScheduleListReceipt(ctx, agentID, cached)
+	return a.Store.ScheduleCoordinator(a).AuthorizeScheduleListReceipt(ctx, agentID, cached)
 }

@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"teamie/services/sandbox/internal/domain"
@@ -109,13 +108,9 @@ func New(engine Engine, token, image, workspace, state string) (*Service, error)
 			return nil, errors.New("workspace and receipt roots must be physically disjoint")
 		}
 	}
-	lock, e := os.OpenFile(filepath.Join(state, "supervisor.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	lock, e := domain.DefaultWorkspaceStorage.AcquireSupervisorLock(filepath.Join(state, "supervisor.lock"))
 	if e != nil {
 		return nil, e
-	}
-	if e = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); e != nil {
-		lock.Close()
-		return nil, errors.New("another sandbox supervisor owns this state")
 	}
 	return &Service{
 		Engine:        engine,
@@ -146,10 +141,7 @@ func (s *Service) Close() {
 		cancel()
 	}
 	s.mu.Unlock()
-	if s.lock != nil {
-		_ = syscall.Flock(int(s.lock.Fd()), syscall.LOCK_UN)
-		_ = s.lock.Close()
-	}
+	domain.DefaultWorkspaceStorage.ReleaseSupervisorLock(s.lock)
 }
 
 func digest(v string) string { return domain.Digest(v) }
@@ -251,8 +243,7 @@ func (s *Service) Exec(ctx context.Context, r *domain.SandboxExecRequest) (*doma
 	if len(entries) >= 10001 {
 		return failure("sandbox_capacity"), nil
 	}
-	var filesystem syscall.Statfs_t
-	if syscall.Statfs(s.WorkspaceRoot, &filesystem) != nil || filesystem.Bavail <= 0 || uint64(filesystem.Bavail)*uint64(filesystem.Bsize) < 2*1024*1024*1024 {
+	if !diskAvailable(s.WorkspaceRoot) {
 		return failure("workspace_capacity"), nil
 	}
 	agentHash := digest(r.AgentId)
@@ -296,8 +287,7 @@ func (s *Service) Exec(ctx context.Context, r *domain.SandboxExecRequest) (*doma
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				var fs syscall.Statfs_t
-				if syscall.Statfs(s.WorkspaceRoot, &fs) != nil || fs.Bavail <= 0 || uint64(fs.Bavail)*uint64(fs.Bsize) < 2*1024*1024*1024 || !workspaceWithinQuota(workspace) {
+				if !diskAvailable(s.WorkspaceRoot) || !workspaceWithinQuota(workspace) {
 					monitorMu.Lock()
 					diskLimited = true
 					monitorMu.Unlock()

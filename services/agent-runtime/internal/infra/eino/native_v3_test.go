@@ -482,16 +482,26 @@ func testNativeTargetedResumeUsesCompatibleCheckpoint(t *testing.T, delayedDelet
 	if delayedDelete {
 		// Hold only the consumed checkpoint row. Resume can read it, but its
 		// eventual DELETE must wait until this independent transaction commits.
-		gate, err := s.DB.Begin(context.Background())
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer gate.Rollback(context.Background())
-		if err = gate.QueryRow(context.Background(), `SELECT pg_backend_pid() FROM runtime_checkpoints WHERE checkpoint_id=$1 FOR UPDATE`, "turnloop:"+f.agent).Scan(&deleteBlocker); err != nil {
+		lockedCh := make(chan error, 1)
+		releaseCh := make(chan struct{})
+		doneCh := make(chan error, 1)
+		go func() {
+			doneCh <- s.DB.WithinTx(context.Background(), func(txCtx context.Context) error {
+				if err := s.DB.QueryRow(txCtx, `SELECT pg_backend_pid() FROM runtime_checkpoints WHERE checkpoint_id=$1 FOR UPDATE`, "turnloop:"+f.agent).Scan(&deleteBlocker); err != nil {
+					lockedCh <- err
+					return err
+				}
+				lockedCh <- nil
+				<-releaseCh
+				return nil
+			})
+		}()
+		if err := <-lockedCh; err != nil {
 			t.Fatal(err)
 		}
 		releaseDelete = func() {
-			if err := gate.Commit(context.Background()); err != nil {
+			close(releaseCh)
+			if err := <-doneCh; err != nil {
 				t.Fatal(err)
 			}
 		}

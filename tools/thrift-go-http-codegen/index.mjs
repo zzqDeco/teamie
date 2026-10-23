@@ -185,6 +185,7 @@ function parseServiceRoutes(raw, filename) {
           requestType,
           responseType,
           status: annotations["api.status"] || null,
+          hasBody: annotations["api.body"] !== undefined,
         });
       }
     }
@@ -203,10 +204,19 @@ function renderRouterGo({ pkgName, idl, structs, services }) {
     "",
     `package ${pkgName}`,
     "",
-    'import "net/http"',
+    "import (",
+    '\t"context"',
+    '\t"net/http"',
+    "",
+    '\t"github.com/cloudwego/hertz/pkg/app"',
+    '\t"github.com/cloudwego/hertz/pkg/route"',
+    ")",
     "",
     "// HTTPResponder abstracts stateless request binding and domain error serialization (implemented by httpx.Responder).",
     "type HTTPResponder interface {",
+    "\tWriteBindError(ctx context.Context, c *app.RequestContext, err error)",
+    "\tWriteDomainError(ctx context.Context, c *app.RequestContext, err error)",
+    "\tWriteOK(ctx context.Context, c *app.RequestContext, resp any)",
     "\tDecodeRequest(w http.ResponseWriter, r *http.Request, dst any) error",
     "\tWriteBindErrorHTTP(w http.ResponseWriter, r *http.Request, err error)",
     "\tWriteDomainErrorHTTP(w http.ResponseWriter, r *http.Request, err error)",
@@ -283,6 +293,32 @@ function renderRouterGo({ pkgName, idl, structs, services }) {
     lines.push("");
 
     lines.push(
+      `// Register${svc.name}HertzServer registers ${svc.serverAlias} endpoints on a native Hertz route.RouterGroup.`,
+    );
+    lines.push(
+      `func Register${svc.name}HertzServer(r *route.RouterGroup, srv ${svc.serverAlias}, m HTTPResponder) {`,
+    );
+    for (const m of svc.methods) {
+      lines.push(
+        `\tr.${m.httpMethod}(${JSON.stringify(m.path)}, func(ctx context.Context, c *app.RequestContext) {`,
+      );
+      lines.push(`\t\tvar req ${m.requestType}`);
+      lines.push("\t\tif err := c.BindAndValidate(&req); err != nil {");
+      lines.push("\t\t\tm.WriteBindError(ctx, c, err)");
+      lines.push("\t\t\treturn");
+      lines.push("\t\t}");
+      lines.push(`\t\tresp, err := srv.${m.name}(ctx, &req)`);
+      lines.push("\t\tif err != nil {");
+      lines.push("\t\t\tm.WriteDomainError(ctx, c, err)");
+      lines.push("\t\t\treturn");
+      lines.push("\t\t}");
+      lines.push("\t\tm.WriteOK(ctx, c, resp)");
+      lines.push("\t})");
+    }
+    lines.push("}");
+    lines.push("");
+
+    lines.push(
       `// Register${svc.serverAlias} binds ${svc.serverAlias} methods using HTTPResponder with optional per-route handler overrides.`,
     );
     lines.push(
@@ -295,9 +331,9 @@ function renderRouterGo({ pkgName, idl, structs, services }) {
     lines.push("\tmw, hasMW := m.(HTTPRouteMiddleware)");
     for (const m of svc.methods) {
       const reqStruct = structs[m.requestType] || { fields: [] };
-      const hasBodyFields = reqStruct.fields.some(
-        (f) => f.annotations["api.body"] !== undefined,
-      );
+      const hasBodyFields =
+        m.hasBody ||
+        reqStruct.fields.some((f) => f.annotations["api.body"] !== undefined);
       const pathFields = reqStruct.fields.filter(
         (f) => f.annotations["api.path"] !== undefined,
       );

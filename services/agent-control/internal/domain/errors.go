@@ -5,16 +5,19 @@
 package domain
 
 // Error represents a domain-level business rule or availability violation with
-// a canonical HTTP status classification and machine-readable error code.
+// a canonical HTTP status classification, safe code, diagnostic stage/reason, and internal cause.
 type Error struct {
-	Status        int
-	Code, Message string
-	Cause         error
+	Status                int
+	Code, Stage, Reason   string
+	Message               string
+	Cause                 error
 }
 
 func (e *Error) Error() string             { return e.Message }
 func (e *Error) StatusCode() int           { return e.Status }
 func (e *Error) ErrorCode() string         { return e.Code }
+func (e *Error) DiagnosticStage() string   { return e.Stage }
+func (e *Error) DiagnosticReason() string  { return e.Reason }
 func (e *Error) DiagnosticMessage() string { return e.Code }
 func (e *Error) Unwrap() error             { return e.Cause }
 

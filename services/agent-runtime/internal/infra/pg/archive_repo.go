@@ -155,53 +155,48 @@ func (r *Repository) PutContextArtifact(
 	w ContextArtifactWrite,
 	canonicalizeSources func(raw []byte) ([]byte, error),
 ) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	if err = CheckLeaseTx(ctx, tx, l); err != nil {
-		return err
-	}
-	var current bool
-	if err = tx.QueryRow(ctx, `SELECT agent_id=$2 AND attempt_id=$3 AND state='running' FROM runtime_runs WHERE id=$1 FOR SHARE`, w.ActiveRunID, w.AgentID, w.ActiveAttempt).Scan(&current); err != nil || !current {
-		if err == nil {
-			err = domain.ErrLeaseLost
+	return r.WithinTx(ctx, func(txCtx context.Context) error {
+		if err := r.CheckLeaseForUpdate(txCtx, l); err != nil {
+			return err
 		}
-		return err
-	}
-	_, err = tx.Exec(ctx, `INSERT INTO runtime_context_artifacts(agent_id,run_id,attempt_id,artifact_key,kind,tool_call_id,tool_name,content,content_hash,sources,source_artifact_refs,source_event_seq) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT DO NOTHING`, w.AgentID, w.RunID, w.Attempt, w.Key, w.Kind, w.ToolCallID, w.ToolName, w.Content, w.ContentHash, w.SourceJSON, w.ParentJSON, w.EventSeq)
-	if err != nil {
-		return err
-	}
-	var hash, kind, call, name string
-	var oldSources, oldParents []byte
-	var seq int64
-	err = tx.QueryRow(ctx, `SELECT content_hash,kind,tool_call_id,tool_name,sources,source_artifact_refs,source_event_seq FROM runtime_context_artifacts WHERE agent_id=$1 AND run_id=$2 AND artifact_key=$3`, w.AgentID, w.RunID, w.Key).Scan(&hash, &kind, &call, &name, &oldSources, &oldParents, &seq)
-	if err != nil {
-		return err
-	}
-	oldJSON, e := canonicalizeSources(oldSources)
-	var previousParents []string
-	if json.Unmarshal(oldParents, &previousParents) != nil {
-		return domain.ErrReplayConflict
-	}
-	previousJSON, _ := json.Marshal(previousParents)
-	if e != nil || hash != w.ContentHash || kind != w.Kind || call != w.ToolCallID || name != w.ToolName || seq != w.EventSeq || !bytes.Equal(oldJSON, w.SourceJSON) || !bytes.Equal(previousJSON, w.ParentJSON) {
-		return fmt.Errorf("%w: context artifact changed", domain.ErrReplayConflict)
-	}
-	_, err = tx.Exec(ctx, `INSERT INTO runtime_tool_observations(run_id,call_id,observation_key,response) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, w.RunID, "context-artifact:"+w.Key, w.VersionKey, w.VersionBytes)
-	if err != nil {
-		return err
-	}
-	var savedVersion []byte
-	if err = tx.QueryRow(ctx, `SELECT response FROM runtime_tool_observations WHERE run_id=$1 AND call_id=$2 AND observation_key=$3`, w.RunID, "context-artifact:"+w.Key, w.VersionKey).Scan(&savedVersion); err != nil {
-		return err
-	}
-	if !bytes.Equal(w.VersionBytes, savedVersion) {
-		return domain.ErrReplayConflict
-	}
-	return tx.Commit(ctx)
+		conn := r.db.Conn(txCtx)
+		var current bool
+		if err := conn.QueryRow(txCtx, `SELECT agent_id=$2 AND attempt_id=$3 AND state='running' FROM runtime_runs WHERE id=$1 FOR SHARE`, w.ActiveRunID, w.AgentID, w.ActiveAttempt).Scan(&current); err != nil || !current {
+			if err == nil {
+				err = domain.ErrLeaseLost
+			}
+			return err
+		}
+		if _, err := conn.Exec(txCtx, `INSERT INTO runtime_context_artifacts(agent_id,run_id,attempt_id,artifact_key,kind,tool_call_id,tool_name,content,content_hash,sources,source_artifact_refs,source_event_seq) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT DO NOTHING`, w.AgentID, w.RunID, w.Attempt, w.Key, w.Kind, w.ToolCallID, w.ToolName, w.Content, w.ContentHash, w.SourceJSON, w.ParentJSON, w.EventSeq); err != nil {
+			return err
+		}
+		var hash, kind, call, name string
+		var oldSources, oldParents []byte
+		var seq int64
+		if err := conn.QueryRow(txCtx, `SELECT content_hash,kind,tool_call_id,tool_name,sources,source_artifact_refs,source_event_seq FROM runtime_context_artifacts WHERE agent_id=$1 AND run_id=$2 AND artifact_key=$3`, w.AgentID, w.RunID, w.Key).Scan(&hash, &kind, &call, &name, &oldSources, &oldParents, &seq); err != nil {
+			return err
+		}
+		oldJSON, e := canonicalizeSources(oldSources)
+		var previousParents []string
+		if json.Unmarshal(oldParents, &previousParents) != nil {
+			return domain.ErrReplayConflict
+		}
+		previousJSON, _ := json.Marshal(previousParents)
+		if e != nil || hash != w.ContentHash || kind != w.Kind || call != w.ToolCallID || name != w.ToolName || seq != w.EventSeq || !bytes.Equal(oldJSON, w.SourceJSON) || !bytes.Equal(previousJSON, w.ParentJSON) {
+			return fmt.Errorf("%w: context artifact changed", domain.ErrReplayConflict)
+		}
+		if _, err := conn.Exec(txCtx, `INSERT INTO runtime_tool_observations(run_id,call_id,observation_key,response) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, w.RunID, "context-artifact:"+w.Key, w.VersionKey, w.VersionBytes); err != nil {
+			return err
+		}
+		var savedVersion []byte
+		if err := conn.QueryRow(txCtx, `SELECT response FROM runtime_tool_observations WHERE run_id=$1 AND call_id=$2 AND observation_key=$3`, w.RunID, "context-artifact:"+w.Key, w.VersionKey).Scan(&savedVersion); err != nil {
+			return err
+		}
+		if !bytes.Equal(w.VersionBytes, savedVersion) {
+			return domain.ErrReplayConflict
+		}
+		return nil
+	})
 }
 
 // LoadedContextArtifactRow holds the raw columns of a loaded context artifact.
@@ -240,33 +235,30 @@ func (r *Repository) LoadVisibleContextArtifact(
 
 // SaveRunningRunObservation persists a tool observation after verifying the active lease and running Run attempt.
 func (r *Repository) SaveRunningRunObservation(ctx context.Context, l *domain.Lease, runID, agentID, attemptID, call, key string, response []byte) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	if err = CheckLeaseTx(ctx, tx, l); err != nil {
-		return err
-	}
-	var current bool
-	if err = tx.QueryRow(ctx, `SELECT agent_id=$2 AND attempt_id=$3 AND state='running' FROM runtime_runs WHERE id=$1 FOR SHARE`, runID, agentID, attemptID).Scan(&current); err != nil {
-		return err
-	}
-	if !current {
-		return domain.ErrLeaseLost
-	}
-	_, err = tx.Exec(ctx, `INSERT INTO runtime_tool_observations(run_id,call_id,observation_key,response) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, runID, call, key, response)
-	if err != nil {
-		return err
-	}
-	var old []byte
-	if err = tx.QueryRow(ctx, `SELECT response FROM runtime_tool_observations WHERE run_id=$1 AND call_id=$2 AND observation_key=$3`, runID, call, key).Scan(&old); err != nil {
-		return err
-	}
-	if !bytes.Equal(old, response) {
-		return domain.ErrReplayConflict
-	}
-	return tx.Commit(ctx)
+	return r.WithinTx(ctx, func(txCtx context.Context) error {
+		if err := r.CheckLeaseForUpdate(txCtx, l); err != nil {
+			return err
+		}
+		conn := r.db.Conn(txCtx)
+		var current bool
+		if err := conn.QueryRow(txCtx, `SELECT agent_id=$2 AND attempt_id=$3 AND state='running' FROM runtime_runs WHERE id=$1 FOR SHARE`, runID, agentID, attemptID).Scan(&current); err != nil {
+			return err
+		}
+		if !current {
+			return domain.ErrLeaseLost
+		}
+		if _, err := conn.Exec(txCtx, `INSERT INTO runtime_tool_observations(run_id,call_id,observation_key,response) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, runID, call, key, response); err != nil {
+			return err
+		}
+		var old []byte
+		if err := conn.QueryRow(txCtx, `SELECT response FROM runtime_tool_observations WHERE run_id=$1 AND call_id=$2 AND observation_key=$3`, runID, call, key).Scan(&old); err != nil {
+			return err
+		}
+		if !bytes.Equal(old, response) {
+			return domain.ErrReplayConflict
+		}
+		return nil
+	})
 }
 
 // ArchiveSessionEventRow holds a raw session event row from runtime_session_events.

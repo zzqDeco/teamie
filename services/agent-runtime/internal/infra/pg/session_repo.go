@@ -170,57 +170,54 @@ func (r *Repository) StartOrResumeRun(
 	firstEventID, newRunID, attemptID string,
 	resolveNew func() (key string, inputsJSON []byte, profile string, budget json.RawMessage, eventIDs []string, err error),
 ) (runID string, inputsJSON []byte, contextHead, acceptanceHead int64, contextProfile string, contextBudget json.RawMessage, resumed bool, err error) {
-	tx, err := r.pool.Begin(ctx)
+	err = r.WithinTx(ctx, func(txCtx context.Context) error {
+		if err := r.CheckLeaseForUpdate(txCtx, l); err != nil {
+			return err
+		}
+		conn := r.db.Conn(txCtx)
+		var existing string
+		var eventIDs []string
+		qErr := conn.QueryRow(txCtx, `SELECT run_id::text FROM runtime_inputs WHERE agent_id=$1 AND event_id=$2 AND run_id IS NOT NULL`, l.AgentID, firstEventID).Scan(&existing)
+		if qErr == nil {
+			resumed = true
+			runID = existing
+			if err := conn.QueryRow(txCtx, `UPDATE runtime_runs SET state='running',attempt_id=$2,attempts=attempts+1 WHERE id=$1 AND state IN ('running','interrupted','waiting_configuration','retry','waiting_input') RETURNING input_json,context_head,acceptance_head,context_profile,context_budget`, runID, attemptID).Scan(&inputsJSON, &contextHead, &acceptanceHead, &contextProfile, &contextBudget); err != nil {
+				return err
+			}
+			var parsed []struct {
+				EventID string `json:"eventId"`
+			}
+			if err := json.Unmarshal(inputsJSON, &parsed); err != nil {
+				return err
+			}
+			for _, item := range parsed {
+				eventIDs = append(eventIDs, item.EventID)
+			}
+		} else if errors.Is(qErr, pgx.ErrNoRows) {
+			runID = newRunID
+			var key string
+			var rErr error
+			key, inputsJSON, contextProfile, contextBudget, eventIDs, rErr = resolveNew()
+			if rErr != nil {
+				return rErr
+			}
+			if err := conn.QueryRow(txCtx, `SELECT (SELECT COALESCE(max(seq),0) FROM runtime_session_events WHERE session_id=$1),(SELECT COALESCE(max(seq),0) FROM runtime_session_acceptances WHERE agent_id=$2)`, "agent:"+l.AgentID, l.AgentID).Scan(&contextHead, &acceptanceHead); err != nil {
+				return err
+			}
+			if _, err := conn.Exec(txCtx, `INSERT INTO runtime_runs(id,agent_id,input_key,input_json,attempt_id,context_head,acceptance_head,context_profile,context_budget) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, runID, l.AgentID, key, inputsJSON, attemptID, contextHead, acceptanceHead, contextProfile, contextBudget); err != nil {
+				return err
+			}
+		} else {
+			return qErr
+		}
+		for _, evID := range eventIDs {
+			if _, err := conn.Exec(txCtx, `UPDATE runtime_inputs SET state='processing',run_id=$3 WHERE agent_id=$1 AND event_id=$2 AND state IN ('pending','processing')`, l.AgentID, evID, runID); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 	if err != nil {
-		return "", nil, 0, 0, "", nil, false, err
-	}
-	defer tx.Rollback(ctx)
-	if err = CheckLeaseTx(ctx, tx, l); err != nil {
-		return "", nil, 0, 0, "", nil, false, err
-	}
-	var existing string
-	var eventIDs []string
-	err = tx.QueryRow(ctx, `SELECT run_id::text FROM runtime_inputs WHERE agent_id=$1 AND event_id=$2 AND run_id IS NOT NULL`, l.AgentID, firstEventID).Scan(&existing)
-	if err == nil {
-		resumed = true
-		runID = existing
-		err = tx.QueryRow(ctx, `UPDATE runtime_runs SET state='running',attempt_id=$2,attempts=attempts+1 WHERE id=$1 AND state IN ('running','interrupted','waiting_configuration','retry','waiting_input') RETURNING input_json,context_head,acceptance_head,context_profile,context_budget`, runID, attemptID).Scan(&inputsJSON, &contextHead, &acceptanceHead, &contextProfile, &contextBudget)
-		if err != nil {
-			return "", nil, 0, 0, "", nil, false, err
-		}
-		var parsed []struct {
-			EventID string `json:"eventId"`
-		}
-		if err = json.Unmarshal(inputsJSON, &parsed); err != nil {
-			return "", nil, 0, 0, "", nil, false, err
-		}
-		for _, item := range parsed {
-			eventIDs = append(eventIDs, item.EventID)
-		}
-	} else if errors.Is(err, pgx.ErrNoRows) {
-		runID = newRunID
-		var key string
-		key, inputsJSON, contextProfile, contextBudget, eventIDs, err = resolveNew()
-		if err != nil {
-			return "", nil, 0, 0, "", nil, false, err
-		}
-		err = tx.QueryRow(ctx, `SELECT (SELECT COALESCE(max(seq),0) FROM runtime_session_events WHERE session_id=$1),(SELECT COALESCE(max(seq),0) FROM runtime_session_acceptances WHERE agent_id=$2)`, "agent:"+l.AgentID, l.AgentID).Scan(&contextHead, &acceptanceHead)
-		if err != nil {
-			return "", nil, 0, 0, "", nil, false, err
-		}
-		_, err = tx.Exec(ctx, `INSERT INTO runtime_runs(id,agent_id,input_key,input_json,attempt_id,context_head,acceptance_head,context_profile,context_budget) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, runID, l.AgentID, key, inputsJSON, attemptID, contextHead, acceptanceHead, contextProfile, contextBudget)
-		if err != nil {
-			return "", nil, 0, 0, "", nil, false, err
-		}
-	} else {
-		return "", nil, 0, 0, "", nil, false, err
-	}
-	for _, evID := range eventIDs {
-		if _, err = tx.Exec(ctx, `UPDATE runtime_inputs SET state='processing',run_id=$3 WHERE agent_id=$1 AND event_id=$2 AND state IN ('pending','processing')`, l.AgentID, evID, runID); err != nil {
-			return "", nil, 0, 0, "", nil, false, err
-		}
-	}
-	if err = tx.Commit(ctx); err != nil {
 		return "", nil, 0, 0, "", nil, false, err
 	}
 	return runID, inputsJSON, contextHead, acceptanceHead, contextProfile, contextBudget, resumed, nil
@@ -228,104 +225,87 @@ func (r *Repository) StartOrResumeRun(
 
 // FinishRun transitions a Run to completed, retry, waiting_input, failed, or canceled under the worker lease fence.
 func (r *Repository) FinishRun(ctx context.Context, l *domain.Lease, runID, state, safeError string, retry bool) error {
-	tx, e := r.pool.Begin(ctx)
-	if e != nil {
-		return e
-	}
-	defer tx.Rollback(ctx)
-	if e = CheckLeaseTx(ctx, tx, l); e != nil {
-		return e
-	}
-	if state == "completed" {
-		if e = AcceptSessionAttemptTx(ctx, tx, l.AgentID, runID); e != nil {
+	return r.WithinTx(ctx, func(txCtx context.Context) error {
+		if e := r.CheckLeaseForUpdate(txCtx, l); e != nil {
 			return e
 		}
-	}
-	if retry {
-		_, e = tx.Exec(ctx, `UPDATE runtime_runs SET state=$2,safe_error=$3,updated_at=now(),next_attempt=now()+interval '15 seconds' WHERE id=$1`, runID, state, safeError)
-	} else {
-		_, e = tx.Exec(ctx, `UPDATE runtime_runs SET state=$2,safe_error=$3,updated_at=now(),committed_attempt=CASE WHEN $2='completed' THEN attempt_id ELSE NULL END,finished_at=now() WHERE id=$1`, runID, state, safeError)
-		if e == nil {
-			_, e = tx.Exec(ctx, `UPDATE runtime_inputs SET state=$2 WHERE agent_id=$1 AND run_id=$3`, l.AgentID, map[bool]string{true: "done", false: "failed"}[state == "completed"], runID)
+		conn := r.db.Conn(txCtx)
+		if state == "completed" {
+			if e := r.acceptSessionAttempt(txCtx, l.AgentID, runID); e != nil {
+				return e
+			}
 		}
-	}
-	if e != nil {
+		var e error
+		if retry {
+			_, e = conn.Exec(txCtx, `UPDATE runtime_runs SET state=$2,safe_error=$3,updated_at=now(),next_attempt=now()+interval '15 seconds' WHERE id=$1`, runID, state, safeError)
+		} else {
+			_, e = conn.Exec(txCtx, `UPDATE runtime_runs SET state=$2,safe_error=$3,updated_at=now(),committed_attempt=CASE WHEN $2='completed' THEN attempt_id ELSE NULL END,finished_at=now() WHERE id=$1`, runID, state, safeError)
+			if e == nil {
+				_, e = conn.Exec(txCtx, `UPDATE runtime_inputs SET state=$2 WHERE agent_id=$1 AND run_id=$3`, l.AgentID, map[bool]string{true: "done", false: "failed"}[state == "completed"], runID)
+			}
+		}
+		if e != nil {
+			return e
+		}
+		_, e = conn.Exec(txCtx, `INSERT INTO runtime_public_events(agent_id,type,run_id,status,error_code) VALUES($1,'run.status',$2,$3,NULLIF($4,''))`, l.AgentID, runID, state, safeError)
 		return e
-	}
-	_, e = tx.Exec(ctx, `INSERT INTO runtime_public_events(agent_id,type,run_id,status,error_code) VALUES($1,'run.status',$2,$3,NULLIF($4,''))`, l.AgentID, runID, state, safeError)
-	if e != nil {
-		return e
-	}
-	return tx.Commit(ctx)
+	})
 }
 
 // InvalidateRun abandons a replay whose source was revoked or changed.
 func (r *Repository) InvalidateRun(ctx context.Context, l *domain.Lease, runID string, invalid []string) error {
-	tx, e := r.pool.Begin(ctx)
-	if e != nil {
+	return r.WithinTx(ctx, func(txCtx context.Context) error {
+		if e := r.CheckLeaseForUpdate(txCtx, l); e != nil {
+			return e
+		}
+		conn := r.db.Conn(txCtx)
+		if _, e := conn.Exec(txCtx, `UPDATE runtime_runs SET state='failed',safe_error='source_unavailable',finished_at=now() WHERE id=$1`, runID); e != nil {
+			return e
+		}
+		_, e := conn.Exec(txCtx, `UPDATE runtime_inputs SET state=CASE WHEN event_id::text=ANY($3::text[]) THEN 'skipped' ELSE 'pending' END,run_id=NULL WHERE agent_id=$1 AND run_id=$2`, l.AgentID, runID, invalid)
 		return e
-	}
-	defer tx.Rollback(ctx)
-	if e = CheckLeaseTx(ctx, tx, l); e != nil {
-		return e
-	}
-	if _, e = tx.Exec(ctx, `UPDATE runtime_runs SET state='failed',safe_error='source_unavailable',finished_at=now() WHERE id=$1`, runID); e != nil {
-		return e
-	}
-	if _, e = tx.Exec(ctx, `UPDATE runtime_inputs SET state=CASE WHEN event_id::text=ANY($3::text[]) THEN 'skipped' ELSE 'pending' END,run_id=NULL WHERE agent_id=$1 AND run_id=$2`, l.AgentID, runID, invalid); e != nil {
-		return e
-	}
-	return tx.Commit(ctx)
+	})
 }
 
 // ConfigureRun updates a Run's revision, generation, and context_attempts and records run.status=running.
 func (r *Repository) ConfigureRun(ctx context.Context, l *domain.Lease, runID string, revision, generation int64, resumeAttempt string, hasResume bool) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
+	return r.WithinTx(ctx, func(txCtx context.Context) error {
+		if err := r.CheckLeaseForUpdate(txCtx, l); err != nil {
+			return err
+		}
+		conn := r.db.Conn(txCtx)
+		var err error
+		if hasResume {
+			_, err = conn.Exec(txCtx, `UPDATE runtime_runs SET revision=$2,generation=$3,context_attempts=array_append(context_attempts,$4::uuid),updated_at=now() WHERE id=$1`, runID, revision, generation, resumeAttempt)
+		} else {
+			_, err = conn.Exec(txCtx, `UPDATE runtime_runs SET revision=$2,generation=$3,context_attempts='{}',updated_at=now() WHERE id=$1`, runID, revision, generation)
+		}
+		if err == nil {
+			_, err = conn.Exec(txCtx, `INSERT INTO runtime_public_events(agent_id,type,run_id,status) VALUES($1,'run.status',$2,'running')`, l.AgentID, runID)
+		}
 		return err
-	}
-	defer tx.Rollback(ctx)
-	if err = CheckLeaseTx(ctx, tx, l); err != nil {
-		return err
-	}
-	if hasResume {
-		_, err = tx.Exec(ctx, `UPDATE runtime_runs SET revision=$2,generation=$3,context_attempts=array_append(context_attempts,$4::uuid),updated_at=now() WHERE id=$1`, runID, revision, generation, resumeAttempt)
-	} else {
-		_, err = tx.Exec(ctx, `UPDATE runtime_runs SET revision=$2,generation=$3,context_attempts='{}',updated_at=now() WHERE id=$1`, runID, revision, generation)
-	}
-	if err == nil {
-		_, err = tx.Exec(ctx, `INSERT INTO runtime_public_events(agent_id,type,run_id,status) VALUES($1,'run.status',$2,'running')`, l.AgentID, runID)
-	}
-	if err == nil {
-		err = tx.Commit(ctx)
-	}
-	return err
+	})
 }
 
 // PreemptRun interrupts an active Run for new input after accepting its session attempt.
 func (r *Repository) PreemptRun(ctx context.Context, l *domain.Lease, runID string) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
+	return r.WithinTx(ctx, func(txCtx context.Context) error {
+		if err := r.CheckLeaseForUpdate(txCtx, l); err != nil {
+			return err
+		}
+		if err := r.acceptSessionAttempt(txCtx, l.AgentID, runID); err != nil {
+			return err
+		}
+		conn := r.db.Conn(txCtx)
+		_, err := conn.Exec(txCtx, `UPDATE runtime_runs SET state='interrupted',safe_error='new_input',committed_attempt=attempt_id,finished_at=now(),updated_at=now() WHERE id=$1`, runID)
+		if err == nil {
+			_, err = conn.Exec(txCtx, `UPDATE runtime_inputs SET state='done' WHERE agent_id=$1 AND run_id=$2`, l.AgentID, runID)
+		}
+		if err == nil {
+			_, err = conn.Exec(txCtx, `INSERT INTO runtime_public_events(agent_id,type,run_id,status,error_code) VALUES($1,'run.status',$2,'interrupted','new_input')`, l.AgentID, runID)
+		}
 		return err
-	}
-	defer tx.Rollback(ctx)
-	if err = CheckLeaseTx(ctx, tx, l); err != nil {
-		return err
-	}
-	if err = AcceptSessionAttemptTx(ctx, tx, l.AgentID, runID); err != nil {
-		return err
-	}
-	_, err = tx.Exec(ctx, `UPDATE runtime_runs SET state='interrupted',safe_error='new_input',committed_attempt=attempt_id,finished_at=now(),updated_at=now() WHERE id=$1`, runID)
-	if err == nil {
-		_, err = tx.Exec(ctx, `UPDATE runtime_inputs SET state='done' WHERE agent_id=$1 AND run_id=$2`, l.AgentID, runID)
-	}
-	if err == nil {
-		_, err = tx.Exec(ctx, `INSERT INTO runtime_public_events(agent_id,type,run_id,status,error_code) VALUES($1,'run.status',$2,'interrupted','new_input')`, l.AgentID, runID)
-	}
-	if err == nil {
-		err = tx.Commit(ctx)
-	}
-	return err
+	})
 }
 
 // IsRunCanceled reports whether cancel_requested is set on runID.
@@ -361,36 +341,24 @@ func (r *Repository) GetCheckpoint(ctx context.Context, id string) ([]byte, []by
 
 // SetCheckpoint upserts a checkpoint row under the active worker lease fence.
 func (r *Repository) SetCheckpoint(ctx context.Context, l *domain.Lease, id string, payload, metadata []byte) error {
-	tx, e := r.pool.Begin(ctx)
-	if e != nil {
+	return r.WithinTx(ctx, func(txCtx context.Context) error {
+		if e := r.CheckLeaseForUpdate(txCtx, l); e != nil {
+			return e
+		}
+		_, e := r.db.Conn(txCtx).Exec(txCtx, `INSERT INTO runtime_checkpoints(checkpoint_id,payload,metadata) VALUES($1,$2,$3) ON CONFLICT(checkpoint_id) DO UPDATE SET payload=EXCLUDED.payload,metadata=EXCLUDED.metadata,updated_at=now()`, id, payload, metadata)
 		return e
-	}
-	defer tx.Rollback(ctx)
-	if e = CheckLeaseTx(ctx, tx, l); e != nil {
-		return e
-	}
-	_, e = tx.Exec(ctx, `INSERT INTO runtime_checkpoints(checkpoint_id,payload,metadata) VALUES($1,$2,$3) ON CONFLICT(checkpoint_id) DO UPDATE SET payload=EXCLUDED.payload,metadata=EXCLUDED.metadata,updated_at=now()`, id, payload, metadata)
-	if e != nil {
-		return e
-	}
-	return tx.Commit(ctx)
+	})
 }
 
 // DeleteCheckpoint deletes a checkpoint row under the active worker lease fence.
 func (r *Repository) DeleteCheckpoint(ctx context.Context, l *domain.Lease, id string) error {
-	tx, e := r.pool.Begin(ctx)
-	if e != nil {
+	return r.WithinTx(ctx, func(txCtx context.Context) error {
+		if e := r.CheckLeaseForUpdate(txCtx, l); e != nil {
+			return e
+		}
+		_, e := r.db.Conn(txCtx).Exec(txCtx, `DELETE FROM runtime_checkpoints WHERE checkpoint_id=$1`, id)
 		return e
-	}
-	defer tx.Rollback(ctx)
-	if e = CheckLeaseTx(ctx, tx, l); e != nil {
-		return e
-	}
-	_, e = tx.Exec(ctx, `DELETE FROM runtime_checkpoints WHERE checkpoint_id=$1`, id)
-	if e != nil {
-		return e
-	}
-	return tx.Commit(ctx)
+	})
 }
 
 // SessionEventWrite holds a serialized session event ready for persistence.
@@ -404,30 +372,35 @@ type SessionEventWrite struct {
 // AppendSessionEvents persists a batch of session events under the active worker lease fence.
 // If a conflicting payload hash already exists for the same (sessionID, eventID), duplicate is returned as true.
 func (r *Repository) AppendSessionEvents(ctx context.Context, l *domain.Lease, sessionID, runID, attemptID string, items []SessionEventWrite) (bool, error) {
-	tx, e := r.pool.Begin(ctx)
-	if e != nil {
-		return false, e
-	}
-	defer tx.Rollback(ctx)
-	if e = CheckLeaseTx(ctx, tx, l); e != nil {
-		return false, e
-	}
-	for _, item := range items {
-		tag, err := tx.Exec(ctx, `INSERT INTO runtime_session_events(session_id,event_id,kind,run_id,attempt_id,payload,payload_hash) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`, sessionID, item.EventID, item.Kind, runID, attemptID, item.Payload, item.Hash)
-		if err != nil {
-			return false, err
+	var conflict bool
+	conflictSentinel := errors.New("session_event_conflict")
+	err := r.WithinTx(ctx, func(txCtx context.Context) error {
+		if e := r.CheckLeaseForUpdate(txCtx, l); e != nil {
+			return e
 		}
-		if tag.RowsAffected() == 0 {
-			var old string
-			if err = tx.QueryRow(ctx, `SELECT payload_hash FROM runtime_session_events WHERE session_id=$1 AND event_id=$2`, sessionID, item.EventID).Scan(&old); err != nil {
-				return false, err
+		conn := r.db.Conn(txCtx)
+		for _, item := range items {
+			tag, err := conn.Exec(txCtx, `INSERT INTO runtime_session_events(session_id,event_id,kind,run_id,attempt_id,payload,payload_hash) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`, sessionID, item.EventID, item.Kind, runID, attemptID, item.Payload, item.Hash)
+			if err != nil {
+				return err
 			}
-			if old != item.Hash {
-				return true, nil
+			if tag.RowsAffected() == 0 {
+				var old string
+				if err = conn.QueryRow(txCtx, `SELECT payload_hash FROM runtime_session_events WHERE session_id=$1 AND event_id=$2`, sessionID, item.EventID).Scan(&old); err != nil {
+					return err
+				}
+				if old != item.Hash {
+					conflict = true
+					return conflictSentinel
+				}
 			}
 		}
+		return nil
+	})
+	if errors.Is(err, conflictSentinel) {
+		return true, nil
 	}
-	return false, tx.Commit(ctx)
+	return conflict, err
 }
 
 // LoadSessionEventPayloads loads visible session event payloads for a Run.
@@ -510,94 +483,85 @@ func (r *Repository) GetModelStepAndRecovery(ctx context.Context, runID string, 
 
 // SaveModelCall persists a model call receipt under the active worker lease fence.
 func (r *Repository) SaveModelCall(ctx context.Context, l *domain.Lease, runID string, step int, hash string, b []byte) error {
-	tx, e := r.pool.Begin(ctx)
-	if e != nil {
-		return e
-	}
-	defer tx.Rollback(ctx)
-	if e = CheckLeaseTx(ctx, tx, l); e != nil {
-		return e
-	}
-	var rejected bool
-	if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM runtime_context_recoveries WHERE run_id=$1 AND model_step=$2)`, runID, step).Scan(&rejected); e != nil {
-		return e
-	}
-	if rejected {
-		return domain.ErrReplayConflict
-	}
-	tag, e := tx.Exec(ctx, `INSERT INTO runtime_model_calls(run_id,step,request_hash,response) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, runID, step, hash, b)
-	if e != nil {
-		return e
-	}
-	if tag.RowsAffected() == 0 {
-		var old string
-		e = tx.QueryRow(ctx, `SELECT request_hash FROM runtime_model_calls WHERE run_id=$1 AND step=$2`, runID, step).Scan(&old)
+	return r.WithinTx(ctx, func(txCtx context.Context) error {
+		if e := r.CheckLeaseForUpdate(txCtx, l); e != nil {
+			return e
+		}
+		conn := r.db.Conn(txCtx)
+		var rejected bool
+		if e := conn.QueryRow(txCtx, `SELECT EXISTS(SELECT 1 FROM runtime_context_recoveries WHERE run_id=$1 AND model_step=$2)`, runID, step).Scan(&rejected); e != nil {
+			return e
+		}
+		if rejected {
+			return domain.ErrReplayConflict
+		}
+		tag, e := conn.Exec(txCtx, `INSERT INTO runtime_model_calls(run_id,step,request_hash,response) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, runID, step, hash, b)
 		if e != nil {
 			return e
 		}
-		if old != hash {
-			return domain.ErrReplayConflict
+		if tag.RowsAffected() == 0 {
+			var old string
+			if e = conn.QueryRow(txCtx, `SELECT request_hash FROM runtime_model_calls WHERE run_id=$1 AND step=$2`, runID, step).Scan(&old); e != nil {
+				return e
+			}
+			if old != hash {
+				return domain.ErrReplayConflict
+			}
 		}
-	}
-	return tx.Commit(ctx)
+		return nil
+	})
 }
 
 // RecordToolIntent records a tool call intent and returns any previously committed result.
 func (r *Repository) RecordToolIntent(ctx context.Context, l *domain.Lease, runID, id, name, hash string) ([]byte, error) {
-	tx, e := r.pool.Begin(ctx)
-	if e != nil {
-		return nil, e
-	}
-	defer tx.Rollback(ctx)
-	if e = CheckLeaseTx(ctx, tx, l); e != nil {
-		return nil, e
-	}
-	tag, e := tx.Exec(ctx, `INSERT INTO runtime_tool_calls(run_id,call_id,name,request_hash) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, runID, id, name, hash)
-	if e != nil {
-		return nil, e
-	}
-	if tag.RowsAffected() == 1 {
-		_, e = tx.Exec(ctx, `INSERT INTO runtime_public_events(agent_id,type,run_id,tool_name,status) VALUES($1,'tool.status',$2,$3,'running')`, l.AgentID, runID, strings.TrimPrefix(name, "native:"))
-		if e != nil {
-			return nil, e
-		}
-	}
-	var old, oldName string
 	var b []byte
-	e = tx.QueryRow(ctx, `SELECT request_hash,name,result FROM runtime_tool_calls WHERE run_id=$1 AND call_id=$2`, runID, id).Scan(&old, &oldName, &b)
-	if e != nil {
-		return nil, e
-	}
-	if old != hash || name != oldName {
-		return nil, fmt.Errorf("%w: tool intent changed", domain.ErrReplayConflict)
-	}
-	if e = tx.Commit(ctx); e != nil {
-		return nil, e
+	err := r.WithinTx(ctx, func(txCtx context.Context) error {
+		if e := r.CheckLeaseForUpdate(txCtx, l); e != nil {
+			return e
+		}
+		conn := r.db.Conn(txCtx)
+		tag, e := conn.Exec(txCtx, `INSERT INTO runtime_tool_calls(run_id,call_id,name,request_hash) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, runID, id, name, hash)
+		if e != nil {
+			return e
+		}
+		if tag.RowsAffected() == 1 {
+			if _, e = conn.Exec(txCtx, `INSERT INTO runtime_public_events(agent_id,type,run_id,tool_name,status) VALUES($1,'tool.status',$2,$3,'running')`, l.AgentID, runID, strings.TrimPrefix(name, "native:")); e != nil {
+				return e
+			}
+		}
+		var old, oldName string
+		if e = conn.QueryRow(txCtx, `SELECT request_hash,name,result FROM runtime_tool_calls WHERE run_id=$1 AND call_id=$2`, runID, id).Scan(&old, &oldName, &b); e != nil {
+			return e
+		}
+		if old != hash || name != oldName {
+			return fmt.Errorf("%w: tool intent changed", domain.ErrReplayConflict)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return b, nil
 }
 
 // RecordToolResult commits the result of a tool call under the active worker lease fence.
 func (r *Repository) RecordToolResult(ctx context.Context, l *domain.Lease, runID, id string, b []byte) error {
-	tx, e := r.pool.Begin(ctx)
-	if e != nil {
-		return e
-	}
-	defer tx.Rollback(ctx)
-	if e = CheckLeaseTx(ctx, tx, l); e != nil {
-		return e
-	}
-	tag, e := tx.Exec(ctx, `UPDATE runtime_tool_calls SET result=$3 WHERE run_id=$1 AND call_id=$2 AND result IS NULL`, runID, id, b)
-	if e != nil {
-		return e
-	}
-	if tag.RowsAffected() == 1 {
-		_, e = tx.Exec(ctx, `INSERT INTO runtime_public_events(agent_id,type,run_id,tool_name,status) SELECT $1,'tool.status',run_id,regexp_replace(name,'^native:',''),'completed' FROM runtime_tool_calls WHERE run_id=$2 AND call_id=$3`, l.AgentID, runID, id)
+	return r.WithinTx(ctx, func(txCtx context.Context) error {
+		if e := r.CheckLeaseForUpdate(txCtx, l); e != nil {
+			return e
+		}
+		conn := r.db.Conn(txCtx)
+		tag, e := conn.Exec(txCtx, `UPDATE runtime_tool_calls SET result=$3 WHERE run_id=$1 AND call_id=$2 AND result IS NULL`, runID, id, b)
 		if e != nil {
 			return e
 		}
-	}
-	return tx.Commit(ctx)
+		if tag.RowsAffected() == 1 {
+			if _, e = conn.Exec(txCtx, `INSERT INTO runtime_public_events(agent_id,type,run_id,tool_name,status) SELECT $1,'tool.status',run_id,regexp_replace(name,'^native:',''),'completed' FROM runtime_tool_calls WHERE run_id=$2 AND call_id=$3`, l.AgentID, runID, id); e != nil {
+				return e
+			}
+		}
+		return nil
+	})
 }
 
 // ListModelCallResponses returns all recorded model call responses for runID ordered by step.
@@ -685,37 +649,34 @@ func (r *Repository) SaveContextRecovery(
 	decision []byte,
 	checkConflict func(oldProfile, oldHash string, oldMode bool, oldCode string, oldVersion int, oldDecision []byte) error,
 ) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	if err = CheckLeaseTx(ctx, tx, lease); err != nil {
-		return err
-	}
-	var success bool
-	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM runtime_model_calls WHERE run_id=$1 AND step=$2)`, runID, step).Scan(&success); err != nil {
-		return err
-	}
-	if success {
-		return domain.ErrReplayConflict
-	}
-	tag, err := tx.Exec(ctx, `INSERT INTO runtime_context_recoveries(run_id,model_step,context_profile,request_hash,streaming,error_code,decision_version,decision_json) VALUES($1,$2,$3,$4,$5,$6,1,$7) ON CONFLICT DO NOTHING`, runID, step, profile, hash, streaming, code, decision)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		var oldProfile, oldHash, oldCode string
-		var oldMode bool
-		var oldVersion int
-		var oldDecision []byte
-		err = tx.QueryRow(ctx, `SELECT context_profile,request_hash,streaming,error_code,decision_version,decision_json FROM runtime_context_recoveries WHERE run_id=$1 AND model_step=$2`, runID, step).Scan(&oldProfile, &oldHash, &oldMode, &oldCode, &oldVersion, &oldDecision)
+	return r.WithinTx(ctx, func(txCtx context.Context) error {
+		if err := r.CheckLeaseForUpdate(txCtx, lease); err != nil {
+			return err
+		}
+		conn := r.db.Conn(txCtx)
+		var success bool
+		if err := conn.QueryRow(txCtx, `SELECT EXISTS(SELECT 1 FROM runtime_model_calls WHERE run_id=$1 AND step=$2)`, runID, step).Scan(&success); err != nil {
+			return err
+		}
+		if success {
+			return domain.ErrReplayConflict
+		}
+		tag, err := conn.Exec(txCtx, `INSERT INTO runtime_context_recoveries(run_id,model_step,context_profile,request_hash,streaming,error_code,decision_version,decision_json) VALUES($1,$2,$3,$4,$5,$6,1,$7) ON CONFLICT DO NOTHING`, runID, step, profile, hash, streaming, code, decision)
 		if err != nil {
 			return err
 		}
-		if err = checkConflict(oldProfile, oldHash, oldMode, oldCode, oldVersion, oldDecision); err != nil {
-			return err
+		if tag.RowsAffected() == 0 {
+			var oldProfile, oldHash, oldCode string
+			var oldMode bool
+			var oldVersion int
+			var oldDecision []byte
+			if err = conn.QueryRow(txCtx, `SELECT context_profile,request_hash,streaming,error_code,decision_version,decision_json FROM runtime_context_recoveries WHERE run_id=$1 AND model_step=$2`, runID, step).Scan(&oldProfile, &oldHash, &oldMode, &oldCode, &oldVersion, &oldDecision); err != nil {
+				return err
+			}
+			if err = checkConflict(oldProfile, oldHash, oldMode, oldCode, oldVersion, oldDecision); err != nil {
+				return err
+			}
 		}
-	}
-	return tx.Commit(ctx)
+		return nil
+	})
 }

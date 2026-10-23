@@ -298,6 +298,7 @@ func (a *Adapter) WriteSingleProfile(w http.ResponseWriter, r *http.Request, ag 
 }
 
 type controlResponder struct {
+	httpx.Responder
 	adapter *Adapter
 }
 

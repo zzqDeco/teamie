@@ -2,10 +2,19 @@
 
 package identity
 
-import "net/http"
+import (
+	"context"
+	"net/http"
+
+	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/route"
+)
 
 // HTTPResponder abstracts stateless request binding and domain error serialization (implemented by httpx.Responder).
 type HTTPResponder interface {
+	WriteBindError(ctx context.Context, c *app.RequestContext, err error)
+	WriteDomainError(ctx context.Context, c *app.RequestContext, err error)
+	WriteOK(ctx context.Context, c *app.RequestContext, resp any)
 	DecodeRequest(w http.ResponseWriter, r *http.Request, dst any) error
 	WriteBindErrorHTTP(w http.ResponseWriter, r *http.Request, err error)
 	WriteDomainErrorHTTP(w http.ResponseWriter, r *http.Request, err error)
@@ -142,6 +151,192 @@ func RegisterIdentityHTTPServiceRoutes(mux *http.ServeMux, h IdentityHTTPService
 		panic("IdentityHTTPServiceRouteHandlers.ResetPassword (" + PatternResetPassword + ") is nil")
 	}
 	mux.HandleFunc(PatternResetPassword, h.ResetPassword)
+}
+
+// RegisterIdentityHTTPServiceHertzServer registers IdentityHTTPServer endpoints on a native Hertz route.RouterGroup.
+func RegisterIdentityHTTPServiceHertzServer(r *route.RouterGroup, srv IdentityHTTPServer, m HTTPResponder) {
+	r.GET("/api/v1/auth/registration", func(ctx context.Context, c *app.RequestContext) {
+		var req GetRegistrationMetadataReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.GetRegistrationMetadata(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.POST("/api/v1/auth/register", func(ctx context.Context, c *app.RequestContext) {
+		var req RegisterReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.Register(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.POST("/api/v1/auth/login", func(ctx context.Context, c *app.RequestContext) {
+		var req LoginReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.Login(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.GET("/api/v1/auth/session", func(ctx context.Context, c *app.RequestContext) {
+		var req GetSessionReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.GetSession(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.POST("/api/v1/auth/logout", func(ctx context.Context, c *app.RequestContext) {
+		var req LogoutReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.Logout(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.POST("/api/v1/auth/password", func(ctx context.Context, c *app.RequestContext) {
+		var req ChangePasswordReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.ChangePassword(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.PATCH("/api/v1/auth/profile", func(ctx context.Context, c *app.RequestContext) {
+		var req UpdateProfileReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.UpdateProfile(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.GET("/api/v1/auth/admin/invites", func(ctx context.Context, c *app.RequestContext) {
+		var req ListInvitesReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.ListInvites(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.POST("/api/v1/auth/admin/invites", func(ctx context.Context, c *app.RequestContext) {
+		var req CreateInviteReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.CreateInvite(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.DELETE("/api/v1/auth/admin/invites/:id", func(ctx context.Context, c *app.RequestContext) {
+		var req RevokeInviteReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.RevokeInvite(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.GET("/api/v1/auth/admin/users", func(ctx context.Context, c *app.RequestContext) {
+		var req ListAdminUsersReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.ListAdminUsers(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.POST("/api/v1/auth/admin/users/:id/password-reset-links", func(ctx context.Context, c *app.RequestContext) {
+		var req CreatePasswordResetLinkReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.CreatePasswordResetLink(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.POST("/api/v1/auth/password-reset/inspect", func(ctx context.Context, c *app.RequestContext) {
+		var req InspectPasswordResetReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.InspectPasswordReset(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.POST("/api/v1/auth/password-reset", func(ctx context.Context, c *app.RequestContext) {
+		var req ResetPasswordReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.ResetPassword(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
 }
 
 // RegisterIdentityHTTPServer binds IdentityHTTPServer methods using HTTPResponder with optional per-route handler overrides.
@@ -290,6 +485,10 @@ func RegisterIdentityHTTPServer(mux *http.ServeMux, srv IdentityHTTPServer, m HT
 	if h.CreateInvite == nil {
 		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req CreateInviteReq
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
+			}
 			resp, err := srv.CreateInvite(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
@@ -346,6 +545,10 @@ func RegisterIdentityHTTPServer(mux *http.ServeMux, srv IdentityHTTPServer, m HT
 	if h.CreatePasswordResetLink == nil {
 		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req CreatePasswordResetLinkReq
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
+			}
 			req.ID = r.PathValue("id")
 			resp, err := srv.CreatePasswordResetLink(r.Context(), &req)
 			if err != nil {

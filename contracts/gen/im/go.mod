@@ -4,6 +4,7 @@ go 1.27.2
 
 require (
 	github.com/cloudwego/gopkg v0.2.1
+	github.com/cloudwego/hertz v0.10.6
 	github.com/cloudwego/kitex v0.16.4
 )
 
@@ -21,6 +22,7 @@ require (
 	github.com/cloudwego/runtimex v0.1.2 // indirect
 	github.com/cloudwego/thriftgo v0.4.5 // indirect
 	github.com/fatih/structtag v1.2.0 // indirect
+	github.com/fsnotify/fsnotify v1.5.4 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/pprof v0.0.0-20240727154555-813a5fbdbec8 // indirect
 	github.com/iancoleman/strcase v0.2.0 // indirect

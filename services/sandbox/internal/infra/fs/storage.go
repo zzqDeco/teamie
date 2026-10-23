@@ -74,6 +74,42 @@ func (Storage) AtomicBinaryImport(root *os.Root, name string, content []byte) er
 	return AtomicBinaryImport(root, name, content)
 }
 
+func (Storage) AcquireSupervisorLock(path string) (*os.File, error) {
+	lock, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, err
+	}
+	if err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		lock.Close()
+		return nil, errors.New("another sandbox supervisor owns this state")
+	}
+	return lock, nil
+}
+
+func (Storage) ReleaseSupervisorLock(f *os.File) {
+	if f != nil {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
+	}
+}
+
+func (Storage) DiskAvailable(p string) bool {
+	var stat syscall.Statfs_t
+	return syscall.Statfs(p, &stat) == nil && stat.Bavail > 0 && uint64(stat.Bavail)*uint64(stat.Bsize) >= 2*1024*1024*1024
+}
+
+func (Storage) OpenNonblock(root *os.Root, name string) (*os.File, error) {
+	return root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+}
+
+func (Storage) OpenNonblockNoFollow(root *os.Root, name string) (*os.File, error) {
+	return root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
+}
+
+func (Storage) OpenNoFollowFile(p string, flag int, perm os.FileMode) (*os.File, error) {
+	return os.OpenFile(p, flag|syscall.O_NOFOLLOW, perm)
+}
+
 // WriteAtomicJSON writes r as JSON to a temporary file in filepath.Dir(target),
 // fsyncs the file, renames it over target, and fsyncs the parent directory.
 func WriteAtomicJSON(target string, r any) error {

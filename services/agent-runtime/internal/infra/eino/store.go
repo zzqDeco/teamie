@@ -23,7 +23,10 @@ import (
 var ErrLeaseLost = domain.ErrLeaseLost
 var ErrReplayConflict = domain.ErrReplayConflict
 
-type Store struct{ DB *pg.Repository }
+type Store struct {
+	DB          *pg.Repository
+	Coordinator func(im domain.IMGateway) domain.ScheduleCoordinator
+}
 type Lease = domain.Lease
 type Input struct {
 	EventID        string           `json:"eventId"`
@@ -259,16 +262,15 @@ func (s *Store) Repo() *pg.Repository {
 	return s.DB
 }
 
-func (s *Store) Policy(im domain.IMGateway) *domain.PolicyEngine {
-	repo := s.Repo()
-	return &domain.PolicyEngine{
-		Tx:           repo,
-		Sessions:     repo,
-		Schedules:    repo,
-		Archive:      repo,
-		ToolReceipts: repo,
-		IM:           im,
+func (s *Store) ScheduleCoordinator(im domain.IMGateway) domain.ScheduleCoordinator {
+	if s != nil && s.Coordinator != nil {
+		return s.Coordinator(im)
 	}
+	repo := s.Repo()
+	if domain.DefaultScheduleCoordinator != nil {
+		return domain.DefaultScheduleCoordinator(repo, repo, repo, repo, repo, im)
+	}
+	return nil
 }
 
 func Open(ctx context.Context, url string) (*Store, error) {

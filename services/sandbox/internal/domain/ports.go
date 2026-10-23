@@ -41,6 +41,12 @@ type WorkspaceStorage interface {
 	WorkspaceWithinQuota(workspace string) bool
 	BinaryHash(root *os.Root, name string) (string, error)
 	AtomicBinaryImport(root *os.Root, name string, content []byte) error
+	AcquireSupervisorLock(path string) (*os.File, error)
+	ReleaseSupervisorLock(f *os.File)
+	DiskAvailable(path string) bool
+	OpenNonblock(root *os.Root, name string) (*os.File, error)
+	OpenNonblockNoFollow(root *os.Root, name string) (*os.File, error)
+	OpenNoFollowFile(path string, flag int, perm os.FileMode) (*os.File, error)
 }
 
 // DefaultWorkspaceStorage is populated by infra/fs at initialization.

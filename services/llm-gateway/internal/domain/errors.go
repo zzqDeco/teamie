@@ -12,16 +12,19 @@ import (
 )
 
 // Error represents a domain or upstream boundary violation with a canonical
-// HTTP status code and machine-readable error code.
+// HTTP status code, machine-readable error code, diagnostic stage/reason, and internal cause.
 type Error struct {
-	Status        int
-	Code, Message string
-	Cause         error
+	Status                int
+	Code, Stage, Reason   string
+	Message               string
+	Cause                 error
 }
 
 func (e *Error) Error() string             { return e.Code }
 func (e *Error) StatusCode() int           { return e.Status }
 func (e *Error) ErrorCode() string         { return e.Code }
+func (e *Error) DiagnosticStage() string   { return e.Stage }
+func (e *Error) DiagnosticReason() string  { return e.Reason }
 func (e *Error) SafeMessage() string       { return e.Message }
 func (e *Error) DiagnosticMessage() string { return e.Code + ": " + e.Message }
 func (e *Error) Unwrap() error             { return e.Cause }

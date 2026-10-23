@@ -14,11 +14,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/adaptor"
 
-	rpcx "teamie/services/llm-gateway/internal/infra/rpcclient"
+	gatewaygen "teamie/contracts/gen/agent/hertz_gen/agent/gateway"
 	"teamie/contracts/gen/agent/kitex_gen/agent"
+	httpAdapter "teamie/services/llm-gateway/internal/adapter/http"
+	rpcx "teamie/services/llm-gateway/internal/infra/rpcclient"
 )
 
 const delta = `{"id":"fixture","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant","content":"one"},"finish_reason":null}]}`
@@ -236,5 +239,53 @@ func TestHertzStreamAdapterFlushAndDisconnectCancellation(t *testing.T) {
 	case <-upstreamCanceled:
 	case <-time.After(2 * time.Second):
 		t.Fatal("Hertz disconnect did not cancel provider context")
+	}
+}
+
+func TestHertzNativeSSEWriterStreamChat(t *testing.T) {
+	s, dummy := streamFixtureService(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintf(w, "data: %s\n\n", delta)
+		fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", finalDelta)
+	})
+	dummy.Close()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := server.New(server.WithListener(listener))
+	adapter := httpAdapter.New(s.App)
+	h.POST("/internal/v1/chat/stream", func(ctx context.Context, c *app.RequestContext) {
+		var req gatewaygen.ChatCallReq
+		if err := json.Unmarshal(c.Request.Body(), &req); err != nil {
+			c.Status(http.StatusBadRequest)
+			return
+		}
+		if err := adapter.StreamChatSSE(ctx, c, &req); err != nil {
+			c.Status(http.StatusBadRequest)
+		}
+	})
+	stopped := make(chan struct{})
+	go func() { defer close(stopped); _ = h.Run() }()
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = h.Shutdown(ctx)
+		listener.Close()
+		<-stopped
+	}()
+	req := streamRequest(t, context.Background(), "http://"+listener.Addr().String(), "sse-writer")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "event: chunk") || !strings.Contains(string(body), "event: done") {
+		t.Fatalf("expected Hertz sse.NewWriter events, got %s", string(body))
 	}
 }

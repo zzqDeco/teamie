@@ -13,10 +13,16 @@ layouts:
       import (
       	"context"
       	"net/http"
+
+      	"github.com/cloudwego/hertz/pkg/app"
+      	"github.com/cloudwego/hertz/pkg/route"
       )
 
-      // HTTPResponder abstracts request binding and domain error serialization (implemented by httpx.Responder).
+      // HTTPResponder abstracts stateless request binding and domain error serialization (implemented by httpx.Responder).
       type HTTPResponder interface {
+      	WriteBindError(ctx context.Context, c *app.RequestContext, err error)
+      	WriteDomainError(ctx context.Context, c *app.RequestContext, err error)
+      	WriteOK(ctx context.Context, c *app.RequestContext, resp any)
       	DecodeRequest(w http.ResponseWriter, r *http.Request, dst any) error
       	WriteBindErrorHTTP(w http.ResponseWriter, r *http.Request, err error)
       	WriteDomainErrorHTTP(w http.ResponseWriter, r *http.Request, err error)

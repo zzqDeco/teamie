@@ -2,10 +2,19 @@
 
 package chat
 
-import "net/http"
+import (
+	"context"
+	"net/http"
+
+	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/route"
+)
 
 // HTTPResponder abstracts stateless request binding and domain error serialization (implemented by httpx.Responder).
 type HTTPResponder interface {
+	WriteBindError(ctx context.Context, c *app.RequestContext, err error)
+	WriteDomainError(ctx context.Context, c *app.RequestContext, err error)
+	WriteOK(ctx context.Context, c *app.RequestContext, resp any)
 	DecodeRequest(w http.ResponseWriter, r *http.Request, dst any) error
 	WriteBindErrorHTTP(w http.ResponseWriter, r *http.Request, err error)
 	WriteDomainErrorHTTP(w http.ResponseWriter, r *http.Request, err error)
@@ -212,6 +221,322 @@ func RegisterChatHTTPServiceRoutes(mux *http.ServeMux, h ChatHTTPServiceRouteHan
 		panic("ChatHTTPServiceRouteHandlers.DownloadAttachment (" + PatternDownloadAttachment + ") is nil")
 	}
 	mux.HandleFunc(PatternDownloadAttachment, h.DownloadAttachment)
+}
+
+// RegisterChatHTTPServiceHertzServer registers ChatHTTPServer endpoints on a native Hertz route.RouterGroup.
+func RegisterChatHTTPServiceHertzServer(r *route.RouterGroup, srv ChatHTTPServer, m HTTPResponder) {
+	r.GET("/api/v1/bootstrap", func(ctx context.Context, c *app.RequestContext) {
+		var req GetBootstrapReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.GetBootstrap(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.POST("/api/v1/workspaces", func(ctx context.Context, c *app.RequestContext) {
+		var req CreateWorkspaceReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.CreateWorkspace(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.GET("/api/v1/workspaces/:id/members", func(ctx context.Context, c *app.RequestContext) {
+		var req ListWorkspaceMembersReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.ListWorkspaceMembers(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.POST("/api/v1/workspaces/:id/invites", func(ctx context.Context, c *app.RequestContext) {
+		var req CreateWorkspaceInviteReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.CreateWorkspaceInvite(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.GET("/api/v1/invites/:code", func(ctx context.Context, c *app.RequestContext) {
+		var req GetInviteReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.GetInvite(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.POST("/api/v1/invites/:code/accept", func(ctx context.Context, c *app.RequestContext) {
+		var req AcceptInviteReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.AcceptInvite(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.DELETE("/api/v1/workspaces/:id/members/:userId", func(ctx context.Context, c *app.RequestContext) {
+		var req RemoveWorkspaceMemberReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.RemoveWorkspaceMember(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.GET("/api/v1/workspaces/:id/conversations", func(ctx context.Context, c *app.RequestContext) {
+		var req ListConversationsReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.ListConversations(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.POST("/api/v1/workspaces/:id/conversations", func(ctx context.Context, c *app.RequestContext) {
+		var req CreateConversationReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.CreateConversation(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.POST("/api/v1/conversations/:id/members", func(ctx context.Context, c *app.RequestContext) {
+		var req AddConversationMemberReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.AddConversationMember(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.DELETE("/api/v1/conversations/:id/members/:userId", func(ctx context.Context, c *app.RequestContext) {
+		var req RemoveConversationMemberReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.RemoveConversationMember(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.GET("/api/v1/conversations/:id/messages", func(ctx context.Context, c *app.RequestContext) {
+		var req ListMessagesReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.ListMessages(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.GET("/api/v1/conversations/:id/messages/:messageId", func(ctx context.Context, c *app.RequestContext) {
+		var req GetMessageReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.GetMessage(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.POST("/api/v1/conversations/:id/messages", func(ctx context.Context, c *app.RequestContext) {
+		var req SendMessageReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.SendMessage(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.PATCH("/api/v1/conversations/:id/messages/:messageId", func(ctx context.Context, c *app.RequestContext) {
+		var req EditMessageReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.EditMessage(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.DELETE("/api/v1/conversations/:id/messages/:messageId", func(ctx context.Context, c *app.RequestContext) {
+		var req RetractMessageReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.RetractMessage(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.POST("/api/v1/conversations/:id/read", func(ctx context.Context, c *app.RequestContext) {
+		var req MarkReadReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.MarkRead(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.GET("/api/v1/workspaces/:id/messages/search", func(ctx context.Context, c *app.RequestContext) {
+		var req SearchWorkspaceMessagesReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.SearchWorkspaceMessages(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.GET("/api/v1/attention", func(ctx context.Context, c *app.RequestContext) {
+		var req GetAttentionReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.GetAttention(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.GET("/api/v1/sync", func(ctx context.Context, c *app.RequestContext) {
+		var req SyncReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.Sync(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.POST("/api/v1/conversations/:id/attachments", func(ctx context.Context, c *app.RequestContext) {
+		var req UploadAttachmentReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.UploadAttachment(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.GET("/api/v1/conversations/:id/attachment-uploads/:uploadKey", func(ctx context.Context, c *app.RequestContext) {
+		var req GetAttachmentUploadReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.GetAttachmentUpload(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.DELETE("/api/v1/conversations/:id/attachments/:attachmentId", func(ctx context.Context, c *app.RequestContext) {
+		var req DeletePendingAttachmentReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.DeletePendingAttachment(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.GET("/api/v1/conversations/:id/attachments/:attachmentId/content", func(ctx context.Context, c *app.RequestContext) {
+		var req DownloadAttachmentReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.DownloadAttachment(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
 }
 
 // RegisterChatHTTPServer binds ChatHTTPServer methods using HTTPResponder with optional per-route handler overrides.

@@ -28,6 +28,24 @@ var (
 	ErrOutputExpired    = errors.New("output_expired")
 )
 
+// Error represents a coded sandbox domain error with a safe code, diagnostic stage/reason, and internal cause.
+type Error struct {
+	Status  int
+	Code    string
+	Stage   string
+	Reason  string
+	Message string
+	Cause   error
+}
+
+func (e *Error) Error() string             { return e.Message }
+func (e *Error) StatusCode() int           { return e.Status }
+func (e *Error) ErrorCode() string         { return e.Code }
+func (e *Error) DiagnosticStage() string   { return e.Stage }
+func (e *Error) DiagnosticReason() string  { return e.Reason }
+func (e *Error) DiagnosticMessage() string { return e.Code + ": " + e.Message }
+func (e *Error) Unwrap() error             { return e.Cause }
+
 // ValidRunnerImage validates that image is an immutable platform runner image digest.
 func ValidRunnerImage(image string) bool {
 	if !imagePattern.MatchString(image) {

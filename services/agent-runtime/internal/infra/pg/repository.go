@@ -45,22 +45,17 @@ func IsRetryableError(err error) bool {
 
 // Repository implements the domain persistence ports against PostgreSQL.
 type Repository struct {
-	db   *postgres.DB
-	pool *pgxpool.Pool
+	db *postgres.DB
 }
 
 // New constructs a Repository backed by a context-aware postgres.DB handle.
 func New(db *postgres.DB) *Repository {
-	var pool *pgxpool.Pool
-	if db != nil {
-		pool = db.Pool()
-	}
-	return &Repository{db: db, pool: pool}
+	return &Repository{db: db}
 }
 
 // NewFromPool constructs a Repository backed by a pgxpool.Pool.
 func NewFromPool(pool *pgxpool.Pool) *Repository {
-	return &Repository{db: postgres.New(pool), pool: pool}
+	return &Repository{db: postgres.New(pool)}
 }
 
 var (
@@ -104,26 +99,8 @@ func (r *Repository) QueryRow(ctx context.Context, sql string, args ...any) pgx.
 	return r.db.QueryRow(ctx, sql, args...)
 }
 
-// Begin starts a raw pgx transaction on the underlying pool.
-func (r *Repository) Begin(ctx context.Context) (pgx.Tx, error) {
-	return r.pool.Begin(ctx)
-}
-
-// CheckLeaseTx locks the agent row FOR UPDATE on tx and verifies the active lease fence.
-func CheckLeaseTx(ctx context.Context, tx pgx.Tx, l *domain.Lease) error {
-	var ok bool
-	err := tx.QueryRow(ctx, `SELECT lease_owner=$2 AND fence=$3 AND lease_until>now() FROM runtime_agents WHERE agent_id=$1 FOR UPDATE`, l.AgentID, l.Owner, l.Fence).Scan(&ok)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return domain.ErrLeaseLost
-	}
-	return nil
-}
-
-// AcceptSessionAttemptTx records accepted session attempts for runID on tx.
-func AcceptSessionAttemptTx(ctx context.Context, tx pgx.Tx, agentID, runID string) error {
-	_, err := tx.Exec(ctx, `INSERT INTO runtime_session_acceptances(agent_id,attempt_id,run_id) SELECT $1,unnest(array_append(context_attempts,attempt_id)),id FROM runtime_runs WHERE id=$2 ON CONFLICT DO NOTHING`, agentID, runID)
+// acceptSessionAttempt records accepted session attempts for runID on the active transaction in ctx.
+func (r *Repository) acceptSessionAttempt(ctx context.Context, agentID, runID string) error {
+	_, err := r.db.Conn(ctx).Exec(ctx, `INSERT INTO runtime_session_acceptances(agent_id,attempt_id,run_id) SELECT $1,unnest(array_append(context_attempts,attempt_id)),id FROM runtime_runs WHERE id=$2 ON CONFLICT DO NOTHING`, agentID, runID)
 	return err
 }

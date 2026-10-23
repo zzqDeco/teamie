@@ -76,6 +76,7 @@ func main() {
 		Engine:       runtimeEngine,
 		ControlToken: cfg.ControlToken,
 	}
+	store.Coordinator = appSvc.WithIM
 
 	rpcAddr, err := net.ResolveTCPAddr("tcp", httpx.Env("RPC_ADDR", ":8885"))
 	if err != nil {

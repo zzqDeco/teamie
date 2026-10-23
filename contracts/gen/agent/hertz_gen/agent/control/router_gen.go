@@ -2,10 +2,19 @@
 
 package control
 
-import "net/http"
+import (
+	"context"
+	"net/http"
+
+	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/route"
+)
 
 // HTTPResponder abstracts stateless request binding and domain error serialization (implemented by httpx.Responder).
 type HTTPResponder interface {
+	WriteBindError(ctx context.Context, c *app.RequestContext, err error)
+	WriteDomainError(ctx context.Context, c *app.RequestContext, err error)
+	WriteOK(ctx context.Context, c *app.RequestContext, resp any)
 	DecodeRequest(w http.ResponseWriter, r *http.Request, dst any) error
 	WriteBindErrorHTTP(w http.ResponseWriter, r *http.Request, err error)
 	WriteDomainErrorHTTP(w http.ResponseWriter, r *http.Request, err error)
@@ -86,6 +95,88 @@ func RegisterAgentControlHTTPServiceRoutes(mux *http.ServeMux, h AgentControlHTT
 		panic("AgentControlHTTPServiceRouteHandlers.ListWorkspaceAgents (" + PatternListWorkspaceAgents + ") is nil")
 	}
 	mux.HandleFunc(PatternListWorkspaceAgents, h.ListWorkspaceAgents)
+}
+
+// RegisterAgentControlHTTPServiceHertzServer registers AgentControlHTTPServer endpoints on a native Hertz route.RouterGroup.
+func RegisterAgentControlHTTPServiceHertzServer(r *route.RouterGroup, srv AgentControlHTTPServer, m HTTPResponder) {
+	r.GET("/api/v1/agents", func(ctx context.Context, c *app.RequestContext) {
+		var req ListOwnedAgentsReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.ListOwnedAgents(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.POST("/api/v1/agents", func(ctx context.Context, c *app.RequestContext) {
+		var req CreateAgentReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.CreateAgent(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.GET("/api/v1/agents/:id", func(ctx context.Context, c *app.RequestContext) {
+		var req GetAgentProfileReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.GetAgentProfile(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.PATCH("/api/v1/agents/:id", func(ctx context.Context, c *app.RequestContext) {
+		var req UpdateAgentReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.UpdateAgent(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.DELETE("/api/v1/agents/:id", func(ctx context.Context, c *app.RequestContext) {
+		var req DeleteAgentReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.DeleteAgent(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.GET("/api/v1/workspaces/:id/agents", func(ctx context.Context, c *app.RequestContext) {
+		var req ListWorkspaceAgentsReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.ListWorkspaceAgents(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
 }
 
 // RegisterAgentControlHTTPServer binds AgentControlHTTPServer methods using HTTPResponder with optional per-route handler overrides.

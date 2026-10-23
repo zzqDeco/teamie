@@ -2,10 +2,19 @@
 
 package realtime
 
-import "net/http"
+import (
+	"context"
+	"net/http"
+
+	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/route"
+)
 
 // HTTPResponder abstracts stateless request binding and domain error serialization (implemented by httpx.Responder).
 type HTTPResponder interface {
+	WriteBindError(ctx context.Context, c *app.RequestContext, err error)
+	WriteDomainError(ctx context.Context, c *app.RequestContext, err error)
+	WriteOK(ctx context.Context, c *app.RequestContext, resp any)
 	DecodeRequest(w http.ResponseWriter, r *http.Request, dst any) error
 	WriteBindErrorHTTP(w http.ResponseWriter, r *http.Request, err error)
 	WriteDomainErrorHTTP(w http.ResponseWriter, r *http.Request, err error)
@@ -58,6 +67,36 @@ func RegisterRealtimeWSServiceRoutes(mux *http.ServeMux, h RealtimeWSServiceRout
 		panic("RealtimeWSServiceRouteHandlers.PublishTyping (" + PatternPublishTyping + ") is nil")
 	}
 	mux.HandleFunc(PatternPublishTyping, h.PublishTyping)
+}
+
+// RegisterRealtimeWSServiceHertzServer registers RealtimeWSServer endpoints on a native Hertz route.RouterGroup.
+func RegisterRealtimeWSServiceHertzServer(r *route.RouterGroup, srv RealtimeWSServer, m HTTPResponder) {
+	r.GET("/api/v1/ws", func(ctx context.Context, c *app.RequestContext) {
+		var req ConnectWSReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.ConnectWS(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
+	r.POST("/api/v1/conversations/:id/typing", func(ctx context.Context, c *app.RequestContext) {
+		var req PublishTypingReq
+		if err := c.BindAndValidate(&req); err != nil {
+			m.WriteBindError(ctx, c, err)
+			return
+		}
+		resp, err := srv.PublishTyping(ctx, &req)
+		if err != nil {
+			m.WriteDomainError(ctx, c, err)
+			return
+		}
+		m.WriteOK(ctx, c, resp)
+	})
 }
 
 // RegisterRealtimeWSServer binds RealtimeWSServer methods using HTTPResponder with optional per-route handler overrides.

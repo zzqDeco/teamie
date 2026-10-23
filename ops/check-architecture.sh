@@ -5,8 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
 # 1. Contract sync gate
-make gen
-git diff --exit-code -- contracts/ packages/api-client/src/generated.ts
+bash ops/codegen.sh --check
 
 # 2. Generated code purity gate: every .go file in contracts/gen/ must be tool-generated
 while IFS= read -r -d '' f; do
@@ -39,11 +38,11 @@ for svc in services/*; do
   fi
 done
 
-# 5. DDD app layer purity gate: services/*/internal/app/... must never import adapter, infra, hertz, kitex, pgx, eino, or contracts/gen
+# 5. DDD app layer purity gate: services/*/internal/app/... must never import adapter, infra, hertz, kitex, pgx, eino, contracts/gen, or syscall
 for svc in services/*; do
   if [[ -d "${svc}/internal/app" ]]; then
     app_imports="$(cd "${svc}" && go list -f '{{join .Imports "\n"}}' ./internal/app/...)"
-    if printf '%s\n' "${app_imports}" | grep -E '(internal/adapter|internal/infra|hertz|kitex|pgx|eino|contracts/gen)' >/dev/null; then
+    if printf '%s\n' "${app_imports}" | grep -E '(internal/adapter|internal/infra|hertz|kitex|pgx|eino|contracts/gen|^syscall$)' >/dev/null; then
       echo "DDD app layer purity violation in ${svc}/internal/app" >&2
       exit 1
     fi
@@ -57,12 +56,16 @@ if printf '%s\n' "${eino_imports}" | grep -E 'github\.com/jackc/pgx' >/dev/null;
   exit 1
 fi
 
-# 7. Unified PostgreSQL mechanism gate: every service with internal/infra/pg must import teamie/pkg/postgres
+# 7. Unified PostgreSQL mechanism gate: every service with internal/infra/pg must import teamie/pkg/postgres and never write manual Begin/Commit/Rollback/pg_advisory_xact_lock
 for svc in services/*; do
   if [[ -d "${svc}/internal/infra/pg" ]]; then
     pg_imports="$(cd "${svc}" && go list -f '{{join .Imports "\n"}}' ./internal/infra/pg/...)"
     if ! printf '%s\n' "${pg_imports}" | grep -Fx 'teamie/pkg/postgres' >/dev/null; then
       echo "infra/pg in ${svc} must use shared teamie/pkg/postgres mechanism" >&2
+      exit 1
+    fi
+    if grep -rnE '\.(Begin|Commit|Rollback)\(|pg_advisory_xact_lock' "${svc}/internal/infra/pg" >/dev/null; then
+      echo "infra/pg in ${svc} must use pkg/postgres WithinTx/Conn/AdvisoryXactLock instead of manual Begin/Commit/Rollback/pg_advisory_xact_lock" >&2
       exit 1
     fi
   fi

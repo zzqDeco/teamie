@@ -33,6 +33,9 @@ func Open(ctx context.Context, url string) (*PGStore, error) {
 	}
 	s := &PGStore{DB: db}
 	if err := db.WithinTx(ctx, func(txCtx context.Context) error {
+		if lockErr := db.AdvisoryXactLock(txCtx, 7463260102); lockErr != nil {
+			return lockErr
+		}
 		_, execErr := db.Conn(txCtx).Exec(txCtx, SchemaSQL)
 		return execErr
 	}); err != nil {

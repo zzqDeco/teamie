@@ -26,21 +26,34 @@ type Service struct {
 	ControlToken string
 }
 
-func (s *Service) policy() *domain.PolicyEngine {
+func init() {
+	domain.DefaultScheduleCoordinator = func(
+		tx domain.TxManager,
+		sessions domain.SessionRepository,
+		schedules domain.ScheduleRepository,
+		archive domain.ArchiveRepository,
+		receipts domain.ToolReceiptRepository,
+		im domain.IMGateway,
+	) domain.ScheduleCoordinator {
+		return &Service{
+			Tx:           tx,
+			Sessions:     sessions,
+			Schedules:    schedules,
+			Archive:      archive,
+			ToolReceipts: receipts,
+			IM:           im,
+		}
+	}
+}
+
+// WithIM returns a ScheduleCoordinator scoped to the given IMGateway.
+func (s *Service) WithIM(im domain.IMGateway) domain.ScheduleCoordinator {
 	if s == nil {
-		return &domain.PolicyEngine{}
+		return &Service{IM: im}
 	}
-	return &domain.PolicyEngine{
-		Tx:           s.Tx,
-		Sessions:     s.Sessions,
-		Schedules:    s.Schedules,
-		Archive:      s.Archive,
-		ToolReceipts: s.ToolReceipts,
-		IM:           s.IM,
-		Control:      s.Control,
-		Model:        s.Model,
-		Sandbox:      s.Sandbox,
-	}
+	cp := *s
+	cp.IM = im
+	return &cp
 }
 
 // Ready checks whether the runtime engine and its upstream dependencies are ready.

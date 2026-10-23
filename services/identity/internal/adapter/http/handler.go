@@ -94,6 +94,13 @@ func recordIssuedToken(ctx context.Context, token string) {
 	}
 }
 
+func issuedTokenFromContext(ctx context.Context) string {
+	if dst, ok := ctx.Value(issuedTokenSinkKey{}).(*string); ok && dst != nil {
+		return *dst
+	}
+	return ""
+}
+
 // Adapter implements the generated identitygen.IdentityHTTPService contract
 // and wires HTTP routes to the Identity application service.
 type Adapter struct {
@@ -211,6 +218,9 @@ func (a *Adapter) GetRegistrationMetadata(ctx context.Context, _ *identitygen.Ge
 }
 
 func (a *Adapter) Register(ctx context.Context, req *identitygen.RegisterReq) (*identitygen.SessionResp, error) {
+	if !a.Limiter.Allow(req.Email) {
+		return nil, domain.ErrRateLimited()
+	}
 	ss, token, err := a.App.Register(ctx, req.Email, req.Password, req.DisplayName, req.InviteCode)
 	if err != nil {
 		return nil, err
@@ -220,6 +230,9 @@ func (a *Adapter) Register(ctx context.Context, req *identitygen.RegisterReq) (*
 }
 
 func (a *Adapter) Login(ctx context.Context, req *identitygen.LoginReq) (*identitygen.SessionResp, error) {
+	if !a.Limiter.Allow(req.Email) {
+		return nil, domain.ErrRateLimited()
+	}
 	ss, token, err := a.App.Login(ctx, req.Email, req.Password)
 	if err != nil {
 		return nil, err
@@ -360,6 +373,9 @@ func (a *Adapter) CreatePasswordResetLink(ctx context.Context, req *identitygen.
 	if !ok {
 		return nil, domain.ErrUnauthenticatedSignIn()
 	}
+	if !a.Limiter.Allow("password-reset-issue:" + actor.Session.User.ID) {
+		return nil, domain.ErrRateLimited()
+	}
 	reset, token, err := a.App.CreatePasswordResetLink(ctx, actor.Session.User.ID, actor.Token, req.ID)
 	if err != nil {
 		return nil, err
@@ -375,6 +391,9 @@ func (a *Adapter) CreatePasswordResetLink(ctx context.Context, req *identitygen.
 }
 
 func (a *Adapter) InspectPasswordReset(ctx context.Context, req *identitygen.InspectPasswordResetReq) (*identitygen.PasswordResetInspectionResp, error) {
+	if !a.Limiter.Allow("password-reset:" + req.Token) {
+		return nil, domain.ErrRateLimited()
+	}
 	res, err := a.App.InspectPasswordReset(ctx, req.Token)
 	if err != nil {
 		return nil, err
@@ -390,6 +409,9 @@ func (a *Adapter) InspectPasswordReset(ctx context.Context, req *identitygen.Ins
 }
 
 func (a *Adapter) ResetPassword(ctx context.Context, req *identitygen.ResetPasswordReq) (*identitygen.EmptyResp, error) {
+	if !a.Limiter.Allow("password-reset:" + req.Token) {
+		return nil, domain.ErrRateLimited()
+	}
 	if err := a.App.ResetPassword(ctx, req.Token, req.NewPassword); err != nil {
 		return nil, err
 	}
@@ -423,26 +445,72 @@ func (a *Adapter) decodeStrictJSON(w http.ResponseWriter, r *http.Request, input
 
 type identityResponder struct {
 	httpx.Responder
+	adapter   *Adapter
 	withHuman func(fn func(w http.ResponseWriter, r *http.Request, ctx context.Context, s httpx.Session) error) http.HandlerFunc
 }
 
-func (identityResponder) WriteOKHTTP(w http.ResponseWriter, _ *http.Request, status int, resp any) {
+func (ir identityResponder) DecodeRequest(w http.ResponseWriter, r *http.Request, dst any) error {
+	switch dst.(type) {
+	case *identitygen.RegisterReq, *identitygen.LoginReq:
+		if err := httpx.CheckOrigin(r, ir.adapter.Origin); err != nil {
+			return err
+		}
+		return httpx.DecodeJSON(w, r, dst)
+	case *identitygen.CreateInviteReq:
+		actor, ok := actorFromContext(r.Context())
+		if !ok {
+			return domain.ErrUnauthenticatedSignIn()
+		}
+		if err := ir.adapter.App.RequireAdmin(r.Context(), actor.Session.User.ID); err != nil {
+			return err
+		}
+		return httpx.DecodeJSON(w, r, dst)
+	case *identitygen.CreatePasswordResetLinkReq:
+		actor, ok := actorFromContext(r.Context())
+		if !ok {
+			return domain.ErrUnauthenticatedSignIn()
+		}
+		if err := ir.adapter.App.RequireAdmin(r.Context(), actor.Session.User.ID); err != nil {
+			return err
+		}
+		return ir.adapter.decodeStrictJSON(w, r, &struct{}{})
+	case *identitygen.InspectPasswordResetReq, *identitygen.ResetPasswordReq:
+		return ir.adapter.decodeStrictJSON(w, r, dst)
+	default:
+		return httpx.DecodeJSON(w, r, dst)
+	}
+}
+
+func (ir identityResponder) WriteOKHTTP(w http.ResponseWriter, r *http.Request, status int, resp any) {
+	if token := issuedTokenFromContext(r.Context()); token != "" {
+		if sessResp, ok := resp.(*identitygen.SessionResp); ok && sessResp != nil {
+			observability.AnnotateHTTP(w, zap.String("user.id", sessResp.GetUser().GetID()))
+		}
+		ir.adapter.setCookie(w, token, 7*86400)
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	httpx.WriteJSON(w, status, resp)
 }
 
 func (ir identityResponder) WrapRoute(route identitygen.RouteSpec, next http.HandlerFunc) http.HandlerFunc {
-	if route.Name == "GetRegistrationMetadata" {
+	switch route.Name {
+	case "GetRegistrationMetadata", "InspectPasswordReset", "ResetPassword":
 		return func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Cache-Control", "no-store")
 			next(w, r)
 		}
+	case "Register", "Login":
+		return func(w http.ResponseWriter, r *http.Request) {
+			var token string
+			next(w, r.WithContext(withIssuedTokenSink(r.Context(), &token)))
+		}
+	default:
+		return ir.withHuman(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ httpx.Session) error {
+			w.Header().Set("Cache-Control", "no-store")
+			next(w, r.WithContext(ctx))
+			return nil
+		})
 	}
-	return ir.withHuman(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ httpx.Session) error {
-		w.Header().Set("Cache-Control", "no-store")
-		next(w, r.WithContext(ctx))
-		return nil
-	})
 }
 
 // Routes mounts all Identity HTTP endpoints onto an http.ServeMux using the
@@ -470,125 +538,7 @@ func (a *Adapter) Routes() http.Handler {
 		})
 	}
 
-	identitygen.RegisterIdentityHTTPServer(m, a, identityResponder{withHuman: withHuman}, identitygen.IdentityHTTPServiceRouteHandlers{
-		Register: func(w http.ResponseWriter, r *http.Request) {
-			if err := httpx.CheckOrigin(r, a.Origin); err != nil {
-				httpx.WriteError(w, err)
-				return
-			}
-			var req identitygen.RegisterReq
-			if err := httpx.DecodeJSON(w, r, &req); err != nil {
-				httpx.WriteError(w, err)
-				return
-			}
-			if !a.Limiter.Allow(req.Email) {
-				httpx.WriteError(w, domain.ErrRateLimited())
-				return
-			}
-			var token string
-			resp, err := a.Register(withIssuedTokenSink(r.Context(), &token), &req)
-			if err != nil {
-				httpx.WriteError(w, err)
-				return
-			}
-			observability.AnnotateHTTP(w, zap.String("user.id", resp.GetUser().GetID()))
-			a.setCookie(w, token, 7*86400)
-			w.Header().Set("Cache-Control", "no-store")
-			httpx.WriteJSON(w, http.StatusCreated, resp)
-		},
-		Login: func(w http.ResponseWriter, r *http.Request) {
-			if err := httpx.CheckOrigin(r, a.Origin); err != nil {
-				httpx.WriteError(w, err)
-				return
-			}
-			var req identitygen.LoginReq
-			if err := httpx.DecodeJSON(w, r, &req); err != nil {
-				httpx.WriteError(w, err)
-				return
-			}
-			if !a.Limiter.Allow(req.Email) {
-				httpx.WriteError(w, domain.ErrRateLimited())
-				return
-			}
-			var token string
-			resp, err := a.Login(withIssuedTokenSink(r.Context(), &token), &req)
-			if err != nil {
-				httpx.WriteError(w, err)
-				return
-			}
-			observability.AnnotateHTTP(w, zap.String("user.id", resp.GetUser().GetID()))
-			a.setCookie(w, token, 7*86400)
-			w.Header().Set("Cache-Control", "no-store")
-			httpx.WriteJSON(w, http.StatusOK, resp)
-		},
-		CreateInvite: withHuman(func(w http.ResponseWriter, r *http.Request, ctx context.Context, s httpx.Session) error {
-			w.Header().Set("Cache-Control", "no-store")
-			if err := a.App.RequireAdmin(ctx, s.User.ID); err != nil {
-				return err
-			}
-			var req identitygen.CreateInviteReq
-			if err := httpx.DecodeJSON(w, r, &req); err != nil {
-				return err
-			}
-			resp, err := a.CreateInvite(ctx, &req)
-			if err != nil {
-				return err
-			}
-			httpx.WriteJSON(w, http.StatusCreated, resp)
-			return nil
-		}),
-		CreatePasswordResetLink: withHuman(func(w http.ResponseWriter, r *http.Request, ctx context.Context, s httpx.Session) error {
-			w.Header().Set("Cache-Control", "no-store")
-			if err := a.App.RequireAdmin(ctx, s.User.ID); err != nil {
-				return err
-			}
-			if err := a.decodeStrictJSON(w, r, &struct{}{}); err != nil {
-				return err
-			}
-			if !a.Limiter.Allow("password-reset-issue:" + s.User.ID) {
-				return domain.ErrRateLimited()
-			}
-			resp, err := a.CreatePasswordResetLink(ctx, &identitygen.CreatePasswordResetLinkReq{ID: r.PathValue("id")})
-			if err != nil {
-				return err
-			}
-			httpx.WriteJSON(w, http.StatusCreated, resp)
-			return nil
-		}),
-		InspectPasswordReset: func(w http.ResponseWriter, r *http.Request) {
-			var req identitygen.InspectPasswordResetReq
-			if err := a.decodeStrictJSON(w, r, &req); err != nil {
-				httpx.WriteError(w, err)
-				return
-			}
-			if !a.Limiter.Allow("password-reset:" + req.Token) {
-				httpx.WriteError(w, domain.ErrRateLimited())
-				return
-			}
-			resp, err := a.InspectPasswordReset(r.Context(), &req)
-			if err != nil {
-				httpx.WriteError(w, err)
-				return
-			}
-			httpx.WriteJSON(w, http.StatusOK, resp)
-		},
-		ResetPassword: func(w http.ResponseWriter, r *http.Request) {
-			var req identitygen.ResetPasswordReq
-			if err := a.decodeStrictJSON(w, r, &req); err != nil {
-				httpx.WriteError(w, err)
-				return
-			}
-			if !a.Limiter.Allow("password-reset:" + req.Token) {
-				httpx.WriteError(w, domain.ErrRateLimited())
-				return
-			}
-			if _, err := a.ResetPassword(r.Context(), &req); err != nil {
-				httpx.WriteError(w, err)
-				return
-			}
-			httpx.WriteJSON(w, http.StatusNoContent, nil)
-		},
-	})
+	identitygen.RegisterIdentityHTTPServer(m, a, identityResponder{adapter: a, withHuman: withHuman})
 
 	return m
 }
