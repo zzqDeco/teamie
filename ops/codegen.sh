@@ -41,8 +41,6 @@ if command -v kitex >/dev/null 2>&1 && command -v thriftgo >/dev/null 2>&1; then
     kitex -module teamie/contracts/gen/im ../../im/rpc.thrift
     for idl in http_identity.thrift http_chat.thrift ws_realtime.thrift; do
       thriftgo -g go:template=slim,no_default_serdes=true,no_processor=true -o hertz_gen "../../im/${idl}"
-    end_idl="${idl}"
-      unset end_idl
     done
   )
 
