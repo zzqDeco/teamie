@@ -1,3 +1,6 @@
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError, IDL_ROUTES, TeamieClient } from "@teamie/api-client";
 import type {
@@ -675,6 +678,25 @@ describe("IDL_ROUTES and generated Thrift DTO contracts", () => {
       requestType: "UpdateAdminModelConfigReq",
       responseType: "AdminModelConfigResp",
     });
+    expect("GenerateChat" in IDL_ROUTES).toBe(false);
+    expect("WebSearch" in IDL_ROUTES).toBe(false);
+    expect("WebExtract" in IDL_ROUTES).toBe(false);
+    for (const route of Object.values(IDL_ROUTES)) {
+      expect(route.path.startsWith("/internal/")).toBe(false);
+    }
+  });
+
+  it("verifies generated.ts is in sync with contracts/*.thrift and excludes internal runtime DTOs", () => {
+    const repoRoot = path.resolve(process.cwd(), "../..");
+    const codegenScript = path.join(repoRoot, "tools/thrift-ts-codegen/index.mjs");
+    const generatedFile = path.join(repoRoot, "packages/api-client/src/generated.ts");
+    execFileSync(process.execPath, [codegenScript, "--check"], { stdio: "pipe" });
+    const source = fs.readFileSync(generatedFile, "utf8");
+    expect(source).not.toContain("ChatCallReq");
+    expect(source).not.toContain("StreamEventFrameDTO");
+    expect(source).not.toContain("WebSearchReq");
+    expect(source).not.toContain("WebExtractReq");
+    expect(source).toContain("export type LogoutReq = Record<string, never>;");
   });
 
   it("aligns TeamieClient transport requests with generated IDL_ROUTES and Thrift DTO contracts", async () => {

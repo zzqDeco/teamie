@@ -70,7 +70,7 @@ function splitTrailingAnnotations(line) {
   return { declaration: trimmed, annotations: {} };
 }
 
-function mapThriftType(thriftType) {
+export function mapThriftType(thriftType, resolveStructName = (name) => name) {
   const t = thriftType.trim();
   switch (t) {
     case "string":
@@ -93,28 +93,64 @@ function mapThriftType(thriftType) {
   }
   const listMatch = /^list<(.+)>$/.exec(t);
   if (listMatch) {
-    return `${mapThriftType(listMatch[1])}[]`;
+    return `${mapThriftType(listMatch[1], resolveStructName)}[]`;
   }
   const setMatch = /^set<(.+)>$/.exec(t);
   if (setMatch) {
-    return `${mapThriftType(setMatch[1])}[]`;
+    return `${mapThriftType(setMatch[1], resolveStructName)}[]`;
   }
   const mapMatch = /^map<([^,]+),\s*(.+)>$/.exec(t);
   if (mapMatch) {
-    return `Record<${mapThriftType(mapMatch[1])}, ${mapThriftType(mapMatch[2])}>`;
+    return `Record<${mapThriftType(mapMatch[1], resolveStructName)}, ${mapThriftType(mapMatch[2], resolveStructName)}>`;
   }
-  return t;
+  return resolveStructName(t);
 }
 
-function parseThriftFile(filename) {
-  const fullPath = path.join(CONTRACTS_DIR, filename);
-  const raw = fs.readFileSync(fullPath, "utf8");
+function extractReferencedStructNames(thriftType, out = new Set()) {
+  const t = thriftType.trim();
+  if (
+    t === "string" ||
+    t === "bool" ||
+    t === "byte" ||
+    t === "i8" ||
+    t === "i16" ||
+    t === "i32" ||
+    t === "i64" ||
+    t === "double" ||
+    t === "binary" ||
+    t === "void"
+  ) {
+    return out;
+  }
+  const listMatch = /^list<(.+)>$/.exec(t);
+  if (listMatch) {
+    return extractReferencedStructNames(listMatch[1], out);
+  }
+  const setMatch = /^set<(.+)>$/.exec(t);
+  if (setMatch) {
+    return extractReferencedStructNames(setMatch[1], out);
+  }
+  const mapMatch = /^map<([^,]+),\s*(.+)>$/.exec(t);
+  if (mapMatch) {
+    extractReferencedStructNames(mapMatch[1], out);
+    extractReferencedStructNames(mapMatch[2], out);
+    return out;
+  }
+  out.add(t);
+  return out;
+}
+
+function isBrowserPublicRoute(routePath) {
+  return routePath.startsWith("/api/") || routePath === "/ws" || routePath.startsWith("/ws/");
+}
+
+export function parseThriftSource(raw, filename) {
   const clean = stripComments(raw);
 
   const nsMatch = /^\s*namespace\s+go\s+([a-zA-Z0-9_.]+)/m.exec(clean);
   const namespace = nsMatch ? nsMatch[1] : filename.replace(/\.thrift$/, "");
 
-  const structs = [];
+  const allStructs = [];
   const structRegex = /struct\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\{([\s\S]*?)\}/g;
   let structMatch;
   while ((structMatch = structRegex.exec(clean)) !== null) {
@@ -144,14 +180,15 @@ function parseThriftFile(filename) {
         id: Number(idStr),
         name: fieldName,
         optional: optionality === "optional",
-        tsType: mapThriftType(thriftType),
+        rawThriftType: thriftType.trim(),
         annotations,
       });
     }
-    structs.push({ name: structName, namespace, filename, fields });
+    allStructs.push({ name: structName, namespace, filename, fields });
   }
 
   const routes = [];
+  let hasInternalRoutes = false;
   const serviceRegex = /service\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\{([\s\S]*?)\}/g;
   let serviceMatch;
   while ((serviceMatch = serviceRegex.exec(clean)) !== null) {
@@ -181,6 +218,10 @@ function parseThriftFile(filename) {
         }
       }
       if (httpMethod && routePath) {
+        if (!isBrowserPublicRoute(routePath)) {
+          hasInternalRoutes = true;
+          continue;
+        }
         const clientPath = routePath.startsWith("/api/v1")
           ? routePath.slice("/api/v1".length) || "/"
           : routePath;
@@ -198,17 +239,40 @@ function parseThriftFile(filename) {
     }
   }
 
+  // If the file defines internal runtime-only routes (e.g., /internal/v1/*),
+  // include only structs transitively reachable from browser-public routes.
+  let structs = allStructs;
+  if (hasInternalRoutes) {
+    const byName = new Map(allStructs.map((s) => [s.name, s]));
+    const reachable = new Set();
+    const queue = [];
+    for (const r of routes) {
+      queue.push(r.requestType, r.responseType);
+    }
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (!current || reachable.has(current)) continue;
+      const struct = byName.get(current);
+      if (!struct) continue;
+      reachable.add(current);
+      for (const f of struct.fields) {
+        for (const ref of extractReferencedStructNames(f.rawThriftType)) {
+          if (!reachable.has(ref)) {
+            queue.push(ref);
+          }
+        }
+      }
+    }
+    structs = allStructs.filter((s) => reachable.has(s.name));
+  }
+
   return { filename, namespace, structs, routes };
 }
 
-function renderStructBody(fields) {
-  if (fields.length === 0) {
-    return "{}";
-  }
-  const lines = fields.map(
-    (f) => `  ${f.name}${f.optional ? "?" : ""}: ${f.tsType};`,
-  );
-  return `{\n${lines.join("\n")}\n}`;
+function parseThriftFile(filename) {
+  const fullPath = path.join(CONTRACTS_DIR, filename);
+  const raw = fs.readFileSync(fullPath, "utf8");
+  return parseThriftSource(raw, filename);
 }
 
 function namespacePrefix(namespace) {
@@ -218,14 +282,32 @@ function namespacePrefix(namespace) {
     .join("");
 }
 
-function generate() {
-  const parsedFiles = CONTRACT_FILES.map(parseThriftFile);
+function renderStructDeclaration(tsName, fields, resolveStructName) {
+  if (fields.length === 0) {
+    return {
+      signature: "type = Record<string, never>;",
+      declaration: `export type ${tsName} = Record<string, never>;`,
+    };
+  }
+  const lines = fields.map(
+    (f) =>
+      `  ${f.name}${f.optional ? "?" : ""}: ${mapThriftType(f.rawThriftType, resolveStructName)};`,
+  );
+  const body = `{\n${lines.join("\n")}\n}`;
+  return {
+    signature: `interface ${body}`,
+    declaration: `export interface ${tsName} ${body}`,
+  };
+}
+
+export function generateFromParsedFiles(parsedFiles) {
   const emittedStructs = new Map();
   const outputLines = [
     "// Code generated by tools/thrift-ts-codegen from contracts/*.thrift. DO NOT EDIT.",
-    "/* eslint-disable @typescript-eslint/no-empty-object-type */",
     "",
   ];
+
+  const renameMapByNamespace = new Map();
 
   for (const file of parsedFiles) {
     outputLines.push(`// ============================================================================`);
@@ -234,17 +316,40 @@ function generate() {
     outputLines.push("");
 
     const prefix = namespacePrefix(file.namespace);
+    const localRenameMap = new Map();
+    renameMapByNamespace.set(file.namespace, localRenameMap);
+    const resolveStructName = (name) => localRenameMap.get(name) || name;
+
     for (const struct of file.structs) {
-      const body = renderStructBody(struct.fields);
+      const candidate = renderStructDeclaration(
+        struct.name,
+        struct.fields,
+        resolveStructName,
+      );
       const existing = emittedStructs.get(struct.name);
       if (!existing) {
-        emittedStructs.set(struct.name, { body, namespace: file.namespace });
-        outputLines.push(`export interface ${struct.name} ${body}`);
+        localRenameMap.set(struct.name, struct.name);
+        emittedStructs.set(struct.name, {
+          signature: candidate.signature,
+          namespace: file.namespace,
+        });
+        outputLines.push(candidate.declaration);
         outputLines.push("");
-      } else if (existing.body !== body) {
+      } else if (existing.signature === candidate.signature) {
+        localRenameMap.set(struct.name, struct.name);
+      } else {
         const prefixedName = `${prefix}${struct.name}`;
-        emittedStructs.set(prefixedName, { body, namespace: file.namespace });
-        outputLines.push(`export interface ${prefixedName} ${body}`);
+        localRenameMap.set(struct.name, prefixedName);
+        const prefixedRendered = renderStructDeclaration(
+          prefixedName,
+          struct.fields,
+          resolveStructName,
+        );
+        emittedStructs.set(prefixedName, {
+          signature: prefixedRendered.signature,
+          namespace: file.namespace,
+        });
+        outputLines.push(prefixedRendered.declaration);
         outputLines.push("");
       }
     }
@@ -257,6 +362,8 @@ function generate() {
   outputLines.push("export const IDL_ROUTES = {");
 
   for (const file of parsedFiles) {
+    const localRenameMap = renameMapByNamespace.get(file.namespace) || new Map();
+    const resolveStructName = (name) => localRenameMap.get(name) || name;
     for (const route of file.routes) {
       outputLines.push(`  ${route.name}: {`);
       outputLines.push(`    service: ${JSON.stringify(route.service)},`);
@@ -264,8 +371,12 @@ function generate() {
       outputLines.push(`    method: ${JSON.stringify(route.method)},`);
       outputLines.push(`    path: ${JSON.stringify(route.path)},`);
       outputLines.push(`    clientPath: ${JSON.stringify(route.clientPath)},`);
-      outputLines.push(`    requestType: ${JSON.stringify(route.requestType)},`);
-      outputLines.push(`    responseType: ${JSON.stringify(route.responseType)},`);
+      outputLines.push(
+        `    requestType: ${JSON.stringify(resolveStructName(route.requestType))},`,
+      );
+      outputLines.push(
+        `    responseType: ${JSON.stringify(resolveStructName(route.responseType))},`,
+      );
       outputLines.push("  },");
     }
   }
@@ -276,8 +387,32 @@ function generate() {
   outputLines.push("export type IdlRoute = (typeof IDL_ROUTES)[IdlRouteKey];");
   outputLines.push("");
 
-  fs.mkdirSync(path.dirname(OUTPUT_FILE), { recursive: true });
-  fs.writeFileSync(OUTPUT_FILE, outputLines.join("\n"), "utf8");
+  return outputLines.join("\n");
 }
 
-generate();
+export function generateTypeScriptSDK() {
+  const parsedFiles = CONTRACT_FILES.map(parseThriftFile);
+  return generateFromParsedFiles(parsedFiles);
+}
+
+const isMain =
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isMain) {
+  const generated = generateTypeScriptSDK();
+  if (process.argv.includes("--check")) {
+    const current = fs.existsSync(OUTPUT_FILE)
+      ? fs.readFileSync(OUTPUT_FILE, "utf8")
+      : "";
+    if (current !== generated) {
+      console.error(
+        "packages/api-client/src/generated.ts is out of date with contracts/*.thrift. Run node tools/thrift-ts-codegen/index.mjs.",
+      );
+      process.exit(1);
+    }
+  } else {
+    fs.mkdirSync(path.dirname(OUTPUT_FILE), { recursive: true });
+    fs.writeFileSync(OUTPUT_FILE, generated, "utf8");
+  }
+}
