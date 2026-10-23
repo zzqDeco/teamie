@@ -17,7 +17,7 @@ import (
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 	wire "teamie/contracts/gen/agent/kitex_gen/agent"
-	"teamie/contracts/gen/agent/modeltransport"
+	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
 )
 
 type outputRecoveryTool struct{ calls atomic.Int32 }

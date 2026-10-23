@@ -12,7 +12,7 @@ import (
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
-	"teamie/contracts/gen/agent/modeltransport"
+	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
 )
 
 func TestLegacySessionEventsReadNativelyWithoutChangingIdentity(t *testing.T) {

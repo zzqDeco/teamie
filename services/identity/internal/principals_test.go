@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"teamie/pkg/httpx"
-	"teamie/pkg/config"
 	"teamie/pkg/postgres"
 	"teamie/pkg/postgres/testdb"
 	"teamie/contracts/gen/im/kitex_gen/im"
@@ -15,7 +14,7 @@ import (
 
 func TestPrincipalCredentialScopeRotationAndRevocation(t *testing.T) {
 	ctx := context.Background()
-	s, e := Open(ctx, testdb.URL(t), config.Flags{}, "bootstrap")
+	s, e := Open(ctx, testdb.URL(t), httpx.Flags{}, "bootstrap")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -126,7 +125,7 @@ func TestIdentityV1UpgradePreservesHumanSession(t *testing.T) {
 	if _, e = db.Exec(ctx, "INSERT INTO identity_users(id,email,display_name,password_hash,platform_role) VALUES('human','human@example.invalid','Existing human','preserved-hash','admin'); INSERT INTO identity_sessions(token_hash,user_id,csrf_token,expires_at) VALUES('hash','human','csrf',now()+interval '1 day')"); e != nil {
 		t.Fatal(e)
 	}
-	s, e := Open(ctx, url, config.Flags{}, "bootstrap")
+	s, e := Open(ctx, url, httpx.Flags{}, "bootstrap")
 	if e != nil {
 		t.Fatal(e)
 	}

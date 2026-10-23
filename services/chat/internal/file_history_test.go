@@ -13,7 +13,6 @@ import (
 	"testing"
 
 	"teamie/pkg/httpx"
-	"teamie/pkg/config"
 )
 
 func TestFileHistoryPagesPublishedGroupsAndPreservesReadACLs(t *testing.T) {
@@ -80,12 +79,12 @@ func TestFileHistoryPagesPublishedGroupsAndPreservesReadACLs(t *testing.T) {
 	if err = os.WriteFile(flagPath, []byte(`{"revision":"off","flags":{}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	s.Flags = config.Flags{Path: flagPath}
+	s.Flags = httpx.Flags{Path: flagPath}
 	page, _, err = s.FileHistory(ctx, member.ID, conversation.ID, 0, "report", 10)
 	if err != nil || len(page) != 2 {
 		t.Fatal("disabled writes hid published files", page, err)
 	}
-	s.Flags = config.Flags{}
+	s.Flags = httpx.Flags{}
 	if _, err = s.ChangeMessage(ctx, owner.ID, conversation.ID, last.ID, "", true); err != nil {
 		t.Fatal(err)
 	}

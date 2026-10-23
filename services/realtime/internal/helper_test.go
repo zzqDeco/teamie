@@ -10,7 +10,6 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
 	"teamie/contracts/gen/im/kitex_gen/im"
-	"teamie/pkg/config"
 	"teamie/pkg/httpx"
 	wsadapter "teamie/services/realtime/internal/adapter/ws"
 	"teamie/services/realtime/internal/app"
@@ -77,7 +76,7 @@ type Hub struct {
 	Identity             httpx.Identity
 	Chat                 Access
 	Redis                *redis.Client
-	Flags                config.Flags
+	Flags                httpx.Flags
 	Origin               string
 	RevalidationInterval time.Duration
 	mu                   sync.Mutex
@@ -85,7 +84,7 @@ type Hub struct {
 	policy               domain.TypingPolicy
 }
 
-func NewHub(identity httpx.Identity, chatAccess Access, rdb *redis.Client, cfgFlags config.Flags, origin string) *Hub {
+func NewHub(identity httpx.Identity, chatAccess Access, rdb *redis.Client, cfgFlags httpx.Flags, origin string) *Hub {
 	return &Hub{
 		Identity: identity,
 		Chat:     chatAccess,

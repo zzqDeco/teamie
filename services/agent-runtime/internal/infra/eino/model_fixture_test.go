@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
-	"teamie/contracts/gen/agent/modeltransport"
+	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
 )
 
 // Existing behavior fixtures describe synthetic OpenAI completions. This

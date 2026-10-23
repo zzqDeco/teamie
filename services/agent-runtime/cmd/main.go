@@ -19,6 +19,7 @@ import (
 	"teamie/services/agent-runtime/internal/adapter/worker"
 	"teamie/services/agent-runtime/internal/app"
 	"teamie/services/agent-runtime/internal/infra/eino"
+	"teamie/services/agent-runtime/internal/infra/pg"
 	"teamie/services/agent-runtime/internal/infra/rpcclient"
 )
 
@@ -36,12 +37,13 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 	startup, done := context.WithTimeout(ctx, 30*time.Second)
-	store, err := eino.Open(startup, os.Getenv("DATABASE_URL"))
+	repo, err := pg.OpenRepository(startup, os.Getenv("DATABASE_URL"))
 	done()
 	if err != nil {
 		observability.Fatal("runtime database initialization failed", err)
 	}
-	defer store.DB.Close()
+	defer repo.Close()
+	store := &eino.Store{DB: repo}
 
 	cfg := eino.Config{
 		ControlAddr:      httpx.Env("AGENT_CONTROL_RPC_ADDR", "agent-control:8884"),
@@ -62,7 +64,6 @@ func main() {
 		observability.Fatal("runtime client initialization failed", err)
 	}
 
-	repo := store.Repo()
 	appSvc := &app.Service{
 		Tx:           repo,
 		Sessions:     repo,

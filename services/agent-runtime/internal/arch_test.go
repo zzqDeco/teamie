@@ -75,18 +75,20 @@ func TestRuntimeCleanDDDLayerBoundaries(t *testing.T) {
 			dir: "infra/pg",
 			allowed: func(imp string) bool {
 				return !strings.HasPrefix(imp, "teamie/services/agent-runtime/internal/adapter") &&
-					!strings.HasPrefix(imp, "teamie/services/agent-runtime/internal/app")
+					!strings.HasPrefix(imp, "teamie/services/agent-runtime/internal/app") &&
+					!strings.HasPrefix(imp, "github.com/cloudwego/eino")
 			},
-			rule: "infra layer must not import adapter or app layers",
+			rule: "infra/pg must not import adapter, app, or github.com/cloudwego/eino",
 		},
 		{
 			dir: "infra/eino",
 			allowed: func(imp string) bool {
 				return !strings.HasPrefix(imp, "teamie/services/agent-runtime/internal/adapter") &&
 					!strings.HasPrefix(imp, "teamie/services/agent-runtime/internal/app") &&
+					!strings.HasPrefix(imp, "teamie/services/agent-runtime/internal/infra/pg") &&
 					!strings.HasPrefix(imp, "github.com/jackc/pgx")
 			},
-			rule: "infra/eino must not import adapter, app, or github.com/jackc/pgx (all SQL belongs in infra/pg)",
+			rule: "infra/eino must not import adapter, app, infra/pg, or github.com/jackc/pgx (all SQL belongs in infra/pg)",
 		},
 		{
 			dir: "infra/rpcclient",

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"teamie/contracts/gen/agent/modeltransport"
+	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
 	"teamie/pkg/observability"
 	"teamie/services/llm-gateway/internal/domain"
 )

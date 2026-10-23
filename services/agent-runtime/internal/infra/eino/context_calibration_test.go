@@ -20,7 +20,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"go.uber.org/zap"
 	wire "teamie/contracts/gen/agent/kitex_gen/agent"
-	"teamie/contracts/gen/agent/modeltransport"
+	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
 	"teamie/pkg/observability"
 )
 

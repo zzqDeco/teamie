@@ -11,7 +11,7 @@ import (
 	"teamie/services/chat/internal/domain"
 )
 
-//go:embed schema.sql
+//go:embed migrations/001_chat.sql
 var SchemaV1 string
 
 //go:embed migrations/002_membership_management.sql

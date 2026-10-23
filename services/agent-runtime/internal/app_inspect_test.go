@@ -15,6 +15,7 @@ import (
 	"teamie/services/agent-runtime/internal/app"
 	"teamie/services/agent-runtime/internal/domain"
 	"teamie/services/agent-runtime/internal/infra/eino"
+	_ "teamie/services/agent-runtime/internal/infra/pg"
 )
 
 type stubControlGateway struct {

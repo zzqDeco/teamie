@@ -36,9 +36,9 @@ func WithRuntimeParam(key, value string) Option {
 	return func(cfg *pgxpool.Config) { cfg.ConnConfig.RuntimeParams[key] = value }
 }
 
-// Open creates only the caller service's configured pool. It never selects a
+// OpenPool creates only the caller service's configured pool. It never selects a
 // foreign schema or database. Wire timestamps remain UTC on every host.
-func Open(ctx context.Context, url string, opts ...Option) (*pgxpool.Pool, error) {
+func OpenPool(ctx context.Context, url string, opts ...Option) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(url)
 	if err != nil {
 		return nil, err
@@ -59,6 +59,11 @@ func Open(ctx context.Context, url string, opts ...Option) (*pgxpool.Pool, error
 		}
 	}
 	return pgxpool.NewWithConfig(ctx, cfg)
+}
+
+// Open is an alias for OpenPool.
+func Open(ctx context.Context, url string, opts ...Option) (*pgxpool.Pool, error) {
+	return OpenPool(ctx, url, opts...)
 }
 
 // DB wraps a pgxpool.Pool with context-aware transaction propagation so domain

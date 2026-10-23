@@ -26,6 +26,11 @@ type HTTPRouteMiddleware interface {
 	WrapRoute(route RouteSpec, next http.HandlerFunc) http.HandlerFunc
 }
 
+// HertzRouteMiddleware optionally provides a native Hertz app.HandlerFunc for a generated RouteSpec.
+type HertzRouteMiddleware interface {
+	HertzHandler(route RouteSpec) app.HandlerFunc
+}
+
 // RouteSpec describes a single HTTP/WebSocket endpoint declared in the Thrift IDL.
 type RouteSpec struct {
 	Name         string
@@ -71,32 +76,85 @@ func RegisterRealtimeWSServiceRoutes(mux *http.ServeMux, h RealtimeWSServiceRout
 
 // RegisterRealtimeWSServiceHertzServer registers RealtimeWSServer endpoints on a native Hertz route.RouterGroup.
 func RegisterRealtimeWSServiceHertzServer(r *route.RouterGroup, srv RealtimeWSServer, m HTTPResponder) {
-	r.GET("/api/v1/ws", func(ctx context.Context, c *app.RequestContext) {
-		var req ConnectWSReq
-		if err := c.BindAndValidate(&req); err != nil {
-			m.WriteBindError(ctx, c, err)
-			return
+	hmw, hasHMW := m.(HertzRouteMiddleware)
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "ConnectWS", Method: "GET", Path: "/api/v1/ws", MuxPattern: PatternConnectWS, RequestType: "ConnectWSReq", ResponseType: "EmptyResp"}); hfn != nil {
+			r.GET("/api/v1/ws", hfn)
+		} else {
+			r.GET("/api/v1/ws", func(ctx context.Context, c *app.RequestContext) {
+				var req ConnectWSReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if v := string(c.GetHeader("Origin")); v != "" {
+					req.Origin = &v
+				}
+				resp, err := srv.ConnectWS(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
 		}
-		resp, err := srv.ConnectWS(ctx, &req)
-		if err != nil {
-			m.WriteDomainError(ctx, c, err)
-			return
+	} else {
+		r.GET("/api/v1/ws", func(ctx context.Context, c *app.RequestContext) {
+			var req ConnectWSReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if v := string(c.GetHeader("Origin")); v != "" {
+				req.Origin = &v
+			}
+			resp, err := srv.ConnectWS(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "PublishTyping", Method: "POST", Path: "/api/v1/conversations/:id/typing", MuxPattern: PatternPublishTyping, RequestType: "PublishTypingReq", ResponseType: "EmptyResp"}); hfn != nil {
+			r.POST("/api/v1/conversations/:id/typing", hfn)
+		} else {
+			r.POST("/api/v1/conversations/:id/typing", func(ctx context.Context, c *app.RequestContext) {
+				var req PublishTypingReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				resp, err := srv.PublishTyping(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
 		}
-		m.WriteOK(ctx, c, resp)
-	})
-	r.POST("/api/v1/conversations/:id/typing", func(ctx context.Context, c *app.RequestContext) {
-		var req PublishTypingReq
-		if err := c.BindAndValidate(&req); err != nil {
-			m.WriteBindError(ctx, c, err)
-			return
-		}
-		resp, err := srv.PublishTyping(ctx, &req)
-		if err != nil {
-			m.WriteDomainError(ctx, c, err)
-			return
-		}
-		m.WriteOK(ctx, c, resp)
-	})
+	} else {
+		r.POST("/api/v1/conversations/:id/typing", func(ctx context.Context, c *app.RequestContext) {
+			var req PublishTypingReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			resp, err := srv.PublishTyping(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
 }
 
 // RegisterRealtimeWSServer binds RealtimeWSServer methods using HTTPResponder with optional per-route handler overrides.

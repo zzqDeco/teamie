@@ -15,13 +15,12 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 	"teamie/pkg/httpx"
-	"teamie/pkg/config"
 	"teamie/pkg/postgres/testdb"
 )
 
 func passwordStore(t *testing.T) (*Store, httpx.Session, string) {
 	t.Helper()
-	s, err := Open(context.Background(), testdb.URL(t), config.Flags{}, "password-test-invite")
+	s, err := Open(context.Background(), testdb.URL(t), httpx.Flags{}, "password-test-invite")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -14,7 +14,7 @@ import (
 	"github.com/cloudwego/kitex/client/callopt"
 	wire "teamie/contracts/gen/agent/kitex_gen/agent"
 	"teamie/contracts/gen/agent/kitex_gen/agent/modelgatewayservice"
-	"teamie/contracts/gen/agent/modeltransport"
+	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
 )
 
 // Only Ping/Cancel use the embedded RPC client. Generation uses the same

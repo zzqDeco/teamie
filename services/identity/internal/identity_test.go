@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"teamie/pkg/httpx"
-	"teamie/pkg/config"
 	"teamie/pkg/postgres/testdb"
 	"testing"
 	"time"
@@ -15,7 +14,7 @@ import (
 
 func TestInvitationSessionCSRFAndRevocation(t *testing.T) {
 	ctx := context.Background()
-	s, e := Open(ctx, testdb.URL(t), config.Flags{}, "test-bootstrap-code")
+	s, e := Open(ctx, testdb.URL(t), httpx.Flags{}, "test-bootstrap-code")
 	if e != nil {
 		t.Fatal(e)
 	}

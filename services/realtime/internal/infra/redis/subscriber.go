@@ -7,13 +7,13 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"teamie/pkg/config"
+	"teamie/pkg/httpx"
 	"teamie/services/realtime/internal/domain"
 )
 
-// FlagsProvider adapts config.Flags to domain.FeatureFlags.
+// FlagsProvider adapts httpx.Flags to domain.FeatureFlags.
 type FlagsProvider struct {
-	Flags *config.Flags
+	Flags *httpx.Flags
 }
 
 func (f FlagsProvider) TypingPublishEnabled() bool {

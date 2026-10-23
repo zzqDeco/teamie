@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"teamie/pkg/config"
 	"teamie/pkg/httpx"
 	"teamie/pkg/postgres"
 	"teamie/pkg/postgres/testdb"
@@ -79,7 +78,7 @@ func TestOperatorResetCommandRecoversHumanAndAdminWithoutChangingPrivileges(t *t
 		Principals:          repo,
 		Passwords:           crypto.BcryptHasher{},
 		Tokens:              crypto.TokenGen{},
-		Flags:               flags.New(config.Flags{}),
+		Flags:               flags.New(httpx.Flags{}),
 		BootstrapInviteCode: "operator-test-bootstrap",
 	}
 	admin, adminToken, err := svc.Register(ctx, "admin@example.invalid", "initial-test-password", "Admin", "operator-test-bootstrap")

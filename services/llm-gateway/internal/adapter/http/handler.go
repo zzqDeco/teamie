@@ -11,11 +11,13 @@ import (
 	"time"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/common/adaptor"
 	"github.com/cloudwego/hertz/pkg/protocol/sse"
+	"github.com/cloudwego/hertz/pkg/route"
 	"go.uber.org/zap"
 	gatewaygen "teamie/contracts/gen/agent/hertz_gen/agent/gateway"
 	"teamie/contracts/gen/agent/kitex_gen/agent"
-	"teamie/contracts/gen/agent/modeltransport"
+	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
 	"teamie/contracts/gen/im/kitex_gen/im"
 	"teamie/pkg/httpx"
 	"teamie/pkg/observability"
@@ -159,7 +161,10 @@ func (a *Adapter) StreamChatSSE(ctx context.Context, c *hertzapp.RequestContext,
 	if req == nil || !domain.ValidID(req.OwnerId) || !domain.ValidID(req.AgentId) || !domain.ValidID(req.SessionId) || !domain.ValidID(req.RunId) || req.GetMessageLimit() < 0 || int(req.GetMessageLimit()) > modeltransport.MaxInputMessages {
 		return domain.Err(400, "invalid_request", "Invalid model request")
 	}
+	ctx, operation := gatewayOperation(ctx, req.AgentId, req.SessionId, req.RunId, true)
 	writer := sse.NewWriter(c)
+	c.Response.Header.Set("Cache-Control", "no-store")
+	c.Response.Header.Set("X-Accel-Buffering", "no")
 	defer writer.Close()
 	outcome := a.App.StreamChat(
 		ctx,
@@ -180,6 +185,19 @@ func (a *Adapter) StreamChatSSE(ctx context.Context, c *hertzapp.RequestContext,
 			return writer.WriteEvent("", ev.Type, payload)
 		},
 		domain.InputMessageLimit(int(req.GetMessageLimit())),
+	)
+	streamFailure := outcome.Failure
+	if streamFailure == nil && outcome.TerminalWriteError != nil {
+		streamFailure = observability.Diagnostic("downstream_terminal_write_failed", outcome.TerminalWriteError)
+	}
+	operation.End(streamFailure,
+		zap.String("custom.model.failure_stage", outcome.Phase),
+		zap.Int64("custom.model.prompt_tokens", outcome.PromptTokens),
+		zap.Int64("custom.model.completion_tokens", outcome.CompletionTokens),
+		zap.Int("custom.model.stream.chunk_count", outcome.ChunkCount),
+		zap.Int("custom.model.stream.transport_bytes", outcome.TransportBytes),
+		zap.String("custom.duration_scope", "admission-through-provider-stream-and-usage-record"),
+		zap.Int("custom.retry.attempts", observability.HTTPAttempts(ctx)),
 	)
 	return outcome.TerminalWriteError
 }
@@ -384,6 +402,22 @@ func (a *Adapter) streamHTTP(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if c := httpx.HertzContext(r.Context()); c != nil && strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
+		msgLimit := int32(in.MessageLimit)
+		req := &gatewaygen.ChatCallReq{
+			OwnerId:      in.OwnerID,
+			AgentId:      in.AgentID,
+			SessionId:    in.SessionID,
+			RunId:        in.RunID,
+			RequestJson:  in.RequestJSON,
+			MessageLimit: &msgLimit,
+		}
+		if expected := r.Header.Get(modeltransport.ModelConfigIDHeader); expected != "" {
+			req.ExpectedModelConfigId = &expected
+		}
+		_ = a.StreamChatSSE(r.Context(), c, req)
+		return
+	}
 	ctx, operation := gatewayOperation(r.Context(), in.AgentID, in.SessionID, in.RunID, true)
 	r = r.WithContext(ctx)
 	w.Header().Set("Content-Type", "application/x-ndjson")
@@ -426,8 +460,13 @@ func (a *Adapter) streamHTTP(w http.ResponseWriter, r *http.Request) {
 
 type gatewayResponder struct {
 	httpx.Responder
-	adapter *Adapter
-	auth    AdminAuthorizer
+	adapter    *Adapter
+	auth       AdminAuthorizer
+	muxHandler hertzapp.HandlerFunc
+}
+
+func (gr gatewayResponder) HertzHandler(_ gatewaygen.RouteSpec) hertzapp.HandlerFunc {
+	return gr.muxHandler
 }
 
 func (gatewayResponder) DecodeRequest(w http.ResponseWriter, r *http.Request, dst any) error {
@@ -493,8 +532,15 @@ func (gr gatewayResponder) WrapRoute(route gatewaygen.RouteSpec, next http.Handl
 func (a *Adapter) Routes(auth AdminAuthorizer) http.Handler {
 	m := http.NewServeMux()
 	httpx.OperationsContext(m, a.App.Store.Ready)
-	gatewaygen.RegisterModelGatewayHTTPServer(m, a, gatewayResponder{adapter: a, auth: auth}, gatewaygen.ModelGatewayHTTPServiceRouteHandlers{
+	resp := gatewayResponder{
+		adapter:    a,
+		auth:       auth,
+		muxHandler: adaptor.HertzHandler(observability.HTTP(m)),
+	}
+	gatewaygen.RegisterModelGatewayHTTPServer(m, a, resp, gatewaygen.ModelGatewayHTTPServiceRouteHandlers{
 		StreamChat: a.streamHTTP,
 	})
-	return m
+	return httpx.WrapHertzRouter(m, func(r *route.RouterGroup) {
+		gatewaygen.RegisterModelGatewayHTTPServiceHertzServer(r, a, resp)
+	})
 }

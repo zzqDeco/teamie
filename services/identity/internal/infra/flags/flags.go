@@ -1,14 +1,14 @@
 // Package flags adapts shared runtime feature flags to the Identity domain FeatureFlags port.
 package flags
 
-import "teamie/pkg/config"
+import "teamie/pkg/httpx"
 
-// Adapter implements domain.FeatureFlags over config.Flags.
+// Adapter implements domain.FeatureFlags over httpx.Flags.
 type Adapter struct {
-	Flags config.Flags
+	Flags httpx.Flags
 }
 
-func New(f config.Flags) Adapter {
+func New(f httpx.Flags) Adapter {
 	return Adapter{Flags: f}
 }
 

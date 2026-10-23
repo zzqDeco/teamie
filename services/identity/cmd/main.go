@@ -5,7 +5,6 @@ import (
 	"net"
 
 	"teamie/contracts/gen/im/kitex_gen/im/identityservice"
-	"teamie/pkg/config"
 	"teamie/pkg/httpx"
 	"teamie/pkg/observability"
 	"teamie/pkg/postgres"
@@ -23,7 +22,7 @@ func main() {
 	stopLogging := observability.Configure("teamie.identity", httpx.BuildVersion, httpx.BuildSHA)
 	defer stopLogging()
 
-	cfgFlags := config.Flags{Path: httpx.Env("FEATURE_FLAGS_FILE", "")}
+	cfgFlags := httpx.Flags{Path: httpx.Env("FEATURE_FLAGS_FILE", "")}
 	if err := cfgFlags.Validate(); err != nil {
 		observability.Fatal("Service initialization failed", err)
 	}

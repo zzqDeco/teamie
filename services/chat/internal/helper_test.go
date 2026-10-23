@@ -9,7 +9,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	goredis "github.com/redis/go-redis/v9"
 	"teamie/contracts/gen/im/kitex_gen/im"
-	"teamie/pkg/config"
 	"teamie/pkg/httpx"
 	"teamie/pkg/imtext"
 	"teamie/pkg/postgres"
@@ -184,7 +183,7 @@ func fromDomainEvent(ev domain.Event) Event {
 
 type Store struct {
 	DB    *pgxpool.Pool
-	Flags config.Flags
+	Flags httpx.Flags
 }
 
 func (s *Store) App(identity httpx.Identity, controlToken string) *app.Service {
@@ -208,7 +207,7 @@ func (s *Store) App(identity httpx.Identity, controlToken string) *app.Service {
 	}
 }
 
-func Open(ctx context.Context, url string, cfgFlags config.Flags) (*Store, error) {
+func Open(ctx context.Context, url string, cfgFlags httpx.Flags) (*Store, error) {
 	db, err := postgres.Open(ctx, url)
 	if err != nil {
 		return nil, err

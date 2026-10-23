@@ -182,20 +182,7 @@ func (r *Repository) PutContextArtifact(
 }
 
 // LoadedContextArtifactRow holds the raw columns of a loaded context artifact.
-type LoadedContextArtifactRow struct {
-	Attempt    string
-	Key        string
-	Kind       string
-	ToolCallID string
-	ToolName   string
-	Raw        []byte
-	Hash       string
-	Sources    []byte
-	Parents    []byte
-	EventSeq   int64
-	CreatedAt  time.Time
-	Version    []byte
-}
+type LoadedContextArtifactRow = domain.LoadedContextArtifactRow
 
 // LoadVisibleContextArtifact loads a visible context artifact and its optional source-version observation.
 func (r *Repository) LoadVisibleContextArtifact(
@@ -244,13 +231,7 @@ func (r *Repository) SaveRunningRunObservation(ctx context.Context, l *domain.Le
 }
 
 // ArchiveSessionEventRow holds a raw session event row from runtime_session_events.
-type ArchiveSessionEventRow struct {
-	Seq     int64
-	RunID   string
-	Attempt string
-	EventID string
-	Payload []byte
-}
+type ArchiveSessionEventRow = domain.ArchiveSessionEventRow
 
 // ListVisibleSessionEventPage returns a page of visible session events in (after, head].
 func (r *Repository) ListVisibleSessionEventPage(ctx context.Context, sessionID, attemptID, runID string, contextHead, acceptanceHead, after, head int64, limit int) ([]ArchiveSessionEventRow, error) {
@@ -282,12 +263,7 @@ func (r *Repository) GetContextSearchHeads(ctx context.Context, agentID, session
 }
 
 // SearchArtifactCandidate holds a candidate context artifact row for search scanning.
-type SearchArtifactCandidate struct {
-	Seq   int64
-	RunID string
-	Kind  string
-	Key   string
-}
+type SearchArtifactCandidate = domain.SearchArtifactCandidate
 
 // ListVisibleSearchArtifactCandidates returns a page of searchable context artifact candidates.
 func (r *Repository) ListVisibleSearchArtifactCandidates(ctx context.Context, agentID, attemptID, runID string, contextHead, acceptanceHead, after, artifactHead int64, limit int) ([]SearchArtifactCandidate, error) {
@@ -373,10 +349,7 @@ func (r *Repository) GetRunContextBudget(ctx context.Context, runID string) ([]b
 }
 
 // SeqPayload holds a sequence number and serialized event payload.
-type SeqPayload struct {
-	Seq     int64
-	Payload []byte
-}
+type SeqPayload = domain.SeqPayload
 
 // ListVisibleRunEventPayloads returns a page of visible session event payloads for targetRunID in (after, eventHead].
 func (r *Repository) ListVisibleRunEventPayloads(ctx context.Context, sessionID, attemptID, activeRunID string, contextHead, acceptanceHead int64, targetRunID string, after, eventHead int64) ([]SeqPayload, error) {
@@ -426,11 +399,7 @@ func (r *Repository) GetAcceptedInputPayload(ctx context.Context, agentID, event
 }
 
 // RetrievalObservationRow holds a committed context retrieval tool call and its observation payload.
-type RetrievalObservationRow struct {
-	OriginRunID string
-	Receipt     []byte
-	Observation []byte
-}
+type RetrievalObservationRow = domain.RetrievalObservationRow
 
 // ListAcceptedRetrievalObservations lists committed context_read/context_search tool calls and observations.
 func (r *Repository) ListAcceptedRetrievalObservations(ctx context.Context, agentID, callID, toolName, runID string, acceptanceHead int64) ([]RetrievalObservationRow, error) {
@@ -451,11 +420,7 @@ func (r *Repository) ListAcceptedRetrievalObservations(ctx context.Context, agen
 }
 
 // MessageSourceArtifactRow holds a message source index artifact row.
-type MessageSourceArtifactRow struct {
-	Key       string
-	Sources   []byte
-	Inherited []byte
-}
+type MessageSourceArtifactRow = domain.MessageSourceArtifactRow
 
 // ListVisibleMessageSourceArtifacts queries visible kind='message' context artifacts matching keys.
 func (r *Repository) ListVisibleMessageSourceArtifacts(ctx context.Context, agentID, attemptID, runID string, contextHead, acceptanceHead int64, keys []string) ([]MessageSourceArtifactRow, error) {
@@ -540,15 +505,7 @@ func (r *Repository) GetAgentToolCallMeta(ctx context.Context, agentID, runID, c
 }
 
 // WorkspaceWriterRow holds a prior workspace writer tool call and its optional source snapshot observation.
-type WorkspaceWriterRow struct {
-	Run      string
-	Call     string
-	Name     string
-	Hash     string
-	Result   []byte
-	Snapshot []byte
-	At       time.Time
-}
+type WorkspaceWriterRow = domain.WorkspaceWriterRow
 
 // ListPriorWorkspaceWriters lists workspace writer tool calls for agentID created at or before cutoff.
 func (r *Repository) ListPriorWorkspaceWriters(ctx context.Context, agentID string, cutoff time.Time, names []string, excludeRunID, excludeCallID, obsKey string) ([]WorkspaceWriterRow, error) {
@@ -624,10 +581,7 @@ func (r *Repository) HasUnknownLegacyWorkspaceWriterView(ctx context.Context, ag
 }
 
 // RunEventPayloadRow holds a run_id and serialized session event payload.
-type RunEventPayloadRow struct {
-	RunID   string
-	Payload []byte
-}
+type RunEventPayloadRow = domain.RunEventPayloadRow
 
 // ListVisibleMessageUpdatedEventsForCall lists visible message_updated session events containing callID.
 func (r *Repository) ListVisibleMessageUpdatedEventsForCall(ctx context.Context, sessionID, attemptID, runID string, contextHead, acceptanceHead int64, originRun, callID string) ([]RunEventPayloadRow, error) {

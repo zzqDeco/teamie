@@ -11,9 +11,13 @@ import (
 	"strconv"
 	"time"
 
+	hertzapp "github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/common/adaptor"
+	"github.com/cloudwego/hertz/pkg/route"
 	chatgen "teamie/contracts/gen/im/hertz_gen/im/chat"
 	"teamie/pkg/httpx"
 	"teamie/pkg/imlimits"
+	"teamie/pkg/observability"
 	"teamie/services/chat/internal/app"
 	"teamie/services/chat/internal/domain"
 )
@@ -707,7 +711,12 @@ func (a *Adapter) DownloadAttachment(ctx context.Context, req *chatgen.DownloadA
 
 type chatResponder struct {
 	httpx.Responder
-	withAuth func(next func(w http.ResponseWriter, r *http.Request, ctx context.Context, s httpx.Session) error) http.HandlerFunc
+	withAuth   func(next func(w http.ResponseWriter, r *http.Request, ctx context.Context, s httpx.Session) error) http.HandlerFunc
+	muxHandler hertzapp.HandlerFunc
+}
+
+func (cr chatResponder) HertzHandler(_ chatgen.RouteSpec) hertzapp.HandlerFunc {
+	return cr.muxHandler
 }
 
 func (chatResponder) WriteOKHTTP(w http.ResponseWriter, r *http.Request, status int, resp any) {
@@ -748,7 +757,11 @@ func (a *Adapter) Routes() http.Handler {
 		})
 	}
 
-	chatgen.RegisterChatHTTPServer(m, a, chatResponder{withAuth: withAuth}, chatgen.ChatHTTPServiceRouteHandlers{
+	resp := chatResponder{
+		withAuth:   withAuth,
+		muxHandler: adaptor.HertzHandler(observability.HTTP(m)),
+	}
+	chatgen.RegisterChatHTTPServer(m, a, resp, chatgen.ChatHTTPServiceRouteHandlers{
 		UploadAttachment: withAuth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, s httpx.Session) error {
 			key := r.Header.Get("Idempotency-Key")
 			if key == "" {
@@ -832,5 +845,7 @@ func (a *Adapter) Routes() http.Handler {
 		}),
 	})
 
-	return m
+	return httpx.WrapHertzRouter(m, func(r *route.RouterGroup) {
+		chatgen.RegisterChatHTTPServiceHertzServer(r, a, resp)
+	})
 }

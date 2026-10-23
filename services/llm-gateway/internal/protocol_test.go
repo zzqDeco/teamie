@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"teamie/contracts/gen/agent/modeltransport"
+	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
 )
 
 func TestMessageAdmissionDefaultsPreserveHistoricalEnvelope(t *testing.T) {

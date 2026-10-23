@@ -9,6 +9,7 @@ const CONTRACTS_DIR = path.join(ROOT_DIR, "contracts");
 const OUTPUT_FILE = path.join(ROOT_DIR, "packages/api-client/src/generated.ts");
 
 const CONTRACT_FILES = [
+  "common/common.thrift",
   "im/http_identity.thrift",
   "im/http_chat.thrift",
   "im/ws_realtime.thrift",

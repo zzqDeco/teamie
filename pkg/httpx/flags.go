@@ -1,4 +1,4 @@
-package config
+package httpx
 
 import (
 	"encoding/json"
@@ -7,12 +7,18 @@ import (
 	"strings"
 )
 
+// Snapshot represents a loaded feature-flag configuration snapshot.
 type Snapshot struct {
 	Revision string          `json:"revision"`
 	Flags    map[string]bool `json:"flags"`
 }
-type Flags struct{ Path string }
 
+// Flags loads and validates feature flags from an optional JSON file path.
+type Flags struct {
+	Path string
+}
+
+// Implemented lists all feature flags supported by this binary build.
 var Implemented = map[string]bool{
 	"agents.enabled": true, "agents.create": true, "agents.update": true, "agents.delete": true, "agents.discover": true,
 	"agents.runtime.v3": true, "agents.tasks.execute": true,
@@ -21,6 +27,7 @@ var Implemented = map[string]bool{
 	"im.presence.publish": false, "im.attachments.upload": true, "im.reactions.create": false, "im.threads.create": false,
 }
 
+// Load reads and intersects the feature-flag file with Implemented capabilities, failing closed on error.
 func (f Flags) Load() Snapshot {
 	s := Snapshot{Revision: "default-v1", Flags: map[string]bool{}}
 	for k, v := range Implemented {
@@ -44,6 +51,8 @@ func (f Flags) Load() Snapshot {
 	}
 	return s
 }
+
+// Validate checks that a configured FEATURE_FLAGS_FILE can be loaded cleanly.
 func (f Flags) Validate() error {
 	if f.Path != "" && f.Load().Revision == "invalid-flags" {
 		return fmt.Errorf("FEATURE_FLAGS_FILE is missing or invalid")

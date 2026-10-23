@@ -14,7 +14,6 @@ import (
 	"testing"
 
 	"teamie/pkg/httpx"
-	"teamie/pkg/config"
 	"teamie/pkg/imlimits"
 )
 
@@ -153,7 +152,7 @@ func TestAttachmentWriteFlagExpiryQuotasAndConversationScope(t *testing.T) {
 	if e = os.WriteFile(flagPath, []byte(`{"revision":"off","flags":{}}`), 0600); e != nil {
 		t.Fatal(e)
 	}
-	s.Flags = config.Flags{Path: flagPath}
+	s.Flags = httpx.Flags{Path: flagPath}
 	if _, e = s.UploadAttachment(ctx, owner.ID, c.ID, "blocked", []byte{1}); e == nil {
 		t.Fatal("flag off upload accepted")
 	}
@@ -172,7 +171,7 @@ func TestAttachmentWriteFlagExpiryQuotasAndConversationScope(t *testing.T) {
 	if _, first, e := s.SendWithAttachments(ctx, owner, c.ID, "persist", "", nil, []string{a.ID}); e != nil || first {
 		t.Fatal("flag off broke committed retry", e)
 	}
-	s.Flags = config.Flags{}
+	s.Flags = httpx.Flags{}
 	for i := 0; i < imlimits.PendingAttachmentsPerSender; i++ {
 		if _, e = s.UploadAttachment(ctx, owner.ID, c.ID, "quota", []byte{1}); e != nil {
 			t.Fatal(i, e)

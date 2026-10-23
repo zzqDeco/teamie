@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	"teamie/contracts/gen/agent/modeltransport"
+	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
 	"teamie/services/llm-gateway/internal/domain"
 )
 

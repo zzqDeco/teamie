@@ -11,6 +11,9 @@ import (
 	"sync"
 	"time"
 
+	hertzapp "github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/common/adaptor"
+	"github.com/cloudwego/hertz/pkg/route"
 	"go.uber.org/zap"
 	identitygen "teamie/contracts/gen/im/hertz_gen/im/identity"
 	"teamie/pkg/httpx"
@@ -445,8 +448,13 @@ func (a *Adapter) decodeStrictJSON(w http.ResponseWriter, r *http.Request, input
 
 type identityResponder struct {
 	httpx.Responder
-	adapter   *Adapter
-	withHuman func(fn func(w http.ResponseWriter, r *http.Request, ctx context.Context, s httpx.Session) error) http.HandlerFunc
+	adapter    *Adapter
+	withHuman  func(fn func(w http.ResponseWriter, r *http.Request, ctx context.Context, s httpx.Session) error) http.HandlerFunc
+	muxHandler hertzapp.HandlerFunc
+}
+
+func (ir identityResponder) HertzHandler(_ identitygen.RouteSpec) hertzapp.HandlerFunc {
+	return ir.muxHandler
 }
 
 func (ir identityResponder) DecodeRequest(w http.ResponseWriter, r *http.Request, dst any) error {
@@ -538,7 +546,14 @@ func (a *Adapter) Routes() http.Handler {
 		})
 	}
 
-	identitygen.RegisterIdentityHTTPServer(m, a, identityResponder{adapter: a, withHuman: withHuman})
+	resp := identityResponder{
+		adapter:    a,
+		withHuman:  withHuman,
+		muxHandler: adaptor.HertzHandler(observability.HTTP(m)),
+	}
+	identitygen.RegisterIdentityHTTPServer(m, a, resp)
 
-	return m
+	return httpx.WrapHertzRouter(m, func(r *route.RouterGroup) {
+		identitygen.RegisterIdentityHTTPServiceHertzServer(r, a, resp)
+	})
 }

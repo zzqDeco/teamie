@@ -20,6 +20,7 @@ import (
 
 	gatewaygen "teamie/contracts/gen/agent/hertz_gen/agent/gateway"
 	"teamie/contracts/gen/agent/kitex_gen/agent"
+	"teamie/pkg/httpx"
 	httpAdapter "teamie/services/llm-gateway/internal/adapter/http"
 	rpcx "teamie/services/llm-gateway/internal/infra/rpcclient"
 )
@@ -255,17 +256,9 @@ func TestHertzNativeSSEWriterStreamChat(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := server.New(server.WithListener(listener))
-	adapter := httpAdapter.New(s.App)
-	h.POST("/internal/v1/chat/stream", func(ctx context.Context, c *app.RequestContext) {
-		var req gatewaygen.ChatCallReq
-		if err := json.Unmarshal(c.Request.Body(), &req); err != nil {
-			c.Status(http.StatusBadRequest)
-			return
-		}
-		if err := adapter.StreamChatSSE(ctx, c, &req); err != nil {
-			c.Status(http.StatusBadRequest)
-		}
-	})
+	httpx.MountHertz(h, s.Routes(rpcx.AdminAuth{}))
+	_ = httpAdapter.New(s.App)
+	var _ gatewaygen.ModelGatewayHTTPService = (*httpAdapter.Adapter)(nil)
 	stopped := make(chan struct{})
 	go func() { defer close(stopped); _ = h.Run() }()
 	defer func() {
@@ -276,6 +269,7 @@ func TestHertzNativeSSEWriterStreamChat(t *testing.T) {
 		<-stopped
 	}()
 	req := streamRequest(t, context.Background(), "http://"+listener.Addr().String(), "sse-writer")
+	req.Header.Set("Accept", "text/event-stream")
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -288,4 +282,5 @@ func TestHertzNativeSSEWriterStreamChat(t *testing.T) {
 	if !strings.Contains(string(body), "event: chunk") || !strings.Contains(string(body), "event: done") {
 		t.Fatalf("expected Hertz sse.NewWriter events, got %s", string(body))
 	}
+	_ = app.RequestContext{}
 }

@@ -26,6 +26,11 @@ type HTTPRouteMiddleware interface {
 	WrapRoute(route RouteSpec, next http.HandlerFunc) http.HandlerFunc
 }
 
+// HertzRouteMiddleware optionally provides a native Hertz app.HandlerFunc for a generated RouteSpec.
+type HertzRouteMiddleware interface {
+	HertzHandler(route RouteSpec) app.HandlerFunc
+}
+
 // RouteSpec describes a single HTTP/WebSocket endpoint declared in the Thrift IDL.
 type RouteSpec struct {
 	Name         string
@@ -99,84 +104,229 @@ func RegisterAgentControlHTTPServiceRoutes(mux *http.ServeMux, h AgentControlHTT
 
 // RegisterAgentControlHTTPServiceHertzServer registers AgentControlHTTPServer endpoints on a native Hertz route.RouterGroup.
 func RegisterAgentControlHTTPServiceHertzServer(r *route.RouterGroup, srv AgentControlHTTPServer, m HTTPResponder) {
-	r.GET("/api/v1/agents", func(ctx context.Context, c *app.RequestContext) {
-		var req ListOwnedAgentsReq
-		if err := c.BindAndValidate(&req); err != nil {
-			m.WriteBindError(ctx, c, err)
-			return
+	hmw, hasHMW := m.(HertzRouteMiddleware)
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "ListOwnedAgents", Method: "GET", Path: "/api/v1/agents", MuxPattern: PatternListOwnedAgents, RequestType: "ListOwnedAgentsReq", ResponseType: "AgentListResp"}); hfn != nil {
+			r.GET("/api/v1/agents", hfn)
+		} else {
+			r.GET("/api/v1/agents", func(ctx context.Context, c *app.RequestContext) {
+				var req ListOwnedAgentsReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				resp, err := srv.ListOwnedAgents(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
 		}
-		resp, err := srv.ListOwnedAgents(ctx, &req)
-		if err != nil {
-			m.WriteDomainError(ctx, c, err)
-			return
+	} else {
+		r.GET("/api/v1/agents", func(ctx context.Context, c *app.RequestContext) {
+			var req ListOwnedAgentsReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			resp, err := srv.ListOwnedAgents(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "CreateAgent", Method: "POST", Path: "/api/v1/agents", MuxPattern: PatternCreateAgent, RequestType: "CreateAgentReq", ResponseType: "AgentResp"}); hfn != nil {
+			r.POST("/api/v1/agents", hfn)
+		} else {
+			r.POST("/api/v1/agents", func(ctx context.Context, c *app.RequestContext) {
+				var req CreateAgentReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				resp, err := srv.CreateAgent(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
 		}
-		m.WriteOK(ctx, c, resp)
-	})
-	r.POST("/api/v1/agents", func(ctx context.Context, c *app.RequestContext) {
-		var req CreateAgentReq
-		if err := c.BindAndValidate(&req); err != nil {
-			m.WriteBindError(ctx, c, err)
-			return
+	} else {
+		r.POST("/api/v1/agents", func(ctx context.Context, c *app.RequestContext) {
+			var req CreateAgentReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			resp, err := srv.CreateAgent(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "GetAgentProfile", Method: "GET", Path: "/api/v1/agents/:id", MuxPattern: PatternGetAgentProfile, RequestType: "GetAgentProfileReq", ResponseType: "AgentResp"}); hfn != nil {
+			r.GET("/api/v1/agents/:id", hfn)
+		} else {
+			r.GET("/api/v1/agents/:id", func(ctx context.Context, c *app.RequestContext) {
+				var req GetAgentProfileReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				resp, err := srv.GetAgentProfile(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
 		}
-		resp, err := srv.CreateAgent(ctx, &req)
-		if err != nil {
-			m.WriteDomainError(ctx, c, err)
-			return
+	} else {
+		r.GET("/api/v1/agents/:id", func(ctx context.Context, c *app.RequestContext) {
+			var req GetAgentProfileReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			resp, err := srv.GetAgentProfile(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "UpdateAgent", Method: "PATCH", Path: "/api/v1/agents/:id", MuxPattern: PatternUpdateAgent, RequestType: "UpdateAgentReq", ResponseType: "AgentResp"}); hfn != nil {
+			r.PATCH("/api/v1/agents/:id", hfn)
+		} else {
+			r.PATCH("/api/v1/agents/:id", func(ctx context.Context, c *app.RequestContext) {
+				var req UpdateAgentReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				resp, err := srv.UpdateAgent(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
 		}
-		m.WriteOK(ctx, c, resp)
-	})
-	r.GET("/api/v1/agents/:id", func(ctx context.Context, c *app.RequestContext) {
-		var req GetAgentProfileReq
-		if err := c.BindAndValidate(&req); err != nil {
-			m.WriteBindError(ctx, c, err)
-			return
+	} else {
+		r.PATCH("/api/v1/agents/:id", func(ctx context.Context, c *app.RequestContext) {
+			var req UpdateAgentReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			resp, err := srv.UpdateAgent(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "DeleteAgent", Method: "DELETE", Path: "/api/v1/agents/:id", MuxPattern: PatternDeleteAgent, RequestType: "DeleteAgentReq", ResponseType: "EmptyResp"}); hfn != nil {
+			r.DELETE("/api/v1/agents/:id", hfn)
+		} else {
+			r.DELETE("/api/v1/agents/:id", func(ctx context.Context, c *app.RequestContext) {
+				var req DeleteAgentReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				resp, err := srv.DeleteAgent(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
 		}
-		resp, err := srv.GetAgentProfile(ctx, &req)
-		if err != nil {
-			m.WriteDomainError(ctx, c, err)
-			return
+	} else {
+		r.DELETE("/api/v1/agents/:id", func(ctx context.Context, c *app.RequestContext) {
+			var req DeleteAgentReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			resp, err := srv.DeleteAgent(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "ListWorkspaceAgents", Method: "GET", Path: "/api/v1/workspaces/:id/agents", MuxPattern: PatternListWorkspaceAgents, RequestType: "ListWorkspaceAgentsReq", ResponseType: "AgentListResp"}); hfn != nil {
+			r.GET("/api/v1/workspaces/:id/agents", hfn)
+		} else {
+			r.GET("/api/v1/workspaces/:id/agents", func(ctx context.Context, c *app.RequestContext) {
+				var req ListWorkspaceAgentsReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				resp, err := srv.ListWorkspaceAgents(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
 		}
-		m.WriteOK(ctx, c, resp)
-	})
-	r.PATCH("/api/v1/agents/:id", func(ctx context.Context, c *app.RequestContext) {
-		var req UpdateAgentReq
-		if err := c.BindAndValidate(&req); err != nil {
-			m.WriteBindError(ctx, c, err)
-			return
-		}
-		resp, err := srv.UpdateAgent(ctx, &req)
-		if err != nil {
-			m.WriteDomainError(ctx, c, err)
-			return
-		}
-		m.WriteOK(ctx, c, resp)
-	})
-	r.DELETE("/api/v1/agents/:id", func(ctx context.Context, c *app.RequestContext) {
-		var req DeleteAgentReq
-		if err := c.BindAndValidate(&req); err != nil {
-			m.WriteBindError(ctx, c, err)
-			return
-		}
-		resp, err := srv.DeleteAgent(ctx, &req)
-		if err != nil {
-			m.WriteDomainError(ctx, c, err)
-			return
-		}
-		m.WriteOK(ctx, c, resp)
-	})
-	r.GET("/api/v1/workspaces/:id/agents", func(ctx context.Context, c *app.RequestContext) {
-		var req ListWorkspaceAgentsReq
-		if err := c.BindAndValidate(&req); err != nil {
-			m.WriteBindError(ctx, c, err)
-			return
-		}
-		resp, err := srv.ListWorkspaceAgents(ctx, &req)
-		if err != nil {
-			m.WriteDomainError(ctx, c, err)
-			return
-		}
-		m.WriteOK(ctx, c, resp)
-	})
+	} else {
+		r.GET("/api/v1/workspaces/:id/agents", func(ctx context.Context, c *app.RequestContext) {
+			var req ListWorkspaceAgentsReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			resp, err := srv.ListWorkspaceAgents(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
 }
 
 // RegisterAgentControlHTTPServer binds AgentControlHTTPServer methods using HTTPResponder with optional per-route handler overrides.

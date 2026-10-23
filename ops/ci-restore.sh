@@ -26,7 +26,7 @@ CREATE TABLE restore_fixture(id INTEGER PRIMARY KEY,payload JSONB NOT NULL,encry
 INSERT INTO restore_fixture VALUES(1,'{"owner":"ci","message":"persisted","count":3}',decode('010203aaff','hex'));
 SQL
   if [[ $suffix == identity ]]; then
-    cat services/identity/internal/infra/pg/schema.sql services/identity/internal/infra/pg/migrations/002_principals.sql \
+    cat services/identity/internal/infra/pg/migrations/001_identity.sql services/identity/internal/infra/pg/migrations/002_principals.sql \
       services/identity/internal/infra/pg/migrations/003_password_resets.sql | "${pg[@]}" psql -U postgres -d teamie_identity -v ON_ERROR_STOP=1 >/dev/null
     "${pg[@]}" psql -U postgres -d teamie_identity -v ON_ERROR_STOP=1 <<'SQL'
 INSERT INTO identity_schema_migrations(version) VALUES(2),(3) ON CONFLICT DO NOTHING;
@@ -45,7 +45,7 @@ SQL
   if [[ $suffix == chat ]]; then
     # Restore an actual linked binary attachment through Chat's real schema,
     # including bytes that cannot survive a UTF-8/text-file transport.
-    cat services/chat/internal/infra/pg/schema.sql services/chat/internal/infra/pg/migrations/002_membership_management.sql \
+    cat services/chat/internal/infra/pg/migrations/001_chat.sql services/chat/internal/infra/pg/migrations/002_membership_management.sql \
       services/chat/internal/infra/pg/migrations/003_attachments.sql services/chat/internal/infra/pg/migrations/004_attachment_uploads.sql \
       services/chat/internal/infra/pg/migrations/005_mentions.sql | "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 >/dev/null
     "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 <<'SQL'

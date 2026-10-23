@@ -14,7 +14,7 @@ import (
 	"github.com/cloudwego/eino-ext/components/model/agenticopenai"
 	"github.com/cloudwego/eino/schema"
 	wire "teamie/contracts/gen/agent/kitex_gen/agent"
-	"teamie/contracts/gen/agent/modeltransport"
+	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
 )
 
 func TestNativeHTTPGenerateRetainsRichReceiptAndReplaysWithoutRequest(t *testing.T) {

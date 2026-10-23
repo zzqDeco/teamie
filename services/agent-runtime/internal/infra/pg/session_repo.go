@@ -578,11 +578,7 @@ func (r *Repository) ListModelCallResponses(ctx context.Context, runID string) (
 }
 
 // ToolCallResultRecord holds a persisted tool call receipt row.
-type ToolCallResultRecord struct {
-	CallID string
-	Name   string
-	Result []byte
-}
+type ToolCallResultRecord = domain.ToolCallResultRecord
 
 // ListIMToolCallResults returns committed IM tool call results for runID.
 func (r *Repository) ListIMToolCallResults(ctx context.Context, runID string) ([]ToolCallResultRecord, error) {
@@ -603,10 +599,7 @@ func (r *Repository) ListIMToolCallResults(ctx context.Context, runID string) ([
 }
 
 // AttemptEventPayload holds an attempt_id and serialized session event payload.
-type AttemptEventPayload struct {
-	AttemptID string
-	Payload   []byte
-}
+type AttemptEventPayload = domain.AttemptEventPayload
 
 // ListOtherAttemptMessageEvents returns message session events for runID from attempts other than excludeAttemptID.
 func (r *Repository) ListOtherAttemptMessageEvents(ctx context.Context, runID, excludeAttemptID string) ([]AttemptEventPayload, error) {

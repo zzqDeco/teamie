@@ -10,7 +10,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"teamie/contracts/gen/im/kitex_gen/im"
-	"teamie/pkg/config"
 	"teamie/pkg/httpx"
 	"teamie/pkg/postgres"
 	httpadapter "teamie/services/identity/internal/adapter/http"
@@ -83,7 +82,7 @@ func toAPISession(s domain.Session) httpx.Session {
 
 type Store struct {
 	DB                  *pgxpool.Pool
-	Flags               config.Flags
+	Flags               httpx.Flags
 	BootstrapInviteCode string
 	ControlToken        string
 	RuntimeToken        string
@@ -107,7 +106,7 @@ func (s *Store) App() *app.Service {
 	}
 }
 
-func Open(ctx context.Context, url string, cfgFlags config.Flags, code string) (*Store, error) {
+func Open(ctx context.Context, url string, cfgFlags httpx.Flags, code string) (*Store, error) {
 	db, err := postgres.Open(ctx, url)
 	if err != nil {
 		return nil, err

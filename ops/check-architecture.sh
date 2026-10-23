@@ -49,14 +49,29 @@ for svc in services/*; do
   fi
 done
 
-# 6. Agent Runtime infra/eino isolation gate: non-test files in infra/eino must not import pgx
+# 6. Agent Runtime infra/eino & infra/pg isolation gate:
+# - non-test files in infra/eino must not import pgx or infra/pg
+# - infra/pg must not import github.com/cloudwego/eino
 eino_imports="$(cd services/agent-runtime && go list -f '{{join .Imports "\n"}}' ./internal/infra/eino)"
-if printf '%s\n' "${eino_imports}" | grep -E 'github\.com/jackc/pgx' >/dev/null; then
-  echo "infra/eino must not import github.com/jackc/pgx directly; use infra/pg" >&2
+if printf '%s\n' "${eino_imports}" | grep -E '(github\.com/jackc/pgx|teamie/services/agent-runtime/internal/infra/pg)' >/dev/null; then
+  echo "infra/eino must not import github.com/jackc/pgx or internal/infra/pg directly; use domain.RuntimeRepository" >&2
+  exit 1
+fi
+runtime_pg_imports="$(cd services/agent-runtime && go list -f '{{join .Imports "\n"}}' ./internal/infra/pg/...)"
+if printf '%s\n' "${runtime_pg_imports}" | grep -E 'github\.com/cloudwego/eino' >/dev/null; then
+  echo "infra/pg in services/agent-runtime must not import github.com/cloudwego/eino" >&2
   exit 1
 fi
 
-# 7. Unified PostgreSQL mechanism gate: every service with internal/infra/pg must import teamie/pkg/postgres and never write manual Begin/Commit/Rollback/pg_advisory_xact_lock
+# 7. Shared pkg/ directory structure gate: strictly the 7 packages from Plan Section 1.2
+expected_pkg=$'crypto\nhttpx\nimlimits\nimtext\nobservability\npostgres\nrpcx'
+actual_pkg="$(find pkg -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort)"
+if [[ "${actual_pkg}" != "${expected_pkg}" ]]; then
+  echo "pkg/ directory mismatch: expected (${expected_pkg}), got (${actual_pkg})" >&2
+  exit 1
+fi
+
+# 8. Unified PostgreSQL mechanism gate: every service with internal/infra/pg must import teamie/pkg/postgres and never write manual Begin/Commit/Rollback/pg_advisory_xact_lock
 for svc in services/*; do
   if [[ -d "${svc}/internal/infra/pg" ]]; then
     pg_imports="$(cd "${svc}" && go list -f '{{join .Imports "\n"}}' ./internal/infra/pg/...)"

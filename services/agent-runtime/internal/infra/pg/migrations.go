@@ -90,17 +90,8 @@ func OpenRepository(ctx context.Context, url string) (*Repository, error) {
 		return nil, err
 	}
 	repo := NewFromPool(pool)
-	if err := repo.WithinTx(ctx, func(txCtx context.Context) error {
-		if err := repo.db.AdvisoryXactLock(txCtx, 704205); err != nil {
-			return err
-		}
-		conn := repo.db.Conn(txCtx)
-		if err := ValidateRuntimeSchema(txCtx, conn); err != nil {
-			return err
-		}
-		_, err := conn.Exec(txCtx, SchemaSQL+SchemaV2SQL+SchemaV3SQL+ContextArchiveSchemaSQL+ContextRecoverySchemaSQL+SchemaV4SQL+SchemaV5SQL+SchemaV6SQL+SchemaV7SQL+SchemaV8SQL+SchemaV9SQL+SchemaV10SQL+SchemaV11SQL+SchemaV12SQL)
-		return err
-	}); err != nil {
+	allSQL := SchemaSQL + SchemaV2SQL + SchemaV3SQL + ContextArchiveSchemaSQL + ContextRecoverySchemaSQL + SchemaV4SQL + SchemaV5SQL + SchemaV6SQL + SchemaV7SQL + SchemaV8SQL + SchemaV9SQL + SchemaV10SQL + SchemaV11SQL + SchemaV12SQL
+	if err := postgres.MigrateSQL(ctx, repo.db, 704205, allSQL, ValidateRuntimeSchema); err != nil {
 		repo.Close()
 		return nil, err
 	}

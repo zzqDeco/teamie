@@ -52,3 +52,22 @@ func Migrate(ctx context.Context, db *pgxpool.Pool, lock int64, ledger string, m
 	}
 	return tx.Commit(ctx)
 }
+
+// MigrateSQL applies a self-managed migration script under an advisory transaction lock
+// using the context-aware DB handle, running an optional precheck before DDL execution.
+func MigrateSQL(ctx context.Context, db *DB, lock int64, sql string, precheck func(ctx context.Context, q Querier) error) error {
+	return db.WithinTx(ctx, func(txCtx context.Context) error {
+		if err := db.AdvisoryXactLock(txCtx, lock); err != nil {
+			return err
+		}
+		conn := db.Conn(txCtx)
+		if precheck != nil {
+			if err := precheck(txCtx, conn); err != nil {
+				return err
+			}
+		}
+		_, err := conn.Exec(txCtx, sql)
+		return err
+	})
+}
+

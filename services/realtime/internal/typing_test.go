@@ -10,7 +10,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"teamie/pkg/httpx"
-	"teamie/pkg/config"
 	"teamie/contracts/gen/im/kitex_gen/im"
 	"testing"
 	"time"
@@ -139,7 +138,7 @@ func TestHTTPTypingUsesOrdinaryAuthenticationAndConversationACL(t *testing.T) {
 	if err = os.WriteFile(flags, []byte(`{"revision":"disabled","flags":{"im.typing.publish":false}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	h.Flags = config.Flags{Path: flags}
+	h.Flags = httpx.Flags{Path: flags}
 	request(path, `{"isTyping":true}`, machine, 403)
 	identity.mu.Lock()
 	delete(identity.sessions, agentToken)

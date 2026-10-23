@@ -17,7 +17,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"teamie/pkg/httpx"
-	"teamie/pkg/config"
 	"teamie/pkg/postgres"
 	"teamie/pkg/postgres/testdb"
 )
@@ -196,7 +195,7 @@ func TestPasswordResetFlagGatesOnlyNewIssuance(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"revision":"reset-off","flags":{"auth.password_reset":false}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	s.Flags = config.Flags{Path: path}
+	s.Flags = httpx.Flags{Path: path}
 	_, _, err := s.CreatePasswordResetLink(ctx, admin.User.ID, adminToken, admin.User.ID)
 	passwordError(t, err, 403, "feature_disabled")
 	_, _, err = s.OperatorPasswordResetLink(ctx, admin.User.Email)
@@ -678,7 +677,7 @@ func TestIdentityV2PasswordResetMigrationPreservesDataAndGatesNewerSchema(t *tes
 		INSERT INTO principal_tokens(principal_id,token_hash,expires_at) VALUES('preserved-agent','preserved-principal-hash',now()+interval '1 hour');`); err != nil {
 		t.Fatal(err)
 	}
-	s, err := Open(ctx, url, config.Flags{}, "")
+	s, err := Open(ctx, url, httpx.Flags{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}

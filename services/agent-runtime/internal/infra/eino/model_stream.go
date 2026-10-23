@@ -19,7 +19,7 @@ import (
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
-	"teamie/contracts/gen/agent/modeltransport"
+	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
 	"teamie/pkg/postgres"
 )
 
@@ -112,6 +112,7 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 	}
 	req.Header.Set("Authorization", "Bearer "+m.Token)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
 	if reqConfigID != "" {
 		req.Header.Set(modeltransport.ModelConfigIDHeader, reqConfigID)
 	}

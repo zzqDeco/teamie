@@ -10,7 +10,7 @@ import (
 	"teamie/pkg/postgres"
 )
 
-//go:embed schema.sql
+//go:embed migrations/001_identity.sql
 var SchemaV1 string
 
 //go:embed migrations/002_principals.sql

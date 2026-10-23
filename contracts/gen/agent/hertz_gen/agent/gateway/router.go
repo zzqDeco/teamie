@@ -26,6 +26,11 @@ type HTTPRouteMiddleware interface {
 	WrapRoute(route RouteSpec, next http.HandlerFunc) http.HandlerFunc
 }
 
+// HertzRouteMiddleware optionally provides a native Hertz app.HandlerFunc for a generated RouteSpec.
+type HertzRouteMiddleware interface {
+	HertzHandler(route RouteSpec) app.HandlerFunc
+}
+
 // RouteSpec describes a single HTTP/WebSocket endpoint declared in the Thrift IDL.
 type RouteSpec struct {
 	Name         string
@@ -106,97 +111,250 @@ func RegisterModelGatewayHTTPServiceRoutes(mux *http.ServeMux, h ModelGatewayHTT
 
 // RegisterModelGatewayHTTPServiceHertzServer registers ModelGatewayHTTPServer endpoints on a native Hertz route.RouterGroup.
 func RegisterModelGatewayHTTPServiceHertzServer(r *route.RouterGroup, srv ModelGatewayHTTPServer, m HTTPResponder) {
-	r.GET("/api/v1/admin/model-gateway", func(ctx context.Context, c *app.RequestContext) {
-		var req GetAdminModelConfigReq
-		if err := c.BindAndValidate(&req); err != nil {
-			m.WriteBindError(ctx, c, err)
-			return
+	hmw, hasHMW := m.(HertzRouteMiddleware)
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "GetAdminModelConfig", Method: "GET", Path: "/api/v1/admin/model-gateway", MuxPattern: PatternGetAdminModelConfig, RequestType: "GetAdminModelConfigReq", ResponseType: "AdminModelConfigResp"}); hfn != nil {
+			r.GET("/api/v1/admin/model-gateway", hfn)
+		} else {
+			r.GET("/api/v1/admin/model-gateway", func(ctx context.Context, c *app.RequestContext) {
+				var req GetAdminModelConfigReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				resp, err := srv.GetAdminModelConfig(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
 		}
-		resp, err := srv.GetAdminModelConfig(ctx, &req)
-		if err != nil {
-			m.WriteDomainError(ctx, c, err)
-			return
+	} else {
+		r.GET("/api/v1/admin/model-gateway", func(ctx context.Context, c *app.RequestContext) {
+			var req GetAdminModelConfigReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			resp, err := srv.GetAdminModelConfig(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "UpdateAdminModelConfig", Method: "PUT", Path: "/api/v1/admin/model-gateway", MuxPattern: PatternUpdateAdminModelConfig, RequestType: "UpdateAdminModelConfigReq", ResponseType: "AdminModelConfigResp"}); hfn != nil {
+			r.PUT("/api/v1/admin/model-gateway", hfn)
+		} else {
+			r.PUT("/api/v1/admin/model-gateway", func(ctx context.Context, c *app.RequestContext) {
+				var req UpdateAdminModelConfigReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				resp, err := srv.UpdateAdminModelConfig(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
 		}
-		m.WriteOK(ctx, c, resp)
-	})
-	r.PUT("/api/v1/admin/model-gateway", func(ctx context.Context, c *app.RequestContext) {
-		var req UpdateAdminModelConfigReq
-		if err := c.BindAndValidate(&req); err != nil {
-			m.WriteBindError(ctx, c, err)
-			return
+	} else {
+		r.PUT("/api/v1/admin/model-gateway", func(ctx context.Context, c *app.RequestContext) {
+			var req UpdateAdminModelConfigReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			resp, err := srv.UpdateAdminModelConfig(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "TestAdminModelConfig", Method: "POST", Path: "/api/v1/admin/model-gateway/test", MuxPattern: PatternTestAdminModelConfig, RequestType: "TestAdminModelConfigReq", ResponseType: "TestAdminModelConfigResp"}); hfn != nil {
+			r.POST("/api/v1/admin/model-gateway/test", hfn)
+		} else {
+			r.POST("/api/v1/admin/model-gateway/test", func(ctx context.Context, c *app.RequestContext) {
+				var req TestAdminModelConfigReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				resp, err := srv.TestAdminModelConfig(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
 		}
-		resp, err := srv.UpdateAdminModelConfig(ctx, &req)
-		if err != nil {
-			m.WriteDomainError(ctx, c, err)
-			return
+	} else {
+		r.POST("/api/v1/admin/model-gateway/test", func(ctx context.Context, c *app.RequestContext) {
+			var req TestAdminModelConfigReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			resp, err := srv.TestAdminModelConfig(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "GenerateChat", Method: "POST", Path: "/internal/v1/chat", MuxPattern: PatternGenerateChat, RequestType: "ChatCallReq", ResponseType: "ChatCallResp"}); hfn != nil {
+			r.POST("/internal/v1/chat", hfn)
+		} else {
+			r.POST("/internal/v1/chat", func(ctx context.Context, c *app.RequestContext) {
+				var req ChatCallReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if v := string(c.GetHeader("X-Teamie-Model-Config-Id")); v != "" {
+					req.ExpectedModelConfigId = &v
+				}
+				resp, err := srv.GenerateChat(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
 		}
-		m.WriteOK(ctx, c, resp)
-	})
-	r.POST("/api/v1/admin/model-gateway/test", func(ctx context.Context, c *app.RequestContext) {
-		var req TestAdminModelConfigReq
-		if err := c.BindAndValidate(&req); err != nil {
-			m.WriteBindError(ctx, c, err)
-			return
+	} else {
+		r.POST("/internal/v1/chat", func(ctx context.Context, c *app.RequestContext) {
+			var req ChatCallReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if v := string(c.GetHeader("X-Teamie-Model-Config-Id")); v != "" {
+				req.ExpectedModelConfigId = &v
+			}
+			resp, err := srv.GenerateChat(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "StreamChat", Method: "POST", Path: "/internal/v1/chat/stream", MuxPattern: PatternStreamChat, RequestType: "ChatCallReq", ResponseType: "StreamEventFrameDTO"}); hfn != nil {
+			r.POST("/internal/v1/chat/stream", hfn)
+		} else {
+			r.POST("/internal/v1/chat/stream", func(ctx context.Context, c *app.RequestContext) {
+				var req ChatCallReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if v := string(c.GetHeader("X-Teamie-Model-Config-Id")); v != "" {
+					req.ExpectedModelConfigId = &v
+				}
+				resp, err := srv.StreamChat(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
 		}
-		resp, err := srv.TestAdminModelConfig(ctx, &req)
-		if err != nil {
-			m.WriteDomainError(ctx, c, err)
-			return
+	} else {
+		r.POST("/internal/v1/chat/stream", func(ctx context.Context, c *app.RequestContext) {
+			var req ChatCallReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if v := string(c.GetHeader("X-Teamie-Model-Config-Id")); v != "" {
+				req.ExpectedModelConfigId = &v
+			}
+			resp, err := srv.StreamChat(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "WebSearch", Method: "POST", Path: "/internal/v1/web/search", MuxPattern: PatternWebSearch, RequestType: "WebSearchReq", ResponseType: "WebSearchResp"}); hfn != nil {
+			r.POST("/internal/v1/web/search", hfn)
+		} else {
+			r.POST("/internal/v1/web/search", func(ctx context.Context, c *app.RequestContext) {
+				var req WebSearchReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				resp, err := srv.WebSearch(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
 		}
-		m.WriteOK(ctx, c, resp)
-	})
-	r.POST("/internal/v1/chat", func(ctx context.Context, c *app.RequestContext) {
-		var req ChatCallReq
-		if err := c.BindAndValidate(&req); err != nil {
-			m.WriteBindError(ctx, c, err)
-			return
+	} else {
+		r.POST("/internal/v1/web/search", func(ctx context.Context, c *app.RequestContext) {
+			var req WebSearchReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			resp, err := srv.WebSearch(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "WebExtract", Method: "POST", Path: "/internal/v1/web/extract", MuxPattern: PatternWebExtract, RequestType: "WebExtractReq", ResponseType: "WebExtractResp"}); hfn != nil {
+			r.POST("/internal/v1/web/extract", hfn)
+		} else {
+			r.POST("/internal/v1/web/extract", func(ctx context.Context, c *app.RequestContext) {
+				var req WebExtractReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				resp, err := srv.WebExtract(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
 		}
-		resp, err := srv.GenerateChat(ctx, &req)
-		if err != nil {
-			m.WriteDomainError(ctx, c, err)
-			return
-		}
-		m.WriteOK(ctx, c, resp)
-	})
-	r.POST("/internal/v1/chat/stream", func(ctx context.Context, c *app.RequestContext) {
-		var req ChatCallReq
-		if err := c.BindAndValidate(&req); err != nil {
-			m.WriteBindError(ctx, c, err)
-			return
-		}
-		resp, err := srv.StreamChat(ctx, &req)
-		if err != nil {
-			m.WriteDomainError(ctx, c, err)
-			return
-		}
-		m.WriteOK(ctx, c, resp)
-	})
-	r.POST("/internal/v1/web/search", func(ctx context.Context, c *app.RequestContext) {
-		var req WebSearchReq
-		if err := c.BindAndValidate(&req); err != nil {
-			m.WriteBindError(ctx, c, err)
-			return
-		}
-		resp, err := srv.WebSearch(ctx, &req)
-		if err != nil {
-			m.WriteDomainError(ctx, c, err)
-			return
-		}
-		m.WriteOK(ctx, c, resp)
-	})
-	r.POST("/internal/v1/web/extract", func(ctx context.Context, c *app.RequestContext) {
-		var req WebExtractReq
-		if err := c.BindAndValidate(&req); err != nil {
-			m.WriteBindError(ctx, c, err)
-			return
-		}
-		resp, err := srv.WebExtract(ctx, &req)
-		if err != nil {
-			m.WriteDomainError(ctx, c, err)
-			return
-		}
-		m.WriteOK(ctx, c, resp)
-	})
+	} else {
+		r.POST("/internal/v1/web/extract", func(ctx context.Context, c *app.RequestContext) {
+			var req WebExtractReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			resp, err := srv.WebExtract(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
 }
 
 // RegisterModelGatewayHTTPServer binds ModelGatewayHTTPServer methods using HTTPResponder with optional per-route handler overrides.

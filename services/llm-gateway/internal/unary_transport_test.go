@@ -21,7 +21,7 @@ import (
 	rpcx "teamie/services/llm-gateway/internal/infra/rpcclient"
 	"teamie/contracts/gen/agent/kitex_gen/agent"
 	"teamie/contracts/gen/agent/kitex_gen/agent/modelgatewayservice"
-	"teamie/contracts/gen/agent/modeltransport"
+	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
 )
 
 func fixtureHTTPChat(t *testing.T, s *Service, ctx context.Context, in *agent.GatewayChatRequest) (*agent.GatewayChatResponse, error) {

@@ -14,17 +14,16 @@ import (
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
-	"teamie/contracts/gen/agent/modeltransport"
-	"teamie/services/agent-runtime/internal/domain"
-	"teamie/services/agent-runtime/internal/infra/pg"
+	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
 	"teamie/pkg/imtext"
+	"teamie/services/agent-runtime/internal/domain"
 )
 
 var ErrLeaseLost = domain.ErrLeaseLost
 var ErrReplayConflict = domain.ErrReplayConflict
 
 type Store struct {
-	DB          *pg.Repository
+	DB          domain.RuntimeRepository
 	Coordinator func(im domain.IMGateway) domain.ScheduleCoordinator
 }
 type Lease = domain.Lease
@@ -255,7 +254,7 @@ func toDomainInputs(inputs []Input) []domain.Input {
 	return out
 }
 
-func (s *Store) Repo() *pg.Repository {
+func (s *Store) Repo() domain.RuntimeRepository {
 	if s == nil {
 		return nil
 	}
@@ -274,7 +273,10 @@ func (s *Store) ScheduleCoordinator(im domain.IMGateway) domain.ScheduleCoordina
 }
 
 func Open(ctx context.Context, url string) (*Store, error) {
-	db, err := pg.OpenRepository(ctx, url)
+	if domain.DefaultRuntimeRepository == nil {
+		return nil, errors.New("runtime repository provider not registered")
+	}
+	db, err := domain.DefaultRuntimeRepository(ctx, url)
 	if err != nil {
 		return nil, err
 	}
@@ -290,12 +292,21 @@ func (s *Store) Release(ctx context.Context, l *Lease) {
 	s.Repo().ReleaseLease(ctx, l)
 }
 func (s *Store) CheckLease(ctx context.Context, l *Lease) error {
+	if coord := s.ScheduleCoordinator(nil); coord != nil {
+		return coord.ValidateLease(ctx, l)
+	}
 	return s.Repo().CheckLease(ctx, l)
 }
 func (s *Store) Cursor(ctx context.Context, l *Lease) (string, error) {
+	if coord := s.ScheduleCoordinator(nil); coord != nil {
+		return coord.GetInboxCursor(ctx, l)
+	}
 	return s.Repo().GetCursor(ctx, l)
 }
 func (s *Store) Ingest(ctx context.Context, l *Lease, cursor string, inputs []Input) error {
+	if coord := s.ScheduleCoordinator(nil); coord != nil {
+		return coord.IngestInboxInputs(ctx, l, cursor, toDomainInputs(inputs))
+	}
 	return s.Repo().IngestInputs(ctx, l, cursor, toDomainInputs(inputs))
 }
 func (s *Store) Pending(ctx context.Context, l *Lease) ([]Input, error) {
@@ -314,6 +325,9 @@ func (s *Store) Pending(ctx context.Context, l *Lease) ([]Input, error) {
 	return out, nil
 }
 func (s *Store) Skip(ctx context.Context, l *Lease, id string) error {
+	if coord := s.ScheduleCoordinator(nil); coord != nil {
+		return coord.SkipInboxInput(ctx, l, id)
+	}
 	return s.Repo().SkipInput(ctx, l, id)
 }
 func (s *Store) StartRun(ctx context.Context, l *Lease, inputs []Input) (*Run, error) {
@@ -334,7 +348,16 @@ func (s *Store) StartRunWithContextPolicy(ctx context.Context, l *Lease, inputs 
 		r.ID,
 		r.Attempt,
 		func() (string, []byte, string, json.RawMessage, []string, error) {
-			canonProfile, canonBudget, err := canonicalContextPolicy(profile, budget)
+			var (
+				canonProfile string
+				canonBudget  json.RawMessage
+				err          error
+			)
+			if coord := s.ScheduleCoordinator(nil); coord != nil {
+				canonProfile, canonBudget, err = coord.ResolveRunContextPolicy(profile, budget)
+			} else {
+				canonProfile, canonBudget, err = canonicalContextPolicy(profile, budget)
+			}
 			if err != nil {
 				return "", nil, "", nil, nil, err
 			}

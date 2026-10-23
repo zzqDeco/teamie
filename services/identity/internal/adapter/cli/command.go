@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"teamie/pkg/config"
 	"teamie/pkg/httpx"
 	"teamie/pkg/postgres"
 	"teamie/services/identity/internal/app"
@@ -61,7 +60,7 @@ func Run(ctx context.Context, args []string, getenv func(string) string, stdout,
 		fmt.Fprintln(stderr, err.Error())
 		return 1
 	}
-	cfgFlags := config.Flags{Path: getenv("FEATURE_FLAGS_FILE")}
+	cfgFlags := httpx.Flags{Path: getenv("FEATURE_FLAGS_FILE")}
 	if err = cfgFlags.Validate(); err != nil {
 		fmt.Fprintln(stderr, "FEATURE_FLAGS_FILE is missing or invalid")
 		return 1

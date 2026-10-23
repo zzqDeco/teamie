@@ -16,7 +16,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	rpcx "teamie/services/llm-gateway/internal/infra/rpcclient"
 	"teamie/contracts/gen/agent/kitex_gen/agent"
-	"teamie/contracts/gen/agent/modeltransport"
+	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
 )
 
 func TestGatewayPreservesFrozenOutputAfterWindowDecrease(t *testing.T) {

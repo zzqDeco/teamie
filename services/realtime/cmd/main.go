@@ -4,7 +4,6 @@ import (
 	"context"
 
 	goredis "github.com/redis/go-redis/v9"
-	"teamie/pkg/config"
 	"teamie/pkg/httpx"
 	"teamie/pkg/observability"
 	wsadapter "teamie/services/realtime/internal/adapter/ws"
@@ -18,7 +17,7 @@ func main() {
 	stopLogging := observability.Configure("teamie.realtime", httpx.BuildVersion, httpx.BuildSHA)
 	defer stopLogging()
 
-	cfgFlags := config.Flags{Path: httpx.Env("FEATURE_FLAGS_FILE", "")}
+	cfgFlags := httpx.Flags{Path: httpx.Env("FEATURE_FLAGS_FILE", "")}
 	if err := cfgFlags.Validate(); err != nil {
 		observability.Fatal("Service initialization failed", err)
 	}

@@ -15,7 +15,6 @@ import (
 	"testing"
 
 	"teamie/pkg/httpx"
-	"teamie/pkg/config"
 )
 
 func uploadError(t *testing.T, err error, status int, code string) {
@@ -141,7 +140,7 @@ func TestAttachmentUploadConcurrentIdentityAndLostResponseDiscovery(t *testing.T
 	if err = os.WriteFile(flagFile, []byte(`{"revision":"upload-disabled","flags":{"im.attachments.upload":false}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	s.Flags = config.Flags{Path: flagFile}
+	s.Flags = httpx.Flags{Path: flagFile}
 	if _, err = s.LookupAttachmentUpload(ctx, owner.ID, conversation.ID, key); err != nil {
 		t.Fatal("disabled writes hid a persisted upload", err)
 	}

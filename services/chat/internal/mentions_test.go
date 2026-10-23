@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"teamie/pkg/config"
+	"teamie/pkg/httpx"
 	"teamie/pkg/postgres"
 	"teamie/pkg/postgres/testdb"
 	"teamie/pkg/imtext"
@@ -52,7 +52,7 @@ func TestMentionsConcurrentSendEditRetractionAndReplay(t *testing.T) {
 	if err = os.WriteFile(flags, []byte(`{"revision":"mentions-off","flags":{"im.message.mentions":false,"im.message.retract":true}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	s.Flags = config.Flags{Path: flags}
+	s.Flags = httpx.Flags{Path: flags}
 	if _, _, err = s.SendAnnotated(ctx, owner, c.ID, "mention-once", body, nil, nil, mentions); err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ INSERT INTO messages(id,conversation_id,sender_id,sender_name,sender_kind,client
 INSERT INTO attachment_uploads(uploader_id,upload_key,conversation_id,fingerprint) VALUES('owner','spent','c','original');`); err != nil {
 		t.Fatal(err)
 	}
-	s, err := Open(ctx, url, config.Flags{})
+	s, err := Open(ctx, url, httpx.Flags{})
 	if err != nil {
 		t.Fatal(err)
 	}

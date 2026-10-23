@@ -318,7 +318,7 @@ func (w *workerTasks) notifications(ctx context.Context, l *Lease) (failure erro
 		if n.SessionID != "agent:"+l.AgentID {
 			return errors.New("notification scope mismatch")
 		}
-		seq, parentRunID, inserted, err := w.store.pgStore().PersistNotificationInput(
+		seq, parentRunID, inserted, err := w.store.PersistNotificationInput(
 			ctx,
 			l.AgentID,
 			n.TaskID,

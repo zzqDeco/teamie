@@ -26,6 +26,11 @@ type HTTPRouteMiddleware interface {
 	WrapRoute(route RouteSpec, next http.HandlerFunc) http.HandlerFunc
 }
 
+// HertzRouteMiddleware optionally provides a native Hertz app.HandlerFunc for a generated RouteSpec.
+type HertzRouteMiddleware interface {
+	HertzHandler(route RouteSpec) app.HandlerFunc
+}
+
 // RouteSpec describes a single HTTP/WebSocket endpoint declared in the Thrift IDL.
 type RouteSpec struct {
 	Name         string
@@ -155,188 +160,499 @@ func RegisterIdentityHTTPServiceRoutes(mux *http.ServeMux, h IdentityHTTPService
 
 // RegisterIdentityHTTPServiceHertzServer registers IdentityHTTPServer endpoints on a native Hertz route.RouterGroup.
 func RegisterIdentityHTTPServiceHertzServer(r *route.RouterGroup, srv IdentityHTTPServer, m HTTPResponder) {
-	r.GET("/api/v1/auth/registration", func(ctx context.Context, c *app.RequestContext) {
-		var req GetRegistrationMetadataReq
-		if err := c.BindAndValidate(&req); err != nil {
-			m.WriteBindError(ctx, c, err)
-			return
+	hmw, hasHMW := m.(HertzRouteMiddleware)
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "GetRegistrationMetadata", Method: "GET", Path: "/api/v1/auth/registration", MuxPattern: PatternGetRegistrationMetadata, RequestType: "GetRegistrationMetadataReq", ResponseType: "RegistrationMetadataResp"}); hfn != nil {
+			r.GET("/api/v1/auth/registration", hfn)
+		} else {
+			r.GET("/api/v1/auth/registration", func(ctx context.Context, c *app.RequestContext) {
+				var req GetRegistrationMetadataReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				resp, err := srv.GetRegistrationMetadata(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
 		}
-		resp, err := srv.GetRegistrationMetadata(ctx, &req)
-		if err != nil {
-			m.WriteDomainError(ctx, c, err)
-			return
+	} else {
+		r.GET("/api/v1/auth/registration", func(ctx context.Context, c *app.RequestContext) {
+			var req GetRegistrationMetadataReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			resp, err := srv.GetRegistrationMetadata(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "Register", Method: "POST", Path: "/api/v1/auth/register", MuxPattern: PatternRegister, RequestType: "RegisterReq", ResponseType: "SessionResp"}); hfn != nil {
+			r.POST("/api/v1/auth/register", hfn)
+		} else {
+			r.POST("/api/v1/auth/register", func(ctx context.Context, c *app.RequestContext) {
+				var req RegisterReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				resp, err := srv.Register(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
 		}
-		m.WriteOK(ctx, c, resp)
-	})
-	r.POST("/api/v1/auth/register", func(ctx context.Context, c *app.RequestContext) {
-		var req RegisterReq
-		if err := c.BindAndValidate(&req); err != nil {
-			m.WriteBindError(ctx, c, err)
-			return
+	} else {
+		r.POST("/api/v1/auth/register", func(ctx context.Context, c *app.RequestContext) {
+			var req RegisterReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			resp, err := srv.Register(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "Login", Method: "POST", Path: "/api/v1/auth/login", MuxPattern: PatternLogin, RequestType: "LoginReq", ResponseType: "SessionResp"}); hfn != nil {
+			r.POST("/api/v1/auth/login", hfn)
+		} else {
+			r.POST("/api/v1/auth/login", func(ctx context.Context, c *app.RequestContext) {
+				var req LoginReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				resp, err := srv.Login(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
 		}
-		resp, err := srv.Register(ctx, &req)
-		if err != nil {
-			m.WriteDomainError(ctx, c, err)
-			return
+	} else {
+		r.POST("/api/v1/auth/login", func(ctx context.Context, c *app.RequestContext) {
+			var req LoginReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			resp, err := srv.Login(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "GetSession", Method: "GET", Path: "/api/v1/auth/session", MuxPattern: PatternGetSession, RequestType: "GetSessionReq", ResponseType: "SessionResp"}); hfn != nil {
+			r.GET("/api/v1/auth/session", hfn)
+		} else {
+			r.GET("/api/v1/auth/session", func(ctx context.Context, c *app.RequestContext) {
+				var req GetSessionReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				resp, err := srv.GetSession(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
 		}
-		m.WriteOK(ctx, c, resp)
-	})
-	r.POST("/api/v1/auth/login", func(ctx context.Context, c *app.RequestContext) {
-		var req LoginReq
-		if err := c.BindAndValidate(&req); err != nil {
-			m.WriteBindError(ctx, c, err)
-			return
+	} else {
+		r.GET("/api/v1/auth/session", func(ctx context.Context, c *app.RequestContext) {
+			var req GetSessionReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			resp, err := srv.GetSession(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "Logout", Method: "POST", Path: "/api/v1/auth/logout", MuxPattern: PatternLogout, RequestType: "LogoutReq", ResponseType: "EmptyResp"}); hfn != nil {
+			r.POST("/api/v1/auth/logout", hfn)
+		} else {
+			r.POST("/api/v1/auth/logout", func(ctx context.Context, c *app.RequestContext) {
+				var req LogoutReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				resp, err := srv.Logout(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
 		}
-		resp, err := srv.Login(ctx, &req)
-		if err != nil {
-			m.WriteDomainError(ctx, c, err)
-			return
+	} else {
+		r.POST("/api/v1/auth/logout", func(ctx context.Context, c *app.RequestContext) {
+			var req LogoutReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			resp, err := srv.Logout(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "ChangePassword", Method: "POST", Path: "/api/v1/auth/password", MuxPattern: PatternChangePassword, RequestType: "ChangePasswordReq", ResponseType: "EmptyResp"}); hfn != nil {
+			r.POST("/api/v1/auth/password", hfn)
+		} else {
+			r.POST("/api/v1/auth/password", func(ctx context.Context, c *app.RequestContext) {
+				var req ChangePasswordReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				resp, err := srv.ChangePassword(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
 		}
-		m.WriteOK(ctx, c, resp)
-	})
-	r.GET("/api/v1/auth/session", func(ctx context.Context, c *app.RequestContext) {
-		var req GetSessionReq
-		if err := c.BindAndValidate(&req); err != nil {
-			m.WriteBindError(ctx, c, err)
-			return
+	} else {
+		r.POST("/api/v1/auth/password", func(ctx context.Context, c *app.RequestContext) {
+			var req ChangePasswordReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			resp, err := srv.ChangePassword(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "UpdateProfile", Method: "PATCH", Path: "/api/v1/auth/profile", MuxPattern: PatternUpdateProfile, RequestType: "UpdateProfileReq", ResponseType: "UpdateProfileResp"}); hfn != nil {
+			r.PATCH("/api/v1/auth/profile", hfn)
+		} else {
+			r.PATCH("/api/v1/auth/profile", func(ctx context.Context, c *app.RequestContext) {
+				var req UpdateProfileReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				resp, err := srv.UpdateProfile(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
 		}
-		resp, err := srv.GetSession(ctx, &req)
-		if err != nil {
-			m.WriteDomainError(ctx, c, err)
-			return
+	} else {
+		r.PATCH("/api/v1/auth/profile", func(ctx context.Context, c *app.RequestContext) {
+			var req UpdateProfileReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			resp, err := srv.UpdateProfile(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "ListInvites", Method: "GET", Path: "/api/v1/auth/admin/invites", MuxPattern: PatternListInvites, RequestType: "ListInvitesReq", ResponseType: "ListInvitesResp"}); hfn != nil {
+			r.GET("/api/v1/auth/admin/invites", hfn)
+		} else {
+			r.GET("/api/v1/auth/admin/invites", func(ctx context.Context, c *app.RequestContext) {
+				var req ListInvitesReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				resp, err := srv.ListInvites(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
 		}
-		m.WriteOK(ctx, c, resp)
-	})
-	r.POST("/api/v1/auth/logout", func(ctx context.Context, c *app.RequestContext) {
-		var req LogoutReq
-		if err := c.BindAndValidate(&req); err != nil {
-			m.WriteBindError(ctx, c, err)
-			return
+	} else {
+		r.GET("/api/v1/auth/admin/invites", func(ctx context.Context, c *app.RequestContext) {
+			var req ListInvitesReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			resp, err := srv.ListInvites(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "CreateInvite", Method: "POST", Path: "/api/v1/auth/admin/invites", MuxPattern: PatternCreateInvite, RequestType: "CreateInviteReq", ResponseType: "CreateInviteResp"}); hfn != nil {
+			r.POST("/api/v1/auth/admin/invites", hfn)
+		} else {
+			r.POST("/api/v1/auth/admin/invites", func(ctx context.Context, c *app.RequestContext) {
+				var req CreateInviteReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				resp, err := srv.CreateInvite(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
 		}
-		resp, err := srv.Logout(ctx, &req)
-		if err != nil {
-			m.WriteDomainError(ctx, c, err)
-			return
+	} else {
+		r.POST("/api/v1/auth/admin/invites", func(ctx context.Context, c *app.RequestContext) {
+			var req CreateInviteReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			resp, err := srv.CreateInvite(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "RevokeInvite", Method: "DELETE", Path: "/api/v1/auth/admin/invites/:id", MuxPattern: PatternRevokeInvite, RequestType: "RevokeInviteReq", ResponseType: "EmptyResp"}); hfn != nil {
+			r.DELETE("/api/v1/auth/admin/invites/:id", hfn)
+		} else {
+			r.DELETE("/api/v1/auth/admin/invites/:id", func(ctx context.Context, c *app.RequestContext) {
+				var req RevokeInviteReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				resp, err := srv.RevokeInvite(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
 		}
-		m.WriteOK(ctx, c, resp)
-	})
-	r.POST("/api/v1/auth/password", func(ctx context.Context, c *app.RequestContext) {
-		var req ChangePasswordReq
-		if err := c.BindAndValidate(&req); err != nil {
-			m.WriteBindError(ctx, c, err)
-			return
+	} else {
+		r.DELETE("/api/v1/auth/admin/invites/:id", func(ctx context.Context, c *app.RequestContext) {
+			var req RevokeInviteReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			resp, err := srv.RevokeInvite(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "ListAdminUsers", Method: "GET", Path: "/api/v1/auth/admin/users", MuxPattern: PatternListAdminUsers, RequestType: "ListAdminUsersReq", ResponseType: "AdminUserPageResp"}); hfn != nil {
+			r.GET("/api/v1/auth/admin/users", hfn)
+		} else {
+			r.GET("/api/v1/auth/admin/users", func(ctx context.Context, c *app.RequestContext) {
+				var req ListAdminUsersReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if v := c.Query("cursor"); v != "" {
+					req.Cursor = &v
+				}
+				if v := c.Query("limit"); v != "" {
+					req.Limit = &v
+				}
+				if v := c.Query("q"); v != "" {
+					req.Q = &v
+				}
+				resp, err := srv.ListAdminUsers(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
 		}
-		resp, err := srv.ChangePassword(ctx, &req)
-		if err != nil {
-			m.WriteDomainError(ctx, c, err)
-			return
+	} else {
+		r.GET("/api/v1/auth/admin/users", func(ctx context.Context, c *app.RequestContext) {
+			var req ListAdminUsersReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if v := c.Query("cursor"); v != "" {
+				req.Cursor = &v
+			}
+			if v := c.Query("limit"); v != "" {
+				req.Limit = &v
+			}
+			if v := c.Query("q"); v != "" {
+				req.Q = &v
+			}
+			resp, err := srv.ListAdminUsers(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "CreatePasswordResetLink", Method: "POST", Path: "/api/v1/auth/admin/users/:id/password-reset-links", MuxPattern: PatternCreatePasswordResetLink, RequestType: "CreatePasswordResetLinkReq", ResponseType: "CreatePasswordResetLinkResp"}); hfn != nil {
+			r.POST("/api/v1/auth/admin/users/:id/password-reset-links", hfn)
+		} else {
+			r.POST("/api/v1/auth/admin/users/:id/password-reset-links", func(ctx context.Context, c *app.RequestContext) {
+				var req CreatePasswordResetLinkReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				resp, err := srv.CreatePasswordResetLink(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
 		}
-		m.WriteOK(ctx, c, resp)
-	})
-	r.PATCH("/api/v1/auth/profile", func(ctx context.Context, c *app.RequestContext) {
-		var req UpdateProfileReq
-		if err := c.BindAndValidate(&req); err != nil {
-			m.WriteBindError(ctx, c, err)
-			return
+	} else {
+		r.POST("/api/v1/auth/admin/users/:id/password-reset-links", func(ctx context.Context, c *app.RequestContext) {
+			var req CreatePasswordResetLinkReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			resp, err := srv.CreatePasswordResetLink(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "InspectPasswordReset", Method: "POST", Path: "/api/v1/auth/password-reset/inspect", MuxPattern: PatternInspectPasswordReset, RequestType: "InspectPasswordResetReq", ResponseType: "PasswordResetInspectionResp"}); hfn != nil {
+			r.POST("/api/v1/auth/password-reset/inspect", hfn)
+		} else {
+			r.POST("/api/v1/auth/password-reset/inspect", func(ctx context.Context, c *app.RequestContext) {
+				var req InspectPasswordResetReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				resp, err := srv.InspectPasswordReset(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
 		}
-		resp, err := srv.UpdateProfile(ctx, &req)
-		if err != nil {
-			m.WriteDomainError(ctx, c, err)
-			return
+	} else {
+		r.POST("/api/v1/auth/password-reset/inspect", func(ctx context.Context, c *app.RequestContext) {
+			var req InspectPasswordResetReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			resp, err := srv.InspectPasswordReset(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "ResetPassword", Method: "POST", Path: "/api/v1/auth/password-reset", MuxPattern: PatternResetPassword, RequestType: "ResetPasswordReq", ResponseType: "EmptyResp"}); hfn != nil {
+			r.POST("/api/v1/auth/password-reset", hfn)
+		} else {
+			r.POST("/api/v1/auth/password-reset", func(ctx context.Context, c *app.RequestContext) {
+				var req ResetPasswordReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				resp, err := srv.ResetPassword(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
 		}
-		m.WriteOK(ctx, c, resp)
-	})
-	r.GET("/api/v1/auth/admin/invites", func(ctx context.Context, c *app.RequestContext) {
-		var req ListInvitesReq
-		if err := c.BindAndValidate(&req); err != nil {
-			m.WriteBindError(ctx, c, err)
-			return
-		}
-		resp, err := srv.ListInvites(ctx, &req)
-		if err != nil {
-			m.WriteDomainError(ctx, c, err)
-			return
-		}
-		m.WriteOK(ctx, c, resp)
-	})
-	r.POST("/api/v1/auth/admin/invites", func(ctx context.Context, c *app.RequestContext) {
-		var req CreateInviteReq
-		if err := c.BindAndValidate(&req); err != nil {
-			m.WriteBindError(ctx, c, err)
-			return
-		}
-		resp, err := srv.CreateInvite(ctx, &req)
-		if err != nil {
-			m.WriteDomainError(ctx, c, err)
-			return
-		}
-		m.WriteOK(ctx, c, resp)
-	})
-	r.DELETE("/api/v1/auth/admin/invites/:id", func(ctx context.Context, c *app.RequestContext) {
-		var req RevokeInviteReq
-		if err := c.BindAndValidate(&req); err != nil {
-			m.WriteBindError(ctx, c, err)
-			return
-		}
-		resp, err := srv.RevokeInvite(ctx, &req)
-		if err != nil {
-			m.WriteDomainError(ctx, c, err)
-			return
-		}
-		m.WriteOK(ctx, c, resp)
-	})
-	r.GET("/api/v1/auth/admin/users", func(ctx context.Context, c *app.RequestContext) {
-		var req ListAdminUsersReq
-		if err := c.BindAndValidate(&req); err != nil {
-			m.WriteBindError(ctx, c, err)
-			return
-		}
-		resp, err := srv.ListAdminUsers(ctx, &req)
-		if err != nil {
-			m.WriteDomainError(ctx, c, err)
-			return
-		}
-		m.WriteOK(ctx, c, resp)
-	})
-	r.POST("/api/v1/auth/admin/users/:id/password-reset-links", func(ctx context.Context, c *app.RequestContext) {
-		var req CreatePasswordResetLinkReq
-		if err := c.BindAndValidate(&req); err != nil {
-			m.WriteBindError(ctx, c, err)
-			return
-		}
-		resp, err := srv.CreatePasswordResetLink(ctx, &req)
-		if err != nil {
-			m.WriteDomainError(ctx, c, err)
-			return
-		}
-		m.WriteOK(ctx, c, resp)
-	})
-	r.POST("/api/v1/auth/password-reset/inspect", func(ctx context.Context, c *app.RequestContext) {
-		var req InspectPasswordResetReq
-		if err := c.BindAndValidate(&req); err != nil {
-			m.WriteBindError(ctx, c, err)
-			return
-		}
-		resp, err := srv.InspectPasswordReset(ctx, &req)
-		if err != nil {
-			m.WriteDomainError(ctx, c, err)
-			return
-		}
-		m.WriteOK(ctx, c, resp)
-	})
-	r.POST("/api/v1/auth/password-reset", func(ctx context.Context, c *app.RequestContext) {
-		var req ResetPasswordReq
-		if err := c.BindAndValidate(&req); err != nil {
-			m.WriteBindError(ctx, c, err)
-			return
-		}
-		resp, err := srv.ResetPassword(ctx, &req)
-		if err != nil {
-			m.WriteDomainError(ctx, c, err)
-			return
-		}
-		m.WriteOK(ctx, c, resp)
-	})
+	} else {
+		r.POST("/api/v1/auth/password-reset", func(ctx context.Context, c *app.RequestContext) {
+			var req ResetPasswordReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			resp, err := srv.ResetPassword(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
 }
 
 // RegisterIdentityHTTPServer binds IdentityHTTPServer methods using HTTPResponder with optional per-route handler overrides.

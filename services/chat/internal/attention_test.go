@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"teamie/pkg/httpx"
-	"teamie/pkg/config"
 	"teamie/pkg/imtext"
 )
 
@@ -103,7 +102,7 @@ func TestAttentionProjectsCurrentMentionsRepliesAndReadCursors(t *testing.T) {
 	if err = os.WriteFile(path, []byte(`{"revision":"off","flags":{}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	s.Flags = config.Flags{Path: path}
+	s.Flags = httpx.Flags{Path: path}
 	page, err = s.Attention(ctx, agent.ID, "", 50, false)
 	if err != nil || len(page.Items) != 1 {
 		t.Fatal("disabled writes hid delivered mentions", page, err)

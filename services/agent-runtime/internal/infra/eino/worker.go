@@ -208,7 +208,15 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		if err != nil {
 			return &ModelError{Code: "control_unavailable", Retry: true}
 		}
-		if r.Agent == nil || !r.Agent.Enabled || r.Agent.DeletedAt != nil || r.Agent.Revision != def.Revision {
+		shouldPreempt := r.Agent == nil
+		if !shouldPreempt {
+			if coord := e.Store.ScheduleCoordinator(nil); coord != nil {
+				shouldPreempt = coord.CheckRevisionPreemption(r.Agent.Enabled, r.Agent.DeletedAt != nil, r.Agent.Revision, def.Revision)
+			} else {
+				shouldPreempt = !r.Agent.Enabled || r.Agent.DeletedAt != nil || r.Agent.Revision != def.Revision
+			}
+		}
+		if shouldPreempt {
 			return &ModelError{Code: "principal_disabled", Retry: true}
 		}
 		if run, runErr := CurrentRun(ctx); runErr == nil && e.Store.runCanceled(ctx, run.ID) {

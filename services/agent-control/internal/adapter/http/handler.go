@@ -12,8 +12,10 @@ import (
 	"net/http"
 	"time"
 
+	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/adaptor"
+	"github.com/cloudwego/hertz/pkg/route"
 	"go.uber.org/zap"
 	controlgen "teamie/contracts/gen/agent/hertz_gen/agent/control"
 	"teamie/pkg/httpx"
@@ -299,7 +301,12 @@ func (a *Adapter) WriteSingleProfile(w http.ResponseWriter, r *http.Request, ag 
 
 type controlResponder struct {
 	httpx.Responder
-	adapter *Adapter
+	adapter    *Adapter
+	muxHandler hertzapp.HandlerFunc
+}
+
+func (cr controlResponder) HertzHandler(_ controlgen.RouteSpec) hertzapp.HandlerFunc {
+	return cr.muxHandler
 }
 
 func (controlResponder) DecodeRequest(w http.ResponseWriter, r *http.Request, dst any) error {
@@ -345,13 +352,19 @@ func (a *Adapter) Routes() http.Handler {
 	m.HandleFunc("GET /version", func(w http.ResponseWriter, _ *http.Request) {
 		Write(w, http.StatusOK, map[string]string{"version": a.Version, "sha": a.SHA})
 	})
-	controlgen.RegisterAgentControlHTTPServer(m, a, controlResponder{adapter: a})
-	return m
+	resp := controlResponder{
+		adapter:    a,
+		muxHandler: adaptor.HertzHandler(observability.HTTP(m)),
+	}
+	controlgen.RegisterAgentControlHTTPServer(m, a, resp)
+	return httpx.WrapHertzRouter(m, func(r *route.RouterGroup) {
+		controlgen.RegisterAgentControlHTTPServiceHertzServer(r, a, resp)
+	})
 }
 
 // Serve runs the Hertz HTTP server for the Agent Control Plane with a 64 KiB max request body.
 func Serve(addr string, h http.Handler) {
 	s := server.Default(server.WithHostPorts(addr), server.WithMaxRequestBodySize(65536))
-	s.Any("/*path", adaptor.HertzHandler(observability.HTTP(h)))
+	httpx.MountHertz(s, h)
 	s.Spin()
 }

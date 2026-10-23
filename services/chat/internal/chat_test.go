@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"sync"
 	"teamie/pkg/httpx"
-	"teamie/pkg/config"
 	"teamie/pkg/postgres/testdb"
 	"testing"
 )
@@ -17,7 +16,7 @@ import (
 func setup(t *testing.T) (*Store, Workspace, Conversation, httpx.User, httpx.User) {
 	t.Helper()
 	ctx := context.Background()
-	s, e := Open(ctx, testdb.URL(t), config.Flags{})
+	s, e := Open(ctx, testdb.URL(t), httpx.Flags{})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -238,11 +237,11 @@ func TestWriteFlagsDoNotHidePersistedContent(t *testing.T) {
 		t.Fatal(e)
 	}
 	path := filepath.Join(t.TempDir(), "flags.json")
-	payload, _ := json.Marshal(config.Snapshot{Revision: "disabled", Flags: map[string]bool{}})
+	payload, _ := json.Marshal(httpx.Snapshot{Revision: "disabled", Flags: map[string]bool{}})
 	if e = os.WriteFile(path, payload, 0600); e != nil {
 		t.Fatal(e)
 	}
-	s.Flags = config.Flags{Path: path}
+	s.Flags = httpx.Flags{Path: path}
 	if _, e = s.ChangeMessage(ctx, owner.ID, c.ID, m.ID, "blocked", false); e == nil {
 		t.Fatal("disabled edit accepted")
 	}

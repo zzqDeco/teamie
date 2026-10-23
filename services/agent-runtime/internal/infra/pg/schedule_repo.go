@@ -203,13 +203,7 @@ func (r *Repository) CancelAllActiveSchedules(ctx context.Context, agentID strin
 }
 
 // DrainedScheduleLog records the outcome of draining a due schedule wakeup into runtime_inputs.
-type DrainedScheduleLog struct {
-	ScheduleID     string
-	NotificationID string
-	EventID        string
-	ParentRunID    string
-	Inserted       bool
-}
+type DrainedScheduleLog = domain.DrainedScheduleLog
 
 type dueScheduleRecord struct {
 	id              string

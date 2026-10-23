@@ -6,12 +6,16 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"teamie/pkg/postgres"
 	"teamie/services/agent-runtime/internal/domain"
 )
+
+func init() {
+	domain.DefaultRuntimeRepository = func(ctx context.Context, url string) (domain.RuntimeRepository, error) {
+		return OpenRepository(ctx, url)
+	}
+}
 
 // OpenPool opens the Agent Runtime's dedicated PostgreSQL connection pool with
 // UTC normalization, 5s connect timeout, MaxConns=4, MinConns=0, and the writer schema guard setting.
@@ -58,6 +62,7 @@ var (
 	_ domain.ToolReceiptRepository = (*Repository)(nil)
 	_ domain.ArchiveRepository     = (*Repository)(nil)
 	_ domain.InspectRepository     = (*Repository)(nil)
+	_ domain.RuntimeRepository     = (*Repository)(nil)
 )
 
 // Close closes the underlying connection pool.
@@ -78,17 +83,17 @@ func (r *Repository) Ping(ctx context.Context) error {
 }
 
 // Exec executes a statement using the active transaction in ctx or the connection pool.
-func (r *Repository) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+func (r *Repository) Exec(ctx context.Context, sql string, args ...any) (domain.ExecTag, error) {
 	return r.db.Exec(ctx, sql, args...)
 }
 
 // Query executes a multi-row query using the active transaction in ctx or the connection pool.
-func (r *Repository) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+func (r *Repository) Query(ctx context.Context, sql string, args ...any) (domain.RowsScanner, error) {
 	return r.db.Query(ctx, sql, args...)
 }
 
 // QueryRow executes a single-row query using the active transaction in ctx or the connection pool.
-func (r *Repository) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+func (r *Repository) QueryRow(ctx context.Context, sql string, args ...any) domain.RowScanner {
 	return r.db.QueryRow(ctx, sql, args...)
 }
 

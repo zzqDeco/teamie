@@ -3,7 +3,6 @@ package chat
 import (
 	"context"
 	"teamie/pkg/httpx"
-	"teamie/pkg/config"
 	"teamie/pkg/postgres"
 	"teamie/pkg/postgres/testdb"
 	"testing"
@@ -154,7 +153,7 @@ func TestChatV1UpgradePreservesMessages(t *testing.T) {
 	if _, e = db.Exec(ctx, "INSERT INTO workspaces(id,name,created_by) VALUES('ws','Existing','owner'); INSERT INTO workspace_members(workspace_id,user_id,role) VALUES('ws','owner','owner'); INSERT INTO conversations(id,workspace_id,type,name,last_seq) VALUES('conversation','ws','channel','general',1); INSERT INTO messages(id,conversation_id,sender_id,sender_name,sender_kind,client_message_id,seq,body,original_body_hash) VALUES('message','conversation','owner','Owner','human','retry',1,'Preserved','hash')"); e != nil {
 		t.Fatal(e)
 	}
-	s, e := Open(ctx, url, config.Flags{})
+	s, e := Open(ctx, url, httpx.Flags{})
 	if e != nil {
 		t.Fatal(e)
 	}

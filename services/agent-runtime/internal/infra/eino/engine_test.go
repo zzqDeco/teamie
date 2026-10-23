@@ -27,6 +27,8 @@ import (
 	"teamie/contracts/gen/im/kitex_gen/im"
 	"teamie/contracts/gen/im/kitex_gen/im/identityservice"
 	"teamie/pkg/imtext"
+	_ "teamie/services/agent-runtime/internal/app"
+	_ "teamie/services/agent-runtime/internal/infra/pg"
 )
 
 func testStore(t *testing.T) *Store {

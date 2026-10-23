@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 )
 
@@ -192,13 +193,21 @@ type TurnExecutor interface {
 }
 
 // ScheduleCoordinator defines the application-level use-case boundary for schedule creation,
-// wakeup input authorization, active schedule ACL filtering, and provenance row-source resolution.
+// wakeup input authorization, active schedule ACL filtering, provenance row-source resolution,
+// worker lease validation, inbox ingestion, and context policy resolution.
 type ScheduleCoordinator interface {
 	ResolveScheduleRowSources(ctx context.Context, agentID, createdRunID string, sourceRefsJSON []byte, sourceOverflow bool) ([]InputSource, error)
 	AuthorizeScheduleInput(ctx context.Context, lease *Lease, in Input) error
 	FilterAuthorizedSchedules(ctx context.Context, agentID string, candidates []ScheduleCandidate) ([]ScheduleItem, error)
 	AuthorizeScheduleListReceipt(ctx context.Context, agentID string, cached []byte) error
 	EvaluateScheduleCreation(ctx context.Context, lease *Lease, runID, callID string, runInputs []Input, spec ScheduleSpec) (*ScheduleItem, string, error)
+	ValidateLease(ctx context.Context, lease *Lease) error
+	CheckRevisionPreemption(enabled, deleted bool, currentRevision, workerRevision int64) bool
+	ResolveRunContextPolicy(profile string, raw json.RawMessage) (string, json.RawMessage, error)
+	GetInboxCursor(ctx context.Context, lease *Lease) (string, error)
+	IngestInboxInputs(ctx context.Context, lease *Lease, cursor string, inputs []Input) error
+	SkipInboxInput(ctx context.Context, lease *Lease, eventID string) error
+	ResolveRunSources(ctx context.Context, agentID, runID string) ([]InputSource, error)
 }
 
 // DefaultScheduleCoordinator is registered by the application layer to construct a ScheduleCoordinator
@@ -211,6 +220,27 @@ var DefaultScheduleCoordinator func(
 	receipts ToolReceiptRepository,
 	im IMGateway,
 ) ScheduleCoordinator
+
+// DefaultRuntimeRepository is registered by the PostgreSQL infrastructure package to open a RuntimeRepository.
+var DefaultRuntimeRepository func(ctx context.Context, url string) (RuntimeRepository, error)
+
+// ExecTag abstracts a SQL command execution tag without importing driver packages.
+type ExecTag interface {
+	RowsAffected() int64
+}
+
+// RowScanner abstracts a single-row SQL scanner without importing driver packages.
+type RowScanner interface {
+	Scan(dest ...any) error
+}
+
+// RowsScanner abstracts a multi-row SQL cursor without importing driver packages.
+type RowsScanner interface {
+	Next() bool
+	Scan(dest ...any) error
+	Close()
+	Err() error
+}
 
 // SessionEventWrite holds a serialized session event ready for persistence.
 type SessionEventWrite struct {
@@ -245,4 +275,236 @@ type AcceptedToolCallCandidate struct {
 	RunID string
 	Name  string
 	Raw   []byte
+}
+
+// ToolCallResultRecord holds a persisted tool call receipt row.
+type ToolCallResultRecord struct {
+	CallID string
+	Name   string
+	Result []byte
+}
+
+// AttemptEventPayload holds an attempt_id and serialized session event payload.
+type AttemptEventPayload struct {
+	AttemptID string
+	Payload   []byte
+}
+
+// DrainedScheduleLog records the outcome of draining a due schedule wakeup into runtime_inputs.
+type DrainedScheduleLog struct {
+	ScheduleID     string
+	NotificationID string
+	EventID        string
+	ParentRunID    string
+	Inserted       bool
+}
+
+// LoadedContextArtifactRow holds the raw columns of a loaded context artifact.
+type LoadedContextArtifactRow struct {
+	Attempt    string
+	Key        string
+	Kind       string
+	ToolCallID string
+	ToolName   string
+	Raw        []byte
+	Hash       string
+	Sources    []byte
+	Parents    []byte
+	EventSeq   int64
+	CreatedAt  time.Time
+	Version    []byte
+}
+
+// ArchiveSessionEventRow holds a raw session event row from runtime_session_events.
+type ArchiveSessionEventRow struct {
+	Seq     int64
+	RunID   string
+	Attempt string
+	EventID string
+	Payload []byte
+}
+
+// SearchArtifactCandidate holds a candidate context artifact row for search scanning.
+type SearchArtifactCandidate struct {
+	Seq   int64
+	RunID string
+	Kind  string
+	Key   string
+}
+
+// SeqPayload holds a sequence number and serialized event payload.
+type SeqPayload struct {
+	Seq     int64
+	Payload []byte
+}
+
+// RetrievalObservationRow holds a committed context retrieval tool call and its observation payload.
+type RetrievalObservationRow struct {
+	OriginRunID string
+	Receipt     []byte
+	Observation []byte
+}
+
+// MessageSourceArtifactRow holds a message source index artifact row.
+type MessageSourceArtifactRow struct {
+	Key       string
+	Sources   []byte
+	Inherited []byte
+}
+
+// WorkspaceWriterRow holds a prior workspace writer tool call and its optional source snapshot observation.
+type WorkspaceWriterRow struct {
+	Run      string
+	Call     string
+	Name     string
+	Hash     string
+	Result   []byte
+	Snapshot []byte
+	At       time.Time
+}
+
+// RunEventPayloadRow holds a run_id and serialized session event payload.
+type RunEventPayloadRow struct {
+	RunID   string
+	Payload []byte
+}
+
+// TaskEventRow holds a persisted task progress event row from runtime_task_events.
+type TaskEventRow struct {
+	Seq       int64
+	EventID   string
+	Data      []byte
+	CreatedAt time.Time
+}
+
+// NotificationDeliveryRow holds a claimed task notification row from runtime_task_notifications.
+type NotificationDeliveryRow struct {
+	ID       string
+	Snapshot []byte
+	Receipt  []byte
+}
+
+// RuntimeRepository defines the full outbound persistence contract for the Agent Runtime engine.
+type RuntimeRepository interface {
+	TxManager
+	SessionRepository
+	ScheduleRepository
+	ArchiveRepository
+	ToolReceiptRepository
+	InspectRepository
+	Close()
+	Exec(ctx context.Context, sql string, args ...any) (ExecTag, error)
+	Query(ctx context.Context, sql string, args ...any) (RowsScanner, error)
+	QueryRow(ctx context.Context, sql string, args ...any) RowScanner
+	WithinFencedTx(ctx context.Context, lease *Lease, fn func(txCtx context.Context) error) error
+	ReportAgentState(ctx context.Context, agentID, owner, state, code string, active bool) error
+	ListPendingInputs(ctx context.Context, agentID string) ([][]byte, error)
+	ListFreshPendingInputs(ctx context.Context, agentID string) ([][]byte, error)
+	FilterEligibleInputIDs(ctx context.Context, agentID string, ids []string) (map[string]bool, error)
+	StartOrResumeRun(
+		ctx context.Context,
+		l *Lease,
+		firstEventID, newRunID, newAttemptID string,
+		prepareNew func() (key string, inputsJSON []byte, canonProfile string, canonBudget json.RawMessage, inputIDs []string, err error),
+	) (runID string, inputsJSON []byte, contextHead, acceptanceHead int64, contextProfile string, contextBudget json.RawMessage, resumed bool, err error)
+	FinishRun(ctx context.Context, l *Lease, runID, state, safeError string, retry bool) error
+	InvalidateRun(ctx context.Context, l *Lease, runID string, invalid []string) error
+	ConfigureRun(ctx context.Context, l *Lease, runID string, revision, generation int64, resumeAttempt string, hasResume bool) error
+	PreemptRun(ctx context.Context, l *Lease, runID string) error
+	IsRunCanceled(ctx context.Context, runID string) bool
+	CheckpointExists(ctx context.Context, id string) bool
+	GetCheckpointMetadata(ctx context.Context, id string) ([]byte, error)
+	GetCheckpoint(ctx context.Context, id string) ([]byte, []byte, bool, error)
+	SetCheckpoint(ctx context.Context, l *Lease, id string, payload, metadata []byte) error
+	DeleteCheckpoint(ctx context.Context, l *Lease, id string) error
+	AppendSessionEvents(ctx context.Context, l *Lease, sessionID, runID, attemptID string, items []SessionEventWrite) (bool, error)
+	LoadSessionEventPayloads(
+		ctx context.Context,
+		sessionID, runID, attemptID string,
+		contextHead, acceptanceHead int64,
+		afterEventID string,
+		kinds []string,
+		limit int,
+		reverse bool,
+	) ([][]byte, bool, error)
+	SessionEventExists(ctx context.Context, sessionID, eventID string) (bool, error)
+	GetCachedModelCall(ctx context.Context, runID string, step int, hash string) ([]byte, error)
+	GetModelStepAndRecovery(ctx context.Context, runID string, step int) ([]byte, []byte, error)
+	SaveModelCall(ctx context.Context, l *Lease, runID string, step int, hash string, b []byte) error
+	RecordToolIntent(ctx context.Context, l *Lease, runID, id, name, hash string) ([]byte, error)
+	RecordToolResult(ctx context.Context, l *Lease, runID, id string, b []byte) error
+	ListModelCallResponses(ctx context.Context, runID string) ([][]byte, error)
+	ListIMToolCallResults(ctx context.Context, runID string) ([]ToolCallResultRecord, error)
+	ListOtherAttemptMessageEvents(ctx context.Context, runID, excludeAttemptID string) ([]AttemptEventPayload, error)
+	GetContextRecovery(ctx context.Context, runID string, step int) (hash, profile, code string, streaming bool, version int, decisionJSON []byte, err error)
+	SaveContextRecovery(
+		ctx context.Context,
+		lease *Lease,
+		runID string,
+		step int,
+		profile, hash string,
+		streaming bool,
+		code string,
+		decision []byte,
+		checkConflict func(oldProfile, oldHash string, oldMode bool, oldCode string, oldVersion int, oldDecision []byte) error,
+	) error
+	GetObservation(ctx context.Context, runID, callID, key string) ([]byte, error)
+	CancelAllActiveSchedules(ctx context.Context, agentID string) error
+	DrainDueSchedules(ctx context.Context, l *Lease) ([]DrainedScheduleLog, error)
+	CheckRunAttemptRunning(ctx context.Context, runID, agentID, attemptID string) (bool, error)
+	ListVisibleSessionRunIDsThrough(ctx context.Context, sessionID, attemptID, runID string, contextHead, acceptanceHead, eventHead int64) ([]string, error)
+	PutContextArtifact(ctx context.Context, l *Lease, w ContextArtifactWrite, mergeSources func(oldSources []byte) ([]byte, error)) error
+	LoadVisibleContextArtifact(
+		ctx context.Context,
+		agentID, attemptID, activeRunID string,
+		contextHead, acceptanceHead int64,
+		targetRunID, key string,
+	) (*LoadedContextArtifactRow, bool, error)
+	SaveRunningRunObservation(ctx context.Context, l *Lease, runID, agentID, attemptID, call, key string, response []byte) error
+	ListVisibleSessionEventPage(ctx context.Context, sessionID, attemptID, runID string, contextHead, acceptanceHead, after, head int64, limit int) ([]ArchiveSessionEventRow, error)
+	GetContextSearchHeads(ctx context.Context, agentID, sessionID, attemptID, runID string, contextHead, acceptanceHead int64) (int64, int64, error)
+	ListVisibleSearchArtifactCandidates(ctx context.Context, agentID, attemptID, runID string, contextHead, acceptanceHead, after, artifactHead int64, limit int) ([]SearchArtifactCandidate, error)
+	GetUploadedFileToolObservation(ctx context.Context, runID, call, obsKey string) (string, string, []byte, bool, error)
+	GetToolCallObservationWithMeta(ctx context.Context, runID, call, obsKey string) (string, string, []byte, error)
+	ListAcceptedToolCallCandidates(ctx context.Context, agentID, callID string, names []string, runID string, acceptanceHead int64, originRun string) ([]AcceptedToolCallCandidate, error)
+	ListVisibleToolReductionRefs(ctx context.Context, agentID, attemptID, runID string, contextHead, acceptanceHead int64, toolName, callID, originRun string) ([]string, error)
+	GetRunContextBudget(ctx context.Context, runID string) ([]byte, error)
+	ListVisibleRunEventPayloads(ctx context.Context, sessionID, attemptID, activeRunID string, contextHead, acceptanceHead int64, targetRunID string, after, eventHead int64) ([]SeqPayload, error)
+	ListMatchingToolCallReceipts(ctx context.Context, agentID, callID string, names, hashes []string, runID string, acceptanceHead int64, currentOnly bool) ([]AcceptedToolCallCandidate, error)
+	GetAcceptedInputPayload(ctx context.Context, agentID, eventID, runID string, acceptanceHead int64) ([]byte, string, bool, error)
+	ListAcceptedRetrievalObservations(ctx context.Context, agentID, callID, toolName, runID string, acceptanceHead int64) ([]RetrievalObservationRow, error)
+	ListVisibleMessageSourceArtifacts(ctx context.Context, agentID, attemptID, runID string, contextHead, acceptanceHead int64, keys []string) ([]MessageSourceArtifactRow, error)
+	ListVisibleWantedSessionEvents(ctx context.Context, sessionID, attemptID, runID string, contextHead, acceptanceHead int64, needsLegacy bool, ids []string, after int64) ([]ArchiveSessionEventRow, error)
+	ListRunToolReductionArtifactKeys(ctx context.Context, agentID, runID, callID, toolName string) ([]string, error)
+	GetSessionEventPayloadBySeq(ctx context.Context, sessionID, runID string, seq int64) ([]byte, error)
+	HasLegacyWorkspaceToolActivity(ctx context.Context, agentID, ownerRunID string, createdAt time.Time, names []string, sessionID string) (bool, error)
+	GetAgentToolCallMeta(ctx context.Context, agentID, runID, callID string) (string, string, time.Time, []byte, error)
+	ListPriorWorkspaceWriters(ctx context.Context, agentID string, cutoff time.Time, names []string, excludeRunID, excludeCallID, obsKey string) ([]WorkspaceWriterRow, error)
+	GetTaskOriginBeforeCutoff(ctx context.Context, agentID, taskID string, cutoff time.Time) (string, time.Time, error)
+	GetRunHeads(ctx context.Context, runID, agentID string) (string, int64, int64, error)
+	ListRunToolCallsBeforeCutoff(ctx context.Context, runID string, cutoff time.Time) ([]ToolCallResultRecord, error)
+	GetArtifactProvenanceRaw(ctx context.Context, agentID, runID, key string) ([]byte, []byte, error)
+	IsValidWorkspaceSourceSnapshotArtifact(ctx context.Context, agentID, runID, key string) (bool, error)
+	HasUnknownLegacyWorkspaceWriterView(ctx context.Context, agentID, runID string) (bool, error)
+	ListVisibleMessageUpdatedEventsForCall(ctx context.Context, sessionID, attemptID, runID string, contextHead, acceptanceHead int64, originRun, callID string) ([]RunEventPayloadRow, error)
+	LoadTaskRowForUpdate(ctx context.Context, agentID, taskID string) ([]byte, *time.Time, time.Time, error)
+	InsertTaskRow(ctx context.Context, taskID, agentID string, runID *string, snapshot []byte) (bool, error)
+	UpdateTaskRow(ctx context.Context, taskID, agentID string, snapshot []byte, until *time.Time) error
+	InsertTaskNotificationRow(ctx context.Context, id, agentID, taskID string, snapshot []byte) error
+	InsertTaskPublicEvent(ctx context.Context, taskID, agentID, status string) error
+	ListTaskIDsAfter(ctx context.Context, agentID, lastID string) ([]string, error)
+	UpsertTaskEventRow(ctx context.Context, taskID, eventID string, payload []byte) (bool, []byte, time.Time, error)
+	MaxTaskEventSeq(ctx context.Context, taskID string) (int64, error)
+	ListTaskEventRows(ctx context.Context, taskID string, endSeq, posSeq int64, newestFirst bool, limit int) ([]TaskEventRow, error)
+	UpsertCustomNotificationRow(ctx context.Context, taskID, eventID, kind string, data []byte) (bool, string, []byte, error)
+	ClaimNotificationRowsForUpdate(ctx context.Context, agentID string, limit int, leaseSeconds float64) ([]NotificationDeliveryRow, error)
+	AckNotificationRow(ctx context.Context, agentID string, receipt []byte) (bool, error)
+	PersistNotificationInput(
+		ctx context.Context,
+		lease *Lease,
+		agentID, taskID, notificationID, status, createdAt string,
+		extractSources func(rawInputs []byte) ([]InputSource, bool, error),
+	) (seq, parentRunID string, inserted bool, err error)
+	ListIncompleteAgentTaskIDs(ctx context.Context, agentID string) ([]string, error)
+	ListIncompleteRunTaskIDs(ctx context.Context, agentID, runID string) ([]string, error)
 }

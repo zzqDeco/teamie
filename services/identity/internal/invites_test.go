@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
-	"teamie/pkg/config"
 	"teamie/pkg/httpx"
 	"teamie/pkg/postgres/testdb"
 	"testing"
@@ -18,7 +17,7 @@ import (
 
 func newIdentity(t *testing.T, code string) *Store {
 	t.Helper()
-	s, e := Open(context.Background(), testdb.URL(t), config.Flags{}, code)
+	s, e := Open(context.Background(), testdb.URL(t), httpx.Flags{}, code)
 	if e != nil {
 		t.Fatal(e)
 	}

@@ -120,6 +120,9 @@ func (a *ContextArchive) runSources(ctx context.Context, runID string) ([]InputS
 	if a == nil || a.Store == nil || a.Lease == nil {
 		return nil, errContextUnavailable
 	}
+	if coord := a.Store.ScheduleCoordinator(a); coord != nil {
+		return coord.ResolveRunSources(ctx, a.Lease.AgentID, runID)
+	}
 	return a.Store.Repo().ResolveRunSources(ctx, a.Lease.AgentID, runID)
 }
 
