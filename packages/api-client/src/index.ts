@@ -1,79 +1,89 @@
-export type User = {
-  id: string;
-  email: string;
-  displayName: string;
+import {
+  IDL_ROUTES,
+  type AdminModelConfigResp,
+  type AdminUserPageResp,
+  type AgentListResp,
+  type AgentResp,
+  type AttachmentDTO,
+  type AttachmentLimitsDTO,
+  type AttachmentResp,
+  type AttentionItemDTO,
+  type AttentionPageResp,
+  type BootstrapResp,
+  type ChangePasswordReq,
+  type ConversationDTO,
+  type CreateAgentReq,
+  type CreatePasswordResetLinkResp,
+  type CreateWorkspaceReq,
+  type EventDTO,
+  type GetInviteResp,
+  type InspectPasswordResetReq,
+  type ListInvitesResp,
+  type ListMessagesResp,
+  type LoginReq,
+  type MarkReadResp,
+  type MemberDTO,
+  type MentionDTO,
+  type MessageDTO,
+  type ModelConfigDTO,
+  type PasswordResetDTO,
+  type PasswordResetInspectionResp,
+  type PublicAgentDTO,
+  type RegisterReq,
+  type RegistrationInviteDTO,
+  type RegistrationMetadataResp,
+  type ResetPasswordReq,
+  type SendMessageReq,
+  type SessionResp,
+  type SyncResp,
+  type TestAdminModelConfigResp,
+  type UpdateAdminModelConfigReq,
+  type UpdateProfileReq,
+  type UserDTO,
+  type WebSearchConfigDTO,
+  type WorkspaceDTO,
+  type WorkspaceSearchItemDTO,
+  type WorkspaceSearchPageResp,
+} from "./generated";
+
+export * from "./generated";
+
+export type User = Omit<UserDTO, "kind" | "platformRole"> & {
   kind: "human" | "agent";
   platformRole: "admin" | "user";
-  createdAt: string;
 };
-export type Session = { user: User; csrfToken: string };
-export type RegistrationPolicy = { mode: "invite"; bootstrapRequired: boolean };
-export type RegistrationInvite = {
-  id: string;
-  createdAt: string;
-  expiresAt: string;
-  usedAt?: string;
-  revokedAt?: string;
-  usedBy?: string;
+export type Session = Omit<SessionResp, "user"> & { user: User };
+export type RegistrationPolicy = Omit<RegistrationMetadataResp, "mode"> & {
+  mode: "invite";
 };
+export type RegistrationInvite = RegistrationInviteDTO;
 export type CreatedRegistrationInvite = {
   invite: Pick<RegistrationInvite, "id" | "createdAt" | "expiresAt"> & {
     code: string;
   };
   url: string;
 };
-export type PlatformUsersPage = { users: User[]; cursor?: string };
-export type PasswordResetLink = {
-  id: string;
-  createdAt: string;
-  expiresAt: string;
+export type PlatformUsersPage = Omit<AdminUserPageResp, "users"> & {
+  users: User[];
 };
-export type CreatedPasswordResetLink = {
-  reset: PasswordResetLink;
-  url: string;
-};
-export type PasswordResetInspection = {
-  account: Pick<User, "id" | "displayName"> & { emailMasked: string };
-  expiresAt: string;
-};
-export type Workspace = {
-  id: string;
-  name: string;
-  createdBy: string;
-  createdAt: string;
-};
-export type Conversation = {
-  id: string;
-  workspaceId: string;
+export type PasswordResetLink = PasswordResetDTO;
+export type CreatedPasswordResetLink = CreatePasswordResetLinkResp;
+export type PasswordResetInspection = PasswordResetInspectionResp;
+export type Workspace = WorkspaceDTO;
+export type Conversation = Omit<
+  ConversationDTO,
+  "type" | "canManageMembers"
+> & {
   type: "channel" | "direct" | "group";
-  name: string;
-  memberIds: string[];
-  lastSeq: number;
-  readSeq: number;
-  updatedAt: string;
-  createdBy?: string;
   canManageMembers?: boolean;
 };
-export type Member = {
-  userId: string;
-  displayName: string;
+export type Member = Omit<MemberDTO, "role" | "kind"> & {
   role: "owner" | "member";
   kind: "human" | "agent";
   ownerId?: string;
   ownerName?: string;
 };
-export type Agent = {
-  id: string;
-  principalId: string;
-  ownerId: string;
-  ownerName: string;
-  name: string;
-  description: string;
-  workspaceIds: string[];
-  enabled: boolean;
-  createdAt: string;
-  updatedAt: string;
-};
+export type Agent = PublicAgentDTO;
 function publicAgent(value: Agent, workspaceId?: string): Agent {
   return {
     id: value.id,
@@ -110,35 +120,23 @@ function publicAgentProfile(
     ...(value.enabled === undefined ? {} : { enabled: value.enabled }),
   };
 }
-export type WebSearchGatewayConfig = {
-  provider: string;
-  hasApiKey: boolean;
-  enabled: boolean;
-  configured: boolean;
-};
-export type ModelGatewayConfig = {
-  baseUrl: string;
-  model: string;
-  hasApiKey: boolean;
-  enabled: boolean;
-  configured: boolean;
-  updatedAt: string;
+export type WebSearchGatewayConfig = WebSearchConfigDTO;
+export type ModelGatewayConfig = Omit<
+  ModelConfigDTO,
+  "contextWindowTokens" | "webSearch"
+> & {
   contextWindowTokens?: number;
   webSearch?: WebSearchGatewayConfig;
 };
-export type ModelGateway = {
+export type ModelGateway = Omit<AdminModelConfigResp, "config" | "status"> & {
   config: ModelGatewayConfig;
   status: "unconfigured" | "ready" | "disabled";
 };
-export type ModelGatewayInput = {
-  baseUrl: string;
-  model: string;
-  apiKey?: string;
-  enabled: boolean;
+export type ModelGatewayInput = Omit<
+  UpdateAdminModelConfigReq,
+  "clearApiKey" | "clearWebSearchApiKey"
+> & {
   clearApiKey?: boolean;
-  contextWindowTokens?: number;
-  webSearchEnabled?: boolean;
-  webSearchApiKey?: string;
   clearWebSearchApiKey?: boolean;
 };
 function publicModelGateway(value: ModelGateway): ModelGateway {
@@ -168,49 +166,29 @@ function publicModelGateway(value: ModelGateway): ModelGateway {
     status: value.status,
   };
 }
-export type Attachment = {
-  id: string;
-  filename: string;
-  mediaType: string;
-  sizeBytes: number;
-  sha256: string;
-};
-export type AttachmentLimits = {
-  maxFileBytes: number;
-  maxFilesPerMessage: number;
-};
+export type Attachment = AttachmentDTO;
+export type AttachmentLimits = AttachmentLimitsDTO;
 export const defaultAttachmentLimits: AttachmentLimits = {
   maxFileBytes: 4 * 1024 * 1024,
   maxFilesPerMessage: 8,
 };
-export type Mention = { userId: string; start: number; end: number };
-export type Message = {
-  id: string;
-  conversationId: string;
-  senderId: string;
-  senderName: string;
+export type Mention = MentionDTO;
+export type Message = Omit<MessageDTO, "senderKind"> & {
   senderKind: "human" | "agent";
-  clientMessageId: string;
-  seq: number;
-  body: string;
-  replyToId?: string;
-  createdAt: string;
-  editedAt?: string;
-  retractedAt?: string;
-  attachments?: Attachment[];
-  mentions?: Mention[];
 };
-export type Bootstrap = {
+export type Bootstrap = Omit<
+  BootstrapResp,
+  "user" | "workspaces" | "conversations" | "attachmentLimits"
+> & {
   user: User;
   workspaces: Workspace[];
   conversations: Conversation[];
-  capabilities: Record<string, boolean>;
-  flagsRevision: string;
-  syncCursor: string;
   attachmentLimits?: AttachmentLimits;
 };
-export type SyncEvent = {
-  id: string;
+export type SyncEvent = Omit<
+  EventDTO,
+  "type" | "message" | "conversation"
+> & {
   type:
     | "message.created"
     | "message.updated"
@@ -218,39 +196,39 @@ export type SyncEvent = {
     | "conversation.created"
     | "membership.changed"
     | "read.updated";
-  conversationId?: string;
-  workspaceId?: string;
   message?: Message;
   conversation?: Conversation;
-  readSeq?: number;
-  createdAt: string;
 };
-export type SyncPage = {
+export type SyncPage = Omit<SyncResp, "events"> & {
   events: SyncEvent[];
-  cursor: string;
-  hasMore: boolean;
 };
-export type MessagePage = { messages: Message[]; hasMore: boolean };
-export type AttentionItem = {
+export type MessagePage = Omit<ListMessagesResp, "messages"> & {
+  messages: Message[];
+};
+export type AttentionItem = Omit<
+  AttentionItemDTO,
+  "message" | "conversation" | "reasons"
+> & {
   message: Message;
   conversation: Pick<Conversation, "id" | "workspaceId" | "name" | "type">;
-  workspaceName: string;
   reasons: ("mention" | "reply")[];
-  isRead: boolean;
 };
-export type AttentionPage = {
+export type AttentionPage = Omit<
+  AttentionPageResp,
+  "items" | "channelUnreadCount"
+> & {
   items: AttentionItem[];
-  cursor?: string;
-  unreadCount: number;
   channelUnreadCount?: number;
 };
-export type WorkspaceSearchItem = {
+export type WorkspaceSearchItem = Omit<
+  WorkspaceSearchItemDTO,
+  "message" | "conversation"
+> & {
   message: Message;
   conversation: Pick<Conversation, "id" | "workspaceId" | "name" | "type">;
 };
-export type WorkspaceSearchPage = {
+export type WorkspaceSearchPage = Omit<WorkspaceSearchPageResp, "items"> & {
   items: WorkspaceSearchItem[];
-  cursor?: string;
 };
 export class ApiError extends Error {
   status: number;
@@ -263,6 +241,15 @@ export class ApiError extends Error {
   }
 }
 const part = encodeURIComponent;
+function routePath(
+  route: { clientPath: string },
+  params?: Record<string, string>,
+): string {
+  if (!params) return route.clientPath;
+  return route.clientPath.replace(/:([a-zA-Z0-9_]+)/g, (_, key: string) =>
+    part(params[key] ?? ""),
+  );
+}
 export class TeamieClient {
   csrfToken = "";
   onUnauthorized?: () => void;
@@ -280,7 +267,11 @@ export class TeamieClient {
       headers.set("Content-Type", "application/json");
     // Bind protected reads to the same browser session as writes. Session
     // discovery deliberately remains unbound so a changed cookie can recover.
-    if (authentication === "session" && path !== "/auth/session" && sessionToken)
+    if (
+      authentication === "session" &&
+      path !== IDL_ROUTES.GetSession.clientPath &&
+      sessionToken
+    )
       headers.set("X-CSRF-Token", sessionToken);
     const response = await fetch(`/api/v1${path}`, {
       ...options,
@@ -299,8 +290,8 @@ export class TeamieClient {
         sessionToken === this.csrfToken &&
         response.status === 401 &&
         !sessionChanged &&
-        !path.startsWith("/auth/login") &&
-        !path.startsWith("/auth/register")
+        !path.startsWith(IDL_ROUTES.Login.clientPath) &&
+        !path.startsWith(IDL_ROUTES.Register.clientPath)
       )
         this.onUnauthorized?.();
       if (
@@ -323,18 +314,24 @@ export class TeamieClient {
       throw new ApiError(409, "stale_session", "账号已变化，请重试。");
     return value as T;
   }
-  session = () => this.#request<Session>("/auth/session");
-  registration = () => this.#request<RegistrationPolicy>("/auth/registration");
+  session = () => this.#request<Session>(IDL_ROUTES.GetSession.clientPath);
+  registration = () =>
+    this.#request<RegistrationPolicy>(
+      IDL_ROUTES.GetRegistrationMetadata.clientPath,
+    );
   registrationInvites = () =>
-    this.#request<{ invites: RegistrationInvite[] }>("/auth/admin/invites");
+    this.#request<ListInvitesResp>(IDL_ROUTES.ListInvites.clientPath);
   createRegistrationInvite = () =>
-    this.#request<CreatedRegistrationInvite>("/auth/admin/invites", {
-      method: "POST",
-      body: JSON.stringify({}),
-    });
+    this.#request<CreatedRegistrationInvite>(
+      IDL_ROUTES.CreateInvite.clientPath,
+      {
+        method: IDL_ROUTES.CreateInvite.method,
+        body: JSON.stringify({}),
+      },
+    );
   revokeRegistrationInvite = (id: string) =>
-    this.#request<void>(`/auth/admin/invites/${part(id)}`, {
-      method: "DELETE",
+    this.#request<void>(routePath(IDL_ROUTES.RevokeInvite, { id }), {
+      method: IDL_ROUTES.RevokeInvite.method,
     });
   platformUsers = async (
     options: { cursor?: string; limit?: number; q?: string } = {},
@@ -344,7 +341,7 @@ export class TeamieClient {
     if (options.limit !== undefined) params.set("limit", String(options.limit));
     if (options.q) params.set("q", options.q);
     const result = await this.#request<PlatformUsersPage>(
-      `/auth/admin/users${params.size ? `?${params}` : ""}`,
+      `${IDL_ROUTES.ListAdminUsers.clientPath}${params.size ? `?${params}` : ""}`,
     );
     return {
       users: result.users.map((user) => ({
@@ -360,39 +357,51 @@ export class TeamieClient {
   };
   createPasswordResetLink = (userId: string) =>
     this.#request<CreatedPasswordResetLink>(
-      `/auth/admin/users/${part(userId)}/password-reset-links`,
-      { method: "POST", body: JSON.stringify({}) },
+      routePath(IDL_ROUTES.CreatePasswordResetLink, { id: userId }),
+      { method: IDL_ROUTES.CreatePasswordResetLink.method, body: JSON.stringify({}) },
     );
   inspectPasswordReset = (token: string) =>
     this.#request<PasswordResetInspection>(
-      "/auth/password-reset/inspect",
-      { method: "POST", body: JSON.stringify({ token }) },
+      IDL_ROUTES.InspectPasswordReset.clientPath,
+      {
+        method: IDL_ROUTES.InspectPasswordReset.method,
+        body: JSON.stringify({ token } satisfies InspectPasswordResetReq),
+      },
       "json",
       "capability",
     );
   resetPassword = (token: string, newPassword: string) =>
     this.#request<void>(
-      "/auth/password-reset",
-      { method: "POST", body: JSON.stringify({ token, newPassword }) },
+      IDL_ROUTES.ResetPassword.clientPath,
+      {
+        method: IDL_ROUTES.ResetPassword.method,
+        body: JSON.stringify({ token, newPassword } satisfies ResetPasswordReq),
+      },
       "json",
       "capability",
     );
   agents = async () => ({
-    agents: (await this.#request<{ agents: Agent[] }>("/agents")).agents.map(
-      (agent) => publicAgent(agent),
-    ),
+    agents: (
+      await this.#request<AgentListResp>(IDL_ROUTES.ListOwnedAgents.clientPath)
+    ).agents.map((agent) => publicAgent(agent)),
   });
   agent = async (id: string) => ({
     agent: publicAgent(
-      (await this.#request<{ agent: Agent }>(`/agents/${part(id)}`)).agent,
+      (
+        await this.#request<AgentResp>(
+          routePath(IDL_ROUTES.GetAgentProfile, { id }),
+        )
+      ).agent,
     ),
   });
   createAgent = async (profile: AgentProfileInput) => ({
     agent: publicAgent(
       (
-        await this.#request<{ agent: Agent }>("/agents", {
-          method: "POST",
-          body: JSON.stringify(publicAgentProfile(profile)),
+        await this.#request<AgentResp>(IDL_ROUTES.CreateAgent.clientPath, {
+          method: IDL_ROUTES.CreateAgent.method,
+          body: JSON.stringify(
+            publicAgentProfile(profile) satisfies CreateAgentReq,
+          ),
         })
       ).agent,
     ),
@@ -400,122 +409,151 @@ export class TeamieClient {
   updateAgent = async (id: string, profile: Partial<AgentProfileInput>) => ({
     agent: publicAgent(
       (
-        await this.#request<{ agent: Agent }>(`/agents/${part(id)}`, {
-          method: "PATCH",
-          body: JSON.stringify(publicAgentProfile(profile)),
-        })
+        await this.#request<AgentResp>(
+          routePath(IDL_ROUTES.UpdateAgent, { id }),
+          {
+            method: IDL_ROUTES.UpdateAgent.method,
+            body: JSON.stringify(publicAgentProfile(profile)),
+          },
+        )
       ).agent,
     ),
   });
   deleteAgent = (id: string) =>
-    this.#request<void>(`/agents/${part(id)}`, { method: "DELETE" });
+    this.#request<void>(routePath(IDL_ROUTES.DeleteAgent, { id }), {
+      method: IDL_ROUTES.DeleteAgent.method,
+    });
   workspaceAgents = async (id: string) => ({
     agents: (
-      await this.#request<{ agents: Agent[] }>(`/workspaces/${part(id)}/agents`)
+      await this.#request<AgentListResp>(
+        routePath(IDL_ROUTES.ListWorkspaceAgents, { id }),
+      )
     ).agents.map((agent) => publicAgent(agent, id)),
   });
   modelGateway = async () =>
     publicModelGateway(
-      await this.#request<ModelGateway>("/admin/model-gateway"),
+      await this.#request<ModelGateway>(
+        IDL_ROUTES.GetAdminModelConfig.clientPath,
+      ),
     );
   saveModelGateway = async (config: ModelGatewayInput) =>
     publicModelGateway(
-      await this.#request<ModelGateway>("/admin/model-gateway", {
-        method: "PUT",
-        body: JSON.stringify(config),
-      }),
+      await this.#request<ModelGateway>(
+        IDL_ROUTES.UpdateAdminModelConfig.clientPath,
+        {
+          method: IDL_ROUTES.UpdateAdminModelConfig.method,
+          body: JSON.stringify(config),
+        },
+      ),
     );
   testModelGateway = () =>
-    this.#request<{ ok: boolean; model: string; latencyMs: number }>(
-      "/admin/model-gateway/test",
-      { method: "POST", body: JSON.stringify({}) },
+    this.#request<TestAdminModelConfigResp>(
+      IDL_ROUTES.TestAdminModelConfig.clientPath,
+      { method: IDL_ROUTES.TestAdminModelConfig.method, body: JSON.stringify({}) },
     );
   login = (email: string, password: string) =>
-    this.#request<Session>("/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ email, password }),
+    this.#request<Session>(IDL_ROUTES.Login.clientPath, {
+      method: IDL_ROUTES.Login.method,
+      body: JSON.stringify({ email, password } satisfies LoginReq),
     });
-  register = (data: {
-    email: string;
-    password: string;
-    displayName: string;
-    inviteCode: string;
-  }) =>
-    this.#request<Session>("/auth/register", {
-      method: "POST",
+  register = (data: RegisterReq) =>
+    this.#request<Session>(IDL_ROUTES.Register.clientPath, {
+      method: IDL_ROUTES.Register.method,
       body: JSON.stringify(data),
     });
-  logout = () => this.#request<void>("/auth/logout", { method: "POST" });
+  logout = () =>
+    this.#request<void>(IDL_ROUTES.Logout.clientPath, {
+      method: IDL_ROUTES.Logout.method,
+    });
   changePassword = (currentPassword: string, newPassword: string) =>
-    this.#request<void>("/auth/password", {
-      method: "POST",
-      body: JSON.stringify({ currentPassword, newPassword }),
+    this.#request<void>(IDL_ROUTES.ChangePassword.clientPath, {
+      method: IDL_ROUTES.ChangePassword.method,
+      body: JSON.stringify({
+        currentPassword,
+        newPassword,
+      } satisfies ChangePasswordReq),
     });
   profile = (displayName: string) =>
-    this.#request<{ user: User }>("/auth/profile", {
-      method: "PATCH",
-      body: JSON.stringify({ displayName }),
+    this.#request<{ user: User }>(IDL_ROUTES.UpdateProfile.clientPath, {
+      method: IDL_ROUTES.UpdateProfile.method,
+      body: JSON.stringify({ displayName } satisfies UpdateProfileReq),
     });
-  bootstrap = () => this.#request<Bootstrap>("/bootstrap");
+  bootstrap = () =>
+    this.#request<Bootstrap>(IDL_ROUTES.GetBootstrap.clientPath);
   createWorkspace = (name: string) =>
     this.#request<{ workspace: Workspace; conversation: Conversation }>(
-      "/workspaces",
-      { method: "POST", body: JSON.stringify({ name }) },
+      IDL_ROUTES.CreateWorkspace.clientPath,
+      {
+        method: IDL_ROUTES.CreateWorkspace.method,
+        body: JSON.stringify({ name } satisfies CreateWorkspaceReq),
+      },
     );
   members = (id: string) =>
-    this.#request<{ members: Member[] }>(`/workspaces/${part(id)}/members`);
+    this.#request<{ members: Member[] }>(
+      routePath(IDL_ROUTES.ListWorkspaceMembers, { id }),
+    );
   createInvite = (id: string) =>
     this.#request<{ code: string; expiresAt: string }>(
-      `/workspaces/${part(id)}/invites`,
-      { method: "POST" },
+      routePath(IDL_ROUTES.CreateWorkspaceInvite, { id }),
+      { method: IDL_ROUTES.CreateWorkspaceInvite.method },
     );
   invite = (code: string) =>
-    this.#request<{
-      workspace: Pick<Workspace, "id" | "name">;
-      expiresAt: string;
-    }>(`/invites/${part(code)}`);
+    this.#request<GetInviteResp>(routePath(IDL_ROUTES.GetInvite, { code }));
   acceptInvite = (code: string) =>
     this.#request<{ workspace: Workspace; conversations: Conversation[] }>(
-      `/invites/${part(code)}/accept`,
-      { method: "POST" },
+      routePath(IDL_ROUTES.AcceptInvite, { code }),
+      { method: IDL_ROUTES.AcceptInvite.method },
     );
   removeMember = (workspaceId: string, userId: string) =>
     this.#request<void>(
-      `/workspaces/${part(workspaceId)}/members/${part(userId)}`,
-      { method: "DELETE" },
+      routePath(IDL_ROUTES.RemoveWorkspaceMember, { id: workspaceId, userId }),
+      { method: IDL_ROUTES.RemoveWorkspaceMember.method },
     );
   conversations = (id: string) =>
     this.#request<{ conversations: Conversation[] }>(
-      `/workspaces/${part(id)}/conversations`,
+      routePath(IDL_ROUTES.ListConversations, { id }),
     );
   addConversationMember = (id: string, userId: string) =>
     this.#request<{ conversation: Conversation }>(
-      `/conversations/${part(id)}/members`,
-      { method: "POST", body: JSON.stringify({ userId }) },
+      routePath(IDL_ROUTES.AddConversationMember, { id }),
+      {
+        method: IDL_ROUTES.AddConversationMember.method,
+        body: JSON.stringify({ userId }),
+      },
     );
   removeConversationMember = (id: string, userId: string) =>
     this.#request<{ conversation: Conversation }>(
-      `/conversations/${part(id)}/members/${part(userId)}`,
-      { method: "DELETE" },
+      routePath(IDL_ROUTES.RemoveConversationMember, { id, userId }),
+      { method: IDL_ROUTES.RemoveConversationMember.method },
     );
   createConversation = (
     id: string,
     data: { type: Conversation["type"]; name?: string; memberIds?: string[] },
   ) =>
     this.#request<{ conversation: Conversation }>(
-      `/workspaces/${part(id)}/conversations`,
-      { method: "POST", body: JSON.stringify(data) },
+      routePath(IDL_ROUTES.CreateConversation, { id }),
+      {
+        method: IDL_ROUTES.CreateConversation.method,
+        body: JSON.stringify(data),
+      },
     );
   messages = (id: string, beforeSeq?: number) =>
     this.#request<MessagePage>(
-      `/conversations/${part(id)}/messages?limit=50${beforeSeq ? `&beforeSeq=${beforeSeq}` : ""}`,
+      `${routePath(IDL_ROUTES.ListMessages, { id })}?limit=50${beforeSeq ? `&beforeSeq=${beforeSeq}` : ""}`,
     );
-  attention = (options: { cursor?: string; limit?: number; unreadOnly?: boolean } = {}, signal?: AbortSignal) => {
+  attention = (
+    options: { cursor?: string; limit?: number; unreadOnly?: boolean } = {},
+    signal?: AbortSignal,
+  ) => {
     const params = new URLSearchParams();
     if (options.cursor) params.set("cursor", options.cursor);
     if (options.limit !== undefined) params.set("limit", String(options.limit));
-    if (options.unreadOnly !== undefined) params.set("unreadOnly", String(options.unreadOnly));
-    return this.#request<AttentionPage>(`/attention${params.size ? `?${params}` : ""}`, { signal });
+    if (options.unreadOnly !== undefined)
+      params.set("unreadOnly", String(options.unreadOnly));
+    return this.#request<AttentionPage>(
+      `${IDL_ROUTES.GetAttention.clientPath}${params.size ? `?${params}` : ""}`,
+      { signal },
+    );
   };
   searchMessages = (
     id: string,
@@ -525,8 +563,12 @@ export class TeamieClient {
     const params = new URLSearchParams({ limit: "50" });
     if (options.q) params.set("q", options.q);
     if (options.content) params.set("content", options.content);
-    if (options.beforeSeq !== undefined) params.set("beforeSeq", String(options.beforeSeq));
-    return this.#request<MessagePage>(`/conversations/${part(id)}/messages?${params}`, { signal });
+    if (options.beforeSeq !== undefined)
+      params.set("beforeSeq", String(options.beforeSeq));
+    return this.#request<MessagePage>(
+      `${routePath(IDL_ROUTES.ListMessages, { id })}?${params}`,
+      { signal },
+    );
   };
   searchWorkspaceMessages = (
     workspaceId: string,
@@ -537,28 +579,27 @@ export class TeamieClient {
     if (options.cursor) params.set("cursor", options.cursor);
     if (options.limit !== undefined) params.set("limit", String(options.limit));
     return this.#request<WorkspaceSearchPage>(
-      `/workspaces/${part(workspaceId)}/messages/search?${params}`,
+      `${routePath(IDL_ROUTES.SearchWorkspaceMessages, { id: workspaceId })}?${params}`,
       { signal },
     );
   };
   message = (conversationId: string, id: string, signal?: AbortSignal) =>
-    this.#request<{ message: Message }>(`/conversations/${part(conversationId)}/messages/${part(id)}`, { signal });
+    this.#request<{ message: Message }>(
+      routePath(IDL_ROUTES.GetMessage, { id: conversationId, messageId: id }),
+      { signal },
+    );
   messagesAround = (id: string, seq: number) =>
-    this.#request<MessagePage>(`/conversations/${part(id)}/messages?limit=50&aroundSeq=${seq}`);
-  send = (
-    id: string,
-    data: {
-      clientMessageId: string;
-      body: string;
-      replyToId?: string;
-      attachmentIds?: string[];
-      mentions?: Mention[];
-    },
-  ) =>
-    this.#request<{ message: Message }>(`/conversations/${part(id)}/messages`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
+    this.#request<MessagePage>(
+      `${routePath(IDL_ROUTES.ListMessages, { id })}?limit=50&aroundSeq=${seq}`,
+    );
+  send = (id: string, data: Omit<SendMessageReq, "id">) =>
+    this.#request<{ message: Message }>(
+      routePath(IDL_ROUTES.SendMessage, { id }),
+      {
+        method: IDL_ROUTES.SendMessage.method,
+        body: JSON.stringify(data),
+      },
+    );
   uploadAttachment = (
     conversationId: string,
     file: File,
@@ -567,10 +608,10 @@ export class TeamieClient {
   ) => {
     const form = new FormData();
     form.append("file", file, file.name);
-    return this.#request<{ attachment: Attachment }>(
-      `/conversations/${part(conversationId)}/attachments`,
+    return this.#request<AttachmentResp>(
+      routePath(IDL_ROUTES.UploadAttachment, { id: conversationId }),
       {
-        method: "POST",
+        method: IDL_ROUTES.UploadAttachment.method,
         body: form,
         signal,
         ...(idempotencyKey
@@ -580,36 +621,61 @@ export class TeamieClient {
     );
   };
   attachmentUpload = (conversationId: string, uploadKey: string) =>
-    this.#request<{ attachment: Attachment }>(
-      `/conversations/${part(conversationId)}/attachment-uploads/${part(uploadKey)}`,
+    this.#request<AttachmentResp>(
+      routePath(IDL_ROUTES.GetAttachmentUpload, {
+        id: conversationId,
+        uploadKey,
+      }),
     );
   deletePendingAttachment = (conversationId: string, attachmentId: string) =>
     this.#request<void>(
-      `/conversations/${part(conversationId)}/attachments/${part(attachmentId)}`,
-      { method: "DELETE" },
+      routePath(IDL_ROUTES.DeletePendingAttachment, {
+        id: conversationId,
+        attachmentId,
+      }),
+      { method: IDL_ROUTES.DeletePendingAttachment.method },
     );
   attachmentContent = (conversationId: string, attachmentId: string) =>
     this.#request<Blob>(
-      `/conversations/${part(conversationId)}/attachments/${part(attachmentId)}/content`,
+      routePath(IDL_ROUTES.DownloadAttachment, {
+        id: conversationId,
+        attachmentId,
+      }),
       {},
       "blob",
     );
-  edit = (conversationId: string, id: string, body: string, mentions?: Mention[]) =>
+  edit = (
+    conversationId: string,
+    id: string,
+    body: string,
+    mentions?: Mention[],
+  ) =>
     this.#request<{ message: Message }>(
-      `/conversations/${part(conversationId)}/messages/${part(id)}`,
-      { method: "PATCH", body: JSON.stringify({ body, ...(mentions?.length ? { mentions } : {}) }) },
+      routePath(IDL_ROUTES.EditMessage, { id: conversationId, messageId: id }),
+      {
+        method: IDL_ROUTES.EditMessage.method,
+        body: JSON.stringify({
+          body,
+          ...(mentions?.length ? { mentions } : {}),
+        }),
+      },
     );
   retract = (conversationId: string, id: string) =>
     this.#request<{ message: Message }>(
-      `/conversations/${part(conversationId)}/messages/${part(id)}`,
-      { method: "DELETE" },
+      routePath(IDL_ROUTES.RetractMessage, {
+        id: conversationId,
+        messageId: id,
+      }),
+      { method: IDL_ROUTES.RetractMessage.method },
     );
   read = (id: string, seq: number) =>
-    this.#request<{ readSeq: number }>(`/conversations/${part(id)}/read`, {
-      method: "POST",
+    this.#request<MarkReadResp>(routePath(IDL_ROUTES.MarkRead, { id }), {
+      method: IDL_ROUTES.MarkRead.method,
       body: JSON.stringify({ seq }),
     });
   sync = (cursor: string) =>
-    this.#request<SyncPage>(`/sync?cursor=${part(cursor)}&limit=100`);
+    this.#request<SyncPage>(
+      `${IDL_ROUTES.Sync.clientPath}?cursor=${part(cursor)}&limit=100`,
+    );
 }
 export const api = new TeamieClient();
