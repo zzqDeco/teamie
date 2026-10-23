@@ -1,23 +1,68 @@
-# Gateway and Sandbox
+# Model Gateway & Sandbox (`teamie/agent-infra`)
 
-Independent Go module: `teamie/agent-infra`. The shared Thrift/Kitex module is `../agent-protocol`; only generated Identity RPC types/client are imported from `../backend`. No IM service imports this module. Read `../docs/contracts/agents-v1.md` for the public contract and `../ops/README.md` for production upgrade/recovery.
+Independent Go 1.27.2 module providing two strictly separated infrastructure services: **Model Gateway** (`cmd/llm-gateway`, `internal/gateway`) and **Sandbox** (`cmd/sandbox`, `internal/sandbox`).
 
-`cmd/llm-gateway` exposes private HTTP8086/RPC8886. Required environment: own `DATABASE_URL`, `APP_ORIGIN`, `GATEWAY_MASTER_KEY` (64 hex characters), `GATEWAY_RUNTIME_TOKEN` (at least24 characters). `IDENTITY_RPC_ADDR` defaults to identity:8881. `cmd/sandbox` exposes private HTTP8087/RPC8887 and requires `SANDBOX_RUNTIME_TOKEN`, `SANDBOX_RUNNER_IMAGE`, protected/disjoint `SANDBOX_WORKSPACE_ROOT` and `SANDBOX_STATE_ROOT`; Docker socket defaults to /var/run/docker.sock. All services expose /healthz,/readyz,/version; version/SHA are injected at image build. Production Compose pins the runner to an immutable Aliyun ACR digest; the local CI launcher may use an immutable local sha256 image ID. Existing exact `ghcr.io/zzqdeco/teamie-sandbox-runner@sha256:...` references remain valid for prior-release recovery.
+- **Module & Contract Boundaries**:
+  - Shared Agent RPC and HTTP contracts live in `../agent-protocol` (generated from `../contracts/agent.thrift` and `../contracts/agent_gateway_http.thrift` via `./ops/codegen.sh`).
+  - Only generated Identity RPC client types are imported from `../backend`; no IM service imports `agent-infra`.
+  - **4-Layer Hexagonal Clean DDD**: Both `internal/gateway` and `internal/sandbox` are structured into `domain` (stdlib-only entities, policies, and ports), `app` (use-case orchestration), `adapter` (`http`, `rpc`), and `infra` (`pg`, `crypto`, `upstream`, `docker`, `fs`). AST architecture tests (`arch_test.go`) enforce inward dependency direction and guarantee that `sandbox` never imports `gateway`.
 
-ACR runner references must be `<registry>/<namespace>/teamie-sandbox-runner@sha256:<64 lowercase hex characters>`. Supported registries are the documented [legacy/new personal-edition public and VPC domains](https://help.aliyun.com/zh/acr/user-guide/individual-edition-instance-independent-domain-name-capacity-limit), `registry[-vpc].<region>.aliyuncs.com` and `crpi-<id>[-vpc].<region>.personal.cr.aliyuncs.com`, plus [enterprise public and VPC domains](https://help.aliyun.com/zh/acr/user-guide/configure-access-over-vpcs), `<instance>-registry[-vpc].<region>.cr.aliyuncs.com`. Region labels use lowercase hyphen-separated components. Namespaces contain lowercase alphanumerics separated by a single `.`, `_` or `-`, with a 63-character limit; hostname labels must fit DNS limits. Tags, other repositories, URL schemes, credentials, ports and nested namespace paths are rejected before Sandbox state is initialized. Registry credentials remain with the deployment host and are never passed into execution children.
+See [`../docs/contracts/agents-v1.md`](../docs/contracts/agents-v1.md) for the service contracts, [`../docs/architecture/model-gateway.md`](../docs/architecture/model-gateway.md) for the OpenAI Agentic model boundary, and [`../ops/README.md`](../ops/README.md) for production operations.
 
-Gateway administrator HTTP is cookie/Identity-RPC authenticated, human-admin-only and CSRF/Origin protected for writes. Provider credentials are AES-256-GCM encrypted in Gateway's own PostgreSQL database, omitted keys preserve the saved key, explicit clear deletes it, and reads expose only `hasApiKey`. No provider key is needed for readiness. Saved config status is `unconfigured`, `disabled` or `ready`; `ready` means saved configuration is complete and enabled, not a successful live provider test. The explicit test endpoint sends one small real request using only saved, enabled configuration.
+---
 
-Runtime Chat RPC requires its scoped service token, attribution IDs and non-streaming OpenAI chat-completion JSON. Unary calls have a50 second deadline. Actual incremental upstream streaming uses private `POST /internal/v1/chat/stream` on8086 with `Authorization: Bearer <GATEWAY_RUNTIME_TOKEN>` and JSON `{ownerId,agentId,sessionId,runId,requestJson}`. It forwards OpenAI SSE chunks as NDJSON `{type:"chunk",responseJson:"<chunk JSON>"}` and exactly one terminal `{type:"done"}` or `{type:"error",errorCode,errorMessage,statusCode}`. EOF without a terminal event is incomplete. Explicit upstream HTTP failures, HTTP200 in-stream errors, unknown partial interruption, and cancellation have distinct audit codes. Tool-call deltas and usage chunks are preserved. Streaming has its own five minute deadline; client disconnect or Cancel closes the upstream request. Hertz senses disconnects and flushes chunks incrementally. Both transports share one model-call slot, configured model policy, request/output/token limits and encrypted credentials. No model output is automatically published to IM. Only public HTTPS provider endpoints are accepted; every DNS address is checked again and pinned on dialing, redirects and environment proxies are disabled, and JSON-decoded values are checked for provider credentials, including Unicode escapes. Semantic text/tool-argument deltas are checked across chunks; only raw chunks owning a possible credential prefix wait for disambiguation, and safe chunks still flush incrementally. Tool arguments also check their inner JSON escapes. Unary responses use the same decoded guard. Logs/usage never contain prompt, completion or credential bodies. Usage retains at most roughly100,000 rows/30 days through bounded hourly pruning. Explicit Cancel remembers recent cancellation for two minutes, so a cancel arriving just before dispatch still prevents a provider request. Gateway run IDs include the durable run and a fresh execution-attempt ID; a later attempt remains eligible.
+## 1. Model Gateway (`cmd/llm-gateway`)
 
-Administrator config includes `contextWindowTokens` metadata, default16384 and range4096–2000000; omitted updates preserve it. Gateway migration2 adds the column without changing the encrypted-key boundary. Authenticated Ping returns this capacity for runtime summarization. This describes the administrator-selected model; it is not an upstream capability probe.
+### Configuration & Administration
+- **Listeners**: Private HTTP `:8086` / Kitex RPC `:8886`.
+- **Required Environment**: `DATABASE_URL` (dedicated PostgreSQL database/role), `APP_ORIGIN`, `GATEWAY_MASTER_KEY` (64 hex characters for AES-256-GCM), `GATEWAY_RUNTIME_TOKEN` (at least 24 characters). `IDENTITY_RPC_ADDR` defaults to `identity:8881`.
+- **Admin HTTP API (`/api/v1/admin/model-config`)**: Authenticated via human platform-admin cookies and Identity RPC, with Origin and CSRF protection on writes.
+- **Secret Storage (`gateway_schema_migrations` v3)**:
+  - Provider API keys and Tavily web-search API keys are encrypted with AES-256-GCM in Gateway's PostgreSQL database.
+  - Omitted keys preserve saved credentials; explicit `clearApiKey` / `clearWebSearchApiKey` flags delete them; read responses expose only `hasApiKey` / `hasWebSearchApiKey`.
+  - Includes `contextWindowTokens` metadata (default `16,384`, range `4,096`–`2,000,000`) returned on authenticated `Ping` for runtime context budgeting.
+  - Saved configuration status is `unconfigured`, `disabled`, or `ready`. The explicit connection-test endpoint (`POST /api/v1/admin/model-config/test`) executes one bounded live probe against the saved, enabled provider using the `teamie-agentic-chat-v1` transport contract.
 
-Sandbox accepts commands and identifiers only. Fixed image, one per-Agent hash workspace bind mount, UID10001, no network/secrets/socket, read-only root, cap-dropALL/no-new-privileges, 0.5CPU/128MiB/no swap/32PIDs/128FDs/8MiB file limit/16MiB tmp/64KiB combined output are supervisor policy. Commands use a non-login shell. Legacy synchronous Exec retains its30 second default/max60 compatibility; new native background tasks use Start/Get/ReadOutput/CancelTask and have no command deadline by default. An explicit async deadline may be1–86400 seconds. Network operation deadlines never define the command lifetime. Output attaches before process start; exceeding64KiB terminates the child and preserves its bounded prefix with truncated=true. A2GiB disk reserve is checked before and every100ms during jobs; a10000-receipt bound rejects new identities instead of expiring records and rerunning side effects.
+### Model Streaming, Web Research & Security Guards
+- **Incremental Streaming (`POST /internal/v1/chat/stream`)**: Authenticated with `Authorization: Bearer <GATEWAY_RUNTIME_TOKEN>` and optional `X-Teamie-Model-Config-Id`. Forwards upstream OpenAI-compatible Chat Completions SSE chunks as NDJSON (`{type:"chunk",responseJson:"..."}`) terminated by `{type:"done"}` or `{type:"error",errorCode,errorMessage,statusCode}`.
+- **Web Search & Extract (`POST /internal/v1/web/search`, `POST /internal/v1/web/extract`)**: Executes bounded Tavily search and content-extraction requests when enabled by administrator policy and `agents.web.v1`.
+- **SSRF & Credential-Leakage Guards**:
+  - Only public HTTPS endpoints are permitted; DNS resolution is verified against private/loopback/link-local ranges and pinned on dial; HTTP redirects and environment proxies are disabled.
+  - Streaming and unary responses scan decoded text and tool-argument deltas (including nested JSON and Unicode escapes) for provider credentials, holding only ambiguous prefix chunks until disambiguated.
+  - Usage records retain at most ~100,000 rows / 30 days via hourly pruning and never log prompts, completions, or secrets.
 
-A protected async intent is fsynced before Docker create. A stable per-Agent Task ID identifies one logical command across runtime/transport restarts. Intent, output snapshots, cancel intent and terminal result are stored outside the Agent workspace with0600 permissions and directory fsync. The terminal result is durable before its container is removed. States are `not_started`, `running`, `completed`, `failed`, `canceled`, `unknown`; `ok` reports whether the RPC was handled, and callers inspect `state`/`exitCode`/`errorCode` for execution outcome. Get returns `ok=false,errorCode=task_not_found,state=not_started` when no durable receipt exists; an accepted queued task returns `ok=true,state=not_started`. Missing-task CancelTask stays idempotent. ReadOutput uses chronological byte offsets across stdout/stderr and returns separate bounded fields plus `nextOffset`. Closing a supervisor detaches observation and preserves daemon-owned containers. Startup adopts only containers with the exact durable name and Agent/Task labels, replays logs against the saved prefix, and cleans only known terminal receipts' stopped containers. It never indiscriminately removes managed containers or reruns an unknown task. Receipt/output ambiguity remains unknown and blocks new capacity until reconciled. Legacy Exec uses stable request IDs and optional cancellation `executionId`; its prior synchronous receipt semantics remain available.
+---
 
-Workspace RPC provides ls/read/write/edit/delete/glob/grep under virtual `/workspace`, accepts relative paths, rejects traversal/absolute host paths, and uses `os.Root` confinement even during symlink races. Reads/writes are bounded to256KiB; listings/matches, recursion and total grep bytes are bounded. Read offsets/limits are1-based lines. Grep supports regex, recursive globs, file extension, case, multiline and before/after context. Mutations accept a stable optional `requestId` (required by the runtime adapter): fsynced mutation intent and desired-content hashes reconcile a crash after file commit but before receipt, while an ambiguous intervening edit remains unknown. Replaying a completed delete never deletes a newly created file. Native filesystem/backend and RecoverableShell interfaces stay in agent-runtime; Sandbox imports no Eino code.
+## 2. Sandbox Service (`cmd/sandbox`)
 
-Workspace state survives container deletion; trusted receipts/output are never exposed to jobs. Database dumps do not contain Sandbox workspaces/receipts: back up both roots together while runtime/execution is quiesced. Provider decryption also requires a separate protected backup of GATEWAY_MASTER_KEY.
+### Configuration & Runner Image Policy
+- **Listeners**: Private HTTP `:8087` (`/healthz`, `/readyz`, `/version`) / Kitex RPC `:8887`.
+- **Required Environment**: `SANDBOX_RUNTIME_TOKEN`, `SANDBOX_RUNNER_IMAGE`, and disjoint host paths `SANDBOX_WORKSPACE_ROOT` and `SANDBOX_STATE_ROOT`. Docker socket defaults to `/var/run/docker.sock`.
+- **Immutable Runner References**: Production Compose pins `SANDBOX_RUNNER_IMAGE` to an immutable Alibaba Cloud Container Registry (ACR) digest (`<registry>/<namespace>/teamie-sandbox-runner@sha256:<64 lowercase hex characters>`). Tags, URL schemes, credentials, ports, and nested paths are rejected before Sandbox initialization.
 
-Run `go test -race ./...`, `go vet ./...`, `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ./...`. `DATABASE_URL_TEST` enables unique-schema PostgreSQL encryption/persistence/usage tests. `SANDBOX_TEST_RUNNER_IMAGE` enables real Docker filesystem/network/secrets/resource/output/timeout/cleanup and async supervisor-restart verification on disposable CI; it is explicitly skipped when unset. Managed-daemon and Docker wire fixtures cover logical task recovery locally. Protocol-accurate TLS provider fixtures exercise incremental chunks, tool deltas, usage, partial errors, cancellation and the real Hertz streaming adapter without real provider calls or production SSRF bypasses. `ops/ci-agent-acceptance.sh` launches a fresh disposable full stack and drops only its unique databases on exit; local diagnostics may explicitly skip Sandbox and print that limitation.
+### Container Isolation & Resource Policy
+- Fixed runner image, one per-Agent hashed `/workspace` bind mount, `UID 10001`, `--network=none`, no secrets or Docker socket, read-only root filesystem, `--cap-drop=ALL`, `--security-opt=no-new-privileges`.
+- Bounded per-container resources: `0.5 CPU`, `128 MiB` memory (no swap), `32 PIDs`, `128 FDs`, `8 MiB` file-size limit, `16 MiB` `/tmp`, `64 KiB` combined stdout/stderr cap, and a `2 GiB` host disk-reserve check every `100 ms`.
+
+### Durable Task Lifecycle & Confined Workspace Filesystem
+- **Async Execution (`Start` / `Get` / `ReadOutput` / `CancelTask`)**:
+  - Fsyncs protected task intent (`0600` outside the Agent workspace) before `docker create`.
+  - Terminal results (`completed`, `failed`, `canceled`, `unknown`) are fsynced before container removal. Completed, cleaned-up output expires after a 24-hour retention window (renewed on authenticated read).
+  - On supervisor restart, Sandbox adopts only known containers matching exact durable names and Agent/Task labels, never rerunning unknown effects.
+- **Confined Workspace Operations**:
+  - Provides `ls`, `read`, `write`, `edit`, `delete`, `glob`, and `grep` under virtual `/workspace`, plus `ImportFile` / `ExportFile` for IM attachment and file-delivery flows.
+  - Rejects path traversal and absolute host paths, enforcing `os.Root` confinement against symlink races and bounding reads/writes to `256 KiB` with fsynced mutation receipts.
+
+---
+
+## Verification
+
+```sh
+cd agent-infra
+DATABASE_URL_TEST="postgres://127.0.0.1:5432/teamie_test?sslmode=disable" go test -race ./...
+go vet ./...
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ./...
+```
+
+- `DATABASE_URL_TEST` enables isolated PostgreSQL encryption, persistence, and usage-pruning tests for `internal/gateway`.
+- `SANDBOX_TEST_RUNNER_IMAGE` enables real Docker container isolation, resource-limit, and supervisor-restart tests for `internal/sandbox`.

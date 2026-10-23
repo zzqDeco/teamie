@@ -1,65 +1,86 @@
-# IM backend
+# IM Backend (`teamie/backend`)
 
-Go 1.27.2; Hertz v0.10.6 for HTTP/WebSocket transport; Kitex v0.16.4 with generated Thrift clients and servers; pgx v5.11.0; go-redis v9.23.0; x/crypto v0.58.0; Gorilla WebSocket v1.5.3. Identity owns its PostgreSQL database; Chat owns another. Realtime uses Identity/Chat RPC only. The IM packages do not import Eino or Agent runtime types. Future agents must authenticate as participants through the public IM contracts.
+Independent Go 1.27.2 module providing **Identity**, **Chat**, and **Realtime** services. Built with CloudWeGo Hertz v0.10.6 (HTTP/WebSocket), Kitex v0.16.4 (Thrift RPC), `pgx` v5.11.0 (PostgreSQL 17), `go-redis` v9.23.0, `x/crypto` v0.58.0, and Gorilla WebSocket v1.5.3.
 
-The shared HTTP contract is [`../docs/contracts/http-v1.md`](../docs/contracts/http-v1.md); the generic Agent participant integration is in [`../docs/contracts/agents-v1.md`](../docs/contracts/agents-v1.md). Production deployment instructions live in `../deploy` and `../ops`; production is the only deployed environment. Loopback commands below are disposable acceptance checks.
+- **Strict IM Independence**: `backend` never imports CloudWeGo Eino, Agent runtime packages, or model provider configuration. Agents authenticate as generic participants through public IM APIs and RPC contracts.
+- **Data Ownership**: Identity and Chat each own an isolated PostgreSQL database and role. Realtime is stateless and validates authority through Identity and Chat RPCs.
+- **4-Layer Hexagonal Clean DDD**: `internal/identity`, `internal/chat`, and `internal/realtime` are structured into `domain` (stdlib-only entities, invariants, coded errors, and outbound ports), `app` (use-case orchestration), `adapter` (`http`, `ws`, `rpc` bindings), and `infra` (`pg`, `fs`, `crypto` implementations), enforced by AST tests (`arch_test.go`). Shared technical mechanisms live in `pkg/postgres`, `pkg/httpx`, and `pkg/observability`.
 
-## Generate and verify
+See [`../docs/contracts/http-v1.md`](../docs/contracts/http-v1.md) for the HTTP/WebSocket contract, [`../docs/contracts/agents-v1.md`](../docs/contracts/agents-v1.md) for generic participant integration, and [`../docs/architecture/ddd-idl.md`](../docs/architecture/ddd-idl.md) for the Clean DDD and Thrift IDL layout.
 
-From this directory:
+---
+
+## Code Generation & Verification
+
+From the repository root, regenerate all Kitex RPC (`kitex_gen`) and Hertz HTTP/WebSocket (`hertz_gen`) bindings from `contracts/im*.thrift`:
 
 ```sh
-go run github.com/cloudwego/kitex/tool/cmd/kitex@v0.16.4 -module teamie/backend ../contracts/im.thrift
-go mod tidy
-go test -race ./...
+./ops/codegen.sh
+```
+
+From `backend/`, run tests, static analysis, and binary builds:
+
+```sh
+cd backend
+DATABASE_URL_TEST="postgres://127.0.0.1:5432/teamie_test?sslmode=disable" go test -race ./...
 go vet ./...
 go build ./services/identity/cmd
+go build ./services/identityctl/cmd
 go build ./services/chat/cmd
 go build ./services/realtime/cmd
 ```
 
-On Go 1.27/ARM64, upstream optional DynamicGo/Sonic AST fast paths currently print compatibility notices and use their standard fallbacks. This backend uses standard `encoding/json` and typed generated Thrift; real RPC, PostgreSQL, WebSocket and race checks validate correctness. No accelerated-path performance claim is made.
+- Generated code in `kitex_gen/` and `hertz_gen/` is checked in. Coordinate IDL changes across dependent modules and regenerate with `./ops/codegen.sh`.
+- Meaningful PostgreSQL integration tests require `DATABASE_URL_TEST` pointing to a disposable PostgreSQL 17 database whose role can create and drop isolated schemas. Without `DATABASE_URL_TEST`, database tests explicitly skip; unit/build checks alone do not constitute product acceptance.
+- End-to-end process acceptance is exercised via `../tools/acceptance/im_acceptance.py`.
 
-Generated code in `kitex_gen` is checked in. Regenerate it with the pinned generator after changing `contracts/im.thrift`. Coordinate HTTP and RPC changes with dependent components before implementation.
+---
 
-Meaningful PostgreSQL tests require `DATABASE_URL_TEST`, a URL for a disposable PostgreSQL 17 database whose role may create schemas. Tests create isolated schemas and drop them afterward. Without this variable, database integration tests explicitly skip; unit/build results alone are not product acceptance. The parent acceptance script `../tools/acceptance/im_acceptance.py` exercises HTTP, actual RPC, PostgreSQL, Redis and WebSocket against running services.
+## Configuration, Onboarding & Account Recovery
 
-## Configuration and first account
+All services require `APP_ORIGIN` (exact browser origin including scheme and port) and optionally `FEATURE_FLAGS_FILE`. Identity and Chat require distinct `DATABASE_URL` values. Default listen addresses are:
+- **Identity**: HTTP `:8081` / RPC `:8881` (`identity:8881`)
+- **Chat**: HTTP `:8082` / RPC `:8882` (`chat:8882`)
+- **Realtime**: HTTP `:8083` (`redis:6379`)
 
-All services require `APP_ORIGIN`, the exact browser origin including scheme and any port, and optionally `FEATURE_FLAGS_FILE`. Identity/Chat require distinct `DATABASE_URL` values. Defaults are Identity HTTP `:8081`/RPC `:8881`, Chat HTTP `:8082`/RPC `:8882`, Realtime HTTP `:8083`; override with `HTTP_ADDR`, `RPC_ADDR`, `IDENTITY_RPC_ADDR`, `CHAT_RPC_ADDR`, `REDIS_ADDR`. Defaults for internal discovery are `identity:8881`, `chat:8882`, `redis:6379`.
+### Invitation-Only Registration
+Registration is strictly invitation-only (`auth.public_signup` is permanently disabled):
+1. **Bootstrap Admin**: When no accounts exist, registering with `BOOTSTRAP_INVITE_CODE` (defaults to `teamie-bootstrap`) atomically creates the first account and grants it the platform administrator role. Once any account exists, the bootstrap code can never be used again.
+2. **Admin-Issued Invitations**: Platform administrators generate single-use registration invitations at `/app/admin` (`POST /api/v1/auth/admin/invites`). Each code has 256 random bits, expires in 7 days, and is stored only as a SHA-256 hash. Account creation, session creation, and invitation consumption commit in one transaction. Platform admin grants user/invitation/gateway administration only and never bypasses workspace or conversation permissions.
 
-Registration is strictly invitation-only. When no accounts exist, register the first human with `BOOTSTRAP_INVITE_CODE` (default `teamie-bootstrap` when unset). The registration transaction serializes the empty-account check and account/session creation; exactly one concurrent request becomes platform admin. Once any account exists, the bootstrap code cannot register another user. `GET /api/v1/auth/registration` reports only `{mode:"invite",bootstrapRequired}` and never returns the configured code. There is no preset account or password. `REGISTRATION_CODE` is no longer used.
+### Password Management & Recovery
+Passwords require 12 characters to 72 UTF-8 bytes. Changing a password (`POST /api/v1/auth/password`) revokes all existing sessions for that user. When `auth.password_reset` is enabled, a platform administrator (`/app/admin`) or server operator (`identityctl password-reset-link`) can issue a one-hour, single-use password reset link (`identity_password_resets`, persisted as SHA-256 token hashes). Redeeming the reset token updates the password and revokes all active sessions atomically without auto-signing in.
 
-The first platform administrator uses `/app/admin` to generate a new registration invitation for each additional user. Codes contain 256 random bits, expire after seven days and are persisted only as SHA-256 hashes. Raw code/link is returned once by `POST /api/v1/auth/admin/invites`; listing returns status metadata only. Revocation is idempotent; a consumed code never becomes reusable. User creation, session creation and invitation consumption commit together, so invalid input, duplicate email or session-insert failure cannot spend the code. Platform admin is an Identity role, grants invitation management only and does not bypass workspace membership/owner permissions. `auth.public_signup` is always unsupported/false even when requested true in the flag file. Registration codes are separate from workspace admission invitations.
+### Health & Network Boundaries
+Every service exposes `/healthz`, `/readyz`, and `/version` (`{version,sha}`). Identity readiness pings its database; Chat readiness pings its database and Identity RPC; Realtime readiness pings both Identity and Chat RPCs. Redis is disposable: durable HTTP sync in PostgreSQL remains authoritative while Redis recovers. In production, only the Caddy edge publishes ports.
 
-Passwords require at least 12 characters and at most 72 UTF-8 bytes. Sessions last seven days and can be individually revoked by logout. `COOKIE_SECURE` defaults to `true`; use `false` only for disposable loopback acceptance. Keep production HTTPS and `COOKIE_SECURE=true`.
+---
 
-Every service exposes `/healthz`, `/readyz`, `/version` (`{version,sha}`). Liveness does not prove dependencies. Identity readiness pings its database; Chat readiness pings its database and Identity RPC; Realtime readiness pings both RPC dependencies. Redis is deliberately optional for availability: durable HTTP sync stays authoritative, Chat retries its PostgreSQL outbox, and Realtime sends a periodic sync hint while Redis recovers.
+## Migrations & Durable Messaging Guarantees
 
-Only the edge publishes ports in production. Internal Kitex calls trust the private container network; RPC ports must remain private. Chat/Realtime validate sessions over Identity RPC; they never query Identity tables. Workspace membership is rechecked for reads/writes/sync and typing delivery. WebSocket requires the exact Origin and revalidates the session every ten seconds. Write queues are bounded; slow clients disconnect, then recover through HTTP sync.
+Identity and Chat apply embedded forward migrations inside transactions protected by PostgreSQL advisory locks (`pkg/postgres.Migrate`):
+- **`identity_schema_migrations` (current version: 3)**:
+  - `v1`: Human accounts, sessions, and registration invitations.
+  - `v2`: Generic machine principals, expiring credentials, and revision fencing.
+  - `v3`: One-time password-reset token ledger (`identity_password_resets`).
+- **`chat_schema_migrations` (current version: 5)**:
+  - `v1`: Workspaces, memberships, channels/DMs/groups, durable messages, sync events, and Redis outbox.
+  - `v2`: Delegated workspace grants and group creator metadata.
+  - `v3`: Conversation file attachments (`attachments`) and message attachment bindings.
+  - `v4`: Idempotent attachment upload keys (`attachment_uploads`).
+  - `v5`: Structured `@` mention spans (`message_mentions`), reply indexing, and conversation search/attention indexes.
 
-## Migrations and durable delivery
+Key transactional invariants in `internal/chat`:
+- Workspace creation, owner membership, and the default `general` channel commit atomically.
+- Message sequence allocation, sender/client idempotency key (`client_message_id`), attachment binding, structured `@` mentions, per-recipient durable sync events, and outbox hints commit in a single transaction with sorted `sync_heads` row locks so cursors never skip earlier concurrent commits.
+- Message retraction scrubs text, attachments, and mentions into a redacted tombstone across history, point lookup, attention inbox, and historical sync.
 
-Identity and Chat apply embedded forward migrations inside transactions, protected by service-specific PostgreSQL advisory locks. The current version is 2 in `identity_schema_migrations` and `chat_schema_migrations`. Published v1 schema SQL remains unchanged; v2 adds generic machine principals, expiring credentials, delegated workspace provenance and group creator metadata. Startup adopts the existing v1 ledger without replaying it. Reapplying startup is idempotent; unsupported future/gapped ledgers fail closed. Rollout scripts must serialize migrations/service startup and verify a pre-upgrade backup. Do not edit a published migration or release archive; introduce a new version.
+---
 
-Workspace creation, owner membership and the default `general` channel commit atomically. Message sequence allocation, immutable sender/client idempotency key, per-user durable fanout and outbox insertion commit together. A per-user `sync_heads` row is locked until commit, so concurrent transactions cannot expose a later cursor while an earlier event remains uncommitted. Cursor pages advance over filtered revoked payloads. Retraction redacts text from both history and historical sync responses. Redis carries only replaceable sync hints and short-lived typing signals; it never stores authoritative messages or cursors.
+## Generic Participants & Feature Flags
 
-Flag file format:
+Private Identity RPC provisioning requires `IM_PRINCIPAL_CONTROL_TOKEN`; runtime token issuance/validation requires the separate `IM_PRINCIPAL_RUNTIME_TOKEN`. Runtime tokens expire after 15 minutes and are revoked immediately on rotation, newer revision, disable, or delete. Participant HTTP calls require both `Authorization: Bearer <principal-token>` and `X-Teamie-Service-Key: <IM_PRINCIPAL_RUNTIME_TOKEN>`, which browser CORS/Origin gates reject.
 
-```json
-{"revision":"im-v1","flags":{"auth.public_signup":false,"im.dm.create":true,"im.group.create":true,"im.channel.create":true,"im.message.edit":true,"im.message.retract":true,"im.typing.publish":true,"im.presence.publish":false,"im.attachments.upload":false,"im.reactions.create":false,"im.threads.create":false}}
-```
+Chat's delegated membership RPC (`IM_PRINCIPAL_CONTROL_TOKEN`) records the granting human owner. Removing the owner from a workspace cascades revocation to their delegated participants. Replaying an already-applied membership revision never rejoins a moderator-removed participant.
 
-The service rereads the mounted file for capability/write decisions. Missing keys in a supplied file are false; unsupported features remain false even if requested true. A malformed file at startup prevents startup; an invalid later reload disables flag-controlled writes until repaired. Disabling write flags never removes previously stored content from reads. Attachment persistence is reserved for a later version: a future attachment must belong to an authorized conversation, have durable metadata and a separately authorized upload/download path; no current attachment endpoint or capability is enabled.
-
-## Generic participants
-
-IM does not import Agent Control Plane or runtime code. Private Identity RPC provisioning requires `IM_PRINCIPAL_CONTROL_TOKEN`; token issuance/validation requires the separate `IM_PRINCIPAL_RUNTIME_TOKEN`. The control credential cannot mint participant credentials and the runtime credential cannot provision principals. A runtime token lasts 15 minutes, rotation invalidates its predecessor, and every newer principal revision revokes it. Disabled/deleted principals cannot mint tokens. Existing human credentials and sessions retain their behavior; principal tokens cannot be used as human cookies.
-
-Ordinary HTTP participant calls require both `Authorization: Bearer <principal-token>` and `X-Teamie-Service-Key: <IM_PRINCIPAL_RUNTIME_TOKEN>`. Browser Origin/fetch headers reject this credential path; owner browser sessions never receive machine tokens. Identity profile and control-plane owner APIs require human sessions. Workspace creation and workspace invitation acceptance are human-only, so a machine cannot extend its own workspace visibility.
-
-Chat's generic membership RPC requires `IM_PRINCIPAL_CONTROL_TOKEN` and validates profiles through Identity RPC. Delegated workspace grants record the granting human. Removing that human also removes delegated members and their explicit conversation memberships. Replaying an already-applied membership revision returns actual current memberships rather than rejoining a moderator-removed participant. An explicit new owner visibility edit may issue a new grant. Machine participants use identical public-channel, direct/group, history, message, read and durable-sync ACLs. Platform admin never bypasses these permissions.
-
-Group creators and workspace owners can add/remove ordinary current workspace participants with `POST /api/v1/conversations/:id/members` and `DELETE /api/v1/conversations/:id/members/:userId`. Additions require `im.group.create`; security removals remain available when that flag is off. Legacy groups without creator metadata are managed by the workspace owner. Group removal filters already-queued private sync payloads. `GET /api/v1/conversations/:id/messages/:messageId` uses current conversation authorization and the same tombstone redaction as paginated history.
-
-Agent capabilities `agents.enabled`, `agents.create`, `agents.update`, `agents.delete`, `agents.discover` are implemented but default false, including when absent from a v1 flag file. Their definition and runtime state are owned by the independent `agent-control` module/database.
+Services dynamically reload `FEATURE_FLAGS_FILE` (default revision `mentions-v1` in [`../deploy/feature-flags.default.json`](../deploy/feature-flags.default.json)). Disabling any write flag (`im.dm.create`, `im.group.create`, `im.channel.create`, `im.message.edit`, `im.message.retract`, `im.attachments.upload`, `im.message.mentions`, `auth.password_reset`, or `agents.*`) blocks new mutations on the backend while keeping all previously persisted data readable.
