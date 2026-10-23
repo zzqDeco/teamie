@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -9,18 +8,18 @@ import (
 	"io"
 	"strings"
 	"sync"
-	"unicode/utf8"
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 	"go.uber.org/zap"
 	"teamie/agent-protocol/modeltransport"
+	"teamie/agent-runtime/internal/engine/domain"
 )
 
-const contextBudgetVersion = 7
-const contextCounterVersion = "teamie-visible-estimate-v1"
-const contextCounterVersionV7 = "teamie-visible-bytes-div4-v1"
-const contextTransportLimit = 262144
+const contextBudgetVersion = domain.ContextBudgetVersion
+const contextCounterVersion = domain.ContextCounterVersion
+const contextCounterVersionV7 = domain.ContextCounterVersionV7
+const contextTransportLimit = domain.ContextTransportLimit
 
 // ContextBudgetSnapshot is immutable Run policy, not a wall-clock work budget.
 // Keeping its complete values prevents a gateway configuration change from
@@ -49,39 +48,8 @@ func makeContextBudgetSnapshot(window int) (ContextBudgetSnapshot, error) {
 }
 
 func makeContextBudgetSnapshotVersion(window, version int) (ContextBudgetSnapshot, error) {
-	if window < 4096 || window > 2_000_000 {
-		return ContextBudgetSnapshot{}, errors.New("invalid context window")
-	}
-	reserve := min(2048, window/4)
-	if version == 2 {
-		reserve = min(8192, window/4)
-	} else if version == 3 || version == 4 || version == 5 {
-		reserve = min(4096, window/4)
-	} else if version == 6 || version == 7 {
-		reserve = min(modeltransport.MaxOutputTokens, window/4)
-	} else if version != 1 {
-		return ContextBudgetSnapshot{}, errors.New("unsupported context budget version")
-	}
-	input := window - reserve - 256
-	budget := ContextBudgetSnapshot{
-		Version: version, CounterVersion: contextCounterVersion,
-		ContextWindowTokens: window, InputTokenLimit: input, TriggerTokens: input * 3 / 4,
-		OutputReserveTokens: reserve, SummaryOutputTokens: min(2048, reserve),
-		TransportLimitBytes: contextTransportLimit, TransportTargetBytes: contextTransportLimit * 3 / 4,
-		TailTokenLimit: min(6000, input/3), ToolResultByteLimit: min(16384, max(1024, input/4)),
-	}
-	if version >= 6 {
-		budget.TransportLimitBytes = modeltransport.MaxRequestBytes
-		budget.TransportTargetBytes = budget.TransportLimitBytes * 3 / 4
-		budget.SummaryOutputTokens = min(reserve, min(8192, max(2048, input/32)))
-		budget.TailTokenLimit = min(262144, input/3)
-		budget.ToolResultByteLimit = min(262144, max(1024, input/4))
-	}
-	if version >= 7 {
-		budget.CounterVersion = contextCounterVersionV7
-		budget.TriggerTokens = (input * 9) / 10
-	}
-	return budget, nil
+	b, err := domain.MakeContextBudgetSnapshotVersion(window, version)
+	return ContextBudgetSnapshot(b), err
 }
 
 func NewContextBudgetSnapshot(window int) (json.RawMessage, error) {
@@ -99,29 +67,12 @@ func newContextBudgetWithFiles(window int, fileDelivery bool, mentions ...bool) 
 }
 
 func ParseContextBudgetSnapshot(raw json.RawMessage) (ContextBudgetSnapshot, error) {
-	var budget ContextBudgetSnapshot
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if decoder.Decode(&budget) != nil || decoder.Decode(new(any)) != io.EOF {
-		return budget, errors.New("invalid context budget snapshot")
-	}
-	expected, err := makeContextBudgetSnapshotVersion(budget.ContextWindowTokens, budget.Version)
-	expected.FileDelivery = budget.FileDelivery
-	expected.StructuredMentions = budget.StructuredMentions
-	expected.EventDrivenInputs = budget.EventDrivenInputs
-	expected.WebSearch = budget.WebSearch
-	expected.ScheduledWakeups = budget.ScheduledWakeups
-	if err != nil || budget != expected {
-		return budget, errors.New("unsupported context budget snapshot")
-	}
-	return budget, nil
+	b, err := domain.ParseContextBudgetSnapshot(raw)
+	return ContextBudgetSnapshot(b), err
 }
 
 func (b ContextBudgetSnapshot) initialOutputTokens() int {
-	if b.Version >= 6 {
-		return min(b.OutputReserveTokens, max(2048, min(32768, b.OutputReserveTokens/2)))
-	}
-	return min(2048, b.OutputReserveTokens)
+	return domain.ContextBudgetSnapshot(b).InitialOutputTokens()
 }
 
 func flattenToolInfos(groups [][]*schema.ToolInfo) []*schema.ToolInfo {
@@ -168,25 +119,14 @@ func (b ContextBudgetSnapshot) measureContextRequest(request []byte) (ContextMea
 }
 
 const contextUsageAnchorExtraKey = "_teamie_usage_anchor"
-const maxCalibratedPromptTokens = 100_000_000
+const maxCalibratedPromptTokens = domain.MaxCalibratedPromptTokens
 
 func validCalibratedTokenBounds(promptTokens, localTokens int) bool {
-	return promptTokens > 0 && promptTokens <= maxCalibratedPromptTokens && localTokens > 0 && localTokens <= maxCalibratedPromptTokens
+	return domain.ValidCalibratedTokenBounds(promptTokens, localTokens)
 }
 
 func calibratedEffectiveTokens(promptTokens, localTokens, anchorLocalTokens int) (int, bool) {
-	if !validCalibratedTokenBounds(promptTokens, anchorLocalTokens) || localTokens <= 0 || localTokens > maxCalibratedPromptTokens {
-		return 0, false
-	}
-	delta := int64(localTokens) - int64(anchorLocalTokens)
-	effective := int64(promptTokens) + delta
-	if effective < 1 {
-		effective = 1
-	}
-	if effective > maxCalibratedPromptTokens {
-		return 0, false
-	}
-	return int(effective), true
+	return domain.CalibratedEffectiveTokens(promptTokens, localTokens, anchorLocalTokens)
 }
 
 type contextUsageAnchor struct {
@@ -619,21 +559,7 @@ func (m ContextMeasurement) counterMode() string {
 }
 
 func (b ContextBudgetSnapshot) compactionReason(m ContextMeasurement, forced bool) string {
-	if forced {
-		return "provider_context_overflow"
-	}
-	tokenTriggered := m.EstimatedTokens > b.TriggerTokens
-	byteTriggered := m.TransportBytes > b.TransportTargetBytes
-	switch {
-	case tokenTriggered && byteTriggered:
-		return "both"
-	case tokenTriggered:
-		return "token_threshold"
-	case byteTriggered:
-		return "byte_threshold"
-	default:
-		return ""
-	}
+	return domain.ContextBudgetSnapshot(b).CompactionReason(m.EstimatedTokens, m.TransportBytes, forced)
 }
 
 func (b ContextBudgetSnapshot) measurementLogFields(m ContextMeasurement, compactionReason string) []zap.Field {
@@ -657,24 +583,11 @@ func (b ContextBudgetSnapshot) measurementLogFields(m ContextMeasurement, compac
 
 // This is a conservative, versioned text estimate for frozen v1-v6 Runs.
 func estimateContextTokens(text []byte) int {
-	ascii, nonASCII := 0, 0
-	for len(text) > 0 {
-		r, size := utf8.DecodeRune(text)
-		if r < 128 {
-			ascii++
-		} else {
-			nonASCII++
-		}
-		text = text[size:]
-	}
-	return (ascii+2)/3 + nonASCII*2
+	return domain.EstimateContextTokens(text)
 }
 
 func estimateVisibleTokensV7(visibleBytes int) int {
-	if visibleBytes <= 0 {
-		return 0
-	}
-	return (visibleBytes+3)/4 + 64
+	return domain.EstimateVisibleTokensV7(visibleBytes)
 }
 
 func visibleContextBytes(messages []*schema.AgenticMessage, tools, deferred []*schema.ToolInfo, stop []string, choice *schema.AgenticToolChoice) (int, string, error) {
@@ -846,9 +759,9 @@ func measureLegacyContextRequest(request []byte) (ContextMeasurement, error) {
 }
 
 func (b ContextBudgetSnapshot) fits(measurement ContextMeasurement) bool {
-	return measurement.EstimatedTokens <= b.InputTokenLimit && measurement.TransportBytes <= b.TransportLimitBytes
+	return domain.ContextBudgetSnapshot(b).Fits(measurement.EstimatedTokens, measurement.TransportBytes)
 }
 
 func (b ContextBudgetSnapshot) shouldCompact(measurement ContextMeasurement) bool {
-	return measurement.EstimatedTokens > b.TriggerTokens || measurement.TransportBytes > b.TransportTargetBytes
+	return domain.ContextBudgetSnapshot(b).ShouldCompact(measurement.EstimatedTokens, measurement.TransportBytes)
 }

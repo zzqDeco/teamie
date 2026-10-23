@@ -2,8 +2,6 @@ package engine
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,17 +18,17 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"teamie/agent-protocol/modeltransport"
+	"teamie/agent-runtime/internal/engine/app"
+	"teamie/agent-runtime/internal/engine/domain"
+	"teamie/agent-runtime/internal/engine/infra/pg"
 	"teamie/backend/pkg/imtext"
 )
 
-var ErrLeaseLost = errors.New("runtime lease lost")
-var ErrReplayConflict = errors.New("durable execution replay conflict")
+var ErrLeaseLost = domain.ErrLeaseLost
+var ErrReplayConflict = domain.ErrReplayConflict
 
 type Store struct{ DB *pgxpool.Pool }
-type Lease struct {
-	AgentID, Owner string
-	Fence          int64
-}
+type Lease = domain.Lease
 type Input struct {
 	EventID        string           `json:"eventId"`
 	WorkspaceID    string           `json:"workspaceId"`
@@ -215,7 +213,67 @@ func CurrentRun(ctx context.Context) (*Run, error) {
 	}
 	return r, nil
 }
-func digest(b []byte) string { v := sha256.Sum256(b); return hex.EncodeToString(v[:]) }
+func digest(b []byte) string { return domain.Digest(b) }
+
+func toDomainInput(in Input) domain.Input {
+	var mentions []domain.MentionSpan
+	if len(in.Mentions) > 0 {
+		mentions = make([]domain.MentionSpan, len(in.Mentions))
+		for i, m := range in.Mentions {
+			mentions[i] = domain.MentionSpan(m)
+		}
+	}
+	return domain.Input{
+		EventID:        in.EventID,
+		WorkspaceID:    in.WorkspaceID,
+		ConversationID: in.ConversationID,
+		MessageID:      in.MessageID,
+		SenderID:       in.SenderID,
+		SenderName:     in.SenderName,
+		SenderKind:     in.SenderKind,
+		Body:           in.Body,
+		Attachments:    in.Attachments,
+		Mentions:       mentions,
+		ReplyToID:      in.ReplyToID,
+		Seq:            in.Seq,
+		CreatedAt:      in.CreatedAt,
+		Kind:           in.Kind,
+		TaskID:         in.TaskID,
+		ScheduleID:     in.ScheduleID,
+		NotificationID: in.NotificationID,
+		Status:         in.Status,
+		ParentRunID:    in.ParentRunID,
+		SourceRefs:     in.SourceRefs,
+		SourceOverflow: in.SourceOverflow,
+	}
+}
+
+func toDomainInputs(inputs []Input) []domain.Input {
+	out := make([]domain.Input, len(inputs))
+	for i, in := range inputs {
+		out[i] = toDomainInput(in)
+	}
+	return out
+}
+
+func (s *Store) Repo() *pg.Repository {
+	if s == nil {
+		return nil
+	}
+	return pg.NewFromPool(s.DB)
+}
+
+func (s *Store) App(im domain.IMGateway) *app.Service {
+	repo := s.Repo()
+	return &app.Service{
+		Tx:           repo,
+		Sessions:     repo,
+		Schedules:    repo,
+		Archive:      repo,
+		ToolReceipts: repo,
+		IM:           im,
+	}
+}
 
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS agent_runtime_schema_migrations(version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now());
@@ -231,16 +289,7 @@ CREATE TABLE IF NOT EXISTS runtime_tool_calls(run_id uuid NOT NULL REFERENCES ru
 INSERT INTO agent_runtime_schema_migrations(version) VALUES(1) ON CONFLICT DO NOTHING;`
 
 func Open(ctx context.Context, url string) (*Store, error) {
-	cfg, err := pgxpool.ParseConfig(url)
-	if err != nil {
-		return nil, err
-	}
-	cfg.MaxConns = 4
-	cfg.MinConns = 0
-	cfg.ConnConfig.ConnectTimeout = 5 * time.Second
-	cfg.ConnConfig.RuntimeParams["timezone"] = "UTC"
-	cfg.ConnConfig.RuntimeParams[runtimeWriterSchemaSetting] = fmt.Sprint(runtimeSchemaVersion)
-	db, err := pgxpool.NewWithConfig(ctx, cfg)
+	db, err := pg.OpenPool(ctx, url, runtimeWriterSchemaSetting, runtimeSchemaVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -267,26 +316,13 @@ func Open(ctx context.Context, url string) (*Store, error) {
 	return &Store{DB: db}, nil
 }
 func (s *Store) Acquire(ctx context.Context, agentID, owner string) (*Lease, error) {
-	if _, err := uuid.Parse(agentID); err != nil {
-		return nil, err
-	}
-	_, err := s.DB.Exec(ctx, "INSERT INTO runtime_agents(agent_id) VALUES($1) ON CONFLICT DO NOTHING", agentID)
-	if err != nil {
-		return nil, err
-	}
-	l := &Lease{AgentID: agentID, Owner: owner}
-	err = s.DB.QueryRow(ctx, `UPDATE runtime_agents SET lease_owner=$2,lease_until=now()+interval '45 seconds',fence=fence+1 WHERE agent_id=$1 AND (lease_until IS NULL OR lease_until<now()) RETURNING fence`, agentID, owner).Scan(&l.Fence)
-	return l, err
+	return s.Repo().AcquireLease(ctx, agentID, owner)
 }
 func (s *Store) Renew(ctx context.Context, l *Lease) error {
-	tag, err := s.DB.Exec(ctx, `UPDATE runtime_agents SET lease_until=now()+interval '45 seconds' WHERE agent_id=$1 AND lease_owner=$2 AND fence=$3 AND lease_until>now()`, l.AgentID, l.Owner, l.Fence)
-	if err == nil && tag.RowsAffected() != 1 {
-		return ErrLeaseLost
-	}
-	return err
+	return s.Repo().RenewLease(ctx, l)
 }
 func (s *Store) Release(ctx context.Context, l *Lease) {
-	_, _ = s.DB.Exec(ctx, `UPDATE runtime_agents SET lease_until=NULL,lease_owner=NULL WHERE agent_id=$1 AND lease_owner=$2 AND fence=$3`, l.AgentID, l.Owner, l.Fence)
+	s.Repo().ReleaseLease(ctx, l)
 }
 func checkLease(ctx context.Context, tx pgx.Tx, l *Lease) error {
 	var ok bool
@@ -300,43 +336,13 @@ func checkLease(ctx context.Context, tx pgx.Tx, l *Lease) error {
 	return nil
 }
 func (s *Store) CheckLease(ctx context.Context, l *Lease) error {
-	var ok bool
-	err := s.DB.QueryRow(ctx, `SELECT lease_owner=$2 AND fence=$3 AND lease_until>now() FROM runtime_agents WHERE agent_id=$1`, l.AgentID, l.Owner, l.Fence).Scan(&ok)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return ErrLeaseLost
-	}
-	return nil
+	return s.Repo().CheckLease(ctx, l)
 }
 func (s *Store) Cursor(ctx context.Context, l *Lease) (string, error) {
-	var c string
-	err := s.DB.QueryRow(ctx, `SELECT cursor::text FROM runtime_agents WHERE agent_id=$1`, l.AgentID).Scan(&c)
-	return c, err
+	return s.Repo().GetCursor(ctx, l)
 }
 func (s *Store) Ingest(ctx context.Context, l *Lease, cursor string, inputs []Input) error {
-	tx, err := s.DB.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	if err = checkLease(ctx, tx, l); err != nil {
-		return err
-	}
-	for _, in := range inputs {
-		b, e := json.Marshal(in)
-		if e != nil {
-			return e
-		}
-		if _, err = tx.Exec(ctx, `INSERT INTO runtime_inputs(agent_id,event_id,payload) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, l.AgentID, in.EventID, b); err != nil {
-			return err
-		}
-	}
-	if _, err = tx.Exec(ctx, `UPDATE runtime_agents SET cursor=GREATEST(cursor,$2::numeric),updated_at=now() WHERE agent_id=$1`, l.AgentID, cursor); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	return s.Repo().IngestInputs(ctx, l, cursor, toDomainInputs(inputs))
 }
 func (s *Store) Pending(ctx context.Context, l *Lease) ([]Input, error) {
 	rows, err := s.DB.Query(ctx, `SELECT i.payload FROM runtime_inputs i LEFT JOIN runtime_runs r ON i.run_id=r.id WHERE i.agent_id=$1 AND i.state IN ('pending','processing') AND (r.id IS NULL OR (r.next_attempt<=now() AND r.state<>'waiting_input')) ORDER BY i.delivery_seq LIMIT 32`, l.AgentID)
@@ -359,19 +365,7 @@ func (s *Store) Pending(ctx context.Context, l *Lease) ([]Input, error) {
 	return out, rows.Err()
 }
 func (s *Store) Skip(ctx context.Context, l *Lease, id string) error {
-	tx, e := s.DB.Begin(ctx)
-	if e != nil {
-		return e
-	}
-	defer tx.Rollback(ctx)
-	if e = checkLease(ctx, tx, l); e != nil {
-		return e
-	}
-	_, e = tx.Exec(ctx, `UPDATE runtime_inputs SET state='skipped' WHERE agent_id=$1 AND event_id=$2`, l.AgentID, id)
-	if e != nil {
-		return e
-	}
-	return tx.Commit(ctx)
+	return s.Repo().SkipInput(ctx, l, id)
 }
 func (s *Store) StartRun(ctx context.Context, l *Lease, inputs []Input) (*Run, error) {
 	return s.StartRunWithContextPolicy(ctx, l, inputs, contextProfileLegacy, json.RawMessage(`{}`))

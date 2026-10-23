@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"strconv"
@@ -11,24 +10,30 @@ import (
 	bg "github.com/cloudwego/eino/adk/backgroundtask"
 	"github.com/jackc/pgx/v5"
 	wire "teamie/agent-protocol/kitex_gen/agent"
+	rpcadapter "teamie/agent-runtime/internal/engine/adapter/rpc"
+	"teamie/agent-runtime/internal/engine/domain"
 )
 
 type RuntimeRPC struct{ Engine *Engine }
+type RPC = RuntimeRPC
+
+func (r *RuntimeRPC) Server() *rpcadapter.Server {
+	var appSvc *Engine
+	if r != nil {
+		appSvc = r.Engine
+	}
+	_ = appSvc
+	return &rpcadapter.Server{Handler: r}
+}
 
 func runtimeOK(v any) (*wire.RuntimeResponse, error) {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return runtimeFail(503, "runtime_unavailable")
-	}
-	s := string(b)
-	return &wire.RuntimeResponse{Ok: true, DataJson: &s}, nil
+	return rpcadapter.RuntimeOK(v)
 }
 func runtimeFail(status int32, code string) (*wire.RuntimeResponse, error) {
-	message := code
-	return &wire.RuntimeResponse{StatusCode: &status, ErrorCode: &code, ErrorMessage: &message}, nil
+	return rpcadapter.RuntimeFail(status, code)
 }
 func (r *RuntimeRPC) authorize(ctx context.Context, q *wire.RuntimeRequest, write bool) (*wire.AgentDefinition, *wire.RuntimeResponse) {
-	if q == nil || r.Engine.Config.ControlToken == "" || subtle.ConstantTimeCompare([]byte(q.ServiceToken), []byte(r.Engine.Config.ControlToken)) != 1 {
+	if q == nil || !domain.ValidServiceKey(r.Engine.Config.ControlToken, q.ServiceToken) {
 		v, _ := runtimeFail(403, "forbidden")
 		return nil, v
 	}
@@ -118,21 +123,10 @@ type publicTask struct {
 }
 
 func publicErrorCode(code string) string {
-	switch code {
-	case "model_unconfigured", "model_disabled", "gateway_unavailable", "gateway_error", "upstream_timeout", "upstream_error", "invalid_request", "request_too_large", "upstream_response_limit", "invalid_upstream_response", "run_cancelled", "cancelled", "canceled", "deadline_exceeded", "execution_failed", "lease_lost", "replay_conflict", "im_unavailable", "source_unavailable", "new_input", "principal_disabled", "control_unavailable", "runtime_disabled", "task_execution_disabled", "sandbox_unavailable", "sandbox_busy", "sandbox_command_failed", "sandbox_execution_unknown", "gateway_stream_interrupted":
-		return code
-	}
-	return "execution_failed"
+	return domain.PublicErrorCode(code)
 }
 func requestLimit(q *wire.RuntimeRequest) int {
-	n := int(q.GetLimit())
-	if n <= 0 {
-		return 50
-	}
-	if n > 100 {
-		return 100
-	}
-	return n
+	return rpcadapter.RequestLimit(q)
 }
 func (r *RuntimeRPC) runs(ctx context.Context, q *wire.RuntimeRequest, detail bool) (*wire.RuntimeResponse, error) {
 	if _, f := r.authorize(ctx, q, false); f != nil {
@@ -325,7 +319,7 @@ func (r *RuntimeRPC) CancelRun(ctx context.Context, q *wire.RuntimeRequest) (*wi
 	if err != nil {
 		return runtimeFail(503, "runtime_unavailable")
 	}
-	if state == "completed" || state == "failed" || state == "canceled" {
+	if !domain.CanCancelRun(state) {
 		return runtimeFail(409, "run_not_cancelable")
 	}
 	_, err = tx.Exec(ctx, `UPDATE runtime_runs SET cancel_requested=true,state=CASE WHEN state='running' THEN state ELSE 'canceled' END,updated_at=now(),finished_at=CASE WHEN state='running' THEN finished_at ELSE now() END WHERE id=$1`, q.GetResourceId())
@@ -367,7 +361,7 @@ func (r *RuntimeRPC) RetryRun(ctx context.Context, q *wire.RuntimeRequest) (*wir
 	if err != nil {
 		return runtimeFail(503, "runtime_unavailable")
 	}
-	if state != "failed" && state != "interrupted" && state != "retry" && state != "waiting_configuration" && state != "canceled" && state != "waiting_input" {
+	if !domain.CanRetryRun(state) {
 		return runtimeFail(409, "run_not_retryable")
 	}
 	_, err = tx.Exec(ctx, `UPDATE runtime_runs SET state='retry',cancel_requested=false,next_attempt=now(),finished_at=NULL,updated_at=now(),safe_error='' WHERE id=$1`, q.GetResourceId())
@@ -426,10 +420,7 @@ func (r *RuntimeRPC) CancelTask(ctx context.Context, q *wire.RuntimeRequest) (*w
 var _ wire.AgentRuntimeService = (*RuntimeRPC)(nil)
 
 func publicErrorCodeOptional(v string) string {
-	if v == "" {
-		return ""
-	}
-	return publicErrorCode(v)
+	return domain.PublicErrorCodeOptional(v)
 }
 
 func utcPointer(t *time.Time) *time.Time {

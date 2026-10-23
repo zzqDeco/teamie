@@ -19,6 +19,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"teamie/agent-runtime/internal/engine/domain"
 )
 
 // These are private Runtime records. Neither Chat nor the browser reads this table.
@@ -46,15 +47,15 @@ CREATE INDEX IF NOT EXISTS runtime_context_artifacts_agent_key ON runtime_contex
 `
 
 const (
-	contextArtifactMaximum = 4 << 20
-	contextReadDefault     = 4096
-	contextReadMaximum     = 8192
-	contextResponseMaximum = 16 << 10
-	contextSearchScan      = 64
+	contextArtifactMaximum = domain.ContextArtifactMaximum
+	contextReadDefault     = domain.ContextReadDefault
+	contextReadMaximum     = domain.ContextReadMaximum
+	contextResponseMaximum = domain.ContextResponseMaximum
+	contextSearchScan      = domain.ContextSearchScan
 )
 
-var errContextUnavailable = errors.New("context_unavailable")
-var errContextArguments = errors.New("invalid_context_arguments")
+var errContextUnavailable = domain.ErrContextUnavailable
+var errContextArguments = domain.ErrContextArguments
 
 // ContextArchive stores immutable text, outside the mutable Sandbox workspace.
 // Authorize checks the current Agent configuration; IM checks source membership.
@@ -124,160 +125,42 @@ func (a *ContextArchive) scope(ctx context.Context) (*Run, error) {
 }
 
 func contextKind(kind string) bool {
-	switch kind {
-	case "tool_trunc", "tool_clear", "transcript", "message":
-		return true
-	}
-	return false
+	return domain.ValidContextArtifactKind(kind)
 }
 
 func contextRef(runID, kind, key string) string {
-	return "context:v1:" + runID + ":" + kind + ":" + digest([]byte(key))
+	return domain.FormatContextRef(runID, kind, key)
 }
 
 func parseContextRef(ref string) (runID, kind, key string, err error) {
-	parts := strings.Split(ref, ":")
-	if len(parts) != 5 || parts[0] != "context" || parts[1] != "v1" || !validUUID(parts[2]) || !contextKind(parts[3]) || len(parts[4]) != 64 {
-		return "", "", "", errContextArguments
-	}
-	for _, c := range parts[4] {
-		if !strings.ContainsRune("0123456789abcdef", c) {
-			return "", "", "", errContextArguments
-		}
-	}
-	return parts[2], parts[3], parts[3] + ":" + parts[4], nil
+	return domain.ParseContextRef(ref)
 }
 
 func canonicalContextSources(refs []InputSource) ([]InputSource, error) {
-	byKey := make(map[string]InputSource, len(refs))
-	for _, ref := range refs {
-		if !validUUID(ref.ConversationID) || !validUUID(ref.MessageID) || ref.WorkspaceID != "" && !validUUID(ref.WorkspaceID) || ref.SenderID != "" && !validUUID(ref.SenderID) {
-			// A conversation-only source represents metadata from a committed
-			// im_list_conversations response, never a fabricated message ID.
-			if !validUUID(ref.ConversationID) || ref.MessageID != "" || ref.EventID != "" || ref.ReplyToID != "" || ref.SenderID != "" || ref.SenderKind != "" || len(ref.AttachmentIDs) != 0 || ref.WorkspaceID != "" && !validUUID(ref.WorkspaceID) {
-				return nil, errContextUnavailable
-			}
-		}
-		ref.AttachmentIDs = append([]string(nil), ref.AttachmentIDs...)
-		for _, id := range ref.AttachmentIDs {
-			if !validUUID(id) {
-				return nil, errContextUnavailable
-			}
-		}
-		sort.Strings(ref.AttachmentIDs)
-		ref.AttachmentIDs = slices.Compact(ref.AttachmentIDs)
-		key := ref.EventID + "/" + ref.ConversationID + "/" + ref.MessageID
-		if old, exists := byKey[key]; exists {
-			// Different authenticated tools can know different parts of the
-			// same source. Fill missing fields without accepting two conflicting
-			// known identities, and retain every observed attachment reference.
-			for _, pair := range []struct {
-				old *string
-				new string
-			}{{&old.WorkspaceID, ref.WorkspaceID}, {&old.SenderID, ref.SenderID}, {&old.SenderKind, ref.SenderKind}, {&old.ReplyToID, ref.ReplyToID}} {
-				if pair.new != "" {
-					if *pair.old != "" && *pair.old != pair.new {
-						return nil, ErrReplayConflict
-					}
-					*pair.old = pair.new
-				}
-			}
-			old.AttachmentIDs = append(old.AttachmentIDs, ref.AttachmentIDs...)
-			sort.Strings(old.AttachmentIDs)
-			old.AttachmentIDs = slices.Compact(old.AttachmentIDs)
-			ref = old
-		}
-		byKey[key] = ref
-	}
-	keys := make([]string, 0, len(byKey))
-	for key := range byKey {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	out := make([]InputSource, 0, len(keys))
-	for _, key := range keys {
-		out = append(out, byKey[key])
-	}
-	return out, nil
+	return domain.CanonicalContextSources(refs)
 }
 
 // runSources follows durable parent references, never routing text in a model
 // message. Overflow is resolved against the complete parent Run, not silently
 // treated as a unique destination.
 func (a *ContextArchive) runSources(ctx context.Context, runID string) ([]InputSource, error) {
-	visited := map[string]bool{}
-	active := map[string]bool{}
-	refs := []InputSource{}
-	var visit func(string) error
-	visit = func(id string) error {
-		if active[id] {
-			return errContextUnavailable
-		}
-		if visited[id] {
-			return nil
-		}
-		active[id] = true
-		defer delete(active, id)
-		visited[id] = true
-		var raw []byte
-		if err := a.Store.DB.QueryRow(ctx, `SELECT input_json FROM runtime_runs WHERE id=$1 AND agent_id=$2`, id, a.Lease.AgentID).Scan(&raw); err != nil {
-			return err
-		}
-		var inputs []Input
-		if json.Unmarshal(raw, &inputs) != nil {
-			return errContextUnavailable
-		}
-		for _, in := range inputs {
-			if in.Kind != "task.notification" && in.Kind != "schedule.wakeup" && in.ConversationID != "" && in.MessageID != "" {
-				ref := InputSource{EventID: in.EventID, WorkspaceID: in.WorkspaceID, ConversationID: in.ConversationID, MessageID: in.MessageID, ReplyToID: in.ReplyToID, SenderID: in.SenderID, SenderKind: in.SenderKind}
-				for _, attachment := range in.Attachments {
-					ref.AttachmentIDs = append(ref.AttachmentIDs, attachment.ID)
-				}
-				refs = append(refs, ref)
-			}
-			refs = append(refs, in.SourceRefs...)
-			parent := in.ParentRunID
-			if parent == "" && in.Kind == "task.notification" && len(in.SourceRefs) == 0 {
-				if in.TaskID == "" {
-					return errContextUnavailable
-				}
-				var storedParent *string
-				if err := a.Store.DB.QueryRow(ctx, `SELECT run_id::text FROM runtime_tasks WHERE id=$1 AND agent_id=$2`, in.TaskID, a.Lease.AgentID).Scan(&storedParent); err != nil || storedParent == nil {
-					return errContextUnavailable
-				}
-				parent = *storedParent
-			}
-			if parent == "" && in.Kind == "schedule.wakeup" && len(in.SourceRefs) == 0 {
-				if in.ScheduleID == "" {
-					return errContextUnavailable
-				}
-				var storedParent *string
-				if err := a.Store.DB.QueryRow(ctx, `SELECT created_run_id::text FROM runtime_schedules WHERE id=$1 AND agent_id=$2`, in.ScheduleID, a.Lease.AgentID).Scan(&storedParent); err != nil || storedParent == nil {
-					return errContextUnavailable
-				}
-				parent = *storedParent
-			}
-			if parent != "" {
-				if !validUUID(parent) {
-					return errContextUnavailable
-				}
-				if err := visit(parent); err != nil {
-					return err
-				}
-			} else if in.SourceOverflow {
-				return errContextUnavailable
-			}
-		}
-		return nil
+	if a == nil || a.Store == nil || a.Lease == nil {
+		return nil, errContextUnavailable
 	}
-	if err := visit(runID); err != nil {
-		return nil, err
+	return a.Store.Repo().ResolveRunSources(ctx, a.Lease.AgentID, runID)
+}
+
+// ResolveRunSources implements domain.ArchiveRepository.
+func (a *ContextArchive) ResolveRunSources(ctx context.Context, agentID, runID string) ([]InputSource, error) {
+	if a == nil || a.Store == nil {
+		return nil, errContextUnavailable
 	}
-	refs, err := canonicalContextSources(refs)
-	if err == nil && len(refs) == 0 {
-		err = errContextUnavailable
-	}
-	return refs, err
+	return a.Store.Repo().ResolveRunSources(ctx, agentID, runID)
+}
+
+// AuthorizeSources implements domain.IMGateway.
+func (a *ContextArchive) AuthorizeSources(ctx context.Context, refs []InputSource) error {
+	return a.authorizeSources(ctx, refs)
 }
 
 func (a *ContextArchive) sourcesThrough(ctx context.Context, r *Run, eventHead int64) ([]InputSource, []string, error) {
@@ -536,7 +419,7 @@ func (a *ContextArchive) authorizeSources(ctx context.Context, refs []InputSourc
 	if a.IM == nil {
 		return errContextUnavailable
 	}
-	var conversations map[string]Conversation
+	var conversations map[string]string
 	for _, ref := range refs {
 		if ref.MessageID == "" {
 			if conversations == nil {
@@ -548,14 +431,13 @@ func (a *ContextArchive) authorizeSources(ctx context.Context, refs []InputSourc
 					}
 					return err
 				}
-				conversations = map[string]Conversation{}
+				conversations = map[string]string{}
 				for _, conversation := range bootstrap.Conversations {
-					conversations[conversation.ID] = conversation
+					conversations[conversation.ID] = conversation.WorkspaceID
 				}
 			}
-			current, exists := conversations[ref.ConversationID]
-			if !exists || ref.WorkspaceID != "" && current.WorkspaceID != ref.WorkspaceID {
-				return errContextUnavailable
+			if err := domain.VerifyConversationSourceAccess(ref, conversations); err != nil {
+				return err
 			}
 			continue
 		}
@@ -567,20 +449,22 @@ func (a *ContextArchive) authorizeSources(ctx context.Context, refs []InputSourc
 			}
 			return err
 		}
-		if message == nil || message.ID != ref.MessageID || message.ConversationID != ref.ConversationID || message.RetractedAt != nil || ref.SenderID != "" && message.SenderID != ref.SenderID {
-			return errContextUnavailable
+		var snap *domain.SourceMessageSnapshot
+		if message != nil {
+			attIDs := make([]string, len(message.Attachments))
+			for i, att := range message.Attachments {
+				attIDs[i] = att.ID
+			}
+			snap = &domain.SourceMessageSnapshot{
+				ID:             message.ID,
+				ConversationID: message.ConversationID,
+				SenderID:       message.SenderID,
+				Retracted:      message.RetractedAt != nil,
+				AttachmentIDs:  attIDs,
+			}
 		}
-		for _, id := range ref.AttachmentIDs {
-			linked := false
-			for _, attachment := range message.Attachments {
-				if attachment.ID == id {
-					linked = true
-					break
-				}
-			}
-			if !linked {
-				return errContextUnavailable
-			}
+		if err := domain.VerifyMessageSourceAccess(ref, snap); err != nil {
+			return err
 		}
 	}
 	return nil

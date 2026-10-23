@@ -3,26 +3,18 @@ package engine
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"time"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 	"github.com/jackc/pgx/v5"
+	"teamie/agent-runtime/internal/engine/domain"
+	"teamie/agent-runtime/internal/engine/infra/eino"
 )
 
-const nativeRuntimeVersion = "eino-v0.10.0-alpha.35/teamie-v4-agentic"
+const nativeRuntimeVersion = domain.NativeRuntimeVersion
 
-type checkpointMetadata struct {
-	ToolProfile       string
-	ContextProfile    string `json:",omitempty"`
-	ContextBudgetHash string `json:",omitempty"`
-	Version           string
-	Revision          int64
-	RunID, Attempt    string
-	ModelStep         int64
-	Targets           []string
-}
+type checkpointMetadata = domain.CheckpointMetadata
 
 func (s *Store) ResumeMetadata(ctx context.Context, id string) (*checkpointMetadata, error) {
 	var b []byte
@@ -146,48 +138,19 @@ func (s *Store) checkpointExists(ctx context.Context, id string) bool {
 	return v
 }
 func targetsFromError(err error) []string {
-	var c *adk.CancelError
-	if !errors.As(err, &c) {
-		return nil
-	}
-	out := []string{}
-	for _, v := range c.InterruptContexts {
-		if v != nil && v.ID != "" {
-			out = append(out, v.ID)
-		}
-	}
-	return out
+	return eino.TargetsFromCancelError(err)
 }
 func inputMessages(inputs []Input) []*schema.AgenticMessage {
-	out := make([]*schema.AgenticMessage, 0, len(inputs))
-	for _, in := range inputs {
-		b, _ := json.Marshal(in)
-		prefix := "TEAMIE_NEW_MESSAGE "
-		if in.Kind == "task.notification" {
-			prefix = "TEAMIE_TASK_NOTIFICATION "
-		} else if in.Kind == "schedule.wakeup" {
-			prefix = "TEAMIE_SCHEDULE_WAKEUP "
-		}
-		out = append(out, schema.UserAgenticMessage(prefix+string(b)))
-	}
-	return out
+	return eino.BuildInputMessages(inputs, func(in Input) string { return in.Kind })
 }
 func relevantInput(in Input, tc *adk.TurnContext[Input, *schema.AgenticMessage]) bool {
 	if tc == nil {
 		return false
 	}
-	if in.Kind == "task.notification" || in.Kind == "schedule.wakeup" {
-		return false
-	}
-	for _, old := range tc.Consumed {
-		if in.ConversationID != "" && in.ConversationID == old.ConversationID && in.SenderKind == "human" {
-			return true
-		}
-	}
-	return false
+	return domain.RelevantPreemptInput(toDomainInput(in), toDomainInputs(tc.Consumed))
 }
 func resumeCompatible(m *checkpointMetadata, revision int64, runID string) bool {
-	return m != nil && m.Version == nativeRuntimeVersion && m.Revision == revision && m.RunID == runID && m.Attempt != "" && len(m.Targets) > 0
+	return domain.ResumeCompatible(m, revision, runID)
 }
 func detachedPersistence(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
