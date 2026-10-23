@@ -137,21 +137,22 @@ func toMentionDTO(m domain.Mention) *chatgen.MentionDTO {
 	}
 }
 
-func fromMentionDTOs(ms []*chatgen.MentionDTO) []domain.Mention {
+func fromMentionDTOs(ms []*chatgen.MentionDTO) ([]domain.Mention, error) {
 	if len(ms) == 0 {
-		return nil
+		return nil, nil
 	}
 	out := make([]domain.Mention, 0, len(ms))
 	for _, m := range ms {
-		if m != nil {
-			out = append(out, domain.Mention{
-				UserID: m.UserId,
-				Start:  int(m.Start),
-				End:    int(m.End),
-			})
+		if m == nil {
+			return nil, domain.Err(400, "invalid_mentions", "Invalid mentions")
 		}
+		out = append(out, domain.Mention{
+			UserID: m.UserId,
+			Start:  int(m.Start),
+			End:    int(m.End),
+		})
 	}
-	return out
+	return out, nil
 }
 
 func toMessageDTO(m domain.Message) *chatgen.MessageDTO {
@@ -491,7 +492,11 @@ func (a *Adapter) sendMessage(ctx context.Context, req *chatgen.SendMessageReq) 
 	if !ok {
 		return domain.Message{}, false, domain.Err(401, "unauthenticated", "Sign in to continue")
 	}
-	return a.App.SendAnnotated(ctx, user, req.ID, req.ClientMessageId, req.Body, req.ReplyToId, req.GetAttachmentIds(), fromMentionDTOs(req.GetMentions()))
+	mentions, err := fromMentionDTOs(req.GetMentions())
+	if err != nil {
+		return domain.Message{}, false, err
+	}
+	return a.App.SendAnnotated(ctx, user, req.ID, req.ClientMessageId, req.Body, req.ReplyToId, req.GetAttachmentIds(), mentions)
 }
 
 func (a *Adapter) EditMessage(ctx context.Context, req *chatgen.EditMessageReq) (*chatgen.MessageResp, error) {
@@ -499,7 +504,11 @@ func (a *Adapter) EditMessage(ctx context.Context, req *chatgen.EditMessageReq) 
 	if !ok {
 		return nil, domain.Err(401, "unauthenticated", "Sign in to continue")
 	}
-	msg, err := a.App.ChangeAnnotatedMessage(ctx, user.ID, req.ID, req.MessageId, req.Body, false, fromMentionDTOs(req.GetMentions()))
+	mentions, err := fromMentionDTOs(req.GetMentions())
+	if err != nil {
+		return nil, err
+	}
+	msg, err := a.App.ChangeAnnotatedMessage(ctx, user.ID, req.ID, req.MessageId, req.Body, false, mentions)
 	if err != nil {
 		return nil, err
 	}
