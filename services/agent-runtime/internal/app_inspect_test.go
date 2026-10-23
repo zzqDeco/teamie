@@ -7,7 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/google/uuid"
+	httpadapter "teamie/services/agent-runtime/internal/adapter/http"
 	"teamie/services/agent-runtime/internal/adapter/rpc"
 	"teamie/services/agent-runtime/internal/adapter/worker"
 	"teamie/services/agent-runtime/internal/app"
@@ -76,11 +78,13 @@ func TestAppLayersAndInspectRepositoryIntegration(t *testing.T) {
 		ControlToken: "runtime-secret",
 	}
 
-	// Verify adapter/worker wiring
+	// Verify adapter/worker and adapter/http wiring
 	w := worker.New(appSvc)
 	if w.App != appSvc {
 		t.Fatalf("expected worker to wrap app.Service")
 	}
+	h := server.New()
+	(&httpadapter.Handler{App: appSvc, Version: "v1.0.0", SHA: "deadbeef"}).RegisterRoutes(h)
 
 	// Verify lease + inbox app orchestration
 	lease, err := repo.AcquireLease(ctx, agentID, "test-worker")

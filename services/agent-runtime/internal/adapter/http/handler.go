@@ -23,17 +23,17 @@ type Handler struct {
 
 // RegisterRoutes wires /healthz, /readyz, and /version onto the Hertz server.
 func (h *Handler) RegisterRoutes(srv *server.Hertz) {
+	if h.Version != "" {
+		httpx.BuildVersion = h.Version
+	}
+	if h.SHA != "" {
+		httpx.BuildSHA = h.SHA
+	}
 	mux := http.NewServeMux()
 	httpx.OperationsContext(mux, func(ctx context.Context) error {
 		pc, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
 		return h.App.Ready(pc)
-	})
-	mux.HandleFunc("GET /version", func(w http.ResponseWriter, _ *http.Request) {
-		httpx.WriteNoStoreJSON(w, http.StatusOK, map[string]string{
-			"version": h.Version,
-			"sha":     h.SHA,
-		})
 	})
 	srv.Any("/*path", adaptor.HertzHandler(observability.HTTP(mux)))
 }
