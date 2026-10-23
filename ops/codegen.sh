@@ -16,6 +16,8 @@ done
   cd "${ROOT_DIR}/backend"
   kitex -module teamie/backend ../contracts/im.thrift
   thriftgo -g go:template=slim,no_default_serdes=true,no_processor=true -o hertz_gen ../contracts/im_identity_http.thrift
+  thriftgo -g go:template=slim,no_default_serdes=true,no_processor=true -o hertz_gen ../contracts/im_chat_http.thrift
+  thriftgo -g go:template=slim,no_default_serdes=true,no_processor=true -o hertz_gen ../contracts/im_realtime_ws.thrift
 )
 
 (
