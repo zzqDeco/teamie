@@ -56,17 +56,20 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: backend/go.mod
-          cache-dependency-path: backend/go.sum
+          go-version-file: pkg/go.mod
+          cache-dependency-path: |
+            pkg/go.sum
+            contracts/gen/im/go.sum
+            services/identity/go.sum
+            services/chat/go.sum
+            services/realtime/go.sum
       - name: Test authorization, persistence and concurrency
-        run: go test -race ./...
-        working-directory: backend
         env:
           DATABASE_URL_TEST: postgres://postgres:ci-only-postgres@127.0.0.1:5432/teamie_test?sslmode=disable
-      - run: go vet ./...
-        working-directory: backend
-      - run: go build ./services/identity/cmd ./services/identityctl/cmd ./services/chat/cmd ./services/realtime/cmd
-        working-directory: backend
+        run: |
+          for module in pkg contracts/gen/im services/identity services/chat services/realtime; do
+            (cd "$module" && go test -race ./... && go vet ./... && go build ./...)
+          done
       - name: Full HTTP and WebSocket acceptance against disposable processes
         run: bash ops/ci-acceptance.sh
 
@@ -93,15 +96,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: agent-infra/go.mod
+          go-version-file: pkg/go.mod
           cache-dependency-path: |
-            agent-protocol/go.sum
-            agent-control/go.sum
-            agent-runtime/go.sum
-            agent-infra/go.sum
+            pkg/go.sum
+            contracts/gen/im/go.sum
+            contracts/gen/agent/go.sum
+            services/agent-control/go.sum
+            services/agent-runtime/go.sum
+            services/llm-gateway/go.sum
+            services/sandbox/go.sum
       - name: Build immutable disposable execution runner
         run: |
-          docker build --tag teamie-sandbox-runner-ci --file agent-infra/runner/Dockerfile .
+          docker build --tag teamie-sandbox-runner-ci --file services/sandbox/runner/Dockerfile .
           printf 'SANDBOX_TEST_RUNNER_IMAGE=%s\n' "$(docker image inspect teamie-sandbox-runner-ci --format '{{.Id}}')" >> "$GITHUB_ENV"
       - name: Create isolated runtime integration database
         run: docker exec "$POSTGRES_CONTAINER_ID" createdb -U postgres runtime_test
@@ -112,7 +118,7 @@ jobs:
           TEAMIE_RUNTIME_TEST_DATABASE_URL: postgres://postgres:ci-only-postgres@127.0.0.1:5432/runtime_test?sslmode=disable
           DATABASE_URL_TEST: postgres://postgres:ci-only-postgres@127.0.0.1:5432/teamie_test?sslmode=disable
         run: |
-          for module in agent-protocol agent-control agent-runtime agent-infra; do
+          for module in contracts/gen/agent services/agent-control services/agent-runtime services/llm-gateway services/sandbox; do
             (cd "$module" && go test -race -timeout 300s ./... && go vet ./... && go build ./...)
           done
       - name: Agent profile privacy and IM acceptance against fresh disposable processes
@@ -130,15 +136,15 @@ jobs:
       max-parallel: 4
       matrix:
         include:
-          - {service: identity, dockerfile: backend/Dockerfile}
-          - {service: chat, dockerfile: backend/Dockerfile}
-          - {service: realtime, dockerfile: backend/Dockerfile}
+          - {service: identity, dockerfile: services/identity/Dockerfile}
+          - {service: chat, dockerfile: services/chat/Dockerfile}
+          - {service: realtime, dockerfile: services/realtime/Dockerfile}
           - {service: web, dockerfile: apps/web/Dockerfile}
-          - {service: agent-control, dockerfile: agent-control/Dockerfile}
-          - {service: agent-runtime, dockerfile: agent-runtime/Dockerfile}
-          - {service: llm-gateway, dockerfile: agent-infra/Dockerfile}
-          - {service: sandbox, dockerfile: agent-infra/Dockerfile}
-          - {service: sandbox-runner, dockerfile: agent-infra/runner/Dockerfile}
+          - {service: agent-control, dockerfile: services/agent-control/Dockerfile}
+          - {service: agent-runtime, dockerfile: services/agent-runtime/Dockerfile}
+          - {service: llm-gateway, dockerfile: services/llm-gateway/Dockerfile}
+          - {service: sandbox, dockerfile: services/sandbox/Dockerfile}
+          - {service: sandbox-runner, dockerfile: services/sandbox/runner/Dockerfile}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -163,8 +169,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: backend/go.mod
+          go-version-file: pkg/go.mod
           cache: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+      - name: Enforce contract sync, IM independence and Clean DDD dependency boundaries
+        run: |
+          make gen && git diff --exit-code -- contracts/ packages/api-client/src/generated.ts
+          bash ops/check-architecture.sh
       - run: python3 -m unittest discover -s ops -p 'test_*.py' -v
       - name: Validate shell and workflow syntax
         run: |

@@ -19,7 +19,7 @@ for database in teamie_identity teamie_chat; do
     --set ON_ERROR_STOP=1 --command "CREATE DATABASE $database;"
 done
 for service in identity chat realtime; do
-  (cd backend && go build -o "$scratch/$service" "./services/$service/cmd")
+  (cd "services/$service" && go build -o "$scratch/$service" ./cmd)
 done
 HTTP_ADDR=:8081 RPC_ADDR=:8881 DATABASE_URL='postgres://postgres:ci-only-postgres@127.0.0.1:5432/teamie_identity?sslmode=disable' \
   "$scratch/identity" > "$scratch/identity.log" 2>&1 & pids+=("$!")

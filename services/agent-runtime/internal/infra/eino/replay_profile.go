@@ -1,0 +1,60 @@
+package eino
+
+import (
+	"context"
+	"encoding/json"
+
+	"github.com/cloudwego/eino/components/tool"
+	"teamie/services/agent-runtime/internal/domain"
+)
+
+const currentToolProfile = domain.CurrentToolProfile
+const v034ToolProfile = domain.V034ToolProfile
+
+// v0.3.4 wrote plain schema.Message receipts. Native receipts are serialized
+// with a registered type and must never select an older execution profile.
+func classicModelReceipt(raw []byte) bool {
+	var value map[string]json.RawMessage
+	if json.Unmarshal(raw, &value) != nil || value["$type"] != nil || string(value["role"]) != `"assistant"` {
+		return false
+	}
+	return isLegacyMessage(raw)
+}
+
+// Keep the entire started Run's tool profile, including summary token counting
+// and actual execution. Appending native receipts after old ones must not
+// change that choice on another retry. No stored hash or receipt is rewritten.
+func (s *Store) runToolProfile(ctx context.Context, runID string) (string, error) {
+	raws, err := s.DB.ListModelCallResponses(ctx, runID)
+	if err != nil {
+		return "", err
+	}
+	for _, raw := range raws {
+		if classicModelReceipt(raw) {
+			return v034ToolProfile, nil
+		}
+	}
+	return currentToolProfile, nil
+}
+
+func toolsForRun(ctx context.Context, available []tool.BaseTool, run *Run) ([]tool.BaseTool, error) {
+	return FilterToolsForProfile(ctx, available, run.toolProfile)
+}
+
+func resumeCompatibleForRun(metadata *checkpointMetadata, revision int64, run *Run) bool {
+	if !resumeCompatible(metadata, revision, run.ID) {
+		return false
+	}
+	if contextProfile(run) == contextProfileV1 {
+		_, budget, err := canonicalContextPolicy(run.ContextProfile, run.ContextBudget)
+		if err != nil || metadata.ContextProfile != run.ContextProfile || metadata.ContextBudgetHash != digest(budget) {
+			return false
+		}
+	} else if metadata.ContextProfile != "" && metadata.ContextProfile != contextProfileLegacy {
+		return false
+	}
+	// Existing native-only v0.3.5 checkpoints used the current tool profile.
+	// A classic Run cannot load an unlabelled native checkpoint: v0.3.5 may
+	// have built it with five tools or already changed summary provenance.
+	return metadata.ToolProfile == run.toolProfile || metadata.ToolProfile == "" && run.toolProfile == currentToolProfile
+}

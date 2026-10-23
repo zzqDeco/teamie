@@ -44,8 +44,8 @@ flowchart LR
 
 1. **Strict IM Independence**: Identity, Chat, and Realtime own credentials, memberships, durable messages, and realtime hints without depending on Agent modules.
 2. **Service Data Ownership**: Five stateful services (**Identity**, **Chat**, **Agent Control Plane**, **Agent Runtime**, and **Model Gateway**) each own a dedicated PostgreSQL 17 database and role. **Sandbox** owns isolated filesystem workspaces and execution receipts; **Realtime** is stateless. Services never read another service's database tables.
-3. **Homogeneous 4-Layer Hexagonal Clean DDD**: Every service module (`identity`, `chat`, `realtime`, `control`, `engine`, `gateway`, `sandbox`) is structured into `domain` (zero external dependencies), `app` (pure use-case orchestration), `adapter` (inbound HTTP/WS/RPC), and `infra` (PostgreSQL, Docker, Eino, outbound RPC/HTTP), enforced by AST-level architecture tests (`arch_test.go`).
-4. **Unified Thrift IDL Pipeline**: External HTTP/SSE/WebSocket contracts and internal Kitex RPC contracts are defined in `contracts/*.thrift` and compiled via `./ops/codegen.sh` into Go bindings (`kitex_gen`, `hertz_gen`) and the frontend TypeScript SDK (`packages/api-client/src/generated.ts`).
+3. **Homogeneous 4-Layer Hexagonal Clean DDD**: Every peer service under `services/{identity,chat,realtime,agent-control,agent-runtime,llm-gateway,sandbox}` is structured into `domain` (zero external dependencies), `app` (pure use-case orchestration), `adapter` (inbound HTTP/WS/RPC/CLI), and `infra` (PostgreSQL, Docker, Eino, outbound RPC/HTTP), enforced by AST-level architecture tests (`arch_test.go`).
+4. **Unified Thrift IDL Pipeline**: External HTTP/SSE/WebSocket contracts (`contracts/im/*.thrift`, `contracts/agent/*.thrift`) and internal Kitex RPC contracts are compiled via `./ops/codegen.sh` into isolated Go contract modules (`contracts/gen/im`, `contracts/gen/agent`) with generated HTTP route binders (`router_gen.go`) and the frontend TypeScript SDK (`packages/api-client/src/generated.ts`).
 5. **Single Production Environment & Immutable Archives**: `production` is the only deployed environment. `main` is the development trunk; each `release/vMAJOR.MINOR.PATCH` branch and tag is an immutable permanent archive deployed via digest-pinned container images.
 
 ---
@@ -99,18 +99,20 @@ flowchart LR
 
 | Path | Description |
 | :--- | :--- |
-| [`contracts/`](contracts) | Canonical Thrift IDLs for internal Kitex RPC (`im.thrift`, `agent.thrift`) and HTTP/WS/SSE boundaries (`*_http.thrift`, `*_ws.thrift`) |
+| [`contracts/`](contracts) | Canonical Thrift IDLs (`common/`, `im/`, `agent/`, `tpl/hz_package.yaml`) and generated Go contract modules (`gen/im`, `gen/agent`) |
+| [`pkg/`](pkg) | Standalone shared Go technical mechanisms (`postgres`, `httpx`, `rpcx`, `observability`, `config`, `crypto`, `imlimits`, `imtext`) |
+| [`services/identity/`](services/identity) | Identity & Principal service (`cmd/`, `cmd/identityctl/`, `internal/{domain,app,adapter,infra}`) |
+| [`services/chat/`](services/chat) | Workspace, Conversation, Message & Attachment service (`cmd/`, `internal/{domain,app,adapter,infra}`) |
+| [`services/realtime/`](services/realtime) | WebSocket Realtime & Typing Hint service (`cmd/`, `internal/{domain,app,adapter,infra}`) |
+| [`services/agent-control/`](services/agent-control) | Agent Control Plane service (`cmd/`, `internal/{domain,app,adapter,infra}`) |
+| [`services/agent-runtime/`](services/agent-runtime) | Eino Agent Runtime service (`cmd/`, `internal/{domain,app,adapter,infra}`) |
+| [`services/llm-gateway/`](services/llm-gateway) | Platform-Admin Model Gateway service (`cmd/`, `internal/{domain,app,adapter,infra}`) |
+| [`services/sandbox/`](services/sandbox) | Isolated Docker Sandbox service (`cmd/`, `runner/Dockerfile`, `internal/{domain,app,adapter,infra}`) |
 | [`apps/web/`](apps/web) | React 19 / TypeScript / Vite browser application |
 | [`packages/api-client/`](packages/api-client) | Typed browser HTTP client and Thrift-generated DTOs/route metadata (`src/generated.ts`) |
-| [`tools/thrift-ts-codegen/`](tools/thrift-ts-codegen) | Deterministic zero-dependency Thrift-to-TypeScript SDK generator |
-| [`backend/`](backend) | Independent IM Go module (`services/identity`, `services/chat`, `services/realtime`, `internal/{identity,chat,realtime}`, `pkg/{postgres,httpx,observability}`) |
-| [`agent-protocol/`](agent-protocol) | Shared generated Go bindings for Agent Kitex RPC (`kitex_gen`) and Hertz HTTP (`hertz_gen`) contracts |
-| [`agent-control/`](agent-control) | Agent Control Plane service (`internal/control/{domain,app,adapter,infra}`) |
-| [`agent-runtime/`](agent-runtime) | Eino Agent Runtime service (`internal/engine/{domain,app,adapter,infra}`) |
-| [`agent-infra/`](agent-infra) | Model Gateway (`internal/gateway`) and Sandbox (`internal/sandbox`) services plus `runner/` image |
+| [`tools/`](tools) | Deterministic Thrift-to-Go HTTP router generator (`thrift-go-http-codegen`), Thrift-to-TypeScript SDK generator (`thrift-ts-codegen`), and acceptance suites (`acceptance/`) |
 | [`deploy/`](deploy) | Production Docker Compose, Caddyfile, feature-flag defaults, and environment template |
 | [`ops/`](ops) | Code generation (`codegen.sh`), immutable release manifest tooling, deployment, backup, and rollback scripts |
-| [`tools/acceptance/`](tools/acceptance) | End-to-end HTTP, RPC, PostgreSQL, Redis, and WebSocket acceptance suites |
 
 ---
 
@@ -119,6 +121,7 @@ flowchart LR
 ### 1. Contract & Codegen Synchronization
 ```sh
 ./ops/codegen.sh
+node tools/thrift-go-http-codegen/index.mjs --check
 node tools/thrift-ts-codegen/index.mjs --check
 ```
 
@@ -131,22 +134,16 @@ npm test
 npm run build
 ```
 
-### 3. IM Backend (`backend`)
+### 3. Shared Mechanisms, Contracts & Peer Services
 ```sh
-cd backend
-go test -race ./...
-go vet ./...
-go build ./services/identity/cmd ./services/identityctl/cmd ./services/chat/cmd ./services/realtime/cmd
-```
-
-### 4. Agent Services (`agent-protocol`, `agent-control`, `agent-infra`, `agent-runtime`)
-```sh
-for mod in agent-protocol agent-control agent-infra agent-runtime; do
+for mod in pkg contracts/gen/im contracts/gen/agent \
+  services/identity services/chat services/realtime \
+  services/agent-control services/agent-runtime services/llm-gateway services/sandbox; do
   (cd "$mod" && go test -race ./... && go vet ./... && go build ./...)
 done
 ```
 
-> **Database & Docker Integration Tests**: Set `DATABASE_URL_TEST` (for `backend`, `agent-control`, `agent-infra`) and `TEAMIE_RUNTIME_TEST_DATABASE_URL` (for `agent-runtime`) to disposable PostgreSQL 17 databases whose role can create and drop isolated per-test schemas. Set `SANDBOX_TEST_RUNNER_IMAGE` to exercise real Docker container isolation in `agent-infra`.
+> **Database & Docker Integration Tests**: Set `DATABASE_URL_TEST` and `TEAMIE_RUNTIME_TEST_DATABASE_URL` to disposable PostgreSQL 17 databases whose role can create and drop isolated per-test schemas. Set `SANDBOX_TEST_RUNNER_IMAGE` to exercise real Docker container isolation in `services/sandbox`.
 
 ---
 
