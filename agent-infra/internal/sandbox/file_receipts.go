@@ -7,18 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"teamie/agent-infra/internal/sandbox/domain"
 	"teamie/agent-protocol/kitex_gen/agent"
 )
 
-type fileReceipt struct {
-	Version      int    `json:"version"`
-	Fingerprint  string `json:"fingerprint"`
-	State        string `json:"state"`
-	Operation    string `json:"operation"`
-	Path         string `json:"path"`
-	ExpectedHash string `json:"expectedHash"`
-	DataJSON     string `json:"dataJson"`
-}
+type fileReceipt = domain.FileReceipt
 
 // A file mutation intent precedes the atomic filesystem effect. If the process
 // dies before the result receipt, reconciliation recognizes the intended bytes

@@ -2,8 +2,6 @@ package sandbox
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -19,45 +16,20 @@ import (
 	"time"
 
 	"teamie/agent-infra/internal/api"
+	rpcAdapter "teamie/agent-infra/internal/sandbox/adapter/rpc"
+	"teamie/agent-infra/internal/sandbox/app"
+	"teamie/agent-infra/internal/sandbox/domain"
+	sandboxfs "teamie/agent-infra/internal/sandbox/infra/fs"
 	"teamie/agent-protocol/kitex_gen/agent"
 )
 
-const (
-	acrRegionPattern    = `[a-z]{2}(?:-[a-z0-9]+)+`
-	acrInstancePattern  = `[a-z0-9](?:[a-z0-9-]*[a-z0-9])?`
-	acrNamespacePattern = `[a-z0-9]+(?:[._-][a-z0-9]+)*`
-	acrRegistryPattern  = `(?:registry(?:-vpc)?\.` + acrRegionPattern + `\.aliyuncs\.com|crpi-[a-z0-9]+(?:-vpc)?\.` + acrRegionPattern + `\.personal\.cr\.aliyuncs\.com|` + acrInstancePattern + `-registry(?:-vpc)?\.` + acrRegionPattern + `\.cr\.aliyuncs\.com)`
-)
-
-var imagePattern = regexp.MustCompile(`^(?:ghcr\.io/zzqdeco/teamie-sandbox-runner@|` + acrRegistryPattern + `/` + acrNamespacePattern + `/teamie-sandbox-runner@)?sha256:[0-9a-f]{64}$`)
+var _ agent.SandboxService = (*rpcAdapter.Server)(nil)
 
 func validRunnerImage(image string) bool {
-	if !imagePattern.MatchString(image) {
-		return false
-	}
-	// Bare IDs support the disposable CI launcher; GHCR digests preserve existing
-	// release recovery. ACR names remain one namespace and a valid DNS hostname.
-	if strings.HasPrefix(image, "sha256:") || strings.HasPrefix(image, "ghcr.io/") {
-		return true
-	}
-	parts := strings.SplitN(image, "/", 3)
-	if len(parts[1]) > 63 {
-		return false
-	}
-	for _, label := range strings.Split(parts[0], ".") {
-		if len(label) > 63 {
-			return false
-		}
-	}
-	return true
+	return domain.ValidRunnerImage(image)
 }
 
-type Receipt struct {
-	Fingerprint string    `json:"fingerprint"`
-	State       string    `json:"state"`
-	Result      Result    `json:"result"`
-	UpdatedAt   time.Time `json:"updatedAt"`
-}
+type Receipt = domain.Receipt
 type Service struct {
 	Engine                                 Engine
 	Token, Image, WorkspaceRoot, StateRoot string
@@ -145,9 +117,10 @@ func (s *Service) Close() {
 		_ = s.lock.Close()
 	}
 }
-func digest(v string) string                       { b := sha256.Sum256([]byte(v)); return hex.EncodeToString(b[:]) }
-func validID(v string) bool                        { return v != "" && len(v) <= 160 && !strings.ContainsAny(v, "\x00\r\n") }
-func (s *Service) Ready(ctx context.Context) error { return s.Engine.Ready(ctx, s.Image) }
+func digest(v string) string                       { return domain.Digest(v) }
+func validID(v string) bool                        { return domain.ValidID(v) }
+func (s *Service) appService() *app.Service        { return app.New(s.Engine, s.Token, s.Image, s.WorkspaceRoot, s.StateRoot) }
+func (s *Service) Ready(ctx context.Context) error { return s.appService().Ready(ctx) }
 func (s *Service) Ping(ctx context.Context, r *agent.PingRequest) (*agent.PingResponse, error) {
 	return &agent.PingResponse{Ready: r != nil && api.EqualSecret(r.GetServiceToken(), s.Token) && s.Ready(ctx) == nil}, nil
 }
@@ -155,10 +128,7 @@ func response(r Result) *agent.SandboxExecResponse {
 	res := &agent.SandboxExecResponse{Ok: r.ErrorCode == "", ExitCode: r.ExitCode, Stdout: r.Stdout, Stderr: r.Stderr, Truncated: r.Truncated}
 	if r.ErrorCode != "" {
 		res.ErrorCode = &r.ErrorCode
-		message := map[string]string{"execution_unknown": "A prior execution was interrupted; its side effects must be inspected before retrying", "execution_canceled": "Execution canceled", "execution_timeout": "Execution exceeded its time limit"}[r.ErrorCode]
-		if message == "" {
-			message = "Execution could not be completed"
-		}
+		message := domain.ExecErrorMessage(r.ErrorCode)
 		res.ErrorMessage = &message
 	}
 	return res
@@ -171,38 +141,7 @@ func (s *Service) receiptPath(agentID, requestID string) string {
 }
 func writeReceipt(path string, r Receipt) error { return writeAtomicJSON(path, r) }
 func writeAtomicJSON(path string, r any) error {
-	b, e := json.Marshal(r)
-	if e != nil {
-		return e
-	}
-	f, e := os.CreateTemp(filepath.Dir(path), ".receipt-")
-	if e != nil {
-		return e
-	}
-	name := f.Name()
-	defer os.Remove(name)
-	if e = f.Chmod(0600); e == nil {
-		_, e = f.Write(b)
-	}
-	if e == nil {
-		e = f.Sync()
-	}
-	closeErr := f.Close()
-	if e == nil {
-		e = closeErr
-	}
-	if e == nil {
-		e = os.Rename(name, path)
-	}
-	if e == nil {
-		d, openErr := os.Open(filepath.Dir(path))
-		if openErr != nil {
-			return openErr
-		}
-		e = d.Sync()
-		d.Close()
-	}
-	return e
+	return sandboxfs.WriteAtomicJSON(path, r)
 }
 func (s *Service) Exec(ctx context.Context, r *agent.SandboxExecRequest) (reply *agent.SandboxExecResponse, executionErr error) {
 	if r == nil || !api.EqualSecret(r.ServiceToken, s.Token) {

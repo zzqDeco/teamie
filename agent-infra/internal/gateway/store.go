@@ -2,187 +2,20 @@ package gateway
 
 import (
 	"context"
-	"errors"
-	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"teamie/agent-protocol/modeltransport"
+	"teamie/agent-infra/internal/gateway/domain"
+	"teamie/agent-infra/internal/gateway/infra/pg"
 )
 
-type Config struct {
-	BaseURL             string    `json:"baseUrl"`
-	Model               string    `json:"model"`
-	CipherKey           []byte    `json:"-"`
-	Enabled             bool      `json:"enabled"`
-	UpdatedAt           time.Time `json:"updatedAt"`
-	ContextWindowTokens int64     `json:"contextWindowTokens"`
-	WebSearchCipherKey  []byte    `json:"-"`
-	WebSearchEnabled    bool      `json:"webSearchEnabled"`
-	WebSearchEnabledSet bool      `json:"-"`
-	WebSearchAPIKey     *string   `json:"-"`
-	ClearWebSearchKey   bool      `json:"-"`
-}
-
-func (c Config) ContextWindow() int64 {
-	if c.ContextWindowTokens == 0 {
-		return 16384
-	}
-	return c.ContextWindowTokens
-}
-
-func (c Config) Configured() bool          { return c.BaseURL != "" && c.Model != "" && len(c.CipherKey) > 0 }
-func (c Config) WebSearchConfigured() bool { return len(c.WebSearchCipherKey) > 0 }
-func (c Config) CountingConfigID() string {
-	if !c.Configured() {
-		return ""
-	}
-	return modeltransport.CountingConfigID(c.BaseURL, c.Model)
-}
-func (c Config) View() map[string]any {
-	status := "unconfigured"
-	if c.Configured() {
-		status = "disabled"
-		if c.Enabled {
-			status = "ready"
-		}
-	}
-	return map[string]any{
-		"config": map[string]any{
-			"baseUrl":             c.BaseURL,
-			"model":               c.Model,
-			"contextWindowTokens": c.ContextWindow(),
-			"hasApiKey":           len(c.CipherKey) > 0,
-			"enabled":             c.Enabled,
-			"configured":          c.Configured(),
-			"webSearch": map[string]any{
-				"provider":   "tavily",
-				"enabled":    c.WebSearchEnabled,
-				"hasApiKey":  len(c.WebSearchCipherKey) > 0,
-				"configured": c.WebSearchConfigured(),
-			},
-			"updatedAt": c.UpdatedAt,
-		},
-		"status": status,
-	}
-}
-
-type Usage struct {
-	OwnerID, AgentID, SessionID, RunID, Status string
-	PromptTokens, CompletionTokens             int64
-	LatencyMS                                  int64
-}
-type Store interface {
-	Load(context.Context) (Config, error)
-	Save(context.Context, Config, *string, bool, Cipher) (Config, error)
-	Record(context.Context, Usage) error
-	Ready(context.Context) error
-}
-type PGStore struct{ DB *pgxpool.Pool }
+type Config = domain.Config
+type Usage = domain.Usage
+type Store = domain.ConfigStore
+type PGStore = pg.PGStore
 
 func Open(ctx context.Context, url string) (*PGStore, error) {
-	cfg, e := pgxpool.ParseConfig(url)
-	if e != nil {
-		return nil, errors.New("invalid gateway database configuration")
-	}
-	cfg.MaxConns = 3
-	cfg.MinConns = 0
-	cfg.MaxConnIdleTime = time.Minute
-	db, e := pgxpool.NewWithConfig(ctx, cfg)
-	if e != nil {
-		return nil, e
-	}
-	s := &PGStore{db}
-	tx, e := db.Begin(ctx)
-	if e != nil {
-		db.Close()
-		return nil, e
-	}
-	defer tx.Rollback(ctx)
-	_, e = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(7463260102); CREATE TABLE IF NOT EXISTS gateway_schema_migrations(version INTEGER PRIMARY KEY,applied_at TIMESTAMPTZ NOT NULL DEFAULT now()); CREATE TABLE IF NOT EXISTS gateway_config(id BOOLEAN PRIMARY KEY DEFAULT true CHECK(id),base_url TEXT NOT NULL DEFAULT '',model TEXT NOT NULL DEFAULT '',encrypted_key BYTEA,enabled BOOLEAN NOT NULL DEFAULT false,updated_at TIMESTAMPTZ NOT NULL DEFAULT now()); INSERT INTO gateway_config(id)VALUES(true)ON CONFLICT DO NOTHING; CREATE TABLE IF NOT EXISTS gateway_usage(id BIGSERIAL PRIMARY KEY,owner_id TEXT NOT NULL,agent_id TEXT NOT NULL,session_id TEXT NOT NULL,run_id TEXT NOT NULL,status TEXT NOT NULL,prompt_tokens BIGINT NOT NULL,completion_tokens BIGINT NOT NULL,latency_ms BIGINT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now()); CREATE INDEX IF NOT EXISTS gateway_usage_created ON gateway_usage(created_at); INSERT INTO gateway_schema_migrations(version)VALUES(1)ON CONFLICT DO NOTHING;`)
-	if e == nil {
-		_, e = tx.Exec(ctx, `ALTER TABLE gateway_config ADD COLUMN IF NOT EXISTS context_window_tokens BIGINT NOT NULL DEFAULT 16384 CHECK(context_window_tokens BETWEEN 4096 AND 2000000); INSERT INTO gateway_schema_migrations(version)VALUES(2)ON CONFLICT DO NOTHING;`)
-	}
-	if e == nil {
-		_, e = tx.Exec(ctx, `ALTER TABLE gateway_config ADD COLUMN IF NOT EXISTS web_search_encrypted_key BYTEA, ADD COLUMN IF NOT EXISTS web_search_enabled BOOLEAN NOT NULL DEFAULT false; INSERT INTO gateway_schema_migrations(version)VALUES(3)ON CONFLICT DO NOTHING;`)
-	}
-	if e == nil {
-		e = tx.Commit(ctx)
-	}
-	if e != nil {
-		db.Close()
-		return nil, e
-	}
-	return s, nil
-}
-func (s *PGStore) Ready(ctx context.Context) error { return s.DB.Ping(ctx) }
-func scan(row pgx.Row) (c Config, e error) {
-	e = row.Scan(&c.BaseURL, &c.Model, &c.CipherKey, &c.Enabled, &c.UpdatedAt, &c.ContextWindowTokens, &c.WebSearchCipherKey, &c.WebSearchEnabled)
-	return
-}
-func (s *PGStore) Load(ctx context.Context) (Config, error) {
-	return scan(s.DB.QueryRow(ctx, `SELECT base_url,model,encrypted_key,enabled,updated_at,context_window_tokens,web_search_encrypted_key,web_search_enabled FROM gateway_config WHERE id`))
+	return pg.Open(ctx, url)
 }
 
 func mergeSavedConfig(old, c Config, key *string, clear bool, crypto Cipher) (Config, error) {
-	var e error
-	c.CipherKey = old.CipherKey
-	c.WebSearchCipherKey = old.WebSearchCipherKey
-	if !c.WebSearchEnabledSet && !c.WebSearchEnabled {
-		c.WebSearchEnabled = old.WebSearchEnabled
-	}
-	if c.ContextWindowTokens == 0 {
-		c.ContextWindowTokens = old.ContextWindow()
-	}
-	if c.ContextWindowTokens < 4096 || c.ContextWindowTokens > 2000000 {
-		return Config{}, errors.New("invalid context window")
-	}
-	if clear {
-		c.CipherKey = nil
-	}
-	if key != nil {
-		c.CipherKey, e = crypto.Encrypt(*key)
-		if e != nil {
-			return Config{}, e
-		}
-	}
-	if c.ClearWebSearchKey {
-		c.WebSearchCipherKey = nil
-	}
-	if c.WebSearchAPIKey != nil {
-		c.WebSearchCipherKey, e = crypto.Encrypt(*c.WebSearchAPIKey)
-		if e != nil {
-			return Config{}, e
-		}
-	}
-	return c, nil
-}
-
-func (s *PGStore) Save(ctx context.Context, c Config, key *string, clear bool, crypto Cipher) (Config, error) {
-	tx, e := s.DB.Begin(ctx)
-	if e != nil {
-		return Config{}, e
-	}
-	defer tx.Rollback(ctx)
-	old, e := scan(tx.QueryRow(ctx, `SELECT base_url,model,encrypted_key,enabled,updated_at,context_window_tokens,web_search_encrypted_key,web_search_enabled FROM gateway_config WHERE id FOR UPDATE`))
-	if e != nil {
-		return Config{}, e
-	}
-	c, e = mergeSavedConfig(old, c, key, clear, crypto)
-	if e != nil {
-		return Config{}, e
-	}
-	c, e = scan(tx.QueryRow(ctx, `UPDATE gateway_config SET base_url=$1,model=$2,encrypted_key=$3,enabled=$4,context_window_tokens=$5,web_search_encrypted_key=$6,web_search_enabled=$7,updated_at=now() WHERE id RETURNING base_url,model,encrypted_key,enabled,updated_at,context_window_tokens,web_search_encrypted_key,web_search_enabled`, c.BaseURL, c.Model, c.CipherKey, c.Enabled, c.ContextWindowTokens, c.WebSearchCipherKey, c.WebSearchEnabled))
-	if e != nil {
-		return Config{}, e
-	}
-	return c, tx.Commit(ctx)
-}
-func (s *PGStore) Record(ctx context.Context, u Usage) error {
-	_, e := s.DB.Exec(ctx, `INSERT INTO gateway_usage(owner_id,agent_id,session_id,run_id,status,prompt_tokens,completion_tokens,latency_ms)VALUES($1,$2,$3,$4,$5,$6,$7,$8);`, u.OwnerID, u.AgentID, u.SessionID, u.RunID, u.Status, u.PromptTokens, u.CompletionTokens, u.LatencyMS)
-	return e
-}
-func (s *PGStore) Prune(ctx context.Context) error {
-	_, e := s.DB.Exec(ctx, `DELETE FROM gateway_usage WHERE id IN(SELECT id FROM gateway_usage WHERE created_at<now()-interval '30 days' OR id <= (SELECT coalesce(max(id),0)-100000 FROM gateway_usage) ORDER BY id LIMIT 10000)`)
-	return e
+	return domain.MergeSavedConfig(old, c, key, clear, crypto)
 }

@@ -6,118 +6,39 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"net"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"go.uber.org/zap"
 	"teamie/agent-infra/internal/api"
+	"teamie/agent-infra/internal/gateway/domain"
 	"teamie/agent-protocol/modeltransport"
 	"teamie/backend/pkg/observability"
 )
 
-const defaultTavilyBaseURL = "https://api.tavily.com"
-const maxExtractContentBytes = 64 << 10
-const maxSearchSnippetBytes = 1500
-const maxSearchTitleBytes = 512
+const defaultTavilyBaseURL = domain.DefaultTavilyBaseURL
+const maxExtractContentBytes = domain.MaxExtractContentBytes
+const maxSearchSnippetBytes = domain.MaxSearchSnippetBytes
+const maxSearchTitleBytes = domain.MaxSearchTitleBytes
 
 func utf8Prefix(text string, limit int) string {
-	if len(text) <= limit {
-		return text
-	}
-	for limit > 0 && !utf8.RuneStart(text[limit]) {
-		limit--
-	}
-	return text[:limit]
+	return domain.UTF8Prefix(text, limit)
 }
 
 func validDomainName(raw string) (string, bool) {
-	d := strings.ToLower(strings.TrimSpace(raw))
-	if d == "" || len(d) > 253 || strings.HasPrefix(d, ".") || strings.HasSuffix(d, ".") || !strings.Contains(d, ".") {
-		return "", false
-	}
-	if d == "localhost" || strings.HasSuffix(d, ".localhost") || strings.HasSuffix(d, ".local") || strings.HasSuffix(d, ".internal") {
-		return "", false
-	}
-	if net.ParseIP(d) != nil {
-		return "", false
-	}
-	labels := strings.Split(d, ".")
-	for _, label := range labels {
-		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
-			return "", false
-		}
-		for i := 0; i < len(label); i++ {
-			ch := label[i]
-			if !((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-') {
-				return "", false
-			}
-		}
-	}
-	return d, true
+	return domain.ValidDomainName(raw)
 }
 
 func normalizeDomains(items []string) ([]string, error) {
-	if len(items) > 10 {
-		return nil, api.Err(400, "invalid_request", "At most 10 domain filters are allowed")
-	}
-	if len(items) == 0 {
-		return nil, nil
-	}
-	out := make([]string, 0, len(items))
-	seen := make(map[string]bool, len(items))
-	for _, raw := range items {
-		d, ok := validDomainName(raw)
-		if !ok {
-			return nil, api.Err(400, "invalid_request", "Invalid domain filter")
-		}
-		if !seen[d] {
-			seen[d] = true
-			out = append(out, d)
-		}
-	}
-	return out, nil
+	out, err := domain.NormalizeDomains(items)
+	return out, toAPIError(err)
 }
 
 func validateExtractURLs(rawURLs []string) ([]string, error) {
-	if len(rawURLs) == 0 || len(rawURLs) > 5 {
-		return nil, api.Err(400, "invalid_request", "Between 1 and 5 URLs are required")
-	}
-	out := make([]string, 0, len(rawURLs))
-	seen := make(map[string]bool, len(rawURLs))
-	for _, raw := range rawURLs {
-		trimmed := strings.TrimSpace(raw)
-		if trimmed == "" || len(trimmed) > 2048 || strings.ContainsAny(trimmed, "\r\n\t\x00") {
-			return nil, api.Err(400, "invalid_request", "Invalid target URL")
-		}
-		u, err := url.Parse(trimmed)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || u.Fragment != "" {
-			return nil, api.Err(400, "invalid_request", "Use public HTTP or HTTPS URLs without credentials or fragments")
-		}
-		if p := u.Port(); p != "" {
-			port, err := strconv.Atoi(p)
-			if err != nil || port < 1 || port > 65535 {
-				return nil, api.Err(400, "invalid_request", "Invalid URL port")
-			}
-		}
-		host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
-		if host == "localhost" || strings.HasSuffix(host, ".localhost") || strings.HasSuffix(host, ".local") || strings.HasSuffix(host, ".internal") || !strings.Contains(host, ".") {
-			return nil, api.Err(400, "invalid_request", "Private or internal hostnames are not permitted")
-		}
-		if ip := net.ParseIP(host); ip != nil && !PublicIP(ip) {
-			return nil, api.Err(400, "invalid_request", "Private or reserved IP addresses are not permitted")
-		}
-		normalized := u.String()
-		if !seen[normalized] {
-			seen[normalized] = true
-			out = append(out, normalized)
-		}
-	}
-	return out, nil
+	out, err := domain.ValidateExtractURLs(rawURLs)
+	return out, toAPIError(err)
 }
 
 func (s *Service) authorizeBearer(w http.ResponseWriter, r *http.Request) bool {
