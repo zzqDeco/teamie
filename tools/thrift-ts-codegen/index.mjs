@@ -9,11 +9,11 @@ const CONTRACTS_DIR = path.join(ROOT_DIR, "contracts");
 const OUTPUT_FILE = path.join(ROOT_DIR, "packages/api-client/src/generated.ts");
 
 const CONTRACT_FILES = [
-  "im_identity_http.thrift",
-  "im_chat_http.thrift",
-  "im_realtime_ws.thrift",
-  "agent_control_http.thrift",
-  "agent_gateway_http.thrift",
+  "im/http_identity.thrift",
+  "im/http_chat.thrift",
+  "im/ws_realtime.thrift",
+  "agent/http_control.thrift",
+  "agent/http_gateway.thrift",
 ];
 
 const HTTP_ANNOTATION_METHODS = [

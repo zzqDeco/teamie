@@ -3,7 +3,7 @@
 Teamie uses native Zap with Elastic's official `ecszap` v1.0.3 encoder. The former
 scattered slog/stdlib calls are replaced at the service entry points and error
 boundaries. HTTP, Kitex, Runtime, Gateway and Sandbox use the same infrastructure
-in `backend/pkg/observability`, which has no Agent, IM or Eino dependency.
+in `pkg/observability` (and re-exported at `backend/pkg/observability` historically), which has no Agent, IM or Eino dependency.
 
 This is application logging, without an additional log storage or collection
 service. Existing Docker `json-file` rotation remains 10 MiB x 3 files per

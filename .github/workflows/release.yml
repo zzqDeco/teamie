@@ -71,15 +71,15 @@ jobs:
       max-parallel: 4
       matrix:
         include:
-          - {service: identity, dockerfile: backend/Dockerfile, upstream: ""}
-          - {service: chat, dockerfile: backend/Dockerfile, upstream: ""}
-          - {service: realtime, dockerfile: backend/Dockerfile, upstream: ""}
+          - {service: identity, dockerfile: services/identity/Dockerfile, upstream: ""}
+          - {service: chat, dockerfile: services/chat/Dockerfile, upstream: ""}
+          - {service: realtime, dockerfile: services/realtime/Dockerfile, upstream: ""}
           - {service: web, dockerfile: apps/web/Dockerfile, upstream: ""}
-          - {service: agent-control, dockerfile: agent-control/Dockerfile, upstream: ""}
-          - {service: agent-runtime, dockerfile: agent-runtime/Dockerfile, upstream: ""}
-          - {service: llm-gateway, dockerfile: agent-infra/Dockerfile, upstream: ""}
-          - {service: sandbox, dockerfile: agent-infra/Dockerfile, upstream: ""}
-          - {service: sandbox-runner, dockerfile: agent-infra/runner/Dockerfile, upstream: ""}
+          - {service: agent-control, dockerfile: services/agent-control/Dockerfile, upstream: ""}
+          - {service: agent-runtime, dockerfile: services/agent-runtime/Dockerfile, upstream: ""}
+          - {service: llm-gateway, dockerfile: services/llm-gateway/Dockerfile, upstream: ""}
+          - {service: sandbox, dockerfile: services/sandbox/Dockerfile, upstream: ""}
+          - {service: sandbox-runner, dockerfile: services/sandbox/runner/Dockerfile, upstream: ""}
           - {service: caddy, dockerfile: "", upstream: "caddy:2.11.7-alpine"}
           - {service: postgres, dockerfile: "", upstream: "postgres:17-alpine"}
           - {service: redis, dockerfile: "", upstream: "redis:7.4-alpine"}

@@ -26,8 +26,8 @@ CREATE TABLE restore_fixture(id INTEGER PRIMARY KEY,payload JSONB NOT NULL,encry
 INSERT INTO restore_fixture VALUES(1,'{"owner":"ci","message":"persisted","count":3}',decode('010203aaff','hex'));
 SQL
   if [[ $suffix == identity ]]; then
-    cat backend/internal/identity/schema.sql backend/internal/identity/migrations/002_principals.sql \
-      backend/internal/identity/migrations/003_password_resets.sql | "${pg[@]}" psql -U postgres -d teamie_identity -v ON_ERROR_STOP=1 >/dev/null
+    cat services/identity/internal/infra/pg/schema.sql services/identity/internal/infra/pg/migrations/002_principals.sql \
+      services/identity/internal/infra/pg/migrations/003_password_resets.sql | "${pg[@]}" psql -U postgres -d teamie_identity -v ON_ERROR_STOP=1 >/dev/null
     "${pg[@]}" psql -U postgres -d teamie_identity -v ON_ERROR_STOP=1 <<'SQL'
 INSERT INTO identity_schema_migrations(version) VALUES(2),(3) ON CONFLICT DO NOTHING;
 INSERT INTO identity_users(id,email,display_name,kind,password_hash,platform_role)
@@ -45,9 +45,9 @@ SQL
   if [[ $suffix == chat ]]; then
     # Restore an actual linked binary attachment through Chat's real schema,
     # including bytes that cannot survive a UTF-8/text-file transport.
-    cat backend/internal/chat/schema.sql backend/internal/chat/migrations/002_membership_management.sql \
-      backend/internal/chat/migrations/003_attachments.sql backend/internal/chat/migrations/004_attachment_uploads.sql \
-      backend/internal/chat/migrations/005_mentions.sql | "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 >/dev/null
+    cat services/chat/internal/infra/pg/schema.sql services/chat/internal/infra/pg/migrations/002_membership_management.sql \
+      services/chat/internal/infra/pg/migrations/003_attachments.sql services/chat/internal/infra/pg/migrations/004_attachment_uploads.sql \
+      services/chat/internal/infra/pg/migrations/005_mentions.sql | "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 >/dev/null
     "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 <<'SQL'
 INSERT INTO workspaces(id,name,created_by) VALUES('restore-workspace','Restore','owner');
 INSERT INTO chat_schema_migrations(version) VALUES(2),(3),(4),(5) ON CONFLICT DO NOTHING;
@@ -68,7 +68,7 @@ SQL
     python3 - <<'PY' | "${pg[@]}" psql -U postgres -d teamie_agent_runtime -v ON_ERROR_STOP=1 >/dev/null
 from pathlib import Path
 import re
-root=Path('agent-runtime/internal/engine')
+root=Path('services/agent-runtime/internal/infra/eino')
 sources='\n'.join(p.read_text() for p in root.glob('*.go') if not p.name.endswith('_test.go'))
 print("SET teamie.runtime_writer_schema='12';")
 for name in ('schemaSQL','schemaV2SQL','schemaV3SQL','contextArchiveSchemaSQL','contextRecoverySchemaSQL','schemaV4SQL','schemaV5SQL','schemaV6SQL','schemaV7SQL','schemaV8SQL','schemaV9SQL','schemaV10SQL','schemaV11SQL','schemaV12SQL'):

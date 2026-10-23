@@ -40,13 +40,8 @@ for suffix in identity chat agent_control agent_runtime gateway; do
   PGPASSWORD="$pg_password" "${pg[@]}" --command "CREATE DATABASE $database;" >/dev/null
   databases+=("$database")
 done
-for service in identity chat realtime; do
-  (cd backend && go build -o "$scratch/$service" "./services/$service/cmd")
-done
-(cd agent-control && go build -o "$scratch/agent-control" ./cmd)
-(cd agent-runtime && go build -o "$scratch/agent-runtime" ./cmd)
-for service in llm-gateway sandbox; do
-  (cd agent-infra && go build -o "$scratch/$service" "./cmd/$service")
+for service in identity chat realtime agent-control agent-runtime llm-gateway sandbox; do
+  (cd "services/$service" && go build -o "$scratch/$service" ./cmd)
 done
 launch() {
   local service=$1 offset=$2 suffix=$3

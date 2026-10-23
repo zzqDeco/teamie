@@ -1,0 +1,11 @@
+# Custom Hertz / HTTP router package template for stateless Clean DDD HTTP adapters.
+# Used by ops/codegen.sh and tools/thrift-go-http-codegen/index.mjs to generate
+# deterministic route registration and DTO binding functions alongside thriftgo types.
+layouts:
+  - path: router_gen.go
+    delims:
+      - "{{"
+      - "}}"
+    body: |
+      // Code generated from {{.SourceIDL}} using contracts/tpl/hz_package.yaml. DO NOT EDIT.
+      package {{.PackageName}}

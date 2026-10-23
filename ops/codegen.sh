@@ -13,19 +13,20 @@ for bin in kitex thriftgo node; do
 done
 
 (
-  cd "${ROOT_DIR}/backend"
-  kitex -module teamie/backend ../contracts/im.thrift
-  for idl in im_identity_http.thrift im_chat_http.thrift im_realtime_ws.thrift; do
-    thriftgo -g go:template=slim,no_default_serdes=true,no_processor=true -o hertz_gen "../contracts/${idl}"
+  cd "${ROOT_DIR}/contracts/gen/im"
+  kitex -module teamie/contracts/gen/im ../../im/rpc.thrift
+  for idl in http_identity.thrift http_chat.thrift ws_realtime.thrift; do
+    thriftgo -g go:template=slim,no_default_serdes=true,no_processor=true -o hertz_gen "../../im/${idl}"
   done
 )
 
 (
-  cd "${ROOT_DIR}/agent-protocol"
-  kitex -module teamie/agent-protocol ../contracts/agent.thrift
-  for idl in agent_control_http.thrift agent_gateway_http.thrift; do
-    thriftgo -g go:template=slim,no_default_serdes=true,no_processor=true -o hertz_gen "../contracts/${idl}"
+  cd "${ROOT_DIR}/contracts/gen/agent"
+  kitex -module teamie/contracts/gen/agent ../../agent/rpc.thrift
+  for idl in http_control.thrift http_gateway.thrift; do
+    thriftgo -g go:template=slim,no_default_serdes=true,no_processor=true -o hertz_gen "../../agent/${idl}"
   done
 )
 
+node "${ROOT_DIR}/tools/thrift-go-http-codegen/index.mjs"
 node "${ROOT_DIR}/tools/thrift-ts-codegen/index.mjs"
