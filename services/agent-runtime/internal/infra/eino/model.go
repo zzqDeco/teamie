@@ -17,7 +17,7 @@ import (
 	wire "teamie/contracts/gen/agent/kitex_gen/agent"
 	"teamie/contracts/gen/agent/kitex_gen/agent/modelgatewayservice"
 	"teamie/contracts/gen/agent/modeltransport"
-	"teamie/services/agent-runtime/internal/infra/pg"
+	"teamie/pkg/postgres"
 )
 
 type ModelError struct {
@@ -173,7 +173,7 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticM
 		}
 		return result, decodeErr
 	}
-	if !pg.IsNoRows(e) {
+	if !postgres.IsNoRows(e) {
 		return nil, e
 	}
 	if e = m.cachedRecovery(ctx, run, step, hash, false); e != nil {
@@ -270,7 +270,7 @@ func retryError(err error) bool {
 		return true
 	}
 	var networkError net.Error
-	if errors.As(err, &networkError) || pg.IsRetryableError(err) {
+	if errors.As(err, &networkError) || postgres.IsRetryable(err) {
 		return true
 	}
 

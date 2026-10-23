@@ -4,11 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5"
+	"teamie/pkg/postgres"
 	"teamie/services/agent-runtime/internal/domain"
 )
 
@@ -129,24 +128,7 @@ func (r *Repository) ListVisibleSessionRunIDsThrough(ctx context.Context, sessio
 }
 
 // ContextArtifactWrite holds the parameters for persisting a context artifact and its source version proof.
-type ContextArtifactWrite struct {
-	AgentID       string
-	ActiveRunID   string
-	ActiveAttempt string
-	RunID         string
-	Attempt       string
-	Key           string
-	Kind          string
-	ToolCallID    string
-	ToolName      string
-	Content       []byte
-	ContentHash   string
-	SourceJSON    []byte
-	ParentJSON    []byte
-	EventSeq      int64
-	VersionKey    string
-	VersionBytes  []byte
-}
+type ContextArtifactWrite = domain.ContextArtifactWrite
 
 // PutContextArtifact atomically inserts and verifies a context artifact and its provenance version observation.
 func (r *Repository) PutContextArtifact(
@@ -224,7 +206,7 @@ func (r *Repository) LoadVisibleContextArtifact(
 ) (*LoadedContextArtifactRow, bool, error) {
 	var out LoadedContextArtifactRow
 	err := r.db.Conn(ctx).QueryRow(ctx, `SELECT a.attempt_id::text,a.artifact_key,a.kind,a.tool_call_id,a.tool_name,a.content,a.content_hash,a.sources,a.source_artifact_refs,a.source_event_seq,a.created_at,o.response FROM runtime_context_artifacts a JOIN runtime_runs r ON r.id=a.run_id LEFT JOIN runtime_tool_observations o ON o.run_id=a.run_id AND o.call_id='context-artifact:'||a.artifact_key AND o.observation_key='context-source-version-v1' WHERE a.agent_id=$1 AND `+contextArtifactVisibility+` AND a.run_id=$6 AND a.artifact_key=$7`, agentID, attemptID, activeRunID, contextHead, acceptanceHead, targetRunID, key).Scan(&out.Attempt, &out.Key, &out.Kind, &out.ToolCallID, &out.ToolName, &out.Raw, &out.Hash, &out.Sources, &out.Parents, &out.EventSeq, &out.CreatedAt, &out.Version)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if postgres.IsNoRows(err) {
 		return nil, false, nil
 	}
 	if err != nil {
@@ -330,7 +312,7 @@ func (r *Repository) GetUploadedFileToolObservation(ctx context.Context, runID, 
 	var agentID, hash string
 	var raw []byte
 	err := r.db.Conn(ctx).QueryRow(ctx, `SELECT r.agent_id,t.request_hash,o.response FROM runtime_tool_calls t JOIN runtime_runs r ON r.id=t.run_id JOIN runtime_tool_observations o ON o.run_id=t.run_id AND o.call_id=t.call_id AND o.observation_key=$3 WHERE t.run_id=$1 AND t.call_id=$2 AND t.name='im_upload_file'`, runID, call, obsKey).Scan(&agentID, &hash, &raw)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if postgres.IsNoRows(err) {
 		return "", "", nil, false, nil
 	}
 	return agentID, hash, raw, err == nil, err
@@ -345,11 +327,7 @@ func (r *Repository) GetToolCallObservationWithMeta(ctx context.Context, runID, 
 }
 
 // AcceptedToolCallCandidate holds a committed tool call candidate from an accepted or current Run.
-type AcceptedToolCallCandidate struct {
-	RunID string
-	Name  string
-	Raw   []byte
-}
+type AcceptedToolCallCandidate = domain.AcceptedToolCallCandidate
 
 // ListAcceptedToolCallCandidates lists committed tool calls matching (agentID, callID, names) in current or accepted runs.
 func (r *Repository) ListAcceptedToolCallCandidates(ctx context.Context, agentID, callID string, names []string, runID string, acceptanceHead int64, originRun string) ([]AcceptedToolCallCandidate, error) {
@@ -441,7 +419,7 @@ func (r *Repository) GetAcceptedInputPayload(ctx context.Context, agentID, event
 	var raw []byte
 	var ownerRunID string
 	err := r.db.Conn(ctx).QueryRow(ctx, `SELECT i.payload,i.run_id::text FROM runtime_inputs i JOIN runtime_runs owner ON owner.id=i.run_id WHERE i.agent_id=$1 AND i.event_id=$2 AND (owner.id=$3 OR EXISTS(SELECT 1 FROM runtime_session_acceptances x WHERE x.agent_id=i.agent_id AND x.run_id=owner.id AND x.seq<=$4))`, agentID, eventID, runID, acceptanceHead).Scan(&raw, &ownerRunID)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if postgres.IsNoRows(err) {
 		return nil, "", false, nil
 	}
 	return raw, ownerRunID, err == nil, err

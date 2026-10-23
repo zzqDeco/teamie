@@ -796,7 +796,7 @@ func RegisterChatHTTPServer(mux *http.ServeMux, srv ChatHTTPServer, m HTTPRespon
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
-			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+			m.WriteOKHTTP(w, r, http.StatusCreated, resp)
 		})
 		if hasMW {
 			fn = mw.WrapRoute(RouteSpec{Name: "SendMessage", Method: "POST", Path: "/api/v1/conversations/:id/messages", MuxPattern: PatternSendMessage, RequestType: "SendMessageReq", ResponseType: "MessageResp"}, fn)

@@ -11,7 +11,7 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
-	"teamie/services/agent-runtime/internal/infra/pg"
+	"teamie/pkg/postgres"
 )
 
 type contextToolResponse struct {
@@ -138,7 +138,7 @@ func (a *ContextArchive) observe(ctx context.Context, name string, args []byte, 
 	const key = "context-observation-v1"
 	raw, err := a.Store.readObservation(ctx, r, callID, key)
 	var observation contextToolObservation
-	if pg.IsNoRows(err) {
+	if postgres.IsNoRows(err) {
 		if cached != nil {
 			return "", ErrReplayConflict
 		}

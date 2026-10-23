@@ -14,7 +14,7 @@ import (
 
 	bg "github.com/cloudwego/eino/adk/backgroundtask"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
+	"teamie/pkg/postgres"
 	"teamie/services/agent-runtime/internal/domain"
 )
 
@@ -108,7 +108,7 @@ func (s *TaskStore) load(ctx context.Context, id string) (*bg.Task, *time.Time, 
 	var until *time.Time
 	var now time.Time
 	err := s.Repo.db.Conn(ctx).QueryRow(ctx, `SELECT snapshot,lease_until,clock_timestamp() FROM runtime_tasks WHERE id=$1 AND agent_id=$2 FOR UPDATE`, id, s.AgentID).Scan(&b, &until, &now)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if postgres.IsNoRows(err) {
 		err = bg.ErrNotFound
 	}
 	if err != nil {

@@ -4,9 +4,7 @@ package pg
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -35,12 +33,7 @@ func IsNoRows(err error) bool {
 
 // IsRetryableError reports whether err is a transient PostgreSQL connection or serialization error.
 func IsRetryableError(err error) bool {
-	var databaseError *pgconn.PgError
-	if errors.As(err, &databaseError) {
-		code := databaseError.Code
-		return strings.HasPrefix(code, "08") || strings.HasPrefix(code, "53") || code == "40001" || code == "40P01" || code == "57P01" || code == "57P02" || code == "57P03"
-	}
-	return pgconn.SafeToRetry(err) || pgconn.Timeout(err)
+	return postgres.IsRetryable(err)
 }
 
 // Repository implements the domain persistence ports against PostgreSQL.

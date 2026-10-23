@@ -211,3 +211,38 @@ var DefaultScheduleCoordinator func(
 	receipts ToolReceiptRepository,
 	im IMGateway,
 ) ScheduleCoordinator
+
+// SessionEventWrite holds a serialized session event ready for persistence.
+type SessionEventWrite struct {
+	EventID string
+	Kind    string
+	Payload []byte
+	Hash    string
+}
+
+// ContextArtifactWrite holds the parameters for persisting a context artifact and its source version proof.
+type ContextArtifactWrite struct {
+	AgentID       string
+	ActiveRunID   string
+	ActiveAttempt string
+	RunID         string
+	Attempt       string
+	Key           string
+	Kind          string
+	ToolCallID    string
+	ToolName      string
+	Content       []byte
+	ContentHash   string
+	SourceJSON    []byte
+	ParentJSON    []byte
+	EventSeq      int64
+	VersionKey    string
+	VersionBytes  []byte
+}
+
+// AcceptedToolCallCandidate holds a committed tool call candidate from an accepted or current Run.
+type AcceptedToolCallCandidate struct {
+	RunID string
+	Name  string
+	Raw   []byte
+}

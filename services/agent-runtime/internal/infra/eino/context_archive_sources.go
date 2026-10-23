@@ -11,7 +11,7 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/middlewares/reduction"
 	"github.com/cloudwego/eino/schema"
-	"teamie/services/agent-runtime/internal/infra/pg"
+	"teamie/services/agent-runtime/internal/domain"
 )
 
 const contextArchiveRefKey = "teamie_context_archive_ref"
@@ -117,7 +117,7 @@ func (a *ContextArchive) toolSources(ctx context.Context, r *Run, detail *reduct
 	if err != nil {
 		return nil, err
 	}
-	matches := []pg.AcceptedToolCallCandidate{}
+	matches := []domain.AcceptedToolCallCandidate{}
 	for _, item := range candidates {
 		if contextReceiptMatchesTool(item.Raw, item.Name, detail) {
 			matches = append(matches, item)

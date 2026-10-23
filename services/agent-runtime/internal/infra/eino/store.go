@@ -391,7 +391,7 @@ func (s *SessionStore[M]) AppendEvents(ctx context.Context, sessionID string, ev
 		return errors.New("session scope mismatch")
 	}
 	ser := &schema.HumanReadableSerializer{}
-	items := make([]pg.SessionEventWrite, 0, len(events))
+	items := make([]domain.SessionEventWrite, 0, len(events))
 	for _, event := range events {
 		if event == nil || event.EventID == "" {
 			return adk.ErrInvalidEventID
@@ -403,7 +403,7 @@ func (s *SessionStore[M]) AppendEvents(ctx context.Context, sessionID string, ev
 		if err != nil {
 			return err
 		}
-		items = append(items, pg.SessionEventWrite{
+		items = append(items, domain.SessionEventWrite{
 			EventID: event.EventID,
 			Kind:    string(event.Kind),
 			Payload: b,

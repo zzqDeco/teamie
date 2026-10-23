@@ -13,18 +13,13 @@ import (
 	"teamie/contracts/gen/agent/kitex_gen/agent/agentcontrolservice"
 	"teamie/contracts/gen/agent/kitex_gen/agent/modelgatewayservice"
 	"teamie/contracts/gen/agent/kitex_gen/agent/sandboxservice"
-	"teamie/services/agent-runtime/internal/domain"
 	"teamie/contracts/gen/im/kitex_gen/im/identityservice"
-	"teamie/pkg/observability"
+	"teamie/pkg/rpcx"
+	"teamie/services/agent-runtime/internal/domain"
 )
 
 func dialOptions(addr string, timeout time.Duration) []client.Option {
-	return []client.Option{
-		observability.RPCClient(),
-		client.WithHostPorts(addr),
-		client.WithRPCTimeout(timeout),
-		client.WithConnectTimeout(time.Second),
-	}
+	return rpcx.ClientOptions(addr, timeout, time.Second)
 }
 
 // DialAgentControl creates a Kitex RPC client for teamie.agent-control.

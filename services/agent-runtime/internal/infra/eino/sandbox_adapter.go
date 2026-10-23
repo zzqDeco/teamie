@@ -21,7 +21,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	wire "teamie/contracts/gen/agent/kitex_gen/agent"
 	"teamie/contracts/gen/agent/kitex_gen/agent/sandboxservice"
-	"teamie/services/agent-runtime/internal/infra/pg"
+	"teamie/pkg/postgres"
 )
 
 // SandboxBackend is the sole workspace boundary. The Sandbox service confines
@@ -81,7 +81,7 @@ func (s *SandboxBackend) workspace(ctx context.Context, op string, args any, out
 				}
 				return nil
 			}
-			if !pg.IsNoRows(err) {
+			if !postgres.IsNoRows(err) {
 				return err
 			}
 		}

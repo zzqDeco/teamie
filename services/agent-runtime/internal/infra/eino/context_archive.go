@@ -18,7 +18,6 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
 	"teamie/services/agent-runtime/internal/domain"
-	"teamie/services/agent-runtime/internal/infra/pg"
 )
 
 const (
@@ -240,7 +239,7 @@ func (a *ContextArchive) put(ctx context.Context, r *Run, artifact contextArtifa
 	if err = a.Store.DB.PutContextArtifact(
 		ctx,
 		a.Lease,
-		pg.ContextArtifactWrite{
+		domain.ContextArtifactWrite{
 			AgentID:       r.AgentID,
 			ActiveRunID:   r.ID,
 			ActiveAttempt: r.Attempt,

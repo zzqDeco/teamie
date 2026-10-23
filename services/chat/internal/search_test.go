@@ -175,8 +175,24 @@ func TestWorkspaceSearchACLsRetractionsPaginationAndAgents(t *testing.T) {
 		t.Fatal("delegated agent retained workspace search access after grantor removal")
 	}
 
-	// HTTP route validation (400 invalid_query on bad q, limit, cursor)
-	h := (&Handler{Store: s, Identity: attachmentIdentity{httpx.Session{User: owner}}}).Routes()
+	// HTTP route validation (400 invalid_query on bad q, limit, cursor; 201 Created vs 200 OK on SendMessage)
+	h := (&Handler{Store: s, Origin: "https://teamie.example", Identity: attachmentIdentity{httpx.Session{User: owner, CSRFToken: "csrf-ok"}}}).Routes()
+	postMsg := func(clientMsgID string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("POST", "/api/v1/conversations/"+channel.ID+"/messages", strings.NewReader(`{"clientMessageId":"`+clientMsgID+`","body":"http status check"}`))
+		r.Header.Set("Origin", "https://teamie.example")
+		r.Header.Set("X-CSRF-Token", "csrf-ok")
+		r.Header.Set("Content-Type", "application/json")
+		r.AddCookie(&http.Cookie{Name: "teamie_session", Value: "fixture"})
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	if w := postMsg("http-send-201-check"); w.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created on fresh message send, got %d: %s", w.Code, w.Body.String())
+	}
+	if w := postMsg("http-send-201-check"); w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on idempotent message replay, got %d: %s", w.Code, w.Body.String())
+	}
 	get := func(query string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest("GET", "/api/v1/workspaces/"+ws.ID+"/messages/search?"+query, nil)
 		r.AddCookie(&http.Cookie{Name: "teamie_session", Value: "fixture"})

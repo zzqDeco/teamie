@@ -6,7 +6,7 @@ import (
 	"errors"
 	"strings"
 
-	"teamie/services/agent-runtime/internal/infra/pg"
+	"teamie/pkg/postgres"
 )
 
 type contextRecoveryDecision struct {
@@ -121,7 +121,7 @@ func (m *GatewayModel) cachedRecovery(ctx context.Context, run *Run, step int, h
 		return nil
 	}
 	failure, err := m.Store.CachedContextRecovery(ctx, run, step, hash, streaming)
-	if pg.IsNoRows(err) {
+	if postgres.IsNoRows(err) {
 		return nil
 	}
 	if err != nil {

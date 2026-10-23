@@ -338,7 +338,7 @@ service ChatHTTPService {
   ConversationResp RemoveConversationMember(1: RemoveConversationMemberReq req) (api.delete="/api/v1/conversations/:id/members/:userId")
   ListMessagesResp ListMessages(1: ListMessagesReq req) (api.get="/api/v1/conversations/:id/messages")
   MessageResp GetMessage(1: GetMessageReq req) (api.get="/api/v1/conversations/:id/messages/:messageId")
-  MessageResp SendMessage(1: SendMessageReq req) (api.post="/api/v1/conversations/:id/messages")
+  MessageResp SendMessage(1: SendMessageReq req) (api.post="/api/v1/conversations/:id/messages", api.status="201")
   MessageResp EditMessage(1: EditMessageReq req) (api.patch="/api/v1/conversations/:id/messages/:messageId")
   MessageResp RetractMessage(1: RetractMessageReq req) (api.delete="/api/v1/conversations/:id/messages/:messageId")
   MarkReadResp MarkRead(1: MarkReadReq req) (api.post="/api/v1/conversations/:id/read")

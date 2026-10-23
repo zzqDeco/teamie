@@ -13,7 +13,7 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
-	"teamie/services/agent-runtime/internal/infra/pg"
+	"teamie/pkg/postgres"
 )
 
 type contextTranscriptBlock struct {
@@ -225,7 +225,7 @@ func (a *ContextArchive) Search(ctx context.Context, query, rawCursor string, li
 	if rawCursor == "" {
 		cursor = contextSearchCursor{RunID: r.ID, ViewID: contextSearchViewID(compose.GetToolCallID(ctx)), QueryHash: digest([]byte(query)), ContextHead: r.ContextHead, AcceptanceHead: r.AcceptanceHead, Phase: "artifacts"}
 		prior, e := a.Store.readObservation(ctx, r, "context-search/"+cursor.ViewID, viewKey)
-		if pg.IsNoRows(e) {
+		if postgres.IsNoRows(e) {
 			cursor.ArtifactHead, cursor.EventHead, err = a.Store.DB.GetContextSearchHeads(ctx, r.AgentID, "agent:"+r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead)
 			if err == nil {
 				snapshot, _ := json.Marshal(cursor)

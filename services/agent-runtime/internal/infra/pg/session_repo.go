@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
+	"teamie/pkg/postgres"
 	"teamie/services/agent-runtime/internal/domain"
 )
 
@@ -193,7 +193,7 @@ func (r *Repository) StartOrResumeRun(
 			for _, item := range parsed {
 				eventIDs = append(eventIDs, item.EventID)
 			}
-		} else if errors.Is(qErr, pgx.ErrNoRows) {
+		} else if postgres.IsNoRows(qErr) {
 			runID = newRunID
 			var key string
 			var rErr error
@@ -333,7 +333,7 @@ func (r *Repository) GetCheckpointMetadata(ctx context.Context, id string) ([]by
 func (r *Repository) GetCheckpoint(ctx context.Context, id string) ([]byte, []byte, bool, error) {
 	var b, metadata []byte
 	err := r.db.Conn(ctx).QueryRow(ctx, `SELECT payload,metadata FROM runtime_checkpoints WHERE checkpoint_id=$1`, id).Scan(&b, &metadata)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if postgres.IsNoRows(err) {
 		return nil, nil, false, nil
 	}
 	return b, metadata, err == nil, err
@@ -362,12 +362,7 @@ func (r *Repository) DeleteCheckpoint(ctx context.Context, l *domain.Lease, id s
 }
 
 // SessionEventWrite holds a serialized session event ready for persistence.
-type SessionEventWrite struct {
-	EventID string
-	Kind    string
-	Payload []byte
-	Hash    string
-}
+type SessionEventWrite = domain.SessionEventWrite
 
 // AppendSessionEvents persists a batch of session events under the active worker lease fence.
 // If a conflicting payload hash already exists for the same (sessionID, eventID), duplicate is returned as true.
@@ -423,7 +418,7 @@ func (r *Repository) LoadSessionEventPayloads(
 	conn := r.db.Conn(ctx)
 	if afterEventID != "" {
 		err := conn.QueryRow(ctx, `SELECT e.seq FROM runtime_session_events e JOIN runtime_runs r ON r.id=e.run_id WHERE e.session_id=$1 AND `+afterVisible+` AND e.event_id=$3 AND (e.run_id=$5 OR e.seq<=$4)`, sessionID, attemptID, afterEventID, contextHead, runID, acceptanceHead).Scan(&after)
-		if errors.Is(err, pgx.ErrNoRows) {
+		if postgres.IsNoRows(err) {
 			return nil, true, nil
 		}
 		if err != nil {
@@ -475,7 +470,7 @@ func (r *Repository) GetCachedModelCall(ctx context.Context, runID string, step 
 func (r *Repository) GetModelStepAndRecovery(ctx context.Context, runID string, step int) ([]byte, []byte, error) {
 	var raw, decisionRaw []byte
 	err := r.db.Conn(ctx).QueryRow(ctx, `SELECT (SELECT response FROM runtime_model_calls WHERE run_id=$1 AND step=$2), (SELECT decision_json FROM runtime_context_recoveries WHERE run_id=$1 AND model_step=$2)`, runID, step).Scan(&raw, &decisionRaw)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if postgres.IsNoRows(err) {
 		return nil, nil, nil
 	}
 	return raw, decisionRaw, err

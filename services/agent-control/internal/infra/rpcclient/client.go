@@ -9,11 +9,12 @@ import (
 
 	"github.com/cloudwego/kitex/client"
 	"go.uber.org/zap"
-	"teamie/services/agent-control/internal/domain"
 	"teamie/contracts/gen/im/kitex_gen/im"
 	"teamie/contracts/gen/im/kitex_gen/im/chatservice"
 	"teamie/contracts/gen/im/kitex_gen/im/identityservice"
 	"teamie/pkg/observability"
+	"teamie/pkg/rpcx"
+	"teamie/services/agent-control/internal/domain"
 )
 
 // IMClient communicates with the independent Identity and Chat RPC services.
@@ -28,12 +29,7 @@ var _ domain.IMAuthority = (*IMClient)(nil)
 // NewIMClient creates Kitex clients for Identity and Chat RPC endpoints.
 func NewIMClient(identityAddr, chatAddr, token string) (*IMClient, error) {
 	opts := func(addr string) []client.Option {
-		return []client.Option{
-			observability.RPCClient(),
-			client.WithHostPorts(addr),
-			client.WithRPCTimeout(3 * time.Second),
-			client.WithConnectTimeout(time.Second),
-		}
+		return rpcx.ClientOptions(addr, 3*time.Second, time.Second)
 	}
 	identity, err := identityservice.NewClient("teamie.identity", opts(identityAddr)...)
 	if err != nil {

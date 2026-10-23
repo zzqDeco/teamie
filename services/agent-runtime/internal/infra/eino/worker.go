@@ -24,9 +24,9 @@ import (
 	"teamie/contracts/gen/agent/kitex_gen/agent/agentcontrolservice"
 	"teamie/contracts/gen/agent/kitex_gen/agent/modelgatewayservice"
 	"teamie/contracts/gen/agent/kitex_gen/agent/sandboxservice"
-	"teamie/services/agent-runtime/internal/domain"
-	"teamie/services/agent-runtime/internal/infra/rpcclient"
 	"teamie/contracts/gen/im/kitex_gen/im/identityservice"
+	"teamie/pkg/rpcx"
+	"teamie/services/agent-runtime/internal/domain"
 )
 
 type Config struct{ ControlAddr, GatewayAddr, SandboxAddr, IdentityAddr, IMURL, IMRealtimeURL, ControlToken, GatewayToken, SandboxToken, IMToken, FlagsFile, GatewayStreamURL string }
@@ -45,13 +45,13 @@ func New(store *Store, c Config) (*Engine, error) {
 	if c.GatewayStreamURL == "" {
 		c.GatewayStreamURL = "http://llm-gateway:8086/internal/v1/chat/stream"
 	}
-	cp, e := rpcclient.DialAgentControl(c.ControlAddr)
+	cp, e := agentcontrolservice.NewClient("teamie.agent-control", rpcx.ClientOptions(c.ControlAddr, 4*time.Second, time.Second)...)
 	if e != nil {
 		return nil, e
 	}
 	// RPC now carries only bounded Ping/Cancel operations. Native model
 	// generation follows HTTP disconnect/cancellation without an RPC timer.
-	gwRPC, e := rpcclient.DialModelGateway(c.GatewayAddr)
+	gwRPC, e := modelgatewayservice.NewClient("teamie.model-gateway", rpcx.ClientOptions(c.GatewayAddr, 4*time.Second, time.Second)...)
 	if e != nil {
 		return nil, e
 	}
@@ -59,11 +59,11 @@ func New(store *Store, c Config) (*Engine, error) {
 	if e != nil {
 		return nil, e
 	}
-	sb, e := rpcclient.DialSandbox(c.SandboxAddr)
+	sb, e := sandboxservice.NewClient("teamie.sandbox", rpcx.ClientOptions(c.SandboxAddr, 70*time.Second, time.Second)...)
 	if e != nil {
 		return nil, e
 	}
-	id, e := rpcclient.DialIdentity(c.IdentityAddr)
+	id, e := identityservice.NewClient("teamie.identity", rpcx.ClientOptions(c.IdentityAddr, 4*time.Second, time.Second)...)
 	if e != nil {
 		return nil, e
 	}

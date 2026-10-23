@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"teamie/pkg/postgres"
 	"teamie/services/agent-runtime/internal/domain"
 )
@@ -25,7 +24,7 @@ func (r *Repository) CountActiveSchedules(ctx context.Context, agentID string) (
 }
 
 // ScanScheduleItem scans a single schedule row into a domain.ScheduleItem.
-func ScanScheduleItem(row pgx.Row) (domain.ScheduleItem, error) {
+func ScanScheduleItem(row postgres.RowScanner) (domain.ScheduleItem, error) {
 	var (
 		out             domain.ScheduleItem
 		intervalSeconds *int64

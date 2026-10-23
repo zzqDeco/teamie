@@ -11,7 +11,7 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
-	"teamie/services/agent-runtime/internal/infra/pg"
+	"teamie/pkg/postgres"
 )
 
 const workspaceSourcesKey = "context-workspace-sources-v1"
@@ -79,7 +79,7 @@ func (a *ContextArchive) workspaceToolSources(ctx context.Context, r *Run, runID
 		}
 		return a.workspaceSnapshotSources(ctx, r.AgentID, saved.Ref)
 	}
-	if !pg.IsNoRows(err) {
+	if !postgres.IsNoRows(err) {
 		return nil, err
 	}
 	refs, err := a.runSources(ctx, runID)
@@ -94,7 +94,7 @@ func (a *ContextArchive) workspaceToolSources(ctx context.Context, r *Run, runID
 		refs = append(refs, causal...)
 		if name == "im_get_attachment" {
 			actual, err := a.workspaceImportSources(ctx, runID, call, hash)
-			if pg.IsNoRows(err) && len(result) > 0 {
+			if postgres.IsNoRows(err) && len(result) > 0 {
 				actual, err = a.imReceiptSources(ctx, runID, call, name, result)
 			}
 			if err != nil {
@@ -134,7 +134,7 @@ func (a *ContextArchive) workspaceToolSources(ctx context.Context, r *Run, runID
 			actual, proofErr := a.workspaceImportSources(ctx, w.Run, w.Call, w.Hash)
 			if proofErr == nil {
 				refs = append(refs, actual...)
-			} else if !pg.IsNoRows(proofErr) {
+			} else if !postgres.IsNoRows(proofErr) {
 				return nil, proofErr
 			} else {
 				var output Observation

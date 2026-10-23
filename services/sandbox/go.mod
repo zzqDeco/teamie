@@ -3,6 +3,7 @@ module teamie/services/sandbox
 go 1.27.2
 
 require (
+	github.com/cloudwego/gopkg v0.2.1
 	github.com/cloudwego/kitex v0.16.4
 	go.uber.org/zap v1.27.1
 	teamie/contracts/gen/agent v0.0.0
@@ -19,7 +20,6 @@ require (
 	github.com/cloudwego/dynamicgo v0.9.2 // indirect
 	github.com/cloudwego/fastpb v0.0.6 // indirect
 	github.com/cloudwego/frugal v0.3.1 // indirect
-	github.com/cloudwego/gopkg v0.2.1 // indirect
 	github.com/cloudwego/hertz v0.10.6 // indirect
 	github.com/cloudwego/localsession v0.2.2 // indirect
 	github.com/cloudwego/netpoll v0.7.5 // indirect

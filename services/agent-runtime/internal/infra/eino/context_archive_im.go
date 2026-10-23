@@ -9,7 +9,8 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/middlewares/reduction"
 	"github.com/cloudwego/eino/schema"
-	"teamie/services/agent-runtime/internal/infra/pg"
+	"teamie/pkg/postgres"
+	"teamie/services/agent-runtime/internal/domain"
 )
 
 const contextIMArgumentsKey = "context-im-arguments-v1"
@@ -105,7 +106,7 @@ func (a *ContextArchive) imReceiptSources(ctx context.Context, runID, call, name
 		// metadata. Its authenticated request supplies the conversation scope.
 		if len(page.Messages) == 0 {
 			args, err := a.imArguments(ctx, runID, call, name)
-			if pg.IsNoRows(err) {
+			if postgres.IsNoRows(err) {
 				return nil, errContextUnavailable
 			}
 			if err != nil {
@@ -127,7 +128,7 @@ func (a *ContextArchive) imReceiptSources(ctx context.Context, runID, call, name
 		}
 	case "im_get_attachment":
 		args, err := a.imArguments(ctx, runID, call, name)
-		if pg.IsNoRows(err) {
+		if postgres.IsNoRows(err) {
 			return nil, errContextUnavailable
 		}
 		if err != nil {
@@ -229,7 +230,7 @@ func (a *ContextArchive) toolMessageSources(ctx context.Context, r *Run, message
 		if err != nil {
 			return nil, true, err
 		}
-		matches := []pg.AcceptedToolCallCandidate{}
+		matches := []domain.AcceptedToolCallCandidate{}
 		for _, item := range candidates {
 			if contextReceiptMatchesTool(item.Raw, item.Name, detail) {
 				matches = append(matches, item)
