@@ -55,6 +55,7 @@ struct ChatCallReq {
   4: required string runId (api.body="runId")
   5: required string requestJson (api.body="requestJson")
   6: optional i32 messageLimit (api.body="messageLimit")
+  7: optional string expectedModelConfigId (api.header="X-Teamie-Model-Config-Id")
 }
 
 struct ChatCallResp {
@@ -135,7 +136,6 @@ service ModelGatewayHTTPService {
   AdminModelConfigResp UpdateAdminModelConfig(1: UpdateAdminModelConfigReq req) (api.put="/api/v1/admin/model-gateway")
   TestAdminModelConfigResp TestAdminModelConfig(1: TestAdminModelConfigReq req) (api.post="/api/v1/admin/model-gateway/test")
   ChatCallResp GenerateChat(1: ChatCallReq req) (api.post="/internal/v1/chat")
-  StreamEventFrameDTO StreamChat(1: ChatCallReq req) (api.post="/internal/v1/chat/stream")
   WebSearchResp WebSearch(1: WebSearchReq req) (api.post="/internal/v1/web/search")
   WebExtractResp WebExtract(1: WebExtractReq req) (api.post="/internal/v1/web/extract")
 }

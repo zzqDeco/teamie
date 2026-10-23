@@ -15,12 +15,15 @@ import (
 
 var _ gatewaygen.ModelGatewayHTTPService = (*Adapter)(nil)
 
+// StreamEventSink emits a single NDJSON stream event frame during a streaming chat call.
+type StreamEventSink func(frame *gatewaygen.StreamEventFrameDTO) error
+
 // Adapter translates generated Thrift HTTP DTOs into gateway application use cases.
 type Adapter struct {
 	App      *app.Service
 	Test     func(ctx context.Context, req *gatewaygen.TestAdminModelConfigReq) (*gatewaygen.TestAdminModelConfigResp, error)
 	Generate func(ctx context.Context, req *gatewaygen.ChatCallReq) (*gatewaygen.ChatCallResp, error)
-	Stream   func(ctx context.Context, req *gatewaygen.ChatCallReq) (*gatewaygen.StreamEventFrameDTO, error)
+	Stream   func(ctx context.Context, req *gatewaygen.ChatCallReq, emit StreamEventSink) error
 	Search   func(ctx context.Context, req *gatewaygen.WebSearchReq) (*gatewaygen.WebSearchResp, error)
 	Extract  func(ctx context.Context, req *gatewaygen.WebExtractReq) (*gatewaygen.WebExtractResp, error)
 }
@@ -137,18 +140,30 @@ func (a *Adapter) TestAdminModelConfig(ctx context.Context, req *gatewaygen.Test
 	}, nil
 }
 
+func withExpectedConfig(ctx context.Context, req *gatewaygen.ChatCallReq) context.Context {
+	if req != nil && req.GetExpectedModelConfigId() != "" {
+		return app.WithExpectedModelConfigID(ctx, req.GetExpectedModelConfigId())
+	}
+	return ctx
+}
+
 func (a *Adapter) GenerateChat(ctx context.Context, req *gatewaygen.ChatCallReq) (*gatewaygen.ChatCallResp, error) {
 	if a.Generate != nil {
-		return a.Generate(ctx, req)
+		return a.Generate(withExpectedConfig(ctx, req), req)
 	}
 	return nil, domain.Err(501, "not_implemented", "GenerateChat handler not bound")
 }
 
-func (a *Adapter) StreamChat(ctx context.Context, req *gatewaygen.ChatCallReq) (*gatewaygen.StreamEventFrameDTO, error) {
-	if a.Stream != nil {
-		return a.Stream(ctx, req)
+// StreamChat executes an NDJSON streaming inference call, emitting zero or more
+// chunk frames followed by a terminal done or error StreamEventFrameDTO via emit.
+func (a *Adapter) StreamChat(ctx context.Context, req *gatewaygen.ChatCallReq, emit StreamEventSink) error {
+	if emit == nil {
+		return domain.Err(400, "invalid_request", "Stream event sink is required")
 	}
-	return nil, domain.Err(501, "not_implemented", "StreamChat handler not bound")
+	if a.Stream != nil {
+		return a.Stream(withExpectedConfig(ctx, req), req, emit)
+	}
+	return domain.Err(501, "not_implemented", "StreamChat handler not bound")
 }
 
 func (a *Adapter) WebSearch(ctx context.Context, req *gatewaygen.WebSearchReq) (*gatewaygen.WebSearchResp, error) {

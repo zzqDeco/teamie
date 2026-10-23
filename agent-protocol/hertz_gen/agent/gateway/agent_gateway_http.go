@@ -311,12 +311,13 @@ func (p *TestAdminModelConfigResp) String() string {
 }
 
 type ChatCallReq struct {
-	OwnerId      string `thrift:"ownerId,1,required" json:"ownerId"`
-	AgentId      string `thrift:"agentId,2,required" json:"agentId"`
-	SessionId    string `thrift:"sessionId,3,required" json:"sessionId"`
-	RunId        string `thrift:"runId,4,required" json:"runId"`
-	RequestJson  string `thrift:"requestJson,5,required" json:"requestJson"`
-	MessageLimit *int32 `thrift:"messageLimit,6,optional" json:"messageLimit,omitempty"`
+	OwnerId               string  `thrift:"ownerId,1,required" json:"ownerId"`
+	AgentId               string  `thrift:"agentId,2,required" json:"agentId"`
+	SessionId             string  `thrift:"sessionId,3,required" json:"sessionId"`
+	RunId                 string  `thrift:"runId,4,required" json:"runId"`
+	RequestJson           string  `thrift:"requestJson,5,required" json:"requestJson"`
+	MessageLimit          *int32  `thrift:"messageLimit,6,optional" json:"messageLimit,omitempty"`
+	ExpectedModelConfigId *string `thrift:"expectedModelConfigId,7,optional" json:"expectedModelConfigId,omitempty"`
 }
 
 func NewChatCallReq() *ChatCallReq {
@@ -355,8 +356,21 @@ func (p *ChatCallReq) GetMessageLimit() (v int32) {
 	return *p.MessageLimit
 }
 
+var ChatCallReq_ExpectedModelConfigId_DEFAULT string
+
+func (p *ChatCallReq) GetExpectedModelConfigId() (v string) {
+	if !p.IsSetExpectedModelConfigId() {
+		return ChatCallReq_ExpectedModelConfigId_DEFAULT
+	}
+	return *p.ExpectedModelConfigId
+}
+
 func (p *ChatCallReq) IsSetMessageLimit() bool {
 	return p.MessageLimit != nil
+}
+
+func (p *ChatCallReq) IsSetExpectedModelConfigId() bool {
+	return p.ExpectedModelConfigId != nil
 }
 
 func (p *ChatCallReq) String() string {
@@ -991,8 +1005,6 @@ type ModelGatewayHTTPService interface {
 	TestAdminModelConfig(ctx context.Context, req *TestAdminModelConfigReq) (r *TestAdminModelConfigResp, err error)
 
 	GenerateChat(ctx context.Context, req *ChatCallReq) (r *ChatCallResp, err error)
-
-	StreamChat(ctx context.Context, req *ChatCallReq) (r *StreamEventFrameDTO, err error)
 
 	WebSearch(ctx context.Context, req *WebSearchReq) (r *WebSearchResp, err error)
 
