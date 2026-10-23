@@ -1,28 +1,17 @@
 package chat
 
 import (
+	"teamie/backend/internal/chat/domain"
 	"teamie/backend/pkg/imtext"
 	"time"
 )
 
-type Workspace struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	CreatedBy string    `json:"createdBy"`
-	CreatedAt time.Time `json:"createdAt"`
-}
-type Conversation struct {
-	ID               string    `json:"id"`
-	WorkspaceID      string    `json:"workspaceId"`
-	Type             string    `json:"type"`
-	Name             string    `json:"name"`
-	MemberIDs        []string  `json:"memberIds"`
-	LastSeq          int64     `json:"lastSeq"`
-	ReadSeq          int64     `json:"readSeq"`
-	UpdatedAt        time.Time `json:"updatedAt"`
-	CreatedBy        string    `json:"createdBy,omitempty"`
-	CanManageMembers bool      `json:"canManageMembers"`
-}
+type Workspace = domain.Workspace
+type Conversation = domain.Conversation
+type Attachment = domain.Attachment
+type Member = domain.Member
+type AttentionConversation = domain.AttentionConversation
+
 type Message struct {
 	ID              string           `json:"id"`
 	ConversationID  string           `json:"conversationId"`
@@ -40,13 +29,6 @@ type Message struct {
 	Mentions        []imtext.Mention `json:"mentions,omitempty"`
 }
 
-type Attachment struct {
-	ID        string `json:"id"`
-	Filename  string `json:"filename"`
-	MediaType string `json:"mediaType"`
-	SizeBytes int    `json:"sizeBytes"`
-	SHA256    string `json:"sha256"`
-}
 type Event struct {
 	ID             string        `json:"id"`
 	Type           string        `json:"type"`

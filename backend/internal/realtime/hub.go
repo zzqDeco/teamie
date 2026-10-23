@@ -1,31 +1,35 @@
+// Package realtime wires the Realtime 4-layer Clean DDD components
+// (domain, app, adapter/ws, infra) and exposes the service composition root.
 package realtime
 
 import (
 	"context"
 	"encoding/json"
-	"github.com/gorilla/websocket"
-	"github.com/redis/go-redis/v9"
+	"errors"
 	"net/http"
 	"sync"
+	"time"
+
+	"github.com/gorilla/websocket"
+	"github.com/redis/go-redis/v9"
 	"teamie/backend/internal/api"
 	"teamie/backend/internal/chat"
 	"teamie/backend/internal/config"
+	wsadapter "teamie/backend/internal/realtime/adapter/ws"
+	"teamie/backend/internal/realtime/app"
+	"teamie/backend/internal/realtime/domain"
+	"teamie/backend/internal/realtime/infra"
 	"teamie/backend/kitex_gen/im"
-	"time"
 )
 
 type Access interface {
 	CheckAccess(context.Context, string, string) (*im.AccessResponse, error)
 	Ping(context.Context) error
 }
-type Hint struct {
-	Type           string   `json:"type"`
-	UserIDs        []string `json:"userIds,omitempty"`
-	ConversationID string   `json:"conversationId,omitempty"`
-	UserID         string   `json:"userId,omitempty"`
-	DisplayName    string   `json:"displayName,omitempty"`
-	IsTyping       bool     `json:"isTyping"`
-}
+
+type Hint = domain.Hint
+type Client = domain.Client
+
 type peer struct {
 	user  string
 	token string
@@ -35,7 +39,20 @@ type peer struct {
 	once  sync.Once
 }
 
-func (p *peer) close() { p.once.Do(func() { close(p.done); _ = p.conn.Close() }) }
+func (p *peer) UserID() string { return p.user }
+func (p *peer) Token() string  { return p.token }
+func (p *peer) Send(h Hint)    { p.enqueue(h) }
+func (p *peer) Close()         { p.close() }
+
+func (p *peer) close() {
+	p.once.Do(func() {
+		close(p.done)
+		if p.conn != nil {
+			_ = p.conn.Close()
+		}
+	})
+}
+
 func (p *peer) enqueue(h Hint) {
 	select {
 	case <-p.done:
@@ -48,6 +65,17 @@ func (p *peer) enqueue(h Hint) {
 	}
 }
 
+func compatErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	var de *domain.Error
+	if errors.As(err, &de) {
+		return api.Err(de.Status, de.Code, de.Message)
+	}
+	return err
+}
+
 type Hub struct {
 	Identity api.Identity
 	Chat     Access
@@ -58,173 +86,98 @@ type Hub struct {
 	RevalidationInterval time.Duration
 	mu                   sync.Mutex
 	peers                map[*peer]struct{}
-	typingMu             sync.Mutex
-	typingGates          map[string]*typingGate
+	policyOnce           sync.Once
+	policy               domain.TypingPolicy
 }
 
-func (h *Hub) Routes() http.Handler {
-	m := http.NewServeMux()
-	api.Operations(m, func(r *http.Request) error {
-		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
-		defer cancel()
-		if e := h.Identity.Ping(ctx); e != nil {
-			return e
-		}
-		return h.Chat.Ping(ctx)
-	})
-	m.HandleFunc("GET /api/v1/ws", h.connect)
-	m.HandleFunc("POST /api/v1/conversations/{id}/typing", api.Auth(h.Identity, h.Origin, h.typing))
-	return m
+func NewHub(identity api.Identity, chatAccess Access, rdb *redis.Client, flags config.Flags, origin string) *Hub {
+	return &Hub{
+		Identity: identity,
+		Chat:     chatAccess,
+		Redis:    rdb,
+		Flags:    flags,
+		Origin:   origin,
+	}
 }
-func (h *Hub) connect(w http.ResponseWriter, r *http.Request) {
-	// Browsers always send Origin for WS. An absent header cannot bypass this gate.
-	if r.Header.Get("Origin") != h.Origin {
-		api.Fail(w, api.Err(403, "untrusted_origin", "WebSocket origin must match this application"))
-		return
+
+func (h *Hub) App() *app.HubService {
+	var idVal domain.SessionValidator
+	if h.Identity != nil {
+		idVal = infra.IdentityValidator{Identity: h.Identity}
 	}
-	ss, e := h.Identity.Validate(r.Context(), api.Token(r))
-	if e != nil {
-		api.Fail(w, e)
-		return
+	var chatAuth domain.AccessAuthority
+	if h.Chat != nil {
+		chatAuth = infra.ChatAuthority{Chat: h.Chat}
 	}
+	var bus domain.HintBus
+	if h.Redis != nil {
+		bus = infra.RedisBus{Client: h.Redis}
+	}
+	return &app.HubService{
+		Identity: idVal,
+		Chat:     chatAuth,
+		Flags:    infra.FlagsProvider{Flags: &h.Flags},
+		Bus:      bus,
+		Policy:   &h.policy,
+	}
+}
+
+func (h *Hub) clients() []domain.Client {
 	h.mu.Lock()
-	n := 0
+	defer h.mu.Unlock()
+	out := make([]domain.Client, 0, len(h.peers))
 	for p := range h.peers {
-		if p.user == ss.User.ID {
-			n++
-		}
+		out = append(out, p)
 	}
-	full := n >= 8 || len(h.peers) >= 10000
-	h.mu.Unlock()
-	if full {
-		api.Fail(w, api.Err(429, "too_many_connections", "Close an existing connection and try again"))
-		return
+	return out
+}
+
+func (h *Hub) registerPeer(userID, token string, conn *websocket.Conn) (domain.Client, <-chan domain.Event, <-chan struct{}) {
+	p := &peer{
+		user:  userID,
+		token: token,
+		conn:  conn,
+		queue: make(chan Hint, 16),
+		done:  make(chan struct{}),
 	}
-	upgrader := websocket.Upgrader{ReadBufferSize: 4096, WriteBufferSize: 4096, HandshakeTimeout: 5 * time.Second, CheckOrigin: func(r *http.Request) bool { return r.Header.Get("Origin") == h.Origin }}
-	conn, e := upgrader.Upgrade(w, r, nil)
-	if e != nil {
-		return
-	}
-	p := &peer{user: ss.User.ID, token: api.Token(r), conn: conn, queue: make(chan Hint, 16), done: make(chan struct{})}
 	h.mu.Lock()
 	if h.peers == nil {
 		h.peers = map[*peer]struct{}{}
 	}
 	h.peers[p] = struct{}{}
 	h.mu.Unlock()
-	defer func() { p.close(); h.mu.Lock(); delete(h.peers, p); h.mu.Unlock() }()
-	go h.write(p)
-	conn.SetReadLimit(4096)
-	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-	conn.SetPongHandler(func(string) error { return conn.SetReadDeadline(time.Now().Add(60 * time.Second)) })
-	for {
-		var input struct {
-			Type           string `json:"type"`
-			ConversationID string `json:"conversationId"`
-			IsTyping       bool   `json:"isTyping"`
-		}
-		if e = conn.ReadJSON(&input); e != nil {
-			return
-		}
-		if input.Type != "typing" || input.ConversationID == "" || !h.Flags.Load().Flags["im.typing.publish"] {
-			continue
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		current, e := h.Identity.Validate(ctx, p.token)
-		if e != nil {
-			cancel()
-			return
-		}
-		_ = h.publishTyping(ctx, current.User, input.ConversationID, input.IsTyping)
-		cancel()
-	}
+	return p, p.queue, p.done
 }
-func (h *Hub) write(p *peer) {
-	defer p.close()
-	write := func(v any) error {
-		_ = p.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-		return p.conn.WriteJSON(v)
-	}
-	if write(map[string]string{"type": "ready"}) != nil || write(map[string]string{"type": "sync.required"}) != nil {
+
+func (h *Hub) unregisterPeer(c domain.Client) {
+	p, ok := c.(*peer)
+	if !ok {
+		c.Close()
 		return
 	}
-	heartbeat := time.NewTicker(20 * time.Second)
-	interval := h.RevalidationInterval
-	if interval <= 0 {
-		interval = 10 * time.Second
-	}
-	revalidate := time.NewTicker(interval)
-	fallback := time.NewTicker(5 * time.Second)
-	defer heartbeat.Stop()
-	defer revalidate.Stop()
-	defer fallback.Stop()
-	for {
-		select {
-		case <-p.done:
-			return
-		case hint := <-p.queue:
-			// Never expose internal recipient lists to browsers.
-			hint.UserIDs = nil
-			if write(hint) != nil {
-				return
-			}
-		case <-fallback.C:
-			if write(map[string]string{"type": "sync.required"}) != nil {
-				return
-			}
-		case <-revalidate.C:
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			_, e := h.Identity.Validate(ctx, p.token)
-			cancel()
-			if e != nil {
-				_ = p.conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "session expired"), time.Now().Add(time.Second))
-				return
-			}
-		case <-heartbeat.C:
-			if e := p.conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)); e != nil {
-				return
-			}
-		}
-	}
-}
-func (h *Hub) deliver(ctx context.Context, hint Hint) {
-	if hint.Type == "typing" {
-		// Redis is only a wakeup/signal transport. Recheck the sender as well as
-		// recipients so a queued hint cannot survive membership revocation.
-		access, err := h.Chat.CheckAccess(ctx, hint.UserID, hint.ConversationID)
-		if err != nil || access == nil || !access.Allowed || !access.TypingEnabled {
-			return
-		}
-	}
-	set := map[string]bool{}
-	for _, id := range hint.UserIDs {
-		set[id] = true
-	}
+	p.close()
 	h.mu.Lock()
-	targets := []*peer{}
-	for p := range h.peers {
-		if set[p.user] {
-			targets = append(targets, p)
-		}
-	}
+	delete(h.peers, p)
 	h.mu.Unlock()
-	for _, p := range targets {
-		if hint.Type == "typing" {
-			if p.user == hint.UserID || !h.Flags.Load().Flags["im.typing.publish"] {
-				continue
-			}
-			access, e := h.Chat.CheckAccess(ctx, p.user, hint.ConversationID)
-			if e != nil || access == nil || !access.Allowed || !access.TypingEnabled {
-				continue
-			}
-			if _, e = h.Identity.Validate(ctx, p.token); e != nil {
-				p.close()
-				continue
-			}
-		}
-		p.enqueue(hint)
-	}
 }
+
+func (h *Hub) Routes() http.Handler {
+	adapter := &wsadapter.Adapter{
+		Service:              h.App,
+		Auth:                 h.Identity,
+		Origin:               h.Origin,
+		RevalidationInterval: func() time.Duration { return h.RevalidationInterval },
+		Clients:              h.clients,
+		RegisterPeer:         h.registerPeer,
+		UnregisterPeer:       h.unregisterPeer,
+	}
+	return adapter.Routes()
+}
+
+func (h *Hub) deliver(ctx context.Context, hint Hint) {
+	h.App().Deliver(ctx, h.clients(), hint)
+}
+
 func (h *Hub) Run(ctx context.Context) {
 	if h.Redis == nil {
 		return
