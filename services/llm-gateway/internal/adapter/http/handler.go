@@ -397,12 +397,44 @@ func (a *Adapter) decodeHTTPCall(w http.ResponseWriter, r *http.Request) (*model
 	return &in, true
 }
 
+type httpSSEExtWriter struct {
+	w           http.ResponseWriter
+	rc          *hertzapp.RequestContext
+	wroteHeader bool
+}
+
+func (e *httpSSEExtWriter) syncHeaders() {
+	if e.wroteHeader {
+		return
+	}
+	e.wroteHeader = true
+	if e.rc != nil {
+		e.rc.Response.Header.VisitAll(func(k, v []byte) {
+			e.w.Header().Set(string(k), string(v))
+		})
+	}
+}
+
+func (e *httpSSEExtWriter) Write(p []byte) (int, error) {
+	e.syncHeaders()
+	return e.w.Write(p)
+}
+
+func (e *httpSSEExtWriter) Flush() error {
+	e.syncHeaders()
+	return http.NewResponseController(e.w).Flush()
+}
+
+func (e *httpSSEExtWriter) Finalize() error {
+	return nil
+}
+
 func (a *Adapter) streamHTTP(w http.ResponseWriter, r *http.Request) {
 	in, ok := a.decodeHTTPCall(w, r)
 	if !ok {
 		return
 	}
-	if c := httpx.HertzContext(r.Context()); c != nil && strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
+	if strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
 		msgLimit := int32(in.MessageLimit)
 		req := &gatewaygen.ChatCallReq{
 			OwnerId:      in.OwnerID,
@@ -415,7 +447,9 @@ func (a *Adapter) streamHTTP(w http.ResponseWriter, r *http.Request) {
 		if expected := r.Header.Get(modeltransport.ModelConfigIDHeader); expected != "" {
 			req.ExpectedModelConfigId = &expected
 		}
-		_ = a.StreamChatSSE(r.Context(), c, req)
+		sseCtx := hertzapp.NewContext(0)
+		sseCtx.Response.HijackWriter(&httpSSEExtWriter{w: w, rc: sseCtx})
+		_ = a.StreamChatSSE(r.Context(), sseCtx, req)
 		return
 	}
 	ctx, operation := gatewayOperation(r.Context(), in.AgentID, in.SessionID, in.RunID, true)

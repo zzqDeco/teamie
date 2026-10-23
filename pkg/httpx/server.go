@@ -59,12 +59,24 @@ func MountHertz(h *server.Hertz, handler http.Handler) {
 		c.Next(WithHertzContext(ctx, c))
 	})
 	obs := observability.HTTP(handler)
+	adapted := adaptor.HertzHandler(obs)
 	if reg, ok := handler.(HertzRouteRegistrar); ok {
 		reg.RegisterHertz(&h.RouterGroup)
-		h.NoRoute(adaptor.HertzHandler(obs))
+		h.GET("/healthz", adapted)
+		h.GET("/readyz", adapted)
+		h.GET("/version", adapted)
+		noRoute := func(ctx context.Context, c *app.RequestContext) {
+			c.SetStatusCode(http.StatusOK)
+			adapted(ctx, c)
+			if c.Response.GetHijackWriter() != nil && !c.Response.HasBodyBytes() {
+				c.Response.BodyBuffer().WriteByte(0)
+			}
+		}
+		h.NoRoute(noRoute)
+		h.NoMethod(noRoute)
 		return
 	}
-	h.Any("/*path", adaptor.HertzHandler(obs))
+	h.Any("/*path", adapted)
 }
 
 // Serve starts a Hertz HTTP server with streaming body and disabled multipart pre-parsing
