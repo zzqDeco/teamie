@@ -6,22 +6,8 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
+	"teamie/services/agent-runtime/internal/infra/pg"
 )
-
-const contextRecoverySchemaSQL = `
-CREATE TABLE IF NOT EXISTS runtime_context_recoveries (
- run_id uuid NOT NULL REFERENCES runtime_runs(id),
- model_step integer NOT NULL CHECK(model_step > 0),
- context_profile text NOT NULL CHECK(context_profile = 'teamie-context-v038'),
- request_hash text NOT NULL,
- streaming boolean NOT NULL,
- error_code text NOT NULL CHECK(error_code IN ('context_overflow','request_too_large')),
- decision_version integer NOT NULL CHECK(decision_version = 1),
- decision_json jsonb NOT NULL,
- created_at timestamptz NOT NULL DEFAULT now(),
- PRIMARY KEY(run_id,model_step)
-);`
 
 type contextRecoveryDecision struct {
 	Version           int                   `json:"version"`
@@ -74,11 +60,7 @@ func isContextOverflow(code string) bool {
 // Failure receipts are an immutable part of the model-step tape. Replaying a
 // rejected request must reproduce the recovery branch without another call.
 func (s *Store) CachedContextRecovery(ctx context.Context, run *Run, step int, hash string, streaming bool) (*ModelError, error) {
-	var old, profile, code string
-	var mode bool
-	var version int
-	var raw []byte
-	err := s.DB.QueryRow(ctx, `SELECT request_hash,context_profile,streaming,error_code,decision_version,decision_json FROM runtime_context_recoveries WHERE run_id=$1 AND model_step=$2`, run.ID, step).Scan(&old, &profile, &mode, &code, &version, &raw)
+	old, profile, code, mode, version, raw, err := s.DB.GetContextRecovery(ctx, run.ID, step)
 	if err != nil {
 		return nil, err
 	}
@@ -106,49 +88,32 @@ func (s *Store) SaveContextRecovery(ctx context.Context, lease *Lease, run *Run,
 	if err != nil {
 		return err
 	}
-	tx, err := s.DB.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	// Same Agent row lock as SaveModel serializes mutually exclusive decisions.
-	if err = checkLease(ctx, tx, lease); err != nil {
-		return err
-	}
-	var success bool
-	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM runtime_model_calls WHERE run_id=$1 AND step=$2)`, run.ID, step).Scan(&success); err != nil {
-		return err
-	}
-	if success {
-		return ErrReplayConflict
-	}
-	tag, err := tx.Exec(ctx, `INSERT INTO runtime_context_recoveries(run_id,model_step,context_profile,request_hash,streaming,error_code,decision_version,decision_json) VALUES($1,$2,$3,$4,$5,$6,1,$7) ON CONFLICT DO NOTHING`, run.ID, step, contextProfile(run), hash, streaming, code, decision)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		var oldProfile, oldHash, oldCode string
-		var oldMode bool
-		var oldVersion int
-		var oldDecision []byte
-		err = tx.QueryRow(ctx, `SELECT context_profile,request_hash,streaming,error_code,decision_version,decision_json FROM runtime_context_recoveries WHERE run_id=$1 AND model_step=$2`, run.ID, step).Scan(&oldProfile, &oldHash, &oldMode, &oldCode, &oldVersion, &oldDecision)
-		if err != nil {
-			return err
-		}
-		var a, b contextRecoveryDecision
-		if json.Unmarshal(oldDecision, &a) != nil || json.Unmarshal(decision, &b) != nil {
-			return ErrReplayConflict
-		}
-		if a.ConfigID != "" && b.ConfigID != "" && a.ConfigID != b.ConfigID {
-			return ErrReplayConflict
-		}
-		a.ConfigID, a.AdmissionConfigID, a.CounterMode = "", "", ""
-		b.ConfigID, b.AdmissionConfigID, b.CounterMode = "", "", ""
-		if oldProfile != contextProfile(run) || oldHash != hash || oldMode != streaming || oldCode != code || oldVersion != 1 || a != b {
-			return ErrReplayConflict
-		}
-	}
-	return tx.Commit(ctx)
+	return s.DB.SaveContextRecovery(
+		ctx,
+		lease,
+		run.ID,
+		step,
+		contextProfile(run),
+		hash,
+		streaming,
+		code,
+		decision,
+		func(oldProfile, oldHash string, oldMode bool, oldCode string, oldVersion int, oldDecision []byte) error {
+			var a, b contextRecoveryDecision
+			if json.Unmarshal(oldDecision, &a) != nil || json.Unmarshal(decision, &b) != nil {
+				return ErrReplayConflict
+			}
+			if a.ConfigID != "" && b.ConfigID != "" && a.ConfigID != b.ConfigID {
+				return ErrReplayConflict
+			}
+			a.ConfigID, a.AdmissionConfigID, a.CounterMode = "", "", ""
+			b.ConfigID, b.AdmissionConfigID, b.CounterMode = "", "", ""
+			if oldProfile != contextProfile(run) || oldHash != hash || oldMode != streaming || oldCode != code || oldVersion != 1 || a != b {
+				return ErrReplayConflict
+			}
+			return nil
+		},
+	)
 }
 
 func (m *GatewayModel) cachedRecovery(ctx context.Context, run *Run, step int, hash string, streaming bool) error {
@@ -156,7 +121,7 @@ func (m *GatewayModel) cachedRecovery(ctx context.Context, run *Run, step int, h
 		return nil
 	}
 	failure, err := m.Store.CachedContextRecovery(ctx, run, step, hash, streaming)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if pg.IsNoRows(err) {
 		return nil
 	}
 	if err != nil {

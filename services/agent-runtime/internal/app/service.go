@@ -53,10 +53,3 @@ func (s *Service) Ready(ctx context.Context) error {
 	}
 	return nil
 }
-
-// Run starts the background runtime TurnLoop scheduler until ctx is canceled.
-func (s *Service) Run(ctx context.Context) {
-	if s != nil && s.Engine != nil {
-		s.Engine.Run(ctx)
-	}
-}

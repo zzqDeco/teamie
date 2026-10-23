@@ -1,4 +1,4 @@
-package agent_protocol_test
+package sandbox_test
 
 import (
 	"bytes"

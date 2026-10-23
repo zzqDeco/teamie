@@ -225,8 +225,8 @@ func (m *nativeToolReceipts) WrapEnhancedInvokableToolCall(_ context.Context, ne
 				if existing.Spec.SessionID != "agent:"+r.AgentID {
 					return nil, errors.New("task session scope mismatch")
 				}
-				var exists bool
-				if err = m.Store.DB.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM runtime_session_events WHERE session_id=$1 AND event_id=$2)`, "agent:"+r.AgentID, bg.TaskCreatedSessionEventID(existing.Spec.ID)).Scan(&exists); err != nil {
+				exists, err := m.Store.DB.SessionEventExists(ctx, "agent:"+r.AgentID, bg.TaskCreatedSessionEventID(existing.Spec.ID))
+				if err != nil {
 					return nil, err
 				}
 				if !exists {
@@ -318,35 +318,29 @@ func (w *workerTasks) notifications(ctx context.Context, l *Lease) (failure erro
 		if n.SessionID != "agent:"+l.AgentID {
 			return errors.New("notification scope mismatch")
 		}
-		tx, err := w.store.begin(ctx)
-		if err != nil {
-			return err
-		}
-		var seq string
-		err = tx.QueryRow(ctx, `SELECT (90000000000000000000::numeric+nextval('runtime_notification_input_seq'))::text`).Scan(&seq)
-		in := Input{EventID: seq, Kind: "task.notification", TaskID: n.TaskID, NotificationID: n.ID, Status: string(n.Kind), CreatedAt: n.CreatedAt.UTC().Format(time.RFC3339Nano)}
-		if err == nil {
-			in.ParentRunID, in.SourceRefs, in.SourceOverflow, err = taskInputOrigin(ctx, tx, l.AgentID, n.TaskID)
-		}
-		b, _ := json.Marshal(in)
-		inserted := false
-		if err == nil {
-			tag, insertErr := tx.Exec(ctx, `INSERT INTO runtime_inputs(agent_id,event_id,payload,notification_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, l.AgentID, seq, b, n.ID)
-			err = insertErr
-			inserted = tag.RowsAffected() > 0
-		}
-		if err == nil {
-			err = tx.Commit(ctx)
-		} else {
-			_ = tx.Rollback(ctx)
-		}
+		seq, parentRunID, inserted, err := w.store.pgStore().PersistNotificationInput(
+			ctx,
+			l.AgentID,
+			n.TaskID,
+			n.ID,
+			string(n.Kind),
+			n.CreatedAt.UTC().Format(time.RFC3339Nano),
+			func(raw []byte) ([]InputSource, bool, error) {
+				var inputs []Input
+				if err := json.Unmarshal(raw, &inputs); err != nil {
+					return nil, false, err
+				}
+				refs, overflow := inputSources(inputs)
+				return refs, overflow, nil
+			},
+		)
 		if err != nil {
 			return err
 		}
 		if !inserted {
 			seq = ""
 		}
-		observability.L(ctx).Info("Task notification persisted", zap.Bool("custom.input.inserted", inserted), zap.String("custom.task.notification_id", observability.ID(n.ID)), zap.String("event.action", "task-notification-persisted"), zap.String("custom.agent.id", l.AgentID), zap.String("custom.task.id", observability.ID(n.TaskID)), zap.String("custom.input.event_id", seq), zap.String("custom.runtime.parent_run_id", in.ParentRunID))
+		observability.L(ctx).Info("Task notification persisted", zap.Bool("custom.input.inserted", inserted), zap.String("custom.task.notification_id", observability.ID(n.ID)), zap.String("event.action", "task-notification-persisted"), zap.String("custom.agent.id", l.AgentID), zap.String("custom.task.id", observability.ID(n.TaskID)), zap.String("custom.input.event_id", seq), zap.String("custom.runtime.parent_run_id", parentRunID))
 		if err = w.store.Ack(ctx, d.Receipt); err != nil {
 			return err
 		}
@@ -354,23 +348,15 @@ func (w *workerTasks) notifications(ctx context.Context, l *Lease) (failure erro
 	return nil
 }
 func (e *Engine) cancelAgentTasks(ctx context.Context, id string) {
-	_, _ = e.Store.DB.Exec(ctx, `UPDATE runtime_schedules SET status='canceled',updated_at=now() WHERE agent_id=$1 AND status='active'`, id)
+	_ = e.Store.DB.CancelAllActiveSchedules(ctx, id)
 	s := &TaskStore{Store: e.Store, AgentID: id}
 	// An executor may fail on principal revocation before cancellation reaches
 	// the daemon. Failed/canceled SDK state is not proof that its child stopped.
 	// Confirm physical shutdown without rewriting terminal Runtime receipts.
-	rows, err := e.Store.DB.Query(ctx, `SELECT id FROM runtime_tasks WHERE agent_id=$1 AND snapshot->>'Status'<>'completed'`, id)
+	ids, err := e.Store.DB.ListIncompleteAgentTaskIDs(ctx, id)
 	if err != nil {
 		return
 	}
-	ids := []string{}
-	for rows.Next() {
-		var taskID string
-		if rows.Scan(&taskID) == nil {
-			ids = append(ids, taskID)
-		}
-	}
-	rows.Close()
 	for _, taskID := range ids {
 		for i := 0; i < 4; i++ {
 			t, err := s.Get(ctx, taskID)
@@ -498,18 +484,10 @@ func (e *Engine) confirmTaskStopped(ctx context.Context, store *TaskStore, id st
 }
 func (e *Engine) cancelRunTasks(ctx context.Context, agent, runID string) {
 	store := &TaskStore{Store: e.Store, AgentID: agent}
-	rows, err := e.Store.DB.Query(ctx, `SELECT id FROM runtime_tasks WHERE agent_id=$1 AND run_id=$2 AND snapshot->>'Status'<>'completed'`, agent, runID)
+	ids, err := e.Store.DB.ListIncompleteRunTaskIDs(ctx, agent, runID)
 	if err != nil {
 		return
 	}
-	ids := []string{}
-	for rows.Next() {
-		var id string
-		if rows.Scan(&id) == nil {
-			ids = append(ids, id)
-		}
-	}
-	rows.Close()
 	for _, id := range ids {
 		for i := 0; i < 4; i++ {
 			task, err := store.Get(ctx, id)

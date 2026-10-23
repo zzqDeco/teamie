@@ -49,6 +49,7 @@ type SuperviseHook func(ctx context.Context, agentID, runID, taskID string, reco
 // Service coordinates Sandbox use cases, slot admission, workspace mutations, and durable task supervision.
 type Service struct {
 	Engine                                 Engine
+	Storage                                domain.WorkspaceStorage
 	Token, Image, WorkspaceRoot, StateRoot string
 	slots                                  chan struct{}
 	mu                                     sync.Mutex
@@ -190,7 +191,7 @@ func (s *Service) ReceiptPath(agentID, requestID string) string {
 
 func writeReceipt(path string, r Receipt) error { return writeAtomicJSON(path, r) }
 func writeAtomicJSON(path string, r any) error {
-	return domain.WriteAtomicJSON(path, r)
+	return domain.DefaultWorkspaceStorage.WriteAtomicJSON(path, r)
 }
 
 // ValidateExecRequest validates an execution request without running it.

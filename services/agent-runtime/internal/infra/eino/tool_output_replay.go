@@ -65,24 +65,13 @@ func (s *Store) replayToolWire(ctx context.Context, run *Run, callID, name strin
 // a combination of arbitrary JSON spellings. The caller still checks the full
 // native/classic request hash before accepting any cached model response.
 func (s *Store) observedToolReplayInputs(ctx context.Context, run *Run, messages []*schema.AgenticMessage) ([][]*schema.AgenticMessage, error) {
-	rows, err := s.DB.Query(ctx, `SELECT call_id,name,result FROM runtime_tool_calls WHERE run_id=$1 AND result IS NOT NULL AND name IN ('im_list_conversations','im_list_messages','im_get_message','im_send_message','im_get_attachment')`, run.ID)
-	if err != nil {
+	items, err := s.DB.ListIMToolCallResults(ctx, run.ID)
+	if err != nil || len(items) == 0 {
 		return nil, err
 	}
-	receipts := map[string]replayToolOutput{}
-	for rows.Next() {
-		var callID string
-		var output replayToolOutput
-		if err = rows.Scan(&callID, &output.name, &output.raw); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		receipts[callID] = output
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil || len(receipts) == 0 {
-		return nil, err
+	receipts := make(map[string]replayToolOutput, len(items))
+	for _, item := range items {
+		receipts[item.CallID] = replayToolOutput{name: item.Name, raw: item.Result}
 	}
 	attempts, err := s.observedToolAttempts(ctx, run, receipts)
 	if err != nil {
@@ -169,19 +158,15 @@ func (s *Store) observedToolReplayInputs(ctx context.Context, run *Run, messages
 }
 
 func (s *Store) observedToolAttempts(ctx context.Context, run *Run, receipts map[string]replayToolOutput) ([]*observedToolAttempt, error) {
-	rows, err := s.DB.Query(ctx, `SELECT attempt_id::text,payload FROM runtime_session_events WHERE run_id=$1 AND attempt_id<>$2 AND kind='message' ORDER BY seq`, run.ID, run.Attempt)
+	items, err := s.DB.ListOtherAttemptMessageEvents(ctx, run.ID, run.Attempt)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	attempts := map[string]*observedToolAttempt{}
 	var order []*observedToolAttempt
-	for rows.Next() {
-		var attemptID string
-		var payload []byte
-		if err = rows.Scan(&attemptID, &payload); err != nil {
-			return nil, err
-		}
+	for _, item := range items {
+		attemptID := item.AttemptID
+		payload := item.Payload
 		var event adk.SessionEvent[*schema.AgenticMessage]
 		if err = decodeSessionPayload(payload, &event); err != nil {
 			return nil, err
@@ -213,9 +198,6 @@ func (s *Store) observedToolAttempts(ctx context.Context, run *Run, receipts map
 			}
 			attempt.values[result.CallID] = value
 		}
-	}
-	if err = rows.Err(); err != nil {
-		return nil, err
 	}
 	return order, nil
 }

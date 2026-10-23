@@ -25,21 +25,16 @@ func classicModelReceipt(raw []byte) bool {
 // and actual execution. Appending native receipts after old ones must not
 // change that choice on another retry. No stored hash or receipt is rewritten.
 func (s *Store) runToolProfile(ctx context.Context, runID string) (string, error) {
-	rows, err := s.DB.Query(ctx, `SELECT response FROM runtime_model_calls WHERE run_id=$1 ORDER BY step`, runID)
+	raws, err := s.DB.ListModelCallResponses(ctx, runID)
 	if err != nil {
 		return "", err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var raw []byte
-		if err = rows.Scan(&raw); err != nil {
-			return "", err
-		}
+	for _, raw := range raws {
 		if classicModelReceipt(raw) {
 			return v034ToolProfile, nil
 		}
 	}
-	return currentToolProfile, rows.Err()
+	return currentToolProfile, nil
 }
 
 func toolsForRun(ctx context.Context, available []tool.BaseTool, run *Run) ([]tool.BaseTool, error) {

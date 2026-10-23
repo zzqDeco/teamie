@@ -43,19 +43,19 @@ func workspaceResult(data any) *domain.SandboxWorkspaceResponse {
 }
 
 func regularRead(root *os.Root, name string) ([]byte, error) {
-	return domain.RegularRead(root, name)
+	return domain.DefaultWorkspaceStorage.RegularRead(root, name)
 }
 
 func openWorkspaceDirectory(root *os.Root, name string) (*os.File, error) {
-	return domain.OpenWorkspaceDirectory(root, name)
+	return domain.DefaultWorkspaceStorage.OpenWorkspaceDirectory(root, name)
 }
 
 func ensureWorkspaceParents(root *os.Root, parent string) error {
-	return domain.EnsureWorkspaceParents(root, parent)
+	return domain.DefaultWorkspaceStorage.EnsureWorkspaceParents(root, parent)
 }
 
 func atomicWorkspaceWrite(root *os.Root, name, content string) error {
-	return domain.AtomicWorkspaceWrite(root, name, content)
+	return domain.DefaultWorkspaceStorage.AtomicWorkspaceWrite(root, name, content)
 }
 
 func globMatches(pattern, name string) bool {

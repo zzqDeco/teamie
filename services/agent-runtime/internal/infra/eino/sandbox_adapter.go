@@ -19,9 +19,9 @@ import (
 	"github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
-	"github.com/jackc/pgx/v5"
 	wire "teamie/contracts/gen/agent/kitex_gen/agent"
 	"teamie/contracts/gen/agent/kitex_gen/agent/sandboxservice"
+	"teamie/services/agent-runtime/internal/infra/pg"
 )
 
 // SandboxBackend is the sole workspace boundary. The Sandbox service confines
@@ -81,7 +81,7 @@ func (s *SandboxBackend) workspace(ctx context.Context, op string, args any, out
 				}
 				return nil
 			}
-			if !errors.Is(err, pgx.ErrNoRows) {
+			if !pg.IsNoRows(err) {
 				return err
 			}
 		}

@@ -14,6 +14,7 @@ import (
 	rpcAdapter "teamie/services/sandbox/internal/adapter/rpc"
 	"teamie/services/sandbox/internal/app"
 	"teamie/services/sandbox/internal/infra/docker"
+	"teamie/services/sandbox/internal/infra/fs"
 )
 
 func main() {
@@ -36,6 +37,7 @@ func main() {
 	if err != nil {
 		observability.Fatal("Service initialization failed", err)
 	}
+	appSvc.Storage = fs.NewStorage()
 	defer appSvc.Close()
 
 	rpcServer := rpcAdapter.New(appSvc)

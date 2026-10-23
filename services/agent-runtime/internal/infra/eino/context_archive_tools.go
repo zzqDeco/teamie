@@ -11,7 +11,7 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
-	"github.com/jackc/pgx/v5"
+	"teamie/services/agent-runtime/internal/infra/pg"
 )
 
 type contextToolResponse struct {
@@ -138,7 +138,7 @@ func (a *ContextArchive) observe(ctx context.Context, name string, args []byte, 
 	const key = "context-observation-v1"
 	raw, err := a.Store.readObservation(ctx, r, callID, key)
 	var observation contextToolObservation
-	if errors.Is(err, pgx.ErrNoRows) {
+	if pg.IsNoRows(err) {
 		if cached != nil {
 			return "", ErrReplayConflict
 		}
@@ -174,31 +174,5 @@ func (a *ContextArchive) observe(ctx context.Context, name string, args []byte, 
 }
 
 func (a *ContextArchive) saveObservation(ctx context.Context, r *Run, call, key string, response []byte) error {
-	tx, err := a.Store.DB.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	if err = checkLease(ctx, tx, a.Lease); err != nil {
-		return err
-	}
-	var current bool
-	if err = tx.QueryRow(ctx, `SELECT agent_id=$2 AND attempt_id=$3 AND state='running' FROM runtime_runs WHERE id=$1 FOR SHARE`, r.ID, r.AgentID, r.Attempt).Scan(&current); err != nil {
-		return err
-	}
-	if !current {
-		return ErrLeaseLost
-	}
-	_, err = tx.Exec(ctx, `INSERT INTO runtime_tool_observations(run_id,call_id,observation_key,response) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, r.ID, call, key, response)
-	if err != nil {
-		return err
-	}
-	var old []byte
-	if err = tx.QueryRow(ctx, `SELECT response FROM runtime_tool_observations WHERE run_id=$1 AND call_id=$2 AND observation_key=$3`, r.ID, call, key).Scan(&old); err != nil {
-		return err
-	}
-	if !bytes.Equal(old, response) {
-		return ErrReplayConflict
-	}
-	return tx.Commit(ctx)
+	return a.Store.DB.SaveRunningRunObservation(ctx, a.Lease, r.ID, r.AgentID, r.Attempt, call, key, response)
 }

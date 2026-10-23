@@ -11,6 +11,7 @@ import (
 	"teamie/services/sandbox/internal/app"
 	"teamie/services/sandbox/internal/domain"
 	"teamie/services/sandbox/internal/infra/docker"
+	"teamie/services/sandbox/internal/infra/fs"
 )
 
 const (
@@ -195,29 +196,29 @@ func encodeSpool(r spoolRecord) []byte {
 }
 
 func writeReceipt(path string, r Receipt) error {
-	return domain.WriteAtomicJSON(path, r)
+	return fs.WriteAtomicJSON(path, r)
 }
 
 func writeAtomicJSON(path string, r any) error {
-	return domain.WriteAtomicJSON(path, r)
+	return fs.WriteAtomicJSON(path, r)
 }
 
 func openWorkspaceDirectory(root *os.Root, name string) (*os.File, error) {
-	return domain.OpenWorkspaceDirectory(root, name)
+	return fs.OpenWorkspaceDirectory(root, name)
 }
 
 func ensureWorkspaceParents(root *os.Root, parent string) error {
-	return domain.EnsureWorkspaceParents(root, parent)
+	return fs.EnsureWorkspaceParents(root, parent)
 }
 
 func atomicWorkspaceWrite(root *os.Root, name, content string) error {
-	return domain.AtomicWorkspaceWrite(root, name, content)
+	return fs.AtomicWorkspaceWrite(root, name, content)
 }
 
 func atomicBinaryImport(root *os.Root, name string, content []byte) error {
-	return domain.AtomicBinaryImport(root, name, content)
+	return fs.AtomicBinaryImport(root, name, content)
 }
 
 func workspaceCapacity(root *os.Root, name string, replacementBytes int64) bool {
-	return domain.WorkspaceCapacity(root, name, replacementBytes)
+	return fs.WorkspaceCapacity(root, name, replacementBytes)
 }

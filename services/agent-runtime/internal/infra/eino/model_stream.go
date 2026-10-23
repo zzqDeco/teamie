@@ -19,8 +19,8 @@ import (
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
-	"github.com/jackc/pgx/v5"
 	"teamie/contracts/gen/agent/modeltransport"
+	"teamie/services/agent-runtime/internal/infra/pg"
 )
 
 func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessage, options ...model.Option) (out *schema.StreamReader[*schema.AgenticMessage], failure error) {
@@ -87,7 +87,7 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 		}
 		return schema.StreamReaderFromArray([]*schema.AgenticMessage{result}), nil
 	}
-	if !errors.Is(err, pgx.ErrNoRows) {
+	if !pg.IsNoRows(err) {
 		return nil, err
 	}
 	if err = m.cachedRecovery(ctx, run, step, hash, true); err != nil {

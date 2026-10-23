@@ -2,17 +2,14 @@ package eino
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"time"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/compose"
-	"github.com/jackc/pgx/v5"
 	"go.uber.org/zap"
 	"teamie/services/agent-runtime/internal/domain"
-	"teamie/services/agent-runtime/internal/infra/pg"
 	"teamie/pkg/observability"
 )
 
@@ -74,10 +71,6 @@ func resolveScheduleTimezone(raw string) (*time.Location, string, error) {
 
 func nextCronTime(expr, tzName string, after time.Time) (time.Time, error) {
 	return domain.NextCronTime(expr, tzName, after)
-}
-
-func scanScheduleView(row pgx.Row) (scheduleView, error) {
-	return pg.ScanScheduleItem(row)
 }
 
 func (t *Tools) BuildScheduleTools() ([]tool.BaseTool, error) {
@@ -228,121 +221,25 @@ func (t *Tools) BuildScheduleTools() ([]tool.BaseTool, error) {
 	return []tool.BaseTool{clockTool, createTool, listTool, cancelTool}, nil
 }
 
-type dueScheduleRecord struct {
-	id              string
-	createdRunID    string
-	kind            string
-	intervalSeconds *int64
-	cronExpr        string
-	timezone        string
-	prompt          string
-	maxRuns         *int
-	runCount        int
-	nextRunAt       time.Time
-	sourceRefsJSON  []byte
-	sourceOverflow  bool
-}
-
-type drainedScheduleLog struct {
-	scheduleID     string
-	notificationID string
-	eventID        string
-	parentRunID    string
-	inserted       bool
-}
-
 func (e *Engine) drainSchedules(ctx context.Context, l *Lease) (failure error) {
 	if !runtimeFlag(e.Config.FlagsFile, "agents.schedule.v1") {
 		return nil
 	}
 	ctx, operation := observability.Begin(ctx, "schedule-wakeup-drain", zap.String("custom.agent.id", l.AgentID))
 	defer func() { operation.EndQuiet(failure) }()
-	tx, err := e.Store.DB.Begin(ctx)
+	logs, err := e.Store.DB.DrainDueSchedules(ctx, l)
 	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	if err = checkLease(ctx, tx, l); err != nil {
-		return err
-	}
-	var now time.Time
-	if err = tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
-		return err
-	}
-	rows, err := tx.Query(ctx, `SELECT id,created_run_id::text,kind,interval_seconds,cron_expr,timezone,prompt,max_runs,run_count,next_run_at,source_refs,source_overflow FROM runtime_schedules WHERE agent_id=$1 AND status='active' AND next_run_at<=$2 ORDER BY next_run_at ASC, id ASC FOR UPDATE SKIP LOCKED LIMIT 16`, l.AgentID, now)
-	if err != nil {
-		return err
-	}
-	due := []dueScheduleRecord{}
-	for rows.Next() {
-		var r dueScheduleRecord
-		if err = rows.Scan(&r.id, &r.createdRunID, &r.kind, &r.intervalSeconds, &r.cronExpr, &r.timezone, &r.prompt, &r.maxRuns, &r.runCount, &r.nextRunAt, &r.sourceRefsJSON, &r.sourceOverflow); err != nil {
-			rows.Close()
-			return err
-		}
-		due = append(due, r)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return err
-	}
-	if len(due) == 0 {
-		return tx.Commit(ctx)
-	}
-	logs := make([]drainedScheduleLog, 0, len(due))
-	for _, r := range due {
-		nextStatus, nextCount, nextRunAt := domain.AdvanceDueSchedule(r.kind, r.intervalSeconds, r.cronExpr, r.timezone, r.maxRuns, r.runCount, r.nextRunAt, now)
-		var seq string
-		if err = tx.QueryRow(ctx, `SELECT (90000000000000000000::numeric+nextval('runtime_notification_input_seq'))::text`).Scan(&seq); err != nil {
-			return err
-		}
-		notificationID := domain.ScheduleNotificationID(r.id, nextCount)
-		var refs []InputSource
-		_ = json.Unmarshal(r.sourceRefsJSON, &refs)
-		in := Input{
-			EventID:        seq,
-			Kind:           "schedule.wakeup",
-			ScheduleID:     r.id,
-			NotificationID: notificationID,
-			Body:           r.prompt,
-			CreatedAt:      now.UTC().Format(time.RFC3339Nano),
-			ParentRunID:    r.createdRunID,
-			SourceRefs:     refs,
-			SourceOverflow: r.sourceOverflow,
-		}
-		payload, _ := json.Marshal(in)
-		tag, err := tx.Exec(ctx, `INSERT INTO runtime_inputs(agent_id,event_id,payload,notification_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, l.AgentID, seq, payload, notificationID)
-		if err != nil {
-			return err
-		}
-		inserted := tag.RowsAffected() > 0
-		if !inserted {
-			seq = ""
-		}
-		if _, err = tx.Exec(ctx, `UPDATE runtime_schedules SET status=$3,run_count=$4,last_run_at=$5,next_run_at=$6,updated_at=$5 WHERE id=$1 AND agent_id=$2`, r.id, l.AgentID, nextStatus, nextCount, now.UTC(), nextRunAt); err != nil {
-			return err
-		}
-		logs = append(logs, drainedScheduleLog{
-			scheduleID:     r.id,
-			notificationID: notificationID,
-			eventID:        seq,
-			parentRunID:    r.createdRunID,
-			inserted:       inserted,
-		})
-	}
-	if err = tx.Commit(ctx); err != nil {
 		return err
 	}
 	for _, item := range logs {
 		observability.L(ctx).Info("Schedule wakeup persisted",
-			zap.Bool("custom.input.inserted", item.inserted),
-			zap.String("custom.schedule.notification_id", observability.ID(item.notificationID)),
+			zap.Bool("custom.input.inserted", item.Inserted),
+			zap.String("custom.schedule.notification_id", observability.ID(item.NotificationID)),
 			zap.String("event.action", "schedule-wakeup-persisted"),
 			zap.String("custom.agent.id", l.AgentID),
-			zap.String("custom.schedule.id", observability.ID(item.scheduleID)),
-			zap.String("custom.input.event_id", item.eventID),
-			zap.String("custom.runtime.parent_run_id", item.parentRunID),
+			zap.String("custom.schedule.id", observability.ID(item.ScheduleID)),
+			zap.String("custom.input.event_id", item.EventID),
+			zap.String("custom.runtime.parent_run_id", item.ParentRunID),
 		)
 	}
 	return nil

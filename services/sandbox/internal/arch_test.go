@@ -50,10 +50,10 @@ func TestCleanDDDArchitecture(t *testing.T) {
 		}
 	}
 
-	// 1. domain must only import Go standard library packages.
+	// 1. domain must only import Go standard library packages, and never syscall.
 	checkDir("domain", func(file, imp string) {
-		if strings.Contains(imp, ".") || strings.HasPrefix(imp, "teamie/") {
-			t.Errorf("domain layer violation in %s: forbidden non-stdlib import %q", file, imp)
+		if strings.Contains(imp, ".") || strings.HasPrefix(imp, "teamie/") || imp == "syscall" {
+			t.Errorf("domain layer violation in %s: forbidden import %q", file, imp)
 		}
 	})
 

@@ -12,6 +12,11 @@ type HTTPResponder interface {
 	WriteOKHTTP(w http.ResponseWriter, r *http.Request, status int, resp any)
 }
 
+// HTTPRouteMiddleware optionally wraps generated per-route handlers (e.g. authentication/CSRF middleware).
+type HTTPRouteMiddleware interface {
+	WrapRoute(route RouteSpec, next http.HandlerFunc) http.HandlerFunc
+}
+
 // RouteSpec describes a single HTTP/WebSocket endpoint declared in the Thrift IDL.
 type RouteSpec struct {
 	Name         string
@@ -61,33 +66,44 @@ func RegisterRealtimeWSServer(mux *http.ServeMux, srv RealtimeWSServer, m HTTPRe
 	if len(overrides) > 0 {
 		h = overrides[0]
 	}
+	mw, hasMW := m.(HTTPRouteMiddleware)
 	if h.ConnectWS == nil {
-		h.ConnectWS = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req ConnectWSReq
+			if v := r.Header.Get("Origin"); v != "" {
+				req.Origin = &v
+			}
 			_, err := srv.ConnectWS(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusNoContent, nil)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "ConnectWS", Method: "GET", Path: "/api/v1/ws", MuxPattern: PatternConnectWS, RequestType: "ConnectWSReq", ResponseType: "EmptyResp"}, fn)
 		}
+		h.ConnectWS = fn
 	}
 	if h.PublishTyping == nil {
-		h.PublishTyping = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req PublishTypingReq
-			if r.ContentLength != 0 {
-				if err := m.DecodeRequest(w, r, &req); err != nil {
-					m.WriteBindErrorHTTP(w, r, err)
-					return
-				}
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
 			}
+			req.ID = r.PathValue("id")
 			_, err := srv.PublishTyping(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusNoContent, nil)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "PublishTyping", Method: "POST", Path: "/api/v1/conversations/:id/typing", MuxPattern: PatternPublishTyping, RequestType: "PublishTypingReq", ResponseType: "EmptyResp"}, fn)
 		}
+		h.PublishTyping = fn
 	}
 	RegisterRealtimeWSServiceRoutes(mux, h)
 }

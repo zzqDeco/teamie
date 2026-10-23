@@ -14,11 +14,10 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	wire "teamie/contracts/gen/agent/kitex_gen/agent"
 	"teamie/contracts/gen/agent/kitex_gen/agent/modelgatewayservice"
 	"teamie/contracts/gen/agent/modeltransport"
+	"teamie/services/agent-runtime/internal/infra/pg"
 )
 
 type ModelError struct {
@@ -174,7 +173,7 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticM
 		}
 		return result, decodeErr
 	}
-	if !errors.Is(e, pgx.ErrNoRows) {
+	if !pg.IsNoRows(e) {
 		return nil, e
 	}
 	if e = m.cachedRecovery(ctx, run, step, hash, false); e != nil {
@@ -270,13 +269,8 @@ func retryError(err error) bool {
 	if errors.Is(err, adk.ErrSessionEventPersistence) {
 		return true
 	}
-	var databaseError *pgconn.PgError
-	if errors.As(err, &databaseError) {
-		code := databaseError.Code
-		return strings.HasPrefix(code, "08") || strings.HasPrefix(code, "53") || code == "40001" || code == "40P01" || code == "57P01" || code == "57P02" || code == "57P03"
-	}
 	var networkError net.Error
-	if errors.As(err, &networkError) || pgconn.SafeToRetry(err) || pgconn.Timeout(err) {
+	if errors.As(err, &networkError) || pg.IsRetryableError(err) {
 		return true
 	}
 

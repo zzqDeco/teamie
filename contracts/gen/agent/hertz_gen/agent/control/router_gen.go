@@ -12,6 +12,11 @@ type HTTPResponder interface {
 	WriteOKHTTP(w http.ResponseWriter, r *http.Request, status int, resp any)
 }
 
+// HTTPRouteMiddleware optionally wraps generated per-route handlers (e.g. authentication/CSRF middleware).
+type HTTPRouteMiddleware interface {
+	WrapRoute(route RouteSpec, next http.HandlerFunc) http.HandlerFunc
+}
+
 // RouteSpec describes a single HTTP/WebSocket endpoint declared in the Thrift IDL.
 type RouteSpec struct {
 	Name         string
@@ -89,8 +94,9 @@ func RegisterAgentControlHTTPServer(mux *http.ServeMux, srv AgentControlHTTPServ
 	if len(overrides) > 0 {
 		h = overrides[0]
 	}
+	mw, hasMW := m.(HTTPRouteMiddleware)
 	if h.ListOwnedAgents == nil {
-		h.ListOwnedAgents = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req ListOwnedAgentsReq
 			resp, err := srv.ListOwnedAgents(r.Context(), &req)
 			if err != nil {
@@ -98,74 +104,98 @@ func RegisterAgentControlHTTPServer(mux *http.ServeMux, srv AgentControlHTTPServ
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "ListOwnedAgents", Method: "GET", Path: "/api/v1/agents", MuxPattern: PatternListOwnedAgents, RequestType: "ListOwnedAgentsReq", ResponseType: "AgentListResp"}, fn)
 		}
+		h.ListOwnedAgents = fn
 	}
 	if h.CreateAgent == nil {
-		h.CreateAgent = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req CreateAgentReq
-			if r.ContentLength != 0 {
-				if err := m.DecodeRequest(w, r, &req); err != nil {
-					m.WriteBindErrorHTTP(w, r, err)
-					return
-				}
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
 			}
 			resp, err := srv.CreateAgent(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
-			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+			m.WriteOKHTTP(w, r, http.StatusCreated, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "CreateAgent", Method: "POST", Path: "/api/v1/agents", MuxPattern: PatternCreateAgent, RequestType: "CreateAgentReq", ResponseType: "AgentResp"}, fn)
 		}
+		h.CreateAgent = fn
 	}
 	if h.GetAgentProfile == nil {
-		h.GetAgentProfile = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req GetAgentProfileReq
+			req.ID = r.PathValue("id")
 			resp, err := srv.GetAgentProfile(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "GetAgentProfile", Method: "GET", Path: "/api/v1/agents/:id", MuxPattern: PatternGetAgentProfile, RequestType: "GetAgentProfileReq", ResponseType: "AgentResp"}, fn)
 		}
+		h.GetAgentProfile = fn
 	}
 	if h.UpdateAgent == nil {
-		h.UpdateAgent = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req UpdateAgentReq
-			if r.ContentLength != 0 {
-				if err := m.DecodeRequest(w, r, &req); err != nil {
-					m.WriteBindErrorHTTP(w, r, err)
-					return
-				}
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
 			}
+			req.ID = r.PathValue("id")
 			resp, err := srv.UpdateAgent(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "UpdateAgent", Method: "PATCH", Path: "/api/v1/agents/:id", MuxPattern: PatternUpdateAgent, RequestType: "UpdateAgentReq", ResponseType: "AgentResp"}, fn)
 		}
+		h.UpdateAgent = fn
 	}
 	if h.DeleteAgent == nil {
-		h.DeleteAgent = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req DeleteAgentReq
+			req.ID = r.PathValue("id")
 			_, err := srv.DeleteAgent(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusNoContent, nil)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "DeleteAgent", Method: "DELETE", Path: "/api/v1/agents/:id", MuxPattern: PatternDeleteAgent, RequestType: "DeleteAgentReq", ResponseType: "EmptyResp"}, fn)
 		}
+		h.DeleteAgent = fn
 	}
 	if h.ListWorkspaceAgents == nil {
-		h.ListWorkspaceAgents = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req ListWorkspaceAgentsReq
+			req.ID = r.PathValue("id")
 			resp, err := srv.ListWorkspaceAgents(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "ListWorkspaceAgents", Method: "GET", Path: "/api/v1/workspaces/:id/agents", MuxPattern: PatternListWorkspaceAgents, RequestType: "ListWorkspaceAgentsReq", ResponseType: "AgentListResp"}, fn)
 		}
+		h.ListWorkspaceAgents = fn
 	}
 	RegisterAgentControlHTTPServiceRoutes(mux, h)
 }

@@ -12,6 +12,11 @@ type HTTPResponder interface {
 	WriteOKHTTP(w http.ResponseWriter, r *http.Request, status int, resp any)
 }
 
+// HTTPRouteMiddleware optionally wraps generated per-route handlers (e.g. authentication/CSRF middleware).
+type HTTPRouteMiddleware interface {
+	WrapRoute(route RouteSpec, next http.HandlerFunc) http.HandlerFunc
+}
+
 // RouteSpec describes a single HTTP/WebSocket endpoint declared in the Thrift IDL.
 type RouteSpec struct {
 	Name         string
@@ -96,8 +101,9 @@ func RegisterModelGatewayHTTPServer(mux *http.ServeMux, srv ModelGatewayHTTPServ
 	if len(overrides) > 0 {
 		h = overrides[0]
 	}
+	mw, hasMW := m.(HTTPRouteMiddleware)
 	if h.GetAdminModelConfig == nil {
-		h.GetAdminModelConfig = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req GetAdminModelConfigReq
 			resp, err := srv.GetAdminModelConfig(r.Context(), &req)
 			if err != nil {
@@ -105,16 +111,18 @@ func RegisterModelGatewayHTTPServer(mux *http.ServeMux, srv ModelGatewayHTTPServ
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "GetAdminModelConfig", Method: "GET", Path: "/api/v1/admin/model-gateway", MuxPattern: PatternGetAdminModelConfig, RequestType: "GetAdminModelConfigReq", ResponseType: "AdminModelConfigResp"}, fn)
 		}
+		h.GetAdminModelConfig = fn
 	}
 	if h.UpdateAdminModelConfig == nil {
-		h.UpdateAdminModelConfig = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req UpdateAdminModelConfigReq
-			if r.ContentLength != 0 {
-				if err := m.DecodeRequest(w, r, &req); err != nil {
-					m.WriteBindErrorHTTP(w, r, err)
-					return
-				}
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
 			}
 			resp, err := srv.UpdateAdminModelConfig(r.Context(), &req)
 			if err != nil {
@@ -122,33 +130,36 @@ func RegisterModelGatewayHTTPServer(mux *http.ServeMux, srv ModelGatewayHTTPServ
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "UpdateAdminModelConfig", Method: "PUT", Path: "/api/v1/admin/model-gateway", MuxPattern: PatternUpdateAdminModelConfig, RequestType: "UpdateAdminModelConfigReq", ResponseType: "AdminModelConfigResp"}, fn)
 		}
+		h.UpdateAdminModelConfig = fn
 	}
 	if h.TestAdminModelConfig == nil {
-		h.TestAdminModelConfig = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req TestAdminModelConfigReq
-			if r.ContentLength != 0 {
-				if err := m.DecodeRequest(w, r, &req); err != nil {
-					m.WriteBindErrorHTTP(w, r, err)
-					return
-				}
-			}
 			resp, err := srv.TestAdminModelConfig(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "TestAdminModelConfig", Method: "POST", Path: "/api/v1/admin/model-gateway/test", MuxPattern: PatternTestAdminModelConfig, RequestType: "TestAdminModelConfigReq", ResponseType: "TestAdminModelConfigResp"}, fn)
 		}
+		h.TestAdminModelConfig = fn
 	}
 	if h.GenerateChat == nil {
-		h.GenerateChat = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req ChatCallReq
-			if r.ContentLength != 0 {
-				if err := m.DecodeRequest(w, r, &req); err != nil {
-					m.WriteBindErrorHTTP(w, r, err)
-					return
-				}
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
+			}
+			if v := r.Header.Get("X-Teamie-Model-Config-Id"); v != "" {
+				req.ExpectedModelConfigId = &v
 			}
 			resp, err := srv.GenerateChat(r.Context(), &req)
 			if err != nil {
@@ -156,16 +167,21 @@ func RegisterModelGatewayHTTPServer(mux *http.ServeMux, srv ModelGatewayHTTPServ
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "GenerateChat", Method: "POST", Path: "/internal/v1/chat", MuxPattern: PatternGenerateChat, RequestType: "ChatCallReq", ResponseType: "ChatCallResp"}, fn)
 		}
+		h.GenerateChat = fn
 	}
 	if h.StreamChat == nil {
-		h.StreamChat = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req ChatCallReq
-			if r.ContentLength != 0 {
-				if err := m.DecodeRequest(w, r, &req); err != nil {
-					m.WriteBindErrorHTTP(w, r, err)
-					return
-				}
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
+			}
+			if v := r.Header.Get("X-Teamie-Model-Config-Id"); v != "" {
+				req.ExpectedModelConfigId = &v
 			}
 			resp, err := srv.StreamChat(r.Context(), &req)
 			if err != nil {
@@ -173,16 +189,18 @@ func RegisterModelGatewayHTTPServer(mux *http.ServeMux, srv ModelGatewayHTTPServ
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "StreamChat", Method: "POST", Path: "/internal/v1/chat/stream", MuxPattern: PatternStreamChat, RequestType: "ChatCallReq", ResponseType: "StreamEventFrameDTO"}, fn)
 		}
+		h.StreamChat = fn
 	}
 	if h.WebSearch == nil {
-		h.WebSearch = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req WebSearchReq
-			if r.ContentLength != 0 {
-				if err := m.DecodeRequest(w, r, &req); err != nil {
-					m.WriteBindErrorHTTP(w, r, err)
-					return
-				}
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
 			}
 			resp, err := srv.WebSearch(r.Context(), &req)
 			if err != nil {
@@ -190,16 +208,18 @@ func RegisterModelGatewayHTTPServer(mux *http.ServeMux, srv ModelGatewayHTTPServ
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "WebSearch", Method: "POST", Path: "/internal/v1/web/search", MuxPattern: PatternWebSearch, RequestType: "WebSearchReq", ResponseType: "WebSearchResp"}, fn)
 		}
+		h.WebSearch = fn
 	}
 	if h.WebExtract == nil {
-		h.WebExtract = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req WebExtractReq
-			if r.ContentLength != 0 {
-				if err := m.DecodeRequest(w, r, &req); err != nil {
-					m.WriteBindErrorHTTP(w, r, err)
-					return
-				}
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
 			}
 			resp, err := srv.WebExtract(r.Context(), &req)
 			if err != nil {
@@ -207,7 +227,11 @@ func RegisterModelGatewayHTTPServer(mux *http.ServeMux, srv ModelGatewayHTTPServ
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "WebExtract", Method: "POST", Path: "/internal/v1/web/extract", MuxPattern: PatternWebExtract, RequestType: "WebExtractReq", ResponseType: "WebExtractResp"}, fn)
 		}
+		h.WebExtract = fn
 	}
 	RegisterModelGatewayHTTPServiceRoutes(mux, h)
 }

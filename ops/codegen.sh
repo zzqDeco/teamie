@@ -38,6 +38,7 @@ assemble_rpc_idl agent "${ROOT_DIR}/contracts/agent/rpc.thrift" \
 if command -v kitex >/dev/null 2>&1 && command -v thriftgo >/dev/null 2>&1; then
   (
     cd "${ROOT_DIR}/contracts/gen/im"
+    rm -rf kitex_gen hertz_gen
     kitex -module teamie/contracts/gen/im ../../im/rpc.thrift
     for idl in http_identity.thrift http_chat.thrift ws_realtime.thrift; do
       thriftgo -g go:template=slim,no_default_serdes=true,no_processor=true -o hertz_gen "../../im/${idl}"
@@ -46,6 +47,7 @@ if command -v kitex >/dev/null 2>&1 && command -v thriftgo >/dev/null 2>&1; then
 
   (
     cd "${ROOT_DIR}/contracts/gen/agent"
+    rm -rf kitex_gen hertz_gen
     kitex -module teamie/contracts/gen/agent ../../agent/rpc.thrift
     for idl in http_control.thrift http_gateway.thrift; do
       thriftgo -g go:template=slim,no_default_serdes=true,no_processor=true -o hertz_gen "../../agent/${idl}"

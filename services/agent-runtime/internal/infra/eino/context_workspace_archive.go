@@ -45,8 +45,8 @@ func (a *ContextArchive) legacyWorkspaceArchiveSources(ctx context.Context, r *R
 		return a.toolSources(ctx, r, &reduction.ToolDetail{ToolContext: &adk.ToolContext{Name: original.Name, CallID: original.CallID}, ToolArgument: original.Argument, ToolResult: original.Result}, false)
 	}
 	if artifact.EventSeq > 0 {
-		var raw []byte
-		if err := a.Store.DB.QueryRow(ctx, `SELECT payload FROM runtime_session_events WHERE session_id=$1 AND run_id=$2 AND seq=$3`, "agent:"+r.AgentID, artifact.RunID, artifact.EventSeq).Scan(&raw); err != nil {
+		raw, err := a.Store.DB.GetSessionEventPayloadBySeq(ctx, "agent:"+r.AgentID, artifact.RunID, artifact.EventSeq)
+		if err != nil {
 			return nil, err
 		}
 		var event adk.SessionEvent[*schema.AgenticMessage]
@@ -75,13 +75,7 @@ func (a *ContextArchive) legacyWorkspaceArchiveSources(ctx context.Context, r *R
 	if contextIMTool(artifact.ToolName) {
 		return nil, nil
 	}
-	var touched bool
-	err := a.Store.DB.QueryRow(ctx, `SELECT EXISTS(
- SELECT 1 FROM runtime_tool_calls t JOIN runtime_runs origin ON origin.id=t.run_id JOIN runtime_runs owner ON owner.id=$2
- WHERE origin.agent_id=$1 AND t.created_at<=$3 AND t.name=ANY($4::text[]) AND
- (origin.id=owner.id OR EXISTS(SELECT 1 FROM runtime_session_events e
- WHERE e.session_id=$5 AND e.run_id=origin.id AND e.seq<=owner.context_head
- AND EXISTS(SELECT 1 FROM runtime_session_acceptances x WHERE x.agent_id=$1 AND x.attempt_id=e.attempt_id AND x.seq<=owner.acceptance_head))))`, r.AgentID, artifact.RunID, artifact.CreatedAt, []string{"native:read_file", "native:ls", "native:glob", "native:grep", "native:workspace_read_page", "native:workspace_execute", "native:task_output", "native:task_stop", "native:TaskCreate", "native:TaskUpdate", "native:TaskGet", "native:TaskList", "workspace_execute"}, "agent:"+r.AgentID).Scan(&touched)
+	touched, err := a.Store.DB.HasLegacyWorkspaceToolActivity(ctx, r.AgentID, artifact.RunID, artifact.CreatedAt, []string{"native:read_file", "native:ls", "native:glob", "native:grep", "native:workspace_read_page", "native:workspace_execute", "native:task_output", "native:task_stop", "native:TaskCreate", "native:TaskUpdate", "native:TaskGet", "native:TaskList", "workspace_execute"}, "agent:"+r.AgentID)
 	if err != nil {
 		return nil, err
 	}

@@ -33,7 +33,7 @@ func utf8End(b []byte, end int) int {
 	return domain.UTF8End(b, end)
 }
 func readPageFile(root *os.Root, name string) ([]byte, error) {
-	return domain.ReadPageFile(root, name)
+	return domain.DefaultWorkspaceStorage.ReadPageFile(root, name)
 }
 
 func (s *Service) workspacePage(ctx context.Context, r *domain.SandboxWorkspaceRequest, in workspaceArgs) *domain.SandboxWorkspaceResponse {

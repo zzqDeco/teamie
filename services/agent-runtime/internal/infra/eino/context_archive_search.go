@@ -13,7 +13,7 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
-	"github.com/jackc/pgx/v5"
+	"teamie/services/agent-runtime/internal/infra/pg"
 )
 
 type contextTranscriptBlock struct {
@@ -117,25 +117,25 @@ type contextArchiveEvent struct {
 }
 
 func (a *ContextArchive) eventPage(ctx context.Context, r *Run, after, head int64, limit int) ([]contextArchiveEvent, error) {
-	rows, err := a.Store.DB.Query(ctx, `SELECT e.seq,e.run_id::text,e.attempt_id::text,e.event_id,e.payload FROM runtime_session_events e JOIN runtime_runs r ON r.id=e.run_id WHERE e.session_id=$1 AND `+contextEventVisibility+` AND e.seq>$6 AND e.seq<=$7 ORDER BY e.seq LIMIT $8`, "agent:"+r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead, after, head, limit)
+	rows, err := a.Store.DB.ListVisibleSessionEventPage(ctx, "agent:"+r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead, after, head, limit)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	out := []contextArchiveEvent{}
-	for rows.Next() {
-		var item contextArchiveEvent
-		var payload []byte
-		if err = rows.Scan(&item.seq, &item.runID, &item.attempt, &item.id, &payload); err != nil {
-			return nil, err
+	out := make([]contextArchiveEvent, 0, len(rows))
+	for _, row := range rows {
+		item := contextArchiveEvent{
+			seq:     row.Seq,
+			runID:   row.RunID,
+			attempt: row.Attempt,
+			id:      row.EventID,
+			event:   new(adk.SessionEvent[*schema.AgenticMessage]),
 		}
-		item.event = new(adk.SessionEvent[*schema.AgenticMessage])
-		if err = decodeSessionPayload(payload, item.event); err != nil {
+		if err = decodeSessionPayload(row.Payload, item.event); err != nil {
 			return nil, err
 		}
 		out = append(out, item)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (a *ContextArchive) eventArtifact(ctx context.Context, r *Run, item contextArchiveEvent) (*contextArtifact, error) {
@@ -225,11 +225,8 @@ func (a *ContextArchive) Search(ctx context.Context, query, rawCursor string, li
 	if rawCursor == "" {
 		cursor = contextSearchCursor{RunID: r.ID, ViewID: contextSearchViewID(compose.GetToolCallID(ctx)), QueryHash: digest([]byte(query)), ContextHead: r.ContextHead, AcceptanceHead: r.AcceptanceHead, Phase: "artifacts"}
 		prior, e := a.Store.readObservation(ctx, r, "context-search/"+cursor.ViewID, viewKey)
-		if errors.Is(e, pgx.ErrNoRows) {
-			err = a.Store.DB.QueryRow(ctx, `SELECT COALESCE(max(seq),0) FROM runtime_context_artifacts WHERE agent_id=$1`, r.AgentID).Scan(&cursor.ArtifactHead)
-			if err == nil {
-				err = a.Store.DB.QueryRow(ctx, `SELECT COALESCE(max(e.seq),0) FROM runtime_session_events e JOIN runtime_runs r ON r.id=e.run_id WHERE e.session_id=$1 AND `+contextEventVisibility, "agent:"+r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead).Scan(&cursor.EventHead)
-			}
+		if pg.IsNoRows(e) {
+			cursor.ArtifactHead, cursor.EventHead, err = a.Store.DB.GetContextSearchHeads(ctx, r.AgentID, "agent:"+r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead)
 			if err == nil {
 				snapshot, _ := json.Marshal(cursor)
 				err = a.saveObservation(ctx, r, "context-search/"+cursor.ViewID, viewKey, snapshot)
@@ -255,32 +252,14 @@ func (a *ContextArchive) Search(ctx context.Context, query, rawCursor string, li
 	page := &ContextSearchPage{Hits: []ContextSearchHit{}}
 	scanned := 0
 	if cursor.Phase == "artifacts" {
-		rows, e := a.Store.DB.Query(ctx, `SELECT a.seq,a.run_id::text,a.kind,a.artifact_key FROM runtime_context_artifacts a JOIN runtime_runs r ON r.id=a.run_id WHERE a.agent_id=$1 AND `+contextArtifactVisibility+` AND a.source_event_seq=0 AND a.tool_name<>'context_source_index' AND a.seq>$6 AND a.seq<=$7 ORDER BY a.seq LIMIT $8`, r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead, cursor.After, cursor.ArtifactHead, contextSearchScan)
-		if e != nil {
-			return nil, e
-		}
-		type candidate struct {
-			seq              int64
-			runID, kind, key string
-		}
-		candidates := []candidate{}
-		for rows.Next() {
-			var item candidate
-			if e = rows.Scan(&item.seq, &item.runID, &item.kind, &item.key); e != nil {
-				rows.Close()
-				return nil, e
-			}
-			candidates = append(candidates, item)
-		}
-		e = rows.Err()
-		rows.Close()
+		candidates, e := a.Store.DB.ListVisibleSearchArtifactCandidates(ctx, r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead, cursor.After, cursor.ArtifactHead, contextSearchScan)
 		if e != nil {
 			return nil, e
 		}
 		for _, item := range candidates {
-			cursor.After = item.seq
+			cursor.After = item.Seq
 			scanned++
-			ref := "context:v1:" + item.runID + ":" + item.key
+			ref := "context:v1:" + item.RunID + ":" + item.Key
 			artifact, e := a.load(ctx, r, ref)
 			if e != nil {
 				return nil, e

@@ -76,11 +76,14 @@ func TestCleanDDDArchitecture(t *testing.T) {
 		})
 	}
 
-	// 4. infra/* must never import adapter/* or app.
+	// 4. infra/* must never import adapter/* or app, and infra/pg must use pkg/postgres instead of raw pgx.
 	for _, sub := range []string{"infra/pg", "infra/kms", "infra/rpcclient", "infra/upstream"} {
 		checkDir(sub, func(file, imp string) {
 			if imp == modulePrefix || imp == modulePrefix+"/app" || strings.HasPrefix(imp, modulePrefix+"/adapter") {
 				t.Errorf("infra layer violation in %s: forbidden import %q", file, imp)
+			}
+			if sub == "infra/pg" && strings.HasPrefix(imp, "github.com/jackc/pgx") {
+				t.Errorf("infra/pg violation in %s: must use teamie/pkg/postgres instead of raw %q", file, imp)
 			}
 		})
 	}

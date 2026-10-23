@@ -16,7 +16,6 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/compose"
-	"github.com/jackc/pgx/v5"
 	wire "teamie/contracts/gen/agent/kitex_gen/agent"
 	"teamie/pkg/imlimits"
 )
@@ -215,14 +214,12 @@ func (t *Tools) fileMessageTool() (tool.InvokableTool, error) {
 // The upload is an authenticated workspace observation. Its proven source
 // closure lives outside model text and is checked again on archive/cache reads.
 func (a *ContextArchive) uploadedFileSources(ctx context.Context, runID, call string) ([]InputSource, error) {
-	var agentID, hash string
-	var raw []byte
-	err := a.Store.DB.QueryRow(ctx, `SELECT r.agent_id,t.request_hash,o.response FROM runtime_tool_calls t JOIN runtime_runs r ON r.id=t.run_id JOIN runtime_tool_observations o ON o.run_id=t.run_id AND o.call_id=t.call_id AND o.observation_key=$3 WHERE t.run_id=$1 AND t.call_id=$2 AND t.name='im_upload_file'`, runID, call, workspaceSourcesKey).Scan(&agentID, &hash, &raw)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, errContextUnavailable
-	}
+	agentID, hash, raw, found, err := a.Store.DB.GetUploadedFileToolObservation(ctx, runID, call, workspaceSourcesKey)
 	if err != nil {
 		return nil, err
+	}
+	if !found {
+		return nil, errContextUnavailable
 	}
 	var snapshot workspaceSourceSnapshot
 	if json.Unmarshal(raw, &snapshot) != nil || snapshot.Version != 1 || snapshot.Name != "im_upload_file" || snapshot.RequestHash != hash {

@@ -12,7 +12,29 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"teamie/services/agent-runtime/internal/infra/pg"
 )
+
+const (
+	runtimeSchemaVersion       = pg.RuntimeSchemaVersion
+	runtimeWriterSchemaSetting = pg.RuntimeWriterSchemaSetting
+	schemaSQL                  = pg.SchemaSQL
+	schemaV2SQL                = pg.SchemaV2SQL
+	schemaV3SQL                = pg.SchemaV3SQL
+	contextArchiveSchemaSQL    = pg.ContextArchiveSchemaSQL
+	contextRecoverySchemaSQL   = pg.ContextRecoverySchemaSQL
+	schemaV4SQL                = pg.SchemaV4SQL
+	schemaV5SQL                = pg.SchemaV5SQL
+	schemaV6SQL                = pg.SchemaV6SQL
+	schemaV7SQL                = pg.SchemaV7SQL
+	schemaV8SQL                = pg.SchemaV8SQL
+	schemaV9SQL                = pg.SchemaV9SQL
+	schemaV10SQL               = pg.SchemaV10SQL
+	schemaV11SQL               = pg.SchemaV11SQL
+	schemaV12SQL               = pg.SchemaV12SQL
+)
+
+var errUnsupportedRuntimeSchema = pg.ErrUnsupportedRuntimeSchema
 
 func runtimeMigrationDatabase(t *testing.T) (string, *pgx.Conn) {
 	t.Helper()

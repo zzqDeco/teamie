@@ -11,7 +11,66 @@ import (
 	"github.com/google/uuid"
 	wire "teamie/contracts/gen/agent/kitex_gen/agent"
 	"teamie/contracts/gen/agent/kitex_gen/agent/agentcontrolservice"
+	rpcadapter "teamie/services/agent-runtime/internal/adapter/rpc"
+	"teamie/services/agent-runtime/internal/app"
+	"teamie/services/agent-runtime/internal/infra/rpcclient"
 )
+
+type RuntimeRPC struct{ Engine *Engine }
+type RPC = RuntimeRPC
+
+func (r *RuntimeRPC) server() *rpcadapter.Server {
+	repo := r.Engine.Store.Repo()
+	return &rpcadapter.Server{
+		App: &app.Service{
+			Tx:           repo,
+			Sessions:     repo,
+			Schedules:    repo,
+			Archive:      repo,
+			ToolReceipts: repo,
+			Inspect:      repo,
+			Control:      &rpcclient.ControlAdapter{Client: r.Engine.Control, Token: r.Engine.Config.ControlToken},
+			Engine:       r.Engine,
+			ControlToken: r.Engine.Config.ControlToken,
+		},
+	}
+}
+
+func (r *RuntimeRPC) State(ctx context.Context, q *wire.RuntimeRequest) (*wire.RuntimeResponse, error) {
+	return r.server().State(ctx, q)
+}
+
+func (r *RuntimeRPC) Runs(ctx context.Context, q *wire.RuntimeRequest) (*wire.RuntimeResponse, error) {
+	return r.server().Runs(ctx, q)
+}
+
+func (r *RuntimeRPC) Run(ctx context.Context, q *wire.RuntimeRequest) (*wire.RuntimeResponse, error) {
+	return r.server().Run(ctx, q)
+}
+
+func (r *RuntimeRPC) Tasks(ctx context.Context, q *wire.RuntimeRequest) (*wire.RuntimeResponse, error) {
+	return r.server().Tasks(ctx, q)
+}
+
+func (r *RuntimeRPC) Task(ctx context.Context, q *wire.RuntimeRequest) (*wire.RuntimeResponse, error) {
+	return r.server().Task(ctx, q)
+}
+
+func (r *RuntimeRPC) Events(ctx context.Context, q *wire.RuntimeRequest) (*wire.RuntimeResponse, error) {
+	return r.server().Events(ctx, q)
+}
+
+func (r *RuntimeRPC) CancelRun(ctx context.Context, q *wire.RuntimeRequest) (*wire.RuntimeResponse, error) {
+	return r.server().CancelRun(ctx, q)
+}
+
+func (r *RuntimeRPC) RetryRun(ctx context.Context, q *wire.RuntimeRequest) (*wire.RuntimeResponse, error) {
+	return r.server().RetryRun(ctx, q)
+}
+
+func (r *RuntimeRPC) CancelTask(ctx context.Context, q *wire.RuntimeRequest) (*wire.RuntimeResponse, error) {
+	return r.server().CancelTask(ctx, q)
+}
 
 type rpcOwnerControl struct {
 	agentcontrolservice.Client

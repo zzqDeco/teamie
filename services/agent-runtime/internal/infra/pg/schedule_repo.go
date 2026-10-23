@@ -197,26 +197,115 @@ func (r *Repository) GetScheduleSourcesMeta(ctx context.Context, agentID, schedu
 	return createdRunID, sourceRefsJSON, sourceOverflow, true, nil
 }
 
-// ReadObservation reads a saved tool observation snapshot by (runID, callID, key).
-func (r *Repository) ReadObservation(ctx context.Context, runID, callID, key string) ([]byte, bool, error) {
-	var out []byte
-	err := r.db.Conn(ctx).QueryRow(ctx, `SELECT response FROM runtime_tool_observations WHERE run_id=$1 AND call_id=$2 AND observation_key=$3`, runID, callID, key).Scan(&out)
-	if postgres.IsNoRows(err) {
-		return nil, false, nil
-	}
-	if err != nil {
-		return nil, false, err
-	}
-	return out, true, nil
+// CancelAllActiveSchedules cancels all active schedules for agentID.
+func (r *Repository) CancelAllActiveSchedules(ctx context.Context, agentID string) error {
+	_, err := r.db.Conn(ctx).Exec(ctx, `UPDATE runtime_schedules SET status='canceled',updated_at=now() WHERE agent_id=$1 AND status='active'`, agentID)
+	return err
 }
 
-// SaveObservation persists a tool observation snapshot under the active worker lease fence.
-func (r *Repository) SaveObservation(ctx context.Context, lease *domain.Lease, runID, callID, key string, payload []byte) error {
-	return r.WithinTx(ctx, func(txCtx context.Context) error {
-		if err := r.CheckLeaseForUpdate(txCtx, lease); err != nil {
-			return err
+// DrainedScheduleLog records the outcome of draining a due schedule wakeup into runtime_inputs.
+type DrainedScheduleLog struct {
+	ScheduleID     string
+	NotificationID string
+	EventID        string
+	ParentRunID    string
+	Inserted       bool
+}
+
+type dueScheduleRecord struct {
+	id              string
+	createdRunID    string
+	kind            string
+	intervalSeconds *int64
+	cronExpr        string
+	timezone        string
+	prompt          string
+	maxRuns         *int
+	runCount        int
+	nextRunAt       time.Time
+	sourceRefsJSON  []byte
+	sourceOverflow  bool
+}
+
+// DrainDueSchedules atomically claims up to 16 due active schedules under the worker lease fence,
+// inserts wakeup inputs, advances schedule next_run_at/status, and returns log records.
+func (r *Repository) DrainDueSchedules(ctx context.Context, l *domain.Lease) ([]DrainedScheduleLog, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	if err = CheckLeaseTx(ctx, tx, l); err != nil {
+		return nil, err
+	}
+	var now time.Time
+	if err = tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(ctx, `SELECT id,created_run_id::text,kind,interval_seconds,cron_expr,timezone,prompt,max_runs,run_count,next_run_at,source_refs,source_overflow FROM runtime_schedules WHERE agent_id=$1 AND status='active' AND next_run_at<=$2 ORDER BY next_run_at ASC, id ASC FOR UPDATE SKIP LOCKED LIMIT 16`, l.AgentID, now)
+	if err != nil {
+		return nil, err
+	}
+	due := []dueScheduleRecord{}
+	for rows.Next() {
+		var rec dueScheduleRecord
+		if err = rows.Scan(&rec.id, &rec.createdRunID, &rec.kind, &rec.intervalSeconds, &rec.cronExpr, &rec.timezone, &rec.prompt, &rec.maxRuns, &rec.runCount, &rec.nextRunAt, &rec.sourceRefsJSON, &rec.sourceOverflow); err != nil {
+			rows.Close()
+			return nil, err
 		}
-		_, err := r.db.Conn(txCtx).Exec(txCtx, `INSERT INTO runtime_tool_observations(run_id,call_id,observation_key,response) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, runID, callID, key, payload)
-		return err
-	})
+		due = append(due, rec)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	if len(due) == 0 {
+		return nil, tx.Commit(ctx)
+	}
+	logs := make([]DrainedScheduleLog, 0, len(due))
+	for _, rec := range due {
+		nextStatus, nextCount, nextRunAt := domain.AdvanceDueSchedule(rec.kind, rec.intervalSeconds, rec.cronExpr, rec.timezone, rec.maxRuns, rec.runCount, rec.nextRunAt, now)
+		var seq string
+		if err = tx.QueryRow(ctx, `SELECT (90000000000000000000::numeric+nextval('runtime_notification_input_seq'))::text`).Scan(&seq); err != nil {
+			return nil, err
+		}
+		notificationID := domain.ScheduleNotificationID(rec.id, nextCount)
+		var refs []domain.InputSource
+		_ = json.Unmarshal(rec.sourceRefsJSON, &refs)
+		in := domain.Input{
+			EventID:        seq,
+			Kind:           "schedule.wakeup",
+			ScheduleID:     rec.id,
+			NotificationID: notificationID,
+			Body:           rec.prompt,
+			CreatedAt:      now.UTC().Format(time.RFC3339Nano),
+			ParentRunID:    rec.createdRunID,
+			SourceRefs:     refs,
+			SourceOverflow: rec.sourceOverflow,
+		}
+		payload, _ := json.Marshal(in)
+		tag, err := tx.Exec(ctx, `INSERT INTO runtime_inputs(agent_id,event_id,payload,notification_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, l.AgentID, seq, payload, notificationID)
+		if err != nil {
+			return nil, err
+		}
+		inserted := tag.RowsAffected() > 0
+		if !inserted {
+			seq = ""
+		}
+		if _, err = tx.Exec(ctx, `UPDATE runtime_schedules SET status=$3,run_count=$4,last_run_at=$5,next_run_at=$6,updated_at=$5 WHERE id=$1 AND agent_id=$2`, rec.id, l.AgentID, nextStatus, nextCount, now.UTC(), nextRunAt); err != nil {
+			return nil, err
+		}
+		logs = append(logs, DrainedScheduleLog{
+			ScheduleID:     rec.id,
+			NotificationID: notificationID,
+			EventID:        seq,
+			ParentRunID:    rec.createdRunID,
+			Inserted:       inserted,
+		})
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return logs, nil
 }

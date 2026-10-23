@@ -20,7 +20,6 @@ import (
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	wire "teamie/contracts/gen/agent/kitex_gen/agent"
 	"teamie/contracts/gen/agent/kitex_gen/agent/agentcontrolservice"
 	"teamie/contracts/gen/agent/kitex_gen/agent/modelgatewayservice"
@@ -85,7 +84,7 @@ func (e *Engine) Ready(ctx context.Context) error {
 }
 func (e *Engine) report(ctx context.Context, id, state, code string, active bool) {
 	code = publicErrorCodeOptional(code)
-	_, _ = e.Store.DB.Exec(ctx, `UPDATE runtime_agents SET state=$3,last_error=$4,last_active_at=CASE WHEN $5 THEN now() ELSE last_active_at END WHERE agent_id=$1 AND lease_owner=$2 AND lease_until>now()`, id, e.owner, state, publicErrorCodeOptional(code), active)
+	_ = e.Store.DB.ReportAgentState(ctx, id, e.owner, state, code, active)
 	r := &wire.RuntimeReport{ServiceToken: e.Config.ControlToken, AgentId: id, RuntimeState: state, SessionId: "agent:" + id}
 	if code != "" {
 		r.LastError = &code
@@ -112,85 +111,29 @@ func (e *Engine) cancelRun(id string, run *Run) {
 	wg.Wait()
 }
 
-type workerHandle struct {
-	revision int64
-	cancel   context.CancelFunc
-	done     chan struct{}
+func (e *Engine) OwnerID() string {
+	return e.owner
 }
 
-func (e *Engine) Run(ctx context.Context) {
-	workers := map[string]*workerHandle{}
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-	defer func() {
-		for _, w := range workers {
-			w.cancel()
-		}
-		for _, w := range workers {
-			<-w.done
-		}
-	}()
-	refresh := func() {
-		r, err := e.Control.ListAgents(ctx, &wire.AgentListRequest{ServiceToken: e.Config.ControlToken})
-		if err != nil {
-			return
-		}
-		defs := map[string]*wire.AgentDefinition{}
-		for _, d := range r.Agents {
-			defs[d.Id] = d
-		}
-		for id, w := range workers {
-			d := defs[id]
-			select {
-			case <-w.done:
-				delete(workers, id)
-				continue
-			default:
-			}
-			if d == nil || !d.Enabled || d.DeletedAt != nil || d.Revision != w.revision {
-				w.cancel()
-			}
-		}
-		for _, d := range r.Agents {
-			if !d.Enabled || d.DeletedAt != nil {
-				pc, c := context.WithTimeout(ctx, 3*time.Second)
-				e.cancelAgentTasks(pc, d.Id)
-				c()
-				continue
-			}
-			if _, exists := workers[d.Id]; exists {
-				continue
-			}
-			lease, err := e.Store.Acquire(ctx, d.Id, e.owner)
-			if errors.Is(err, pgx.ErrNoRows) {
-				continue
-			}
-			if err != nil {
-				continue
-			}
-			wc, cancel := context.WithCancel(ctx)
-			w := &workerHandle{revision: d.Revision, cancel: cancel, done: make(chan struct{})}
-			workers[d.Id] = w
-			go func(def *wire.AgentDefinition, l *Lease, handle *workerHandle) {
-				defer close(handle.done)
-				defer func() {
-					release, done := context.WithTimeout(context.Background(), 5*time.Second)
-					defer done()
-					e.Store.Release(release, l)
-				}()
-				e.work(wc, def, l)
-			}(d, lease, w)
-		}
+func (e *Engine) CancelAgentTasks(ctx context.Context, agentID string) {
+	e.cancelAgentTasks(ctx, agentID)
+}
+
+func (e *Engine) WorkAgent(ctx context.Context, profile domain.AgentProfile, lease *domain.Lease) {
+	def := &wire.AgentDefinition{
+		Id:           profile.ID,
+		OwnerId:      profile.OwnerID,
+		Name:         profile.DisplayName,
+		Description:  profile.RoleDescription,
+		WorkspaceIds: append([]string(nil), profile.WorkspaceIDs...),
+		Enabled:      profile.Enabled,
+		Revision:     profile.Revision,
 	}
-	refresh()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			refresh()
-		}
+	if profile.Deleted {
+		del := "deleted"
+		def.DeletedAt = &del
 	}
+	e.work(ctx, def, lease)
 }
 
 type turnGuard struct {
@@ -428,7 +371,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 				if err := e.authorizeScheduleInput(ctx, imc, lease, in); err != nil {
 					if errors.Is(err, errContextUnavailable) {
 						if in.ScheduleID != "" {
-							_, _ = e.Store.DB.Exec(ctx, `UPDATE runtime_schedules SET status='canceled',updated_at=now() WHERE id=$1 AND agent_id=$2 AND status='active'`, in.ScheduleID, lease.AgentID)
+							_ = e.Store.DB.CancelActiveSchedule(ctx, lease.AgentID, in.ScheduleID)
 						}
 						if err = e.Store.Skip(ctx, lease, in.EventID); err != nil {
 							return nil, err
@@ -524,7 +467,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 				if readErr := e.authorizeScheduleInput(ctx, imc, lease, in); readErr != nil {
 					if errors.Is(readErr, errContextUnavailable) {
 						if in.ScheduleID != "" {
-							_, _ = e.Store.DB.Exec(ctx, `UPDATE runtime_schedules SET status='canceled',updated_at=now() WHERE id=$1 AND agent_id=$2 AND status='active'`, in.ScheduleID, lease.AgentID)
+							_ = e.Store.DB.CancelActiveSchedule(ctx, lease.AgentID, in.ScheduleID)
 						}
 						invalid = append(invalid, in.EventID)
 						continue

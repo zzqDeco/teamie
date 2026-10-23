@@ -12,6 +12,11 @@ type HTTPResponder interface {
 	WriteOKHTTP(w http.ResponseWriter, r *http.Request, status int, resp any)
 }
 
+// HTTPRouteMiddleware optionally wraps generated per-route handlers (e.g. authentication/CSRF middleware).
+type HTTPRouteMiddleware interface {
+	WrapRoute(route RouteSpec, next http.HandlerFunc) http.HandlerFunc
+}
+
 // RouteSpec describes a single HTTP/WebSocket endpoint declared in the Thrift IDL.
 type RouteSpec struct {
 	Name         string
@@ -145,8 +150,9 @@ func RegisterIdentityHTTPServer(mux *http.ServeMux, srv IdentityHTTPServer, m HT
 	if len(overrides) > 0 {
 		h = overrides[0]
 	}
+	mw, hasMW := m.(HTTPRouteMiddleware)
 	if h.GetRegistrationMetadata == nil {
-		h.GetRegistrationMetadata = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req GetRegistrationMetadataReq
 			resp, err := srv.GetRegistrationMetadata(r.Context(), &req)
 			if err != nil {
@@ -154,33 +160,37 @@ func RegisterIdentityHTTPServer(mux *http.ServeMux, srv IdentityHTTPServer, m HT
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "GetRegistrationMetadata", Method: "GET", Path: "/api/v1/auth/registration", MuxPattern: PatternGetRegistrationMetadata, RequestType: "GetRegistrationMetadataReq", ResponseType: "RegistrationMetadataResp"}, fn)
 		}
+		h.GetRegistrationMetadata = fn
 	}
 	if h.Register == nil {
-		h.Register = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req RegisterReq
-			if r.ContentLength != 0 {
-				if err := m.DecodeRequest(w, r, &req); err != nil {
-					m.WriteBindErrorHTTP(w, r, err)
-					return
-				}
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
 			}
 			resp, err := srv.Register(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
-			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+			m.WriteOKHTTP(w, r, http.StatusCreated, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "Register", Method: "POST", Path: "/api/v1/auth/register", MuxPattern: PatternRegister, RequestType: "RegisterReq", ResponseType: "SessionResp"}, fn)
 		}
+		h.Register = fn
 	}
 	if h.Login == nil {
-		h.Login = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req LoginReq
-			if r.ContentLength != 0 {
-				if err := m.DecodeRequest(w, r, &req); err != nil {
-					m.WriteBindErrorHTTP(w, r, err)
-					return
-				}
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
 			}
 			resp, err := srv.Login(r.Context(), &req)
 			if err != nil {
@@ -188,10 +198,14 @@ func RegisterIdentityHTTPServer(mux *http.ServeMux, srv IdentityHTTPServer, m HT
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "Login", Method: "POST", Path: "/api/v1/auth/login", MuxPattern: PatternLogin, RequestType: "LoginReq", ResponseType: "SessionResp"}, fn)
 		}
+		h.Login = fn
 	}
 	if h.GetSession == nil {
-		h.GetSession = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req GetSessionReq
 			resp, err := srv.GetSession(r.Context(), &req)
 			if err != nil {
@@ -199,33 +213,33 @@ func RegisterIdentityHTTPServer(mux *http.ServeMux, srv IdentityHTTPServer, m HT
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "GetSession", Method: "GET", Path: "/api/v1/auth/session", MuxPattern: PatternGetSession, RequestType: "GetSessionReq", ResponseType: "SessionResp"}, fn)
 		}
+		h.GetSession = fn
 	}
 	if h.Logout == nil {
-		h.Logout = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req LogoutReq
-			if r.ContentLength != 0 {
-				if err := m.DecodeRequest(w, r, &req); err != nil {
-					m.WriteBindErrorHTTP(w, r, err)
-					return
-				}
-			}
 			_, err := srv.Logout(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusNoContent, nil)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "Logout", Method: "POST", Path: "/api/v1/auth/logout", MuxPattern: PatternLogout, RequestType: "LogoutReq", ResponseType: "EmptyResp"}, fn)
 		}
+		h.Logout = fn
 	}
 	if h.ChangePassword == nil {
-		h.ChangePassword = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req ChangePasswordReq
-			if r.ContentLength != 0 {
-				if err := m.DecodeRequest(w, r, &req); err != nil {
-					m.WriteBindErrorHTTP(w, r, err)
-					return
-				}
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
 			}
 			_, err := srv.ChangePassword(r.Context(), &req)
 			if err != nil {
@@ -233,16 +247,18 @@ func RegisterIdentityHTTPServer(mux *http.ServeMux, srv IdentityHTTPServer, m HT
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusNoContent, nil)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "ChangePassword", Method: "POST", Path: "/api/v1/auth/password", MuxPattern: PatternChangePassword, RequestType: "ChangePasswordReq", ResponseType: "EmptyResp"}, fn)
 		}
+		h.ChangePassword = fn
 	}
 	if h.UpdateProfile == nil {
-		h.UpdateProfile = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req UpdateProfileReq
-			if r.ContentLength != 0 {
-				if err := m.DecodeRequest(w, r, &req); err != nil {
-					m.WriteBindErrorHTTP(w, r, err)
-					return
-				}
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
 			}
 			resp, err := srv.UpdateProfile(r.Context(), &req)
 			if err != nil {
@@ -250,10 +266,14 @@ func RegisterIdentityHTTPServer(mux *http.ServeMux, srv IdentityHTTPServer, m HT
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "UpdateProfile", Method: "PATCH", Path: "/api/v1/auth/profile", MuxPattern: PatternUpdateProfile, RequestType: "UpdateProfileReq", ResponseType: "UpdateProfileResp"}, fn)
 		}
+		h.UpdateProfile = fn
 	}
 	if h.ListInvites == nil {
-		h.ListInvites = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req ListInvitesReq
 			resp, err := srv.ListInvites(r.Context(), &req)
 			if err != nil {
@@ -261,72 +281,90 @@ func RegisterIdentityHTTPServer(mux *http.ServeMux, srv IdentityHTTPServer, m HT
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "ListInvites", Method: "GET", Path: "/api/v1/auth/admin/invites", MuxPattern: PatternListInvites, RequestType: "ListInvitesReq", ResponseType: "ListInvitesResp"}, fn)
 		}
+		h.ListInvites = fn
 	}
 	if h.CreateInvite == nil {
-		h.CreateInvite = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req CreateInviteReq
-			if r.ContentLength != 0 {
-				if err := m.DecodeRequest(w, r, &req); err != nil {
-					m.WriteBindErrorHTTP(w, r, err)
-					return
-				}
-			}
 			resp, err := srv.CreateInvite(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
-			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+			m.WriteOKHTTP(w, r, http.StatusCreated, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "CreateInvite", Method: "POST", Path: "/api/v1/auth/admin/invites", MuxPattern: PatternCreateInvite, RequestType: "CreateInviteReq", ResponseType: "CreateInviteResp"}, fn)
 		}
+		h.CreateInvite = fn
 	}
 	if h.RevokeInvite == nil {
-		h.RevokeInvite = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req RevokeInviteReq
+			req.ID = r.PathValue("id")
 			_, err := srv.RevokeInvite(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusNoContent, nil)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "RevokeInvite", Method: "DELETE", Path: "/api/v1/auth/admin/invites/:id", MuxPattern: PatternRevokeInvite, RequestType: "RevokeInviteReq", ResponseType: "EmptyResp"}, fn)
 		}
+		h.RevokeInvite = fn
 	}
 	if h.ListAdminUsers == nil {
-		h.ListAdminUsers = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req ListAdminUsersReq
+			q := r.URL.Query()
+			if v := q.Get("cursor"); v != "" {
+				req.Cursor = &v
+			}
+			if v := q.Get("limit"); v != "" {
+				req.Limit = &v
+			}
+			if v := q.Get("q"); v != "" {
+				req.Q = &v
+			}
 			resp, err := srv.ListAdminUsers(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "ListAdminUsers", Method: "GET", Path: "/api/v1/auth/admin/users", MuxPattern: PatternListAdminUsers, RequestType: "ListAdminUsersReq", ResponseType: "AdminUserPageResp"}, fn)
 		}
+		h.ListAdminUsers = fn
 	}
 	if h.CreatePasswordResetLink == nil {
-		h.CreatePasswordResetLink = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req CreatePasswordResetLinkReq
-			if r.ContentLength != 0 {
-				if err := m.DecodeRequest(w, r, &req); err != nil {
-					m.WriteBindErrorHTTP(w, r, err)
-					return
-				}
-			}
+			req.ID = r.PathValue("id")
 			resp, err := srv.CreatePasswordResetLink(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
-			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+			m.WriteOKHTTP(w, r, http.StatusCreated, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "CreatePasswordResetLink", Method: "POST", Path: "/api/v1/auth/admin/users/:id/password-reset-links", MuxPattern: PatternCreatePasswordResetLink, RequestType: "CreatePasswordResetLinkReq", ResponseType: "CreatePasswordResetLinkResp"}, fn)
 		}
+		h.CreatePasswordResetLink = fn
 	}
 	if h.InspectPasswordReset == nil {
-		h.InspectPasswordReset = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req InspectPasswordResetReq
-			if r.ContentLength != 0 {
-				if err := m.DecodeRequest(w, r, &req); err != nil {
-					m.WriteBindErrorHTTP(w, r, err)
-					return
-				}
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
 			}
 			resp, err := srv.InspectPasswordReset(r.Context(), &req)
 			if err != nil {
@@ -334,16 +372,18 @@ func RegisterIdentityHTTPServer(mux *http.ServeMux, srv IdentityHTTPServer, m HT
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "InspectPasswordReset", Method: "POST", Path: "/api/v1/auth/password-reset/inspect", MuxPattern: PatternInspectPasswordReset, RequestType: "InspectPasswordResetReq", ResponseType: "PasswordResetInspectionResp"}, fn)
 		}
+		h.InspectPasswordReset = fn
 	}
 	if h.ResetPassword == nil {
-		h.ResetPassword = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req ResetPasswordReq
-			if r.ContentLength != 0 {
-				if err := m.DecodeRequest(w, r, &req); err != nil {
-					m.WriteBindErrorHTTP(w, r, err)
-					return
-				}
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
 			}
 			_, err := srv.ResetPassword(r.Context(), &req)
 			if err != nil {
@@ -351,7 +391,11 @@ func RegisterIdentityHTTPServer(mux *http.ServeMux, srv IdentityHTTPServer, m HT
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusNoContent, nil)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "ResetPassword", Method: "POST", Path: "/api/v1/auth/password-reset", MuxPattern: PatternResetPassword, RequestType: "ResetPasswordReq", ResponseType: "EmptyResp"}, fn)
 		}
+		h.ResetPassword = fn
 	}
 	RegisterIdentityHTTPServiceRoutes(mux, h)
 }

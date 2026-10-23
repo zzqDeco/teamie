@@ -683,8 +683,23 @@ func (a *Adapter) DownloadAttachment(ctx context.Context, req *chatgen.DownloadA
 
 // --- HTTP Transport Wiring ---
 
+type chatResponder struct {
+	httpx.Responder
+	withAuth func(next func(w http.ResponseWriter, r *http.Request, ctx context.Context, s httpx.Session) error) http.HandlerFunc
+}
+
+func (cr chatResponder) WrapRoute(route chatgen.RouteSpec, next http.HandlerFunc) http.HandlerFunc {
+	if route.Name == "GetInvite" {
+		return next
+	}
+	return cr.withAuth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ httpx.Session) error {
+		next(w, r.WithContext(ctx))
+		return nil
+	})
+}
+
 // Routes mounts all Chat HTTP endpoints onto an http.ServeMux using the
-// generated chatgen.RegisterChatHTTPServiceRoutes router bindings and DTOs.
+// generated chatgen.RegisterChatHTTPServer stateless interface bindings and DTOs.
 func (a *Adapter) Routes() http.Handler {
 	m := http.NewServeMux()
 	httpx.Operations(m, func(r *http.Request) error {
@@ -706,147 +721,7 @@ func (a *Adapter) Routes() http.Handler {
 		})
 	}
 
-	chatgen.RegisterChatHTTPServiceRoutes(m, chatgen.ChatHTTPServiceRouteHandlers{
-		GetBootstrap: withAuth(func(w http.ResponseWriter, _ *http.Request, ctx context.Context, _ httpx.Session) error {
-			resp, err := a.GetBootstrap(ctx, &chatgen.GetBootstrapReq{})
-			if err != nil {
-				return err
-			}
-			httpx.WriteJSON(w, http.StatusOK, resp)
-			return nil
-		}),
-		CreateWorkspace: withAuth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, s httpx.Session) error {
-			if s.User.Kind != "human" {
-				return domain.ErrHumanWorkspaceManagementRequired()
-			}
-			var req chatgen.CreateWorkspaceReq
-			if err := httpx.DecodeJSON(w, r, &req); err != nil {
-				return err
-			}
-			resp, err := a.CreateWorkspace(ctx, &req)
-			if err != nil {
-				return err
-			}
-			httpx.WriteJSON(w, http.StatusCreated, resp)
-			return nil
-		}),
-		ListWorkspaceMembers: withAuth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ httpx.Session) error {
-			resp, err := a.ListWorkspaceMembers(ctx, &chatgen.ListWorkspaceMembersReq{ID: r.PathValue("id")})
-			if err != nil {
-				return err
-			}
-			httpx.WriteJSON(w, http.StatusOK, resp)
-			return nil
-		}),
-		CreateWorkspaceInvite: withAuth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ httpx.Session) error {
-			resp, err := a.CreateWorkspaceInvite(ctx, &chatgen.CreateWorkspaceInviteReq{ID: r.PathValue("id")})
-			if err != nil {
-				return err
-			}
-			httpx.WriteJSON(w, http.StatusCreated, resp)
-			return nil
-		}),
-		GetInvite: func(w http.ResponseWriter, r *http.Request) {
-			resp, err := a.GetInvite(r.Context(), &chatgen.GetInviteReq{Code: r.PathValue("code")})
-			if err != nil {
-				httpx.WriteError(w, err)
-				return
-			}
-			httpx.WriteJSON(w, http.StatusOK, resp)
-		},
-		AcceptInvite: withAuth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, s httpx.Session) error {
-			if s.User.Kind != "human" {
-				return domain.ErrHumanWorkspaceManagementRequired()
-			}
-			resp, err := a.AcceptInvite(ctx, &chatgen.AcceptInviteReq{Code: r.PathValue("code")})
-			if err != nil {
-				return err
-			}
-			httpx.WriteJSON(w, http.StatusOK, resp)
-			return nil
-		}),
-		RemoveWorkspaceMember: withAuth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ httpx.Session) error {
-			if _, err := a.RemoveWorkspaceMember(ctx, &chatgen.RemoveWorkspaceMemberReq{
-				ID:     r.PathValue("id"),
-				UserId: r.PathValue("userId"),
-			}); err != nil {
-				return err
-			}
-			httpx.WriteJSON(w, http.StatusNoContent, nil)
-			return nil
-		}),
-		ListConversations: withAuth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ httpx.Session) error {
-			resp, err := a.ListConversations(ctx, &chatgen.ListConversationsReq{ID: r.PathValue("id")})
-			if err != nil {
-				return err
-			}
-			httpx.WriteJSON(w, http.StatusOK, resp)
-			return nil
-		}),
-		CreateConversation: withAuth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ httpx.Session) error {
-			var req chatgen.CreateConversationReq
-			if err := httpx.DecodeJSON(w, r, &req); err != nil {
-				return err
-			}
-			req.ID = r.PathValue("id")
-			resp, err := a.CreateConversation(ctx, &req)
-			if err != nil {
-				return err
-			}
-			httpx.WriteJSON(w, http.StatusCreated, resp)
-			return nil
-		}),
-		AddConversationMember: withAuth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ httpx.Session) error {
-			var req chatgen.AddConversationMemberReq
-			if err := httpx.DecodeJSON(w, r, &req); err != nil {
-				return err
-			}
-			req.ID = r.PathValue("id")
-			resp, err := a.AddConversationMember(ctx, &req)
-			if err != nil {
-				return err
-			}
-			httpx.WriteJSON(w, http.StatusOK, resp)
-			return nil
-		}),
-		RemoveConversationMember: withAuth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ httpx.Session) error {
-			resp, err := a.RemoveConversationMember(ctx, &chatgen.RemoveConversationMemberReq{
-				ID:     r.PathValue("id"),
-				UserId: r.PathValue("userId"),
-			})
-			if err != nil {
-				return err
-			}
-			httpx.WriteJSON(w, http.StatusOK, resp)
-			return nil
-		}),
-		ListMessages: withAuth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ httpx.Session) error {
-			q := r.URL.Query()
-			resp, err := a.ListMessages(ctx, &chatgen.ListMessagesReq{
-				ID:        r.PathValue("id"),
-				BeforeSeq: optString(q.Get("beforeSeq")),
-				AroundSeq: optString(q.Get("aroundSeq")),
-				Limit:     optString(q.Get("limit")),
-				Q:         optString(q.Get("q")),
-				Content:   optString(q.Get("content")),
-			})
-			if err != nil {
-				return err
-			}
-			httpx.WriteJSON(w, http.StatusOK, resp)
-			return nil
-		}),
-		GetMessage: withAuth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ httpx.Session) error {
-			resp, err := a.GetMessage(ctx, &chatgen.GetMessageReq{
-				ID:        r.PathValue("id"),
-				MessageId: r.PathValue("messageId"),
-			})
-			if err != nil {
-				return err
-			}
-			httpx.WriteJSON(w, http.StatusOK, resp)
-			return nil
-		}),
+	chatgen.RegisterChatHTTPServer(m, a, chatResponder{withAuth: withAuth}, chatgen.ChatHTTPServiceRouteHandlers{
 		SendMessage: withAuth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ httpx.Session) error {
 			var req chatgen.SendMessageReq
 			if err := httpx.DecodeJSON(w, r, &req); err != nil {
@@ -862,83 +737,6 @@ func (a *Adapter) Routes() http.Handler {
 				status = http.StatusCreated
 			}
 			httpx.WriteJSON(w, status, &chatgen.MessageResp{Message: toMessageDTO(msg)})
-			return nil
-		}),
-		EditMessage: withAuth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ httpx.Session) error {
-			var req chatgen.EditMessageReq
-			if err := httpx.DecodeJSON(w, r, &req); err != nil {
-				return err
-			}
-			req.ID = r.PathValue("id")
-			req.MessageId = r.PathValue("messageId")
-			resp, err := a.EditMessage(ctx, &req)
-			if err != nil {
-				return err
-			}
-			httpx.WriteJSON(w, http.StatusOK, resp)
-			return nil
-		}),
-		RetractMessage: withAuth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ httpx.Session) error {
-			resp, err := a.RetractMessage(ctx, &chatgen.RetractMessageReq{
-				ID:        r.PathValue("id"),
-				MessageId: r.PathValue("messageId"),
-			})
-			if err != nil {
-				return err
-			}
-			httpx.WriteJSON(w, http.StatusOK, resp)
-			return nil
-		}),
-		MarkRead: withAuth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ httpx.Session) error {
-			var req chatgen.MarkReadReq
-			if err := httpx.DecodeJSON(w, r, &req); err != nil {
-				return err
-			}
-			req.ID = r.PathValue("id")
-			resp, err := a.MarkRead(ctx, &req)
-			if err != nil {
-				return err
-			}
-			httpx.WriteJSON(w, http.StatusOK, resp)
-			return nil
-		}),
-		SearchWorkspaceMessages: withAuth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ httpx.Session) error {
-			q := r.URL.Query()
-			resp, err := a.SearchWorkspaceMessages(ctx, &chatgen.SearchWorkspaceMessagesReq{
-				ID:     r.PathValue("id"),
-				Q:      optString(q.Get("q")),
-				Cursor: optString(q.Get("cursor")),
-				Limit:  optString(q.Get("limit")),
-			})
-			if err != nil {
-				return err
-			}
-			httpx.WriteJSON(w, http.StatusOK, resp)
-			return nil
-		}),
-		GetAttention: withAuth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ httpx.Session) error {
-			q := r.URL.Query()
-			resp, err := a.GetAttention(ctx, &chatgen.GetAttentionReq{
-				Cursor:     optString(q.Get("cursor")),
-				Limit:      optString(q.Get("limit")),
-				UnreadOnly: optString(q.Get("unreadOnly")),
-			})
-			if err != nil {
-				return err
-			}
-			httpx.WriteJSON(w, http.StatusOK, resp)
-			return nil
-		}),
-		Sync: withAuth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ httpx.Session) error {
-			q := r.URL.Query()
-			resp, err := a.Sync(ctx, &chatgen.SyncReq{
-				Cursor: optString(q.Get("cursor")),
-				Limit:  optString(q.Get("limit")),
-			})
-			if err != nil {
-				return err
-			}
-			httpx.WriteJSON(w, http.StatusOK, resp)
 			return nil
 		}),
 		UploadAttachment: withAuth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, s httpx.Session) error {
@@ -995,27 +793,6 @@ func (a *Adapter) Routes() http.Handler {
 				status = http.StatusCreated
 			}
 			httpx.WriteJSON(w, status, &chatgen.AttachmentResp{Attachment: toAttachmentDTO(att)})
-			return nil
-		}),
-		GetAttachmentUpload: withAuth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ httpx.Session) error {
-			resp, err := a.GetAttachmentUpload(ctx, &chatgen.GetAttachmentUploadReq{
-				ID:        r.PathValue("id"),
-				UploadKey: r.PathValue("uploadKey"),
-			})
-			if err != nil {
-				return err
-			}
-			httpx.WriteJSON(w, http.StatusOK, resp)
-			return nil
-		}),
-		DeletePendingAttachment: withAuth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ httpx.Session) error {
-			if _, err := a.DeletePendingAttachment(ctx, &chatgen.DeletePendingAttachmentReq{
-				ID:           r.PathValue("id"),
-				AttachmentId: r.PathValue("attachmentId"),
-			}); err != nil {
-				return err
-			}
-			httpx.WriteJSON(w, http.StatusNoContent, nil)
 			return nil
 		}),
 		DownloadAttachment: withAuth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ httpx.Session) error {

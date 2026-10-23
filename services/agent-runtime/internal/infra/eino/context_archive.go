@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"github.com/cloudwego/eino/compose"
 	"slices"
 	"sort"
@@ -18,33 +17,9 @@ import (
 	"github.com/cloudwego/eino/adk/middlewares/reduction"
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"teamie/services/agent-runtime/internal/domain"
+	"teamie/services/agent-runtime/internal/infra/pg"
 )
-
-// These are private Runtime records. Neither Chat nor the browser reads this table.
-const contextArchiveSchemaSQL = `
-CREATE TABLE IF NOT EXISTS runtime_context_artifacts(
- seq bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
- agent_id uuid NOT NULL,
- run_id uuid NOT NULL REFERENCES runtime_runs(id),
- attempt_id uuid NOT NULL,
- artifact_key text NOT NULL,
- kind text NOT NULL,
- tool_call_id text NOT NULL DEFAULT '',
- tool_name text NOT NULL DEFAULT '',
- content bytea NOT NULL,
- content_hash text NOT NULL,
- sources jsonb NOT NULL,
- source_artifact_refs jsonb NOT NULL DEFAULT '[]',
- source_event_seq bigint NOT NULL DEFAULT 0,
- created_at timestamptz NOT NULL DEFAULT now(),
- UNIQUE(agent_id,run_id,artifact_key)
-);
-ALTER TABLE runtime_context_artifacts ADD COLUMN IF NOT EXISTS source_artifact_refs jsonb NOT NULL DEFAULT '[]';
-CREATE INDEX IF NOT EXISTS runtime_context_artifacts_agent_order ON runtime_context_artifacts(agent_id,seq);
-CREATE INDEX IF NOT EXISTS runtime_context_artifacts_agent_key ON runtime_context_artifacts(agent_id,artifact_key);
-`
 
 const (
 	contextArtifactMaximum = domain.ContextArtifactMaximum
@@ -113,8 +88,7 @@ func (a *ContextArchive) scope(ctx context.Context) (*Run, error) {
 	if err = a.Store.CheckLease(ctx, a.Lease); err != nil {
 		return nil, err
 	}
-	var current bool
-	err = a.Store.DB.QueryRow(ctx, `SELECT agent_id=$2 AND attempt_id=$3 AND state='running' FROM runtime_runs WHERE id=$1`, r.ID, r.AgentID, r.Attempt).Scan(&current)
+	current, err := a.Store.DB.CheckRunAttemptRunning(ctx, r.ID, r.AgentID, r.Attempt)
 	if err != nil {
 		return nil, err
 	}
@@ -164,21 +138,7 @@ func (a *ContextArchive) AuthorizeSources(ctx context.Context, refs []InputSourc
 }
 
 func (a *ContextArchive) sourcesThrough(ctx context.Context, r *Run, eventHead int64) ([]InputSource, []string, error) {
-	rows, err := a.Store.DB.Query(ctx, `SELECT DISTINCT e.run_id::text FROM runtime_session_events e JOIN runtime_runs r ON r.id=e.run_id WHERE e.session_id=$1 AND `+contextEventVisibility+` AND e.seq<=$6`, "agent:"+r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead, eventHead)
-	if err != nil {
-		return nil, nil, err
-	}
-	ids := []string{}
-	for rows.Next() {
-		var id string
-		if err = rows.Scan(&id); err != nil {
-			rows.Close()
-			return nil, nil, err
-		}
-		ids = append(ids, id)
-	}
-	err = rows.Err()
-	rows.Close()
+	ids, err := a.Store.DB.ListVisibleSessionRunIDsThrough(ctx, "agent:"+r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead, eventHead)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -276,61 +236,41 @@ func (a *ContextArchive) put(ctx context.Context, r *Run, artifact contextArtifa
 		return "", errContextUnavailable
 	}
 	_, _, key, _ := parseContextRef(ref)
-	tx, err := a.Store.DB.Begin(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer tx.Rollback(ctx)
-	if err = checkLease(ctx, tx, a.Lease); err != nil {
-		return "", err
-	}
-	var current bool
-	if err = tx.QueryRow(ctx, `SELECT agent_id=$2 AND attempt_id=$3 AND state='running' FROM runtime_runs WHERE id=$1 FOR SHARE`, r.ID, r.AgentID, r.Attempt).Scan(&current); err != nil || !current {
-		if err == nil {
-			err = ErrLeaseLost
-		}
-		return "", err
-	}
-	_, err = tx.Exec(ctx, `INSERT INTO runtime_context_artifacts(agent_id,run_id,attempt_id,artifact_key,kind,tool_call_id,tool_name,content,content_hash,sources,source_artifact_refs,source_event_seq) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT DO NOTHING`, r.AgentID, artifact.RunID, artifact.Attempt, key, artifact.Kind, artifact.ToolCallID, artifact.ToolName, []byte(artifact.Text), digest([]byte(artifact.Text)), sourceJSON, parentJSON, artifact.EventSeq)
-	if err != nil {
-		return "", err
-	}
-	var hash, kind, call, name string
-	var oldSources, oldParents []byte
-	var seq int64
-	err = tx.QueryRow(ctx, `SELECT content_hash,kind,tool_call_id,tool_name,sources,source_artifact_refs,source_event_seq FROM runtime_context_artifacts WHERE agent_id=$1 AND run_id=$2 AND artifact_key=$3`, r.AgentID, artifact.RunID, key).Scan(&hash, &kind, &call, &name, &oldSources, &oldParents, &seq)
-	if err != nil {
-		return "", err
-	}
-	var oldRefs []InputSource
-	if json.Unmarshal(oldSources, &oldRefs) != nil {
-		return "", ErrReplayConflict
-	}
-	canonicalOld, e := canonicalContextSources(oldRefs)
-	oldJSON, _ := json.Marshal(canonicalOld)
-	var previousParents []string
-	if json.Unmarshal(oldParents, &previousParents) != nil {
-		return "", ErrReplayConflict
-	}
-	previousJSON, _ := json.Marshal(previousParents)
-	if e != nil || hash != digest([]byte(artifact.Text)) || kind != artifact.Kind || call != artifact.ToolCallID || name != artifact.ToolName || seq != artifact.EventSeq || !bytes.Equal(oldJSON, sourceJSON) || !bytes.Equal(previousJSON, parentJSON) {
-		return "", fmt.Errorf("%w: context artifact changed", ErrReplayConflict)
-	}
-	// Version the provenance in the existing private observation journal. Keep
-	// immutable artifact/tool/model bytes unchanged and commit proof atomically.
 	version := contextSourceVersionBytes([]byte(artifact.Text), sourceJSON, parentJSON)
-	_, err = tx.Exec(ctx, `INSERT INTO runtime_tool_observations(run_id,call_id,observation_key,response) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, artifact.RunID, "context-artifact:"+key, contextSourceVersionKey, version)
-	if err != nil {
-		return "", err
-	}
-	var savedVersion []byte
-	if err = tx.QueryRow(ctx, `SELECT response FROM runtime_tool_observations WHERE run_id=$1 AND call_id=$2 AND observation_key=$3`, artifact.RunID, "context-artifact:"+key, contextSourceVersionKey).Scan(&savedVersion); err != nil {
-		return "", err
-	}
-	if !bytes.Equal(version, savedVersion) {
-		return "", ErrReplayConflict
-	}
-	if err = tx.Commit(ctx); err != nil {
+	if err = a.Store.DB.PutContextArtifact(
+		ctx,
+		a.Lease,
+		pg.ContextArtifactWrite{
+			AgentID:       r.AgentID,
+			ActiveRunID:   r.ID,
+			ActiveAttempt: r.Attempt,
+			RunID:         artifact.RunID,
+			Attempt:       artifact.Attempt,
+			Key:           key,
+			Kind:          artifact.Kind,
+			ToolCallID:    artifact.ToolCallID,
+			ToolName:      artifact.ToolName,
+			Content:       []byte(artifact.Text),
+			ContentHash:   digest([]byte(artifact.Text)),
+			SourceJSON:    sourceJSON,
+			ParentJSON:    parentJSON,
+			EventSeq:      artifact.EventSeq,
+			VersionKey:    contextSourceVersionKey,
+			VersionBytes:  version,
+		},
+		func(oldSources []byte) ([]byte, error) {
+			var oldRefs []InputSource
+			if json.Unmarshal(oldSources, &oldRefs) != nil {
+				return nil, ErrReplayConflict
+			}
+			canonicalOld, err := canonicalContextSources(oldRefs)
+			if err != nil {
+				return nil, err
+			}
+			oldJSON, _ := json.Marshal(canonicalOld)
+			return oldJSON, nil
+		},
+	); err != nil {
 		return "", err
 	}
 	return ref, nil
@@ -374,25 +314,29 @@ func (a *ContextArchive) OffloadPath(ctx context.Context, phase string, detail *
 	return a.ArchiveToolPath(ctx, kind, detail, content)
 }
 
-const contextEventVisibility = `(e.run_id=$3 OR e.seq<=$4) AND (e.attempt_id=$2 OR (e.run_id=$3 AND e.attempt_id=ANY(r.context_attempts)) OR EXISTS(SELECT 1 FROM runtime_session_acceptances x WHERE x.agent_id=r.agent_id AND x.attempt_id=e.attempt_id AND x.seq<=$5))`
-
-const contextArtifactVisibility = `((a.source_event_seq=0 AND (a.run_id=$3 OR EXISTS(SELECT 1 FROM runtime_session_acceptances x WHERE x.agent_id=a.agent_id AND x.run_id=a.run_id AND x.seq<=$5))) OR (a.source_event_seq>0 AND (a.run_id=$3 OR a.source_event_seq<=$4) AND (a.attempt_id=$2 OR (a.run_id=$3 AND a.attempt_id=ANY(r.context_attempts)) OR EXISTS(SELECT 1 FROM runtime_session_acceptances x WHERE x.agent_id=a.agent_id AND x.attempt_id=a.attempt_id AND x.seq<=$5))))`
-
 func (a *ContextArchive) load(ctx context.Context, r *Run, ref string) (*contextArtifact, error) {
 	runID, _, key, err := parseContextRef(ref)
 	if err != nil {
 		return nil, err
 	}
-	out := &contextArtifact{RunID: runID}
-	var raw, sources, parents, version []byte
-	var hash string
-	err = a.Store.DB.QueryRow(ctx, `SELECT a.attempt_id::text,a.artifact_key,a.kind,a.tool_call_id,a.tool_name,a.content,a.content_hash,a.sources,a.source_artifact_refs,a.source_event_seq,a.created_at,o.response FROM runtime_context_artifacts a JOIN runtime_runs r ON r.id=a.run_id LEFT JOIN runtime_tool_observations o ON o.run_id=a.run_id AND o.call_id='context-artifact:'||a.artifact_key AND o.observation_key='context-source-version-v1' WHERE a.agent_id=$1 AND `+contextArtifactVisibility+` AND a.run_id=$6 AND a.artifact_key=$7`, r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead, runID, key).Scan(&out.Attempt, &out.Key, &out.Kind, &out.ToolCallID, &out.ToolName, &raw, &hash, &sources, &parents, &out.EventSeq, &out.CreatedAt, &version)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, errContextUnavailable
-	}
+	row, found, err := a.Store.DB.LoadVisibleContextArtifact(ctx, r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead, runID, key)
 	if err != nil {
 		return nil, err
 	}
+	if !found {
+		return nil, errContextUnavailable
+	}
+	out := &contextArtifact{
+		RunID:      runID,
+		Attempt:    row.Attempt,
+		Key:        row.Key,
+		Kind:       row.Kind,
+		ToolCallID: row.ToolCallID,
+		ToolName:   row.ToolName,
+		EventSeq:   row.EventSeq,
+		CreatedAt:  row.CreatedAt,
+	}
+	raw, hash, sources, parents, version := row.Raw, row.Hash, row.Sources, row.Parents, row.Version
 	if hash != digest(raw) || len(raw) > contextArtifactMaximum || !utf8.Valid(raw) || json.Unmarshal(sources, &out.Sources) != nil || json.Unmarshal(parents, &out.ArtifactRefs) != nil {
 		return nil, ErrReplayConflict
 	}

@@ -297,8 +297,35 @@ func (a *Adapter) WriteSingleProfile(w http.ResponseWriter, r *http.Request, ag 
 	return nil
 }
 
+type controlResponder struct {
+	adapter *Adapter
+}
+
+func (controlResponder) DecodeRequest(w http.ResponseWriter, r *http.Request, dst any) error {
+	return Decode(w, r, dst)
+}
+
+func (controlResponder) WriteBindErrorHTTP(w http.ResponseWriter, _ *http.Request, err error) {
+	Fail(w, err)
+}
+
+func (controlResponder) WriteDomainErrorHTTP(w http.ResponseWriter, _ *http.Request, err error) {
+	Fail(w, err)
+}
+
+func (controlResponder) WriteOKHTTP(w http.ResponseWriter, _ *http.Request, status int, resp any) {
+	Write(w, status, resp)
+}
+
+func (cr controlResponder) WrapRoute(_ controlgen.RouteSpec, next http.HandlerFunc) http.HandlerFunc {
+	return cr.adapter.Auth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ domain.UserProfile) error {
+		next(w, r.WithContext(ctx))
+		return nil
+	})
+}
+
 // Routes mounts all Agent Control HTTP endpoints onto an http.ServeMux using
-// the generated controlgen.RegisterAgentControlHTTPServiceRoutes router bindings.
+// the generated controlgen.RegisterAgentControlHTTPServer stateless interface bindings.
 func (a *Adapter) Routes() http.Handler {
 	m := http.NewServeMux()
 	m.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
@@ -317,64 +344,7 @@ func (a *Adapter) Routes() http.Handler {
 	m.HandleFunc("GET /version", func(w http.ResponseWriter, _ *http.Request) {
 		Write(w, http.StatusOK, map[string]string{"version": a.Version, "sha": a.SHA})
 	})
-	controlgen.RegisterAgentControlHTTPServiceRoutes(m, controlgen.AgentControlHTTPServiceRouteHandlers{
-		ListOwnedAgents: a.Auth(func(w http.ResponseWriter, _ *http.Request, ctx context.Context, _ domain.UserProfile) error {
-			resp, err := a.ListOwnedAgents(ctx, &controlgen.ListOwnedAgentsReq{})
-			if err != nil {
-				return err
-			}
-			Write(w, http.StatusOK, resp)
-			return nil
-		}),
-		CreateAgent: a.Auth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ domain.UserProfile) error {
-			var req controlgen.CreateAgentReq
-			if err := Decode(w, r, &req); err != nil {
-				return err
-			}
-			resp, err := a.CreateAgent(ctx, &req)
-			if err != nil {
-				return err
-			}
-			Write(w, http.StatusCreated, resp)
-			return nil
-		}),
-		GetAgentProfile: a.Auth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ domain.UserProfile) error {
-			resp, err := a.GetAgentProfile(ctx, &controlgen.GetAgentProfileReq{ID: r.PathValue("id")})
-			if err != nil {
-				return err
-			}
-			Write(w, http.StatusOK, resp)
-			return nil
-		}),
-		UpdateAgent: a.Auth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ domain.UserProfile) error {
-			var req controlgen.UpdateAgentReq
-			if err := Decode(w, r, &req); err != nil {
-				return err
-			}
-			req.ID = r.PathValue("id")
-			resp, err := a.UpdateAgent(ctx, &req)
-			if err != nil {
-				return err
-			}
-			Write(w, http.StatusOK, resp)
-			return nil
-		}),
-		DeleteAgent: a.Auth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ domain.UserProfile) error {
-			if _, err := a.DeleteAgent(ctx, &controlgen.DeleteAgentReq{ID: r.PathValue("id")}); err != nil {
-				return err
-			}
-			Write(w, http.StatusNoContent, nil)
-			return nil
-		}),
-		ListWorkspaceAgents: a.Auth(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ domain.UserProfile) error {
-			resp, err := a.ListWorkspaceAgents(ctx, &controlgen.ListWorkspaceAgentsReq{ID: r.PathValue("id")})
-			if err != nil {
-				return err
-			}
-			Write(w, http.StatusOK, resp)
-			return nil
-		}),
-	})
+	controlgen.RegisterAgentControlHTTPServer(m, a, controlResponder{adapter: a})
 	return m
 }
 

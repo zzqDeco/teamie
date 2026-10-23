@@ -37,6 +37,21 @@ func (db *DB) Conn(ctx context.Context) Querier {
 	return db.pool
 }
 
+// Exec executes sql on the active transaction in ctx or the connection pool.
+func (db *DB) Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error) {
+	return db.Conn(ctx).Exec(ctx, sql, arguments...)
+}
+
+// Query executes a multi-row query on the active transaction in ctx or the connection pool.
+func (db *DB) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	return db.Conn(ctx).Query(ctx, sql, args...)
+}
+
+// QueryRow executes a single-row query on the active transaction in ctx or the connection pool.
+func (db *DB) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return db.Conn(ctx).QueryRow(ctx, sql, args...)
+}
+
 // WithinTx executes fn inside a database transaction. If ctx already carries an
 // active transaction, fn runs within that existing transaction.
 func (db *DB) WithinTx(ctx context.Context, fn func(ctx context.Context) error) error {

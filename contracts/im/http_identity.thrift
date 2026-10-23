@@ -139,17 +139,17 @@ struct ResetPasswordReq {
 
 service IdentityHTTPService {
   RegistrationMetadataResp GetRegistrationMetadata(1: GetRegistrationMetadataReq req) (api.get="/api/v1/auth/registration")
-  SessionResp Register(1: RegisterReq req) (api.post="/api/v1/auth/register")
+  SessionResp Register(1: RegisterReq req) (api.post="/api/v1/auth/register", api.status="201")
   SessionResp Login(1: LoginReq req) (api.post="/api/v1/auth/login")
   SessionResp GetSession(1: GetSessionReq req) (api.get="/api/v1/auth/session")
   EmptyResp Logout(1: LogoutReq req) (api.post="/api/v1/auth/logout")
   EmptyResp ChangePassword(1: ChangePasswordReq req) (api.post="/api/v1/auth/password")
   UpdateProfileResp UpdateProfile(1: UpdateProfileReq req) (api.patch="/api/v1/auth/profile")
   ListInvitesResp ListInvites(1: ListInvitesReq req) (api.get="/api/v1/auth/admin/invites")
-  CreateInviteResp CreateInvite(1: CreateInviteReq req) (api.post="/api/v1/auth/admin/invites")
+  CreateInviteResp CreateInvite(1: CreateInviteReq req) (api.post="/api/v1/auth/admin/invites", api.status="201")
   EmptyResp RevokeInvite(1: RevokeInviteReq req) (api.delete="/api/v1/auth/admin/invites/:id")
   AdminUserPageResp ListAdminUsers(1: ListAdminUsersReq req) (api.get="/api/v1/auth/admin/users")
-  CreatePasswordResetLinkResp CreatePasswordResetLink(1: CreatePasswordResetLinkReq req) (api.post="/api/v1/auth/admin/users/:id/password-reset-links")
+  CreatePasswordResetLinkResp CreatePasswordResetLink(1: CreatePasswordResetLinkReq req) (api.post="/api/v1/auth/admin/users/:id/password-reset-links", api.status="201")
   PasswordResetInspectionResp InspectPasswordReset(1: InspectPasswordResetReq req) (api.post="/api/v1/auth/password-reset/inspect")
   EmptyResp ResetPassword(1: ResetPasswordReq req) (api.post="/api/v1/auth/password-reset")
 }

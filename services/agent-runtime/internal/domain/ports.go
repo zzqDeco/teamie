@@ -101,17 +101,12 @@ type PublicEvent struct {
 // RuntimeEngine defines the outbound port for the Eino TurnLoop runtime engine.
 type RuntimeEngine interface {
 	Ready(ctx context.Context) error
-	Run(ctx context.Context)
-	State(ctx context.Context, q RuntimeQuery) (RuntimeResult, error)
-	Runs(ctx context.Context, q RuntimeQuery) (RuntimeResult, error)
-	RunDetail(ctx context.Context, q RuntimeQuery) (RuntimeResult, error)
-	Tasks(ctx context.Context, q RuntimeQuery) (RuntimeResult, error)
-	TaskDetail(ctx context.Context, q RuntimeQuery) (RuntimeResult, error)
-	Events(ctx context.Context, q RuntimeQuery) (RuntimeResult, error)
-	CancelRun(ctx context.Context, q RuntimeQuery) (RuntimeResult, error)
-	RetryRun(ctx context.Context, q RuntimeQuery) (RuntimeResult, error)
-	CancelTask(ctx context.Context, q RuntimeQuery) (RuntimeResult, error)
+	OwnerID() string
+	IsFeatureEnabled(flag string) bool
+	WorkAgent(ctx context.Context, profile AgentProfile, lease *Lease)
+	CancelAgentTasks(ctx context.Context, agentID string)
 	CancelRunTasks(ctx context.Context, agentID, runID string)
+	CancelTaskByID(ctx context.Context, agentID, taskID string) (statusCode int32, errorCode string, err error)
 }
 
 // TxManager coordinates atomic database transactions without exposing SQL driver types

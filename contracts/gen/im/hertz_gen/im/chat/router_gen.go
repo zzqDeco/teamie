@@ -12,6 +12,11 @@ type HTTPResponder interface {
 	WriteOKHTTP(w http.ResponseWriter, r *http.Request, status int, resp any)
 }
 
+// HTTPRouteMiddleware optionally wraps generated per-route handlers (e.g. authentication/CSRF middleware).
+type HTTPRouteMiddleware interface {
+	WrapRoute(route RouteSpec, next http.HandlerFunc) http.HandlerFunc
+}
+
 // RouteSpec describes a single HTTP/WebSocket endpoint declared in the Thrift IDL.
 type RouteSpec struct {
 	Name         string
@@ -215,8 +220,9 @@ func RegisterChatHTTPServer(mux *http.ServeMux, srv ChatHTTPServer, m HTTPRespon
 	if len(overrides) > 0 {
 		h = overrides[0]
 	}
+	mw, hasMW := m.(HTTPRouteMiddleware)
 	if h.GetBootstrap == nil {
-		h.GetBootstrap = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req GetBootstrapReq
 			resp, err := srv.GetBootstrap(r.Context(), &req)
 			if err != nil {
@@ -224,273 +230,391 @@ func RegisterChatHTTPServer(mux *http.ServeMux, srv ChatHTTPServer, m HTTPRespon
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "GetBootstrap", Method: "GET", Path: "/api/v1/bootstrap", MuxPattern: PatternGetBootstrap, RequestType: "GetBootstrapReq", ResponseType: "BootstrapResp"}, fn)
 		}
+		h.GetBootstrap = fn
 	}
 	if h.CreateWorkspace == nil {
-		h.CreateWorkspace = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req CreateWorkspaceReq
-			if r.ContentLength != 0 {
-				if err := m.DecodeRequest(w, r, &req); err != nil {
-					m.WriteBindErrorHTTP(w, r, err)
-					return
-				}
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
 			}
 			resp, err := srv.CreateWorkspace(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
-			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+			m.WriteOKHTTP(w, r, http.StatusCreated, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "CreateWorkspace", Method: "POST", Path: "/api/v1/workspaces", MuxPattern: PatternCreateWorkspace, RequestType: "CreateWorkspaceReq", ResponseType: "CreateWorkspaceResp"}, fn)
 		}
+		h.CreateWorkspace = fn
 	}
 	if h.ListWorkspaceMembers == nil {
-		h.ListWorkspaceMembers = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req ListWorkspaceMembersReq
+			req.ID = r.PathValue("id")
 			resp, err := srv.ListWorkspaceMembers(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "ListWorkspaceMembers", Method: "GET", Path: "/api/v1/workspaces/:id/members", MuxPattern: PatternListWorkspaceMembers, RequestType: "ListWorkspaceMembersReq", ResponseType: "ListWorkspaceMembersResp"}, fn)
 		}
+		h.ListWorkspaceMembers = fn
 	}
 	if h.CreateWorkspaceInvite == nil {
-		h.CreateWorkspaceInvite = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req CreateWorkspaceInviteReq
-			if r.ContentLength != 0 {
-				if err := m.DecodeRequest(w, r, &req); err != nil {
-					m.WriteBindErrorHTTP(w, r, err)
-					return
-				}
-			}
+			req.ID = r.PathValue("id")
 			resp, err := srv.CreateWorkspaceInvite(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
-			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+			m.WriteOKHTTP(w, r, http.StatusCreated, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "CreateWorkspaceInvite", Method: "POST", Path: "/api/v1/workspaces/:id/invites", MuxPattern: PatternCreateWorkspaceInvite, RequestType: "CreateWorkspaceInviteReq", ResponseType: "CreateWorkspaceInviteResp"}, fn)
 		}
+		h.CreateWorkspaceInvite = fn
 	}
 	if h.GetInvite == nil {
-		h.GetInvite = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req GetInviteReq
+			req.Code = r.PathValue("code")
 			resp, err := srv.GetInvite(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "GetInvite", Method: "GET", Path: "/api/v1/invites/:code", MuxPattern: PatternGetInvite, RequestType: "GetInviteReq", ResponseType: "GetInviteResp"}, fn)
 		}
+		h.GetInvite = fn
 	}
 	if h.AcceptInvite == nil {
-		h.AcceptInvite = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req AcceptInviteReq
-			if r.ContentLength != 0 {
-				if err := m.DecodeRequest(w, r, &req); err != nil {
-					m.WriteBindErrorHTTP(w, r, err)
-					return
-				}
-			}
+			req.Code = r.PathValue("code")
 			resp, err := srv.AcceptInvite(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "AcceptInvite", Method: "POST", Path: "/api/v1/invites/:code/accept", MuxPattern: PatternAcceptInvite, RequestType: "AcceptInviteReq", ResponseType: "AcceptInviteResp"}, fn)
 		}
+		h.AcceptInvite = fn
 	}
 	if h.RemoveWorkspaceMember == nil {
-		h.RemoveWorkspaceMember = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req RemoveWorkspaceMemberReq
+			req.ID = r.PathValue("id")
+			req.UserId = r.PathValue("userId")
 			_, err := srv.RemoveWorkspaceMember(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusNoContent, nil)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "RemoveWorkspaceMember", Method: "DELETE", Path: "/api/v1/workspaces/:id/members/:userId", MuxPattern: PatternRemoveWorkspaceMember, RequestType: "RemoveWorkspaceMemberReq", ResponseType: "EmptyResp"}, fn)
 		}
+		h.RemoveWorkspaceMember = fn
 	}
 	if h.ListConversations == nil {
-		h.ListConversations = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req ListConversationsReq
+			req.ID = r.PathValue("id")
 			resp, err := srv.ListConversations(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "ListConversations", Method: "GET", Path: "/api/v1/workspaces/:id/conversations", MuxPattern: PatternListConversations, RequestType: "ListConversationsReq", ResponseType: "ListConversationsResp"}, fn)
 		}
+		h.ListConversations = fn
 	}
 	if h.CreateConversation == nil {
-		h.CreateConversation = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req CreateConversationReq
-			if r.ContentLength != 0 {
-				if err := m.DecodeRequest(w, r, &req); err != nil {
-					m.WriteBindErrorHTTP(w, r, err)
-					return
-				}
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
 			}
+			req.ID = r.PathValue("id")
 			resp, err := srv.CreateConversation(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
-			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+			m.WriteOKHTTP(w, r, http.StatusCreated, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "CreateConversation", Method: "POST", Path: "/api/v1/workspaces/:id/conversations", MuxPattern: PatternCreateConversation, RequestType: "CreateConversationReq", ResponseType: "ConversationResp"}, fn)
 		}
+		h.CreateConversation = fn
 	}
 	if h.AddConversationMember == nil {
-		h.AddConversationMember = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req AddConversationMemberReq
-			if r.ContentLength != 0 {
-				if err := m.DecodeRequest(w, r, &req); err != nil {
-					m.WriteBindErrorHTTP(w, r, err)
-					return
-				}
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
 			}
+			req.ID = r.PathValue("id")
 			resp, err := srv.AddConversationMember(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "AddConversationMember", Method: "POST", Path: "/api/v1/conversations/:id/members", MuxPattern: PatternAddConversationMember, RequestType: "AddConversationMemberReq", ResponseType: "ConversationResp"}, fn)
 		}
+		h.AddConversationMember = fn
 	}
 	if h.RemoveConversationMember == nil {
-		h.RemoveConversationMember = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req RemoveConversationMemberReq
+			req.ID = r.PathValue("id")
+			req.UserId = r.PathValue("userId")
 			resp, err := srv.RemoveConversationMember(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "RemoveConversationMember", Method: "DELETE", Path: "/api/v1/conversations/:id/members/:userId", MuxPattern: PatternRemoveConversationMember, RequestType: "RemoveConversationMemberReq", ResponseType: "ConversationResp"}, fn)
 		}
+		h.RemoveConversationMember = fn
 	}
 	if h.ListMessages == nil {
-		h.ListMessages = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req ListMessagesReq
+			req.ID = r.PathValue("id")
+			q := r.URL.Query()
+			if v := q.Get("beforeSeq"); v != "" {
+				req.BeforeSeq = &v
+			}
+			if v := q.Get("aroundSeq"); v != "" {
+				req.AroundSeq = &v
+			}
+			if v := q.Get("limit"); v != "" {
+				req.Limit = &v
+			}
+			if v := q.Get("q"); v != "" {
+				req.Q = &v
+			}
+			if v := q.Get("content"); v != "" {
+				req.Content = &v
+			}
 			resp, err := srv.ListMessages(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "ListMessages", Method: "GET", Path: "/api/v1/conversations/:id/messages", MuxPattern: PatternListMessages, RequestType: "ListMessagesReq", ResponseType: "ListMessagesResp"}, fn)
 		}
+		h.ListMessages = fn
 	}
 	if h.GetMessage == nil {
-		h.GetMessage = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req GetMessageReq
+			req.ID = r.PathValue("id")
+			req.MessageId = r.PathValue("messageId")
 			resp, err := srv.GetMessage(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "GetMessage", Method: "GET", Path: "/api/v1/conversations/:id/messages/:messageId", MuxPattern: PatternGetMessage, RequestType: "GetMessageReq", ResponseType: "MessageResp"}, fn)
 		}
+		h.GetMessage = fn
 	}
 	if h.SendMessage == nil {
-		h.SendMessage = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req SendMessageReq
-			if r.ContentLength != 0 {
-				if err := m.DecodeRequest(w, r, &req); err != nil {
-					m.WriteBindErrorHTTP(w, r, err)
-					return
-				}
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
 			}
+			req.ID = r.PathValue("id")
 			resp, err := srv.SendMessage(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "SendMessage", Method: "POST", Path: "/api/v1/conversations/:id/messages", MuxPattern: PatternSendMessage, RequestType: "SendMessageReq", ResponseType: "MessageResp"}, fn)
 		}
+		h.SendMessage = fn
 	}
 	if h.EditMessage == nil {
-		h.EditMessage = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req EditMessageReq
-			if r.ContentLength != 0 {
-				if err := m.DecodeRequest(w, r, &req); err != nil {
-					m.WriteBindErrorHTTP(w, r, err)
-					return
-				}
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
 			}
+			req.ID = r.PathValue("id")
+			req.MessageId = r.PathValue("messageId")
 			resp, err := srv.EditMessage(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "EditMessage", Method: "PATCH", Path: "/api/v1/conversations/:id/messages/:messageId", MuxPattern: PatternEditMessage, RequestType: "EditMessageReq", ResponseType: "MessageResp"}, fn)
 		}
+		h.EditMessage = fn
 	}
 	if h.RetractMessage == nil {
-		h.RetractMessage = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req RetractMessageReq
+			req.ID = r.PathValue("id")
+			req.MessageId = r.PathValue("messageId")
 			resp, err := srv.RetractMessage(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "RetractMessage", Method: "DELETE", Path: "/api/v1/conversations/:id/messages/:messageId", MuxPattern: PatternRetractMessage, RequestType: "RetractMessageReq", ResponseType: "MessageResp"}, fn)
 		}
+		h.RetractMessage = fn
 	}
 	if h.MarkRead == nil {
-		h.MarkRead = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req MarkReadReq
-			if r.ContentLength != 0 {
-				if err := m.DecodeRequest(w, r, &req); err != nil {
-					m.WriteBindErrorHTTP(w, r, err)
-					return
-				}
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
 			}
+			req.ID = r.PathValue("id")
 			resp, err := srv.MarkRead(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "MarkRead", Method: "POST", Path: "/api/v1/conversations/:id/read", MuxPattern: PatternMarkRead, RequestType: "MarkReadReq", ResponseType: "MarkReadResp"}, fn)
 		}
+		h.MarkRead = fn
 	}
 	if h.SearchWorkspaceMessages == nil {
-		h.SearchWorkspaceMessages = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req SearchWorkspaceMessagesReq
+			req.ID = r.PathValue("id")
+			q := r.URL.Query()
+			if v := q.Get("q"); v != "" {
+				req.Q = &v
+			}
+			if v := q.Get("cursor"); v != "" {
+				req.Cursor = &v
+			}
+			if v := q.Get("limit"); v != "" {
+				req.Limit = &v
+			}
 			resp, err := srv.SearchWorkspaceMessages(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "SearchWorkspaceMessages", Method: "GET", Path: "/api/v1/workspaces/:id/messages/search", MuxPattern: PatternSearchWorkspaceMessages, RequestType: "SearchWorkspaceMessagesReq", ResponseType: "WorkspaceSearchPageResp"}, fn)
 		}
+		h.SearchWorkspaceMessages = fn
 	}
 	if h.GetAttention == nil {
-		h.GetAttention = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req GetAttentionReq
+			q := r.URL.Query()
+			if v := q.Get("cursor"); v != "" {
+				req.Cursor = &v
+			}
+			if v := q.Get("limit"); v != "" {
+				req.Limit = &v
+			}
+			if v := q.Get("unreadOnly"); v != "" {
+				req.UnreadOnly = &v
+			}
 			resp, err := srv.GetAttention(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "GetAttention", Method: "GET", Path: "/api/v1/attention", MuxPattern: PatternGetAttention, RequestType: "GetAttentionReq", ResponseType: "AttentionPageResp"}, fn)
 		}
+		h.GetAttention = fn
 	}
 	if h.Sync == nil {
-		h.Sync = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req SyncReq
+			q := r.URL.Query()
+			if v := q.Get("cursor"); v != "" {
+				req.Cursor = &v
+			}
+			if v := q.Get("limit"); v != "" {
+				req.Limit = &v
+			}
 			resp, err := srv.Sync(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "Sync", Method: "GET", Path: "/api/v1/sync", MuxPattern: PatternSync, RequestType: "SyncReq", ResponseType: "SyncResp"}, fn)
 		}
+		h.Sync = fn
 	}
 	if h.UploadAttachment == nil {
-		h.UploadAttachment = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req UploadAttachmentReq
-			if r.ContentLength != 0 {
-				if err := m.DecodeRequest(w, r, &req); err != nil {
-					m.WriteBindErrorHTTP(w, r, err)
-					return
-				}
+			req.ID = r.PathValue("id")
+			if v := r.Header.Get("Idempotency-Key"); v != "" {
+				req.IdempotencyKey = &v
 			}
 			resp, err := srv.UploadAttachment(r.Context(), &req)
 			if err != nil {
@@ -498,40 +622,62 @@ func RegisterChatHTTPServer(mux *http.ServeMux, srv ChatHTTPServer, m HTTPRespon
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "UploadAttachment", Method: "POST", Path: "/api/v1/conversations/:id/attachments", MuxPattern: PatternUploadAttachment, RequestType: "UploadAttachmentReq", ResponseType: "AttachmentResp"}, fn)
 		}
+		h.UploadAttachment = fn
 	}
 	if h.GetAttachmentUpload == nil {
-		h.GetAttachmentUpload = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req GetAttachmentUploadReq
+			req.ID = r.PathValue("id")
+			req.UploadKey = r.PathValue("uploadKey")
 			resp, err := srv.GetAttachmentUpload(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "GetAttachmentUpload", Method: "GET", Path: "/api/v1/conversations/:id/attachment-uploads/:uploadKey", MuxPattern: PatternGetAttachmentUpload, RequestType: "GetAttachmentUploadReq", ResponseType: "AttachmentResp"}, fn)
 		}
+		h.GetAttachmentUpload = fn
 	}
 	if h.DeletePendingAttachment == nil {
-		h.DeletePendingAttachment = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req DeletePendingAttachmentReq
+			req.ID = r.PathValue("id")
+			req.AttachmentId = r.PathValue("attachmentId")
 			_, err := srv.DeletePendingAttachment(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusNoContent, nil)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "DeletePendingAttachment", Method: "DELETE", Path: "/api/v1/conversations/:id/attachments/:attachmentId", MuxPattern: PatternDeletePendingAttachment, RequestType: "DeletePendingAttachmentReq", ResponseType: "EmptyResp"}, fn)
 		}
+		h.DeletePendingAttachment = fn
 	}
 	if h.DownloadAttachment == nil {
-		h.DownloadAttachment = func(w http.ResponseWriter, r *http.Request) {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req DownloadAttachmentReq
+			req.ID = r.PathValue("id")
+			req.AttachmentId = r.PathValue("attachmentId")
 			resp, err := srv.DownloadAttachment(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
 				return
 			}
 			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "DownloadAttachment", Method: "GET", Path: "/api/v1/conversations/:id/attachments/:attachmentId/content", MuxPattern: PatternDownloadAttachment, RequestType: "DownloadAttachmentReq", ResponseType: "DownloadAttachmentResp"}, fn)
 		}
+		h.DownloadAttachment = fn
 	}
 	RegisterChatHTTPServiceRoutes(mux, h)
 }

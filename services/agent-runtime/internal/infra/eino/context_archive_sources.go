@@ -11,7 +11,7 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/middlewares/reduction"
 	"github.com/cloudwego/eino/schema"
-	"github.com/jackc/pgx/v5"
+	"teamie/services/agent-runtime/internal/infra/pg"
 )
 
 const contextArchiveRefKey = "teamie_context_archive_ref"
@@ -113,37 +113,22 @@ func (a *ContextArchive) toolSources(ctx context.Context, r *Run, detail *reduct
 	}
 	name, call := detail.ToolContext.Name, detail.ToolContext.CallID
 	hashes := contextArgumentHashes(name, detail.ToolArgument.Text)
-	rows, err := a.Store.DB.Query(ctx, `SELECT t.run_id::text,t.name,t.result FROM runtime_tool_calls t JOIN runtime_runs r ON r.id=t.run_id WHERE r.agent_id=$1 AND t.call_id=$2 AND t.name=ANY($3::text[]) AND t.request_hash=ANY($4::text[]) AND t.result IS NOT NULL AND (r.id=$5 OR EXISTS(SELECT 1 FROM runtime_session_acceptances x WHERE x.agent_id=r.agent_id AND x.run_id=r.id AND x.seq<=$6)) AND (NOT $7::boolean OR r.id=$5)`, r.AgentID, call, []string{name, "native:" + name}, hashes, r.ID, r.AcceptanceHead, currentOnly)
+	candidates, err := a.Store.DB.ListMatchingToolCallReceipts(ctx, r.AgentID, call, []string{name, "native:" + name}, hashes, r.ID, r.AcceptanceHead, currentOnly)
 	if err != nil {
 		return nil, err
 	}
-	type candidate struct {
-		id, name string
-		raw      []byte
-	}
-	matches := []candidate{}
-	for rows.Next() {
-		var id, receiptName string
-		var result []byte
-		if err = rows.Scan(&id, &receiptName, &result); err != nil {
-			rows.Close()
-			return nil, err
+	matches := []pg.AcceptedToolCallCandidate{}
+	for _, item := range candidates {
+		if contextReceiptMatchesTool(item.Raw, item.Name, detail) {
+			matches = append(matches, item)
 		}
-		if contextReceiptMatchesTool(result, receiptName, detail) {
-			matches = append(matches, candidate{id, receiptName, result})
-		}
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return nil, err
 	}
 	if len(matches) == 0 {
 		return nil, errContextUnavailable
 	}
 	refs := []InputSource{}
 	for _, match := range matches {
-		sources, e := a.runSources(ctx, match.id)
+		sources, e := a.runSources(ctx, match.RunID)
 		if e != nil {
 			return nil, e
 		}
@@ -151,16 +136,16 @@ func (a *ContextArchive) toolSources(ctx context.Context, r *Run, detail *reduct
 		if contextIMTool(name) {
 			// IM owns its typed receipt. A generic native envelope alone cannot
 			// supply authenticated message provenance.
-			if match.name != name {
+			if match.Name != name {
 				return nil, errContextUnavailable
 			}
-			actual, err := a.imReceiptSources(ctx, match.id, call, name, match.raw)
+			actual, err := a.imReceiptSources(ctx, match.RunID, call, name, match.Raw)
 			if err != nil {
 				return nil, err
 			}
 			refs = append(refs, actual...)
 		} else if workspaceTool(name) {
-			actual, err := a.workspaceToolSources(ctx, r, match.id, call, match.name, []byte(detail.ToolArgument.Text))
+			actual, err := a.workspaceToolSources(ctx, r, match.RunID, call, match.Name, []byte(detail.ToolArgument.Text))
 			if err != nil {
 				return nil, err
 			}
@@ -245,14 +230,12 @@ func (a *ContextArchive) inputMessageSources(ctx context.Context, r *Run, messag
 			return nil, false, nil
 		}
 	}
-	var raw []byte
-	var runID string
-	err := a.Store.DB.QueryRow(ctx, `SELECT i.payload,i.run_id::text FROM runtime_inputs i JOIN runtime_runs owner ON owner.id=i.run_id WHERE i.agent_id=$1 AND i.event_id=$2 AND (owner.id=$3 OR EXISTS(SELECT 1 FROM runtime_session_acceptances x WHERE x.agent_id=i.agent_id AND x.run_id=owner.id AND x.seq<=$4))`, r.AgentID, input.EventID, r.ID, r.AcceptanceHead).Scan(&raw, &runID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, false, nil
-	}
+	raw, runID, found, err := a.Store.DB.GetAcceptedInputPayload(ctx, r.AgentID, input.EventID, r.ID, r.AcceptanceHead)
 	if err != nil {
 		return nil, false, err
+	}
+	if !found {
+		return nil, false, nil
 	}
 	var actual Input
 	if json.Unmarshal(raw, &actual) != nil {
@@ -299,27 +282,20 @@ func (a *ContextArchive) transcriptRetrievalProvenance(ctx context.Context, r *R
 				return nil, nil, errContextUnavailable
 			}
 			wire := canonicalContextToolText(result.Content[0].Text.Text)
-			rows, err := a.Store.DB.Query(ctx, `SELECT t.run_id::text,t.result,o.response FROM runtime_tool_calls t JOIN runtime_runs owner ON owner.id=t.run_id JOIN runtime_tool_observations o ON o.run_id=t.run_id AND o.call_id=t.call_id AND o.observation_key='context-observation-v1' WHERE owner.agent_id=$1 AND t.call_id=$2 AND t.name=$3 AND t.result IS NOT NULL AND (owner.id=$4 OR EXISTS(SELECT 1 FROM runtime_session_acceptances x WHERE x.agent_id=owner.agent_id AND x.run_id=owner.id AND x.seq<=$5))`, r.AgentID, result.CallID, "native:"+result.Name, r.ID, r.AcceptanceHead)
+			rows, err := a.Store.DB.ListAcceptedRetrievalObservations(ctx, r.AgentID, result.CallID, "native:"+result.Name, r.ID, r.AcceptanceHead)
 			if err != nil {
 				return nil, nil, err
 			}
 			matched := false
 			emptyOrigins := map[string]bool{}
-			for rows.Next() {
-				var receipt, raw []byte
-				var origin string
-				if err = rows.Scan(&origin, &receipt, &raw); err != nil {
-					rows.Close()
-					return nil, nil, err
-				}
+			for _, row := range rows {
+				receipt, raw, origin := row.Receipt, row.Observation, row.OriginRunID
 				var observation contextToolObservation
 				if json.Unmarshal(raw, &observation) != nil || len(observation.Wire) > contextResponseMaximum || !json.Valid([]byte(observation.Wire)) {
-					rows.Close()
 					return nil, nil, ErrReplayConflict
 				}
 				expected, _ := json.Marshal(observation.Wire)
 				if !bytes.Equal(receipt, expected) {
-					rows.Close()
 					return nil, nil, ErrReplayConflict
 				}
 				if canonicalContextToolText(observation.Wire) == wire {
@@ -329,11 +305,6 @@ func (a *ContextArchive) transcriptRetrievalProvenance(ctx context.Context, r *R
 						emptyOrigins[origin] = true
 					}
 				}
-			}
-			err = rows.Err()
-			rows.Close()
-			if err != nil {
-				return nil, nil, err
 			}
 			if !matched {
 				return nil, nil, errContextUnavailable
@@ -400,34 +371,23 @@ func (a *ContextArchive) transcriptSources(ctx context.Context, r *Run, messages
 	for _, target := range targets {
 		keys = append(keys, "message:"+digest([]byte(target.key)))
 	}
-	rows, err := a.Store.DB.Query(ctx, `SELECT a.artifact_key,a.sources,a.source_artifact_refs FROM runtime_context_artifacts a JOIN runtime_runs r ON r.id=a.run_id WHERE a.agent_id=$1 AND `+contextArtifactVisibility+` AND a.kind='message' AND a.artifact_key=ANY($6::text[])`, r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead, keys)
+	artifactRows, err := a.Store.DB.ListVisibleMessageSourceArtifacts(ctx, r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead, keys)
 	if err != nil {
 		return nil, err
 	}
-	for rows.Next() {
-		var key string
-		var sources, inherited []byte
-		if err = rows.Scan(&key, &sources, &inherited); err != nil {
-			rows.Close()
-			return nil, err
-		}
+	for _, row := range artifactRows {
+		key, sources, inherited := row.Key, row.Sources, row.Inherited
 		for _, target := range targets {
 			if key == "message:"+digest([]byte(target.key)) {
 				var found []InputSource
 				var parentRefs []string
 				if json.Unmarshal(sources, &found) != nil || json.Unmarshal(inherited, &parentRefs) != nil {
-					rows.Close()
 					return nil, ErrReplayConflict
 				}
 				target.refs, target.found = append(target.refs, found...), true
 				target.parents = append(target.parents, parentRefs...)
 			}
 		}
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return nil, err
 	}
 	for _, target := range targets {
 		if !target.found {
@@ -465,29 +425,23 @@ func (a *ContextArchive) transcriptSources(ctx context.Context, r *Run, messages
 	if len(ids) > 0 || needsLegacy {
 		var after int64
 		for {
-			rows, err = a.Store.DB.Query(ctx, `SELECT e.seq,e.run_id::text,e.attempt_id::text,e.event_id,e.payload FROM runtime_session_events e JOIN runtime_runs r ON r.id=e.run_id WHERE e.session_id=$1 AND `+contextEventVisibility+` AND ($6 OR EXISTS(SELECT 1 FROM unnest($7::text[]) wanted(id) WHERE position(wanted.id in convert_from(e.payload,'UTF8'))>0)) AND e.seq>$8 ORDER BY e.seq LIMIT 64`, "agent:"+r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead, needsLegacy, ids, after)
+			eventRows, err := a.Store.DB.ListVisibleWantedSessionEvents(ctx, "agent:"+r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead, needsLegacy, ids, after)
 			if err != nil {
 				return nil, err
 			}
-			items := []contextArchiveEvent{}
-			for rows.Next() {
-				var item contextArchiveEvent
-				var payload []byte
-				if err = rows.Scan(&item.seq, &item.runID, &item.attempt, &item.id, &payload); err != nil {
-					rows.Close()
-					return nil, err
+			items := make([]contextArchiveEvent, 0, len(eventRows))
+			for _, er := range eventRows {
+				item := contextArchiveEvent{
+					seq:     er.Seq,
+					runID:   er.RunID,
+					attempt: er.Attempt,
+					id:      er.EventID,
+					event:   new(adk.SessionEvent[*schema.AgenticMessage]),
 				}
-				item.event = new(adk.SessionEvent[*schema.AgenticMessage])
-				if err = decodeSessionPayload(payload, item.event); err != nil {
-					rows.Close()
+				if err = decodeSessionPayload(er.Payload, item.event); err != nil {
 					return nil, err
 				}
 				items = append(items, item)
-			}
-			err = rows.Err()
-			rows.Close()
-			if err != nil {
-				return nil, err
 			}
 			for _, item := range items {
 				candidates := []*schema.AgenticMessage{item.event.Message}
@@ -584,21 +538,7 @@ func (a *ContextArchive) reductionUpdateSources(ctx context.Context, r *Run, ite
 			continue
 		}
 		result := block.FunctionToolResult
-		rows, err := a.Store.DB.Query(ctx, `SELECT artifact_key FROM runtime_context_artifacts WHERE agent_id=$1 AND run_id=$2 AND tool_call_id=$3 AND tool_name=$4 AND kind IN ('tool_clear','tool_trunc')`, r.AgentID, item.runID, result.CallID, result.Name)
-		if err != nil {
-			return nil, err
-		}
-		keys := []string{}
-		for rows.Next() {
-			var key string
-			if err = rows.Scan(&key); err != nil {
-				rows.Close()
-				return nil, err
-			}
-			keys = append(keys, key)
-		}
-		err = rows.Err()
-		rows.Close()
+		keys, err := a.Store.DB.ListRunToolReductionArtifactKeys(ctx, r.AgentID, item.runID, result.CallID, result.Name)
 		if err != nil {
 			return nil, err
 		}

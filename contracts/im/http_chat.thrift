@@ -326,14 +326,14 @@ struct DownloadAttachmentResp {
 
 service ChatHTTPService {
   BootstrapResp GetBootstrap(1: GetBootstrapReq req) (api.get="/api/v1/bootstrap")
-  CreateWorkspaceResp CreateWorkspace(1: CreateWorkspaceReq req) (api.post="/api/v1/workspaces")
+  CreateWorkspaceResp CreateWorkspace(1: CreateWorkspaceReq req) (api.post="/api/v1/workspaces", api.status="201")
   ListWorkspaceMembersResp ListWorkspaceMembers(1: ListWorkspaceMembersReq req) (api.get="/api/v1/workspaces/:id/members")
-  CreateWorkspaceInviteResp CreateWorkspaceInvite(1: CreateWorkspaceInviteReq req) (api.post="/api/v1/workspaces/:id/invites")
+  CreateWorkspaceInviteResp CreateWorkspaceInvite(1: CreateWorkspaceInviteReq req) (api.post="/api/v1/workspaces/:id/invites", api.status="201")
   GetInviteResp GetInvite(1: GetInviteReq req) (api.get="/api/v1/invites/:code")
   AcceptInviteResp AcceptInvite(1: AcceptInviteReq req) (api.post="/api/v1/invites/:code/accept")
   EmptyResp RemoveWorkspaceMember(1: RemoveWorkspaceMemberReq req) (api.delete="/api/v1/workspaces/:id/members/:userId")
   ListConversationsResp ListConversations(1: ListConversationsReq req) (api.get="/api/v1/workspaces/:id/conversations")
-  ConversationResp CreateConversation(1: CreateConversationReq req) (api.post="/api/v1/workspaces/:id/conversations")
+  ConversationResp CreateConversation(1: CreateConversationReq req) (api.post="/api/v1/workspaces/:id/conversations", api.status="201")
   ConversationResp AddConversationMember(1: AddConversationMemberReq req) (api.post="/api/v1/conversations/:id/members")
   ConversationResp RemoveConversationMember(1: RemoveConversationMemberReq req) (api.delete="/api/v1/conversations/:id/members/:userId")
   ListMessagesResp ListMessages(1: ListMessagesReq req) (api.get="/api/v1/conversations/:id/messages")

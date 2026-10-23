@@ -4,13 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/middlewares/reduction"
 	"github.com/cloudwego/eino/schema"
-	"github.com/jackc/pgx/v5"
+	"teamie/services/agent-runtime/internal/infra/pg"
 )
 
 const contextIMArgumentsKey = "context-im-arguments-v1"
@@ -50,9 +49,7 @@ func contextMessageSource(message Message) InputSource {
 }
 
 func (a *ContextArchive) imArguments(ctx context.Context, runID, call, name string) (json.RawMessage, error) {
-	var hash, actualName string
-	var raw []byte
-	err := a.Store.DB.QueryRow(ctx, `SELECT t.request_hash,t.name,o.response FROM runtime_tool_calls t JOIN runtime_tool_observations o ON o.run_id=t.run_id AND o.call_id=t.call_id AND o.observation_key=$3 WHERE t.run_id=$1 AND t.call_id=$2`, runID, call, contextIMArgumentsKey).Scan(&hash, &actualName, &raw)
+	hash, actualName, raw, err := a.Store.DB.GetToolCallObservationWithMeta(ctx, runID, call, contextIMArgumentsKey)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +105,7 @@ func (a *ContextArchive) imReceiptSources(ctx context.Context, runID, call, name
 		// metadata. Its authenticated request supplies the conversation scope.
 		if len(page.Messages) == 0 {
 			args, err := a.imArguments(ctx, runID, call, name)
-			if errors.Is(err, pgx.ErrNoRows) {
+			if pg.IsNoRows(err) {
 				return nil, errContextUnavailable
 			}
 			if err != nil {
@@ -130,7 +127,7 @@ func (a *ContextArchive) imReceiptSources(ctx context.Context, runID, call, name
 		}
 	case "im_get_attachment":
 		args, err := a.imArguments(ctx, runID, call, name)
-		if errors.Is(err, pgx.ErrNoRows) {
+		if pg.IsNoRows(err) {
 			return nil, errContextUnavailable
 		}
 		if err != nil {
@@ -228,30 +225,15 @@ func (a *ContextArchive) toolMessageSources(ctx context.Context, r *Run, message
 		if result.Name == "workspace_execute" {
 			names = append(names, "workspace_execute")
 		}
-		rows, err := a.Store.DB.Query(ctx, `SELECT t.run_id::text,t.name,t.result FROM runtime_tool_calls t JOIN runtime_runs owner ON owner.id=t.run_id WHERE owner.agent_id=$1 AND t.call_id=$2 AND t.name=ANY($3::text[]) AND t.result IS NOT NULL AND ($6='' OR owner.id::text=$6) AND (owner.id=$4 OR EXISTS(SELECT 1 FROM runtime_session_acceptances x WHERE x.agent_id=owner.agent_id AND x.run_id=owner.id AND x.seq<=$5))`, r.AgentID, result.CallID, names, r.ID, r.AcceptanceHead, originRun)
+		candidates, err := a.Store.DB.ListAcceptedToolCallCandidates(ctx, r.AgentID, result.CallID, names, r.ID, r.AcceptanceHead, originRun)
 		if err != nil {
 			return nil, true, err
 		}
-		type candidate struct {
-			runID string
-			name  string
-			raw   []byte
-		}
-		matches := []candidate{}
-		for rows.Next() {
-			var item candidate
-			if err = rows.Scan(&item.runID, &item.name, &item.raw); err != nil {
-				rows.Close()
-				return nil, true, err
-			}
-			if contextReceiptMatchesTool(item.raw, item.name, detail) {
+		matches := []pg.AcceptedToolCallCandidate{}
+		for _, item := range candidates {
+			if contextReceiptMatchesTool(item.Raw, item.Name, detail) {
 				matches = append(matches, item)
 			}
-		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
-			return nil, true, err
 		}
 		if len(matches) == 0 {
 			parents, err := a.toolReducedParents(ctx, r, []*schema.AgenticMessage{{Role: message.Role, ContentBlocks: []*schema.ContentBlock{block}}}, originRun)
@@ -263,15 +245,15 @@ func (a *ContextArchive) toolMessageSources(ctx context.Context, r *Run, message
 			}
 		}
 		for _, match := range matches {
-			inputs, err := a.runSources(ctx, match.runID)
+			inputs, err := a.runSources(ctx, match.RunID)
 			if err != nil {
 				return nil, true, err
 			}
 			var actual []InputSource
 			if contextIMTool(result.Name) {
-				actual, err = a.imReceiptSources(ctx, match.runID, result.CallID, result.Name, match.raw)
+				actual, err = a.imReceiptSources(ctx, match.RunID, result.CallID, result.Name, match.Raw)
 			} else {
-				actual, err = a.workspaceToolSources(ctx, r, match.runID, result.CallID, match.name, nil)
+				actual, err = a.workspaceToolSources(ctx, r, match.RunID, result.CallID, match.Name, nil)
 			}
 			if err != nil {
 				return nil, true, err
@@ -319,21 +301,7 @@ func (a *ContextArchive) toolReducedParents(ctx context.Context, r *Run, message
 					continue
 				}
 			}
-			rows, err := a.Store.DB.Query(ctx, `SELECT a.run_id::text,a.artifact_key FROM runtime_context_artifacts a JOIN runtime_runs r ON r.id=a.run_id WHERE a.agent_id=$1 AND `+contextArtifactVisibility+` AND a.kind IN ('tool_trunc','tool_clear') AND a.tool_name=$6 AND a.tool_call_id=$7 AND ($8='' OR a.run_id::text=$8)`, r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead, result.Name, result.CallID, originRun)
-			if err != nil {
-				return nil, err
-			}
-			candidates := []string{}
-			for rows.Next() {
-				var runID, key string
-				if err = rows.Scan(&runID, &key); err != nil {
-					rows.Close()
-					return nil, err
-				}
-				candidates = append(candidates, "context:v1:"+runID+":"+key)
-			}
-			err = rows.Err()
-			rows.Close()
+			candidates, err := a.Store.DB.ListVisibleToolReductionRefs(ctx, r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead, result.Name, result.CallID, originRun)
 			if err != nil {
 				return nil, err
 			}
@@ -357,8 +325,8 @@ func (a *ContextArchive) toolReducedParents(ctx context.Context, r *Run, message
 				}
 				expected := contextReadNotice(ref)
 				if artifact.Kind == "tool_trunc" {
-					var raw []byte
-					if err = a.Store.DB.QueryRow(ctx, `SELECT context_budget FROM runtime_runs WHERE id=$1`, artifact.RunID).Scan(&raw); err != nil {
+					raw, err := a.Store.DB.GetRunContextBudget(ctx, artifact.RunID)
+					if err != nil {
 						return nil, err
 					}
 					budget, err := ParseContextBudgetSnapshot(raw)
@@ -448,21 +416,15 @@ func (a *ContextArchive) causalRunReadSources(ctx context.Context, r *Run, runID
 	refs, parents := []InputSource{}, []string{}
 	var after int64
 	for {
-		rows, err := a.Store.DB.Query(ctx, `SELECT e.seq,e.payload FROM runtime_session_events e JOIN runtime_runs r ON r.id=e.run_id WHERE e.session_id=$1 AND `+contextEventVisibility+` AND e.run_id=$6 AND e.seq>$7 AND e.seq<=$8 ORDER BY e.seq LIMIT 64`, "agent:"+r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead, runID, after, eventHead)
+		items, err := a.Store.DB.ListVisibleRunEventPayloads(ctx, "agent:"+r.AgentID, r.Attempt, r.ID, r.ContextHead, r.AcceptanceHead, runID, after, eventHead)
 		if err != nil {
 			return nil, nil, err
 		}
 		messages := []*schema.AgenticMessage{}
-		count := 0
-		for rows.Next() {
-			var raw []byte
-			if err = rows.Scan(&after, &raw); err != nil {
-				rows.Close()
-				return nil, nil, err
-			}
+		for _, item := range items {
+			after = item.Seq
 			var event adk.SessionEvent[*schema.AgenticMessage]
-			if err = decodeSessionPayload(raw, &event); err != nil {
-				rows.Close()
+			if err = decodeSessionPayload(item.Payload, &event); err != nil {
 				return nil, nil, err
 			}
 			if event.Message != nil && hasToolResults(event.Message) {
@@ -471,12 +433,6 @@ func (a *ContextArchive) causalRunReadSources(ctx context.Context, r *Run, runID
 			if event.MessageInserted != nil && event.MessageInserted.Message != nil && hasToolResults(event.MessageInserted.Message) {
 				messages = append(messages, event.MessageInserted.Message)
 			}
-			count++
-		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
-			return nil, nil, err
 		}
 		for _, previous := range messages {
 			actual, _, err := a.toolMessageSources(ctx, r, previous, runID)
@@ -496,7 +452,7 @@ func (a *ContextArchive) causalRunReadSources(ctx context.Context, r *Run, runID
 			return nil, nil, err
 		}
 		parents = append(parents, reduced...)
-		if count < 64 {
+		if len(items) < 64 {
 			break
 		}
 	}

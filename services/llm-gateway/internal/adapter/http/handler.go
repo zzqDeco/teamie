@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	hertzapp "github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/protocol/sse"
 	"go.uber.org/zap"
 	gatewaygen "teamie/contracts/gen/agent/hertz_gen/agent/gateway"
 	"teamie/contracts/gen/agent/kitex_gen/agent"
@@ -90,8 +92,21 @@ func (a *Adapter) UpdateAdminModelConfig(ctx context.Context, req *gatewaygen.Up
 	return toAdminModelConfigResp(c), nil
 }
 
+type adminOwnerContextKey struct{}
+
+func withAdminOwner(ctx context.Context, ownerID string) context.Context {
+	return context.WithValue(ctx, adminOwnerContextKey{}, ownerID)
+}
+
+func adminOwnerFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(adminOwnerContextKey{}).(string); ok && v != "" {
+		return v
+	}
+	return "admin-test"
+}
+
 func (a *Adapter) TestAdminModelConfig(ctx context.Context, _ *gatewaygen.TestAdminModelConfigReq) (*gatewaygen.TestAdminModelConfigResp, error) {
-	return a.testAdminModelConfigWithOwner(ctx, "admin-test")
+	return a.testAdminModelConfigWithOwner(ctx, adminOwnerFromContext(ctx))
 }
 
 func (a *Adapter) testAdminModelConfigWithOwner(ctx context.Context, owner string) (*gatewaygen.TestAdminModelConfigResp, error) {
@@ -117,7 +132,7 @@ func (a *Adapter) testAdminModelConfigWithOwner(ctx context.Context, owner strin
 }
 
 func (a *Adapter) GenerateChat(ctx context.Context, req *gatewaygen.ChatCallReq) (*gatewaygen.ChatCallResp, error) {
-	if req == nil {
+	if req == nil || !domain.ValidID(req.OwnerId) || !domain.ValidID(req.AgentId) || !domain.ValidID(req.SessionId) || !domain.ValidID(req.RunId) || req.GetMessageLimit() < 0 || int(req.GetMessageLimit()) > modeltransport.MaxInputMessages {
 		return nil, domain.Err(400, "invalid_request", "Invalid model request")
 	}
 	if req.GetExpectedModelConfigId() != "" {
@@ -136,13 +151,51 @@ func (a *Adapter) GenerateChat(ctx context.Context, req *gatewaygen.ChatCallReq)
 }
 
 func (a *Adapter) StreamChat(_ context.Context, _ *gatewaygen.ChatCallReq) (*gatewaygen.StreamEventFrameDTO, error) {
-	return nil, domain.Err(400, "invalid_request", "Use HTTP NDJSON streaming endpoint")
+	return nil, domain.Err(400, "invalid_request", "Use HTTP streaming endpoint")
+}
+
+// StreamChatSSE writes model stream frames using Hertz's built-in pkg/protocol/sse writer (sse.NewWriter).
+func (a *Adapter) StreamChatSSE(ctx context.Context, c *hertzapp.RequestContext, req *gatewaygen.ChatCallReq) error {
+	if req == nil || !domain.ValidID(req.OwnerId) || !domain.ValidID(req.AgentId) || !domain.ValidID(req.SessionId) || !domain.ValidID(req.RunId) || req.GetMessageLimit() < 0 || int(req.GetMessageLimit()) > modeltransport.MaxInputMessages {
+		return domain.Err(400, "invalid_request", "Invalid model request")
+	}
+	writer := sse.NewWriter(c)
+	defer writer.Close()
+	outcome := a.App.StreamChat(
+		ctx,
+		req.OwnerId,
+		req.AgentId,
+		req.SessionId,
+		req.RunId,
+		req.GetExpectedModelConfigId(),
+		req.RequestJson,
+		func(configID string) {
+			c.Response.Header.Set(modeltransport.ModelConfigIDHeader, configID)
+		},
+		func(ev domain.StreamEvent) error {
+			payload, err := json.Marshal(ev)
+			if err != nil {
+				return err
+			}
+			return writer.WriteEvent("", ev.Type, payload)
+		},
+		domain.InputMessageLimit(int(req.GetMessageLimit())),
+	)
+	return outcome.TerminalWriteError
 }
 
 func (a *Adapter) WebSearch(ctx context.Context, req *gatewaygen.WebSearchReq) (*gatewaygen.WebSearchResp, error) {
-	if req == nil {
+	if req == nil || !domain.ValidID(req.OwnerId) || !domain.ValidID(req.AgentId) || !domain.ValidID(req.SessionId) || !domain.ValidID(req.RunId) {
 		return nil, domain.Err(400, "invalid_request", "Invalid web search request")
 	}
+	run, attempt, _ := strings.Cut(req.RunId, ":")
+	ctx, op := observability.Begin(ctx, "web-search-call",
+		zap.String("custom.agent.id", observability.ID(req.AgentId)),
+		zap.String("custom.runtime.session_id", observability.ID(req.SessionId)),
+		zap.String("custom.runtime.run_id", observability.ID(run)),
+		zap.String("custom.runtime.attempt_id", observability.ID(attempt)),
+	)
+	ctx = observability.WithHTTPAttempts(ctx)
 	outcome := a.App.ExecuteWebSearch(ctx, domain.WebSearchInput{
 		OwnerID:        req.OwnerId,
 		AgentID:        req.AgentId,
@@ -154,6 +207,16 @@ func (a *Adapter) WebSearch(ctx context.Context, req *gatewaygen.WebSearchReq) (
 		IncludeDomains: req.IncludeDomains,
 		ExcludeDomains: req.ExcludeDomains,
 	})
+	var callFailure error
+	if outcome.Failure != nil {
+		callFailure = outcome.Failure
+	}
+	op.End(callFailure,
+		zap.String("custom.model.failure_stage", outcome.Phase),
+		zap.Int("custom.web.result_count", len(outcome.Results)),
+		zap.Int("custom.web.response_bytes", outcome.ResponseBytes),
+		zap.Int("custom.retry.attempts", observability.HTTPAttempts(ctx)),
+	)
 	if outcome.Failure != nil {
 		code := outcome.Failure.Code
 		msg := outcome.Failure.Message
@@ -186,9 +249,17 @@ func (a *Adapter) WebSearch(ctx context.Context, req *gatewaygen.WebSearchReq) (
 }
 
 func (a *Adapter) WebExtract(ctx context.Context, req *gatewaygen.WebExtractReq) (*gatewaygen.WebExtractResp, error) {
-	if req == nil {
+	if req == nil || !domain.ValidID(req.OwnerId) || !domain.ValidID(req.AgentId) || !domain.ValidID(req.SessionId) || !domain.ValidID(req.RunId) {
 		return nil, domain.Err(400, "invalid_request", "Invalid web extract request")
 	}
+	run, attempt, _ := strings.Cut(req.RunId, ":")
+	ctx, op := observability.Begin(ctx, "web-extract-call",
+		zap.String("custom.agent.id", observability.ID(req.AgentId)),
+		zap.String("custom.runtime.session_id", observability.ID(req.SessionId)),
+		zap.String("custom.runtime.run_id", observability.ID(run)),
+		zap.String("custom.runtime.attempt_id", observability.ID(attempt)),
+	)
+	ctx = observability.WithHTTPAttempts(ctx)
 	outcome := a.App.ExecuteWebExtract(ctx, domain.WebExtractInput{
 		OwnerID:   req.OwnerId,
 		AgentID:   req.AgentId,
@@ -196,6 +267,18 @@ func (a *Adapter) WebExtract(ctx context.Context, req *gatewaygen.WebExtractReq)
 		RunID:     req.RunId,
 		URLs:      req.Urls,
 	})
+	var callFailure error
+	if outcome.Failure != nil {
+		callFailure = outcome.Failure
+	}
+	op.End(callFailure,
+		zap.String("custom.model.failure_stage", outcome.Phase),
+		zap.Int("custom.web.url_count", outcome.URLCount),
+		zap.Int("custom.web.result_count", len(outcome.Results)),
+		zap.Int("custom.web.failed_url_count", len(outcome.FailedResults)),
+		zap.Int("custom.web.response_bytes", outcome.ResponseBytes),
+		zap.Int("custom.retry.attempts", observability.HTTPAttempts(ctx)),
+	)
 	failed := make([]*gatewaygen.WebExtractFailureDTO, 0, len(outcome.FailedResults))
 	for _, f := range outcome.FailedResults {
 		errText := f.Error
@@ -296,20 +379,6 @@ func (a *Adapter) decodeHTTPCall(w http.ResponseWriter, r *http.Request) (*model
 	return &in, true
 }
 
-func (a *Adapter) generateHTTP(w http.ResponseWriter, r *http.Request) {
-	in, ok := a.decodeHTTPCall(w, r)
-	if !ok {
-		return
-	}
-	ctx := app.WithExpectedModelConfigID(r.Context(), r.Header.Get(modeltransport.ModelConfigIDHeader))
-	out := a.callWithObservability(ctx, in.OwnerID, in.AgentID, in.SessionID, in.RunID, in.RequestJSON, in.InputMessageLimit())
-	if out.GetModelConfigId() != "" {
-		w.Header().Set(modeltransport.ModelConfigIDHeader, out.GetModelConfigId())
-		out.ModelConfigId = nil
-	}
-	httpx.WriteNoStoreJSON(w, 200, out)
-}
-
 func (a *Adapter) streamHTTP(w http.ResponseWriter, r *http.Request) {
 	in, ok := a.decodeHTTPCall(w, r)
 	if !ok {
@@ -355,215 +424,76 @@ func (a *Adapter) streamHTTP(w http.ResponseWriter, r *http.Request) {
 	)
 }
 
-func (a *Adapter) webSearchHTTP(w http.ResponseWriter, r *http.Request) {
-	if err := a.App.AuthorizeBearer(r.Header.Get("Authorization")); err != nil {
-		httpx.Fail(w, err)
-		return
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
-	var in modeltransport.WebSearchRequest
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if dec.Decode(&in) != nil || dec.Decode(new(any)) != io.EOF || !domain.ValidID(in.OwnerID) || !domain.ValidID(in.AgentID) || !domain.ValidID(in.SessionID) || !domain.ValidID(in.RunID) {
-		httpx.Fail(w, domain.Err(400, "invalid_request", "Invalid web search request"))
-		return
-	}
-	run, attempt, _ := strings.Cut(in.RunID, ":")
-	ctx, op := observability.Begin(r.Context(), "web-search-call",
-		zap.String("custom.agent.id", observability.ID(in.AgentID)),
-		zap.String("custom.runtime.session_id", observability.ID(in.SessionID)),
-		zap.String("custom.runtime.run_id", observability.ID(run)),
-		zap.String("custom.runtime.attempt_id", observability.ID(attempt)),
-	)
-	ctx = observability.WithHTTPAttempts(ctx)
-	outcome := a.App.ExecuteWebSearch(ctx, domain.WebSearchInput{
-		OwnerID:        in.OwnerID,
-		AgentID:        in.AgentID,
-		SessionID:      in.SessionID,
-		RunID:          in.RunID,
-		Query:          in.Query,
-		MaxResults:     in.MaxResults,
-		TimeRange:      in.TimeRange,
-		IncludeDomains: in.IncludeDomains,
-		ExcludeDomains: in.ExcludeDomains,
-	})
-	var callFailure error
-	if outcome.Failure != nil {
-		callFailure = outcome.Failure
-	}
-	op.End(callFailure,
-		zap.String("custom.model.failure_stage", outcome.Phase),
-		zap.Int("custom.web.result_count", len(outcome.Results)),
-		zap.Int("custom.web.response_bytes", outcome.ResponseBytes),
-		zap.Int("custom.retry.attempts", observability.HTTPAttempts(ctx)),
-	)
-	if outcome.Failure != nil {
-		httpx.WriteNoStoreJSON(w, 200, modeltransport.WebSearchResponse{
-			OK:           false,
-			ErrorCode:    outcome.Failure.Code,
-			ErrorMessage: outcome.Failure.Message,
-			StatusCode:   outcome.Failure.Status,
-		})
-		return
-	}
-	results := make([]modeltransport.WebSearchResult, 0, len(outcome.Results))
-	for _, item := range outcome.Results {
-		results = append(results, modeltransport.WebSearchResult{
-			Title:         item.Title,
-			URL:           item.URL,
-			Snippet:       item.Snippet,
-			PublishedDate: item.PublishedDate,
-			Score:         item.Score,
-		})
-	}
-	httpx.WriteNoStoreJSON(w, 200, modeltransport.WebSearchResponse{
-		OK:         true,
-		Results:    results,
-		StatusCode: 200,
-	})
+type gatewayResponder struct {
+	adapter *Adapter
+	auth    AdminAuthorizer
 }
 
-func (a *Adapter) webExtractHTTP(w http.ResponseWriter, r *http.Request) {
-	if err := a.App.AuthorizeBearer(r.Header.Get("Authorization")); err != nil {
-		httpx.Fail(w, err)
-		return
+func (gatewayResponder) DecodeRequest(w http.ResponseWriter, r *http.Request, dst any) error {
+	switch dst.(type) {
+	case *gatewaygen.ChatCallReq:
+		if err := httpx.DecodeJSONMaxBytes(w, r, domain.MaxRequestBytes*2+4096, dst); err != nil {
+			return domain.Err(400, "invalid_request", "Invalid model request")
+		}
+		return nil
+	case *gatewaygen.WebSearchReq:
+		if err := httpx.DecodeJSONMaxBytes(w, r, 32<<10, dst); err != nil {
+			return domain.Err(400, "invalid_request", "Invalid web search request")
+		}
+		return nil
+	case *gatewaygen.WebExtractReq:
+		if err := httpx.DecodeJSONMaxBytes(w, r, 32<<10, dst); err != nil {
+			return domain.Err(400, "invalid_request", "Invalid web extract request")
+		}
+		return nil
+	default:
+		return httpx.DecodeJSONMaxBytes(w, r, 262144, dst)
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
-	var in modeltransport.WebExtractRequest
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if dec.Decode(&in) != nil || dec.Decode(new(any)) != io.EOF || !domain.ValidID(in.OwnerID) || !domain.ValidID(in.AgentID) || !domain.ValidID(in.SessionID) || !domain.ValidID(in.RunID) {
-		httpx.Fail(w, domain.Err(400, "invalid_request", "Invalid web extract request"))
-		return
-	}
-	run, attempt, _ := strings.Cut(in.RunID, ":")
-	ctx, op := observability.Begin(r.Context(), "web-extract-call",
-		zap.String("custom.agent.id", observability.ID(in.AgentID)),
-		zap.String("custom.runtime.session_id", observability.ID(in.SessionID)),
-		zap.String("custom.runtime.run_id", observability.ID(run)),
-		zap.String("custom.runtime.attempt_id", observability.ID(attempt)),
-	)
-	ctx = observability.WithHTTPAttempts(ctx)
-	outcome := a.App.ExecuteWebExtract(ctx, domain.WebExtractInput{
-		OwnerID:   in.OwnerID,
-		AgentID:   in.AgentID,
-		SessionID: in.SessionID,
-		RunID:     in.RunID,
-		URLs:      in.URLs,
-	})
-	var callFailure error
-	if outcome.Failure != nil {
-		callFailure = outcome.Failure
-	}
-	op.End(callFailure,
-		zap.String("custom.model.failure_stage", outcome.Phase),
-		zap.Int("custom.web.url_count", outcome.URLCount),
-		zap.Int("custom.web.result_count", len(outcome.Results)),
-		zap.Int("custom.web.failed_url_count", len(outcome.FailedResults)),
-		zap.Int("custom.web.response_bytes", outcome.ResponseBytes),
-		zap.Int("custom.retry.attempts", observability.HTTPAttempts(ctx)),
-	)
-	failed := make([]modeltransport.WebExtractFailure, 0, len(outcome.FailedResults))
-	for _, item := range outcome.FailedResults {
-		failed = append(failed, modeltransport.WebExtractFailure{
-			URL:   item.URL,
-			Error: item.Error,
-		})
-	}
-	if outcome.Failure != nil {
-		httpx.WriteNoStoreJSON(w, 200, modeltransport.WebExtractResponse{
-			OK:            false,
-			FailedResults: failed,
-			ErrorCode:     outcome.Failure.Code,
-			ErrorMessage:  outcome.Failure.Message,
-			StatusCode:    outcome.Failure.Status,
-		})
-		return
-	}
-	results := make([]modeltransport.WebExtractResult, 0, len(outcome.Results))
-	for _, item := range outcome.Results {
-		results = append(results, modeltransport.WebExtractResult{
-			URL:     item.URL,
-			Content: item.Content,
-		})
-	}
-	httpx.WriteNoStoreJSON(w, 200, modeltransport.WebExtractResponse{
-		OK:            true,
-		Results:       results,
-		FailedResults: failed,
-		StatusCode:    200,
-	})
 }
 
-// Routes binds all generated ModelGatewayHTTPService routes and operational endpoints.
-func (a *Adapter) Routes(auth AdminAuthorizer) http.Handler {
-	m := http.NewServeMux()
-	httpx.OperationsContext(m, a.App.Store.Ready)
-	wrapAdmin := func(fn func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
+func (gatewayResponder) WriteBindErrorHTTP(w http.ResponseWriter, _ *http.Request, err error) {
+	httpx.Fail(w, err)
+}
+
+func (gatewayResponder) WriteDomainErrorHTTP(w http.ResponseWriter, _ *http.Request, err error) {
+	httpx.Fail(w, err)
+}
+
+func (gatewayResponder) WriteOKHTTP(w http.ResponseWriter, _ *http.Request, status int, resp any) {
+	if chatResp, ok := resp.(*gatewaygen.ChatCallResp); ok && chatResp != nil && chatResp.GetModelConfigId() != "" {
+		w.Header().Set(modeltransport.ModelConfigIDHeader, chatResp.GetModelConfigId())
+		chatResp.ModelConfigId = nil
+	}
+	httpx.WriteNoStoreJSON(w, status, resp)
+}
+
+func (gr gatewayResponder) WrapRoute(route gatewaygen.RouteSpec, next http.HandlerFunc) http.HandlerFunc {
+	if strings.HasPrefix(route.Path, "/api/v1/admin/") {
 		return func(w http.ResponseWriter, r *http.Request) {
-			u, err := auth.Require(r)
+			u, err := gr.auth.Require(r)
 			if err != nil {
 				httpx.Fail(w, err)
 				return
 			}
 			observability.AnnotateHTTP(w, zap.String("user.id", u.Id))
-			fn(w, r, u.Id)
+			next(w, r.WithContext(withAdminOwner(r.Context(), u.Id)))
 		}
 	}
-	gatewaygen.RegisterModelGatewayHTTPServiceRoutes(m, gatewaygen.ModelGatewayHTTPServiceRouteHandlers{
-		GetAdminModelConfig: wrapAdmin(func(w http.ResponseWriter, r *http.Request, _ string) {
-			c, err := a.App.LoadConfig(r.Context())
-			if err != nil {
-				httpx.Fail(w, err)
-				return
-			}
-			httpx.WriteNoStoreJSON(w, 200, c.View())
-		}),
-		UpdateAdminModelConfig: wrapAdmin(func(w http.ResponseWriter, r *http.Request, _ string) {
-			var in struct {
-				BaseURL              string  `json:"baseUrl"`
-				Model                string  `json:"model"`
-				APIKey               *string `json:"apiKey"`
-				Enabled              bool    `json:"enabled"`
-				Clear                bool    `json:"clearApiKey"`
-				ContextWindowTokens  *int64  `json:"contextWindowTokens"`
-				WebSearchEnabled     *bool   `json:"webSearchEnabled"`
-				WebSearchAPIKey      *string `json:"webSearchApiKey"`
-				ClearWebSearchAPIKey bool    `json:"clearWebSearchApiKey"`
-			}
-			if err := httpx.DecodeJSONMaxBytes(w, r, 262144, &in); err != nil {
-				httpx.Fail(w, err)
-				return
-			}
-			c, err := a.App.SaveConfig(r.Context(), app.SaveConfigInput{
-				BaseURL:              in.BaseURL,
-				Model:                in.Model,
-				APIKey:               in.APIKey,
-				Enabled:              in.Enabled,
-				ClearAPIKey:          in.Clear,
-				ContextWindowTokens:  in.ContextWindowTokens,
-				WebSearchEnabled:     in.WebSearchEnabled,
-				WebSearchAPIKey:      in.WebSearchAPIKey,
-				ClearWebSearchAPIKey: in.ClearWebSearchAPIKey,
-			})
-			if err != nil {
-				httpx.Fail(w, err)
-				return
-			}
-			httpx.WriteNoStoreJSON(w, 200, c.View())
-		}),
-		TestAdminModelConfig: wrapAdmin(func(w http.ResponseWriter, r *http.Request, owner string) {
-			resp, err := a.testAdminModelConfigWithOwner(r.Context(), owner)
-			if err != nil {
-				httpx.Fail(w, err)
-				return
-			}
-			httpx.WriteNoStoreJSON(w, 200, resp)
-		}),
-		GenerateChat: a.generateHTTP,
-		StreamChat:   a.streamHTTP,
-		WebSearch:    a.webSearchHTTP,
-		WebExtract:   a.webExtractHTTP,
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := gr.adapter.App.AuthorizeBearer(r.Header.Get("Authorization")); err != nil {
+			httpx.Fail(w, err)
+			return
+		}
+		next(w, r)
+	}
+}
+
+// Routes binds all generated ModelGatewayHTTPServer routes and operational endpoints.
+func (a *Adapter) Routes(auth AdminAuthorizer) http.Handler {
+	m := http.NewServeMux()
+	httpx.OperationsContext(m, a.App.Store.Ready)
+	gatewaygen.RegisterModelGatewayHTTPServer(m, a, gatewayResponder{adapter: a, auth: auth}, gatewaygen.ModelGatewayHTTPServiceRouteHandlers{
+		StreamChat: a.streamHTTP,
 	})
 	return m
 }

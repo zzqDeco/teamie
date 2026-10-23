@@ -58,7 +58,7 @@ struct EmptyResp {}
 
 service AgentControlHTTPService {
   AgentListResp ListOwnedAgents(1: ListOwnedAgentsReq req) (api.get="/api/v1/agents")
-  AgentResp CreateAgent(1: CreateAgentReq req) (api.post="/api/v1/agents")
+  AgentResp CreateAgent(1: CreateAgentReq req) (api.post="/api/v1/agents", api.status="201")
   AgentResp GetAgentProfile(1: GetAgentProfileReq req) (api.get="/api/v1/agents/:id")
   AgentResp UpdateAgent(1: UpdateAgentReq req) (api.patch="/api/v1/agents/:id")
   EmptyResp DeleteAgent(1: DeleteAgentReq req) (api.delete="/api/v1/agents/:id")

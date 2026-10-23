@@ -252,6 +252,12 @@ func (a *Adapter) ChangePassword(ctx context.Context, req *identitygen.ChangePas
 	if !ok {
 		return nil, domain.ErrUnauthenticatedSignIn()
 	}
+	if actor.Session.ServicePrincipal {
+		return nil, domain.ErrHumanSessionRequired()
+	}
+	if !a.Limiter.Allow(actor.Session.User.Email) {
+		return nil, domain.ErrRateLimited()
+	}
 	if err := a.App.ChangePassword(ctx, actor.Session.User.ID, actor.Token, req.CurrentPassword, req.NewPassword); err != nil {
 		return nil, err
 	}
@@ -415,8 +421,32 @@ func (a *Adapter) decodeStrictJSON(w http.ResponseWriter, r *http.Request, input
 	return httpx.DecodeJSON(w, r, input)
 }
 
+type identityResponder struct {
+	httpx.Responder
+	withHuman func(fn func(w http.ResponseWriter, r *http.Request, ctx context.Context, s httpx.Session) error) http.HandlerFunc
+}
+
+func (identityResponder) WriteOKHTTP(w http.ResponseWriter, _ *http.Request, status int, resp any) {
+	w.Header().Set("Cache-Control", "no-store")
+	httpx.WriteJSON(w, status, resp)
+}
+
+func (ir identityResponder) WrapRoute(route identitygen.RouteSpec, next http.HandlerFunc) http.HandlerFunc {
+	if route.Name == "GetRegistrationMetadata" {
+		return func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "no-store")
+			next(w, r)
+		}
+	}
+	return ir.withHuman(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ httpx.Session) error {
+		w.Header().Set("Cache-Control", "no-store")
+		next(w, r.WithContext(ctx))
+		return nil
+	})
+}
+
 // Routes mounts all Identity HTTP endpoints onto an http.ServeMux using the
-// generated identitygen.RegisterIdentityHTTPServiceRoutes router bindings and DTOs.
+// generated identitygen.RegisterIdentityHTTPServer stateless interface bindings and DTOs.
 func (a *Adapter) Routes() http.Handler {
 	m := http.NewServeMux()
 	httpx.Operations(m, func(r *http.Request) error { return a.App.Ping(r.Context()) })
@@ -440,16 +470,7 @@ func (a *Adapter) Routes() http.Handler {
 		})
 	}
 
-	identitygen.RegisterIdentityHTTPServiceRoutes(m, identitygen.IdentityHTTPServiceRouteHandlers{
-		GetRegistrationMetadata: func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Cache-Control", "no-store")
-			resp, err := a.GetRegistrationMetadata(r.Context(), &identitygen.GetRegistrationMetadataReq{})
-			if err != nil {
-				httpx.WriteError(w, err)
-				return
-			}
-			httpx.WriteJSON(w, http.StatusOK, resp)
-		},
+	identitygen.RegisterIdentityHTTPServer(m, a, identityResponder{withHuman: withHuman}, identitygen.IdentityHTTPServiceRouteHandlers{
 		Register: func(w http.ResponseWriter, r *http.Request) {
 			if err := httpx.CheckOrigin(r, a.Origin); err != nil {
 				httpx.WriteError(w, err)
@@ -500,61 +521,6 @@ func (a *Adapter) Routes() http.Handler {
 			w.Header().Set("Cache-Control", "no-store")
 			httpx.WriteJSON(w, http.StatusOK, resp)
 		},
-		GetSession: withHuman(func(w http.ResponseWriter, _ *http.Request, ctx context.Context, _ httpx.Session) error {
-			w.Header().Set("Cache-Control", "no-store")
-			resp, err := a.GetSession(ctx, &identitygen.GetSessionReq{})
-			if err != nil {
-				return err
-			}
-			httpx.WriteJSON(w, http.StatusOK, resp)
-			return nil
-		}),
-		Logout: withHuman(func(w http.ResponseWriter, _ *http.Request, ctx context.Context, _ httpx.Session) error {
-			if _, err := a.Logout(ctx, &identitygen.LogoutReq{}); err != nil {
-				return err
-			}
-			httpx.WriteJSON(w, http.StatusNoContent, nil)
-			return nil
-		}),
-		ChangePassword: withHuman(func(w http.ResponseWriter, r *http.Request, ctx context.Context, s httpx.Session) error {
-			w.Header().Set("Cache-Control", "no-store")
-			if s.ServicePrincipal {
-				return domain.ErrHumanSessionRequired()
-			}
-			if !a.Limiter.Allow(s.User.Email) {
-				return domain.ErrRateLimited()
-			}
-			var req identitygen.ChangePasswordReq
-			if err := httpx.DecodeJSON(w, r, &req); err != nil {
-				return err
-			}
-			if _, err := a.ChangePassword(ctx, &req); err != nil {
-				return err
-			}
-			httpx.WriteJSON(w, http.StatusNoContent, nil)
-			return nil
-		}),
-		UpdateProfile: withHuman(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ httpx.Session) error {
-			var req identitygen.UpdateProfileReq
-			if err := httpx.DecodeJSON(w, r, &req); err != nil {
-				return err
-			}
-			resp, err := a.UpdateProfile(ctx, &req)
-			if err != nil {
-				return err
-			}
-			httpx.WriteJSON(w, http.StatusOK, resp)
-			return nil
-		}),
-		ListInvites: withHuman(func(w http.ResponseWriter, _ *http.Request, ctx context.Context, _ httpx.Session) error {
-			w.Header().Set("Cache-Control", "no-store")
-			resp, err := a.ListInvites(ctx, &identitygen.ListInvitesReq{})
-			if err != nil {
-				return err
-			}
-			httpx.WriteJSON(w, http.StatusOK, resp)
-			return nil
-		}),
 		CreateInvite: withHuman(func(w http.ResponseWriter, r *http.Request, ctx context.Context, s httpx.Session) error {
 			w.Header().Set("Cache-Control", "no-store")
 			if err := a.App.RequireAdmin(ctx, s.User.ID); err != nil {
@@ -569,31 +535,6 @@ func (a *Adapter) Routes() http.Handler {
 				return err
 			}
 			httpx.WriteJSON(w, http.StatusCreated, resp)
-			return nil
-		}),
-		RevokeInvite: withHuman(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ httpx.Session) error {
-			w.Header().Set("Cache-Control", "no-store")
-			if _, err := a.RevokeInvite(ctx, &identitygen.RevokeInviteReq{ID: r.PathValue("id")}); err != nil {
-				return err
-			}
-			httpx.WriteJSON(w, http.StatusNoContent, nil)
-			return nil
-		}),
-		ListAdminUsers: withHuman(func(w http.ResponseWriter, r *http.Request, ctx context.Context, _ httpx.Session) error {
-			w.Header().Set("Cache-Control", "no-store")
-			q := r.URL.Query()
-			cursor := q.Get("cursor")
-			limit := q.Get("limit")
-			search := q.Get("q")
-			resp, err := a.ListAdminUsers(ctx, &identitygen.ListAdminUsersReq{
-				Cursor: &cursor,
-				Limit:  &limit,
-				Q:      &search,
-			})
-			if err != nil {
-				return err
-			}
-			httpx.WriteJSON(w, http.StatusOK, resp)
 			return nil
 		}),
 		CreatePasswordResetLink: withHuman(func(w http.ResponseWriter, r *http.Request, ctx context.Context, s httpx.Session) error {

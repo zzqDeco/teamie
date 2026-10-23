@@ -69,52 +69,49 @@ func (s *Service) authorizeInspect(ctx context.Context, q domain.RuntimeQuery, w
 
 // State returns the current runtime state for an Agent.
 func (s *Service) State(ctx context.Context, q domain.RuntimeQuery) (domain.RuntimeResult, error) {
-	if s == nil {
+	if s == nil || s.Inspect == nil {
 		return unavailableResult(), nil
 	}
-	if s.Inspect != nil && s.Control != nil && s.ControlToken != "" {
-		profile, fail := s.authorizeInspect(ctx, q, false)
-		if fail != nil {
-			return *fail, nil
-		}
-		out := map[string]any{"state": "idle", "sessionId": "agent:" + q.AgentID, "pendingInputs": 0, "runningTasks": 0}
-		if !profile.Enabled || profile.Deleted {
-			out["state"] = "disabled"
-		}
-		summary, err := s.Inspect.GetAgentRuntimeSummary(ctx, q.AgentID)
-		if err != nil {
-			return failResult(503, "runtime_unavailable")
-		}
-		out["pendingInputs"] = summary.PendingInputs
-		out["runningTasks"] = summary.RunningTasks
-		if summary.ActiveRunID != "" {
-			out["activeRunId"] = summary.ActiveRunID
-			if profile.Enabled && !profile.Deleted {
-				out["state"] = summary.ActiveStatus
-			}
-		}
-		if summary.HasAgentRow {
-			if profile.Enabled && !profile.Deleted {
-				if _, active := out["activeRunId"]; !active {
-					out["state"] = summary.CurrentState
-				}
-			}
-			if summary.LastActiveAt != nil {
-				out["lastActiveAt"] = summary.LastActiveAt.UTC()
-			}
-			if summary.LastError != "" {
-				out["lastError"] = domain.PublicErrorCode(summary.LastError)
-			}
-		}
-		return okResult(out)
+	profile, fail := s.authorizeInspect(ctx, q, false)
+	if fail != nil {
+		return *fail, nil
 	}
-	if s.Engine == nil {
-		return unavailableResult(), nil
+	out := map[string]any{"state": "idle", "sessionId": "agent:" + q.AgentID, "pendingInputs": 0, "runningTasks": 0}
+	if !profile.Enabled || profile.Deleted {
+		out["state"] = "disabled"
 	}
-	return s.Engine.State(ctx, q)
+	summary, err := s.Inspect.GetAgentRuntimeSummary(ctx, q.AgentID)
+	if err != nil {
+		return failResult(503, "runtime_unavailable")
+	}
+	out["pendingInputs"] = summary.PendingInputs
+	out["runningTasks"] = summary.RunningTasks
+	if summary.ActiveRunID != "" {
+		out["activeRunId"] = summary.ActiveRunID
+		if profile.Enabled && !profile.Deleted {
+			out["state"] = summary.ActiveStatus
+		}
+	}
+	if summary.HasAgentRow {
+		if profile.Enabled && !profile.Deleted {
+			if _, active := out["activeRunId"]; !active {
+				out["state"] = summary.CurrentState
+			}
+		}
+		if summary.LastActiveAt != nil {
+			out["lastActiveAt"] = summary.LastActiveAt.UTC()
+		}
+		if summary.LastError != "" {
+			out["lastError"] = domain.PublicErrorCode(summary.LastError)
+		}
+	}
+	return okResult(out)
 }
 
 func (s *Service) queryRuns(ctx context.Context, q domain.RuntimeQuery, detail bool) (domain.RuntimeResult, error) {
+	if s == nil || s.Inspect == nil {
+		return unavailableResult(), nil
+	}
 	if _, fail := s.authorizeInspect(ctx, q, false); fail != nil {
 		return *fail, nil
 	}
@@ -149,33 +146,18 @@ func (s *Service) queryRuns(ctx context.Context, q domain.RuntimeQuery, detail b
 
 // Runs lists paginated runtime runs for an Agent.
 func (s *Service) Runs(ctx context.Context, q domain.RuntimeQuery) (domain.RuntimeResult, error) {
-	if s == nil {
-		return unavailableResult(), nil
-	}
-	if s.Inspect != nil && s.Control != nil && s.ControlToken != "" {
-		return s.queryRuns(ctx, q, false)
-	}
-	if s.Engine == nil {
-		return unavailableResult(), nil
-	}
-	return s.Engine.Runs(ctx, q)
+	return s.queryRuns(ctx, q, false)
 }
 
 // RunDetail returns a single runtime run by resource ID.
 func (s *Service) RunDetail(ctx context.Context, q domain.RuntimeQuery) (domain.RuntimeResult, error) {
-	if s == nil {
-		return unavailableResult(), nil
-	}
-	if s.Inspect != nil && s.Control != nil && s.ControlToken != "" {
-		return s.queryRuns(ctx, q, true)
-	}
-	if s.Engine == nil {
-		return unavailableResult(), nil
-	}
-	return s.Engine.RunDetail(ctx, q)
+	return s.queryRuns(ctx, q, true)
 }
 
 func (s *Service) queryTasks(ctx context.Context, q domain.RuntimeQuery, detail bool) (domain.RuntimeResult, error) {
+	if s == nil || s.Inspect == nil {
+		return unavailableResult(), nil
+	}
 	if _, fail := s.authorizeInspect(ctx, q, false); fail != nil {
 		return *fail, nil
 	}
@@ -210,112 +192,108 @@ func (s *Service) queryTasks(ctx context.Context, q domain.RuntimeQuery, detail 
 
 // Tasks lists paginated background tasks for an Agent.
 func (s *Service) Tasks(ctx context.Context, q domain.RuntimeQuery) (domain.RuntimeResult, error) {
-	if s == nil {
-		return unavailableResult(), nil
-	}
-	if s.Inspect != nil && s.Control != nil && s.ControlToken != "" {
-		return s.queryTasks(ctx, q, false)
-	}
-	if s.Engine == nil {
-		return unavailableResult(), nil
-	}
-	return s.Engine.Tasks(ctx, q)
+	return s.queryTasks(ctx, q, false)
 }
 
 // TaskDetail returns a single background task by resource ID.
 func (s *Service) TaskDetail(ctx context.Context, q domain.RuntimeQuery) (domain.RuntimeResult, error) {
-	if s == nil {
-		return unavailableResult(), nil
-	}
-	if s.Inspect != nil && s.Control != nil && s.ControlToken != "" {
-		return s.queryTasks(ctx, q, true)
-	}
-	if s.Engine == nil {
-		return unavailableResult(), nil
-	}
-	return s.Engine.TaskDetail(ctx, q)
+	return s.queryTasks(ctx, q, true)
 }
 
 // Events lists paginated public runtime events for an Agent.
 func (s *Service) Events(ctx context.Context, q domain.RuntimeQuery) (domain.RuntimeResult, error) {
-	if s == nil {
+	if s == nil || s.Inspect == nil {
 		return unavailableResult(), nil
 	}
-	if s.Inspect != nil && s.Control != nil && s.ControlToken != "" {
-		if _, fail := s.authorizeInspect(ctx, q, false); fail != nil {
-			return *fail, nil
-		}
-		after := int64(0)
-		if q.Cursor != "" {
-			var err error
-			after, err = strconv.ParseInt(q.Cursor, 10, 64)
-			if err != nil || after < 0 {
-				return failResult(400, "invalid_cursor")
-			}
-		}
-		limit := q.NormalizeLimit()
-		out, err := s.Inspect.ListPublicEvents(ctx, q.AgentID, after, limit+1)
-		if err != nil {
-			return failResult(503, "runtime_unavailable")
-		}
-		more := len(out) > limit
-		if more {
-			out = out[:limit]
-		}
-		cursor := strconv.FormatInt(after, 10)
-		if len(out) > 0 {
-			cursor = out[len(out)-1].ID
-		}
-		return okResult(map[string]any{"events": out, "cursor": cursor, "hasMore": more})
+	if _, fail := s.authorizeInspect(ctx, q, false); fail != nil {
+		return *fail, nil
 	}
-	if s.Engine == nil {
-		return unavailableResult(), nil
+	after := int64(0)
+	if q.Cursor != "" {
+		var err error
+		after, err = strconv.ParseInt(q.Cursor, 10, 64)
+		if err != nil || after < 0 {
+			return failResult(400, "invalid_cursor")
+		}
 	}
-	return s.Engine.Events(ctx, q)
+	limit := q.NormalizeLimit()
+	out, err := s.Inspect.ListPublicEvents(ctx, q.AgentID, after, limit+1)
+	if err != nil {
+		return failResult(503, "runtime_unavailable")
+	}
+	more := len(out) > limit
+	if more {
+		out = out[:limit]
+	}
+	cursor := strconv.FormatInt(after, 10)
+	if len(out) > 0 {
+		cursor = out[len(out)-1].ID
+	}
+	return okResult(map[string]any{"events": out, "cursor": cursor, "hasMore": more})
 }
 
 // CancelRun requests cancellation of an active or pending run.
 func (s *Service) CancelRun(ctx context.Context, q domain.RuntimeQuery) (domain.RuntimeResult, error) {
-	if s == nil {
+	if s == nil || s.Inspect == nil {
 		return unavailableResult(), nil
 	}
-	if s.Inspect != nil && s.Control != nil && s.ControlToken != "" {
-		if _, fail := s.authorizeInspect(ctx, q, true); fail != nil {
-			return *fail, nil
-		}
-		if !domain.ValidUUID(q.ResourceID) {
-			return failResult(404, "not_found")
-		}
-		statusCode, errorCode, err := s.Inspect.RequestRunCancel(ctx, q.AgentID, q.ResourceID)
-		if err != nil {
-			return failResult(503, "runtime_unavailable")
-		}
-		if statusCode != 0 {
-			return failResult(statusCode, errorCode)
-		}
-		if s.Engine != nil {
-			s.Engine.CancelRunTasks(ctx, q.AgentID, q.ResourceID)
-		}
-		return s.RunDetail(ctx, q)
+	if _, fail := s.authorizeInspect(ctx, q, true); fail != nil {
+		return *fail, nil
 	}
-	if s.Engine == nil {
-		return unavailableResult(), nil
+	if !domain.ValidUUID(q.ResourceID) {
+		return failResult(404, "not_found")
 	}
-	return s.Engine.CancelRun(ctx, q)
+	statusCode, errorCode, err := s.Inspect.RequestRunCancel(ctx, q.AgentID, q.ResourceID)
+	if err != nil {
+		return failResult(503, "runtime_unavailable")
+	}
+	if statusCode != 0 {
+		return failResult(statusCode, errorCode)
+	}
+	if s.Engine != nil {
+		s.Engine.CancelRunTasks(ctx, q.AgentID, q.ResourceID)
+	}
+	return s.RunDetail(ctx, q)
 }
 
 // RetryRun schedules a retry for a failed or interrupted run.
 func (s *Service) RetryRun(ctx context.Context, q domain.RuntimeQuery) (domain.RuntimeResult, error) {
-	if s == nil || s.Engine == nil {
+	if s == nil || s.Inspect == nil {
 		return unavailableResult(), nil
 	}
-	return s.Engine.RetryRun(ctx, q)
+	if _, fail := s.authorizeInspect(ctx, q, true); fail != nil {
+		return *fail, nil
+	}
+	if s.Engine != nil && !s.Engine.IsFeatureEnabled("agents.runtime.v3") {
+		return failResult(409, "runtime_disabled")
+	}
+	if !domain.ValidUUID(q.ResourceID) {
+		return failResult(404, "not_found")
+	}
+	statusCode, errorCode, err := s.Inspect.RequestRunRetry(ctx, q.AgentID, q.ResourceID)
+	if err != nil {
+		return failResult(503, "runtime_unavailable")
+	}
+	if statusCode != 0 {
+		return failResult(statusCode, errorCode)
+	}
+	return s.RunDetail(ctx, q)
 }
 
 // CancelTask requests cancellation of an active background task.
 func (s *Service) CancelTask(ctx context.Context, q domain.RuntimeQuery) (domain.RuntimeResult, error) {
-	if s == nil || s.Engine == nil {
+	if s == nil || s.Inspect == nil || s.Engine == nil {
 		return unavailableResult(), nil
 	}
-	return s.Engine.CancelTask(ctx, q)
+	if _, fail := s.authorizeInspect(ctx, q, true); fail != nil {
+		return *fail, nil
+	}
+	statusCode, errorCode, err := s.Engine.CancelTaskByID(ctx, q.AgentID, q.ResourceID)
+	if err != nil && statusCode == 0 {
+		return failResult(503, "runtime_unavailable")
+	}
+	if statusCode != 0 {
+		return failResult(statusCode, errorCode)
+	}
+	return s.TaskDetail(ctx, q)
 }

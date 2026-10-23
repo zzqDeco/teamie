@@ -5,13 +5,17 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
 
+var forbiddenEinoSQLPattern = regexp.MustCompile(`(?i)\b(SELECT\s+.+\s+FROM\s+runtime_|INSERT\s+INTO\s+runtime_|UPDATE\s+runtime_|DELETE\s+FROM\s+runtime_|CREATE\s+TABLE|ALTER\s+TABLE)\b`)
+
 // TestRuntimeCleanDDDLayerBoundaries enforces the 4-layer Hexagonal Clean DDD
-// import rules across services/agent-runtime/internal/{domain,app,adapter,infra}
-// and verifies that no flat non-test .go files remain in internal/.
+// import rules across services/agent-runtime/internal/{domain,app,adapter,infra},
+// verifies that no flat non-test .go files remain in internal/, and enforces
+// that infra/eino contains zero pgx imports and zero raw SQL queries.
 func TestRuntimeCleanDDDLayerBoundaries(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	if err != nil {
@@ -79,9 +83,10 @@ func TestRuntimeCleanDDDLayerBoundaries(t *testing.T) {
 			dir: "infra/eino",
 			allowed: func(imp string) bool {
 				return !strings.HasPrefix(imp, "teamie/services/agent-runtime/internal/adapter") &&
-					!strings.HasPrefix(imp, "teamie/services/agent-runtime/internal/app")
+					!strings.HasPrefix(imp, "teamie/services/agent-runtime/internal/app") &&
+					!strings.HasPrefix(imp, "github.com/jackc/pgx")
 			},
-			rule: "infra layer must not import adapter or app layers",
+			rule: "infra/eino must not import adapter, app, or github.com/jackc/pgx (all SQL belongs in infra/pg)",
 		},
 		{
 			dir: "infra/rpcclient",
@@ -103,7 +108,11 @@ func TestRuntimeCleanDDDLayerBoundaries(t *testing.T) {
 				continue
 			}
 			fullPath := filepath.Join(pkg.dir, entry.Name())
-			file, err := parser.ParseFile(fset, fullPath, nil, parser.ImportsOnly)
+			src, err := os.ReadFile(fullPath)
+			if err != nil {
+				t.Fatalf("read %s: %v", fullPath, err)
+			}
+			file, err := parser.ParseFile(fset, fullPath, src, parser.ImportsOnly)
 			if err != nil {
 				t.Fatalf("parse %s: %v", fullPath, err)
 			}
@@ -111,6 +120,11 @@ func TestRuntimeCleanDDDLayerBoundaries(t *testing.T) {
 				imp := strings.Trim(spec.Path.Value, `"`)
 				if !pkg.allowed(imp) {
 					t.Errorf("%s imports forbidden package %q (%s)", fullPath, imp, pkg.rule)
+				}
+			}
+			if pkg.dir == "infra/eino" {
+				if match := forbiddenEinoSQLPattern.FindString(string(src)); match != "" {
+					t.Errorf("%s contains raw SQL %q; all SQL queries must reside in internal/infra/pg", fullPath, match)
 				}
 			}
 		}

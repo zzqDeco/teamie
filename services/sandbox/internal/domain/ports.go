@@ -3,6 +3,7 @@ package domain
 import (
 	"context"
 	"io"
+	"os"
 )
 
 // Engine is the primary container execution port.
@@ -27,3 +28,20 @@ type TimestampedEngine interface {
 	AttachTimestamped(ctx context.Context, id string) (io.ReadCloser, error)
 	ReleaseOutput(ctx context.Context, id string) error
 }
+
+// WorkspaceStorage is the outbound filesystem port implemented by infra/fs.
+type WorkspaceStorage interface {
+	WriteAtomicJSON(target string, r any) error
+	RegularRead(root *os.Root, name string) ([]byte, error)
+	ReadPageFile(root *os.Root, name string) ([]byte, error)
+	OpenWorkspaceDirectory(root *os.Root, name string) (*os.File, error)
+	EnsureWorkspaceParents(root *os.Root, parent string) error
+	AtomicWorkspaceWrite(root *os.Root, name, content string) error
+	WorkspaceCapacity(root *os.Root, name string, replacementBytes int64) bool
+	WorkspaceWithinQuota(workspace string) bool
+	BinaryHash(root *os.Root, name string) (string, error)
+	AtomicBinaryImport(root *os.Root, name string, content []byte) error
+}
+
+// DefaultWorkspaceStorage is populated by infra/fs at initialization.
+var DefaultWorkspaceStorage WorkspaceStorage

@@ -23,19 +23,19 @@ func (d workspaceDirectories) Open(name string) (fs.File, error) {
 }
 
 func workspaceCapacity(root *os.Root, name string, replacementBytes int64) bool {
-	return domain.WorkspaceCapacity(root, name, replacementBytes)
+	return domain.DefaultWorkspaceStorage.WorkspaceCapacity(root, name, replacementBytes)
 }
 
 func workspaceWithinQuota(workspace string) bool {
-	return domain.WorkspaceWithinQuota(workspace)
+	return domain.DefaultWorkspaceStorage.WorkspaceWithinQuota(workspace)
 }
 
 func binaryHash(root *os.Root, name string) (string, error) {
-	return domain.BinaryHash(root, name)
+	return domain.DefaultWorkspaceStorage.BinaryHash(root, name)
 }
 
 func atomicBinaryImport(root *os.Root, name string, content []byte) error {
-	return domain.AtomicBinaryImport(root, name, content)
+	return domain.DefaultWorkspaceStorage.AtomicBinaryImport(root, name, content)
 }
 
 // ImportFile atomically imports a binary attachment into the agent's workspace with durable receipt idempotency.
