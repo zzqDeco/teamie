@@ -12,8 +12,18 @@ import (
 	"time"
 
 	"teamie/agent-infra/internal/api"
+	httpAdapter "teamie/agent-infra/internal/gateway/adapter/http"
+	rpcAdapter "teamie/agent-infra/internal/gateway/adapter/rpc"
+	"teamie/agent-infra/internal/gateway/app"
+	"teamie/agent-infra/internal/gateway/domain"
+	gatewaygen "teamie/agent-protocol/hertz_gen/agent/gateway"
 	"teamie/agent-protocol/kitex_gen/agent"
 	"teamie/agent-protocol/modeltransport"
+)
+
+var (
+	_ gatewaygen.ModelGatewayHTTPService = (*httpAdapter.Adapter)(nil)
+	_ agent.ModelGatewayService          = (*rpcAdapter.Server)(nil)
 )
 
 type Service struct {
@@ -53,7 +63,7 @@ func failed(e error) *agent.GatewayChatResponse {
 	}
 	return &agent.GatewayChatResponse{Ok: false, ErrorCode: &a.Code, ErrorMessage: &a.Message, StatusCode: ptr(int32(a.Status))}
 }
-func validID(v string) bool { return v != "" && len(v) <= 160 && !strings.ContainsAny(v, "\r\n\x00") }
+func validID(v string) bool { return domain.ValidID(v) }
 func (s *Service) Chat(ctx context.Context, r *agent.GatewayChatRequest) (*agent.GatewayChatResponse, error) {
 	if r == nil || !api.EqualSecret(r.ServiceToken, s.Token) {
 		return failed(api.Err(401, "unauthorized", "Invalid service credential")), nil
@@ -65,18 +75,13 @@ func (s *Service) Chat(ctx context.Context, r *agent.GatewayChatRequest) (*agent
 	// provider call here could orphan the single model slot indefinitely.
 	return failed(api.Err(400, "protocol_unsupported", "Model generation requires the private HTTP transport")), nil
 }
-type expectedConfigIDKey struct{}
 
 func withExpectedModelConfigID(ctx context.Context, configID string) context.Context {
-	return context.WithValue(ctx, expectedConfigIDKey{}, strings.TrimSpace(configID))
+	return app.WithExpectedModelConfigID(ctx, configID)
 }
 
 func expectedModelConfigID(ctx context.Context) string {
-	if ctx == nil {
-		return ""
-	}
-	id, _ := ctx.Value(expectedConfigIDKey{}).(string)
-	return id
+	return app.ExpectedModelConfigID(ctx)
 }
 
 func (s *Service) call(ctx context.Context, owner, id, session, run, raw string, messageLimits ...int) (result *agent.GatewayChatResponse) {

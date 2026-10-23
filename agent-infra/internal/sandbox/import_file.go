@@ -5,126 +5,41 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
-	"io"
 	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
-	"syscall"
-	"time"
 
 	"teamie/agent-infra/internal/api"
+	"teamie/agent-infra/internal/sandbox/domain"
+	sandboxfs "teamie/agent-infra/internal/sandbox/infra/fs"
 	"teamie/agent-protocol/kitex_gen/agent"
 	"teamie/backend/pkg/imlimits"
 )
 
-const MaxWorkspaceBytes int64 = 64 * 1024 * 1024
-const MaxWorkspaceFiles = 4096
+const MaxWorkspaceBytes int64 = domain.MaxWorkspaceBytes
+const MaxWorkspaceFiles = domain.MaxWorkspaceFiles
 
-// WalkDir must also use nonblocking directory opens. os.Root.FS().ReadDir uses
-// Root.Open, which can otherwise block if a child replaces a directory by a FIFO
-// between reading its DirEntry and descending into it.
 type workspaceDirectories struct{ root *os.Root }
 
 func (d workspaceDirectories) Open(name string) (fs.File, error) {
 	return openWorkspaceDirectory(d.root, name)
 }
 
-// Includes files produced by execution children; symlinks are never followed.
 func workspaceCapacity(root *os.Root, name string, replacementBytes int64) bool {
-	var total int64
-	entries := 0
-	e := fs.WalkDir(workspaceDirectories{root}, ".", func(current string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		entries++
-		if entries > MaxWorkspaceFiles {
-			return errors.New("workspace_capacity")
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			return nil
-		}
-		info, e := entry.Info()
-		if e != nil {
-			return e
-		}
-		if info.Mode().IsRegular() && current != name {
-			total += info.Size()
-		}
-		if total+replacementBytes > MaxWorkspaceBytes {
-			return errors.New("workspace_capacity")
-		}
-		return nil
-	})
-	return e == nil && total+replacementBytes <= MaxWorkspaceBytes && entries < MaxWorkspaceFiles
+	return sandboxfs.WorkspaceCapacity(root, name, replacementBytes)
 }
 
 func workspaceWithinQuota(workspace string) bool {
-	root, e := os.OpenRoot(workspace)
-	if e != nil {
-		return false
-	}
-	defer root.Close()
-	return workspaceCapacity(root, "", 0)
+	return sandboxfs.WorkspaceWithinQuota(workspace)
 }
 
 func binaryHash(root *os.Root, name string) (string, error) {
-	f, e := root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
-	if e != nil {
-		return "", e
-	}
-	defer f.Close()
-	info, e := f.Stat()
-	if e != nil || !info.Mode().IsRegular() || info.Size() > imlimits.AttachmentBytes {
-		return "", errors.New("invalid file")
-	}
-	h := sha256.New()
-	n, e := io.Copy(h, io.LimitReader(f, imlimits.AttachmentBytes+1))
-	if e != nil || n > imlimits.AttachmentBytes {
-		return "", errors.New("invalid file")
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return sandboxfs.BinaryHash(root, name)
 }
 
 func atomicBinaryImport(root *os.Root, name string, content []byte) error {
-	parent := path.Dir(name)
-	if e := ensureWorkspaceParents(root, parent); e != nil {
-		return e
-	}
-	tmp := path.Join(parent, ".teamie-import-"+digest(time.Now().UTC().String() + name)[:24])
-	f, e := root.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY|syscall.O_NOFOLLOW, 0666)
-	if e != nil {
-		return e
-	}
-	defer root.Remove(tmp)
-	if e = f.Chmod(0666); e == nil {
-		_, e = f.Write(content)
-	}
-	if e == nil {
-		e = f.Sync()
-	}
-	if closeErr := f.Close(); e == nil {
-		e = closeErr
-	}
-	if e != nil {
-		return e
-	}
-	// An atomic no-replace publication never overwrites a later user-created
-	// file, even if a child races the destination between validation and publish.
-	if e = root.Link(tmp, name); e != nil {
-		return e
-	}
-	if e = root.Remove(tmp); e != nil {
-		return e
-	}
-	dir, e := openWorkspaceDirectory(root, parent)
-	if e != nil {
-		return e
-	}
-	defer dir.Close()
-	return dir.Sync()
+	return sandboxfs.AtomicBinaryImport(root, name, content)
 }
 
 func (s *Service) ImportFile(ctx context.Context, r *agent.SandboxImportRequest) (*agent.SandboxWorkspaceResponse, error) {

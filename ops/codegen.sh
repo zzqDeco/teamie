@@ -23,4 +23,6 @@ done
 (
   cd "${ROOT_DIR}/agent-protocol"
   kitex -module teamie/agent-protocol ../contracts/agent.thrift
+  thriftgo -g go:template=slim,no_default_serdes=true,no_processor=true -o hertz_gen ../contracts/agent_control_http.thrift
+  thriftgo -g go:template=slim,no_default_serdes=true,no_processor=true -o hertz_gen ../contracts/agent_gateway_http.thrift
 )

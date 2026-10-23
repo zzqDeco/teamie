@@ -3,7 +3,6 @@ package sandbox
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"go.uber.org/zap"
 	"io"
 	"io/fs"
@@ -14,79 +13,29 @@ import (
 	"syscall"
 	"teamie/backend/pkg/observability"
 	"time"
-	"unicode/utf8"
 
 	"teamie/agent-infra/internal/api"
+	"teamie/agent-infra/internal/sandbox/domain"
+	sandboxfs "teamie/agent-infra/internal/sandbox/infra/fs"
 	"teamie/agent-protocol/kitex_gen/agent"
 )
 
-const maxFileBytes = 262144
-const maxWorkspaceEntries = 512
+const maxFileBytes = domain.MaxFileBytes
+const maxWorkspaceEntries = domain.MaxWorkspaceEntries
+const MaxWorkspaceResponseBytes = domain.MaxWorkspaceResponseBytes
 
-type workspaceArgs struct {
-	PageVersion     int    `json:"pageVersion,omitempty"`
-	ByteOffset      int64  `json:"byteOffset,omitempty"`
-	MaxBytes        int    `json:"maxBytes,omitempty"`
-	Cursor          string `json:"cursor,omitempty"`
-	ExpectedVersion string `json:"expectedVersion,omitempty"`
-	TaskID          string `json:"taskId,omitempty"`
-	Path            string `json:"path"`
-	Content         string `json:"content"`
-	Old             string `json:"old"`
-	New             string `json:"new"`
-	ReplaceAll      bool   `json:"replaceAll"`
-	Pattern         string `json:"pattern"`
-	Offset          int    `json:"offset"`
-	Limit           int    `json:"limit"`
-	Glob            string `json:"glob"`
-	FileType        string `json:"fileType"`
-	CaseInsensitive bool   `json:"caseInsensitive"`
-	EnableMultiline bool   `json:"enableMultiline"`
-	AfterLines      int    `json:"afterLines"`
-	BeforeLines     int    `json:"beforeLines"`
-}
-type fileInfo struct {
-	Path       string `json:"path"`
-	IsDir      bool   `json:"isDir"`
-	Size       int64  `json:"size"`
-	ModifiedAt string `json:"modifiedAt"`
-}
-type grepMatch struct {
-	Path    string `json:"path"`
-	Line    int    `json:"line"`
-	Content string `json:"content"`
-}
+type workspaceArgs = domain.WorkspaceArgs
+type fileInfo = domain.FileInfo
+type grepMatch = domain.GrepMatch
 
 func virtual(p string) string {
-	if p == "." {
-		return "/workspace"
-	}
-	return "/workspace/" + p
+	return domain.VirtualPath(p)
 }
 func workspacePath(p string) (string, error) {
-	if p == "/workspace" {
-		p = "."
-	} else if strings.HasPrefix(p, "/workspace/") {
-		p = strings.TrimPrefix(p, "/workspace/")
-	}
-	if p == "" {
-		p = "."
-	}
-	if len(p) > 4096 || strings.ContainsAny(p, "\x00\\") || strings.HasPrefix(p, "/") {
-		return "", errors.New("invalid path")
-	}
-	for _, part := range strings.Split(p, "/") {
-		if part == ".." {
-			return "", errors.New("path escapes workspace")
-		}
-	}
-	return path.Clean(p), nil
+	return domain.WorkspacePath(p)
 }
 func workspaceError(code string) *agent.SandboxWorkspaceResponse {
-	message := map[string]string{"unauthorized": "Invalid service credential", "invalid_request": "Invalid workspace operation", "file_conflict": "Edit must match exactly one occurrence unless replaceAll is true", "file_too_large": "Workspace file exceeds the operation limit", "invalid_path": "Path must stay inside /workspace"}[code]
-	if message == "" {
-		message = "Workspace file is unavailable or not a regular file"
-	}
+	message := domain.WorkspaceErrorMessage(code)
 	return &agent.SandboxWorkspaceResponse{ErrorCode: &code, ErrorMessage: &message}
 }
 func workspaceResult(data any) *agent.SandboxWorkspaceResponse {
@@ -98,146 +47,24 @@ func workspaceResult(data any) *agent.SandboxWorkspaceResponse {
 	return &agent.SandboxWorkspaceResponse{Ok: true, DataJson: &value}
 }
 
-const MaxWorkspaceResponseBytes = 1024 * 1024
-
 func regularRead(root *os.Root, name string) ([]byte, error) {
-	f, e := root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
-	if e != nil {
-		return nil, e
-	}
-	defer f.Close()
-	info, e := f.Stat()
-	if e != nil || !info.Mode().IsRegular() {
-		return nil, errors.New("not a regular file")
-	}
-	if info.Size() > maxFileBytes {
-		return nil, errors.New("file_too_large")
-	}
-	b, e := io.ReadAll(io.LimitReader(f, maxFileBytes+1))
-	if len(b) > maxFileBytes {
-		return nil, errors.New("file_too_large")
-	}
-	if !utf8.Valid(b) {
-		return nil, errors.New("binary file")
-	}
-	return b, e
+	return sandboxfs.RegularRead(root, name)
 }
 
-// O_DIRECTORY and O_NONBLOCK prevent a concurrently substituted FIFO from
-// blocking a service operation while it holds the file mutation lock. Root may
-// resolve confined symlinks even with O_NOFOLLOW, so also match the opened fd to
-// the directory inode validated by Lstat before using it for chmod or fsync.
 func openWorkspaceDirectory(root *os.Root, name string) (*os.File, error) {
-	before, e := root.Lstat(name)
-	if e != nil {
-		return nil, e
-	}
-	if !before.IsDir() || before.Mode()&os.ModeSymlink != 0 {
-		return nil, errors.New("not a directory")
-	}
-	f, e := root.OpenFile(name, os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
-	if e != nil {
-		return nil, e
-	}
-	info, e := f.Stat()
-	if e != nil || !info.IsDir() || !os.SameFile(before, info) {
-		f.Close()
-		if e == nil {
-			e = errors.New("not a directory")
-		}
-		return nil, e
-	}
-	return f, nil
+	return sandboxfs.OpenWorkspaceDirectory(root, name)
 }
 
 func ensureWorkspaceParents(root *os.Root, parent string) error {
-	current := ""
-	if parent == "." {
-		return nil
-	}
-	for _, part := range strings.Split(parent, "/") {
-		current = path.Join(current, part)
-		if e := root.Mkdir(current, 0777); e != nil && !os.IsExist(e) {
-			return e
-		}
-		f, e := openWorkspaceDirectory(root, current)
-		if e != nil {
-			return e
-		}
-		e = f.Chmod(0777)
-		f.Close()
-		if e != nil {
-			return e
-		}
-	}
-	return nil
+	return sandboxfs.EnsureWorkspaceParents(root, parent)
 }
 
 func atomicWorkspaceWrite(root *os.Root, name, content string) error {
-	if name == "." || len(content) > maxFileBytes {
-		return errors.New("file_too_large")
-	}
-	parent := path.Dir(name)
-	if e := ensureWorkspaceParents(root, parent); e != nil {
-		return e
-	}
-	if info, e := root.Lstat(name); e == nil && !info.Mode().IsRegular() {
-		return errors.New("not a regular file")
-	}
-	nameTmp := path.Join(parent, ".teamie-write-"+digest(time.Now().UTC().String() + name)[:24])
-	f, e := root.OpenFile(nameTmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY|syscall.O_NOFOLLOW, 0666)
-	if e != nil {
-		return e
-	}
-	defer root.Remove(nameTmp)
-	if e = f.Chmod(0666); e == nil {
-		_, e = io.WriteString(f, content)
-	}
-	if e == nil {
-		e = f.Sync()
-	}
-	closeErr := f.Close()
-	if e == nil {
-		e = closeErr
-	}
-	if e == nil {
-		e = root.Rename(nameTmp, name)
-	}
-	if e == nil {
-		dir, openErr := openWorkspaceDirectory(root, parent)
-		if openErr != nil {
-			return openErr
-		}
-		e = dir.Sync()
-		dir.Close()
-	}
-	return e
+	return sandboxfs.AtomicWorkspaceWrite(root, name, content)
 }
+
 func globMatches(pattern, name string) bool {
-	a, b := strings.Split(strings.TrimPrefix(pattern, "/"), "/"), strings.Split(name, "/")
-	memo := make(map[[2]int]bool)
-	seen := make(map[[2]int]bool)
-	var match func(int, int) bool
-	match = func(i, j int) (result bool) {
-		key := [2]int{i, j}
-		if seen[key] {
-			return memo[key]
-		}
-		seen[key] = true
-		defer func() { memo[key] = result }()
-		if i == len(a) {
-			return j == len(b)
-		}
-		if a[i] == "**" {
-			return match(i+1, j) || j < len(b) && match(i, j+1)
-		}
-		if j == len(b) {
-			return false
-		}
-		yes, e := path.Match(a[i], b[j])
-		return e == nil && yes && match(i+1, j+1)
-	}
-	return match(0, 0)
+	return domain.GlobMatches(pattern, name)
 }
 
 func (s *Service) Workspace(ctx context.Context, r *agent.SandboxWorkspaceRequest) (result *agent.SandboxWorkspaceResponse, failure error) {
@@ -337,7 +164,7 @@ func (s *Service) Workspace(ctx context.Context, r *agent.SandboxWorkspaceReques
 			if e != nil || !info.Mode().IsRegular() && !info.IsDir() {
 				continue
 			}
-			files = append(files, fileInfo{virtual(path.Join(name, entry.Name())), info.IsDir(), info.Size(), info.ModTime().UTC().Format(time.RFC3339Nano)})
+			files = append(files, fileInfo{Path: virtual(path.Join(name, entry.Name())), IsDir: info.IsDir(), Size: info.Size(), ModifiedAt: info.ModTime().UTC().Format(time.RFC3339Nano)})
 		}
 		return workspaceResult(map[string]any{"files": files, "truncated": truncated}), nil
 	case "glob", "grep":
@@ -405,7 +232,7 @@ func (s *Service) Workspace(ctx context.Context, r *agent.SandboxWorkspaceReques
 				}
 				info, e := entry.Info()
 				if e == nil && (info.IsDir() || info.Mode().IsRegular()) {
-					files = append(files, fileInfo{virtual(current), info.IsDir(), info.Size(), info.ModTime().UTC().Format(time.RFC3339Nano)})
+					files = append(files, fileInfo{Path: virtual(current), IsDir: info.IsDir(), Size: info.Size(), ModifiedAt: info.ModTime().UTC().Format(time.RFC3339Nano)})
 				}
 				return nil
 			}
@@ -445,7 +272,7 @@ func (s *Service) Workspace(ctx context.Context, r *agent.SandboxWorkspaceReques
 						content = content[:4096]
 						truncated = true
 					}
-					matches = append(matches, grepMatch{virtual(current), line + 1, content})
+					matches = append(matches, grepMatch{Path: virtual(current), Line: line + 1, Content: content})
 				}
 			} else {
 				for line, content := range lines {
@@ -469,7 +296,7 @@ func (s *Service) Workspace(ctx context.Context, r *agent.SandboxWorkspaceReques
 						content = content[:4096]
 						truncated = true
 					}
-					matches = append(matches, grepMatch{virtual(current), line + 1, content})
+					matches = append(matches, grepMatch{Path: virtual(current), Line: line + 1, Content: content})
 				}
 			}
 			return nil

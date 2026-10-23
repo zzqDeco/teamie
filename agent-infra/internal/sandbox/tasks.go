@@ -14,49 +14,19 @@ import (
 	"time"
 
 	"teamie/agent-infra/internal/api"
+	"teamie/agent-infra/internal/sandbox/domain"
 	"teamie/agent-protocol/kitex_gen/agent"
 )
 
-type taskReceipt struct {
-	Version            int          `json:"version"`
-	AgentID            string       `json:"agentId"`
-	RunID              string       `json:"runId"`
-	TaskID             string       `json:"taskId"`
-	Command            string       `json:"command"`
-	Fingerprint        string       `json:"fingerprint"`
-	ContainerName      string       `json:"containerName"`
-	ContainerID        string       `json:"containerId,omitempty"`
-	CleanupDone        bool         `json:"cleanupDone,omitempty"`
-	State              string       `json:"state"`
-	TimeoutSeconds     int32        `json:"timeoutSeconds"`
-	Deadline           time.Time    `json:"deadline,omitempty"`
-	CancelRequested    bool         `json:"cancelRequested"`
-	CancelCode         string       `json:"cancelCode,omitempty"`
-	Result             Result       `json:"result"`
-	Output             []outputPart `json:"output,omitempty"`
-	OutputBytes        int64        `json:"outputBytes,omitempty"`
-	OutputFileBytes    int64        `json:"outputFileBytes,omitempty"`
-	OutputFrames       int          `json:"outputFrames,omitempty"`
-	OutputStatus       string       `json:"outputStatus,omitempty"`
-	OutputSHA256       string       `json:"outputSha256,omitempty"`
-	OutputAnchor       string       `json:"outputAnchor,omitempty"`
-	OutputAnchorTime   string       `json:"outputAnchorTime,omitempty"`
-	OutputGateReleased bool         `json:"outputGateReleased,omitempty"`
-	OutputExpiresAt    *time.Time   `json:"outputExpiresAt,omitempty"`
-	OutputExpiredAt    *time.Time   `json:"outputExpiredAt,omitempty"`
-	UpdatedAt          time.Time    `json:"updatedAt"`
-}
+type taskReceipt = domain.TaskReceipt
 
-func taskKey(agentID, taskID string) string   { return digest(agentID + "\x00" + taskID) }
+func taskKey(agentID, taskID string) string   { return domain.TaskKey(agentID, taskID) }
 func (s *Service) taskPath(key string) string { return filepath.Join(s.StateRoot, key+".task.json") }
 func terminalTask(state string) bool {
-	return state == "completed" || state == "failed" || state == "canceled" || state == "unknown"
+	return domain.TerminalTask(state)
 }
 func taskFailure(taskID, code string) *agent.SandboxTaskResponse {
-	message := map[string]string{"unauthorized": "Invalid service credential", "invalid_request": "Invalid sandbox request", "request_conflict": "Task ID already identifies a different command", "sandbox_busy": "The sandbox execution slot is busy", "execution_unknown": "Execution state is unknown; inspect its side effects before retrying"}[code]
-	if message == "" {
-		message = "Sandbox operation could not be completed"
-	}
+	message := domain.TaskErrorMessage(code)
 	return &agent.SandboxTaskResponse{TaskId: taskID, State: "unknown", ErrorCode: &code, ErrorMessage: &message}
 }
 func taskResponse(t *taskReceipt) *agent.SandboxTaskResponse {
@@ -305,7 +275,7 @@ func (s *Service) ReadOutput(ctx context.Context, r *agent.SandboxTaskRequest) (
 	}
 	parts := t.Output
 	if len(parts) == 0 {
-		parts = []outputPart{{1, t.Result.Stdout}, {2, t.Result.Stderr}}
+		parts = []outputPart{{Stream: 1, Data: t.Result.Stdout}, {Stream: 2, Data: t.Result.Stderr}}
 	}
 	length := int64(len(t.Result.Stdout) + len(t.Result.Stderr))
 	offset := r.GetOffset()

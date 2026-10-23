@@ -107,7 +107,7 @@ func TestTaskOutputReceiptPreservesRawBytes(t *testing.T) {
 	s := fixture(t, &fakeEngine{})
 	key := taskKey("a", "binary-output")
 	raw := string([]byte{0xff, 0x00, 'a', 0xfe})
-	value := &taskReceipt{Version: 1, AgentID: "a", TaskID: "binary-output", State: "completed", Output: []outputPart{{1, raw}, {2, "stderr"}}}
+	value := &taskReceipt{Version: 1, AgentID: "a", TaskID: "binary-output", State: "completed", Output: []outputPart{{Stream: 1, Data: raw}, {Stream: 2, Data: "stderr"}}}
 	if e := writeAtomicJSON(s.taskPath(key), value); e != nil {
 		t.Fatal(e)
 	}

@@ -16,56 +16,26 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"teamie/agent-infra/internal/sandbox/domain"
+	sandboxfs "teamie/agent-infra/internal/sandbox/infra/fs"
 	"teamie/agent-protocol/kitex_gen/agent"
 )
 
-const MaxReadableFileBytes = 8 * 1024 * 1024
-const MaxPageBytes = 65536
-const maxPageMatches = 10000
+const MaxReadableFileBytes = domain.MaxReadableFileBytes
+const MaxPageBytes = domain.MaxPageBytes
+const maxPageMatches = domain.MaxPageMatches
 
-type pageCursor struct {
-	Query       string `json:"q"`
-	Version     string `json:"v"`
-	File        int    `json:"f"`
-	Match       int    `json:"m,omitempty"`
-	FileVersion string `json:"h,omitempty"`
-}
+type pageCursor = domain.PageCursor
 
 func encodePageCursor(c pageCursor) string {
-	b, _ := json.Marshal(c)
-	return base64.RawURLEncoding.EncodeToString(b)
+	return domain.EncodePageCursor(c)
 }
-func pageFits(v any) bool { b, e := json.Marshal(v); return e == nil && len(b) <= MaxPageBytes }
+func pageFits(v any) bool { return domain.PageFits(v) }
 func utf8End(b []byte, end int) int {
-	if end > len(b) {
-		end = len(b)
-	}
-	for end > 0 && end < len(b) && !utf8.RuneStart(b[end]) {
-		end--
-	}
-	return end
+	return domain.UTF8End(b, end)
 }
 func readPageFile(root *os.Root, name string) ([]byte, error) {
-	f, e := root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
-	if e != nil {
-		return nil, e
-	}
-	defer f.Close()
-	i, e := f.Stat()
-	if e != nil || !i.Mode().IsRegular() {
-		return nil, errors.New("file_unavailable")
-	}
-	if i.Size() > MaxReadableFileBytes {
-		return nil, errors.New("file_too_large")
-	}
-	b, e := io.ReadAll(io.LimitReader(f, MaxReadableFileBytes+1))
-	if len(b) > MaxReadableFileBytes {
-		return nil, errors.New("file_too_large")
-	}
-	if !utf8.Valid(b) {
-		return nil, errors.New("binary_file")
-	}
-	return b, e
+	return sandboxfs.ReadPageFile(root, name)
 }
 
 // Paging is an explicit new protocol. Legacy callers retain their original
@@ -243,7 +213,7 @@ func (s *Service) workspaceSearchPage(ctx context.Context, op string, in workspa
 		if !i.IsDir() && !i.Mode().IsRegular() {
 			return nil
 		}
-		files = append(files, fileInfo{virtual(current), i.IsDir(), i.Size(), i.ModTime().UTC().Format(time.RFC3339Nano)})
+		files = append(files, fileInfo{Path: virtual(current), IsDir: i.IsDir(), Size: i.Size(), ModifiedAt: i.ModTime().UTC().Format(time.RFC3339Nano)})
 		return nil
 	}
 	if op == "ls" {

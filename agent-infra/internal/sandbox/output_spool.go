@@ -2,42 +2,32 @@ package sandbox
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
+
+	"teamie/agent-infra/internal/sandbox/domain"
 )
 
-const DurableOutputLimit int64 = 8 * 1024 * 1024
-const SharedOutputLimit int64 = 64 * 1024 * 1024
-const outputChunkBytes = 32768
-const maxOutputFrames = 32768
+const DurableOutputLimit int64 = domain.DurableOutputLimit
+const SharedOutputLimit int64 = domain.SharedOutputLimit
+const outputChunkBytes = domain.OutputChunkBytes
+const maxOutputFrames = domain.MaxOutputFrames
 
-var errOutputLimit = errors.New("durable output limit")
-var errOutputGap = errors.New("container output replay gap")
+var errOutputLimit = domain.ErrOutputLimit
+var errOutputGap = domain.ErrOutputGap
 
-type spoolRecord struct {
-	Stream    byte
-	Timestamp string
-	Chunk     uint32
-	Data      []byte
-}
+type spoolRecord = domain.SpoolRecord
 
-func (r spoolRecord) identity() string {
-	return fmt.Sprintf("%s/%d/%d/%s", r.Timestamp, r.Stream, r.Chunk, digest(string(r.Data)))
-}
 func newOutputAnchor() (string, error) {
-	var b [32]byte
-	_, e := rand.Read(b[:])
-	return "TEAMIE_OUTPUT_ANCHOR:" + hex.EncodeToString(b[:]), e
+	return domain.NewOutputAnchor()
 }
 func (s *Service) outputPath(key string) string { return filepath.Join(s.StateRoot, key+".output") }
 func (s *Service) openSpool(key string, flag int) (*os.File, error) {
@@ -53,30 +43,10 @@ func (s *Service) openSpool(key string, flag int) (*os.File, error) {
 	return f, nil
 }
 func encodeSpool(r spoolRecord) []byte {
-	b := make([]byte, 10+len(r.Timestamp)+len(r.Data))
-	b[0] = r.Stream
-	b[1] = byte(len(r.Timestamp))
-	binary.BigEndian.PutUint32(b[2:6], r.Chunk)
-	binary.BigEndian.PutUint32(b[6:10], uint32(len(r.Data)))
-	copy(b[10:], r.Timestamp)
-	copy(b[10+len(r.Timestamp):], r.Data)
-	return b
+	return domain.EncodeSpool(r)
 }
 func readSpoolRecord(r io.Reader) (spoolRecord, error) {
-	var h [10]byte
-	_, e := io.ReadFull(r, h[:])
-	if e != nil {
-		return spoolRecord{}, e
-	}
-	n := binary.BigEndian.Uint32(h[6:])
-	if (h[0] != 1 && h[0] != 2) || h[1] > 64 || n > outputChunkBytes {
-		return spoolRecord{}, errors.New("invalid output spool record")
-	}
-	b := make([]byte, int(h[1])+int(n))
-	if _, e = io.ReadFull(r, b); e != nil {
-		return spoolRecord{}, e
-	}
-	return spoolRecord{h[0], string(b[:int(h[1])]), binary.BigEndian.Uint32(h[2:6]), b[int(h[1]):]}, nil
+	return domain.ReadSpoolRecord(r)
 }
 func (s *Service) outputUsedLocked() (int64, error) {
 	entries, e := os.ReadDir(s.StateRoot)
@@ -331,7 +301,7 @@ func (s *Service) outputSegmentsLocked(key string, t *taskReceipt, start, end in
 	if t.Version == 1 {
 		parts := t.Output
 		if len(parts) == 0 {
-			parts = []outputPart{{1, t.Result.Stdout}, {2, t.Result.Stderr}}
+			parts = []outputPart{{Stream: 1, Data: t.Result.Stdout}, {Stream: 2, Data: t.Result.Stderr}}
 		}
 		for _, part := range parts {
 			add(part.Stream, []byte(part.Data))
@@ -419,7 +389,7 @@ func (s *Service) captureSpool(ctx context.Context, key string, t *taskReceipt, 
 		return e
 	}
 	if len(tail) == 0 && anchorTime != "" {
-		tail = []spoolRecord{{1, anchorTime, 0, []byte(anchor + "\n")}}
+		tail = []spoolRecord{{Stream: 1, Timestamp: anchorTime, Chunk: 0, Data: []byte(anchor + "\n")}}
 	}
 	// Before the launch anchor commits, the wrapper cannot have executed the
 	// command. Its first marker can safely establish the initial daemon anchor.
@@ -513,7 +483,7 @@ func (s *Service) captureSpool(ctx context.Context, key string, t *taskReceipt, 
 				return e
 			}
 			data = data[:n]
-			record := spoolRecord{h[0], string(stamp), chunk, data}
+			record := spoolRecord{Stream: h[0], Timestamp: string(stamp), Chunk: chunk, Data: data}
 			chunk++
 			if first && !recovering {
 				first = false
@@ -535,17 +505,17 @@ func (s *Service) captureSpool(ctx context.Context, key string, t *taskReceipt, 
 			if recovering && !matched {
 				if overlap < 0 {
 					for i := range tail {
-						if record.Timestamp == tail[i].Timestamp && record.Stream == tail[i].Stream && record.Chunk == tail[i].Chunk && record.identity() != tail[i].identity() {
+						if record.Timestamp == tail[i].Timestamp && record.Stream == tail[i].Stream && record.Chunk == tail[i].Chunk && record.Identity() != tail[i].Identity() {
 							return errOutputGap
 						}
-						if record.identity() == tail[i].identity() {
+						if record.Identity() == tail[i].Identity() {
 							overlap = i
 							break
 						}
 					}
 				} else {
 					overlap++
-					if overlap >= len(tail) || record.identity() != tail[overlap].identity() {
+					if overlap >= len(tail) || record.Identity() != tail[overlap].Identity() {
 						return errOutputGap
 					}
 				}

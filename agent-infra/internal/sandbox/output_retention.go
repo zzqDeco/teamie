@@ -9,12 +9,13 @@ import (
 	"syscall"
 	"time"
 
+	"teamie/agent-infra/internal/sandbox/domain"
 	"teamie/agent-protocol/kitex_gen/agent"
 )
 
-const OutputRetention = 24 * time.Hour
+const OutputRetention = domain.OutputRetention
 
-var errOutputExpired = errors.New("output_expired")
+var errOutputExpired = domain.ErrOutputExpired
 
 func (s *Service) outputTime() time.Time {
 	if s.outputNow != nil {
@@ -24,7 +25,7 @@ func (s *Service) outputTime() time.Time {
 }
 
 func outputRetentionEligible(t *taskReceipt) bool {
-	return t.Version == 2 && terminalTask(t.State) && t.State != "unknown" && t.CleanupDone
+	return domain.OutputRetentionEligible(t)
 }
 
 func outputRetentionResponse(t *taskReceipt, out *agent.SandboxTaskResponse) {
