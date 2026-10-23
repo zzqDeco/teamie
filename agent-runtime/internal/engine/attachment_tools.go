@@ -15,16 +15,11 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
 	wire "teamie/agent-protocol/kitex_gen/agent"
+	"teamie/agent-runtime/internal/engine/domain"
 	"teamie/backend/pkg/imlimits"
 )
 
-type Attachment struct {
-	ID        string `json:"id"`
-	Filename  string `json:"filename"`
-	MediaType string `json:"mediaType"`
-	SizeBytes int    `json:"sizeBytes"`
-	SHA256    string `json:"sha256"`
-}
+type Attachment = domain.Attachment
 
 type getAttachmentArgs struct {
 	ConversationID string `json:"conversationId" jsonschema:"required,description=Source conversation containing the referenced message"`

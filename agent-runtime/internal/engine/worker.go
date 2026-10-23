@@ -19,13 +19,14 @@ import (
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
-	"github.com/cloudwego/kitex/client"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	wire "teamie/agent-protocol/kitex_gen/agent"
 	"teamie/agent-protocol/kitex_gen/agent/agentcontrolservice"
 	"teamie/agent-protocol/kitex_gen/agent/modelgatewayservice"
 	"teamie/agent-protocol/kitex_gen/agent/sandboxservice"
+	"teamie/agent-runtime/internal/engine/domain"
+	"teamie/agent-runtime/internal/engine/infra/rpcclient"
 	"teamie/backend/kitex_gen/im/identityservice"
 )
 
@@ -45,16 +46,13 @@ func New(store *Store, c Config) (*Engine, error) {
 	if c.GatewayStreamURL == "" {
 		c.GatewayStreamURL = "http://llm-gateway:8086/internal/v1/chat/stream"
 	}
-	opts := func(addr string, timeout time.Duration) []client.Option {
-		return []client.Option{observability.RPCClient(), client.WithHostPorts(addr), client.WithRPCTimeout(timeout), client.WithConnectTimeout(time.Second)}
-	}
-	cp, e := agentcontrolservice.NewClient("teamie.agent-control", opts(c.ControlAddr, 4*time.Second)...)
+	cp, e := rpcclient.DialAgentControl(c.ControlAddr)
 	if e != nil {
 		return nil, e
 	}
 	// RPC now carries only bounded Ping/Cancel operations. Native model
 	// generation follows HTTP disconnect/cancellation without an RPC timer.
-	gwRPC, e := modelgatewayservice.NewClient("teamie.model-gateway", opts(c.GatewayAddr, 4*time.Second)...)
+	gwRPC, e := rpcclient.DialModelGateway(c.GatewayAddr)
 	if e != nil {
 		return nil, e
 	}
@@ -62,11 +60,11 @@ func New(store *Store, c Config) (*Engine, error) {
 	if e != nil {
 		return nil, e
 	}
-	sb, e := sandboxservice.NewClient("teamie.sandbox", opts(c.SandboxAddr, 70*time.Second)...)
+	sb, e := rpcclient.DialSandbox(c.SandboxAddr)
 	if e != nil {
 		return nil, e
 	}
-	id, e := identityservice.NewClient("teamie.identity", opts(c.IdentityAddr, 4*time.Second)...)
+	id, e := rpcclient.DialIdentity(c.IdentityAddr)
 	if e != nil {
 		return nil, e
 	}
@@ -1083,14 +1081,7 @@ func finalizeSummaryWithSourceFormat(_ context.Context, original []*schema.Agent
 // Large-context providers retain a conservative platform trigger so a single
 // summary request still fits the gateway's bounded transport.
 func summaryTrigger(window int) int {
-	if window < 4096 {
-		window = 16384
-	}
-	trigger := window * 3 / 4
-	if trigger > 12000 {
-		trigger = 12000
-	}
-	return trigger
+	return domain.SummaryTrigger(window)
 }
 func boundedInputBatch(inputs []Input) ([]Input, []Input) {
 	n, total := 0, 0

@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 
 	"github.com/cloudwego/eino/components/tool"
+	"teamie/agent-runtime/internal/engine/domain"
+	"teamie/agent-runtime/internal/engine/infra/eino"
 )
 
-const currentToolProfile = "teamie-tools-v035"
-const v034ToolProfile = "teamie-tools-v034"
+const currentToolProfile = domain.CurrentToolProfile
+const v034ToolProfile = domain.V034ToolProfile
 
 // v0.3.4 wrote plain schema.Message receipts. Native receipts are serialized
 // with a registered type and must never select an older execution profile.
@@ -42,20 +44,7 @@ func (s *Store) runToolProfile(ctx context.Context, runID string) (string, error
 }
 
 func toolsForRun(ctx context.Context, available []tool.BaseTool, run *Run) ([]tool.BaseTool, error) {
-	if run.toolProfile != v034ToolProfile {
-		return available, nil
-	}
-	previous := make([]tool.BaseTool, 0, len(available))
-	for _, item := range available {
-		info, err := item.Info(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if info.Name != "im_get_attachment" {
-			previous = append(previous, item)
-		}
-	}
-	return previous, nil
+	return eino.FilterToolsForProfile(ctx, available, run.toolProfile)
 }
 
 func resumeCompatibleForRun(metadata *checkpointMetadata, revision int64, run *Run) bool {
