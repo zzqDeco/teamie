@@ -33,11 +33,11 @@ struct UpdateAdminModelConfigReq {
   2: required string model (api.body="model")
   3: optional string apiKey (api.body="apiKey")
   4: required bool enabled (api.body="enabled")
-  5: required bool clearApiKey (api.body="clearApiKey")
+  5: optional bool clearApiKey (api.body="clearApiKey")
   6: optional i64 contextWindowTokens (api.body="contextWindowTokens")
   7: optional bool webSearchEnabled (api.body="webSearchEnabled")
   8: optional string webSearchApiKey (api.body="webSearchApiKey")
-  9: required bool clearWebSearchApiKey (api.body="clearWebSearchApiKey")
+  9: optional bool clearWebSearchApiKey (api.body="clearWebSearchApiKey")
 }
 
 struct TestAdminModelConfigReq {}

@@ -168,11 +168,11 @@ type UpdateAdminModelConfigReq struct {
 	Model                string  `thrift:"model,2,required" json:"model"`
 	ApiKey               *string `thrift:"apiKey,3,optional" json:"apiKey,omitempty"`
 	Enabled              bool    `thrift:"enabled,4,required" json:"enabled"`
-	ClearApiKey          bool    `thrift:"clearApiKey,5,required" json:"clearApiKey"`
+	ClearApiKey          *bool   `thrift:"clearApiKey,5,optional" json:"clearApiKey,omitempty"`
 	ContextWindowTokens  *int64  `thrift:"contextWindowTokens,6,optional" json:"contextWindowTokens,omitempty"`
 	WebSearchEnabled     *bool   `thrift:"webSearchEnabled,7,optional" json:"webSearchEnabled,omitempty"`
 	WebSearchApiKey      *string `thrift:"webSearchApiKey,8,optional" json:"webSearchApiKey,omitempty"`
-	ClearWebSearchApiKey bool    `thrift:"clearWebSearchApiKey,9,required" json:"clearWebSearchApiKey"`
+	ClearWebSearchApiKey *bool   `thrift:"clearWebSearchApiKey,9,optional" json:"clearWebSearchApiKey,omitempty"`
 }
 
 func NewUpdateAdminModelConfigReq() *UpdateAdminModelConfigReq {
@@ -203,8 +203,13 @@ func (p *UpdateAdminModelConfigReq) GetEnabled() (v bool) {
 	return p.Enabled
 }
 
+var UpdateAdminModelConfigReq_ClearApiKey_DEFAULT bool
+
 func (p *UpdateAdminModelConfigReq) GetClearApiKey() (v bool) {
-	return p.ClearApiKey
+	if !p.IsSetClearApiKey() {
+		return UpdateAdminModelConfigReq_ClearApiKey_DEFAULT
+	}
+	return *p.ClearApiKey
 }
 
 var UpdateAdminModelConfigReq_ContextWindowTokens_DEFAULT int64
@@ -234,12 +239,21 @@ func (p *UpdateAdminModelConfigReq) GetWebSearchApiKey() (v string) {
 	return *p.WebSearchApiKey
 }
 
+var UpdateAdminModelConfigReq_ClearWebSearchApiKey_DEFAULT bool
+
 func (p *UpdateAdminModelConfigReq) GetClearWebSearchApiKey() (v bool) {
-	return p.ClearWebSearchApiKey
+	if !p.IsSetClearWebSearchApiKey() {
+		return UpdateAdminModelConfigReq_ClearWebSearchApiKey_DEFAULT
+	}
+	return *p.ClearWebSearchApiKey
 }
 
 func (p *UpdateAdminModelConfigReq) IsSetApiKey() bool {
 	return p.ApiKey != nil
+}
+
+func (p *UpdateAdminModelConfigReq) IsSetClearApiKey() bool {
+	return p.ClearApiKey != nil
 }
 
 func (p *UpdateAdminModelConfigReq) IsSetContextWindowTokens() bool {
@@ -252,6 +266,10 @@ func (p *UpdateAdminModelConfigReq) IsSetWebSearchEnabled() bool {
 
 func (p *UpdateAdminModelConfigReq) IsSetWebSearchApiKey() bool {
 	return p.WebSearchApiKey != nil
+}
+
+func (p *UpdateAdminModelConfigReq) IsSetClearWebSearchApiKey() bool {
+	return p.ClearWebSearchApiKey != nil
 }
 
 func (p *UpdateAdminModelConfigReq) String() string {

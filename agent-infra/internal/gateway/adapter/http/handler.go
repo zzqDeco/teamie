@@ -71,11 +71,11 @@ func (a *Adapter) UpdateAdminModelConfig(ctx context.Context, req *gatewaygen.Up
 		Model:                req.Model,
 		APIKey:               req.ApiKey,
 		Enabled:              req.Enabled,
-		ClearAPIKey:          req.ClearApiKey,
+		ClearAPIKey:          req.GetClearApiKey(),
 		ContextWindowTokens:  req.ContextWindowTokens,
 		WebSearchEnabled:     req.WebSearchEnabled,
 		WebSearchAPIKey:      req.WebSearchApiKey,
-		ClearWebSearchAPIKey: req.ClearWebSearchApiKey,
+		ClearWebSearchAPIKey: req.GetClearWebSearchApiKey(),
 	})
 	if err != nil {
 		return nil, err
