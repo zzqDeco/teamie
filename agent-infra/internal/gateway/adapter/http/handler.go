@@ -4,11 +4,13 @@ package httpAdapter
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"teamie/agent-infra/internal/gateway/app"
 	"teamie/agent-infra/internal/gateway/domain"
 	gatewaygen "teamie/agent-protocol/hertz_gen/agent/gateway"
+	"teamie/agent-protocol/modeltransport"
 )
 
 var _ gatewaygen.ModelGatewayHTTPService = (*Adapter)(nil)
@@ -96,12 +98,17 @@ func (a *Adapter) TestAdminModelConfig(ctx context.Context, req *gatewaygen.Test
 		return nil, domain.Err(503, "gateway_unavailable", "Model gateway test handler is not bound")
 	}
 	start := time.Now()
+	raw, _ := json.Marshal(modeltransport.Request{
+		Protocol: modeltransport.Version,
+		Messages: json.RawMessage(`[{"role":"user","content_blocks":[{"type":"user_input_text","user_input_text":{"text":"Reply with OK."}}]}]`),
+		Options:  json.RawMessage(`{"MaxTokens":8,"AgenticToolChoice":{"Type":"forbidden"}}`),
+	})
 	res, err := a.Generate(ctx, &gatewaygen.ChatCallReq{
 		OwnerId:     "admin-test",
 		AgentId:     "admin-test",
 		SessionId:   "admin-test",
 		RunId:       start.UTC().Format("20060102T150405.000000000"),
-		RequestJson: `{"protocol":"teamie-model-v1","messages":[{"role":"user","content_blocks":[{"type":"user_input_text","user_input_text":{"text":"Reply with OK."}}]}],"options":{"MaxTokens":8,"AgenticToolChoice":{"Type":"forbidden"}}}`,
+		RequestJson: string(raw),
 	})
 	if err != nil {
 		return nil, err
