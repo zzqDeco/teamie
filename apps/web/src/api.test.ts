@@ -1,6 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, TeamieClient } from "@teamie/api-client";
-import type { Agent } from "@teamie/api-client";
+import { ApiError, IDL_ROUTES, TeamieClient } from "@teamie/api-client";
+import type {
+  Agent,
+  BootstrapResp,
+  MessageDTO,
+  PublicAgentDTO,
+  RealtimeClientFrame,
+  RealtimeServerFrame,
+  SessionResp,
+  UserDTO,
+} from "@teamie/api-client";
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -607,5 +616,148 @@ describe("Agent and model gateway boundaries", () => {
     });
     expect(fetch.mock.calls[0][0]).toBe("/api/v1/admin/model-gateway/test");
     expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({});
+  });
+});
+
+describe("IDL_ROUTES and generated Thrift DTO contracts", () => {
+  it("exports typed route metadata for Identity, Chat, Realtime, AgentControl, and ModelGateway services", () => {
+    expect(IDL_ROUTES.GetSession).toEqual({
+      service: "IdentityHTTPService",
+      namespace: "im.identity",
+      method: "GET",
+      path: "/api/v1/auth/session",
+      clientPath: "/auth/session",
+      requestType: "GetSessionReq",
+      responseType: "SessionResp",
+    });
+    expect(IDL_ROUTES.GetBootstrap).toEqual({
+      service: "ChatHTTPService",
+      namespace: "im.chat",
+      method: "GET",
+      path: "/api/v1/bootstrap",
+      clientPath: "/bootstrap",
+      requestType: "GetBootstrapReq",
+      responseType: "BootstrapResp",
+    });
+    expect(IDL_ROUTES.SendMessage).toEqual({
+      service: "ChatHTTPService",
+      namespace: "im.chat",
+      method: "POST",
+      path: "/api/v1/conversations/:id/messages",
+      clientPath: "/conversations/:id/messages",
+      requestType: "SendMessageReq",
+      responseType: "MessageResp",
+    });
+    expect(IDL_ROUTES.ConnectWS).toEqual({
+      service: "RealtimeWSService",
+      namespace: "im.realtime",
+      method: "GET",
+      path: "/api/v1/ws",
+      clientPath: "/ws",
+      requestType: "ConnectWSReq",
+      responseType: "EmptyResp",
+    });
+    expect(IDL_ROUTES.ListOwnedAgents).toEqual({
+      service: "AgentControlHTTPService",
+      namespace: "agent.control",
+      method: "GET",
+      path: "/api/v1/agents",
+      clientPath: "/agents",
+      requestType: "ListOwnedAgentsReq",
+      responseType: "AgentListResp",
+    });
+    expect(IDL_ROUTES.UpdateAdminModelConfig).toEqual({
+      service: "ModelGatewayHTTPService",
+      namespace: "agent.gateway",
+      method: "PUT",
+      path: "/api/v1/admin/model-gateway",
+      clientPath: "/admin/model-gateway",
+      requestType: "UpdateAdminModelConfigReq",
+      responseType: "AdminModelConfigResp",
+    });
+  });
+
+  it("aligns TeamieClient transport requests with generated IDL_ROUTES and Thrift DTO contracts", async () => {
+    const userDto: UserDTO = {
+      id: "u-1",
+      email: "member@example.test",
+      displayName: "Member",
+      kind: "human",
+      platformRole: "user",
+      createdAt: "2026-10-23T00:00:00Z",
+    };
+    const sessionDto: SessionResp = {
+      user: userDto,
+      csrfToken: "csrf-1",
+    };
+    const bootstrapDto: BootstrapResp = {
+      user: userDto,
+      workspaces: [],
+      conversations: [],
+      capabilities: { chat: true },
+      flagsRevision: "r1",
+      syncCursor: "0",
+      attachmentLimits: { maxFileBytes: 1024, maxFilesPerMessage: 4 },
+    };
+    const messageDto: MessageDTO = {
+      id: "m-1",
+      conversationId: "c-1",
+      senderId: "u-1",
+      senderName: "Member",
+      senderKind: "human",
+      clientMessageId: "cm-1",
+      seq: 1,
+      body: "hello",
+      createdAt: "2026-10-23T00:00:00Z",
+    };
+    const agentDto: PublicAgentDTO = {
+      id: "a-1",
+      principalId: "a-1",
+      ownerId: "u-1",
+      ownerName: "Member",
+      name: "Helper",
+      description: "Desc",
+      workspaceIds: ["w-1"],
+      enabled: true,
+      createdAt: "2026-10-23T00:00:00Z",
+      updatedAt: "2026-10-23T00:00:00Z",
+    };
+    const wsClientFrame: RealtimeClientFrame = {
+      type: "typing",
+      conversationId: "c-1",
+      isTyping: true,
+    };
+    const wsServerFrame: RealtimeServerFrame = {
+      type: "typing.updated",
+      conversationId: "c-1",
+      userId: "u-1",
+      displayName: "Member",
+      isTyping: true,
+    };
+    expect(wsClientFrame.type).toBe("typing");
+    expect(wsServerFrame.type).toBe("typing.updated");
+
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(sessionDto), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(bootstrapDto), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: messageDto }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ agents: [agentDto] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+
+    const client = new TeamieClient();
+    client.csrfToken = sessionDto.csrfToken;
+    await client.session();
+    await client.bootstrap();
+    await client.send("c-1", { clientMessageId: "cm-1", body: "hello" });
+    await client.agents();
+
+    expect(fetch.mock.calls[0][0]).toBe(IDL_ROUTES.GetSession.path);
+    expect(fetch.mock.calls[1][0]).toBe(IDL_ROUTES.GetBootstrap.path);
+    expect(fetch.mock.calls[2][0]).toBe(
+      IDL_ROUTES.SendMessage.path.replace(":id", "c-1"),
+    );
+    expect(fetch.mock.calls[2][1].method).toBe(IDL_ROUTES.SendMessage.method);
+    expect(fetch.mock.calls[3][0]).toBe(IDL_ROUTES.ListOwnedAgents.path);
   });
 });
