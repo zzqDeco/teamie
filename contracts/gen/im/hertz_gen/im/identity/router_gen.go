@@ -4,6 +4,14 @@ package identity
 
 import "net/http"
 
+// HTTPResponder abstracts stateless request binding and domain error serialization (implemented by httpx.Responder).
+type HTTPResponder interface {
+	DecodeRequest(w http.ResponseWriter, r *http.Request, dst any) error
+	WriteBindErrorHTTP(w http.ResponseWriter, r *http.Request, err error)
+	WriteDomainErrorHTTP(w http.ResponseWriter, r *http.Request, err error)
+	WriteOKHTTP(w http.ResponseWriter, r *http.Request, status int, resp any)
+}
+
 // RouteSpec describes a single HTTP/WebSocket endpoint declared in the Thrift IDL.
 type RouteSpec struct {
 	Name         string
@@ -13,6 +21,9 @@ type RouteSpec struct {
 	RequestType  string
 	ResponseType string
 }
+
+// IdentityHTTPServer is the stateless Clean DDD HTTP server interface generated from IdentityHTTPService.
+type IdentityHTTPServer = IdentityHTTPService
 
 // IdentityHTTPService route pattern constants generated from contracts/im/http_identity.thrift.
 const (
@@ -126,4 +137,221 @@ func RegisterIdentityHTTPServiceRoutes(mux *http.ServeMux, h IdentityHTTPService
 		panic("IdentityHTTPServiceRouteHandlers.ResetPassword (" + PatternResetPassword + ") is nil")
 	}
 	mux.HandleFunc(PatternResetPassword, h.ResetPassword)
+}
+
+// RegisterIdentityHTTPServer binds IdentityHTTPServer methods using HTTPResponder with optional per-route handler overrides.
+func RegisterIdentityHTTPServer(mux *http.ServeMux, srv IdentityHTTPServer, m HTTPResponder, overrides ...IdentityHTTPServiceRouteHandlers) {
+	var h IdentityHTTPServiceRouteHandlers
+	if len(overrides) > 0 {
+		h = overrides[0]
+	}
+	if h.GetRegistrationMetadata == nil {
+		h.GetRegistrationMetadata = func(w http.ResponseWriter, r *http.Request) {
+			var req GetRegistrationMetadataReq
+			resp, err := srv.GetRegistrationMetadata(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.Register == nil {
+		h.Register = func(w http.ResponseWriter, r *http.Request) {
+			var req RegisterReq
+			if r.ContentLength != 0 {
+				if err := m.DecodeRequest(w, r, &req); err != nil {
+					m.WriteBindErrorHTTP(w, r, err)
+					return
+				}
+			}
+			resp, err := srv.Register(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.Login == nil {
+		h.Login = func(w http.ResponseWriter, r *http.Request) {
+			var req LoginReq
+			if r.ContentLength != 0 {
+				if err := m.DecodeRequest(w, r, &req); err != nil {
+					m.WriteBindErrorHTTP(w, r, err)
+					return
+				}
+			}
+			resp, err := srv.Login(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.GetSession == nil {
+		h.GetSession = func(w http.ResponseWriter, r *http.Request) {
+			var req GetSessionReq
+			resp, err := srv.GetSession(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.Logout == nil {
+		h.Logout = func(w http.ResponseWriter, r *http.Request) {
+			var req LogoutReq
+			if r.ContentLength != 0 {
+				if err := m.DecodeRequest(w, r, &req); err != nil {
+					m.WriteBindErrorHTTP(w, r, err)
+					return
+				}
+			}
+			_, err := srv.Logout(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusNoContent, nil)
+		}
+	}
+	if h.ChangePassword == nil {
+		h.ChangePassword = func(w http.ResponseWriter, r *http.Request) {
+			var req ChangePasswordReq
+			if r.ContentLength != 0 {
+				if err := m.DecodeRequest(w, r, &req); err != nil {
+					m.WriteBindErrorHTTP(w, r, err)
+					return
+				}
+			}
+			_, err := srv.ChangePassword(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusNoContent, nil)
+		}
+	}
+	if h.UpdateProfile == nil {
+		h.UpdateProfile = func(w http.ResponseWriter, r *http.Request) {
+			var req UpdateProfileReq
+			if r.ContentLength != 0 {
+				if err := m.DecodeRequest(w, r, &req); err != nil {
+					m.WriteBindErrorHTTP(w, r, err)
+					return
+				}
+			}
+			resp, err := srv.UpdateProfile(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.ListInvites == nil {
+		h.ListInvites = func(w http.ResponseWriter, r *http.Request) {
+			var req ListInvitesReq
+			resp, err := srv.ListInvites(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.CreateInvite == nil {
+		h.CreateInvite = func(w http.ResponseWriter, r *http.Request) {
+			var req CreateInviteReq
+			if r.ContentLength != 0 {
+				if err := m.DecodeRequest(w, r, &req); err != nil {
+					m.WriteBindErrorHTTP(w, r, err)
+					return
+				}
+			}
+			resp, err := srv.CreateInvite(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.RevokeInvite == nil {
+		h.RevokeInvite = func(w http.ResponseWriter, r *http.Request) {
+			var req RevokeInviteReq
+			_, err := srv.RevokeInvite(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusNoContent, nil)
+		}
+	}
+	if h.ListAdminUsers == nil {
+		h.ListAdminUsers = func(w http.ResponseWriter, r *http.Request) {
+			var req ListAdminUsersReq
+			resp, err := srv.ListAdminUsers(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.CreatePasswordResetLink == nil {
+		h.CreatePasswordResetLink = func(w http.ResponseWriter, r *http.Request) {
+			var req CreatePasswordResetLinkReq
+			if r.ContentLength != 0 {
+				if err := m.DecodeRequest(w, r, &req); err != nil {
+					m.WriteBindErrorHTTP(w, r, err)
+					return
+				}
+			}
+			resp, err := srv.CreatePasswordResetLink(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.InspectPasswordReset == nil {
+		h.InspectPasswordReset = func(w http.ResponseWriter, r *http.Request) {
+			var req InspectPasswordResetReq
+			if r.ContentLength != 0 {
+				if err := m.DecodeRequest(w, r, &req); err != nil {
+					m.WriteBindErrorHTTP(w, r, err)
+					return
+				}
+			}
+			resp, err := srv.InspectPasswordReset(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.ResetPassword == nil {
+		h.ResetPassword = func(w http.ResponseWriter, r *http.Request) {
+			var req ResetPasswordReq
+			if r.ContentLength != 0 {
+				if err := m.DecodeRequest(w, r, &req); err != nil {
+					m.WriteBindErrorHTTP(w, r, err)
+					return
+				}
+			}
+			_, err := srv.ResetPassword(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusNoContent, nil)
+		}
+	}
+	RegisterIdentityHTTPServiceRoutes(mux, h)
 }

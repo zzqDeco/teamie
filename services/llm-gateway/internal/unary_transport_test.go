@@ -18,7 +18,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/common/adaptor"
 	"github.com/cloudwego/kitex/client"
 	kitexserver "github.com/cloudwego/kitex/server"
-	"teamie/pkg/rpcx"
+	rpcx "teamie/services/llm-gateway/internal/infra/rpcclient"
 	"teamie/contracts/gen/agent/kitex_gen/agent"
 	"teamie/contracts/gen/agent/kitex_gen/agent/modelgatewayservice"
 	"teamie/contracts/gen/agent/modeltransport"

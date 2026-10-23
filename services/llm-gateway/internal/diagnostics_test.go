@@ -11,7 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
-	"teamie/pkg/rpcx"
+	rpcx "teamie/services/llm-gateway/internal/infra/rpcclient"
 	"testing"
 
 	"go.opentelemetry.io/otel"

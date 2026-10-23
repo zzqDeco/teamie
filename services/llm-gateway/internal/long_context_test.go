@@ -14,7 +14,7 @@ import (
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
-	"teamie/pkg/rpcx"
+	rpcx "teamie/services/llm-gateway/internal/infra/rpcclient"
 	"teamie/contracts/gen/agent/kitex_gen/agent"
 	"teamie/contracts/gen/agent/modeltransport"
 )

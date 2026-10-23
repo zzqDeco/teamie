@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,17 +14,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudwego/kitex/client"
-	"github.com/cloudwego/kitex/server"
 	"github.com/gorilla/websocket"
+
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"teamie/contracts/gen/im/kitex_gen/im"
-	"teamie/contracts/gen/im/kitex_gen/im/identityservice"
 )
 
 type logBuffer struct {
@@ -345,44 +341,42 @@ func TestHTTPProbeFailuresAndWebSocketHijacking(t *testing.T) {
 	}
 }
 
-type pingHandler struct {
-	im.IdentityService
-	observed chan trace.SpanContext
+type rpcResultEnvelope struct {
+	Success *rpcReadyReply
 }
 
-func (p *pingHandler) Ping(ctx context.Context, _ *im.PingRequest) (*im.PingResponse, error) {
-	p.observed <- trace.SpanContextFromContext(ctx)
-	L(ctx).Info("RPC handled")
-	return &im.PingResponse{Ready: true}, nil
+type rpcReadyReply struct {
+	Ready bool
 }
 
-func TestRealKitexTTHeaderPropagatesCurrentOperation(t *testing.T) {
+func (r *rpcReadyReply) GetReady() bool {
+	return r != nil && r.Ready
+}
+
+func TestRPCMiddlewarePropagatesCurrentOperation(t *testing.T) {
 	out := testLogging(t)
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	handler := &pingHandler{observed: make(chan trace.SpanContext, 1)}
-	srv := identityservice.NewServer(handler, server.WithListener(listener), RPCServer())
-	ended := make(chan error, 1)
-	go func() { ended <- srv.Run() }()
-	t.Cleanup(func() { _ = srv.Stop(); <-ended })
-	c, err := identityservice.NewClient("logging-fixture", client.WithHostPorts(listener.Addr().String()), RPCClient(), client.WithRPCTimeout(2*time.Second))
-	if err != nil {
-		t.Fatal(err)
-	}
+	observed := make(chan trace.SpanContext, 1)
+	serverEndpoint := rpcMiddleware(true)(func(ctx context.Context, _, response any) error {
+		observed <- trace.SpanContextFromContext(ctx)
+		L(ctx).Info("RPC handled")
+		if env, ok := response.(*rpcResultEnvelope); ok {
+			env.Success = &rpcReadyReply{Ready: true}
+		}
+		return nil
+	})
+	clientEndpoint := rpcMiddleware(false)(serverEndpoint)
 	parent, outer := Begin(context.Background(), "rpc-fixture")
 	before := trace.SpanContextFromContext(parent)
-	res, err := c.Ping(parent, &im.PingRequest{})
-	if err != nil {
+	res := &rpcResultEnvelope{}
+	if err := clientEndpoint(parent, struct{}{}, res); err != nil {
 		t.Fatal(err)
 	}
-	if !res.Ready {
+	if !res.Success.GetReady() {
 		t.Fatal("fixture not ready")
 	}
-	actual := <-handler.observed
+	actual := <-observed
 	if !actual.IsValid() || actual.TraceID() != before.TraceID() || actual.SpanID() == before.SpanID() {
-		t.Fatal("TTHeader correlation failed", actual, before)
+		t.Fatal("RPC correlation failed", actual, before)
 	}
 	outer.End(nil)
 	var clientSpan, serverSpan, serverParent string

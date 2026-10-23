@@ -14,8 +14,9 @@ import (
 	httpAdapter "teamie/services/llm-gateway/internal/adapter/http"
 	rpcAdapter "teamie/services/llm-gateway/internal/adapter/rpc"
 	"teamie/services/llm-gateway/internal/app"
-	"teamie/services/llm-gateway/internal/infra/crypto"
+	"teamie/services/llm-gateway/internal/infra/kms"
 	"teamie/services/llm-gateway/internal/infra/pg"
+	"teamie/services/llm-gateway/internal/infra/rpcclient"
 	"teamie/services/llm-gateway/internal/infra/upstream"
 )
 
@@ -26,7 +27,7 @@ func main() {
 	if len(token) < 24 {
 		observability.Fatal("GATEWAY_RUNTIME_TOKEN must contain at least 24 characters", nil)
 	}
-	cipher, err := crypto.NewCipher(httpx.Env("GATEWAY_MASTER_KEY", ""))
+	cipher, err := kms.NewCipher(httpx.Env("GATEWAY_MASTER_KEY", ""))
 	if err != nil {
 		observability.Fatal("Service initialization failed", err)
 	}
@@ -41,7 +42,7 @@ func main() {
 	if origin == "" {
 		observability.Fatal("APP_ORIGIN is required", nil)
 	}
-	auth, err := rpcx.NewAdminAuth(httpx.Env("IDENTITY_RPC_ADDR", "identity:8881"), origin)
+	auth, err := rpcclient.NewAdminAuth(httpx.Env("IDENTITY_RPC_ADDR", "identity:8881"), origin)
 	if err != nil {
 		observability.Fatal("identity client initialization failed", err)
 	}

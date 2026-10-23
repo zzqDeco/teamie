@@ -90,6 +90,13 @@ function toMuxPattern(httpMethod, routePath) {
   return `${httpMethod} ${muxPath}`;
 }
 
+function toServerAliasName(serviceName) {
+  if (serviceName.endsWith("Service")) {
+    return `${serviceName.slice(0, -7)}Server`;
+  }
+  return `${serviceName}Server`;
+}
+
 function parseServiceRoutes(raw, filename) {
   const clean = stripComments(raw);
   const nsMatch = /^\s*namespace\s+go\s+([a-zA-Z0-9_.]+)/m.exec(clean);
@@ -138,7 +145,11 @@ function parseServiceRoutes(raw, filename) {
         });
       }
     }
-    services.push({ name: serviceName, methods });
+    services.push({
+      name: serviceName,
+      serverAlias: toServerAliasName(serviceName),
+      methods,
+    });
   }
   return { pkgName, namespace, services };
 }
@@ -150,6 +161,14 @@ function renderRouterGo({ pkgName, idl, services }) {
     `package ${pkgName}`,
     "",
     'import "net/http"',
+    "",
+    "// HTTPResponder abstracts stateless request binding and domain error serialization (implemented by httpx.Responder).",
+    "type HTTPResponder interface {",
+    "\tDecodeRequest(w http.ResponseWriter, r *http.Request, dst any) error",
+    "\tWriteBindErrorHTTP(w http.ResponseWriter, r *http.Request, err error)",
+    "\tWriteDomainErrorHTTP(w http.ResponseWriter, r *http.Request, err error)",
+    "\tWriteOKHTTP(w http.ResponseWriter, r *http.Request, status int, resp any)",
+    "}",
     "",
     "// RouteSpec describes a single HTTP/WebSocket endpoint declared in the Thrift IDL.",
     "type RouteSpec struct {",
@@ -164,6 +183,12 @@ function renderRouterGo({ pkgName, idl, services }) {
   ];
 
   for (const svc of services) {
+    lines.push(
+      `// ${svc.serverAlias} is the stateless Clean DDD HTTP server interface generated from ${svc.name}.`,
+    );
+    lines.push(`type ${svc.serverAlias} = ${svc.name}`);
+    lines.push("");
+
     lines.push(`// ${svc.name} route pattern constants generated from contracts/${idl}.`);
     lines.push("const (");
     for (const m of svc.methods) {
@@ -206,6 +231,55 @@ function renderRouterGo({ pkgName, idl, services }) {
       lines.push("\t}");
       lines.push(`\tmux.HandleFunc(Pattern${m.name}, h.${m.name})`);
     }
+    lines.push("}");
+    lines.push("");
+
+    lines.push(
+      `// Register${svc.serverAlias} binds ${svc.serverAlias} methods using HTTPResponder with optional per-route handler overrides.`,
+    );
+    lines.push(
+      `func Register${svc.serverAlias}(mux *http.ServeMux, srv ${svc.serverAlias}, m HTTPResponder, overrides ...${svc.name}RouteHandlers) {`,
+    );
+    lines.push(`\tvar h ${svc.name}RouteHandlers`);
+    lines.push("\tif len(overrides) > 0 {");
+    lines.push("\t\th = overrides[0]");
+    lines.push("\t}");
+    for (const m of svc.methods) {
+      const hasBody =
+        m.httpMethod === "POST" ||
+        m.httpMethod === "PUT" ||
+        m.httpMethod === "PATCH";
+      const okStatus = m.responseType === "EmptyResp" ? "http.StatusNoContent" : "http.StatusOK";
+      lines.push(`\tif h.${m.name} == nil {`);
+      lines.push(`\t\th.${m.name} = func(w http.ResponseWriter, r *http.Request) {`);
+      lines.push(`\t\t\tvar req ${m.requestType}`);
+      if (hasBody) {
+        lines.push("\t\t\tif r.ContentLength != 0 {");
+        lines.push("\t\t\t\tif err := m.DecodeRequest(w, r, &req); err != nil {");
+        lines.push("\t\t\t\t\tm.WriteBindErrorHTTP(w, r, err)");
+        lines.push("\t\t\t\t\treturn");
+        lines.push("\t\t\t\t}");
+        lines.push("\t\t\t}");
+      }
+      if (m.responseType === "EmptyResp") {
+        lines.push(`\t\t\t_, err := srv.${m.name}(r.Context(), &req)`);
+        lines.push("\t\t\tif err != nil {");
+        lines.push("\t\t\t\tm.WriteDomainErrorHTTP(w, r, err)");
+        lines.push("\t\t\t\treturn");
+        lines.push("\t\t\t}");
+        lines.push(`\t\t\tm.WriteOKHTTP(w, r, ${okStatus}, nil)`);
+      } else {
+        lines.push(`\t\t\tresp, err := srv.${m.name}(r.Context(), &req)`);
+        lines.push("\t\t\tif err != nil {");
+        lines.push("\t\t\t\tm.WriteDomainErrorHTTP(w, r, err)");
+        lines.push("\t\t\t\treturn");
+        lines.push("\t\t\t}");
+        lines.push(`\t\t\tm.WriteOKHTTP(w, r, ${okStatus}, resp)`);
+      }
+      lines.push("\t\t}");
+      lines.push("\t}");
+    }
+    lines.push(`\tRegister${svc.name}Routes(mux, h)`);
     lines.push("}");
     lines.push("");
   }

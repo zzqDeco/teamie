@@ -10,17 +10,20 @@ import (
 	"teamie/services/realtime/internal/domain"
 )
 
-// HubService coordinates Realtime application use cases.
-type HubService struct {
+// StreamApp coordinates Realtime stream admission, outbox hint fanout, and typing forwarding.
+type StreamApp struct {
 	Identity domain.SessionValidator
 	Chat     domain.AccessAuthority
 	Flags    domain.FeatureFlags
 	Bus      domain.HintBus
-	Policy   *domain.TypingPolicy
+	Policy   *domain.TypingTracker
 }
 
+// HubService is an alias for StreamApp.
+type HubService = StreamApp
+
 // CheckDependencies verifies Identity and Chat readiness.
-func (s *HubService) CheckDependencies(ctx context.Context) error {
+func (s *StreamApp) CheckDependencies(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	if s.Identity != nil {
@@ -35,7 +38,7 @@ func (s *HubService) CheckDependencies(ctx context.Context) error {
 }
 
 // CheckConnectionCapacity verifies per-user and global WebSocket connection limits.
-func (s *HubService) CheckConnectionCapacity(clients []domain.Client, userID string) error {
+func (s *StreamApp) CheckConnectionCapacity(clients []domain.Client, userID string) error {
 	n := 0
 	for _, c := range clients {
 		if c.UserID() == userID {
@@ -49,7 +52,7 @@ func (s *HubService) CheckConnectionCapacity(clients []domain.Client, userID str
 }
 
 // Deliver verifies sender/recipient membership and broadcasts a realtime hint to matching clients.
-func (s *HubService) Deliver(ctx context.Context, clients []domain.Client, hint domain.Event) {
+func (s *StreamApp) Deliver(ctx context.Context, clients []domain.Client, hint domain.Event) {
 	if hint.Type == "typing" {
 		if s.Chat == nil {
 			return
@@ -91,7 +94,7 @@ func (s *HubService) Deliver(ctx context.Context, clients []domain.Client, hint 
 
 // PublishTyping validates permissions, serializes per-(user, conversation) typing
 // state transitions, and publishes or delivers the ephemeral typing hint.
-func (s *HubService) PublishTyping(ctx context.Context, clients func() []domain.Client, user domain.User, conversationID string, isTyping bool) error {
+func (s *StreamApp) PublishTyping(ctx context.Context, clients func() []domain.Client, user domain.User, conversationID string, isTyping bool) error {
 	if conversationID == "" {
 		return domain.ErrInvalidRequest("conversationId is required")
 	}

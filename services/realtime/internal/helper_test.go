@@ -15,7 +15,8 @@ import (
 	wsadapter "teamie/services/realtime/internal/adapter/ws"
 	"teamie/services/realtime/internal/app"
 	"teamie/services/realtime/internal/domain"
-	"teamie/services/realtime/internal/infra"
+	redisinfra "teamie/services/realtime/internal/infra/redis"
+	"teamie/services/realtime/internal/infra/rpcclient"
 )
 
 type Access interface {
@@ -97,20 +98,20 @@ func NewHub(identity httpx.Identity, chatAccess Access, rdb *redis.Client, cfgFl
 func (h *Hub) App() *app.HubService {
 	var idVal domain.SessionValidator
 	if h.Identity != nil {
-		idVal = infra.IdentityValidator{Identity: h.Identity}
+		idVal = rpcclient.IdentityValidator{Identity: h.Identity}
 	}
 	var chatAuth domain.AccessAuthority
 	if h.Chat != nil {
-		chatAuth = infra.ChatAuthority{Chat: h.Chat}
+		chatAuth = rpcclient.ChatAuthority{Chat: h.Chat}
 	}
 	var bus domain.HintBus
 	if h.Redis != nil {
-		bus = infra.RedisBus{Client: h.Redis}
+		bus = redisinfra.RedisBus{Client: h.Redis}
 	}
 	return &app.HubService{
 		Identity: idVal,
 		Chat:     chatAuth,
-		Flags:    infra.FlagsProvider{Flags: &h.Flags},
+		Flags:    redisinfra.FlagsProvider{Flags: &h.Flags},
 		Bus:      bus,
 		Policy:   &h.policy,
 	}
@@ -181,7 +182,7 @@ func (h *Hub) deliver(ctx context.Context, hint Hint) {
 }
 
 func (h *Hub) Run(ctx context.Context) {
-	infra.RunSubscriber(ctx, h.Redis, h.App(), h.clients, h.closeAll)
+	redisinfra.RunSubscriber(ctx, h.Redis, h.App(), h.clients, h.closeAll)
 }
 
 func (h *Hub) publishTyping(ctx context.Context, user httpx.User, conversationID string, isTyping bool) error {

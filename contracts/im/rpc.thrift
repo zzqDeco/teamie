@@ -1,5 +1,6 @@
 namespace go im
 
+
 // IM participants remain independent from any future Agent runtime.
 struct User {
   1: required string id
@@ -9,6 +10,11 @@ struct User {
   5: required string createdAt
   6: required string platformRole
 }
+
+struct PingRequest {}
+struct PingResponse { 1: required bool ready }
+
+
 struct SessionRequest { 1: required string token }
 struct SessionResponse {
   1: required bool valid
@@ -17,8 +23,6 @@ struct SessionResponse {
 }
 struct UsersRequest { 1: required list<string> ids }
 struct UsersResponse { 1: required list<User> users }
-struct PingRequest {}
-struct PingResponse { 1: required bool ready }
 // Generic participant lifecycle; control and runtime service credentials are
 // scoped separately. No runtime execution configuration crosses this contract.
 struct PrincipalControlRequest {
@@ -42,6 +46,8 @@ service IdentityService {
   PrincipalTokenResponse IssuePrincipalToken(1: PrincipalTokenRequest request)
   SessionResponse ValidatePrincipalToken(1: PrincipalAuthRequest request)
 }
+
+
 struct AccessRequest {
   1: required string userId
   2: required string conversationId
@@ -66,3 +72,4 @@ service ChatService {
   WorkspaceParticipantsResponse GetWorkspaceParticipants(1: WorkspaceParticipantsRequest request)
   ParticipantWorkspacesResponse SetPrincipalWorkspaces(1: PrincipalWorkspacesRequest request)
 }
+

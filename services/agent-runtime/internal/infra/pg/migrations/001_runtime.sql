@@ -1,0 +1,11 @@
+CREATE TABLE IF NOT EXISTS agent_runtime_schema_migrations(version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS runtime_agents(agent_id uuid PRIMARY KEY, cursor numeric(30) NOT NULL DEFAULT 0, lease_owner text, lease_until timestamptz, fence bigint NOT NULL DEFAULT 0, updated_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS runtime_inputs(agent_id uuid NOT NULL, event_id numeric(30) NOT NULL, payload jsonb NOT NULL, state text NOT NULL DEFAULT 'pending', run_id uuid, created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(agent_id,event_id));
+CREATE TABLE IF NOT EXISTS runtime_runs(id uuid PRIMARY KEY, agent_id uuid NOT NULL, input_key text NOT NULL, input_json jsonb NOT NULL, state text NOT NULL DEFAULT 'running', attempt_id uuid NOT NULL, committed_attempt uuid, attempts integer NOT NULL DEFAULT 1, next_attempt timestamptz NOT NULL DEFAULT now(), safe_error text NOT NULL DEFAULT '', started_at timestamptz NOT NULL DEFAULT now(), finished_at timestamptz, UNIQUE(agent_id,input_key));
+CREATE INDEX IF NOT EXISTS runtime_inputs_pending ON runtime_inputs(agent_id,event_id) WHERE state IN ('pending','processing');
+CREATE TABLE IF NOT EXISTS runtime_session_events(seq bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, session_id text NOT NULL, event_id text NOT NULL, kind text NOT NULL, run_id uuid NOT NULL REFERENCES runtime_runs(id), attempt_id uuid NOT NULL, payload bytea NOT NULL, payload_hash text NOT NULL, UNIQUE(session_id,event_id));
+CREATE INDEX IF NOT EXISTS runtime_session_order ON runtime_session_events(session_id,seq);
+CREATE TABLE IF NOT EXISTS runtime_checkpoints(checkpoint_id text PRIMARY KEY, payload bytea NOT NULL, updated_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS runtime_model_calls(run_id uuid NOT NULL REFERENCES runtime_runs(id), step integer NOT NULL, request_hash text NOT NULL, response bytea NOT NULL, PRIMARY KEY(run_id,step));
+CREATE TABLE IF NOT EXISTS runtime_tool_calls(run_id uuid NOT NULL REFERENCES runtime_runs(id), call_id text NOT NULL, name text NOT NULL, request_hash text NOT NULL, result bytea, created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(run_id,call_id));
+INSERT INTO agent_runtime_schema_migrations(version) VALUES(1) ON CONFLICT DO NOTHING;

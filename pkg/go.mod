@@ -15,7 +15,6 @@ require (
 	go.opentelemetry.io/otel/trace v1.47.0
 	go.uber.org/zap v1.27.1
 	golang.org/x/crypto v0.58.0
-	teamie/contracts/gen/im v0.0.0
 )
 
 require (
@@ -67,5 +66,3 @@ require (
 	google.golang.org/protobuf v1.34.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace teamie/contracts/gen/im => ../contracts/gen/im

@@ -8,13 +8,16 @@ import (
 	"time"
 
 	bg "github.com/cloudwego/eino/adk/backgroundtask"
-	"github.com/jackc/pgx/v5"
 	wire "teamie/contracts/gen/agent/kitex_gen/agent"
 	"teamie/services/agent-runtime/internal/domain"
 )
 
 type RuntimeRPC struct{ Engine *Engine }
 type RPC = RuntimeRPC
+
+type publicRun = domain.PublicRun
+type publicTask = domain.PublicTask
+type publicEvent = domain.PublicEvent
 
 func runtimeOK(v any) (*wire.RuntimeResponse, error) {
 	b, err := json.Marshal(v)
@@ -29,6 +32,7 @@ func runtimeFail(status int32, code string) (*wire.RuntimeResponse, error) {
 	message := code
 	return &wire.RuntimeResponse{StatusCode: &status, ErrorCode: &code, ErrorMessage: &message}, nil
 }
+
 func (r *RuntimeRPC) authorize(ctx context.Context, q *wire.RuntimeRequest, write bool) (*wire.AgentDefinition, *wire.RuntimeResponse) {
 	if q == nil || !domain.ValidServiceKey(r.Engine.Config.ControlToken, q.ServiceToken) {
 		v, _ := runtimeFail(403, "forbidden")
@@ -55,6 +59,7 @@ func (r *RuntimeRPC) authorize(ctx context.Context, q *wire.RuntimeRequest, writ
 	}
 	return result.Agent, nil
 }
+
 func (r *RuntimeRPC) State(ctx context.Context, q *wire.RuntimeRequest) (*wire.RuntimeResponse, error) {
 	def, fail := r.authorize(ctx, q, false)
 	if fail != nil {
@@ -64,64 +69,38 @@ func (r *RuntimeRPC) State(ctx context.Context, q *wire.RuntimeRequest) (*wire.R
 	if !def.Enabled || def.DeletedAt != nil {
 		out["state"] = "disabled"
 	}
-	var pending, tasks int
-	err := r.Engine.Store.DB.QueryRow(ctx, `SELECT (SELECT count(*) FROM runtime_inputs WHERE agent_id=$1 AND state='pending'),(SELECT count(*) FROM runtime_tasks WHERE agent_id=$1 AND snapshot->>'Status' IN ('pending','running'))`, q.AgentId).Scan(&pending, &tasks)
+	summary, err := r.Engine.Store.Repo().GetAgentRuntimeSummary(ctx, q.AgentId)
 	if err != nil {
 		return runtimeFail(503, "runtime_unavailable")
 	}
-	out["pendingInputs"] = pending
-	out["runningTasks"] = tasks
-	var id, status string
-	err = r.Engine.Store.DB.QueryRow(ctx, `SELECT id::text,state FROM runtime_runs WHERE agent_id=$1 AND state IN ('running','waiting_input','retry','waiting_configuration','queued') ORDER BY started_at DESC LIMIT 1`, q.AgentId).Scan(&id, &status)
-	if err == nil {
-		out["activeRunId"] = id
+	out["pendingInputs"] = summary.PendingInputs
+	out["runningTasks"] = summary.RunningTasks
+	if summary.ActiveRunID != "" {
+		out["activeRunId"] = summary.ActiveRunID
 		if def.Enabled && def.DeletedAt == nil {
-			out["state"] = status
+			out["state"] = summary.ActiveStatus
 		}
 	}
-	var currentState, lastError string
-	var lastActive *time.Time
-	if r.Engine.Store.DB.QueryRow(ctx, `SELECT state,last_error,last_active_at FROM runtime_agents WHERE agent_id=$1`, q.AgentId).Scan(&currentState, &lastError, &lastActive) == nil {
+	if summary.HasAgentRow {
 		if def.Enabled && def.DeletedAt == nil {
 			if _, active := out["activeRunId"]; !active {
-				out["state"] = currentState
+				out["state"] = summary.CurrentState
 			}
 		}
-		if lastActive != nil {
-			out["lastActiveAt"] = lastActive.UTC()
+		if summary.LastActiveAt != nil {
+			out["lastActiveAt"] = summary.LastActiveAt.UTC()
 		}
-		if lastError != "" {
-			out["lastError"] = publicErrorCode(lastError)
+		if summary.LastError != "" {
+			out["lastError"] = publicErrorCode(summary.LastError)
 		}
 	}
 	return runtimeOK(out)
 }
 
-type publicRun struct {
-	ID         string     `json:"id"`
-	Status     string     `json:"status"`
-	InputCount int        `json:"inputCount"`
-	CreatedAt  time.Time  `json:"createdAt"`
-	UpdatedAt  time.Time  `json:"updatedAt"`
-	StartedAt  time.Time  `json:"startedAt"`
-	FinishedAt *time.Time `json:"finishedAt,omitempty"`
-	ErrorCode  string     `json:"errorCode,omitempty"`
-}
-type publicTask struct {
-	ID          string     `json:"id"`
-	RunID       *string    `json:"runId,omitempty"`
-	Kind        string     `json:"kind"`
-	Description string     `json:"description"`
-	Status      bg.Status  `json:"status"`
-	CreatedAt   time.Time  `json:"createdAt"`
-	UpdatedAt   time.Time  `json:"updatedAt"`
-	FinishedAt  *time.Time `json:"finishedAt,omitempty"`
-	ExitCode    *int32     `json:"exitCode,omitempty"`
-}
-
 func publicErrorCode(code string) string {
 	return domain.PublicErrorCode(code)
 }
+
 func requestLimit(q *wire.RuntimeRequest) int {
 	n := int(q.GetLimit())
 	if n <= 0 {
@@ -132,6 +111,7 @@ func requestLimit(q *wire.RuntimeRequest) int {
 	}
 	return n
 }
+
 func (r *RuntimeRPC) runs(ctx context.Context, q *wire.RuntimeRequest, detail bool) (*wire.RuntimeResponse, error) {
 	if _, f := r.authorize(ctx, q, false); f != nil {
 		return f, nil
@@ -143,30 +123,12 @@ func (r *RuntimeRPC) runs(ctx context.Context, q *wire.RuntimeRequest, detail bo
 	if cursor != "" && !validUUID(cursor) {
 		return runtimeFail(400, "invalid_cursor")
 	}
-	rows, err := r.Engine.Store.DB.Query(ctx, `SELECT id::text,state,jsonb_array_length(input_json),started_at,updated_at,finished_at,safe_error FROM runtime_runs WHERE agent_id=$1 AND ($2='' OR id::text=$2) AND ($3='' OR id::text>$3) ORDER BY id LIMIT $4`, q.AgentId, map[bool]string{true: q.GetResourceId(), false: ""}[detail], cursor, requestLimit(q)+1)
+	resID := ""
+	if detail {
+		resID = q.GetResourceId()
+	}
+	out, err := r.Engine.Store.Repo().ListRuns(ctx, q.AgentId, resID, cursor, requestLimit(q)+1)
 	if err != nil {
-		return runtimeFail(503, "runtime_unavailable")
-	}
-	defer rows.Close()
-	out := []publicRun{}
-	for rows.Next() {
-		var v publicRun
-		if err = rows.Scan(&v.ID, &v.Status, &v.InputCount, &v.CreatedAt, &v.UpdatedAt, &v.FinishedAt, &v.ErrorCode); err != nil {
-			return runtimeFail(503, "runtime_unavailable")
-		}
-		v.CreatedAt = v.CreatedAt.UTC()
-		v.UpdatedAt = v.UpdatedAt.UTC()
-		if v.FinishedAt != nil {
-			x := v.FinishedAt.UTC()
-			v.FinishedAt = &x
-		}
-		v.StartedAt = v.CreatedAt
-		if v.ErrorCode != "" {
-			v.ErrorCode = publicErrorCode(v.ErrorCode)
-		}
-		out = append(out, v)
-	}
-	if rows.Err() != nil {
 		return runtimeFail(503, "runtime_unavailable")
 	}
 	if detail {
@@ -182,12 +144,15 @@ func (r *RuntimeRPC) runs(ctx context.Context, q *wire.RuntimeRequest, detail bo
 	}
 	return runtimeOK(response)
 }
+
 func (r *RuntimeRPC) Runs(ctx context.Context, q *wire.RuntimeRequest) (*wire.RuntimeResponse, error) {
 	return r.runs(ctx, q, false)
 }
+
 func (r *RuntimeRPC) Run(ctx context.Context, q *wire.RuntimeRequest) (*wire.RuntimeResponse, error) {
 	return r.runs(ctx, q, true)
 }
+
 func (r *RuntimeRPC) tasks(ctx context.Context, q *wire.RuntimeRequest, detail bool) (*wire.RuntimeResponse, error) {
 	if _, f := r.authorize(ctx, q, false); f != nil {
 		return f, nil
@@ -198,35 +163,12 @@ func (r *RuntimeRPC) tasks(ctx context.Context, q *wire.RuntimeRequest, detail b
 	if len(q.GetResourceId()) > 200 || len(q.GetCursor()) > 200 {
 		return runtimeFail(400, "invalid_cursor")
 	}
-	rows, err := r.Engine.Store.DB.Query(ctx, `SELECT id,run_id::text,snapshot FROM runtime_tasks WHERE agent_id=$1 AND ($2='' OR id=$2) AND id>$3 ORDER BY id LIMIT $4`, q.AgentId, map[bool]string{true: q.GetResourceId(), false: ""}[detail], q.GetCursor(), requestLimit(q)+1)
+	resID := ""
+	if detail {
+		resID = q.GetResourceId()
+	}
+	out, err := r.Engine.Store.Repo().ListTasks(ctx, q.AgentId, resID, q.GetCursor(), requestLimit(q)+1)
 	if err != nil {
-		return runtimeFail(503, "runtime_unavailable")
-	}
-	defer rows.Close()
-	out := []publicTask{}
-	for rows.Next() {
-		var id string
-		var run *string
-		var b []byte
-		if err = rows.Scan(&id, &run, &b); err != nil {
-			return runtimeFail(503, "runtime_unavailable")
-		}
-		var task bg.Task
-		if json.Unmarshal(b, &task) != nil {
-			return runtimeFail(503, "runtime_unavailable")
-		}
-		v := publicTask{ID: id, RunID: run, Kind: "shell", Description: "Workspace command", Status: task.Status, CreatedAt: task.CreatedAt.UTC(), UpdatedAt: task.UpdatedAt.UTC(), FinishedAt: utcPointer(task.DoneAt)}
-		if task.Status == bg.StatusCompleted {
-			var result struct {
-				ExitCode *int32 `json:"exitCode"`
-			}
-			if json.Unmarshal(task.ResultData, &result) == nil {
-				v.ExitCode = result.ExitCode
-			}
-		}
-		out = append(out, v)
-	}
-	if rows.Err() != nil {
 		return runtimeFail(503, "runtime_unavailable")
 	}
 	if detail {
@@ -242,22 +184,13 @@ func (r *RuntimeRPC) tasks(ctx context.Context, q *wire.RuntimeRequest, detail b
 	}
 	return runtimeOK(response)
 }
+
 func (r *RuntimeRPC) Tasks(ctx context.Context, q *wire.RuntimeRequest) (*wire.RuntimeResponse, error) {
 	return r.tasks(ctx, q, false)
 }
+
 func (r *RuntimeRPC) Task(ctx context.Context, q *wire.RuntimeRequest) (*wire.RuntimeResponse, error) {
 	return r.tasks(ctx, q, true)
-}
-
-type publicEvent struct {
-	ID        string    `json:"id"`
-	Type      string    `json:"type"`
-	RunID     *string   `json:"runId,omitempty"`
-	TaskID    *string   `json:"taskId,omitempty"`
-	ToolName  *string   `json:"toolName,omitempty"`
-	Status    *string   `json:"status,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
-	ErrorCode *string   `json:"errorCode,omitempty"`
 }
 
 func (r *RuntimeRPC) Events(ctx context.Context, q *wire.RuntimeRequest) (*wire.RuntimeResponse, error) {
@@ -272,25 +205,8 @@ func (r *RuntimeRPC) Events(ctx context.Context, q *wire.RuntimeRequest) (*wire.
 			return runtimeFail(400, "invalid_cursor")
 		}
 	}
-	rows, err := r.Engine.Store.DB.Query(ctx, `SELECT id::text,type,run_id::text,task_id,tool_name,status,created_at,error_code FROM runtime_public_events WHERE agent_id=$1 AND id>$2 ORDER BY id LIMIT $3`, q.AgentId, after, requestLimit(q)+1)
+	out, err := r.Engine.Store.Repo().ListPublicEvents(ctx, q.AgentId, after, requestLimit(q)+1)
 	if err != nil {
-		return runtimeFail(503, "runtime_unavailable")
-	}
-	defer rows.Close()
-	out := []publicEvent{}
-	for rows.Next() {
-		var v publicEvent
-		if err = rows.Scan(&v.ID, &v.Type, &v.RunID, &v.TaskID, &v.ToolName, &v.Status, &v.CreatedAt, &v.ErrorCode); err != nil {
-			return runtimeFail(503, "runtime_unavailable")
-		}
-		v.CreatedAt = v.CreatedAt.UTC()
-		if v.ErrorCode != nil {
-			code := publicErrorCode(*v.ErrorCode)
-			v.ErrorCode = &code
-		}
-		out = append(out, v)
-	}
-	if rows.Err() != nil {
 		return runtimeFail(503, "runtime_unavailable")
 	}
 	more := len(out) > requestLimit(q)
@@ -303,6 +219,7 @@ func (r *RuntimeRPC) Events(ctx context.Context, q *wire.RuntimeRequest) (*wire.
 	}
 	return runtimeOK(map[string]any{"events": out, "cursor": cursor, "hasMore": more})
 }
+
 func (r *RuntimeRPC) CancelRun(ctx context.Context, q *wire.RuntimeRequest) (*wire.RuntimeResponse, error) {
 	if _, f := r.authorize(ctx, q, true); f != nil {
 		return f, nil
@@ -310,38 +227,17 @@ func (r *RuntimeRPC) CancelRun(ctx context.Context, q *wire.RuntimeRequest) (*wi
 	if !validUUID(q.GetResourceId()) {
 		return runtimeFail(404, "not_found")
 	}
-	tx, err := r.Engine.Store.DB.Begin(ctx)
+	statusCode, errorCode, err := r.Engine.Store.Repo().RequestRunCancel(ctx, q.AgentId, q.GetResourceId())
 	if err != nil {
 		return runtimeFail(503, "runtime_unavailable")
 	}
-	defer tx.Rollback(ctx)
-	var state string
-	err = tx.QueryRow(ctx, `SELECT state FROM runtime_runs WHERE agent_id=$1 AND id=$2 FOR UPDATE`, q.AgentId, q.GetResourceId()).Scan(&state)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return runtimeFail(404, "not_found")
-	}
-	if err != nil {
-		return runtimeFail(503, "runtime_unavailable")
-	}
-	if !domain.CanCancelRun(state) {
-		return runtimeFail(409, "run_not_cancelable")
-	}
-	_, err = tx.Exec(ctx, `UPDATE runtime_runs SET cancel_requested=true,state=CASE WHEN state='running' THEN state ELSE 'canceled' END,updated_at=now(),finished_at=CASE WHEN state='running' THEN finished_at ELSE now() END WHERE id=$1`, q.GetResourceId())
-	if err == nil && state != "running" {
-		_, err = tx.Exec(ctx, `UPDATE runtime_inputs SET state='failed' WHERE agent_id=$1 AND run_id=$2`, q.AgentId, q.GetResourceId())
-	}
-	if err == nil {
-		_, err = tx.Exec(ctx, `INSERT INTO runtime_public_events(agent_id,type,run_id,status) VALUES($1,'run.cancel_requested',$2,'canceled')`, q.AgentId, q.GetResourceId())
-	}
-	if err == nil {
-		err = tx.Commit(ctx)
-	}
-	if err != nil {
-		return runtimeFail(503, "runtime_unavailable")
+	if statusCode != 0 {
+		return runtimeFail(statusCode, errorCode)
 	}
 	r.Engine.cancelRunTasks(ctx, q.AgentId, q.GetResourceId())
 	return r.Run(ctx, q)
 }
+
 func (r *RuntimeRPC) RetryRun(ctx context.Context, q *wire.RuntimeRequest) (*wire.RuntimeResponse, error) {
 	if _, f := r.authorize(ctx, q, true); f != nil {
 		return f, nil
@@ -352,46 +248,16 @@ func (r *RuntimeRPC) RetryRun(ctx context.Context, q *wire.RuntimeRequest) (*wir
 	if !validUUID(q.GetResourceId()) {
 		return runtimeFail(404, "not_found")
 	}
-	tx, err := r.Engine.Store.DB.Begin(ctx)
+	statusCode, errorCode, err := r.Engine.Store.Repo().RequestRunRetry(ctx, q.AgentId, q.GetResourceId())
 	if err != nil {
 		return runtimeFail(503, "runtime_unavailable")
 	}
-	defer tx.Rollback(ctx)
-	var state string
-	err = tx.QueryRow(ctx, `SELECT state FROM runtime_runs WHERE agent_id=$1 AND id=$2 FOR UPDATE`, q.AgentId, q.GetResourceId()).Scan(&state)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return runtimeFail(404, "not_found")
-	}
-	if err != nil {
-		return runtimeFail(503, "runtime_unavailable")
-	}
-	if !domain.CanRetryRun(state) {
-		return runtimeFail(409, "run_not_retryable")
-	}
-	_, err = tx.Exec(ctx, `UPDATE runtime_runs SET state='retry',cancel_requested=false,next_attempt=now(),finished_at=NULL,updated_at=now(),safe_error='' WHERE id=$1`, q.GetResourceId())
-	if err == nil {
-		tag, inputErr := tx.Exec(ctx, `UPDATE runtime_inputs SET state='processing' WHERE agent_id=$1 AND run_id=$2`, q.AgentId, q.GetResourceId())
-		if inputErr != nil {
-			return runtimeFail(503, "runtime_unavailable")
-		}
-		// InvalidateRun deliberately detached unavailable sources. Returning
-		// before Commit also rolls back the Run update above; never resurrect
-		// its old input batch or publish a retry event with no discoverable work.
-		if tag.RowsAffected() == 0 {
-			return runtimeFail(409, "run_not_retryable")
-		}
-	}
-	if err == nil {
-		_, err = tx.Exec(ctx, `INSERT INTO runtime_public_events(agent_id,type,run_id,status) VALUES($1,'run.retry_requested',$2,'retry')`, q.AgentId, q.GetResourceId())
-	}
-	if err == nil {
-		err = tx.Commit(ctx)
-	}
-	if err != nil {
-		return runtimeFail(503, "runtime_unavailable")
+	if statusCode != 0 {
+		return runtimeFail(statusCode, errorCode)
 	}
 	return r.Run(ctx, q)
 }
+
 func (r *RuntimeRPC) CancelTask(ctx context.Context, q *wire.RuntimeRequest) (*wire.RuntimeResponse, error) {
 	if _, f := r.authorize(ctx, q, true); f != nil {
 		return f, nil
@@ -477,6 +343,10 @@ func (e *Engine) Tasks(ctx context.Context, q domain.RuntimeQuery) (domain.Runti
 	return toDomainResult((&RuntimeRPC{Engine: e}).Tasks(ctx, toWireRequest(q)))
 }
 
+func (e *Engine) RunTasks(ctx context.Context, q domain.RuntimeQuery) (domain.RuntimeResult, error) {
+	return e.Tasks(ctx, q)
+}
+
 func (e *Engine) TaskDetail(ctx context.Context, q domain.RuntimeQuery) (domain.RuntimeResult, error) {
 	return toDomainResult((&RuntimeRPC{Engine: e}).Task(ctx, toWireRequest(q)))
 }
@@ -495,6 +365,10 @@ func (e *Engine) RetryRun(ctx context.Context, q domain.RuntimeQuery) (domain.Ru
 
 func (e *Engine) CancelTask(ctx context.Context, q domain.RuntimeQuery) (domain.RuntimeResult, error) {
 	return toDomainResult((&RuntimeRPC{Engine: e}).CancelTask(ctx, toWireRequest(q)))
+}
+
+func (e *Engine) CancelRunTasks(ctx context.Context, agentID, runID string) {
+	e.cancelRunTasks(ctx, agentID, runID)
 }
 
 func publicErrorCodeOptional(v string) string {

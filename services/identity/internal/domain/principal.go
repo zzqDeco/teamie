@@ -20,12 +20,8 @@ type User struct {
 	CreatedAt    time.Time `json:"createdAt"`
 }
 
-// Session represents an authenticated browser or service principal session.
-type Session struct {
-	User             User   `json:"user"`
-	CSRFToken        string `json:"csrfToken"`
-	ServicePrincipal bool   `json:"-"`
-}
+// Principal is an alias for User (human or agent participant).
+type Principal = User
 
 // BoundedString reports whether strings.TrimSpace(v) has between min and max runes.
 func BoundedString(v string, min, max int) bool {

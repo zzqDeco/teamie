@@ -171,6 +171,13 @@ jobs:
         with:
           go-version-file: pkg/go.mod
           cache: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+      - name: Enforce contract sync, IM independence and Clean DDD dependency boundaries
+        run: |
+          make gen && git diff --exit-code -- contracts/ packages/api-client/src/generated.ts
+          bash ops/check-architecture.sh
       - run: python3 -m unittest discover -s ops -p 'test_*.py' -v
       - name: Validate shell and workflow syntax
         run: |

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"net"
-	"net/http"
 
 	goredis "github.com/redis/go-redis/v9"
 	"teamie/contracts/gen/im/kitex_gen/im/chatservice"
@@ -16,6 +15,7 @@ import (
 	rpcadapter "teamie/services/chat/internal/adapter/rpc"
 	"teamie/services/chat/internal/app"
 	"teamie/services/chat/internal/infra/flags"
+	"teamie/services/chat/internal/infra/fs"
 	"teamie/services/chat/internal/infra/pg"
 	redisinfra "teamie/services/chat/internal/infra/redis"
 	"teamie/services/chat/internal/infra/rpcclient"
@@ -51,7 +51,7 @@ func main() {
 		observability.Fatal("Service initialization failed", err)
 	}
 
-	identityClient, err := rpcx.NewIdentity(httpx.Env("IDENTITY_RPC_ADDR", "identity:8881"))
+	identityClient, err := rpcclient.NewClient(httpx.Env("IDENTITY_RPC_ADDR", "identity:8881"))
 	if err != nil {
 		observability.Fatal("Service initialization failed", err)
 	}
@@ -67,7 +67,7 @@ func main() {
 		Outbox:         repo,
 		Identity:       rpcclient.NewIdentity(identityClient),
 		Flags:          flags.New(cfgFlags),
-		SniffMediaType: http.DetectContentType,
+		SniffMediaType: fs.SniffMediaType,
 		ControlToken:   httpx.Env("IM_PRINCIPAL_CONTROL_TOKEN", ""),
 	}
 

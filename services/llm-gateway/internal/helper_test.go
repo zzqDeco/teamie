@@ -7,15 +7,17 @@ import (
 	"net/http"
 
 	"teamie/contracts/gen/agent/kitex_gen/agent"
-	"teamie/pkg/rpcx"
 	httpAdapter "teamie/services/llm-gateway/internal/adapter/http"
 	rpcAdapter "teamie/services/llm-gateway/internal/adapter/rpc"
 	"teamie/services/llm-gateway/internal/app"
 	"teamie/services/llm-gateway/internal/domain"
-	"teamie/services/llm-gateway/internal/infra/crypto"
+	"teamie/services/llm-gateway/internal/infra/kms"
 	"teamie/services/llm-gateway/internal/infra/pg"
+	"teamie/services/llm-gateway/internal/infra/rpcclient"
 	"teamie/services/llm-gateway/internal/infra/upstream"
 )
+
+type AdminAuth = rpcclient.AdminAuth
 
 type Config = domain.Config
 type Usage = domain.Usage
@@ -33,7 +35,7 @@ const (
 	maxSearchTitleBytes    = domain.MaxSearchTitleBytes
 )
 
-func NewCipher(master string) (Cipher, error) { return crypto.NewCipher(master) }
+func NewCipher(master string) (Cipher, error) { return kms.NewCipher(master) }
 func Open(ctx context.Context, url string) (*pg.PGStore, error) {
 	return pg.Open(ctx, url)
 }
@@ -127,7 +129,7 @@ func New(store Store, cipher Cipher, token string) *Service {
 	return s
 }
 
-func (s *Service) Routes(auth rpcx.AdminAuth) http.Handler {
+func (s *Service) Routes(auth AdminAuth) http.Handler {
 	s.App.WebSearchURL = s.WebSearchURL
 	return s.HTTP.Routes(auth)
 }

@@ -28,6 +28,18 @@ type RuntimeQuery struct {
 	Limit        int32
 }
 
+// NormalizeLimit normalizes the query pagination limit (default 50, max 100).
+func (q RuntimeQuery) NormalizeLimit() int {
+	n := int(q.Limit)
+	if n <= 0 {
+		return 50
+	}
+	if n > 100 {
+		return 100
+	}
+	return n
+}
+
 // RuntimeResult represents the structured outcome of a runtime inspection or lifecycle operation.
 type RuntimeResult struct {
 	OK           bool
@@ -35,6 +47,55 @@ type RuntimeResult struct {
 	StatusCode   int32
 	ErrorCode    string
 	ErrorMessage string
+}
+
+// AgentRuntimeSummary holds the persisted runtime state and counters for an Agent.
+type AgentRuntimeSummary struct {
+	PendingInputs int
+	RunningTasks  int
+	ActiveRunID   string
+	ActiveStatus  string
+	CurrentState  string
+	LastError     string
+	LastActiveAt  *time.Time
+	HasAgentRow   bool
+}
+
+// PublicRun is the safe owner-visible projection of a runtime run.
+type PublicRun struct {
+	ID         string     `json:"id"`
+	Status     string     `json:"status"`
+	InputCount int        `json:"inputCount"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	UpdatedAt  time.Time  `json:"updatedAt"`
+	StartedAt  time.Time  `json:"startedAt"`
+	FinishedAt *time.Time `json:"finishedAt,omitempty"`
+	ErrorCode  string     `json:"errorCode,omitempty"`
+}
+
+// PublicTask is the safe owner-visible projection of a background task.
+type PublicTask struct {
+	ID          string     `json:"id"`
+	RunID       *string    `json:"runId,omitempty"`
+	Kind        string     `json:"kind"`
+	Description string     `json:"description"`
+	Status      string     `json:"status"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
+	FinishedAt  *time.Time `json:"finishedAt,omitempty"`
+	ExitCode    *int32     `json:"exitCode,omitempty"`
+}
+
+// PublicEvent is the safe owner-visible projection of a runtime lifecycle event.
+type PublicEvent struct {
+	ID        string    `json:"id"`
+	Type      string    `json:"type"`
+	RunID     *string   `json:"runId,omitempty"`
+	TaskID    *string   `json:"taskId,omitempty"`
+	ToolName  *string   `json:"toolName,omitempty"`
+	Status    *string   `json:"status,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+	ErrorCode *string   `json:"errorCode,omitempty"`
 }
 
 // RuntimeEngine defines the outbound port for the Eino TurnLoop runtime engine.
@@ -50,6 +111,7 @@ type RuntimeEngine interface {
 	CancelRun(ctx context.Context, q RuntimeQuery) (RuntimeResult, error)
 	RetryRun(ctx context.Context, q RuntimeQuery) (RuntimeResult, error)
 	CancelTask(ctx context.Context, q RuntimeQuery) (RuntimeResult, error)
+	CancelRunTasks(ctx context.Context, agentID, runID string)
 }
 
 // TxManager coordinates atomic database transactions without exposing SQL driver types
@@ -93,6 +155,16 @@ type ArchiveRepository interface {
 type ToolReceiptRepository interface {
 	ReadObservation(ctx context.Context, runID, callID, key string) ([]byte, bool, error)
 	SaveObservation(ctx context.Context, lease *Lease, runID, callID, key string, payload []byte) error
+}
+
+// InspectRepository defines persistence operations for runtime inspection and run/task lifecycle control.
+type InspectRepository interface {
+	GetAgentRuntimeSummary(ctx context.Context, agentID string) (AgentRuntimeSummary, error)
+	ListRuns(ctx context.Context, agentID, resourceID, cursor string, limit int) ([]PublicRun, error)
+	ListTasks(ctx context.Context, agentID, resourceID, cursor string, limit int) ([]PublicTask, error)
+	ListPublicEvents(ctx context.Context, agentID string, afterID int64, limit int) ([]PublicEvent, error)
+	RequestRunCancel(ctx context.Context, agentID, runID string) (statusCode int32, errorCode string, err error)
+	RequestRunRetry(ctx context.Context, agentID, runID string) (statusCode int32, errorCode string, err error)
 }
 
 // IMGateway defines outbound IM service operations for message/conversation ACL verification.

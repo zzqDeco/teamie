@@ -79,8 +79,49 @@ func Err(status int, code, message string) error {
 	return &Error{Status: status, Code: code, Message: message}
 }
 
-// Responder maps application/domain results and CodedErrors onto native Hertz request contexts.
+// Responder maps application/domain results and CodedErrors onto native Hertz request contexts
+// and standard http.ResponseWriter handlers.
 type Responder struct{}
+
+// WriteBindError writes a 400 invalid_request JSON response to a native Hertz RequestContext.
+func (Responder) WriteBindError(_ context.Context, c *app.RequestContext, _ error) {
+	c.JSON(http.StatusBadRequest, map[string]any{
+		"error": map[string]string{
+			"code":    "invalid_request",
+			"message": "Invalid JSON request",
+		},
+	})
+}
+
+// WriteDomainError writes a CodedError or generic 500 internal_error JSON response to a native Hertz RequestContext.
+func (r Responder) WriteDomainError(ctx context.Context, c *app.RequestContext, err error) {
+	r.Error(ctx, c, err)
+}
+
+// WriteOK writes a 200 OK JSON response to a native Hertz RequestContext.
+func (Responder) WriteOK(_ context.Context, c *app.RequestContext, resp any) {
+	c.JSON(http.StatusOK, resp)
+}
+
+// DecodeRequest decodes a JSON request body using strict JSON validation.
+func (Responder) DecodeRequest(w http.ResponseWriter, r *http.Request, dst any) error {
+	return DecodeJSON(w, r, dst)
+}
+
+// WriteBindErrorHTTP writes a 400 invalid_request JSON response to w.
+func (Responder) WriteBindErrorHTTP(w http.ResponseWriter, _ *http.Request, err error) {
+	WriteError(w, err)
+}
+
+// WriteDomainErrorHTTP writes a CodedError or generic 500 internal_error JSON response to w.
+func (Responder) WriteDomainErrorHTTP(w http.ResponseWriter, _ *http.Request, err error) {
+	WriteError(w, err)
+}
+
+// WriteOKHTTP writes a JSON response with status to w.
+func (Responder) WriteOKHTTP(w http.ResponseWriter, _ *http.Request, status int, resp any) {
+	WriteJSON(w, status, resp)
+}
 
 // Error writes a CodedError or generic 500 internal_error JSON response to a native Hertz RequestContext.
 func (Responder) Error(_ context.Context, c *app.RequestContext, err error) {

@@ -1,5 +1,6 @@
 namespace go agent
 
+
 // Public, versioned service contracts. IM services do not import this runtime API.
 struct AgentDefinition {
   1: required string id
@@ -12,18 +13,6 @@ struct AgentDefinition {
   8: required string createdAt
   9: required string updatedAt
   10: optional string deletedAt
-}
-struct AgentListRequest { 1: required string serviceToken }
-struct AgentListResponse { 1: required list<AgentDefinition> agents }
-struct AgentRequest { 1: required string serviceToken, 2: required string agentId }
-struct AgentResponse { 1: optional AgentDefinition agent }
-struct RuntimeReport {
-  1: required string serviceToken
-  2: required string agentId
-  3: required string runtimeState
-  4: required string sessionId
-  5: optional string lastActiveAt
-  6: optional string lastError
 }
 struct Ack { 1: required bool ok }
 struct CancelRequest {
@@ -39,12 +28,27 @@ struct PingResponse {
   4: optional i64 contextWindowTokens
   5: optional string modelConfigId
 }
+
+
+struct AgentListRequest { 1: required string serviceToken }
+struct AgentListResponse { 1: required list<AgentDefinition> agents }
+struct AgentRequest { 1: required string serviceToken, 2: required string agentId }
+struct AgentResponse { 1: optional AgentDefinition agent }
+struct RuntimeReport {
+  1: required string serviceToken
+  2: required string agentId
+  3: required string runtimeState
+  4: required string sessionId
+  5: optional string lastActiveAt
+  6: optional string lastError
+}
 service AgentControlService {
   AgentListResponse ListAgents(1: AgentListRequest request)
   AgentResponse GetAgent(1: AgentRequest request)
   Ack ReportRuntime(1: RuntimeReport request)
   PingResponse Ping(1: PingRequest request)
 }
+
 
 // Runtime internals remain opaque to IM and Control Plane persistence.
 struct RuntimeRequest {
@@ -74,6 +78,7 @@ service AgentRuntimeService {
   RuntimeResponse RetryRun(1: RuntimeRequest request)
 }
 
+
 struct GatewayChatRequest {
   1: required string serviceToken
   2: required string ownerId
@@ -95,6 +100,7 @@ service ModelGatewayService {
   Ack Cancel(1: CancelRequest request)
   PingResponse Ping(1: PingRequest request)
 }
+
 
 struct SandboxExecRequest {
   1: required string serviceToken
@@ -205,3 +211,4 @@ service SandboxService {
   SandboxWorkspaceResponse ImportFile(1: SandboxImportRequest request)
   SandboxExportResponse ExportFile(1: SandboxExportRequest request)
 }
+

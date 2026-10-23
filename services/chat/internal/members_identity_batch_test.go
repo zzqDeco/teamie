@@ -10,10 +10,10 @@ import (
 	"testing"
 
 	"github.com/cloudwego/kitex/client/callopt"
-	"teamie/pkg/httpx"
-	"teamie/pkg/rpcx"
 	"teamie/contracts/gen/im/kitex_gen/im"
 	"teamie/contracts/gen/im/kitex_gen/im/identityservice"
+	"teamie/pkg/httpx"
+	"teamie/services/chat/internal/infra/rpcclient"
 )
 
 type workspaceProfilesClient struct {
@@ -23,7 +23,7 @@ type workspaceProfilesClient struct {
 }
 
 func (c *workspaceProfilesClient) ValidateSession(context.Context, *im.SessionRequest, ...callopt.Option) (*im.SessionResponse, error) {
-	return &im.SessionResponse{Valid: true, User: rpcx.ToUser(c.owner)}, nil
+	return &im.SessionResponse{Valid: true, User: rpcclient.ToUser(c.owner)}, nil
 }
 
 func (c *workspaceProfilesClient) GetUsers(_ context.Context, request *im.UsersRequest, _ ...callopt.Option) (*im.UsersResponse, error) {
@@ -50,7 +50,7 @@ func TestWorkspaceMemberListResolves1001StoredMembers(t *testing.T) {
 		t.Fatal(err)
 	}
 	profiles := &workspaceProfilesClient{owner: owner}
-	handler := (&Handler{Store: s, Identity: &rpcx.Identity{Client: profiles}, Origin: "http://teamie.test"}).Routes()
+	handler := (&Handler{Store: s, Identity: &rpcclient.Identity{Client: profiles}, Origin: "http://teamie.test"}).Routes()
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/"+ws.ID+"/members", nil)
 	request.AddCookie(&http.Cookie{Name: "teamie_session", Value: strings.Repeat("a", 64)})
 	response := httptest.NewRecorder()

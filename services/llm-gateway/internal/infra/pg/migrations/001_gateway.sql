@@ -1,0 +1,11 @@
+SELECT pg_advisory_xact_lock(7463260102);
+CREATE TABLE IF NOT EXISTS gateway_schema_migrations(version INTEGER PRIMARY KEY,applied_at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS gateway_config(id BOOLEAN PRIMARY KEY DEFAULT true CHECK(id),base_url TEXT NOT NULL DEFAULT '',model TEXT NOT NULL DEFAULT '',encrypted_key BYTEA,enabled BOOLEAN NOT NULL DEFAULT false,updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
+INSERT INTO gateway_config(id)VALUES(true)ON CONFLICT DO NOTHING;
+CREATE TABLE IF NOT EXISTS gateway_usage(id BIGSERIAL PRIMARY KEY,owner_id TEXT NOT NULL,agent_id TEXT NOT NULL,session_id TEXT NOT NULL,run_id TEXT NOT NULL,status TEXT NOT NULL,prompt_tokens BIGINT NOT NULL,completion_tokens BIGINT NOT NULL,latency_ms BIGINT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE INDEX IF NOT EXISTS gateway_usage_created ON gateway_usage(created_at);
+INSERT INTO gateway_schema_migrations(version)VALUES(1)ON CONFLICT DO NOTHING;
+ALTER TABLE gateway_config ADD COLUMN IF NOT EXISTS context_window_tokens BIGINT NOT NULL DEFAULT 16384 CHECK(context_window_tokens BETWEEN 4096 AND 2000000);
+INSERT INTO gateway_schema_migrations(version)VALUES(2)ON CONFLICT DO NOTHING;
+ALTER TABLE gateway_config ADD COLUMN IF NOT EXISTS web_search_encrypted_key BYTEA, ADD COLUMN IF NOT EXISTS web_search_enabled BOOLEAN NOT NULL DEFAULT false;
+INSERT INTO gateway_schema_migrations(version)VALUES(3)ON CONFLICT DO NOTHING;

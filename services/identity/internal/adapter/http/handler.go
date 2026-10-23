@@ -82,6 +82,18 @@ func actorFromContext(ctx context.Context) (actorContext, bool) {
 	return a, ok
 }
 
+type issuedTokenSinkKey struct{}
+
+func withIssuedTokenSink(ctx context.Context, dst *string) context.Context {
+	return context.WithValue(ctx, issuedTokenSinkKey{}, dst)
+}
+
+func recordIssuedToken(ctx context.Context, token string) {
+	if dst, ok := ctx.Value(issuedTokenSinkKey{}).(*string); ok && dst != nil {
+		*dst = token
+	}
+}
+
 // Adapter implements the generated identitygen.IdentityHTTPService contract
 // and wires HTTP routes to the Identity application service.
 type Adapter struct {
@@ -199,18 +211,20 @@ func (a *Adapter) GetRegistrationMetadata(ctx context.Context, _ *identitygen.Ge
 }
 
 func (a *Adapter) Register(ctx context.Context, req *identitygen.RegisterReq) (*identitygen.SessionResp, error) {
-	ss, _, err := a.App.Register(ctx, req.Email, req.Password, req.DisplayName, req.InviteCode)
+	ss, token, err := a.App.Register(ctx, req.Email, req.Password, req.DisplayName, req.InviteCode)
 	if err != nil {
 		return nil, err
 	}
+	recordIssuedToken(ctx, token)
 	return toSessionResp(ss), nil
 }
 
 func (a *Adapter) Login(ctx context.Context, req *identitygen.LoginReq) (*identitygen.SessionResp, error) {
-	ss, _, err := a.App.Login(ctx, req.Email, req.Password)
+	ss, token, err := a.App.Login(ctx, req.Email, req.Password)
 	if err != nil {
 		return nil, err
 	}
+	recordIssuedToken(ctx, token)
 	return toSessionResp(ss), nil
 }
 
@@ -450,15 +464,16 @@ func (a *Adapter) Routes() http.Handler {
 				httpx.WriteError(w, domain.ErrRateLimited())
 				return
 			}
-			ss, token, err := a.App.Register(r.Context(), req.Email, req.Password, req.DisplayName, req.InviteCode)
+			var token string
+			resp, err := a.Register(withIssuedTokenSink(r.Context(), &token), &req)
 			if err != nil {
 				httpx.WriteError(w, err)
 				return
 			}
-			observability.AnnotateHTTP(w, zap.String("user.id", ss.User.ID))
+			observability.AnnotateHTTP(w, zap.String("user.id", resp.GetUser().GetID()))
 			a.setCookie(w, token, 7*86400)
 			w.Header().Set("Cache-Control", "no-store")
-			httpx.WriteJSON(w, http.StatusCreated, toSessionResp(ss))
+			httpx.WriteJSON(w, http.StatusCreated, resp)
 		},
 		Login: func(w http.ResponseWriter, r *http.Request) {
 			if err := httpx.CheckOrigin(r, a.Origin); err != nil {
@@ -474,15 +489,16 @@ func (a *Adapter) Routes() http.Handler {
 				httpx.WriteError(w, domain.ErrRateLimited())
 				return
 			}
-			ss, token, err := a.App.Login(r.Context(), req.Email, req.Password)
+			var token string
+			resp, err := a.Login(withIssuedTokenSink(r.Context(), &token), &req)
 			if err != nil {
 				httpx.WriteError(w, err)
 				return
 			}
-			observability.AnnotateHTTP(w, zap.String("user.id", ss.User.ID))
+			observability.AnnotateHTTP(w, zap.String("user.id", resp.GetUser().GetID()))
 			a.setCookie(w, token, 7*86400)
 			w.Header().Set("Cache-Control", "no-store")
-			httpx.WriteJSON(w, http.StatusOK, toSessionResp(ss))
+			httpx.WriteJSON(w, http.StatusOK, resp)
 		},
 		GetSession: withHuman(func(w http.ResponseWriter, _ *http.Request, ctx context.Context, _ httpx.Session) error {
 			w.Header().Set("Cache-Control", "no-store")

@@ -126,6 +126,221 @@ var fieldIDToName_AgentDefinition = map[int16]string{
 	10: "deletedAt",
 }
 
+type Ack struct {
+	Ok bool `thrift:"ok,1,required" frugal:"1,required,bool" json:"ok"`
+}
+
+func NewAck() *Ack {
+	return &Ack{}
+}
+
+func (p *Ack) InitDefault() {
+}
+
+func (p *Ack) GetOk() (v bool) {
+	return p.Ok
+}
+func (p *Ack) SetOk(val bool) {
+	p.Ok = val
+}
+
+func (p *Ack) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("Ack(%+v)", *p)
+}
+
+var fieldIDToName_Ack = map[int16]string{
+	1: "ok",
+}
+
+type CancelRequest struct {
+	ServiceToken string `thrift:"serviceToken,1,required" frugal:"1,required,string" json:"serviceToken"`
+	AgentId      string `thrift:"agentId,2,required" frugal:"2,required,string" json:"agentId"`
+	RunId        string `thrift:"runId,3,required" frugal:"3,required,string" json:"runId"`
+}
+
+func NewCancelRequest() *CancelRequest {
+	return &CancelRequest{}
+}
+
+func (p *CancelRequest) InitDefault() {
+}
+
+func (p *CancelRequest) GetServiceToken() (v string) {
+	return p.ServiceToken
+}
+
+func (p *CancelRequest) GetAgentId() (v string) {
+	return p.AgentId
+}
+
+func (p *CancelRequest) GetRunId() (v string) {
+	return p.RunId
+}
+func (p *CancelRequest) SetServiceToken(val string) {
+	p.ServiceToken = val
+}
+func (p *CancelRequest) SetAgentId(val string) {
+	p.AgentId = val
+}
+func (p *CancelRequest) SetRunId(val string) {
+	p.RunId = val
+}
+
+func (p *CancelRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("CancelRequest(%+v)", *p)
+}
+
+var fieldIDToName_CancelRequest = map[int16]string{
+	1: "serviceToken",
+	2: "agentId",
+	3: "runId",
+}
+
+type PingRequest struct {
+	ServiceToken *string `thrift:"serviceToken,1,optional" frugal:"1,optional,string" json:"serviceToken,omitempty"`
+}
+
+func NewPingRequest() *PingRequest {
+	return &PingRequest{}
+}
+
+func (p *PingRequest) InitDefault() {
+}
+
+var PingRequest_ServiceToken_DEFAULT string
+
+func (p *PingRequest) GetServiceToken() (v string) {
+	if !p.IsSetServiceToken() {
+		return PingRequest_ServiceToken_DEFAULT
+	}
+	return *p.ServiceToken
+}
+func (p *PingRequest) SetServiceToken(val *string) {
+	p.ServiceToken = val
+}
+
+func (p *PingRequest) IsSetServiceToken() bool {
+	return p.ServiceToken != nil
+}
+
+func (p *PingRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PingRequest(%+v)", *p)
+}
+
+var fieldIDToName_PingRequest = map[int16]string{
+	1: "serviceToken",
+}
+
+type PingResponse struct {
+	Ready               bool    `thrift:"ready,1,required" frugal:"1,required,bool" json:"ready"`
+	Configured          *bool   `thrift:"configured,2,optional" frugal:"2,optional,bool" json:"configured,omitempty"`
+	Enabled             *bool   `thrift:"enabled,3,optional" frugal:"3,optional,bool" json:"enabled,omitempty"`
+	ContextWindowTokens *int64  `thrift:"contextWindowTokens,4,optional" frugal:"4,optional,i64" json:"contextWindowTokens,omitempty"`
+	ModelConfigId       *string `thrift:"modelConfigId,5,optional" frugal:"5,optional,string" json:"modelConfigId,omitempty"`
+}
+
+func NewPingResponse() *PingResponse {
+	return &PingResponse{}
+}
+
+func (p *PingResponse) InitDefault() {
+}
+
+func (p *PingResponse) GetReady() (v bool) {
+	return p.Ready
+}
+
+var PingResponse_Configured_DEFAULT bool
+
+func (p *PingResponse) GetConfigured() (v bool) {
+	if !p.IsSetConfigured() {
+		return PingResponse_Configured_DEFAULT
+	}
+	return *p.Configured
+}
+
+var PingResponse_Enabled_DEFAULT bool
+
+func (p *PingResponse) GetEnabled() (v bool) {
+	if !p.IsSetEnabled() {
+		return PingResponse_Enabled_DEFAULT
+	}
+	return *p.Enabled
+}
+
+var PingResponse_ContextWindowTokens_DEFAULT int64
+
+func (p *PingResponse) GetContextWindowTokens() (v int64) {
+	if !p.IsSetContextWindowTokens() {
+		return PingResponse_ContextWindowTokens_DEFAULT
+	}
+	return *p.ContextWindowTokens
+}
+
+var PingResponse_ModelConfigId_DEFAULT string
+
+func (p *PingResponse) GetModelConfigId() (v string) {
+	if !p.IsSetModelConfigId() {
+		return PingResponse_ModelConfigId_DEFAULT
+	}
+	return *p.ModelConfigId
+}
+func (p *PingResponse) SetReady(val bool) {
+	p.Ready = val
+}
+func (p *PingResponse) SetConfigured(val *bool) {
+	p.Configured = val
+}
+func (p *PingResponse) SetEnabled(val *bool) {
+	p.Enabled = val
+}
+func (p *PingResponse) SetContextWindowTokens(val *int64) {
+	p.ContextWindowTokens = val
+}
+func (p *PingResponse) SetModelConfigId(val *string) {
+	p.ModelConfigId = val
+}
+
+func (p *PingResponse) IsSetConfigured() bool {
+	return p.Configured != nil
+}
+
+func (p *PingResponse) IsSetEnabled() bool {
+	return p.Enabled != nil
+}
+
+func (p *PingResponse) IsSetContextWindowTokens() bool {
+	return p.ContextWindowTokens != nil
+}
+
+func (p *PingResponse) IsSetModelConfigId() bool {
+	return p.ModelConfigId != nil
+}
+
+func (p *PingResponse) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PingResponse(%+v)", *p)
+}
+
+var fieldIDToName_PingResponse = map[int16]string{
+	1: "ready",
+	2: "configured",
+	3: "enabled",
+	4: "contextWindowTokens",
+	5: "modelConfigId",
+}
+
 type AgentListRequest struct {
 	ServiceToken string `thrift:"serviceToken,1,required" frugal:"1,required,string" json:"serviceToken"`
 }
@@ -350,221 +565,6 @@ var fieldIDToName_RuntimeReport = map[int16]string{
 	4: "sessionId",
 	5: "lastActiveAt",
 	6: "lastError",
-}
-
-type Ack struct {
-	Ok bool `thrift:"ok,1,required" frugal:"1,required,bool" json:"ok"`
-}
-
-func NewAck() *Ack {
-	return &Ack{}
-}
-
-func (p *Ack) InitDefault() {
-}
-
-func (p *Ack) GetOk() (v bool) {
-	return p.Ok
-}
-func (p *Ack) SetOk(val bool) {
-	p.Ok = val
-}
-
-func (p *Ack) String() string {
-	if p == nil {
-		return "<nil>"
-	}
-	return fmt.Sprintf("Ack(%+v)", *p)
-}
-
-var fieldIDToName_Ack = map[int16]string{
-	1: "ok",
-}
-
-type CancelRequest struct {
-	ServiceToken string `thrift:"serviceToken,1,required" frugal:"1,required,string" json:"serviceToken"`
-	AgentId      string `thrift:"agentId,2,required" frugal:"2,required,string" json:"agentId"`
-	RunId        string `thrift:"runId,3,required" frugal:"3,required,string" json:"runId"`
-}
-
-func NewCancelRequest() *CancelRequest {
-	return &CancelRequest{}
-}
-
-func (p *CancelRequest) InitDefault() {
-}
-
-func (p *CancelRequest) GetServiceToken() (v string) {
-	return p.ServiceToken
-}
-
-func (p *CancelRequest) GetAgentId() (v string) {
-	return p.AgentId
-}
-
-func (p *CancelRequest) GetRunId() (v string) {
-	return p.RunId
-}
-func (p *CancelRequest) SetServiceToken(val string) {
-	p.ServiceToken = val
-}
-func (p *CancelRequest) SetAgentId(val string) {
-	p.AgentId = val
-}
-func (p *CancelRequest) SetRunId(val string) {
-	p.RunId = val
-}
-
-func (p *CancelRequest) String() string {
-	if p == nil {
-		return "<nil>"
-	}
-	return fmt.Sprintf("CancelRequest(%+v)", *p)
-}
-
-var fieldIDToName_CancelRequest = map[int16]string{
-	1: "serviceToken",
-	2: "agentId",
-	3: "runId",
-}
-
-type PingRequest struct {
-	ServiceToken *string `thrift:"serviceToken,1,optional" frugal:"1,optional,string" json:"serviceToken,omitempty"`
-}
-
-func NewPingRequest() *PingRequest {
-	return &PingRequest{}
-}
-
-func (p *PingRequest) InitDefault() {
-}
-
-var PingRequest_ServiceToken_DEFAULT string
-
-func (p *PingRequest) GetServiceToken() (v string) {
-	if !p.IsSetServiceToken() {
-		return PingRequest_ServiceToken_DEFAULT
-	}
-	return *p.ServiceToken
-}
-func (p *PingRequest) SetServiceToken(val *string) {
-	p.ServiceToken = val
-}
-
-func (p *PingRequest) IsSetServiceToken() bool {
-	return p.ServiceToken != nil
-}
-
-func (p *PingRequest) String() string {
-	if p == nil {
-		return "<nil>"
-	}
-	return fmt.Sprintf("PingRequest(%+v)", *p)
-}
-
-var fieldIDToName_PingRequest = map[int16]string{
-	1: "serviceToken",
-}
-
-type PingResponse struct {
-	Ready               bool    `thrift:"ready,1,required" frugal:"1,required,bool" json:"ready"`
-	Configured          *bool   `thrift:"configured,2,optional" frugal:"2,optional,bool" json:"configured,omitempty"`
-	Enabled             *bool   `thrift:"enabled,3,optional" frugal:"3,optional,bool" json:"enabled,omitempty"`
-	ContextWindowTokens *int64  `thrift:"contextWindowTokens,4,optional" frugal:"4,optional,i64" json:"contextWindowTokens,omitempty"`
-	ModelConfigId       *string `thrift:"modelConfigId,5,optional" frugal:"5,optional,string" json:"modelConfigId,omitempty"`
-}
-
-func NewPingResponse() *PingResponse {
-	return &PingResponse{}
-}
-
-func (p *PingResponse) InitDefault() {
-}
-
-func (p *PingResponse) GetReady() (v bool) {
-	return p.Ready
-}
-
-var PingResponse_Configured_DEFAULT bool
-
-func (p *PingResponse) GetConfigured() (v bool) {
-	if !p.IsSetConfigured() {
-		return PingResponse_Configured_DEFAULT
-	}
-	return *p.Configured
-}
-
-var PingResponse_Enabled_DEFAULT bool
-
-func (p *PingResponse) GetEnabled() (v bool) {
-	if !p.IsSetEnabled() {
-		return PingResponse_Enabled_DEFAULT
-	}
-	return *p.Enabled
-}
-
-var PingResponse_ContextWindowTokens_DEFAULT int64
-
-func (p *PingResponse) GetContextWindowTokens() (v int64) {
-	if !p.IsSetContextWindowTokens() {
-		return PingResponse_ContextWindowTokens_DEFAULT
-	}
-	return *p.ContextWindowTokens
-}
-
-var PingResponse_ModelConfigId_DEFAULT string
-
-func (p *PingResponse) GetModelConfigId() (v string) {
-	if !p.IsSetModelConfigId() {
-		return PingResponse_ModelConfigId_DEFAULT
-	}
-	return *p.ModelConfigId
-}
-func (p *PingResponse) SetReady(val bool) {
-	p.Ready = val
-}
-func (p *PingResponse) SetConfigured(val *bool) {
-	p.Configured = val
-}
-func (p *PingResponse) SetEnabled(val *bool) {
-	p.Enabled = val
-}
-func (p *PingResponse) SetContextWindowTokens(val *int64) {
-	p.ContextWindowTokens = val
-}
-func (p *PingResponse) SetModelConfigId(val *string) {
-	p.ModelConfigId = val
-}
-
-func (p *PingResponse) IsSetConfigured() bool {
-	return p.Configured != nil
-}
-
-func (p *PingResponse) IsSetEnabled() bool {
-	return p.Enabled != nil
-}
-
-func (p *PingResponse) IsSetContextWindowTokens() bool {
-	return p.ContextWindowTokens != nil
-}
-
-func (p *PingResponse) IsSetModelConfigId() bool {
-	return p.ModelConfigId != nil
-}
-
-func (p *PingResponse) String() string {
-	if p == nil {
-		return "<nil>"
-	}
-	return fmt.Sprintf("PingResponse(%+v)", *p)
-}
-
-var fieldIDToName_PingResponse = map[int16]string{
-	1: "ready",
-	2: "configured",
-	3: "enabled",
-	4: "contextWindowTokens",
-	5: "modelConfigId",
 }
 
 type RuntimeRequest struct {

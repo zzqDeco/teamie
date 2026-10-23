@@ -61,6 +61,13 @@ func TestRuntimeCleanDDDLayerBoundaries(t *testing.T) {
 			rule: "adapter layer must not import infra layer directly",
 		},
 		{
+			dir: "adapter/worker",
+			allowed: func(imp string) bool {
+				return !strings.HasPrefix(imp, "teamie/services/agent-runtime/internal/infra")
+			},
+			rule: "adapter layer must not import infra layer directly",
+		},
+		{
 			dir: "infra/pg",
 			allowed: func(imp string) bool {
 				return !strings.HasPrefix(imp, "teamie/services/agent-runtime/internal/adapter") &&

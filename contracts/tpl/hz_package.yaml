@@ -9,3 +9,16 @@ layouts:
     body: |
       // Code generated from {{.SourceIDL}} using contracts/tpl/hz_package.yaml. DO NOT EDIT.
       package {{.PackageName}}
+
+      import (
+      	"context"
+      	"net/http"
+      )
+
+      // HTTPResponder abstracts request binding and domain error serialization (implemented by httpx.Responder).
+      type HTTPResponder interface {
+      	DecodeRequest(w http.ResponseWriter, r *http.Request, dst any) error
+      	WriteBindErrorHTTP(w http.ResponseWriter, r *http.Request, err error)
+      	WriteDomainErrorHTTP(w http.ResponseWriter, r *http.Request, err error)
+      	WriteOKHTTP(w http.ResponseWriter, r *http.Request, status int, resp any)
+      }

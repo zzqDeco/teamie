@@ -61,11 +61,9 @@ require (
 	google.golang.org/genproto v0.0.0-20210513213006-bf773b8c8384 // indirect
 	google.golang.org/protobuf v1.34.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	teamie/contracts/gen/im v0.0.0 // indirect
 )
 
 replace (
 	teamie/contracts/gen/agent => ../../contracts/gen/agent
-	teamie/contracts/gen/im => ../../contracts/gen/im
 	teamie/pkg => ../../pkg
 )

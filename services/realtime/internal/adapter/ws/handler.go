@@ -11,6 +11,7 @@ import (
 	"github.com/gorilla/websocket"
 	realtimegen "teamie/contracts/gen/im/hertz_gen/im/realtime"
 	"teamie/pkg/httpx"
+	httpadapter "teamie/services/realtime/internal/adapter/http"
 	"teamie/services/realtime/internal/app"
 	"teamie/services/realtime/internal/domain"
 )
@@ -192,7 +193,7 @@ func (a *Adapter) PublishTyping(ctx context.Context, req *realtimegen.PublishTyp
 // using the generated realtimegen.RegisterRealtimeWSServiceRoutes router bindings.
 func (a *Adapter) Routes() http.Handler {
 	m := http.NewServeMux()
-	httpx.Operations(m, func(r *http.Request) error {
+	httpadapter.RegisterHealthRoutes(m, func(r *http.Request) error {
 		return a.hubService().CheckDependencies(r.Context())
 	})
 	realtimegen.RegisterRealtimeWSServiceRoutes(m, realtimegen.RealtimeWSServiceRouteHandlers{

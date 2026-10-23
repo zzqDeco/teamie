@@ -13,7 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/cloudwego/kitex/client/callopt"
-	"teamie/pkg/rpcx"
+	rpcx "teamie/services/llm-gateway/internal/infra/rpcclient"
 	"teamie/contracts/gen/agent/kitex_gen/agent"
 	"teamie/contracts/gen/agent/modeltransport"
 	"teamie/contracts/gen/im/kitex_gen/im"

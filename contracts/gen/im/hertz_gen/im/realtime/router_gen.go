@@ -4,6 +4,14 @@ package realtime
 
 import "net/http"
 
+// HTTPResponder abstracts stateless request binding and domain error serialization (implemented by httpx.Responder).
+type HTTPResponder interface {
+	DecodeRequest(w http.ResponseWriter, r *http.Request, dst any) error
+	WriteBindErrorHTTP(w http.ResponseWriter, r *http.Request, err error)
+	WriteDomainErrorHTTP(w http.ResponseWriter, r *http.Request, err error)
+	WriteOKHTTP(w http.ResponseWriter, r *http.Request, status int, resp any)
+}
+
 // RouteSpec describes a single HTTP/WebSocket endpoint declared in the Thrift IDL.
 type RouteSpec struct {
 	Name         string
@@ -13,6 +21,9 @@ type RouteSpec struct {
 	RequestType  string
 	ResponseType string
 }
+
+// RealtimeWSServer is the stateless Clean DDD HTTP server interface generated from RealtimeWSService.
+type RealtimeWSServer = RealtimeWSService
 
 // RealtimeWSService route pattern constants generated from contracts/im/ws_realtime.thrift.
 const (
@@ -42,4 +53,41 @@ func RegisterRealtimeWSServiceRoutes(mux *http.ServeMux, h RealtimeWSServiceRout
 		panic("RealtimeWSServiceRouteHandlers.PublishTyping (" + PatternPublishTyping + ") is nil")
 	}
 	mux.HandleFunc(PatternPublishTyping, h.PublishTyping)
+}
+
+// RegisterRealtimeWSServer binds RealtimeWSServer methods using HTTPResponder with optional per-route handler overrides.
+func RegisterRealtimeWSServer(mux *http.ServeMux, srv RealtimeWSServer, m HTTPResponder, overrides ...RealtimeWSServiceRouteHandlers) {
+	var h RealtimeWSServiceRouteHandlers
+	if len(overrides) > 0 {
+		h = overrides[0]
+	}
+	if h.ConnectWS == nil {
+		h.ConnectWS = func(w http.ResponseWriter, r *http.Request) {
+			var req ConnectWSReq
+			_, err := srv.ConnectWS(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusNoContent, nil)
+		}
+	}
+	if h.PublishTyping == nil {
+		h.PublishTyping = func(w http.ResponseWriter, r *http.Request) {
+			var req PublishTypingReq
+			if r.ContentLength != 0 {
+				if err := m.DecodeRequest(w, r, &req); err != nil {
+					m.WriteBindErrorHTTP(w, r, err)
+					return
+				}
+			}
+			_, err := srv.PublishTyping(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusNoContent, nil)
+		}
+	}
+	RegisterRealtimeWSServiceRoutes(mux, h)
 }

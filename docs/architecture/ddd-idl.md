@@ -19,5 +19,6 @@ This document defines the multi-dimensional architecture for Teamie's backend se
    - Generic technical mechanisms (`pkg/postgres`, `pkg/httpx`, `pkg/rpcx`, `pkg/observability`, `pkg/config`, `pkg/crypto`, `pkg/imlimits`, `pkg/imtext`) live in the standalone `teamie/pkg` module.
    - Service-specific SQL queries, schema migrations, and anti-corruption RPC adapters stay private inside each service's `internal/infra/`.
    - Each stateful service connects only to its own PostgreSQL database and role.
-4. **Independent IM Pillar**:
-   - `contracts/gen/im` and `services/{identity,chat,realtime}` never import `eino`, `contracts/gen/agent`, or Agent service packages.
+4. **Independent IM Pillar & Automated CI Architecture Gates**:
+   - `pkg`, `contracts/gen/im`, and `services/{identity,chat,realtime}` never import `eino`, `contracts/gen/agent`, or Agent service packages.
+   - `make gen` (`ops/codegen.sh`) and `make check-arch` (`ops/check-architecture.sh`) enforce contract sync, IM independence, and DDD `domain` purity in CI.

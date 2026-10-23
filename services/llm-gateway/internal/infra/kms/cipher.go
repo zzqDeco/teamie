@@ -1,5 +1,5 @@
-// Package crypto implements the AES-GCM credential Cipher outbound port for the Model Gateway.
-package crypto
+// Package kms implements the AES-GCM credential Cipher outbound port for the Model Gateway.
+package kms
 
 import (
 	"crypto/aes"

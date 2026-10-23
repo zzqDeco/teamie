@@ -4,6 +4,14 @@ package control
 
 import "net/http"
 
+// HTTPResponder abstracts stateless request binding and domain error serialization (implemented by httpx.Responder).
+type HTTPResponder interface {
+	DecodeRequest(w http.ResponseWriter, r *http.Request, dst any) error
+	WriteBindErrorHTTP(w http.ResponseWriter, r *http.Request, err error)
+	WriteDomainErrorHTTP(w http.ResponseWriter, r *http.Request, err error)
+	WriteOKHTTP(w http.ResponseWriter, r *http.Request, status int, resp any)
+}
+
 // RouteSpec describes a single HTTP/WebSocket endpoint declared in the Thrift IDL.
 type RouteSpec struct {
 	Name         string
@@ -13,6 +21,9 @@ type RouteSpec struct {
 	RequestType  string
 	ResponseType string
 }
+
+// AgentControlHTTPServer is the stateless Clean DDD HTTP server interface generated from AgentControlHTTPService.
+type AgentControlHTTPServer = AgentControlHTTPService
 
 // AgentControlHTTPService route pattern constants generated from contracts/agent/http_control.thrift.
 const (
@@ -70,4 +81,91 @@ func RegisterAgentControlHTTPServiceRoutes(mux *http.ServeMux, h AgentControlHTT
 		panic("AgentControlHTTPServiceRouteHandlers.ListWorkspaceAgents (" + PatternListWorkspaceAgents + ") is nil")
 	}
 	mux.HandleFunc(PatternListWorkspaceAgents, h.ListWorkspaceAgents)
+}
+
+// RegisterAgentControlHTTPServer binds AgentControlHTTPServer methods using HTTPResponder with optional per-route handler overrides.
+func RegisterAgentControlHTTPServer(mux *http.ServeMux, srv AgentControlHTTPServer, m HTTPResponder, overrides ...AgentControlHTTPServiceRouteHandlers) {
+	var h AgentControlHTTPServiceRouteHandlers
+	if len(overrides) > 0 {
+		h = overrides[0]
+	}
+	if h.ListOwnedAgents == nil {
+		h.ListOwnedAgents = func(w http.ResponseWriter, r *http.Request) {
+			var req ListOwnedAgentsReq
+			resp, err := srv.ListOwnedAgents(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.CreateAgent == nil {
+		h.CreateAgent = func(w http.ResponseWriter, r *http.Request) {
+			var req CreateAgentReq
+			if r.ContentLength != 0 {
+				if err := m.DecodeRequest(w, r, &req); err != nil {
+					m.WriteBindErrorHTTP(w, r, err)
+					return
+				}
+			}
+			resp, err := srv.CreateAgent(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.GetAgentProfile == nil {
+		h.GetAgentProfile = func(w http.ResponseWriter, r *http.Request) {
+			var req GetAgentProfileReq
+			resp, err := srv.GetAgentProfile(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.UpdateAgent == nil {
+		h.UpdateAgent = func(w http.ResponseWriter, r *http.Request) {
+			var req UpdateAgentReq
+			if r.ContentLength != 0 {
+				if err := m.DecodeRequest(w, r, &req); err != nil {
+					m.WriteBindErrorHTTP(w, r, err)
+					return
+				}
+			}
+			resp, err := srv.UpdateAgent(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.DeleteAgent == nil {
+		h.DeleteAgent = func(w http.ResponseWriter, r *http.Request) {
+			var req DeleteAgentReq
+			_, err := srv.DeleteAgent(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusNoContent, nil)
+		}
+	}
+	if h.ListWorkspaceAgents == nil {
+		h.ListWorkspaceAgents = func(w http.ResponseWriter, r *http.Request) {
+			var req ListWorkspaceAgentsReq
+			resp, err := srv.ListWorkspaceAgents(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	RegisterAgentControlHTTPServiceRoutes(mux, h)
 }

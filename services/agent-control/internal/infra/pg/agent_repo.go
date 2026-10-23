@@ -12,7 +12,7 @@ import (
 	"teamie/services/agent-control/internal/domain"
 )
 
-//go:embed schema.sql
+//go:embed migrations/001_agents.sql
 var SchemaV1 string
 
 // Migrate applies all Agent Control Plane PostgreSQL schema migrations under advisory lock 704201.

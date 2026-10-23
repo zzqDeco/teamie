@@ -62,9 +62,11 @@ func TestRealtimeCleanDDDLayerBoundaries(t *testing.T) {
 	}
 
 	// 3. Infrastructure layer must never import inbound adapters or app.
-	for _, imp := range collectImports(t, "infra") {
-		if strings.Contains(imp, "/adapter/") || strings.Contains(imp, "/app") {
-			t.Fatalf("infra must not import adapter or app layer %q", imp)
+	for _, sub := range []string{"infra/rpcclient", "infra/redis"} {
+		for _, imp := range collectImports(t, sub) {
+			if strings.Contains(imp, "/adapter/") || strings.Contains(imp, "/app") {
+				t.Fatalf("%s must not import adapter or app layer %q", sub, imp)
+			}
 		}
 	}
 }

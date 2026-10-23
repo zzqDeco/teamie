@@ -16,6 +16,7 @@ import (
 	"teamie/pkg/rpcx"
 	httpadapter "teamie/services/agent-runtime/internal/adapter/http"
 	rpcadapter "teamie/services/agent-runtime/internal/adapter/rpc"
+	"teamie/services/agent-runtime/internal/adapter/worker"
 	"teamie/services/agent-runtime/internal/app"
 	"teamie/services/agent-runtime/internal/infra/eino"
 	"teamie/services/agent-runtime/internal/infra/rpcclient"
@@ -68,10 +69,12 @@ func main() {
 		Schedules:    repo,
 		Archive:      repo,
 		ToolReceipts: repo,
+		Inspect:      repo,
 		Control:      &rpcclient.ControlAdapter{Client: runtimeEngine.Control, Token: cfg.ControlToken},
 		Model:        &rpcclient.ModelGatewayAdapter{Client: runtimeEngine.Gateway, Token: cfg.GatewayToken},
 		Sandbox:      &rpcclient.SandboxAdapter{Client: runtimeEngine.Sandbox, Token: cfg.SandboxToken},
 		Engine:       runtimeEngine,
+		ControlToken: cfg.ControlToken,
 	}
 
 	rpcAddr, err := net.ResolveTCPAddr("tcp", httpx.Env("RPC_ADDR", ":8885"))
@@ -94,7 +97,8 @@ func main() {
 	}).RegisterRoutes(h)
 
 	stopped := make(chan struct{})
-	go func() { defer close(stopped); appSvc.Run(ctx) }()
+	runtimeWorker := worker.New(appSvc)
+	go func() { defer close(stopped); runtimeWorker.Run(ctx) }()
 	go func() {
 		if err := h.Run(); err != nil {
 			observability.L(ctx).Error("Runtime HTTP stopped", zap.Error(err))

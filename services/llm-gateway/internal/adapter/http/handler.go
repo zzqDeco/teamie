@@ -14,12 +14,17 @@ import (
 	gatewaygen "teamie/contracts/gen/agent/hertz_gen/agent/gateway"
 	"teamie/contracts/gen/agent/kitex_gen/agent"
 	"teamie/contracts/gen/agent/modeltransport"
+	"teamie/contracts/gen/im/kitex_gen/im"
 	"teamie/pkg/httpx"
 	"teamie/pkg/observability"
-	"teamie/pkg/rpcx"
 	"teamie/services/llm-gateway/internal/app"
 	"teamie/services/llm-gateway/internal/domain"
 )
+
+// AdminAuthorizer authenticates human platform administrators on HTTP requests.
+type AdminAuthorizer interface {
+	Require(r *http.Request) (*im.User, error)
+}
 
 var _ gatewaygen.ModelGatewayHTTPService = (*Adapter)(nil)
 
@@ -491,7 +496,7 @@ func (a *Adapter) webExtractHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // Routes binds all generated ModelGatewayHTTPService routes and operational endpoints.
-func (a *Adapter) Routes(auth rpcx.AdminAuth) http.Handler {
+func (a *Adapter) Routes(auth AdminAuthorizer) http.Handler {
 	m := http.NewServeMux()
 	httpx.OperationsContext(m, a.App.Store.Ready)
 	wrapAdmin := func(fn func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {

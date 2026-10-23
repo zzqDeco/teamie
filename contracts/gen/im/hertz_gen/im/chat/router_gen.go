@@ -4,6 +4,14 @@ package chat
 
 import "net/http"
 
+// HTTPResponder abstracts stateless request binding and domain error serialization (implemented by httpx.Responder).
+type HTTPResponder interface {
+	DecodeRequest(w http.ResponseWriter, r *http.Request, dst any) error
+	WriteBindErrorHTTP(w http.ResponseWriter, r *http.Request, err error)
+	WriteDomainErrorHTTP(w http.ResponseWriter, r *http.Request, err error)
+	WriteOKHTTP(w http.ResponseWriter, r *http.Request, status int, resp any)
+}
+
 // RouteSpec describes a single HTTP/WebSocket endpoint declared in the Thrift IDL.
 type RouteSpec struct {
 	Name         string
@@ -13,6 +21,9 @@ type RouteSpec struct {
 	RequestType  string
 	ResponseType string
 }
+
+// ChatHTTPServer is the stateless Clean DDD HTTP server interface generated from ChatHTTPService.
+type ChatHTTPServer = ChatHTTPService
 
 // ChatHTTPService route pattern constants generated from contracts/im/http_chat.thrift.
 const (
@@ -196,4 +207,331 @@ func RegisterChatHTTPServiceRoutes(mux *http.ServeMux, h ChatHTTPServiceRouteHan
 		panic("ChatHTTPServiceRouteHandlers.DownloadAttachment (" + PatternDownloadAttachment + ") is nil")
 	}
 	mux.HandleFunc(PatternDownloadAttachment, h.DownloadAttachment)
+}
+
+// RegisterChatHTTPServer binds ChatHTTPServer methods using HTTPResponder with optional per-route handler overrides.
+func RegisterChatHTTPServer(mux *http.ServeMux, srv ChatHTTPServer, m HTTPResponder, overrides ...ChatHTTPServiceRouteHandlers) {
+	var h ChatHTTPServiceRouteHandlers
+	if len(overrides) > 0 {
+		h = overrides[0]
+	}
+	if h.GetBootstrap == nil {
+		h.GetBootstrap = func(w http.ResponseWriter, r *http.Request) {
+			var req GetBootstrapReq
+			resp, err := srv.GetBootstrap(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.CreateWorkspace == nil {
+		h.CreateWorkspace = func(w http.ResponseWriter, r *http.Request) {
+			var req CreateWorkspaceReq
+			if r.ContentLength != 0 {
+				if err := m.DecodeRequest(w, r, &req); err != nil {
+					m.WriteBindErrorHTTP(w, r, err)
+					return
+				}
+			}
+			resp, err := srv.CreateWorkspace(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.ListWorkspaceMembers == nil {
+		h.ListWorkspaceMembers = func(w http.ResponseWriter, r *http.Request) {
+			var req ListWorkspaceMembersReq
+			resp, err := srv.ListWorkspaceMembers(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.CreateWorkspaceInvite == nil {
+		h.CreateWorkspaceInvite = func(w http.ResponseWriter, r *http.Request) {
+			var req CreateWorkspaceInviteReq
+			if r.ContentLength != 0 {
+				if err := m.DecodeRequest(w, r, &req); err != nil {
+					m.WriteBindErrorHTTP(w, r, err)
+					return
+				}
+			}
+			resp, err := srv.CreateWorkspaceInvite(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.GetInvite == nil {
+		h.GetInvite = func(w http.ResponseWriter, r *http.Request) {
+			var req GetInviteReq
+			resp, err := srv.GetInvite(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.AcceptInvite == nil {
+		h.AcceptInvite = func(w http.ResponseWriter, r *http.Request) {
+			var req AcceptInviteReq
+			if r.ContentLength != 0 {
+				if err := m.DecodeRequest(w, r, &req); err != nil {
+					m.WriteBindErrorHTTP(w, r, err)
+					return
+				}
+			}
+			resp, err := srv.AcceptInvite(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.RemoveWorkspaceMember == nil {
+		h.RemoveWorkspaceMember = func(w http.ResponseWriter, r *http.Request) {
+			var req RemoveWorkspaceMemberReq
+			_, err := srv.RemoveWorkspaceMember(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusNoContent, nil)
+		}
+	}
+	if h.ListConversations == nil {
+		h.ListConversations = func(w http.ResponseWriter, r *http.Request) {
+			var req ListConversationsReq
+			resp, err := srv.ListConversations(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.CreateConversation == nil {
+		h.CreateConversation = func(w http.ResponseWriter, r *http.Request) {
+			var req CreateConversationReq
+			if r.ContentLength != 0 {
+				if err := m.DecodeRequest(w, r, &req); err != nil {
+					m.WriteBindErrorHTTP(w, r, err)
+					return
+				}
+			}
+			resp, err := srv.CreateConversation(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.AddConversationMember == nil {
+		h.AddConversationMember = func(w http.ResponseWriter, r *http.Request) {
+			var req AddConversationMemberReq
+			if r.ContentLength != 0 {
+				if err := m.DecodeRequest(w, r, &req); err != nil {
+					m.WriteBindErrorHTTP(w, r, err)
+					return
+				}
+			}
+			resp, err := srv.AddConversationMember(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.RemoveConversationMember == nil {
+		h.RemoveConversationMember = func(w http.ResponseWriter, r *http.Request) {
+			var req RemoveConversationMemberReq
+			resp, err := srv.RemoveConversationMember(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.ListMessages == nil {
+		h.ListMessages = func(w http.ResponseWriter, r *http.Request) {
+			var req ListMessagesReq
+			resp, err := srv.ListMessages(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.GetMessage == nil {
+		h.GetMessage = func(w http.ResponseWriter, r *http.Request) {
+			var req GetMessageReq
+			resp, err := srv.GetMessage(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.SendMessage == nil {
+		h.SendMessage = func(w http.ResponseWriter, r *http.Request) {
+			var req SendMessageReq
+			if r.ContentLength != 0 {
+				if err := m.DecodeRequest(w, r, &req); err != nil {
+					m.WriteBindErrorHTTP(w, r, err)
+					return
+				}
+			}
+			resp, err := srv.SendMessage(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.EditMessage == nil {
+		h.EditMessage = func(w http.ResponseWriter, r *http.Request) {
+			var req EditMessageReq
+			if r.ContentLength != 0 {
+				if err := m.DecodeRequest(w, r, &req); err != nil {
+					m.WriteBindErrorHTTP(w, r, err)
+					return
+				}
+			}
+			resp, err := srv.EditMessage(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.RetractMessage == nil {
+		h.RetractMessage = func(w http.ResponseWriter, r *http.Request) {
+			var req RetractMessageReq
+			resp, err := srv.RetractMessage(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.MarkRead == nil {
+		h.MarkRead = func(w http.ResponseWriter, r *http.Request) {
+			var req MarkReadReq
+			if r.ContentLength != 0 {
+				if err := m.DecodeRequest(w, r, &req); err != nil {
+					m.WriteBindErrorHTTP(w, r, err)
+					return
+				}
+			}
+			resp, err := srv.MarkRead(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.SearchWorkspaceMessages == nil {
+		h.SearchWorkspaceMessages = func(w http.ResponseWriter, r *http.Request) {
+			var req SearchWorkspaceMessagesReq
+			resp, err := srv.SearchWorkspaceMessages(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.GetAttention == nil {
+		h.GetAttention = func(w http.ResponseWriter, r *http.Request) {
+			var req GetAttentionReq
+			resp, err := srv.GetAttention(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.Sync == nil {
+		h.Sync = func(w http.ResponseWriter, r *http.Request) {
+			var req SyncReq
+			resp, err := srv.Sync(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.UploadAttachment == nil {
+		h.UploadAttachment = func(w http.ResponseWriter, r *http.Request) {
+			var req UploadAttachmentReq
+			if r.ContentLength != 0 {
+				if err := m.DecodeRequest(w, r, &req); err != nil {
+					m.WriteBindErrorHTTP(w, r, err)
+					return
+				}
+			}
+			resp, err := srv.UploadAttachment(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.GetAttachmentUpload == nil {
+		h.GetAttachmentUpload = func(w http.ResponseWriter, r *http.Request) {
+			var req GetAttachmentUploadReq
+			resp, err := srv.GetAttachmentUpload(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.DeletePendingAttachment == nil {
+		h.DeletePendingAttachment = func(w http.ResponseWriter, r *http.Request) {
+			var req DeletePendingAttachmentReq
+			_, err := srv.DeletePendingAttachment(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusNoContent, nil)
+		}
+	}
+	if h.DownloadAttachment == nil {
+		h.DownloadAttachment = func(w http.ResponseWriter, r *http.Request) {
+			var req DownloadAttachmentReq
+			resp, err := srv.DownloadAttachment(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	RegisterChatHTTPServiceRoutes(mux, h)
 }

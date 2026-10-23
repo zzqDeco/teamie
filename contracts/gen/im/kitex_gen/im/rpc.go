@@ -81,6 +81,54 @@ var fieldIDToName_User = map[int16]string{
 	6: "platformRole",
 }
 
+type PingRequest struct {
+}
+
+func NewPingRequest() *PingRequest {
+	return &PingRequest{}
+}
+
+func (p *PingRequest) InitDefault() {
+}
+
+func (p *PingRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PingRequest(%+v)", *p)
+}
+
+var fieldIDToName_PingRequest = map[int16]string{}
+
+type PingResponse struct {
+	Ready bool `thrift:"ready,1,required" frugal:"1,required,bool" json:"ready"`
+}
+
+func NewPingResponse() *PingResponse {
+	return &PingResponse{}
+}
+
+func (p *PingResponse) InitDefault() {
+}
+
+func (p *PingResponse) GetReady() (v bool) {
+	return p.Ready
+}
+func (p *PingResponse) SetReady(val bool) {
+	p.Ready = val
+}
+
+func (p *PingResponse) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PingResponse(%+v)", *p)
+}
+
+var fieldIDToName_PingResponse = map[int16]string{
+	1: "ready",
+}
+
 type SessionRequest struct {
 	Token string `thrift:"token,1,required" frugal:"1,required,string" json:"token"`
 }
@@ -231,54 +279,6 @@ func (p *UsersResponse) String() string {
 
 var fieldIDToName_UsersResponse = map[int16]string{
 	1: "users",
-}
-
-type PingRequest struct {
-}
-
-func NewPingRequest() *PingRequest {
-	return &PingRequest{}
-}
-
-func (p *PingRequest) InitDefault() {
-}
-
-func (p *PingRequest) String() string {
-	if p == nil {
-		return "<nil>"
-	}
-	return fmt.Sprintf("PingRequest(%+v)", *p)
-}
-
-var fieldIDToName_PingRequest = map[int16]string{}
-
-type PingResponse struct {
-	Ready bool `thrift:"ready,1,required" frugal:"1,required,bool" json:"ready"`
-}
-
-func NewPingResponse() *PingResponse {
-	return &PingResponse{}
-}
-
-func (p *PingResponse) InitDefault() {
-}
-
-func (p *PingResponse) GetReady() (v bool) {
-	return p.Ready
-}
-func (p *PingResponse) SetReady(val bool) {
-	p.Ready = val
-}
-
-func (p *PingResponse) String() string {
-	if p == nil {
-		return "<nil>"
-	}
-	return fmt.Sprintf("PingResponse(%+v)", *p)
-}
-
-var fieldIDToName_PingResponse = map[int16]string{
-	1: "ready",
 }
 
 type PrincipalControlRequest struct {

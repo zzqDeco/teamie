@@ -77,7 +77,7 @@ func TestCleanDDDArchitecture(t *testing.T) {
 	}
 
 	// 4. infra/* must never import adapter/* or app.
-	for _, sub := range []string{"infra/pg", "infra/crypto", "infra/upstream"} {
+	for _, sub := range []string{"infra/pg", "infra/kms", "infra/rpcclient", "infra/upstream"} {
 		checkDir(sub, func(file, imp string) {
 			if imp == modulePrefix || imp == modulePrefix+"/app" || strings.HasPrefix(imp, modulePrefix+"/adapter") {
 				t.Errorf("infra layer violation in %s: forbidden import %q", file, imp)

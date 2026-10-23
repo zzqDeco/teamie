@@ -4,6 +4,14 @@ package gateway
 
 import "net/http"
 
+// HTTPResponder abstracts stateless request binding and domain error serialization (implemented by httpx.Responder).
+type HTTPResponder interface {
+	DecodeRequest(w http.ResponseWriter, r *http.Request, dst any) error
+	WriteBindErrorHTTP(w http.ResponseWriter, r *http.Request, err error)
+	WriteDomainErrorHTTP(w http.ResponseWriter, r *http.Request, err error)
+	WriteOKHTTP(w http.ResponseWriter, r *http.Request, status int, resp any)
+}
+
 // RouteSpec describes a single HTTP/WebSocket endpoint declared in the Thrift IDL.
 type RouteSpec struct {
 	Name         string
@@ -13,6 +21,9 @@ type RouteSpec struct {
 	RequestType  string
 	ResponseType string
 }
+
+// ModelGatewayHTTPServer is the stateless Clean DDD HTTP server interface generated from ModelGatewayHTTPService.
+type ModelGatewayHTTPServer = ModelGatewayHTTPService
 
 // ModelGatewayHTTPService route pattern constants generated from contracts/agent/http_gateway.thrift.
 const (
@@ -77,4 +88,126 @@ func RegisterModelGatewayHTTPServiceRoutes(mux *http.ServeMux, h ModelGatewayHTT
 		panic("ModelGatewayHTTPServiceRouteHandlers.WebExtract (" + PatternWebExtract + ") is nil")
 	}
 	mux.HandleFunc(PatternWebExtract, h.WebExtract)
+}
+
+// RegisterModelGatewayHTTPServer binds ModelGatewayHTTPServer methods using HTTPResponder with optional per-route handler overrides.
+func RegisterModelGatewayHTTPServer(mux *http.ServeMux, srv ModelGatewayHTTPServer, m HTTPResponder, overrides ...ModelGatewayHTTPServiceRouteHandlers) {
+	var h ModelGatewayHTTPServiceRouteHandlers
+	if len(overrides) > 0 {
+		h = overrides[0]
+	}
+	if h.GetAdminModelConfig == nil {
+		h.GetAdminModelConfig = func(w http.ResponseWriter, r *http.Request) {
+			var req GetAdminModelConfigReq
+			resp, err := srv.GetAdminModelConfig(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.UpdateAdminModelConfig == nil {
+		h.UpdateAdminModelConfig = func(w http.ResponseWriter, r *http.Request) {
+			var req UpdateAdminModelConfigReq
+			if r.ContentLength != 0 {
+				if err := m.DecodeRequest(w, r, &req); err != nil {
+					m.WriteBindErrorHTTP(w, r, err)
+					return
+				}
+			}
+			resp, err := srv.UpdateAdminModelConfig(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.TestAdminModelConfig == nil {
+		h.TestAdminModelConfig = func(w http.ResponseWriter, r *http.Request) {
+			var req TestAdminModelConfigReq
+			if r.ContentLength != 0 {
+				if err := m.DecodeRequest(w, r, &req); err != nil {
+					m.WriteBindErrorHTTP(w, r, err)
+					return
+				}
+			}
+			resp, err := srv.TestAdminModelConfig(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.GenerateChat == nil {
+		h.GenerateChat = func(w http.ResponseWriter, r *http.Request) {
+			var req ChatCallReq
+			if r.ContentLength != 0 {
+				if err := m.DecodeRequest(w, r, &req); err != nil {
+					m.WriteBindErrorHTTP(w, r, err)
+					return
+				}
+			}
+			resp, err := srv.GenerateChat(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.StreamChat == nil {
+		h.StreamChat = func(w http.ResponseWriter, r *http.Request) {
+			var req ChatCallReq
+			if r.ContentLength != 0 {
+				if err := m.DecodeRequest(w, r, &req); err != nil {
+					m.WriteBindErrorHTTP(w, r, err)
+					return
+				}
+			}
+			resp, err := srv.StreamChat(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.WebSearch == nil {
+		h.WebSearch = func(w http.ResponseWriter, r *http.Request) {
+			var req WebSearchReq
+			if r.ContentLength != 0 {
+				if err := m.DecodeRequest(w, r, &req); err != nil {
+					m.WriteBindErrorHTTP(w, r, err)
+					return
+				}
+			}
+			resp, err := srv.WebSearch(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	if h.WebExtract == nil {
+		h.WebExtract = func(w http.ResponseWriter, r *http.Request) {
+			var req WebExtractReq
+			if r.ContentLength != 0 {
+				if err := m.DecodeRequest(w, r, &req); err != nil {
+					m.WriteBindErrorHTTP(w, r, err)
+					return
+				}
+			}
+			resp, err := srv.WebExtract(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		}
+	}
+	RegisterModelGatewayHTTPServiceRoutes(mux, h)
 }
