@@ -9,12 +9,14 @@ package domain
 type Error struct {
 	Status        int
 	Code, Message string
+	Cause         error
 }
 
 func (e *Error) Error() string             { return e.Message }
 func (e *Error) StatusCode() int           { return e.Status }
 func (e *Error) ErrorCode() string         { return e.Code }
 func (e *Error) DiagnosticMessage() string { return e.Code }
+func (e *Error) Unwrap() error             { return e.Cause }
 
 // Err constructs a new domain Error.
 func Err(status int, code, message string) *Error {
@@ -78,6 +80,10 @@ func ErrControlUnavailable(message string) error {
 	return Err(503, "control_unavailable", message)
 }
 
-func ErrSchemaUnavailable() error {
-	return Err(503, "schema_unavailable", "Unsupported control schema")
+func ErrSchemaUnavailable(cause ...error) error {
+	var err error
+	if len(cause) > 0 {
+		err = cause[0]
+	}
+	return &Error{Status: 503, Code: "schema_unavailable", Message: "Unsupported control schema", Cause: err}
 }

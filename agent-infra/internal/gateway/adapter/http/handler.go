@@ -16,7 +16,9 @@ var _ gatewaygen.ModelGatewayHTTPService = (*Adapter)(nil)
 // Adapter translates generated Thrift HTTP DTOs into gateway application use cases.
 type Adapter struct {
 	App      *app.Service
+	Test     func(ctx context.Context, req *gatewaygen.TestAdminModelConfigReq) (*gatewaygen.TestAdminModelConfigResp, error)
 	Generate func(ctx context.Context, req *gatewaygen.ChatCallReq) (*gatewaygen.ChatCallResp, error)
+	Stream   func(ctx context.Context, req *gatewaygen.ChatCallReq) (*gatewaygen.StreamEventFrameDTO, error)
 	Search   func(ctx context.Context, req *gatewaygen.WebSearchReq) (*gatewaygen.WebSearchResp, error)
 	Extract  func(ctx context.Context, req *gatewaygen.WebExtractReq) (*gatewaygen.WebExtractResp, error)
 }
@@ -76,15 +78,55 @@ func (a *Adapter) UpdateAdminModelConfig(ctx context.Context, req *gatewaygen.Up
 	return toAdminModelConfigResp(c), nil
 }
 
-func (a *Adapter) TestAdminModelConfig(ctx context.Context, _ *gatewaygen.TestAdminModelConfigReq) (*gatewaygen.TestAdminModelConfigResp, error) {
+func (a *Adapter) TestAdminModelConfig(ctx context.Context, req *gatewaygen.TestAdminModelConfigReq) (*gatewaygen.TestAdminModelConfigResp, error) {
+	if a.Test != nil {
+		return a.Test(ctx, req)
+	}
 	c, err := a.App.LoadConfig(ctx)
 	if err != nil {
 		return nil, err
 	}
+	if !c.Configured() {
+		return nil, domain.Err(409, "model_unconfigured", "An administrator must configure the model gateway")
+	}
+	if !c.Enabled {
+		return nil, domain.Err(409, "model_disabled", "The model gateway is disabled")
+	}
+	if a.Generate == nil {
+		return nil, domain.Err(503, "gateway_unavailable", "Model gateway test handler is not bound")
+	}
+	start := time.Now()
+	res, err := a.Generate(ctx, &gatewaygen.ChatCallReq{
+		OwnerId:     "admin-test",
+		AgentId:     "admin-test",
+		SessionId:   "admin-test",
+		RunId:       start.UTC().Format("20060102T150405.000000000"),
+		RequestJson: `{"protocol":"teamie-model-v1","messages":[{"role":"user","content_blocks":[{"type":"user_input_text","user_input_text":{"text":"Reply with OK."}}]}],"options":{"MaxTokens":8,"AgenticToolChoice":{"Type":"forbidden"}}}`,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if res == nil || !res.Ok {
+		code := "gateway_unavailable"
+		msg := "Model gateway test failed"
+		status := 502
+		if res != nil {
+			if res.GetErrorCode() != "" {
+				code = res.GetErrorCode()
+			}
+			if res.GetErrorMessage() != "" {
+				msg = res.GetErrorMessage()
+			}
+			if res.GetStatusCode() > 0 {
+				status = int(res.GetStatusCode())
+			}
+		}
+		return nil, domain.Err(status, code, msg)
+	}
 	return &gatewaygen.TestAdminModelConfigResp{
 		Ok:        true,
 		Model:     c.Model,
-		LatencyMs: 0,
+		LatencyMs: time.Since(start).Milliseconds(),
 	}, nil
 }
 
@@ -95,8 +137,11 @@ func (a *Adapter) GenerateChat(ctx context.Context, req *gatewaygen.ChatCallReq)
 	return nil, domain.Err(501, "not_implemented", "GenerateChat handler not bound")
 }
 
-func (a *Adapter) StreamChat(_ context.Context, _ *gatewaygen.ChatCallReq) (*gatewaygen.StreamEventFrameDTO, error) {
-	return &gatewaygen.StreamEventFrameDTO{Type: "done"}, nil
+func (a *Adapter) StreamChat(ctx context.Context, req *gatewaygen.ChatCallReq) (*gatewaygen.StreamEventFrameDTO, error) {
+	if a.Stream != nil {
+		return a.Stream(ctx, req)
+	}
+	return nil, domain.Err(501, "not_implemented", "StreamChat handler not bound")
 }
 
 func (a *Adapter) WebSearch(ctx context.Context, req *gatewaygen.WebSearchReq) (*gatewaygen.WebSearchResp, error) {

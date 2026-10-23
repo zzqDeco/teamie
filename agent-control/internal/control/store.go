@@ -61,7 +61,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if err := postgres.Migrate(ctx, s.DB, 704201, "agent_control_schema_migrations", []postgres.Migration{
 		{Version: 1, SQL: schema},
 	}); err != nil {
-		return domain.ErrSchemaUnavailable()
+		return domain.ErrSchemaUnavailable(err)
 	}
 	return nil
 }
