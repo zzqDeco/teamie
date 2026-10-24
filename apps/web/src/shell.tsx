@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { FormEvent } from "react";
 import {
   Link,
   Navigate,
@@ -11,23 +10,15 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   Bot,
-  Bell,
-  ChevronDown,
   Hash,
-  Home,
-  Menu,
-  MessageCircle,
   KeyRound,
-  LoaderCircle,
-  Plus,
+  Menu,
   Settings,
   ShieldCheck,
-  UserPlus,
   Users,
-  X,
 } from "lucide-react";
 import { api } from "@teamie/api-client";
-import type { Conversation, Member, Workspace } from "@teamie/api-client";
+import type { Member, Workspace } from "@teamie/api-client";
 import { useAuth } from "./auth";
 import { errorText, useChat, useChatState } from "./chat";
 import { ProfileSettings, WorkspaceDialog } from "./dialogs";
@@ -35,11 +26,8 @@ import { PlatformInvitations } from "./admin";
 import { PlatformUsers } from "./platform-users";
 import { ModelGatewaySettings } from "./model-gateway";
 import { AgentDetail, MyAgents } from "./agents";
-import { AccountMenu } from "./account-menu";
 import { ConnectionBanner } from "./connection-banner";
-import { ConversationActions } from "./conversation-actions";
 import { WorkspaceMembers } from "./members";
-import { AgentAvatar, AgentBadge } from "./agent-ui";
 import { GroupMembersDialog } from "./group-members";
 import { enrichParticipants } from "./participants";
 import type { Participant } from "./participants";
@@ -54,7 +42,6 @@ import {
   useAttentionCount,
 } from "./attention";
 import {
-  Avatar,
   Button,
   IconButton,
   Loading,
@@ -64,24 +51,15 @@ import {
   useOverlayFocus,
 } from "./ui";
 import { ICON } from "./icons";
+import {
+  pickAdjacentConversation,
+  route,
+  ShellSidebar,
+} from "./shell-sidebar";
+import { ShellMembersPane } from "./shell-members-pane";
+import { parseInviteCode, Welcome } from "./shell-welcome";
+export { parseInviteCode };
 
-function route(conversation: Conversation) {
-  return `/app/w/${conversation.workspaceId}/c/${conversation.id}`;
-}
-export function parseInviteCode(raw: string): string {
-  const trimmed = raw.trim();
-  if (!trimmed) return "";
-  const match = trimmed.match(/\/join\/([^/?#\s]+)/i);
-  if (match?.[1]) {
-    try {
-      return decodeURIComponent(match[1]);
-    } catch {
-      return match[1];
-    }
-  }
-  if (trimmed.includes("://") || trimmed.includes("/")) return "";
-  return trimmed;
-}
 function useDocumentTitle(
   pageTitle: string,
   urgentCount: number,
@@ -104,86 +82,7 @@ function useDocumentTitle(
     [],
   );
 }
-function pickAdjacentConversation(
-  list: Conversation[],
-  currentId: string | undefined,
-  direction: -1 | 1,
-  unreadOnly: boolean,
-) {
-  if (!list.length) return undefined;
-  const currentIndex = currentId
-    ? list.findIndex((c) => c.id === currentId)
-    : -1;
-  for (let step = 1; step <= list.length; step++) {
-    const index =
-      currentIndex === -1
-        ? direction === 1
-          ? step - 1
-          : list.length - step
-        : (currentIndex + direction * step + list.length) % list.length;
-    const candidate = list[index];
-    if (
-      candidate &&
-      (!unreadOnly ||
-        (candidate.lastSeq > candidate.readSeq && candidate.id !== currentId))
-    ) {
-      return candidate;
-    }
-  }
-  return undefined;
-}
-function ConversationItem({
-  conversation,
-  selected,
-  members,
-  onClick,
-}: {
-  conversation: Conversation;
-  selected: boolean;
-  members: Member[];
-  onClick: () => void;
-}) {
-  const { user } = useAuth();
-  const unread = Math.max(0, conversation.lastSeq - conversation.readSeq);
-  const otherMember = members.find(
-    (member) =>
-      member.userId !== user!.id &&
-      conversation.memberIds.includes(member.userId),
-  );
-  return (
-    <Link
-      to={route(conversation)}
-      onClick={onClick}
-      className={`conversation-link ${selected ? "active" : ""} ${unread ? "has-unread" : ""}`}
-      aria-current={selected ? "page" : undefined}
-    >
-      {conversation.type === "channel" ? (
-        <Hash size={ICON.md} />
-      ) : conversation.type === "group" ? (
-        <span className="group-avatar">
-          <Users size={ICON.sm} />
-        </span>
-      ) : otherMember?.kind === "agent" ? (
-        <AgentAvatar size="small" />
-      ) : (
-        <Avatar
-          size="small"
-          name={conversationName(conversation, user!.id, members)}
-          seed={conversation.memberIds.find((id) => id !== user!.id)}
-        />
-      )}
-      <span>{conversationName(conversation, user!.id, members)}</span>
-      {conversation.type === "direct" && otherMember?.kind === "agent" && (
-        <AgentBadge compact ownerName={otherMember.ownerName} />
-      )}
-      {unread > 0 && (
-        <span className="unread-badge" aria-label={`${unread} 条未读`}>
-          {unread > 99 ? "99+" : unread}
-        </span>
-      )}
-    </Link>
-  );
-}
+
 function useMediaQuery(query: string) {
   const [matches, setMatches] = useState(
     () => window.matchMedia(query).matches,
@@ -197,6 +96,7 @@ function useMediaQuery(query: string) {
   }, [query]);
   return matches;
 }
+
 export function Shell() {
   const { user, logout } = useAuth();
   const mobile = useMediaQuery("(max-width: 780px)");
@@ -713,177 +613,33 @@ export function Shell() {
     <div
       className={`app-shell ${sidebar ? "sidebar-open" : ""} ${details ? "details-open" : ""}`}
     >
-      <div
-        className="app-navigation"
-        ref={navigationRef}
-        role={mobile && sidebar ? "dialog" : undefined}
-        aria-modal={mobile && sidebar ? true : undefined}
-        aria-label={mobile ? "对话与团队导航" : undefined}
-        tabIndex={-1}
-        inert={mobile && !sidebar}
-      >
-        <aside className="workspace-rail" aria-label="工作空间切换">
-          <Link
-            className="rail-home"
-            to="/app"
-            title="回到聊天"
-            aria-label="Teamie 工作空间"
-            onClick={closeSidebar}
-          >
-            <Logo compact />
-          </Link>
-          <div className="rail-divider" />
-          <Link
-            to="/app/attention"
-            className={`rail-attention ${isAttentionPage ? "selected" : ""}`}
-            title="提及与回复"
-            aria-label="提及与回复"
-            aria-current={isAttentionPage ? "page" : undefined}
-            onClick={closeSidebar}
-          >
-            <Bell size={ICON.lg} />
-            {!!attentionCount.data?.unreadCount && (
-              <span
-                className="rail-attention-count"
-                aria-label={`${attentionCount.data.unreadCount} 条未读提醒`}
-              >
-                {attentionCount.data.unreadCount > 99
-                  ? "99+"
-                  : attentionCount.data.unreadCount}
-              </span>
-            )}
-          </Link>
-          <div className="workspace-buttons">
-            {chat.data?.workspaces.map((space) => {
-              const hasUnread = allAuthorizedConversations.some(
-                (c) => c.workspaceId === space.id && c.lastSeq > c.readSeq,
-              );
-              return (
-                <button
-                  key={space.id}
-                  className={`workspace-button ${space.id === workspace?.id ? "selected" : ""}`}
-                  title={hasUnread ? `${space.name}（有未读消息）` : space.name}
-                  aria-label={
-                    hasUnread
-                      ? `打开工作空间 ${space.name}（有未读消息）`
-                      : `打开工作空间 ${space.name}`
-                  }
-                  onClick={() => selectWorkspace(space)}
-                >
-                  <span>{Array.from(space.name).slice(0, 2).join("")}</span>
-                  {space.id === workspace?.id && <i />}
-                  {hasUnread && (
-                    <em className="workspace-unread-dot" aria-hidden="true" />
-                  )}
-                </button>
-              );
-            })}
-          </div>
-          <IconButton
-            label="创建工作空间"
-            className="rail-add"
-            onClick={() => openDialog("workspace")}
-          >
-            <Plus size={ICON.xl} />
-          </IconButton>
-          <span className="rail-spacer" />
-          <Link
-            to="/app/agents"
-            className={`rail-settings rail-agents ${isAgentsPage ? "selected" : ""}`}
-            title="个人 Agent"
-            aria-label="个人 Agent"
-            aria-current={isAgentsPage ? "page" : undefined}
-            onClick={closeSidebar}
-          >
-            <Bot size={ICON.lg} aria-hidden="true" />
-          </Link>
-          <AccountMenu
-            user={user!}
-            busy={busy}
-            active={(!mobile || sidebar) && !hasOverlayModal}
-            connection={chat.connection}
-            connectionLabel={connectionLabel}
-            onSignOut={() => void signOut()}
-            onNavigate={closeSidebar}
-            onShortcuts={() => setShortcutsOpen(true)}
-          />
-        </aside>
-        <aside className="navigation-sidebar">
-          <div className="workspace-header">
-            <div className="workspace-title" title={workspace?.name}>
-              <b>{workspace?.name || "我的 Teamie"}</b>
-            </div>
-            {workspace && (caps["im.dm.create"] || caps["im.group.create"]) && (
-              <ConversationActions
-                key={workspace.id}
-                active={(!mobile || sidebar) && !hasOverlayModal}
-                canDirect={!!caps["im.dm.create"]}
-                canGroup={!!caps["im.group.create"]}
-                onSelect={openDialog}
-              />
-            )}
-            <IconButton
-              className="mobile-close"
-              label="关闭频道列表"
-              onClick={() => setSidebar(false)}
-            >
-              <X size={ICON.md} />
-            </IconButton>
-          </div>
-          <div className="sidebar-scroll">
-            <div className="nav-section">
-              <div className="nav-section-title">
-                <span>
-                  <ChevronDown size={ICON.xs} /> 团队频道
-                </span>
-                {workspace && owner && caps["im.channel.create"] && (
-                  <IconButton
-                    label="创建频道"
-                    onClick={() => openDialog("channel")}
-                  >
-                    <Plus size={ICON.sm} />
-                  </IconButton>
-                )}
-              </div>
-              {channels.map((c) => (
-                <ConversationItem
-                  key={c.id}
-                  conversation={c}
-                  selected={c.id === conversation?.id}
-                  members={members}
-                  onClick={() => setSidebar(false)}
-                />
-              ))}
-              {channels.length === 0 && (
-                <div className="sidebar-empty">
-                  {workspace ? "暂无频道" : "暂无团队"}
-                </div>
-              )}
-            </div>
-            <div className="nav-section">
-              <div className="nav-section-title">
-                <span>
-                  <ChevronDown size={ICON.xs} /> 私信与小组
-                </span>
-              </div>
-              {direct.map((c) => (
-                <ConversationItem
-                  key={c.id}
-                  conversation={c}
-                  selected={c.id === conversation?.id}
-                  members={members}
-                  onClick={() => setSidebar(false)}
-                />
-              ))}
-              {direct.length === 0 && (
-                <div className="sidebar-empty">
-                  {workspace ? "暂无对话" : "暂无对话"}
-                </div>
-              )}
-            </div>
-          </div>
-        </aside>
-      </div>
+      <ShellSidebar
+        navigationRef={navigationRef}
+        mobile={mobile}
+        sidebar={sidebar}
+        hasOverlayModal={hasOverlayModal}
+        user={user!}
+        busy={busy}
+        connection={chat.connection}
+        connectionLabel={connectionLabel}
+        isAttentionPage={isAttentionPage}
+        isAgentsPage={isAgentsPage}
+        attentionUnreadCount={attentionCount.data?.unreadCount}
+        workspaces={chat.data?.workspaces || []}
+        workspace={workspace}
+        owner={owner}
+        caps={caps}
+        allAuthorizedConversations={allAuthorizedConversations}
+        channels={channels}
+        direct={direct}
+        conversationId={conversation?.id}
+        members={members}
+        onCloseSidebar={closeSidebar}
+        onSelectWorkspace={selectWorkspace}
+        onOpenDialog={openDialog}
+        onSignOut={() => void signOut()}
+        onShortcuts={() => setShortcutsOpen(true)}
+      />
       {sidebar && mobile && (
         <button
           className="sidebar-shade"
@@ -1073,149 +829,31 @@ export function Shell() {
         )}
       </main>
       {details && !isManagement && workspace && conversation && (
-        <>
-          {overlayMembers && !sidebar && (
-            <button
-              className="members-shade"
-              aria-label="关闭成员列表"
-              onClick={closeDetails}
-            />
-          )}
-          <aside
-            className="members-pane"
-            ref={membersRef}
-            role={overlayMembers ? "dialog" : undefined}
-            aria-modal={overlayMembers ? true : undefined}
-            aria-label="对话成员"
-            tabIndex={-1}
-            inert={mobile && sidebar}
-          >
-            <header>
-              <span>
-                对话成员 <b>{visibleMembers.length}</b>
-              </span>
-              <IconButton
-                label="关闭成员列表"
-                onClick={() => setDetails(false)}
-              >
-                <X size={ICON.md} />
-              </IconButton>
-            </header>
-            <div className="members-description">
-              <span className="member-cover">
-                <Users size={ICON.xl} />
-              </span>
-              <h3>
-                {conversation
-                  ? conversationName(conversation, user!.id, members)
-                  : workspace.name}
-              </h3>
-            </div>
-            <div className="members-list">
-              <span className="members-list-label">
-                {conversation?.type === "channel"
-                  ? "工作空间成员"
-                  : "当前对话成员"}
-              </span>
-              {membersQuery.isLoading && (
-                <div className="member-loading">
-                  <LoaderCircle size={ICON.sm} className="spin" />
-                  加载成员…
-                </div>
-              )}
-              {membersQuery.error && <Notice>成员暂时无法加载。</Notice>}
-              {visibleMembers.map((member) => (
-                <div className="member-row" key={member.userId}>
-                  {member.kind === "agent" ? (
-                    <AgentAvatar />
-                  ) : (
-                    <Avatar name={member.displayName} seed={member.userId} />
-                  )}
-                  <div>
-                    <b>
-                      {member.displayName}
-                      {member.userId === user!.id && <small>你</small>}
-                      {member.kind === "agent" && (
-                        <AgentBadge compact ownerName={member.ownerName} />
-                      )}
-                    </b>
-                    <span>
-                      {member.kind === "agent"
-                        ? member.ownerName
-                          ? `由 ${member.ownerName} 创建`
-                          : "Agent"
-                        : member.role === "owner"
-                          ? "空间所有者"
-                          : "团队成员"}
-                    </span>
-                  </div>
-                  {member.role === "owner" && (
-                    <ShieldCheck size={ICON.xs} className="owner-shield" />
-                  )}
-                  {member.userId !== user!.id &&
-                    caps["im.dm.create"] &&
-                    member.selectable !== false && (
-                      <IconButton
-                        className="member-dm"
-                        label={`与 ${member.displayName} 发起私聊`}
-                        disabled={busy}
-                        onClick={() => void startDirect(member)}
-                      >
-                        <MessageCircle size={ICON.xs} />
-                      </IconButton>
-                    )}
-                  {((conversation?.type === "group" &&
-                    conversation.canManageMembers) ||
-                    (conversation?.type === "channel" &&
-                      owner &&
-                      member.role !== "owner")) &&
-                    member.userId !== user!.id && (
-                      <IconButton
-                        className="remove-member"
-                        label={`${conversation?.type === "group" ? "从小组" : "从空间"}移除 ${member.displayName}`}
-                        onClick={() => {
-                          setRemoving(member);
-                          setRemovingFromGroup(conversation?.type === "group");
-                          setError("");
-                        }}
-                      >
-                        <X size={ICON.xs} />
-                      </IconButton>
-                    )}
-                </div>
-              ))}
-            </div>
-            <Link
-              className="members-directory-link"
-              to={`/app/w/${workspace.id}/members`}
-              onClick={closeDetails}
-            >
-              <Users size={ICON.sm} />
-              查看全部成员
-            </Link>
-            {conversation?.type === "group" &&
-              conversation.canManageMembers && (
-                <button
-                  className="members-invite"
-                  onClick={() => setManagingGroup(true)}
-                >
-                  <Users size={ICON.sm} />
-                  管理小组成员
-                  <Plus size={ICON.xs} />
-                </button>
-              )}
-            {owner && conversation?.type === "channel" && (
-              <button
-                className="members-invite"
-                onClick={() => setDialog("invite")}
-              >
-                <UserPlus size={ICON.sm} />
-                邀请成员
-                <Plus size={ICON.xs} />
-              </button>
-            )}
-          </aside>
-        </>
+        <ShellMembersPane
+          membersRef={membersRef}
+          overlayMembers={overlayMembers}
+          mobile={mobile}
+          sidebar={sidebar}
+          workspace={workspace}
+          conversation={conversation}
+          userId={user!.id}
+          owner={owner}
+          caps={caps}
+          busy={busy}
+          members={members}
+          visibleMembers={visibleMembers}
+          isLoading={membersQuery.isLoading}
+          hasError={!!membersQuery.error}
+          onClose={closeDetails}
+          onStartDirect={(member) => void startDirect(member)}
+          onRequestRemove={(member, fromGroup) => {
+            setRemoving(member);
+            setRemovingFromGroup(fromGroup);
+            setError("");
+          }}
+          onManageGroup={() => setManagingGroup(true)}
+          onInvite={() => setDialog("invite")}
+        />
       )}
       {dialog && (
         <WorkspaceDialog
@@ -1283,93 +921,5 @@ export function Shell() {
         </Modal>
       )}
     </div>
-  );
-}
-function Welcome({
-  userName,
-  onCreate,
-  onMenu,
-}: {
-  userName: string;
-  onCreate: () => void;
-  onMenu: () => void;
-}) {
-  const navigate = useNavigate();
-  const [inviteInput, setInviteInput] = useState("");
-  const inviteCode = parseInviteCode(inviteInput);
-  function submitInvite(event: FormEvent) {
-    event.preventDefault();
-    if (!inviteCode) return;
-    navigate(`/join/${encodeURIComponent(inviteCode)}`);
-  }
-  return (
-    <div className="welcome-view">
-      <header>
-        <IconButton label="打开侧栏" className="mobile-menu" onClick={onMenu}>
-          <Menu size={ICON.lg} />
-        </IconButton>
-        <span>
-          <Home size={ICON.sm} />
-          你的起点
-        </span>
-      </header>
-      <div className="welcome-content">
-        <div className="welcome-illustration">
-          <span className="welcome-bubble">
-            <MessagesSquareIcon />
-          </span>
-        </div>
-        <h1>你好，{userName}</h1>
-        <p>
-          创建一个团队，开始协作。
-          <br />
-          已有团队邀请？输入邀请链接或邀请码即可加入。
-        </p>
-        <Button onClick={onCreate}>
-          <Plus size={ICON.md} />
-          创建工作空间
-        </Button>
-        <form className="welcome-join-form" onSubmit={submitInvite}>
-          <input
-            value={inviteInput}
-            onChange={(event) => setInviteInput(event.target.value)}
-            placeholder="粘贴邀请链接或输入邀请码"
-            aria-label="邀请链接或邀请码"
-          />
-          <Button
-            type="submit"
-            className="secondary"
-            disabled={!inviteCode}
-          >
-            加入团队
-          </Button>
-        </form>
-      </div>
-    </div>
-  );
-}
-function MessagesSquareIcon() {
-  return (
-    <svg
-      width="70"
-      height="64"
-      viewBox="0 0 70 64"
-      fill="none"
-      aria-hidden="true"
-    >
-      <path
-        d="M12 12h39a9 9 0 0 1 9 9v20a9 9 0 0 1-9 9H33L21 60V50h-9a9 9 0 0 1-9-9V21a9 9 0 0 1 9-9z"
-        fill="#fff"
-      />
-      <path
-        d="M26 3h33a8 8 0 0 1 8 8v19a8 8 0 0 1-8 8h-2v8l-10-8H26a8 8 0 0 1-8-8V11a8 8 0 0 1 8-8z"
-        fill="#d8efae"
-        stroke="#7164d9"
-        strokeWidth="3"
-      />
-      <circle cx="31" cy="21" r="2.7" fill="#7164d9" />
-      <circle cx="42" cy="21" r="2.7" fill="#7164d9" />
-      <circle cx="53" cy="21" r="2.7" fill="#7164d9" />
-    </svg>
   );
 }

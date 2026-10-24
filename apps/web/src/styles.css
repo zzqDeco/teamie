@@ -5570,6 +5570,51 @@ label > .copy-input {
   border-radius: var(--r-xs);
   border: 1px solid var(--border);
 }
+.message-body .markdown-code-wrap {
+  margin: 8px 0;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.message-body .markdown-code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-muted);
+}
+.message-body .markdown-code-lang {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: lowercase;
+}
+.message-body .markdown-code-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-xs);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.message-body .markdown-code-copy:hover {
+  color: var(--text-strong);
+  border-color: var(--border-strong);
+}
+.message-body .markdown-code-copy.copied {
+  color: var(--success-text);
+  border-color: var(--mint-border);
+  background: var(--mint-soft);
+}
 .message-body .markdown-code-block,
 .message-body pre {
   margin: 8px 0;
@@ -5580,6 +5625,11 @@ label > .copy-input {
   overflow-x: auto;
   line-height: 1.55;
   white-space: pre;
+}
+.message-body .markdown-code-wrap > .markdown-code-block {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
 }
 .message-body .markdown-code-block > code,
 .message-body pre > code {

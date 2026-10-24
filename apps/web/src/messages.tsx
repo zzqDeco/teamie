@@ -1,5 +1,4 @@
 import {
-  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -12,203 +11,45 @@ import {
   ArrowDown,
   ArrowLeft,
   ArrowUp,
-  CornerUpLeft,
   Hash,
   LoaderCircle,
   MessageCircle,
-  MoreHorizontal,
-  Pencil,
   RefreshCw,
   Search,
-  SendHorizontal,
-  Trash2,
   Users,
-  X,
 } from "lucide-react";
-import { defaultAttachmentLimits } from "@teamie/api-client";
-import {
-  AttachmentDraft,
-  AttachmentPicker,
-  MessageAttachments,
-  useAttachmentDraft,
-} from "./attachments";
-import { api } from "@teamie/api-client";
+import { api, defaultAttachmentLimits } from "@teamie/api-client";
 import type {
   Conversation,
   Member,
-  Message,
   Mention,
+  Message,
 } from "@teamie/api-client";
+import { useAttachmentDraft } from "./attachments";
 import { useAuth } from "./auth";
 import { errorText, sendMessage, useChat, useChatState } from "./chat";
 import { chatStore, reconcileMessages } from "./store";
-import {
-  isComposingKey,
-  MentionInput,
-  trimMentionDraft,
-} from "./mentions";
+import type { LocalMessage } from "./store";
+import { isComposingKey, trimMentionDraft } from "./mentions";
 import { MessageBody } from "./markdown";
 export { MessageBody };
-import type { LocalMessage } from "./store";
-import { Avatar, Button, date, IconButton, Modal, Notice, time } from "./ui";
-import { AgentAvatar, AgentBadge } from "./agent-ui";
+import { Button, IconButton, Modal, Notice } from "./ui";
 import { ConversationSearch } from "./conversation-search";
 import { ICON } from "./icons";
+import {
+  clearComposerDrafts,
+  conversationName,
+  extendHistoryBoundary,
+  readComposerDraft,
+  sameMentions,
+  subscribeDrafts,
+  writeComposerDraft,
+} from "./composer-drafts";
+import type { ComposerDraft } from "./composer-drafts";
+export { clearComposerDrafts, conversationName, extendHistoryBoundary };
+import { MessageItem } from "./message-item";
+import { MessageComposer } from "./message-composer";
 
-function sameMentions(a: Mention[], b: Mention[]) {
-  return (
-    a.length === b.length &&
-    a.every(
-      (m, i) =>
-        m.userId === b[i].userId && m.start === b[i].start && m.end === b[i].end,
-    )
-  );
-}
-
-export function conversationName(
-  conversation: Conversation,
-  userId: string,
-  members: Member[],
-) {
-  if (conversation.name) return conversation.name;
-  return (
-    conversation.memberIds
-      .filter((id) => id !== userId)
-      .map(
-        (id) => members.find((m) => m.userId === id)?.displayName || "团队伙伴",
-      )
-      .join("、") || "私聊"
-  );
-}
-type ComposerDraft = {
-  body: string;
-  mentions: Mention[];
-  replyToId: string;
-};
-const emptyComposerDraft: ComposerDraft = {
-  body: "",
-  mentions: [],
-  replyToId: "",
-};
-const draftStorageKey = (userId: string) => `teamie.drafts.v1:${userId}`;
-let draftUserId = chatStore.getSnapshot().userId;
-// Drafts retain reply identity, never a copied IM body, and disappear with
-// their account or conversation access.
-const composerDrafts = new Map<string, ComposerDraft>();
-const draftListeners = new Set<() => void>();
-const notifyDrafts = () => draftListeners.forEach((listener) => listener());
-const subscribeDrafts = (listener: () => void) => {
-  draftListeners.add(listener);
-  return () => {
-    draftListeners.delete(listener);
-  };
-};
-function persistSessionDrafts(userId: string) {
-  if (!userId) return;
-  try {
-    if (composerDrafts.size === 0)
-      sessionStorage.removeItem(draftStorageKey(userId));
-    else
-      sessionStorage.setItem(
-        draftStorageKey(userId),
-        JSON.stringify(Object.fromEntries(composerDrafts)),
-      );
-  } catch {
-    /* Drafts remain usable in memory when sessionStorage is full or blocked. */
-  }
-}
-function loadSessionDrafts(userId: string) {
-  if (!userId) return;
-  try {
-    const raw = sessionStorage.getItem(draftStorageKey(userId));
-    if (!raw) return;
-    const parsed = JSON.parse(raw) as Record<string, ComposerDraft>;
-    if (!parsed || typeof parsed !== "object") return;
-    for (const [id, entry] of Object.entries(parsed)) {
-      if (
-        entry &&
-        typeof entry.body === "string" &&
-        Array.isArray(entry.mentions) &&
-        typeof entry.replyToId === "string" &&
-        (entry.body || entry.mentions.length > 0 || entry.replyToId)
-      ) {
-        composerDrafts.set(id, {
-          body: entry.body,
-          mentions: entry.mentions,
-          replyToId: entry.replyToId,
-        });
-      }
-    }
-  } catch {
-    /* Corrupted or unavailable sessionStorage falls back to in-memory drafts. */
-  }
-}
-if (draftUserId) loadSessionDrafts(draftUserId);
-export function clearComposerDrafts() {
-  const previousUser = draftUserId;
-  const currentUser = chatStore.getSnapshot().userId;
-  try {
-    if (previousUser) sessionStorage.removeItem(draftStorageKey(previousUser));
-    if (currentUser) sessionStorage.removeItem(draftStorageKey(currentUser));
-  } catch {
-    /* Ignore storage access errors. */
-  }
-  draftUserId = currentUser;
-  composerDrafts.clear();
-  notifyDrafts();
-}
-chatStore.subscribe(() => {
-  const snap = chatStore.getSnapshot();
-  let userChanged = false;
-  if (snap.userId !== draftUserId) {
-    try {
-      if (draftUserId) sessionStorage.removeItem(draftStorageKey(draftUserId));
-    } catch {
-      /* Ignore storage access errors. */
-    }
-    draftUserId = snap.userId;
-    composerDrafts.clear();
-    if (draftUserId) loadSessionDrafts(draftUserId);
-    userChanged = true;
-  }
-  const allowed = snap.conversations;
-  let pruned = false;
-  if (chatStore.hasAuthoritativeConversations) {
-    for (const id of composerDrafts.keys()) {
-      if (!allowed[id]) pruned = composerDrafts.delete(id) || pruned;
-    }
-    if (pruned) persistSessionDrafts(draftUserId);
-  }
-  if (userChanged || pruned) notifyDrafts();
-});
-function readComposerDraft(conversationId: string): ComposerDraft {
-  return composerDrafts.get(conversationId) || emptyComposerDraft;
-}
-function writeComposerDraft(conversationId: string, draft: ComposerDraft) {
-  const snap = chatStore.getSnapshot();
-  if (
-    (chatStore.hasAuthoritativeConversations &&
-      !snap.conversations[conversationId]) ||
-    (!draft.body && draft.mentions.length === 0 && !draft.replyToId)
-  ) {
-    composerDrafts.delete(conversationId);
-  } else {
-    composerDrafts.set(conversationId, {
-      body: draft.body,
-      mentions: [...draft.mentions],
-      replyToId: draft.replyToId,
-    });
-  }
-  persistSessionDrafts(snap.userId);
-  notifyDrafts();
-}
-function extendHistoryBoundary(beforeSeq: number, messages: LocalMessage[]) {
-  const sequences = new Set(
-    messages.filter((message) => !message.status).map((message) => message.seq),
-  );
-  while (beforeSeq > 1 && sequences.has(beforeSeq - 1)) beforeSeq--;
-  return beforeSeq;
-}
 export function ConversationView({
   conversation,
   members,
@@ -232,10 +73,8 @@ export function ConversationView({
 }) {
   const { user } = useAuth();
   const { data, syncError, sync, sendTyping, typing } = useChat();
-  const attachments = useAttachmentDraft(
-    conversation.id,
-    data?.attachmentLimits || defaultAttachmentLimits,
-  );
+  const attachmentLimits = data?.attachmentLimits || defaultAttachmentLimits;
+  const attachments = useAttachmentDraft(conversation.id, attachmentLimits);
   const uploadsEnabled = !!data?.capabilities["im.attachments.upload"];
   const attachmentBlocked =
     attachments.blocked || (attachments.files.length > 0 && !uploadsEnabled);
@@ -970,6 +809,7 @@ export function ConversationView({
     inputRef.current?.focus();
   }
   const canEdit = !!data?.capabilities["im.message.edit"];
+  const canRetract = !!data?.capabilities["im.message.retract"];
   function startEdit(message: Message) {
     setActionMessageId("");
     setEditing(message);
@@ -1281,303 +1121,53 @@ export function ConversationView({
                 replyCandidates.slice(1),
               )[0]
             : undefined;
-          const isRovingTarget = message.id === rovingMessageId;
-          const actionTabIndex =
-            isRovingTarget || actionMessageId === message.id ? 0 : -1;
           return (
-            <Fragment key={message.id}>
-              {showDate && (
-                <div className="date-divider">
-                  <span>{date(message.createdAt)}</span>
-                </div>
-              )}
-              {message.id === firstUnread && (entry?.readSeq ?? 0) > 0 && (
-                <div className="unread-divider">
-                  <span>以下是新消息</span>
-                </div>
-              )}
-              <article
-                id={`message-${message.id}`}
-                data-seq={message.status ? undefined : message.seq}
-                data-own={message.senderId === user!.id ? "true" : undefined}
-                tabIndex={isRovingTarget ? 0 : -1}
-                onFocus={(event) => {
-                  if (event.currentTarget.contains(event.target as Node)) {
-                    setFocusedMessageId(message.id);
-                    setActionMessageId((current) =>
-                      current && current !== message.id ? "" : current,
-                    );
-                  }
-                }}
-                onKeyDown={(event) => {
-                  const tag = (event.target as HTMLElement | null)?.tagName;
-                  if (tag === "INPUT" || tag === "TEXTAREA") return;
-                  if (
-                    (event.key === "ArrowUp" || event.key === "ArrowDown") &&
-                    !event.shiftKey &&
-                    !event.altKey &&
-                    !event.metaKey &&
-                    !event.ctrlKey
-                  ) {
-                    event.preventDefault();
-                    const next =
-                      messages[
-                        event.key === "ArrowUp" ? index - 1 : index + 1
-                      ];
-                    if (next) {
-                      setActionMessageId("");
-                      setFocusedMessageId(next.id);
-                      focusMessage(next.id);
-                    }
-                    return;
-                  }
-                  if (
-                    event.key === "Enter" &&
-                    event.target === event.currentTarget &&
-                    !message.retractedAt &&
-                    !message.status &&
-                    editing?.id !== message.id
-                  ) {
-                    event.preventDefault();
-                    setActionMessageId((current) =>
-                      current === message.id ? "" : message.id,
-                    );
-                    return;
-                  }
-                  if (event.key === "Escape") {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    setActionMessageId("");
-                    inputRef.current?.focus();
-                  }
-                }}
-                className={`message ${highlightId === message.id ? "located" : ""} ${compact ? "compact" : ""} ${message.status || ""} ${message.retractedAt ? "retracted" : ""} ${actionMessageId === message.id ? "actions-open" : ""}`}
-              >
-                <div className="message-avatar">
-                  {!compact ? (
-                    message.senderKind === "agent" ? (
-                      <AgentAvatar />
-                    ) : (
-                      <Avatar
-                        name={message.senderName}
-                        seed={message.senderId}
-                      />
-                    )
-                  ) : (
-                    <span>{time(message.createdAt)}</span>
-                  )}
-                </div>
-                <div className="message-content">
-                  {!compact && (
-                    <div className="message-meta">
-                      <b>{message.senderName}</b>
-                      {message.senderKind === "agent" && (
-                        <AgentBadge
-                          ownerName={
-                            members.find(
-                              (member) => member.userId === message.senderId,
-                            )?.ownerName
-                          }
-                        />
-                      )}
-                      {message.senderId === user!.id && (
-                        <span className="you-label">你</span>
-                      )}
-                      <time dateTime={message.createdAt}>
-                        {time(message.createdAt)}
-                      </time>
-                    </div>
-                  )}
-                  {message.replyToId && (
-                    <button
-                      className="message-reply"
-                      onClick={() => void locate(message.replyToId!)}
-                    >
-                      <CornerUpLeft size={ICON.xs} />
-                      <b>{target?.senderName || "较早的消息"}</b>
-                      <span>
-                        {target?.retractedAt
-                          ? "消息已撤回"
-                          : target?.body ||
-                            (target?.attachments?.length
-                              ? `${target.attachments.length} 个文件`
-                              : "引用了一条较早的消息")}
-                      </span>
-                    </button>
-                  )}
-                  {editing?.id === message.id ? (
-                    <form className="edit-message" onSubmit={edit}>
-                      <MentionInput
-                        autoFocus
-                        value={editBody}
-                        mentions={editMentions}
-                        onChange={(value, mentions) => {
-                          setEditBody(value);
-                          setEditMentions(mentions);
-                        }}
-                        members={mentionMembers}
-                        enabled={mentionsEnabled}
-                        required={!editing.attachments?.length}
-                        aria-label="编辑消息内容"
-                        onKeyDown={(e) => {
-                          if (e.key === "Escape") {
-                            setEditing(null);
-                            inputRef.current?.focus();
-                          } else if (
-                            e.key === "Enter" &&
-                            !e.shiftKey &&
-                            !window.matchMedia("(pointer: coarse)").matches
-                          ) {
-                            e.preventDefault();
-                            e.currentTarget.form?.requestSubmit();
-                          }
-                        }}
-                      />
-                      <Notice>{actionError}</Notice>
-                      <div>
-                        <span>修改后会显示「已编辑」</span>
-                        <Button
-                          type="button"
-                          className="secondary small-button"
-                          onClick={() => setEditing(null)}
-                        >
-                          取消
-                        </Button>
-                        <Button
-                          type="submit"
-                          className="small-button"
-                          busy={actionBusy}
-                          disabled={
-                            !editBody.trim() && !editing.attachments?.length
-                          }
-                        >
-                          保存修改
-                        </Button>
-                      </div>
-                    </form>
-                  ) : (
-                    <div className="message-text message-body">
-                      {message.retractedAt ? (
-                        "这条消息已撤回"
-                      ) : (
-                        <MessageBody
-                          body={message.body}
-                          mentions={message.mentions}
-                          userId={user!.id}
-                        />
-                      )}
-                      {message.editedAt && !message.retractedAt && (
-                        <span className="edited-label">（已编辑）</span>
-                      )}
-                    </div>
-                  )}
-                  {!message.retractedAt && !!message.attachments?.length && (
-                    <MessageAttachments
-                      conversationId={conversation.id}
-                      attachments={message.attachments}
-                    />
-                  )}
-                  {message.status === "sending" && (
-                    <span className="send-status">
-                      <LoaderCircle size={ICON.xs} className="spin" /> 正在发送
-                    </span>
-                  )}
-                  {message.status === "failed" && (
-                    <span className="send-status failed-status">
-                      {message.error || "发送失败"}
-                      {!(message as LocalMessage).permanent && (
-                        <button
-                          onClick={() =>
-                            void sendMessage(
-                              message as LocalMessage,
-                              chatStore.generation,
-                            )
-                          }
-                        >
-                          <RefreshCw size={ICON.xs} />
-                          重试
-                        </button>
-                      )}
-                      <button
-                        onClick={() => {
-                          for (const attachment of message.attachments || []) {
-                            void api
-                              .deletePendingAttachment(
-                                conversation.id,
-                                attachment.id,
-                              )
-                              .catch(() => {});
-                          }
-                          chatStore.discardLocal(
-                            conversation.id,
-                            message.clientMessageId,
-                          );
-                        }}
-                      >
-                        <Trash2 size={ICON.xs} />
-                        删除
-                      </button>
-                    </span>
-                  )}
-                </div>
-                {!message.retractedAt &&
-                  !message.status &&
-                  editing?.id !== message.id && (
-                    <Fragment>
-                      <IconButton
-                        label={`消息操作：${message.senderName}`}
-                        className="message-more-button"
-                        tabIndex={actionTabIndex}
-                        aria-expanded={actionMessageId === message.id}
-                        onClick={() =>
-                          setActionMessageId(
-                            actionMessageId === message.id ? "" : message.id,
-                          )
-                        }
-                      >
-                        <MoreHorizontal size={ICON.md} />
-                      </IconButton>
-                      <div className="message-actions">
-                        <IconButton
-                          label={`回复 ${message.senderName}`}
-                          tabIndex={actionTabIndex}
-                          onClick={() => {
-                            setActionMessageId("");
-                            updateComposerDraft({ replyToId: message.id });
-                            inputRef.current?.focus();
-                          }}
-                        >
-                          <CornerUpLeft size={ICON.sm} />
-                        </IconButton>
-                        {message.senderId === user!.id && canEdit && (
-                            <IconButton
-                              label="编辑消息"
-                              tabIndex={actionTabIndex}
-                              onClick={() => startEdit(message)}
-                            >
-                              <Pencil size={ICON.xs} />
-                            </IconButton>
-                          )}
-                        {message.senderId === user!.id &&
-                          data?.capabilities["im.message.retract"] && (
-                            <IconButton
-                              label="撤回消息"
-                              className="danger-hover"
-                              tabIndex={actionTabIndex}
-                              onClick={() => {
-                                setActionMessageId("");
-                                setRetracting(message);
-                                setActionError("");
-                              }}
-                            >
-                              <Trash2 size={ICON.xs} />
-                            </IconButton>
-                          )}
-                      </div>
-                    </Fragment>
-                  )}
-              </article>
-            </Fragment>
+            <MessageItem
+              key={message.id}
+              message={message}
+              index={index}
+              messages={messages}
+              conversationId={conversation.id}
+              userId={userId}
+              members={members}
+              mentionMembers={mentionMembers}
+              mentionsEnabled={mentionsEnabled}
+              canEdit={canEdit}
+              canRetract={canRetract}
+              showDate={showDate}
+              compact={compact}
+              firstUnread={firstUnread}
+              entryReadSeq={entry?.readSeq ?? 0}
+              target={target}
+              isRovingTarget={message.id === rovingMessageId}
+              highlightId={highlightId}
+              actionMessageId={actionMessageId}
+              editing={editing}
+              editBody={editBody}
+              editMentions={editMentions}
+              actionBusy={actionBusy}
+              actionError={actionError}
+              inputRef={inputRef}
+              setFocusedMessageId={setFocusedMessageId}
+              setActionMessageId={setActionMessageId}
+              focusMessage={focusMessage}
+              locate={locate}
+              onEditSubmit={edit}
+              setEditBody={setEditBody}
+              setEditMentions={setEditMentions}
+              setEditing={setEditing}
+              startEdit={startEdit}
+              onReply={(id) => {
+                setActionMessageId("");
+                updateComposerDraft({ replyToId: id });
+                inputRef.current?.focus();
+              }}
+              onRetractRequest={(msg) => {
+                setActionMessageId("");
+                setRetracting(msg);
+                setActionError("");
+              }}
+            />
           );
         })}
         {located && unreadContext && latest < conversation.lastSeq && (
@@ -1615,115 +1205,42 @@ export function ConversationView({
           回到最新消息
         </button>
       )}
-      <div className="composer-area">
-        <AttachmentDraft
-          files={attachments.files}
-          error={
-            attachments.error ||
-            (attachments.files.length && !uploadsEnabled
-              ? "文件上传已关闭，请移除待发送文件"
-              : "")
-          }
-          onRemove={attachments.remove}
-          onRetry={attachments.retry}
-        />
-        {replyToId && (
-          <div className="reply-preview">
-            <CornerUpLeft size={ICON.sm} />
-            <div>
-              回复 <b>{reply?.senderName || "原消息"}</b>
-              <span>
-                {reply?.retractedAt
-                  ? "消息已撤回"
-                  : reply
-                    ? reply.body || `${reply.attachments?.length || 0} 个文件`
-                    : resolvedReply?.error || "正在加载原消息…"}
-              </span>
-            </div>
-            <IconButton
-              label="取消回复"
-              onClick={() => updateComposerDraft({ replyToId: "" })}
-            >
-              <X size={ICON.sm} />
-            </IconButton>
-          </div>
-        )}
-        <form
-          className={`composer ${replyToId ? "with-reply" : ""}`}
-          onSubmit={submit}
-        >
-          <MentionInput
-            inputRef={inputRef}
-            value={body}
-            mentions={mentions}
-            onChange={(value, mentions) => {
-              updateComposerDraft({ body: value, mentions });
-            }}
-            members={mentionMembers}
-            enabled={mentionsEnabled}
-            onTyping={(value) => {
-              if (!value) {
-                if (lastTyping.current > 0) {
-                  lastTyping.current = 0;
-                  sendTyping(conversation.id, false);
-                }
-                return;
-              }
-              if (Date.now() - lastTyping.current > 1500) {
-                sendTyping(conversation.id, true);
-                lastTyping.current = Date.now();
-              }
-            }}
-            onKeyDown={keyDown}
-            placeholder={
-              conversation.type === "channel"
-                ? `发送消息到 # ${name}`
-                : `发送消息给 ${name}`
+      <MessageComposer
+        conversation={conversation}
+        name={name}
+        body={body}
+        mentions={mentions}
+        replyToId={replyToId}
+        reply={reply}
+        replyError={resolvedReply?.error}
+        attachments={attachments}
+        attachmentLimits={attachmentLimits}
+        uploadsEnabled={uploadsEnabled}
+        attachmentBlocked={attachmentBlocked}
+        mentionMembers={mentionMembers}
+        mentionsEnabled={mentionsEnabled}
+        otherTyping={otherTyping}
+        inputRef={inputRef}
+        onChangeDraft={(value, nextMentions) =>
+          updateComposerDraft({ body: value, mentions: nextMentions })
+        }
+        onClearReply={() => updateComposerDraft({ replyToId: "" })}
+        onTypingChange={(value) => {
+          if (!value) {
+            if (lastTyping.current > 0) {
+              lastTyping.current = 0;
+              sendTyping(conversation.id, false);
             }
-            aria-label="消息内容"
-          />
-          <div className="composer-tools">
-            {uploadsEnabled && (
-              <AttachmentPicker
-                onSelect={attachments.add}
-                disabled={
-                  attachments.files.length >=
-                  (data?.attachmentLimits || defaultAttachmentLimits)
-                    .maxFilesPerMessage
-                }
-                limit={
-                  (data?.attachmentLimits || defaultAttachmentLimits)
-                    .maxFileBytes
-                }
-              />
-            )}
-            {body.length > 7600 && (
-              <span className="character-count">{body.length}/8000</span>
-            )}
-            <button
-              className="send-button"
-              type="submit"
-              disabled={
-                (!body.trim() && !attachments.ready) || attachmentBlocked
-              }
-              aria-label="发送消息"
-              title="发送消息"
-            >
-              <SendHorizontal size={ICON.md} />
-            </button>
-          </div>
-        </form>
-        <div className="composer-footer">
-          <span>
-            {otherTyping.length
-              ? `${otherTyping.map((x) => x.displayName).join("、")} 正在输入…`
-              : ""}
-          </span>
-          <span>
-            <kbd>Enter</kbd> 发送 · <kbd>Shift + Enter</kbd> 换行
-          </span>
-        </div>
-      </div>
+            return;
+          }
+          if (Date.now() - lastTyping.current > 1500) {
+            sendTyping(conversation.id, true);
+            lastTyping.current = Date.now();
+          }
+        }}
+        onKeyDown={keyDown}
+        onSubmit={submit}
+      />
       {retracting && (
         <Modal
           title="撤回这条消息？"

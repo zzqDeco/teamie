@@ -1,8 +1,58 @@
-import { Fragment } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { Check, Copy } from "lucide-react";
 import katex from "katex";
 import "katex/dist/katex.min.css";
 import type { Mention } from "@teamie/api-client";
+import { ICON } from "./icons";
+
+function CodeBlock({
+  codeText,
+  lang,
+}: {
+  codeText: string;
+  lang: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timerRef.current), []);
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard?.writeText(codeText);
+      setCopied(true);
+      clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => setCopied(false), 1800);
+    } catch {
+      /* Clipboard write can fail in restricted contexts. */
+    }
+  }
+
+  return (
+    <div className="markdown-code-wrap">
+      <div className="markdown-code-header">
+        <span className="markdown-code-lang">{lang || "code"}</span>
+        <button
+          type="button"
+          className={`markdown-code-copy ${copied ? "copied" : ""}`}
+          onClick={() => void handleCopy()}
+          aria-label={copied ? "已复制代码" : "复制代码"}
+        >
+          {copied ? <Check size={ICON.xs} /> : <Copy size={ICON.xs} />}
+          <span>{copied ? "已复制" : "复制"}</span>
+        </button>
+      </div>
+      <pre className="markdown-code-block">
+        <code
+          className={lang ? `language-${lang}` : undefined}
+          data-language={lang || undefined}
+        >
+          {codeText}
+        </code>
+      </pre>
+    </div>
+  );
+}
 
 type ValidMention = {
   index: number;
@@ -1100,14 +1150,11 @@ function parseBlocks(
       }
       const codeText = restoreMentionsText(codeLines.join("\n"), ctx);
       blocks.push(
-        <pre key={ctx.nextKey()} className="markdown-code-block">
-          <code
-            className={fence.lang ? `language-${fence.lang}` : undefined}
-            data-language={fence.lang || undefined}
-          >
-            {codeText}
-          </code>
-        </pre>,
+        <CodeBlock
+          key={ctx.nextKey()}
+          codeText={codeText}
+          lang={fence.lang}
+        />,
       );
       continue;
     }
