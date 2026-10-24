@@ -1,6 +1,6 @@
 # IM API v1 — initial implementation contract
 
-This file coordinates the initial frontend, backend and deployment. JSON fields use camelCase, IDs are strings, timestamps are RFC3339 UTC. Responses are JSON objects (no success envelope). Errors use `{ "error": { "code": "forbidden", "message": "..." } }` with appropriate HTTP status. No Agent execution model appears in this API.
+This file coordinates the initial frontend, backend and deployment. The machine-readable IDL source of truth lives in [`contracts/im/http_identity.thrift`](../../contracts/im/http_identity.thrift), [`contracts/im/http_chat.thrift`](../../contracts/im/http_chat.thrift), [`contracts/im/ws_realtime.thrift`](../../contracts/im/ws_realtime.thrift), and [`contracts/im/model.thrift`](../../contracts/im/model.thrift). JSON fields use camelCase, IDs are strings, timestamps are RFC3339 UTC. Responses are JSON objects (no success envelope). Errors use `{ "error": { "code": "forbidden", "message": "..." } }` with appropriate HTTP status. No Agent execution model appears in this API.
 
 ## Identity and session
 

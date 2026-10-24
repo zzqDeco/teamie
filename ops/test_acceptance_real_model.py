@@ -32,9 +32,11 @@ class _MockTeamieState:
         self.attachments: dict[str, bytes] = {}
         self.agent_id = ""
         self.agent_name = ""
+        self.agent_deleted = False
         self.put_gateway_called = False
         self.sse_stream_called = False
         self.web_search_called = False
+        self.web_extract_called = False
 
     def gateway_resp(self) -> dict:
         configured = bool(self.base_url and self.model and self.has_api_key)
@@ -146,9 +148,20 @@ class _MockHandler(BaseHTTPRequestHandler):
             st.enabled = bool(body["enabled"])
             st.has_api_key = bool(body.get("apiKey")) or st.has_api_key
             st.context_window = int(body.get("contextWindowTokens", st.context_window))
-            st.web_search_enabled = bool(body.get("webSearchEnabled", False))
+            if "webSearchEnabled" in body:
+                st.web_search_enabled = bool(body["webSearchEnabled"])
             st.has_web_search_key = bool(body.get("webSearchApiKey")) or st.has_web_search_key
             self._send_json(200, st.gateway_resp())
+            return
+        self._send_json(404, {"error": {"code": "not_found"}})
+
+    def do_DELETE(self) -> None:
+        st = self.state
+        m_del_agent = re.match(r"^/api/v1/agents/([^/]+)$", self.path)
+        if m_del_agent:
+            st.agent_deleted = True
+            self.send_response(204)
+            self.end_headers()
             return
         self._send_json(404, {"error": {"code": "not_found"}})
 
@@ -200,6 +213,33 @@ class _MockHandler(BaseHTTPRequestHandler):
                             "score": 0.99,
                         }
                     ],
+                    "statusCode": 200,
+                },
+            )
+            return
+        if self.path == "/internal/v1/web/extract":
+            body = self._read_json(
+                {
+                    "ownerId",
+                    "agentId",
+                    "sessionId",
+                    "runId",
+                    "urls",
+                }
+            )
+            assert body.get("urls"), "Expected non-empty urls in /internal/v1/web/extract"
+            st.web_extract_called = True
+            self._send_json(
+                200,
+                {
+                    "ok": True,
+                    "results": [
+                        {
+                            "url": body["urls"][0],
+                            "content": "IANA-managed Reserved Domains: example.com, example.net, example.org",
+                        }
+                    ],
+                    "failedResults": [],
                     "statusCode": 200,
                 },
             )
@@ -414,6 +454,8 @@ class AcceptanceRealModelTest(unittest.TestCase):
         self.assertTrue(self.state.put_gateway_called)
         self.assertTrue(self.state.sse_stream_called)
         self.assertTrue(self.state.web_search_called)
+        self.assertTrue(self.state.web_extract_called)
+        self.assertTrue(self.state.agent_deleted)
 
     def test_acceptance_with_preconfigured_admin_gateway(self) -> None:
         env = {
@@ -431,6 +473,8 @@ class AcceptanceRealModelTest(unittest.TestCase):
         self.assertFalse(self.state.put_gateway_called)
         self.assertTrue(self.state.sse_stream_called)
         self.assertTrue(self.state.web_search_called)
+        self.assertTrue(self.state.web_extract_called)
+        self.assertTrue(self.state.agent_deleted)
 
 
 if __name__ == "__main__":

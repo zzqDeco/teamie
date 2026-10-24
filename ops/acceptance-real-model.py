@@ -291,6 +291,42 @@ class Client:
                 result.get("ok") is True,
                 f"Tavily internal web search check failed: {result.get('errorCode')}",
             )
+            results = result.get("results") or []
+            extract_url = (
+                results[0].get("url")
+                if results and results[0].get("url")
+                else "https://www.iana.org/help/example-domains"
+            )
+
+        extract_payload = json.dumps(
+            {
+                "ownerId": owner_id,
+                "agentId": str(uuid.uuid4()),
+                "sessionId": str(uuid.uuid4()),
+                "runId": f"{uuid.uuid4()}:{uuid.uuid4()}",
+                "urls": [extract_url],
+            }
+        ).encode("utf-8")
+        extract_req = urllib.request.Request(
+            self.base_for("/internal/v1/web/extract") + "/internal/v1/web/extract",
+            data=extract_payload,
+            method="POST",
+            headers=headers,
+        )
+        try:
+            extract_resp = self.opener.open(extract_req, timeout=30)
+        except urllib.error.HTTPError as err:
+            extract_resp = err
+        with extract_resp:
+            require(
+                extract_resp.status == 200,
+                f"POST /internal/v1/web/extract expected 200, got {extract_resp.status}",
+            )
+            extract_result = json.loads(extract_resp.read())
+            require(
+                extract_result.get("ok") is True,
+                f"Tavily internal web extract check failed: {extract_result.get('errorCode')}",
+            )
 
 
 def wait_until(
@@ -359,9 +395,9 @@ def main() -> int:
             "apiKey": provider_api_key,
             "model": provider_model,
             "contextWindowTokens": 32768,
-            "webSearchEnabled": bool(web_search_key),
         }
         if web_search_key:
+            gw_payload["webSearchEnabled"] = True
             gw_payload["webSearchApiKey"] = web_search_key
         gw_res = admin.call(
             "PUT", "/api/v1/admin/model-gateway", gw_payload, status=200
@@ -456,190 +492,200 @@ def main() -> int:
         status=201,
     )
     agent_id = agent_res["agent"]["id"]
-    require(
-        agent_id not in restricted_group.get("memberIds", []),
-        "Agent must not be a member of uninvited group conversation.",
-    )
-    wait_until(
-        "Agent IM workspace membership admission",
-        lambda: any(
-            m.get("userId") == agent_id
-            for m in admin.call(
-                "GET",
-                f"/api/v1/workspaces/{urllib.parse.quote(workspace_id)}/members",
-                status=200,
-            ).get("members", [])
-        ),
-        timeout=timeout,
-        poll_interval=poll_interval,
-    )
-
-    def post_mention(text: str) -> dict:
-        mention_prefix = f"@{agent_name} "
-        full_body = mention_prefix + text
-        return admin.call(
-            "POST",
-            f"/api/v1/conversations/{urllib.parse.quote(channel_id)}/messages",
-            {
-                "clientMessageId": str(uuid.uuid4()),
-                "body": full_body,
-                "mentions": [
-                    {
-                        "userId": agent_id,
-                        "start": 0,
-                        "end": len(f"@{agent_name}"),
-                    }
-                ],
-            },
-            status=(200, 201),
-        )["message"]
-
-    def latest_agent_messages(after_seq: int) -> list[dict]:
-        page = admin.call(
-            "GET",
-            f"/api/v1/conversations/{urllib.parse.quote(channel_id)}/messages",
-            status=200,
-        )
-        return [
-            m
-            for m in page.get("messages", [])
-            if m.get("senderId") == agent_id and int(m.get("seq", 0)) > after_seq
-        ]
-
-    print(
-        "[3/5] Scenario 1: #general @Agent mention, replyToId, no raw thought leak, and cross-conversation ACL..."
-    )
-    msg1 = post_mention(
-        f"Think internally (do not include your internal reasoning in the IM message), "
-        f"then call im_send_message in this #general channel with replyToId set to this message's ID "
-        f"and exact body 'ACK-{run_suffix}'. Also verify you cannot access conversation {restricted_id}."
-    )
-    reply1 = wait_until(
-        "Agent #general channel reply",
-        lambda: next(
-            (
-                m
-                for m in latest_agent_messages(int(msg1["seq"]))
-                if f"ACK-{run_suffix}" in m.get("body", "")
-            ),
-            None,
-        ),
-        timeout=timeout,
-        poll_interval=poll_interval,
-    )
-    require(bool(reply1.get("id")), "Agent reply message ID must be present.")
-    require(
-        reply1.get("replyToId") == msg1["id"],
-        f"Expected Agent replyToId={msg1['id']!r}, got {reply1.get('replyToId')!r}",
-    )
-    turn1_msgs = latest_agent_messages(int(msg1["seq"]))
-    require(
-        all(f"ACK-{run_suffix}" in m.get("body", "") for m in turn1_msgs),
-        "Ordinary assistant thought text must never automatically leak as an un-tooled IM message.",
-    )
-    restricted_msgs = admin.call(
-        "GET",
-        f"/api/v1/conversations/{urllib.parse.quote(restricted_id)}/messages",
-        status=200,
-    ).get("messages", [])
-    require(
-        not any(m.get("senderId") == agent_id for m in restricted_msgs),
-        "Agent must not bypass ACLs to post in restricted group conversation.",
-    )
-
-    print(
-        "[4/5] Scenario 2: Sandbox isolated execution, file attachment export, and SHA-256 verification..."
-    )
-    expected_content = f"sandbox-ok-{run_suffix}:isolated\n".encode("utf-8")
-    expected_sha256 = hashlib.sha256(expected_content).hexdigest()
-    msg2 = post_mention(
-        f"In your Sandbox workspace, use workspace_execute to run a script that verifies no GATEWAY_RUNTIME_TOKEN "
-        f"or OPENAI_API_KEY environment variables exist and external network is disabled, then writes exact bytes "
-        f"'sandbox-ok-{run_suffix}:isolated\\n' to report-{run_suffix}.txt, uploads it via im_upload_file, and sends "
-        f"it to this conversation as an attachment via im_send_message (attachmentIds)."
-    )
-    reply2 = wait_until(
-        "Agent Sandbox attachment export",
-        lambda: next(
-            (
-                m
-                for m in latest_agent_messages(int(msg2["seq"]))
-                if m.get("attachments")
-            ),
-            None,
-        ),
-        timeout=timeout,
-        poll_interval=poll_interval,
-    )
-    att = reply2["attachments"][0]
-    downloaded, dl_headers = admin.get_bytes(
-        f"/api/v1/conversations/{urllib.parse.quote(channel_id)}/attachments/{urllib.parse.quote(att['id'])}/content",
-        status=200,
-    )
-    require(
-        f"sandbox-ok-{run_suffix}".encode("utf-8") in downloaded,
-        "Exported attachment content did not match expected Sandbox file output.",
-    )
-    actual_sha256 = hashlib.sha256(downloaded).hexdigest()
-    require(len(actual_sha256) == 64, "Invalid SHA-256 digest length.")
-    if att.get("sha256"):
+    try:
         require(
-            att["sha256"] == actual_sha256,
-            f"Attachment metadata sha256 {att['sha256']} != downloaded sha256 {actual_sha256}",
-        )
-    header_sha256 = dl_headers.get("x-attachment-sha256", "")
-    if header_sha256:
-        require(
-            header_sha256 == actual_sha256,
-            f"X-Attachment-SHA256 header {header_sha256} != downloaded sha256 {actual_sha256}",
-        )
-    if downloaded == expected_content:
-        require(
-            actual_sha256 == expected_sha256,
-            f"Attachment SHA-256 {actual_sha256} != expected {expected_sha256}",
-        )
-
-    if web_search_active:
-        print(
-            "[4b/5] Scenario 3: Verifying live Tavily web_search / web_fetch tool execution..."
-        )
-        msg_ws = post_mention(
-            f"Use web_search and web_fetch to look up 'IANA example domain' and reply with WEB-{run_suffix} and the cited domain."
+            agent_id not in restricted_group.get("memberIds", []),
+            "Agent must not be a member of uninvited group conversation.",
         )
         wait_until(
-            "Agent web search reply",
+            "Agent IM workspace membership admission",
+            lambda: any(
+                m.get("userId") == agent_id
+                for m in admin.call(
+                    "GET",
+                    f"/api/v1/workspaces/{urllib.parse.quote(workspace_id)}/members",
+                    status=200,
+                ).get("members", [])
+            ),
+            timeout=timeout,
+            poll_interval=poll_interval,
+        )
+
+        def post_mention(text: str) -> dict:
+            mention_prefix = f"@{agent_name} "
+            full_body = mention_prefix + text
+            return admin.call(
+                "POST",
+                f"/api/v1/conversations/{urllib.parse.quote(channel_id)}/messages",
+                {
+                    "clientMessageId": str(uuid.uuid4()),
+                    "body": full_body,
+                    "mentions": [
+                        {
+                            "userId": agent_id,
+                            "start": 0,
+                            "end": len(f"@{agent_name}"),
+                        }
+                    ],
+                },
+                status=(200, 201),
+            )["message"]
+
+        def latest_agent_messages(after_seq: int) -> list[dict]:
+            page = admin.call(
+                "GET",
+                f"/api/v1/conversations/{urllib.parse.quote(channel_id)}/messages",
+                status=200,
+            )
+            return [
+                m
+                for m in page.get("messages", [])
+                if m.get("senderId") == agent_id and int(m.get("seq", 0)) > after_seq
+            ]
+
+        print(
+            "[3/5] Scenario 1: #general @Agent mention, replyToId, no raw thought leak, and cross-conversation ACL..."
+        )
+        msg1 = post_mention(
+            f"Think internally (do not include your internal reasoning in the IM message), "
+            f"then call im_send_message in this #general channel with replyToId set to this message's ID "
+            f"and exact body 'ACK-{run_suffix}'. Also verify you cannot access conversation {restricted_id}."
+        )
+        reply1 = wait_until(
+            "Agent #general channel reply",
             lambda: next(
                 (
                     m
-                    for m in latest_agent_messages(int(msg_ws["seq"]))
-                    if f"WEB-{run_suffix}" in m.get("body", "")
+                    for m in latest_agent_messages(int(msg1["seq"]))
+                    if f"ACK-{run_suffix}" in m.get("body", "")
                 ),
                 None,
             ),
             timeout=timeout,
             poll_interval=poll_interval,
         )
+        require(bool(reply1.get("id")), "Agent reply message ID must be present.")
+        require(
+            reply1.get("replyToId") == msg1["id"],
+            f"Expected Agent replyToId={msg1['id']!r}, got {reply1.get('replyToId')!r}",
+        )
+        turn1_msgs = latest_agent_messages(int(msg1["seq"]))
+        require(
+            all(f"ACK-{run_suffix}" in m.get("body", "") for m in turn1_msgs),
+            "Ordinary assistant thought text must never automatically leak as an un-tooled IM message.",
+        )
+        restricted_msgs = admin.call(
+            "GET",
+            f"/api/v1/conversations/{urllib.parse.quote(restricted_id)}/messages",
+            status=200,
+        ).get("messages", [])
+        require(
+            not any(m.get("senderId") == agent_id for m in restricted_msgs),
+            "Agent must not bypass ACLs to post in restricted group conversation.",
+        )
 
-    print(
-        "[5/5] Scenario 4: Verifying schedule_create (TEAMIE_SCHEDULE_WAKEUP) self-wakeup..."
-    )
-    msg3 = post_mention(
-        f"Create a one-shot schedule 5 seconds from now using schedule_create that wakes you up "
-        f"(TEAMIE_SCHEDULE_WAKEUP) to send a follow-up message containing WAKE-{run_suffix} in this conversation."
-    )
-    wait_until(
-        "Agent scheduled wakeup message",
-        lambda: next(
-            (
-                m
-                for m in latest_agent_messages(int(msg3["seq"]))
-                if f"WAKE-{run_suffix}" in m.get("body", "")
+        print(
+            "[4/5] Scenario 2: Sandbox isolated execution, file attachment export, and SHA-256 verification..."
+        )
+        expected_content = f"sandbox-ok-{run_suffix}:isolated\n".encode("utf-8")
+        expected_sha256 = hashlib.sha256(expected_content).hexdigest()
+        msg2 = post_mention(
+            f"In your Sandbox workspace, use workspace_execute to run a script that verifies no GATEWAY_RUNTIME_TOKEN "
+            f"or OPENAI_API_KEY environment variables exist and external network is disabled, then writes exact bytes "
+            f"'sandbox-ok-{run_suffix}:isolated\\n' to report-{run_suffix}.txt, uploads it via im_upload_file, and sends "
+            f"it to this conversation as an attachment via im_send_message (attachmentIds)."
+        )
+        reply2 = wait_until(
+            "Agent Sandbox attachment export",
+            lambda: next(
+                (
+                    m
+                    for m in latest_agent_messages(int(msg2["seq"]))
+                    if m.get("attachments")
+                ),
+                None,
             ),
-            None,
-        ),
-        timeout=max(timeout, 90.0) if timeout >= 15.0 else timeout,
-        poll_interval=poll_interval,
-    )
+            timeout=timeout,
+            poll_interval=poll_interval,
+        )
+        att = reply2["attachments"][0]
+        downloaded, dl_headers = admin.get_bytes(
+            f"/api/v1/conversations/{urllib.parse.quote(channel_id)}/attachments/{urllib.parse.quote(att['id'])}/content",
+            status=200,
+        )
+        require(
+            f"sandbox-ok-{run_suffix}".encode("utf-8") in downloaded,
+            "Exported attachment content did not match expected Sandbox file output.",
+        )
+        actual_sha256 = hashlib.sha256(downloaded).hexdigest()
+        require(len(actual_sha256) == 64, "Invalid SHA-256 digest length.")
+        if att.get("sha256"):
+            require(
+                att["sha256"] == actual_sha256,
+                f"Attachment metadata sha256 {att['sha256']} != downloaded sha256 {actual_sha256}",
+            )
+        header_sha256 = dl_headers.get("x-attachment-sha256", "")
+        if header_sha256:
+            require(
+                header_sha256 == actual_sha256,
+                f"X-Attachment-SHA256 header {header_sha256} != downloaded sha256 {actual_sha256}",
+            )
+        if downloaded == expected_content:
+            require(
+                actual_sha256 == expected_sha256,
+                f"Attachment SHA-256 {actual_sha256} != expected {expected_sha256}",
+            )
+
+        if web_search_active:
+            print(
+                "[4b/5] Scenario 3: Verifying live Tavily web_search / web_fetch tool execution..."
+            )
+            msg_ws = post_mention(
+                f"Use web_search and web_fetch to look up 'IANA example domain' and reply with WEB-{run_suffix} and the cited domain."
+            )
+            wait_until(
+                "Agent web search reply",
+                lambda: next(
+                    (
+                        m
+                        for m in latest_agent_messages(int(msg_ws["seq"]))
+                        if f"WEB-{run_suffix}" in m.get("body", "")
+                    ),
+                    None,
+                ),
+                timeout=timeout,
+                poll_interval=poll_interval,
+            )
+
+        print(
+            "[5/5] Scenario 4: Verifying schedule_create (TEAMIE_SCHEDULE_WAKEUP) self-wakeup..."
+        )
+        msg3 = post_mention(
+            f"Create a one-shot schedule 5 seconds from now using schedule_create that wakes you up "
+            f"(TEAMIE_SCHEDULE_WAKEUP) to send a follow-up message containing WAKE-{run_suffix} in this conversation."
+        )
+        wait_until(
+            "Agent scheduled wakeup message",
+            lambda: next(
+                (
+                    m
+                    for m in latest_agent_messages(int(msg3["seq"]))
+                    if f"WAKE-{run_suffix}" in m.get("body", "")
+                ),
+                None,
+            ),
+            timeout=max(timeout, 90.0) if timeout >= 15.0 else timeout,
+            poll_interval=poll_interval,
+        )
+    finally:
+        try:
+            admin.call(
+                "DELETE",
+                f"/api/v1/agents/{urllib.parse.quote(agent_id)}",
+                status=(200, 204, 404),
+            )
+        except Exception:
+            pass
 
     print("Live model provider acceptance passed all checks.")
     return 0
