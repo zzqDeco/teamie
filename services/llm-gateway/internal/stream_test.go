@@ -10,6 +10,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -281,6 +283,42 @@ func TestHertzNativeSSEWriterStreamChat(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "event: chunk") || !strings.Contains(string(body), "event: done") {
 		t.Fatalf("expected Hertz sse.NewWriter events, got %s", string(body))
+	}
+	if !strings.HasPrefix(res.Header.Get("Content-Type"), "text/event-stream") {
+		t.Fatalf("expected text/event-stream Content-Type, got %q", res.Header.Get("Content-Type"))
+	}
+	if res.Header.Get("X-Teamie-Model-Config-ID") == "" {
+		t.Fatalf("expected X-Teamie-Model-Config-ID header, got empty (headers=%v)", res.Header)
+	}
+	scriptPath, err := filepath.Abs("../../../ops/acceptance-real-model.py")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := s.Store.Load(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	py := exec.Command(
+		"python3",
+		"-c",
+		`import importlib.util, sys
+spec = importlib.util.spec_from_file_location("m", sys.argv[1])
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+cid = m.counting_config_id(sys.argv[3], sys.argv[4])
+assert cid == sys.argv[5], f"{cid} != {sys.argv[5]}"
+c = m.Client({"origin": sys.argv[2], "identity": sys.argv[2], "chat": sys.argv[2], "control": sys.argv[2], "gateway": sys.argv[2], "internal_gateway": sys.argv[2], "runtime_token": sys.argv[6]})
+c.verify_internal_sse_stream(sys.argv[6], "owner-1", cid)
+`,
+		scriptPath,
+		"http://"+listener.Addr().String(),
+		cfg.BaseURL,
+		cfg.Model,
+		res.Header.Get("X-Teamie-Model-Config-ID"),
+		testToken,
+	)
+	if out, err := py.CombinedOutput(); err != nil {
+		t.Fatalf("acceptance-real-model.py SSE client against real Hertz gateway failed: %v\n%s", err, string(out))
 	}
 	_ = app.RequestContext{}
 }

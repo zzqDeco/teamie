@@ -19,17 +19,13 @@ SPEC.loader.exec_module(MOD)
 
 class _MockTeamieState:
     def __init__(self) -> None:
-        self.gateway_settings = {
-            "enabled": True,
-            "baseUrl": "https://api.example.invalid/v1",
-            "model": "gpt-live-test",
-            "timeoutSeconds": 60,
-            "maxTokens": 1024,
-            "hasApiKey": True,
-            "configId": "cfg-live-001",
-            "webSearchEnabled": True,
-            "hasWebSearchKey": True,
-        }
+        self.base_url = "https://1.1.1.1/v1"
+        self.model = "gpt-live-test"
+        self.enabled = True
+        self.has_api_key = True
+        self.context_window = 32768
+        self.web_search_enabled = True
+        self.has_web_search_key = True
         self.workspaces: list[dict] = []
         self.conversations: dict[str, dict] = {}
         self.messages: dict[str, list[dict]] = {}
@@ -38,7 +34,29 @@ class _MockTeamieState:
         self.agent_name = ""
         self.put_gateway_called = False
         self.sse_stream_called = False
-        self.web_search_test_called = False
+        self.web_search_called = False
+
+    def gateway_resp(self) -> dict:
+        configured = bool(self.base_url and self.model and self.has_api_key)
+        ws_configured = bool(self.has_web_search_key)
+        return {
+            "config": {
+                "baseUrl": self.base_url,
+                "model": self.model,
+                "contextWindowTokens": self.context_window,
+                "hasApiKey": self.has_api_key,
+                "enabled": self.enabled,
+                "configured": configured,
+                "webSearch": {
+                    "provider": "tavily",
+                    "enabled": self.web_search_enabled,
+                    "hasApiKey": self.has_web_search_key,
+                    "configured": ws_configured,
+                },
+                "updatedAt": "2026-10-24T06:00:00Z",
+            },
+            "status": "ready" if (configured and self.enabled) else ("disabled" if configured else "unconfigured"),
+        }
 
 
 class _MockHandler(BaseHTTPRequestHandler):
@@ -55,16 +73,21 @@ class _MockHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
-    def _read_json(self) -> dict:
+    def _read_json(self, allowed_keys: set[str] | None = None) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
         if length <= 0:
             return {}
-        return json.loads(self.rfile.read(length).decode("utf-8"))
+        data = json.loads(self.rfile.read(length).decode("utf-8"))
+        if allowed_keys is not None:
+            unknown = set(data.keys()) - allowed_keys
+            if unknown:
+                raise ValueError(f"DisallowUnknownFields rejected keys: {sorted(unknown)}")
+        return data
 
     def do_GET(self) -> None:
         st = self.state
         if self.path == "/api/v1/admin/model-gateway":
-            self._send_json(200, {"settings": st.gateway_settings})
+            self._send_json(200, st.gateway_resp())
             return
         if self.path == "/api/v1/bootstrap":
             self._send_json(
@@ -75,6 +98,13 @@ class _MockHandler(BaseHTTPRequestHandler):
                 },
             )
             return
+        m_members = re.match(r"^/api/v1/workspaces/([^/]+)/members$", self.path)
+        if m_members:
+            members = [{"userId": "u-admin", "displayName": "Admin", "role": "owner", "kind": "human"}]
+            if st.agent_id:
+                members.append({"userId": st.agent_id, "displayName": st.agent_name, "role": "member", "kind": "agent"})
+            self._send_json(200, {"members": members})
+            return
         m_msg = re.match(r"^/api/v1/conversations/([^/]+)/messages$", self.path)
         if m_msg:
             cid = m_msg.group(1)
@@ -84,8 +114,10 @@ class _MockHandler(BaseHTTPRequestHandler):
         if m_att:
             att_id = m_att.group(2)
             raw = st.attachments.get(att_id, b"")
+            sha = hashlib.sha256(raw).hexdigest()
             self.send_response(200)
-            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("X-Attachment-SHA256", sha)
             self.send_header("Content-Length", str(len(raw)))
             self.end_headers()
             self.wfile.write(raw)
@@ -95,26 +127,35 @@ class _MockHandler(BaseHTTPRequestHandler):
     def do_PUT(self) -> None:
         st = self.state
         if self.path == "/api/v1/admin/model-gateway":
-            body = self._read_json()
-            st.put_gateway_called = True
-            st.gateway_settings.update(
+            body = self._read_json(
                 {
-                    "enabled": bool(body.get("enabled", True)),
-                    "baseUrl": body.get("baseUrl", st.gateway_settings["baseUrl"]),
-                    "model": body.get("model", st.gateway_settings["model"]),
-                    "hasApiKey": True,
-                    "webSearchEnabled": bool(body.get("webSearchEnabled", False)),
-                    "hasWebSearchKey": bool(body.get("webSearchApiKey")),
+                    "baseUrl",
+                    "model",
+                    "apiKey",
+                    "enabled",
+                    "clearApiKey",
+                    "contextWindowTokens",
+                    "webSearchEnabled",
+                    "webSearchApiKey",
+                    "clearWebSearchApiKey",
                 }
             )
-            self._send_json(200, {"settings": st.gateway_settings})
+            st.put_gateway_called = True
+            st.base_url = body["baseUrl"]
+            st.model = body["model"]
+            st.enabled = bool(body["enabled"])
+            st.has_api_key = bool(body.get("apiKey")) or st.has_api_key
+            st.context_window = int(body.get("contextWindowTokens", st.context_window))
+            st.web_search_enabled = bool(body.get("webSearchEnabled", False))
+            st.has_web_search_key = bool(body.get("webSearchApiKey")) or st.has_web_search_key
+            self._send_json(200, st.gateway_resp())
             return
         self._send_json(404, {"error": {"code": "not_found"}})
 
     def do_POST(self) -> None:
         st = self.state
-        body = self._read_json()
         if self.path == "/api/v1/auth/login":
+            body = self._read_json({"email", "password"})
             self._send_json(
                 200,
                 {
@@ -129,43 +170,88 @@ class _MockHandler(BaseHTTPRequestHandler):
             )
             return
         if self.path == "/api/v1/admin/model-gateway/test":
-            self._send_json(200, {"ok": True})
+            self._read_json(set())
+            self._send_json(200, {"ok": True, "model": st.model, "latencyMs": 12})
             return
-        if self.path == "/api/v1/admin/model-gateway/web-search-test":
-            st.web_search_test_called = True
-            self._send_json(200, {"ok": True})
+        if self.path == "/internal/v1/web/search":
+            body = self._read_json(
+                {
+                    "ownerId",
+                    "agentId",
+                    "sessionId",
+                    "runId",
+                    "query",
+                    "maxResults",
+                    "timeRange",
+                    "includeDomains",
+                    "excludeDomains",
+                }
+            )
+            st.web_search_called = True
+            self._send_json(
+                200,
+                {
+                    "ok": True,
+                    "results": [
+                        {
+                            "title": "Example Domain",
+                            "url": "https://www.iana.org/help/example-domains",
+                            "snippet": "IANA example domains",
+                            "score": 0.99,
+                        }
+                    ],
+                    "statusCode": 200,
+                },
+            )
             return
         if self.path == "/internal/v1/chat/stream":
+            body = self._read_json(
+                {
+                    "ownerId",
+                    "agentId",
+                    "sessionId",
+                    "runId",
+                    "requestJson",
+                    "messageLimit",
+                    "expectedModelConfigId",
+                }
+            )
+            inner = json.loads(body["requestJson"])
+            assert inner.get("protocol") == "teamie-agentic-chat-v1"
             st.sse_stream_called = True
+            cfg_id = MOD.counting_config_id(st.base_url, st.model)
             sse_payload = (
-                'data: {"type":"chunk","delta":{"role":"assistant","content":"OK"}}\n\n'
-                'data: {"type":"done","usage":{"promptTokens":5,"completionTokens":2,"totalTokens":7}}\n\n'
+                'event: chunk\ndata: {"type":"chunk","responseJson":"{\\"role\\":\\"assistant\\"}"}\n\n'
+                f'event: done\ndata: {{"type":"done","modelConfigId":"{cfg_id}"}}\n\n'
             ).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-            self.send_header("X-Teamie-Model-Config-ID", st.gateway_settings["configId"])
+            self.send_header("X-Teamie-Model-Config-ID", cfg_id)
             self.send_header("Content-Length", str(len(sse_payload)))
             self.end_headers()
             self.wfile.write(sse_payload)
             return
         if self.path == "/api/v1/workspaces":
+            body = self._read_json({"name"})
             ws_id = "ws-accept-1"
             ws = {"id": ws_id, "name": body["name"]}
             st.workspaces.append(ws)
             ch_id = "ch-general-1"
-            st.conversations[ch_id] = {
+            conv = {
                 "id": ch_id,
                 "workspaceId": ws_id,
                 "type": "channel",
                 "name": "general",
                 "memberIds": ["u-admin"],
             }
+            st.conversations[ch_id] = conv
             st.messages[ch_id] = []
-            self._send_json(201, {"workspace": ws})
+            self._send_json(201, {"workspace": ws, "conversation": conv})
             return
         m_ws_conv = re.match(r"^/api/v1/workspaces/([^/]+)/conversations$", self.path)
         if m_ws_conv:
             ws_id = m_ws_conv.group(1)
+            body = self._read_json({"type", "name", "memberIds"})
             cid = f"grp-{len(st.conversations) + 1}"
             conv = {
                 "id": cid,
@@ -179,15 +265,23 @@ class _MockHandler(BaseHTTPRequestHandler):
             self._send_json(201, {"conversation": conv})
             return
         if self.path == "/api/v1/agents":
+            body = self._read_json({"name", "description", "workspaceIds", "enabled"})
             st.agent_id = "ag-live-1"
-            st.agent_name = body["displayName"]
+            st.agent_name = body["name"]
             self._send_json(
                 201,
                 {
                     "agent": {
                         "id": st.agent_id,
-                        "displayName": st.agent_name,
-                        "enabled": True,
+                        "principalId": st.agent_id,
+                        "ownerId": "u-admin",
+                        "ownerName": "Admin",
+                        "name": st.agent_name,
+                        "description": body.get("description", ""),
+                        "workspaceIds": body.get("workspaceIds", []),
+                        "enabled": bool(body.get("enabled", True)),
+                        "createdAt": "2026-10-24T06:00:00Z",
+                        "updatedAt": "2026-10-24T06:00:00Z",
                     }
                 },
             )
@@ -195,6 +289,7 @@ class _MockHandler(BaseHTTPRequestHandler):
         m_post_msg = re.match(r"^/api/v1/conversations/([^/]+)/messages$", self.path)
         if m_post_msg:
             cid = m_post_msg.group(1)
+            body = self._read_json({"clientMessageId", "body", "replyToId", "attachmentIds", "mentions"})
             msgs = st.messages.setdefault(cid, [])
             user_seq = len(msgs) + 1
             user_msg = {
@@ -240,7 +335,9 @@ class _MockHandler(BaseHTTPRequestHandler):
                         "attachments": [
                             {
                                 "id": att_id,
-                                "name": f"report-{suffix}.txt",
+                                "filename": f"report-{suffix}.txt",
+                                "mediaType": "text/plain",
+                                "sizeBytes": len(content),
                                 "sha256": hashlib.sha256(content).hexdigest(),
                             }
                         ],
@@ -303,11 +400,11 @@ class AcceptanceRealModelTest(unittest.TestCase):
             "TEAMIE_ACCEPTANCE_URL": self.base_url,
             "TEAMIE_ADMIN_EMAIL": "admin@example.com",
             "TEAMIE_ADMIN_PASSWORD": "secret-password",
-            "TEAMIE_REAL_PROVIDER_BASE_URL": "https://api.example.invalid/v1",
+            "TEAMIE_REAL_PROVIDER_BASE_URL": "https://1.1.1.1/v1",
             "TEAMIE_REAL_PROVIDER_API_KEY": "sk-test-123",
             "TEAMIE_REAL_PROVIDER_MODEL": "gpt-4o-mini",
             "TEAMIE_REAL_WEB_SEARCH_API_KEY": "tvly-test-123",
-            "GATEWAY_RUNTIME_TOKEN": "rt-token-123",
+            "GATEWAY_RUNTIME_TOKEN": "rt-token-123456789012345678901234",
             "TEAMIE_REAL_MODEL_TIMEOUT": "5",
             "TEAMIE_REAL_MODEL_POLL_INTERVAL": "0.05",
         }
@@ -316,7 +413,7 @@ class AcceptanceRealModelTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertTrue(self.state.put_gateway_called)
         self.assertTrue(self.state.sse_stream_called)
-        self.assertTrue(self.state.web_search_test_called)
+        self.assertTrue(self.state.web_search_called)
 
     def test_acceptance_with_preconfigured_admin_gateway(self) -> None:
         env = {
@@ -324,6 +421,7 @@ class AcceptanceRealModelTest(unittest.TestCase):
             "TEAMIE_ACCEPTANCE_URL": self.base_url,
             "TEAMIE_ADMIN_EMAIL": "admin@example.com",
             "TEAMIE_ADMIN_PASSWORD": "secret-password",
+            "GATEWAY_RUNTIME_TOKEN": "rt-token-123456789012345678901234",
             "TEAMIE_REAL_MODEL_TIMEOUT": "5",
             "TEAMIE_REAL_MODEL_POLL_INTERVAL": "0.05",
         }
@@ -331,7 +429,8 @@ class AcceptanceRealModelTest(unittest.TestCase):
             rc = MOD.main()
         self.assertEqual(rc, 0)
         self.assertFalse(self.state.put_gateway_called)
-        self.assertTrue(self.state.web_search_test_called)
+        self.assertTrue(self.state.sse_stream_called)
+        self.assertTrue(self.state.web_search_called)
 
 
 if __name__ == "__main__":

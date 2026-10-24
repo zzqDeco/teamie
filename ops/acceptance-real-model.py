@@ -30,6 +30,7 @@ import hashlib
 import http.cookiejar
 import json
 import os
+import re
 import secrets
 import sys
 import time
@@ -37,6 +38,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+
+
+TRANSPORT_VERSION = "teamie-agentic-chat-v1"
 
 
 def get_env_config() -> dict[str, str]:
@@ -60,6 +64,23 @@ def require(condition: bool, message: str) -> None:
         raise AssertionError(message)
 
 
+def counting_config_id(base_url: str, model_name: str) -> str:
+    base = base_url.strip().rstrip("/")
+    model = model_name.strip()
+    if not base or not model:
+        return ""
+    payload = json.dumps(
+        {
+            "version": TRANSPORT_VERSION,
+            "baseUrl": base,
+            "model": model,
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    digest = hashlib.sha256(payload).digest()
+    return "modelcfg:v1:" + digest[:16].hex()
+
+
 class Client:
     def __init__(self, urls: dict[str, str] | None = None) -> None:
         self.urls = urls or get_env_config()
@@ -77,7 +98,9 @@ class Client:
             return self.urls["gateway"]
         if path.startswith("/internal/v1/"):
             return self.urls["internal_gateway"] or self.urls["gateway"]
-        if path.startswith("/api/v1/agents") or "/agents" in path:
+        if path.startswith("/api/v1/agents") or re.match(
+            r"^/api/v1/workspaces/[^/]+/agents(?:[/?]|$)", path
+        ):
             return self.urls["control"]
         return self.urls["chat"]
 
@@ -123,7 +146,7 @@ class Client:
             )
             return result
 
-    def get_bytes(self, path: str, status: int = 200) -> bytes:
+    def get_bytes(self, path: str, status: int = 200) -> tuple[bytes, dict[str, str]]:
         req = urllib.request.Request(
             self.base_for(path) + path,
             method="GET",
@@ -138,22 +161,51 @@ class Client:
                 resp.status == status,
                 f"GET {path} expected {status}, got {resp.status}",
             )
-            return resp.read()
+            hdrs = {k.lower(): v for k, v in resp.headers.items()}
+            return resp.read(), hdrs
 
     def verify_internal_sse_stream(
-        self, runtime_token: str, expected_config_id: str = ""
+        self,
+        runtime_token: str,
+        owner_id: str,
+        expected_config_id: str = "",
     ) -> None:
         headers = {
             "Accept": "text/event-stream",
             "Content-Type": "application/json",
             "Authorization": f"Bearer {runtime_token}",
         }
+        if expected_config_id:
+            headers["X-Teamie-Model-Config-ID"] = expected_config_id
+        inner_request = json.dumps(
+            {
+                "protocol": TRANSPORT_VERSION,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content_blocks": [
+                            {
+                                "type": "user_input_text",
+                                "user_input_text": {"text": "Reply with OK."},
+                            }
+                        ],
+                    }
+                ],
+                "options": {
+                    "MaxTokens": 8,
+                    "AgenticToolChoice": {"Type": "forbidden"},
+                },
+                "stream": True,
+            }
+        )
         payload = json.dumps(
             {
+                "ownerId": owner_id,
                 "agentId": str(uuid.uuid4()),
-                "runId": str(uuid.uuid4()),
-                "step": 1,
-                "messages": [{"role": "user", "content": "Reply with OK."}],
+                "sessionId": str(uuid.uuid4()),
+                "runId": f"{uuid.uuid4()}:{uuid.uuid4()}",
+                "requestJson": inner_request,
+                "messageLimit": 128,
             }
         ).encode("utf-8")
         req = urllib.request.Request(
@@ -199,8 +251,51 @@ class Client:
                 "Expected terminal SSE frame with type='done'.",
             )
 
+    def verify_internal_web_search(
+        self,
+        runtime_token: str,
+        owner_id: str,
+    ) -> None:
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {runtime_token}",
+        }
+        payload = json.dumps(
+            {
+                "ownerId": owner_id,
+                "agentId": str(uuid.uuid4()),
+                "sessionId": str(uuid.uuid4()),
+                "runId": f"{uuid.uuid4()}:{uuid.uuid4()}",
+                "query": "IANA example domain",
+                "maxResults": 3,
+            }
+        ).encode("utf-8")
+        req = urllib.request.Request(
+            self.base_for("/internal/v1/web/search") + "/internal/v1/web/search",
+            data=payload,
+            method="POST",
+            headers=headers,
+        )
+        try:
+            resp = self.opener.open(req, timeout=30)
+        except urllib.error.HTTPError as err:
+            resp = err
+        with resp:
+            require(
+                resp.status == 200,
+                f"POST /internal/v1/web/search expected 200, got {resp.status}",
+            )
+            result = json.loads(resp.read())
+            require(
+                result.get("ok") is True,
+                f"Tavily internal web search check failed: {result.get('errorCode')}",
+            )
 
-def wait_until(description: str, check, timeout: float = 90.0, poll_interval: float = 1.0):
+
+def wait_until(
+    description: str, check, timeout: float = 90.0, poll_interval: float = 1.0
+):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         value = check()
@@ -220,7 +315,9 @@ def main() -> int:
         180.0,
         max(1.0, float(os.environ.get("TEAMIE_REAL_MODEL_TIMEOUT", "90"))),
     )
-    poll_interval = max(0.05, float(os.environ.get("TEAMIE_REAL_MODEL_POLL_INTERVAL", "1.0")))
+    poll_interval = max(
+        0.05, float(os.environ.get("TEAMIE_REAL_MODEL_POLL_INTERVAL", "1.0"))
+    )
 
     provider_base_url = os.environ.get("TEAMIE_REAL_PROVIDER_BASE_URL", "").strip()
     provider_api_key = os.environ.get("TEAMIE_REAL_PROVIDER_API_KEY", "").strip()
@@ -249,53 +346,69 @@ def main() -> int:
     )
 
     run_suffix = secrets.token_hex(4)
-    print(f"[1/5] Verifying model gateway configuration and SSE contract (run={run_suffix})...")
-    has_env_provider = bool(provider_base_url and provider_api_key and provider_model)
+    print(
+        f"[1/5] Verifying model gateway configuration and SSE contract (run={run_suffix})..."
+    )
+    has_env_provider = bool(
+        provider_base_url and provider_api_key and provider_model
+    )
     if has_env_provider:
         gw_payload: dict = {
             "enabled": True,
             "baseUrl": provider_base_url,
             "apiKey": provider_api_key,
             "model": provider_model,
-            "timeoutSeconds": 60,
-            "maxTokens": 1024,
+            "contextWindowTokens": 32768,
             "webSearchEnabled": bool(web_search_key),
         }
         if web_search_key:
             gw_payload["webSearchApiKey"] = web_search_key
-        gw_res = admin.call("PUT", "/api/v1/admin/model-gateway", gw_payload, status=200)
+        gw_res = admin.call(
+            "PUT", "/api/v1/admin/model-gateway", gw_payload, status=200
+        )
     else:
         gw_res = admin.call("GET", "/api/v1/admin/model-gateway", status=200)
 
-    settings = gw_res.get("settings", {})
+    config = gw_res.get("config", {})
     require(
-        settings.get("enabled") is True and settings.get("hasApiKey") is True,
-        "Model gateway must be enabled with a stored API key (either via TEAMIE_REAL_PROVIDER_* env vars or pre-configured at /app/admin/gateway).",
+        gw_res.get("status") == "ready"
+        and config.get("enabled") is True
+        and config.get("hasApiKey") is True
+        and config.get("configured") is True,
+        "Model gateway must be enabled and ready with a stored API key (either via TEAMIE_REAL_PROVIDER_* env vars or pre-configured at /app/admin/gateway).",
     )
-    config_id = settings.get("configId", "")
+    expected_config_id = counting_config_id(
+        config.get("baseUrl", ""), config.get("model", "")
+    )
+    web_search_cfg = config.get("webSearch") or {}
     web_search_active = bool(web_search_key) or bool(
-        settings.get("webSearchEnabled") and settings.get("hasWebSearchKey")
+        web_search_cfg.get("enabled")
+        and web_search_cfg.get("hasApiKey")
+        and web_search_cfg.get("configured")
     )
 
-    test_res = admin.call("POST", "/api/v1/admin/model-gateway/test", {}, status=200)
-    require(test_res.get("ok") is True, "Model gateway live connectivity test failed.")
+    test_res = admin.call(
+        "POST", "/api/v1/admin/model-gateway/test", {}, status=200
+    )
+    require(
+        test_res.get("ok") is True, "Model gateway live connectivity test failed."
+    )
 
     if urls["runtime_token"]:
         admin.verify_internal_sse_stream(
             runtime_token=urls["runtime_token"],
-            expected_config_id=config_id,
+            owner_id=admin.user["id"],
+            expected_config_id=expected_config_id,
         )
+        if web_search_active:
+            admin.verify_internal_web_search(
+                runtime_token=urls["runtime_token"],
+                owner_id=admin.user["id"],
+            )
 
-    if web_search_active:
-        ws_test = admin.call(
-            "POST",
-            "/api/v1/admin/model-gateway/web-search-test",
-            {},
-            status=200,
-        )
-        require(ws_test.get("ok") is True, "Tavily web search connectivity test failed.")
-
-    print("[2/5] Creating isolated workspace, #general channel, and personal Agent...")
+    print(
+        "[2/5] Creating isolated workspace, #general channel, and personal Agent..."
+    )
     ws_res = admin.call(
         "POST",
         "/api/v1/workspaces",
@@ -303,16 +416,18 @@ def main() -> int:
         status=201,
     )
     workspace_id = ws_res["workspace"]["id"]
-    bootstrap = admin.call("GET", "/api/v1/bootstrap", status=200)
-    ws_channels = [
-        c
-        for c in bootstrap.get("conversations", [])
-        if c.get("workspaceId") == workspace_id and c.get("type") == "channel"
-    ]
-    channel = next(
-        (c for c in ws_channels if c.get("name") == "general"),
-        ws_channels[0] if ws_channels else None,
-    )
+    channel = ws_res.get("conversation")
+    if not channel:
+        bootstrap = admin.call("GET", "/api/v1/bootstrap", status=200)
+        ws_channels = [
+            c
+            for c in bootstrap.get("conversations", [])
+            if c.get("workspaceId") == workspace_id and c.get("type") == "channel"
+        ]
+        channel = next(
+            (c for c in ws_channels if c.get("name") == "general"),
+            ws_channels[0] if ws_channels else None,
+        )
     require(channel is not None, "Default #general workspace channel not found.")
     channel_id = channel["id"]
 
@@ -330,12 +445,10 @@ def main() -> int:
         "POST",
         "/api/v1/agents",
         {
-            "displayName": agent_name,
-            "description": "Live model acceptance assistant",
-            "prompt": (
-                "You are a concise acceptance test assistant in Teamie. "
-                "Think internally first, then ALWAYS use the im_send_message tool "
-                "with replyToId set to the triggering message ID to reply in the current conversation."
+            "name": agent_name,
+            "description": (
+                "Live model acceptance assistant. Think internally first, then ALWAYS use "
+                "im_send_message with replyToId set to the triggering message ID."
             ),
             "workspaceIds": [workspace_id],
             "enabled": True,
@@ -346,6 +459,19 @@ def main() -> int:
     require(
         agent_id not in restricted_group.get("memberIds", []),
         "Agent must not be a member of uninvited group conversation.",
+    )
+    wait_until(
+        "Agent IM workspace membership admission",
+        lambda: any(
+            m.get("userId") == agent_id
+            for m in admin.call(
+                "GET",
+                f"/api/v1/workspaces/{urllib.parse.quote(workspace_id)}/members",
+                status=200,
+            ).get("members", [])
+        ),
+        timeout=timeout,
+        poll_interval=poll_interval,
     )
 
     def post_mention(text: str) -> dict:
@@ -380,10 +506,12 @@ def main() -> int:
             if m.get("senderId") == agent_id and int(m.get("seq", 0)) > after_seq
         ]
 
-    print("[3/5] Scenario 1: #general @Agent mention, replyToId, no raw thought leak, and cross-conversation ACL...")
+    print(
+        "[3/5] Scenario 1: #general @Agent mention, replyToId, no raw thought leak, and cross-conversation ACL..."
+    )
     msg1 = post_mention(
         f"Think internally (do not include your internal reasoning in the IM message), "
-        f"then call im_send_message in this #general channel with replyToId='{ '{' }triggering_message_id{ '}' }' "
+        f"then call im_send_message in this #general channel with replyToId set to this message's ID "
         f"and exact body 'ACK-{run_suffix}'. Also verify you cannot access conversation {restricted_id}."
     )
     reply1 = wait_until(
@@ -419,7 +547,9 @@ def main() -> int:
         "Agent must not bypass ACLs to post in restricted group conversation.",
     )
 
-    print("[4/5] Scenario 2: Sandbox isolated execution, file attachment export, and SHA-256 verification...")
+    print(
+        "[4/5] Scenario 2: Sandbox isolated execution, file attachment export, and SHA-256 verification..."
+    )
     expected_content = f"sandbox-ok-{run_suffix}:isolated\n".encode("utf-8")
     expected_sha256 = hashlib.sha256(expected_content).hexdigest()
     msg2 = post_mention(
@@ -442,7 +572,7 @@ def main() -> int:
         poll_interval=poll_interval,
     )
     att = reply2["attachments"][0]
-    downloaded = admin.get_bytes(
+    downloaded, dl_headers = admin.get_bytes(
         f"/api/v1/conversations/{urllib.parse.quote(channel_id)}/attachments/{urllib.parse.quote(att['id'])}",
         status=200,
     )
@@ -457,6 +587,12 @@ def main() -> int:
             att["sha256"] == actual_sha256,
             f"Attachment metadata sha256 {att['sha256']} != downloaded sha256 {actual_sha256}",
         )
+    header_sha256 = dl_headers.get("x-attachment-sha256", "")
+    if header_sha256:
+        require(
+            header_sha256 == actual_sha256,
+            f"X-Attachment-SHA256 header {header_sha256} != downloaded sha256 {actual_sha256}",
+        )
     if downloaded == expected_content:
         require(
             actual_sha256 == expected_sha256,
@@ -464,7 +600,9 @@ def main() -> int:
         )
 
     if web_search_active:
-        print("[4b/5] Scenario 3: Verifying live Tavily web_search / web_fetch tool execution...")
+        print(
+            "[4b/5] Scenario 3: Verifying live Tavily web_search / web_fetch tool execution..."
+        )
         msg_ws = post_mention(
             f"Use web_search and web_fetch to look up 'IANA example domain' and reply with WEB-{run_suffix} and the cited domain."
         )
@@ -482,7 +620,9 @@ def main() -> int:
             poll_interval=poll_interval,
         )
 
-    print("[5/5] Scenario 4: Verifying schedule_create (TEAMIE_SCHEDULE_WAKEUP) self-wakeup...")
+    print(
+        "[5/5] Scenario 4: Verifying schedule_create (TEAMIE_SCHEDULE_WAKEUP) self-wakeup..."
+    )
     msg3 = post_mention(
         f"Create a one-shot schedule 5 seconds from now using schedule_create that wakes you up "
         f"(TEAMIE_SCHEDULE_WAKEUP) to send a follow-up message containing WAKE-{run_suffix} in this conversation."
