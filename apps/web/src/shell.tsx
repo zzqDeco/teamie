@@ -1,33 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Link,
   Navigate,
   useLocation,
   useMatch,
   useNavigate,
 } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  ArrowLeft,
-  Bot,
-  Hash,
-  KeyRound,
-  Menu,
-  Settings,
-  ShieldCheck,
-  Users,
-} from "lucide-react";
 import { api } from "@teamie/api-client";
 import type { Member, Workspace } from "@teamie/api-client";
 import { useAuth } from "./auth";
 import { errorText, useChat, useChatState } from "./chat";
-import { ProfileSettings, WorkspaceDialog } from "./dialogs";
-import { PlatformInvitations } from "./admin";
-import { PlatformUsers } from "./platform-users";
-import { ModelGatewaySettings } from "./model-gateway";
-import { AgentDetail, MyAgents } from "./agents";
+import { WorkspaceDialog } from "./dialogs";
 import { ConnectionBanner } from "./connection-banner";
-import { WorkspaceMembers } from "./members";
 import { GroupMembersDialog } from "./group-members";
 import { enrichParticipants } from "./participants";
 import type { Participant } from "./participants";
@@ -35,67 +19,34 @@ import { KeyboardShortcutsModal, QuickSwitcher } from "./quick-switcher";
 import { chatStore, compareTimestampsDesc } from "./store";
 import { setActiveNotificationContext } from "./notifications";
 import type { DialogKind } from "./dialogs";
-import { ConversationView, conversationName } from "./messages";
-import {
-  AttentionInbox,
-  currentAttention,
-  useAttentionCount,
-} from "./attention";
+import { ConversationView } from "./messages";
+import { AttentionInbox, useAttentionCount } from "./attention";
 import {
   Button,
-  IconButton,
   Loading,
   Logo,
-  Modal,
   Notice,
-  useOverlayFocus,
 } from "./ui";
-import { ICON } from "./icons";
 import {
-  pickAdjacentConversation,
+  computePageTitle,
+  computeShellAttention,
+  resolveWorkspaceTarget,
   route,
   ShellSidebar,
+  useShellKeyboardShortcuts,
+  useShellViewportAndFocus,
 } from "./shell-sidebar";
 import { ShellMembersPane } from "./shell-members-pane";
-import { parseInviteCode, Welcome } from "./shell-welcome";
+import {
+  parseInviteCode,
+  RemoveMemberModal,
+  ShellManagementView,
+  UnavailableConversationView,
+  useDocumentTitle,
+  useMediaQuery,
+  Welcome,
+} from "./shell-welcome";
 export { parseInviteCode };
-
-function useDocumentTitle(
-  pageTitle: string,
-  urgentCount: number,
-  hasChannelUnread: boolean,
-) {
-  useEffect(() => {
-    const base = pageTitle ? `${pageTitle} · Teamie` : "Teamie";
-    const prefix =
-      urgentCount > 0
-        ? `(${urgentCount > 99 ? "99+" : urgentCount}) `
-        : hasChannelUnread
-          ? "• "
-          : "";
-    document.title = `${prefix}${base}`;
-  }, [pageTitle, urgentCount, hasChannelUnread]);
-  useEffect(
-    () => () => {
-      document.title = "Teamie";
-    },
-    [],
-  );
-}
-
-function useMediaQuery(query: string) {
-  const [matches, setMatches] = useState(
-    () => window.matchMedia(query).matches,
-  );
-  useEffect(() => {
-    const media = window.matchMedia(query);
-    const change = () => setMatches(media.matches);
-    change();
-    media.addEventListener("change", change);
-    return () => media.removeEventListener("change", change);
-  }, [query]);
-  return matches;
-}
 
 export function Shell() {
   const { user, logout } = useAuth();
@@ -114,7 +65,6 @@ export function Shell() {
     workspaceRootMatch = useMatch("/app/w/:workspaceId"),
     location = useLocation(),
     navigate = useNavigate();
-  const sidebarFocus = useRef({ open: false, pathname: location.pathname });
   const lastConversationByWorkspace = useRef<Record<string, string>>({});
   const lastChatRoute = useRef<string>("");
   const [lastChatPath, setLastChatPath] = useState("");
@@ -231,53 +181,19 @@ export function Shell() {
   const closeDetails = useCallback(() => setDetails(false), []);
   const hasOverlayModal =
     !!dialog || quickSwitcherOpen || shortcutsOpen || managingGroup || !!removing;
-  useOverlayFocus(
+  useShellViewportAndFocus({
     navigationRef,
-    mobile && sidebar && !hasOverlayModal,
-    closeSidebar,
-  );
-  useEffect(() => {
-    const previous = sidebarFocus.current;
-    sidebarFocus.current = { open: sidebar, pathname: location.pathname };
-    if (
-      sidebar ||
-      !mobile ||
-      hasOverlayModal ||
-      (!previous.open && previous.pathname === location.pathname)
-    )
-      return;
-    const focused = document.activeElement;
-    if (focused === document.body || navigationRef.current?.contains(focused)) {
-      navigationRef.current?.parentElement
-        ?.querySelector<HTMLElement>(".app-main .mobile-menu")
-        ?.focus({ preventScroll: true });
-    }
-  }, [sidebar, mobile, hasOverlayModal, location.pathname]);
-  useOverlayFocus(
     membersRef,
-    overlayMembers &&
-      details &&
-      !sidebar &&
-      !hasOverlayModal &&
-      !!conversation,
+    mobile,
+    overlayMembers,
+    sidebar,
+    details,
+    hasOverlayModal,
+    hasConversation: !!conversation,
+    pathname: location.pathname,
+    closeSidebar,
     closeDetails,
-  );
-  useEffect(() => {
-    const viewport = window.visualViewport;
-    const resize = () =>
-      document.documentElement.style.setProperty(
-        "--app-height",
-        `${viewport?.height || window.innerHeight}px`,
-      );
-    resize();
-    viewport?.addEventListener("resize", resize);
-    window.addEventListener("resize", resize);
-    return () => {
-      viewport?.removeEventListener("resize", resize);
-      window.removeEventListener("resize", resize);
-      document.documentElement.style.removeProperty("--app-height");
-    };
-  }, []);
+  });
   const pathname = location.pathname.replace(/\/+$/, "") || "/app";
   const caps = chat.data?.capabilities || {};
   const isSettings = ["/app/settings", "/app/profile"].includes(pathname);
@@ -287,149 +203,44 @@ export function Shell() {
   const isAgentsPage = pathname === "/app/agents" || !!agentMatch;
   const isDirectoryPage = !!directoryMatch;
   const isAttentionPage = pathname === "/app/attention";
-  const activeWorkspaceIds = new Set(
-    (chat.data?.workspaces || []).map((w) => w.id),
-  );
-  const allAuthorizedConversations = Object.values(
-    snapshot.conversations,
-  ).filter((c) => activeWorkspaceIds.has(c.workspaceId));
-  const directUnreadCount = allAuthorizedConversations.reduce(
-    (sum, c) =>
-      c.type !== "channel"
-        ? sum + Math.max(0, c.lastSeq - c.readSeq)
-        : sum,
-    0,
-  );
-  const rawChannelAttention = attentionCount.data?.channelUnreadCount || 0;
-  let locallyResolvedChannel = 0;
-  for (const item of attentionCount.data?.items || []) {
-    if (item.isRead || item.conversation.type !== "channel") continue;
-    const current = currentAttention(item, snapshot, user!.id);
-    if (
-      !current ||
-      current.isRead ||
-      current.conversation.type !== "channel"
-    ) {
-      locallyResolvedChannel += 1;
-    }
-  }
-  const channelAttentionCount = Math.max(
-    0,
-    rawChannelAttention - locallyResolvedChannel,
-  );
-  const urgentCount = directUnreadCount + channelAttentionCount;
-  const hasChannelUnread = allAuthorizedConversations.some(
-    (c) => c.type === "channel" && c.lastSeq > c.readSeq,
-  );
-  const pageTitle = isAttentionPage
-    ? "提及与回复"
-    : isGatewayPage
-      ? "模型网关"
-      : isUsersPage
-        ? "用户管理"
-        : isAdminPage
-          ? "注册邀请"
-          : isAgentsPage
-            ? "个人 Agent"
-            : isDirectoryPage
-              ? workspace
-                ? `${workspace.name} · 成员`
-                : "成员"
-              : isSettings
-                ? "账号设置"
-                : conversation &&
-                    workspace &&
-                    conversation.workspaceId === workspace.id
-                  ? conversation.type === "channel"
-                    ? `# ${conversationName(conversation, user!.id, members)}`
-                    : conversationName(conversation, user!.id, members)
-                  : workspace?.name || "";
+  const { allAuthorizedConversations, urgentCount, hasChannelUnread } =
+    computeShellAttention({
+      workspaces: chat.data?.workspaces || [],
+      snapshot,
+      userId: user!.id,
+      attentionData: attentionCount.data,
+    });
+  const pageTitle = computePageTitle({
+    isAttentionPage,
+    isGatewayPage,
+    isUsersPage,
+    isAdminPage,
+    isAgentsPage,
+    isDirectoryPage,
+    isSettings,
+    workspace,
+    conversation,
+    userId: user!.id,
+    members,
+  });
   useDocumentTitle(pageTitle, urgentCount, hasChannelUnread);
-  useEffect(() => {
-    const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.isComposing || event.keyCode === 229) return;
-      const anyModalOpen = !!document.querySelector(".modal-backdrop");
-      if (
-        (event.metaKey || event.ctrlKey) &&
-        !event.altKey &&
-        !event.shiftKey &&
-        event.key.toLowerCase() === "k"
-      ) {
-        if (anyModalOpen && !quickSwitcherOpen && !shortcutsOpen) return;
-        event.preventDefault();
-        setShortcutsOpen(false);
-        setQuickSwitcherOpen((open) => !open);
-        return;
-      }
-      const target = event.target as HTMLElement | null;
-      const inEditable =
-        !!target &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.tagName === "SELECT" ||
-          target.isContentEditable);
-      if (inEditable || hasOverlayModal || anyModalOpen) return;
-      if (
-        event.altKey &&
-        !event.metaKey &&
-        !event.ctrlKey &&
-        (event.key === "ArrowUp" || event.key === "ArrowDown")
-      ) {
-        const direction = event.key === "ArrowDown" ? 1 : -1;
-        const ordered = [...channels, ...direct];
-        const orderedWorkspaces = [
-          ...(workspace ? [workspace] : []),
-          ...(chat.data?.workspaces || []).filter(
-            (w) => w.id !== workspace?.id,
-          ),
-        ];
-        const allOrdered = orderedWorkspaces.flatMap((ws) => {
-          if (ws.id === workspace?.id) return ordered;
-          const inWs = Object.values(snapshot.conversations).filter(
-            (c) => c.workspaceId === ws.id,
-          );
-          return [
-            ...inWs
-              .filter((c) => c.type === "channel")
-              .sort((a, b) => a.name.localeCompare(b.name)),
-            ...inWs
-              .filter((c) => c.type !== "channel")
-              .sort((a, b) => compareTimestampsDesc(a.updatedAt, b.updatedAt)),
-          ];
-        });
-        const pool =
-          event.shiftKey || ordered.length === 0 ? allOrdered : ordered;
-        const next = pickAdjacentConversation(
-          pool,
-          conversation?.id,
-          direction,
-          event.shiftKey,
-        );
-        if (next) {
-          event.preventDefault();
-          navigate(route(next));
-        }
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [
+  useShellKeyboardShortcuts({
     channels,
     direct,
     workspace,
-    snapshot.conversations,
-    chat.data?.workspaces,
-    conversation?.id,
+    conversationsById: snapshot.conversations,
+    workspaces: chat.data?.workspaces,
+    conversationId: conversation?.id,
     hasOverlayModal,
     quickSwitcherOpen,
     shortcutsOpen,
+    setShortcutsOpen,
+    setQuickSwitcherOpen,
     navigate,
-  ]);
+  });
   const messageTarget =
     new URLSearchParams(location.search).get("message") || "";
   const initialMessageId = messageTarget.length <= 128 ? messageTarget : "";
-  // Clearing ?message= must not remount the view (that would drop staged
-  // uploads); only a new conversation or a new non-empty target remounts it.
   const viewConversationId = match?.params.conversationId || "";
   const [viewKey, setViewKey] = useState({ conversation: "", target: "" });
   if (
@@ -520,23 +331,14 @@ export function Shell() {
     }
   }
   function selectWorkspace(space: Workspace) {
-    const rememberedId = lastConversationByWorkspace.current[space.id];
-    const remembered = rememberedId
-      ? snapshot.conversations[rememberedId]
-      : undefined;
-    const first =
-      (remembered && remembered.workspaceId === space.id
-        ? remembered
-        : undefined) ||
-      Object.values(snapshot.conversations).find(
-        (c) => c.workspaceId === space.id && c.type === "channel",
-      ) ||
-      Object.values(snapshot.conversations).find(
-        (c) => c.workspaceId === space.id,
-      );
-    if (first) navigate(route(first));
-    else if (isManagement || workspace?.id !== space.id)
-      navigate(`/app/w/${space.id}/members`);
+    const target = resolveWorkspaceTarget({
+      space,
+      rememberedId: lastConversationByWorkspace.current[space.id],
+      conversations: snapshot.conversations,
+      isManagement,
+      currentWorkspaceId: workspace?.id,
+    });
+    if (target) navigate(target);
     setSidebar(false);
   }
   if (chat.loading && !chat.data) return <Loading />;
@@ -664,115 +466,32 @@ export function Shell() {
         {isAttentionPage ? (
           <AttentionInbox key={user!.id} onMenu={() => setSidebar(true)} />
         ) : isManagement ? (
-          <>
-            <header className="settings-header">
-              <IconButton
-                label="打开频道列表"
-                className="mobile-menu"
-                onClick={() => setSidebar(true)}
-              >
-                <Menu size={ICON.lg} />
-              </IconButton>
-              {isGatewayPage ? (
-                <KeyRound size={ICON.md} />
-              ) : isDirectoryPage || isUsersPage ? (
-                <Users size={ICON.md} />
-              ) : isAgentsPage ? (
-                <Bot size={ICON.md} />
-              ) : isAdminPage ? (
-                <ShieldCheck size={ICON.md} />
-              ) : (
-                <Settings size={ICON.md} />
-              )}
-              <span>
-                {isGatewayPage
-                  ? "模型网关"
-                  : isUsersPage
-                    ? "用户管理"
-                    : isAdminPage
-                      ? "注册邀请"
-                      : isAgentsPage
-                        ? "个人 Agent"
-                        : isDirectoryPage
-                          ? "成员"
-                          : "账号设置"}
-              </span>
-              <Link to={backChatRoute}>
-                <ArrowLeft size={ICON.sm} />
-                <span>对话</span>
-              </Link>
-            </header>
-            {(isAdminPage || isGatewayPage || isUsersPage) &&
-              user!.platformRole === "admin" && (
-                <nav className="admin-section-nav">
-                  <Link to="/app/admin" className={isAdminPage ? "active" : ""}>
-                    <ShieldCheck size={ICON.xs} />
-                    注册邀请
-                  </Link>
-                  <Link
-                    to="/app/admin/users"
-                    className={isUsersPage ? "active" : ""}
-                  >
-                    <Users size={ICON.xs} />
-                    用户管理
-                  </Link>
-                  <Link
-                    to="/app/admin/gateway"
-                    className={isGatewayPage ? "active" : ""}
-                  >
-                    <KeyRound size={ICON.xs} />
-                    模型网关
-                  </Link>
-                </nav>
-              )}
-            {isUsersPage ? (
-              <PlatformUsers />
-            ) : isGatewayPage ? (
-              <ModelGatewaySettings key={user!.id} />
-            ) : isAdminPage ? (
-              <PlatformInvitations key={user!.id} />
-            ) : isAgentsPage ? (
-              agentMatch?.params.agentId ? (
-                <AgentDetail
-                  key={`${user!.id}:${agentMatch.params.agentId}`}
-                  agentId={agentMatch.params.agentId}
-                />
-              ) : (
-                <MyAgents key={user!.id} />
-              )
-            ) : isDirectoryPage ? (
-              workspace ? (
-                <WorkspaceMembers
-                  key={`${user!.id}:${workspace.id}`}
-                  workspace={workspace}
-                  members={members}
-                  agents={workspaceAgents}
-                  loading={
-                    membersQuery.isLoading ||
-                    (discoveryAllowed && workspaceAgentsQuery.isLoading)
-                  }
-                  loadError={
-                    !!membersQuery.error ||
-                    (discoveryAllowed && !!workspaceAgentsQuery.error)
-                  }
-                  onRetry={() => {
-                    void membersQuery.refetch();
-                    if (discoveryAllowed) void workspaceAgentsQuery.refetch();
-                  }}
-                />
-              ) : (
-                <div className="unavailable-view">
-                  <h2>无法访问这个工作空间</h2>
-                  <p>查看成员需要当前空间成员权限。</p>
-                  <Link className="button" to="/app">
-                    返回对话
-                  </Link>
-                </div>
-              )
-            ) : (
-              <ProfileSettings />
-            )}
-          </>
+          <ShellManagementView
+            user={user!}
+            isGatewayPage={isGatewayPage}
+            isUsersPage={isUsersPage}
+            isAdminPage={isAdminPage}
+            isAgentsPage={isAgentsPage}
+            isDirectoryPage={isDirectoryPage}
+            agentId={agentMatch?.params.agentId}
+            backChatRoute={backChatRoute}
+            workspace={workspace}
+            members={members}
+            workspaceAgents={workspaceAgents}
+            membersLoading={
+              membersQuery.isLoading ||
+              (discoveryAllowed && workspaceAgentsQuery.isLoading)
+            }
+            membersLoadError={
+              !!membersQuery.error ||
+              (discoveryAllowed && !!workspaceAgentsQuery.error)
+            }
+            onOpenSidebar={() => setSidebar(true)}
+            onRetryMembers={() => {
+              void membersQuery.refetch();
+              if (discoveryAllowed) void workspaceAgentsQuery.refetch();
+            }}
+          />
         ) : conversation &&
           workspace &&
           conversation.workspaceId === workspace.id ? (
@@ -800,32 +519,14 @@ export function Shell() {
             onMenu={() => setSidebar(true)}
           />
         ) : (
-          <div className="unavailable-view">
-            <IconButton
-              label="打开频道列表"
-              className="mobile-menu"
-              onClick={() => setSidebar(true)}
-            >
-              <Menu size={ICON.lg} />
-            </IconButton>
-            <span className="large-symbol">
-              <Hash size={ICON.xl} />
-            </span>
-            <h2>{match ? "这个对话暂时无法访问" : "选择一个对话"}</h2>
-            <p>
-              {match
-                ? "你可能已离开工作空间，或尚未加入这个对话。"
-                : "打开对话列表，选择频道或私信。"}
-            </p>
-            <Button
-              onClick={() => {
-                void chat.refresh();
-                navigate("/app");
-              }}
-            >
-              返回对话
-            </Button>
-          </div>
+          <UnavailableConversationView
+            hasMatch={!!match}
+            onOpenSidebar={() => setSidebar(true)}
+            onBack={() => {
+              void chat.refresh();
+              navigate("/app");
+            }}
+          />
         )}
       </main>
       {details && !isManagement && workspace && conversation && (
@@ -900,25 +601,14 @@ export function Shell() {
           />
         )}
       {removing && (
-        <Modal
-          title={`移除 ${removing.displayName}？`}
-          subtitle={
-            removingFromGroup
-              ? "该成员将无法继续访问这个小组对话。工作空间成员资格不受影响。"
-              : "该成员将无法继续访问这个工作空间及其中的对话。可以通过新邀请重新加入。"
-          }
+        <RemoveMemberModal
+          removing={removing}
+          removingFromGroup={removingFromGroup}
+          error={error}
+          busy={busy}
           onClose={closeRemoving}
-        >
-          <Notice>{error}</Notice>
-          <div className="modal-actions">
-            <Button className="secondary" onClick={closeRemoving}>
-              取消
-            </Button>
-            <Button className="danger" busy={busy} onClick={remove}>
-              确认移除
-            </Button>
-          </div>
-        </Modal>
+          onConfirm={() => void remove()}
+        />
       )}
     </div>
   );

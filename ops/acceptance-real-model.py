@@ -3,22 +3,30 @@
 
 In accordance with AGENTS.md, CI and disposable acceptance never call a live
 external LLM provider automatically. This script is strictly opt-in and runs
-only when the operator explicitly supplies real provider credentials in the
-environment (`TEAMIE_REAL_MODEL_ACCEPTANCE=1`).
+only when the operator explicitly sets `TEAMIE_REAL_MODEL_ACCEPTANCE=1` (either
+passing `TEAMIE_REAL_PROVIDER_*` environment variables or using a model gateway
+already enabled at `/app/admin/gateway`).
 
 Security invariants:
 - Never hardcodes, logs, prints, or persists provider API keys, base URLs,
   passwords, or raw prompts/model outputs.
 - Verifies full Eino v0.10.0-alpha.35 runtime execution end-to-end through the
-  public IM & Control Plane HTTP contracts:
-  1. Model Gateway connectivity (`PUT /api/v1/admin/model-gateway` + `/test`)
-  2. Foreground `@Agent` channel turn & `im_send_message` reply
-  3. Sandbox tool execution (`bash` / `write_file`) & attachment export
-  4. Optional Tavily `web_search` / `web_fetch` connectivity & turn verification
-  5. `schedule_create` one-shot self-wakeup & follow-up IM message
+  public IM, Control Plane, and internal Gateway SSE contracts:
+  1. Model Gateway connectivity (`GET/PUT /api/v1/admin/model-gateway` + `/test`)
+     and Hertz native `sse.NewWriter` streaming (`POST /internal/v1/chat/stream`
+     with `Accept: text/event-stream` and `X-Teamie-Model-Config-ID`).
+  2. Scenario 1: `#general` channel `@Agent` turn, `im_send_message` with
+     `replyToId`, no raw assistant thought leakage, and cross-conversation ACL boundary.
+  3. Scenario 2: Sandbox isolated script execution (no service/provider secrets
+     or external network), file attachment export, download, and SHA-256 verification.
+  4. Scenario 3: Tavily `web_search` / `web_fetch` connectivity & turn verification
+     (when `webSearch` is enabled).
+  5. Scenario 4: `schedule_create` (`TEAMIE_SCHEDULE_WAKEUP`) one-shot self-wakeup
+     through the single-writer `TurnLoop` and follow-up IM message.
 """
 from __future__ import annotations
 
+import hashlib
 import http.cookiejar
 import json
 import os
@@ -31,18 +39,20 @@ import urllib.request
 import uuid
 
 
-ORIGIN = os.environ.get(
-    "TEAMIE_ACCEPTANCE_URL",
-    os.environ.get("BASE_URL", "http://127.0.0.1:8080"),
-).rstrip("/")
-IDENTITY = os.environ.get("TEAMIE_IDENTITY_URL", ORIGIN).rstrip("/")
-CHAT = os.environ.get("TEAMIE_CHAT_URL", ORIGIN).rstrip("/")
-CONTROL = os.environ.get("TEAMIE_CONTROL_URL", ORIGIN).rstrip("/")
-GATEWAY = os.environ.get("TEAMIE_GATEWAY_URL", ORIGIN).rstrip("/")
-TIMEOUT = min(
-    180.0,
-    max(15.0, float(os.environ.get("TEAMIE_REAL_MODEL_TIMEOUT", "90"))),
-)
+def get_env_config() -> dict[str, str]:
+    origin = os.environ.get(
+        "TEAMIE_ACCEPTANCE_URL",
+        os.environ.get("BASE_URL", "http://127.0.0.1:8080"),
+    ).rstrip("/")
+    return {
+        "origin": origin,
+        "identity": os.environ.get("TEAMIE_IDENTITY_URL", origin).rstrip("/"),
+        "chat": os.environ.get("TEAMIE_CHAT_URL", origin).rstrip("/"),
+        "control": os.environ.get("TEAMIE_CONTROL_URL", origin).rstrip("/"),
+        "gateway": os.environ.get("TEAMIE_GATEWAY_URL", origin).rstrip("/"),
+        "internal_gateway": os.environ.get("TEAMIE_INTERNAL_GATEWAY_URL", "").rstrip("/"),
+        "runtime_token": os.environ.get("GATEWAY_RUNTIME_TOKEN", "").strip(),
+    }
 
 
 def require(condition: bool, message: str) -> None:
@@ -50,24 +60,26 @@ def require(condition: bool, message: str) -> None:
         raise AssertionError(message)
 
 
-def base_for(path: str) -> str:
-    if path.startswith("/api/v1/auth/"):
-        return IDENTITY
-    if path.startswith("/api/v1/admin/model-gateway"):
-        return GATEWAY
-    if path.startswith("/api/v1/agents") or "/agents" in path:
-        return CONTROL
-    return CHAT
-
-
 class Client:
-    def __init__(self) -> None:
+    def __init__(self, urls: dict[str, str] | None = None) -> None:
+        self.urls = urls or get_env_config()
         self.cookies = http.cookiejar.CookieJar()
         self.opener = urllib.request.build_opener(
             urllib.request.HTTPCookieProcessor(self.cookies)
         )
         self.csrf = ""
         self.user: dict = {}
+
+    def base_for(self, path: str) -> str:
+        if path.startswith("/api/v1/auth/"):
+            return self.urls["identity"]
+        if path.startswith("/api/v1/admin/model-gateway"):
+            return self.urls["gateway"]
+        if path.startswith("/internal/v1/"):
+            return self.urls["internal_gateway"] or self.urls["gateway"]
+        if path.startswith("/api/v1/agents") or "/agents" in path:
+            return self.urls["control"]
+        return self.urls["chat"]
 
     def call(
         self,
@@ -77,7 +89,7 @@ class Client:
         status: int | tuple[int, ...] = 200,
     ) -> dict:
         headers = {
-            "Origin": ORIGIN,
+            "Origin": self.urls["origin"],
             "Accept": "application/json",
         }
         if method not in ("GET", "HEAD") and self.csrf:
@@ -87,7 +99,7 @@ class Client:
             payload = json.dumps(body).encode("utf-8")
             headers["Content-Type"] = "application/json"
         req = urllib.request.Request(
-            base_for(path) + path,
+            self.base_for(path) + path,
             data=payload,
             method=method,
             headers=headers,
@@ -113,9 +125,9 @@ class Client:
 
     def get_bytes(self, path: str, status: int = 200) -> bytes:
         req = urllib.request.Request(
-            base_for(path) + path,
+            self.base_for(path) + path,
             method="GET",
-            headers={"Origin": ORIGIN},
+            headers={"Origin": self.urls["origin"]},
         )
         try:
             resp = self.opener.open(req, timeout=30)
@@ -128,14 +140,73 @@ class Client:
             )
             return resp.read()
 
+    def verify_internal_sse_stream(
+        self, runtime_token: str, expected_config_id: str = ""
+    ) -> None:
+        headers = {
+            "Accept": "text/event-stream",
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {runtime_token}",
+        }
+        payload = json.dumps(
+            {
+                "agentId": str(uuid.uuid4()),
+                "runId": str(uuid.uuid4()),
+                "step": 1,
+                "messages": [{"role": "user", "content": "Reply with OK."}],
+            }
+        ).encode("utf-8")
+        req = urllib.request.Request(
+            self.base_for("/internal/v1/chat/stream") + "/internal/v1/chat/stream",
+            data=payload,
+            method="POST",
+            headers=headers,
+        )
+        try:
+            resp = self.opener.open(req, timeout=60)
+        except urllib.error.HTTPError as err:
+            resp = err
+        with resp:
+            require(
+                resp.status == 200,
+                f"POST /internal/v1/chat/stream expected 200, got {resp.status}",
+            )
+            content_type = resp.headers.get("Content-Type", "")
+            require(
+                content_type.startswith("text/event-stream"),
+                f"Expected text/event-stream Content-Type, got {content_type!r}",
+            )
+            bound_config_id = resp.headers.get("X-Teamie-Model-Config-ID", "").strip()
+            require(
+                bool(bound_config_id),
+                "Expected X-Teamie-Model-Config-ID response header on SSE stream.",
+            )
+            if expected_config_id:
+                require(
+                    bound_config_id == expected_config_id,
+                    f"X-Teamie-Model-Config-ID {bound_config_id!r} != {expected_config_id!r}",
+                )
+            raw_sse = resp.read().decode("utf-8", errors="replace")
+            frames = []
+            for line in raw_sse.splitlines():
+                if line.startswith("data:"):
+                    data_str = line[len("data:") :].strip()
+                    if data_str:
+                        frames.append(json.loads(data_str))
+            require(len(frames) > 0, "Expected at least one SSE data frame.")
+            require(
+                any(f.get("type") == "done" for f in frames),
+                "Expected terminal SSE frame with type='done'.",
+            )
 
-def wait_until(description: str, check, timeout: float = TIMEOUT):
+
+def wait_until(description: str, check, timeout: float = 90.0, poll_interval: float = 1.0):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         value = check()
         if value:
             return value
-        time.sleep(1.0)
+        time.sleep(poll_interval)
     raise AssertionError(f"{description} did not complete within {timeout:.0f}s")
 
 
@@ -144,6 +215,13 @@ def main() -> int:
         os.environ.get("TEAMIE_REAL_MODEL_ACCEPTANCE") == "1",
         "Set TEAMIE_REAL_MODEL_ACCEPTANCE=1 to run live model acceptance.",
     )
+    urls = get_env_config()
+    timeout = min(
+        180.0,
+        max(1.0, float(os.environ.get("TEAMIE_REAL_MODEL_TIMEOUT", "90"))),
+    )
+    poll_interval = max(0.05, float(os.environ.get("TEAMIE_REAL_MODEL_POLL_INTERVAL", "1.0")))
+
     provider_base_url = os.environ.get("TEAMIE_REAL_PROVIDER_BASE_URL", "").strip()
     provider_api_key = os.environ.get("TEAMIE_REAL_PROVIDER_API_KEY", "").strip()
     provider_model = os.environ.get("TEAMIE_REAL_PROVIDER_MODEL", "").strip()
@@ -152,15 +230,11 @@ def main() -> int:
     admin_password = os.environ.get("TEAMIE_ADMIN_PASSWORD", "").strip()
 
     require(
-        bool(provider_base_url and provider_api_key and provider_model),
-        "TEAMIE_REAL_PROVIDER_BASE_URL, TEAMIE_REAL_PROVIDER_API_KEY, and TEAMIE_REAL_PROVIDER_MODEL are required.",
-    )
-    require(
         bool(admin_email and admin_password),
         "TEAMIE_ADMIN_EMAIL and TEAMIE_ADMIN_PASSWORD are required.",
     )
 
-    admin = Client()
+    admin = Client(urls)
     login_res = admin.call(
         "POST",
         "/api/v1/auth/login",
@@ -175,27 +249,44 @@ def main() -> int:
     )
 
     run_suffix = secrets.token_hex(4)
-    print(f"[1/5] Configuring model gateway and running live connectivity test (run={run_suffix})...")
-    gw_payload: dict = {
-        "enabled": True,
-        "baseUrl": provider_base_url,
-        "apiKey": provider_api_key,
-        "model": provider_model,
-        "timeoutSeconds": 60,
-        "maxTokens": 1024,
-        "webSearchEnabled": bool(web_search_key),
-    }
-    if web_search_key:
-        gw_payload["webSearchApiKey"] = web_search_key
+    print(f"[1/5] Verifying model gateway configuration and SSE contract (run={run_suffix})...")
+    has_env_provider = bool(provider_base_url and provider_api_key and provider_model)
+    if has_env_provider:
+        gw_payload: dict = {
+            "enabled": True,
+            "baseUrl": provider_base_url,
+            "apiKey": provider_api_key,
+            "model": provider_model,
+            "timeoutSeconds": 60,
+            "maxTokens": 1024,
+            "webSearchEnabled": bool(web_search_key),
+        }
+        if web_search_key:
+            gw_payload["webSearchApiKey"] = web_search_key
+        gw_res = admin.call("PUT", "/api/v1/admin/model-gateway", gw_payload, status=200)
+    else:
+        gw_res = admin.call("GET", "/api/v1/admin/model-gateway", status=200)
 
-    gw_res = admin.call("PUT", "/api/v1/admin/model-gateway", gw_payload, status=200)
-    require(gw_res["settings"]["enabled"] is True, "Model gateway must be enabled.")
-    require(gw_res["settings"]["hasApiKey"] is True, "Model gateway API key must be stored.")
+    settings = gw_res.get("settings", {})
+    require(
+        settings.get("enabled") is True and settings.get("hasApiKey") is True,
+        "Model gateway must be enabled with a stored API key (either via TEAMIE_REAL_PROVIDER_* env vars or pre-configured at /app/admin/gateway).",
+    )
+    config_id = settings.get("configId", "")
+    web_search_active = bool(web_search_key) or bool(
+        settings.get("webSearchEnabled") and settings.get("hasWebSearchKey")
+    )
 
     test_res = admin.call("POST", "/api/v1/admin/model-gateway/test", {}, status=200)
     require(test_res.get("ok") is True, "Model gateway live connectivity test failed.")
 
-    if web_search_key:
+    if urls["runtime_token"]:
+        admin.verify_internal_sse_stream(
+            runtime_token=urls["runtime_token"],
+            expected_config_id=config_id,
+        )
+
+    if web_search_active:
         ws_test = admin.call(
             "POST",
             "/api/v1/admin/model-gateway/web-search-test",
@@ -204,7 +295,7 @@ def main() -> int:
         )
         require(ws_test.get("ok") is True, "Tavily web search connectivity test failed.")
 
-    print("[2/5] Creating isolated workspace, channel, and personal Agent...")
+    print("[2/5] Creating isolated workspace, #general channel, and personal Agent...")
     ws_res = admin.call(
         "POST",
         "/api/v1/workspaces",
@@ -213,16 +304,26 @@ def main() -> int:
     )
     workspace_id = ws_res["workspace"]["id"]
     bootstrap = admin.call("GET", "/api/v1/bootstrap", status=200)
+    ws_channels = [
+        c
+        for c in bootstrap.get("conversations", [])
+        if c.get("workspaceId") == workspace_id and c.get("type") == "channel"
+    ]
     channel = next(
-        (
-            c
-            for c in bootstrap.get("conversations", [])
-            if c.get("workspaceId") == workspace_id and c.get("type") == "channel"
-        ),
-        None,
+        (c for c in ws_channels if c.get("name") == "general"),
+        ws_channels[0] if ws_channels else None,
     )
-    require(channel is not None, "Default workspace channel not found.")
+    require(channel is not None, "Default #general workspace channel not found.")
     channel_id = channel["id"]
+
+    # Create a restricted group conversation where the Agent is NOT a member to verify cross-conversation ACL boundary
+    restricted_group = admin.call(
+        "POST",
+        f"/api/v1/workspaces/{urllib.parse.quote(workspace_id)}/conversations",
+        {"type": "group", "name": f"restricted-{run_suffix}", "memberIds": []},
+        status=201,
+    )["conversation"]
+    restricted_id = restricted_group["id"]
 
     agent_name = f"LiveBot-{run_suffix}"
     agent_res = admin.call(
@@ -233,7 +334,8 @@ def main() -> int:
             "description": "Live model acceptance assistant",
             "prompt": (
                 "You are a concise acceptance test assistant in Teamie. "
-                "Always use the im_send_message tool to reply in the current conversation."
+                "Think internally first, then ALWAYS use the im_send_message tool "
+                "with replyToId set to the triggering message ID to reply in the current conversation."
             ),
             "workspaceIds": [workspace_id],
             "enabled": True,
@@ -241,6 +343,10 @@ def main() -> int:
         status=201,
     )
     agent_id = agent_res["agent"]["id"]
+    require(
+        agent_id not in restricted_group.get("memberIds", []),
+        "Agent must not be a member of uninvited group conversation.",
+    )
 
     def post_mention(text: str) -> dict:
         mention_prefix = f"@{agent_name} "
@@ -274,10 +380,14 @@ def main() -> int:
             if m.get("senderId") == agent_id and int(m.get("seq", 0)) > after_seq
         ]
 
-    print("[3/5] Verifying foreground @Agent channel turn and im_send_message reply...")
-    msg1 = post_mention(f"Please reply in this channel with the exact token ACK-{run_suffix}.")
+    print("[3/5] Scenario 1: #general @Agent mention, replyToId, no raw thought leak, and cross-conversation ACL...")
+    msg1 = post_mention(
+        f"Think internally (do not include your internal reasoning in the IM message), "
+        f"then call im_send_message in this #general channel with replyToId='{ '{' }triggering_message_id{ '}' }' "
+        f"and exact body 'ACK-{run_suffix}'. Also verify you cannot access conversation {restricted_id}."
+    )
     reply1 = wait_until(
-        "Agent channel reply",
+        "Agent #general channel reply",
         lambda: next(
             (
                 m
@@ -286,13 +396,37 @@ def main() -> int:
             ),
             None,
         ),
+        timeout=timeout,
+        poll_interval=poll_interval,
     )
     require(bool(reply1.get("id")), "Agent reply message ID must be present.")
+    require(
+        reply1.get("replyToId") == msg1["id"],
+        f"Expected Agent replyToId={msg1['id']!r}, got {reply1.get('replyToId')!r}",
+    )
+    turn1_msgs = latest_agent_messages(int(msg1["seq"]))
+    require(
+        all(f"ACK-{run_suffix}" in m.get("body", "") for m in turn1_msgs),
+        "Ordinary assistant thought text must never automatically leak as an un-tooled IM message.",
+    )
+    restricted_msgs = admin.call(
+        "GET",
+        f"/api/v1/conversations/{urllib.parse.quote(restricted_id)}/messages",
+        status=200,
+    ).get("messages", [])
+    require(
+        not any(m.get("senderId") == agent_id for m in restricted_msgs),
+        "Agent must not bypass ACLs to post in restricted group conversation.",
+    )
 
-    print("[4/5] Verifying Sandbox file creation and IM attachment export...")
+    print("[4/5] Scenario 2: Sandbox isolated execution, file attachment export, and SHA-256 verification...")
+    expected_content = f"sandbox-ok-{run_suffix}:isolated\n".encode("utf-8")
+    expected_sha256 = hashlib.sha256(expected_content).hexdigest()
     msg2 = post_mention(
-        f"Create a file named report-{run_suffix}.txt in your workspace containing "
-        f"'sandbox-ok-{run_suffix}' and send it to this conversation as an attachment using im_send_message."
+        f"In your Sandbox workspace, run a script that verifies no GATEWAY_RUNTIME_TOKEN or OPENAI_API_KEY "
+        f"environment variables exist and external network is disabled, then writes exact bytes "
+        f"'sandbox-ok-{run_suffix}:isolated\\n' to report-{run_suffix}.txt and exports it to this conversation "
+        f"as an attachment via im_send_message."
     )
     reply2 = wait_until(
         "Agent Sandbox attachment export",
@@ -304,6 +438,8 @@ def main() -> int:
             ),
             None,
         ),
+        timeout=timeout,
+        poll_interval=poll_interval,
     )
     att = reply2["attachments"][0]
     downloaded = admin.get_bytes(
@@ -314,11 +450,23 @@ def main() -> int:
         f"sandbox-ok-{run_suffix}".encode("utf-8") in downloaded,
         "Exported attachment content did not match expected Sandbox file output.",
     )
+    actual_sha256 = hashlib.sha256(downloaded).hexdigest()
+    require(len(actual_sha256) == 64, "Invalid SHA-256 digest length.")
+    if att.get("sha256"):
+        require(
+            att["sha256"] == actual_sha256,
+            f"Attachment metadata sha256 {att['sha256']} != downloaded sha256 {actual_sha256}",
+        )
+    if downloaded == expected_content:
+        require(
+            actual_sha256 == expected_sha256,
+            f"Attachment SHA-256 {actual_sha256} != expected {expected_sha256}",
+        )
 
-    if web_search_key:
-        print("[4b/5] Verifying live web_search / web_fetch tool execution...")
+    if web_search_active:
+        print("[4b/5] Scenario 3: Verifying live Tavily web_search / web_fetch tool execution...")
         msg_ws = post_mention(
-            f"Use web_search or web_fetch to look up 'IANA example domain' and reply with WEB-{run_suffix}."
+            f"Use web_search and web_fetch to look up 'IANA example domain' and reply with WEB-{run_suffix} and the cited domain."
         )
         wait_until(
             "Agent web search reply",
@@ -330,12 +478,14 @@ def main() -> int:
                 ),
                 None,
             ),
+            timeout=timeout,
+            poll_interval=poll_interval,
         )
 
-    print("[5/5] Verifying schedule_create self-wakeup and follow-up IM message...")
+    print("[5/5] Scenario 4: Verifying schedule_create (TEAMIE_SCHEDULE_WAKEUP) self-wakeup...")
     msg3 = post_mention(
         f"Create a one-shot schedule 5 seconds from now using schedule_create that wakes you up "
-        f"to send a message containing WAKE-{run_suffix} in this conversation."
+        f"(TEAMIE_SCHEDULE_WAKEUP) to send a follow-up message containing WAKE-{run_suffix} in this conversation."
     )
     wait_until(
         "Agent scheduled wakeup message",
@@ -347,7 +497,8 @@ def main() -> int:
             ),
             None,
         ),
-        timeout=max(TIMEOUT, 90.0),
+        timeout=max(timeout, 90.0) if timeout >= 15.0 else timeout,
+        poll_interval=poll_interval,
     )
 
     print("Live model provider acceptance passed all checks.")

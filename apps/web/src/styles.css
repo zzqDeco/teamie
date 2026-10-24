@@ -5610,6 +5610,12 @@ label > .copy-input {
   color: var(--text-strong);
   border-color: var(--border-strong);
 }
+.message-body .markdown-code-copy:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  color: var(--text-strong);
+  border-color: var(--brand);
+}
 .message-body .markdown-code-copy.copied {
   color: var(--success-text);
   border-color: var(--mint-border);

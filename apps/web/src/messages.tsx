@@ -6,34 +6,21 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import type { FormEvent, KeyboardEvent } from "react";
-import {
-  ArrowDown,
-  ArrowLeft,
-  ArrowUp,
-  Hash,
-  LoaderCircle,
-  MessageCircle,
-  RefreshCw,
-  Search,
-  Users,
-} from "lucide-react";
-import { api, defaultAttachmentLimits } from "@teamie/api-client";
+import { ArrowDown, ArrowUp, LoaderCircle } from "lucide-react";
+import { defaultAttachmentLimits } from "@teamie/api-client";
 import type {
   Conversation,
   Member,
-  Mention,
   Message,
 } from "@teamie/api-client";
 import { useAttachmentDraft } from "./attachments";
 import { useAuth } from "./auth";
-import { errorText, sendMessage, useChat, useChatState } from "./chat";
+import { errorText, useChat, useChatState } from "./chat";
 import { chatStore, reconcileMessages } from "./store";
 import type { LocalMessage } from "./store";
-import { isComposingKey, trimMentionDraft } from "./mentions";
 import { MessageBody } from "./markdown";
 export { MessageBody };
-import { Button, IconButton, Modal, Notice } from "./ui";
+import { Notice } from "./ui";
 import { ConversationSearch } from "./conversation-search";
 import { ICON } from "./icons";
 import {
@@ -41,13 +28,27 @@ import {
   conversationName,
   extendHistoryBoundary,
   readComposerDraft,
-  sameMentions,
+  runFetchLatest,
+  runLoadContext,
+  runLoadNewer,
+  runLoadOlder,
+  runLoadUnreadContext,
   subscribeDrafts,
+  useComposerReply,
+  useConversationScrollEffect,
+  useReadWatermarks,
   writeComposerDraft,
 } from "./composer-drafts";
 import type { ComposerDraft } from "./composer-drafts";
 export { clearComposerDrafts, conversationName, extendHistoryBoundary };
-import { MessageItem } from "./message-item";
+import {
+  ConversationBanners,
+  ConversationEmptyStart,
+  ConversationHeader,
+  MessageItem,
+  RetractMessageModal,
+  useMessageActions,
+} from "./message-item";
 import { MessageComposer } from "./message-composer";
 
 export function ConversationView({
@@ -84,9 +85,6 @@ export function ConversationView({
     conversation.readSeq,
     snapshot.conversations[conversation.id]?.readSeq ?? 0,
   );
-  // Freeze what was unread when the view opened so acknowledging messages does
-  // not erase the divider mid-read. Wait for the bootstrap response: a reload
-  // can mount the view from a persisted snapshot with stale cursors.
   const authoritative = data
     ? data.conversations.find((c) => c.id === conversation.id) || conversation
     : undefined;
@@ -100,17 +98,10 @@ export function ConversationView({
       lastSeq: Math.max(authoritative.lastSeq, conversation.lastSeq),
     };
     setEntry(frozen);
-    setAnchorPending(
-      !initialMessageId && frozen.lastSeq > frozen.readSeq,
-    );
+    setAnchorPending(!initialMessageId && frozen.lastSeq > frozen.readSeq);
   }
   const [latestLoaded, setLatestLoaded] = useState(false);
-  // Sequences whose rows were actually visible after scrolling settled. Reads
-  // only advance through a gap-free run of these after the current cursor.
-  const seenRows = useRef(new Set<number>());
-  const [readCandidate, setReadCandidate] = useState(0);
   const [unreadContext, setUnreadContext] = useState(false);
-  const editPending = useRef(false);
   const fetchedLatest = useRef(false);
   const [located, setLocated] = useState<LocalMessage[] | null>(null);
   const [resolvedTargets, setResolvedTargets] = useState<
@@ -145,13 +136,29 @@ export function ConversationView({
       ...patch,
     });
   }
-  const [editMentions, setEditMentions] = useState<Mention[]>([]);
   const mentionMembers = members.filter((member) =>
     conversation.memberIds.includes(member.userId),
   );
   const mentionsEnabled = !!data?.capabilities["im.message.mentions"];
   const name = conversationName(conversation, user!.id, members);
-  const [actionMessageId, setActionMessageId] = useState("");
+  const {
+    actionMessageId,
+    setActionMessageId,
+    editing,
+    setEditing,
+    editBody,
+    setEditBody,
+    editMentions,
+    setEditMentions,
+    retracting,
+    actionBusy,
+    actionError,
+    startEdit,
+    edit,
+    retract,
+    closeRetract,
+    requestRetract,
+  } = useMessageActions(conversation.id);
   const [loading, setLoading] = useState(
       () =>
         !(chatStore.getSnapshot().messages[conversation.id] || []).some(
@@ -162,147 +169,58 @@ export function ConversationView({
     [loadingOlder, setLoadingOlder] = useState(false),
     [loadingNewer, setLoadingNewer] = useState(false),
     [error, setError] = useState("");
-  const [editing, setEditing] = useState<Message | null>(null),
-    [editBody, setEditBody] = useState("");
-  const [retracting, setRetracting] = useState<Message | null>(null),
-    [actionBusy, setActionBusy] = useState(false),
-    [actionError, setActionError] = useState("");
   const [atBottom, setAtBottom] = useState(true),
     [visible, setVisible] = useState(document.visibilityState === "visible");
   const scrollRef = useRef<HTMLDivElement>(null),
     inputRef = useRef<HTMLTextAreaElement>(null),
     initialScroll = useRef(true),
-    lastRead = useRef(readSeq),
-    lastTyping = useRef(0);
-  const generation = chatStore.generation;
+    lastRead = useRef(readSeq);
   const userId = user!.id;
   const canReadConversation =
     snapshot.userId === userId && !!snapshot.conversations[conversation.id];
-  const cachedReply = reconcileMessages(
-    [],
-    [...allMessages, ...(located || [])].filter(
-      (message) =>
-        message.conversationId === conversation.id && message.id === replyToId,
-    ),
-  )[0];
-  const replyKey = JSON.stringify([
-    generation,
-    conversation.id,
+  const { reply, replyError } = useComposerReply({
+    conversationId: conversation.id,
     initialMessageId,
     replyToId,
-  ]);
-  const [resolvedComposerReply, setResolvedComposerReply] = useState<{
-    key: string;
-    signal: AbortSignal;
-    message?: Message;
-    error?: string;
-  } | null>(null);
-  const resolvedReply =
-    resolvedComposerReply?.key === replyKey && !resolvedComposerReply.signal.aborted
-      ? resolvedComposerReply
-      : null;
-  // Reply-only reads stay local; current sync versions always win over an
-  // older context or a delayed single-message response.
-  const reply = canReadConversation && replyToId
-    ? reconcileMessages(
-        resolvedReply?.message ? [resolvedReply.message] : [],
-        cachedReply ? [cachedReply] : [],
-      )[0]
-    : undefined;
-  useEffect(() => {
-    if (!canReadConversation || !replyToId) return;
-    // One read belongs to the selected reply's lifetime. A cache arrival or a
-    // same-account profile refresh must not discard an accepted newer version.
-    const controller = new AbortController();
-    const current = () =>
-      !controller.signal.aborted &&
-      generation === chatStore.generation &&
-      chatStore.getSnapshot().userId === userId &&
-      !!chatStore.getSnapshot().conversations[conversation.id] &&
-      readComposerDraft(conversation.id).replyToId === replyToId;
-    void api
-      .message(conversation.id, replyToId, controller.signal)
-      .then(({ message }) => {
-        if (current())
-          setResolvedComposerReply({ key: replyKey, signal: controller.signal, message });
-      })
-      .catch((error: unknown) => {
-        if (!current()) return;
-        if (error instanceof Error && "status" in error && error.status === 404) {
-          writeComposerDraft(conversation.id, {
-            ...readComposerDraft(conversation.id),
-            replyToId: "",
-          });
-          return;
-        }
-        setResolvedComposerReply({
-          key: replyKey,
-          signal: controller.signal,
-          error: "原消息暂时无法加载",
-        });
-      });
-    return () => controller.abort();
-  }, [
-    canReadConversation,
-    conversation.id,
-    generation,
-    replyKey,
-    replyToId,
     userId,
-  ]);
+    canReadConversation,
+    allMessages,
+    located,
+  });
+
   useEffect(
     () => () => {
       navigation.current++;
     },
     [conversation.id],
   );
-  const fetchLatest = useCallback(async () => {
-    const token = chatStore.generation;
-    const operation = ++navigation.current;
-    const hasConfirmed = (
-      chatStore.getSnapshot().messages[conversation.id] || []
-    ).some((m) => !m.status);
-    if (fetchedLatest.current) {
-      const current = chatStore.getSnapshot().conversations[conversation.id];
-      if (current) {
-        setEntry({ readSeq: current.readSeq, lastSeq: current.lastSeq });
-        setAnchorPending(
-          current.lastSeq > current.readSeq,
-        );
-      }
-    }
-    fetchedLatest.current = true;
-    acknowledgement.current = null;
-    historyBefore.current = null;
-    setHasMore(false);
-    setLocated(null);
-    setUnreadContext(false);
-    setHighlightId("");
-    setLocating(false);
-    setLoadingOlder(false);
-    setLoadingNewer(false);
-    initialScroll.current = true;
-    setAtBottom(true);
-    setLoading(!hasConfirmed);
-    setError("");
-    try {
-      const page = await api.messages(conversation.id);
-      if (token !== chatStore.generation || operation !== navigation.current)
-        return;
-      historyBefore.current = page.messages[0]
-        ? { seq: page.messages[0].seq, generation: token }
-        : null;
-      chatStore.merge(page.messages);
-      setHasMore(page.hasMore);
-      setLatestLoaded(true);
-    } catch (e) {
-      if (token === chatStore.generation && operation === navigation.current)
-        setError(errorText(e));
-    } finally {
-      if (token === chatStore.generation && operation === navigation.current)
-        setLoading(false);
-    }
-  }, [conversation.id]);
+  const fetchLatest = useCallback(
+    () =>
+      runFetchLatest({
+        conversationId: conversation.id,
+        fetchedLatest,
+        navigation,
+        acknowledgement,
+        historyBefore,
+        initialScroll,
+        setEntry,
+        setAnchorPending,
+        setHasMore,
+        setLocated,
+        setUnreadContext,
+        setHighlightId,
+        setLocating,
+        setLoadingOlder,
+        setLoadingNewer,
+        setAtBottom,
+        setLoading,
+        setError,
+        setLatestLoaded,
+        formatError: errorText,
+      }),
+    [conversation.id],
+  );
+
   const focusMessage = useCallback((id: string) => {
     const target = document.getElementById(`message-${id}`);
     if (
@@ -319,178 +237,63 @@ export function ConversationView({
     });
     target.focus({ preventScroll: true });
   }, []);
+
   useLayoutEffect(() => {
     if (highlightId) focusMessage(highlightId);
   }, [highlightId, focusMessage, visible, membersOpen]);
-  useLayoutEffect(() => {
-    const pending = acknowledgement.current;
-    if (
-      !visible ||
-      !pending ||
-      pending.id !== highlightId ||
-      pending.generation !== chatStore.generation ||
-      pending.operation !== navigation.current
-    )
-      return;
-    const target = document.getElementById(`message-${pending.id}`);
-    if (
-      !target ||
-      !scrollRef.current?.contains(target) ||
-      target.closest("[inert]")
-    )
-      return;
-    acknowledgement.current = null;
-    if (
-      messages.some(
-        (message) => message.id === pending.id && message.retractedAt,
-      ) ||
-      chatStore
-        .getSnapshot()
-        .messages[
-          conversation.id
-        ]?.some((message) => message.id === pending.id && message.retractedAt)
-    )
-      return;
-    void api
-      .read(conversation.id, pending.seq)
-      .then((result) => {
-        if (
-          pending.generation === chatStore.generation &&
-          pending.operation === navigation.current
-        ) {
-          lastRead.current = Math.max(lastRead.current, result.readSeq);
-          chatStore.markRead(conversation.id, result.readSeq);
-        }
-      })
-      .catch(() => {
-        if (
-          pending.generation === chatStore.generation &&
-          pending.operation === navigation.current
-        )
-          setError("已读状态暂未同步");
-      });
-  }, [
-    highlightId,
-    located,
-    visible,
-    conversation.id,
-    membersOpen,
-    messages,
-  ]);
+
   const loadContext = useCallback(
-    async (id: string, readOnDisplay = false) => {
-      const token = chatStore.generation;
-      const operation = ++navigation.current;
-      const current = () =>
-        token === chatStore.generation && operation === navigation.current;
-      setAtBottom(false);
-      setLoading(false);
-      setLoadingOlder(false);
-      setLoadingNewer(false);
-      setLocating(true);
-      acknowledgement.current = null;
-      historyBefore.current = null;
-      setHasMore(false);
-      initialScroll.current = false;
-      setError("");
-      try {
-        const target = await api.message(conversation.id, id);
-        if (!current()) return;
-        setResolvedTargets((old) => ({
-          ...old,
-          [target.message.id]: old[target.message.id]
-            ? reconcileMessages([old[target.message.id]], [target.message])[0]
-            : target.message,
-        }));
-        const page = await api.messagesAround(
-          conversation.id,
-          target.message.seq,
-        );
-        if (!current()) return;
-        const currentTarget = chatStore
-          .getSnapshot()
-          .messages[conversation.id]?.find((message) => message.id === id);
-        const context = reconcileMessages(page.messages, [
-          target.message,
-          ...(currentTarget ? [currentTarget] : []),
-        ]);
-        const resolved =
-          context.find((m) => m.id === target.message.id) || target.message;
-        setResolvedTargets((old) => ({
-          ...old,
-          [resolved.id]: old[resolved.id]
-            ? reconcileMessages([old[resolved.id]], [resolved])[0]
-            : resolved,
-        }));
-        if (readOnDisplay && !resolved.retractedAt)
-          acknowledgement.current = {
-            id,
-            seq: resolved.seq,
-            generation: token,
-            operation,
-          };
-        setLocated(context);
-        setUnreadContext(false);
-        historyBefore.current = context[0]
-          ? { seq: context[0].seq, generation: token }
-          : null;
-        setHasMore((historyBefore.current?.seq ?? 1) > 1);
-        setHighlightId(id);
-      } catch (e) {
-        if (current())
-          setError(
-            e instanceof Error && "status" in e && e.status === 404
-              ? "原消息已不可访问"
-              : errorText(e),
-          );
-      } finally {
-        if (current()) setLocating(false);
-      }
-    },
+    (id: string, readOnDisplay = false) =>
+      runLoadContext({
+        conversationId: conversation.id,
+        id,
+        readOnDisplay,
+        navigation,
+        acknowledgement,
+        historyBefore,
+        setAtBottom,
+        setLoading,
+        setLoadingOlder,
+        setLoadingNewer,
+        setLocating,
+        setHasMore,
+        initialScroll,
+        setError,
+        setResolvedTargets,
+        setLocated,
+        setUnreadContext,
+        setHighlightId,
+        formatError: errorText,
+      }),
     [conversation.id],
   );
-  const loadUnreadContext = useCallback(async () => {
-    const seq = readSeq + 1;
-    const token = chatStore.generation;
-    const operation = ++navigation.current;
-    const current = () =>
-      token === chatStore.generation && operation === navigation.current;
-    setAnchorPending(false);
-    setAtBottom(false);
-    setLoading(false);
-    setLoadingOlder(false);
-    setLoadingNewer(false);
-    setLocating(true);
-    acknowledgement.current = null;
-    historyBefore.current = null;
-    setHasMore(false);
-    initialScroll.current = false;
-    setError("");
-    try {
-      const page = await api.messagesAround(conversation.id, seq);
-      if (!current()) return;
-      const context = reconcileMessages(
-        page.messages,
-        (chatStore.getSnapshot().messages[conversation.id] || []).filter(
-          (message) => page.messages.some((m) => m.id === message.id),
-        ),
-      );
-      setLocated(context);
-      setUnreadContext(true);
-      historyBefore.current = context[0]
-        ? { seq: context[0].seq, generation: token }
-        : null;
-      setHasMore((historyBefore.current?.seq ?? 1) > 1);
-      const target = context.find((m) => !m.status && m.seq >= seq);
-      if (target) setHighlightId(target.id);
-    } catch (e) {
-      if (current()) setError(errorText(e));
-    } finally {
-      if (current()) setLocating(false);
-    }
-  }, [conversation.id, readSeq]);
+
+  const loadUnreadContext = useCallback(
+    () =>
+      runLoadUnreadContext({
+        conversationId: conversation.id,
+        readSeq,
+        navigation,
+        acknowledgement,
+        historyBefore,
+        setAnchorPending,
+        setAtBottom,
+        setLoading,
+        setLoadingOlder,
+        setLoadingNewer,
+        setLocating,
+        setHasMore,
+        initialScroll,
+        setError,
+        setLocated,
+        setUnreadContext,
+        setHighlightId,
+        formatError: errorText,
+      }),
+    [conversation.id, readSeq],
+  );
+
   function returnToLatest() {
-    // Leaving the initial deep link can be the first latest-page fetch.
     const current = chatStore.getSnapshot().conversations[conversation.id];
     if (current) {
       setEntry({ readSeq: current.readSeq, lastSeq: current.lastSeq });
@@ -499,6 +302,7 @@ export function ConversationView({
     if (initialMessageId && onClearMessageTarget) onClearMessageTarget();
     else void fetchLatest();
   }
+
   async function locate(id: string) {
     if (!messages.some((message) => message.id === id)) return loadContext(id);
     navigation.current++;
@@ -518,34 +322,12 @@ export function ConversationView({
       );
     }
   }
+
   useEffect(() => {
     if (initialMessageId) void loadContext(initialMessageId, true);
     else void fetchLatest();
-    return () => {
-      lastTyping.current = 0;
-      sendTyping(conversation.id, false);
-    };
-  }, [fetchLatest, loadContext, initialMessageId, sendTyping, conversation.id]);
-  useEffect(() => {
-    const change = () => setVisible(document.visibilityState === "visible");
-    document.addEventListener("visibilitychange", change);
-    return () => document.removeEventListener("visibilitychange", change);
-  }, []);
-  useEffect(() => {
-    const input = inputRef.current;
-    if (!input) return;
-    input.style.height = "auto";
-    input.style.height = `${input.scrollHeight}px`;
-  }, [body]);
-  useEffect(() => {
-    const scroll = scrollRef.current;
-    if (!scroll || !atBottom || located || locating) return;
-    const observer = new ResizeObserver(() => {
-      scroll.scrollTop = scroll.scrollHeight;
-    });
-    observer.observe(scroll);
-    return () => observer.disconnect();
-  }, [atBottom, located, locating]);
+  }, [fetchLatest, loadContext, initialMessageId]);
+
   const latest = messages.filter((m) => !m.status).at(-1)?.seq || 0;
   const tailId = messages.at(-1)?.id;
   const firstUnread =
@@ -559,8 +341,6 @@ export function ConversationView({
         )?.id
       : undefined;
   const nextUnreadSeq = readSeq + 1;
-  // A real gap: the next unread sequence is not loaded, yet later rows are.
-  // Isolated cached rows (e.g. a synced old edit) do not hide the gap.
   const unreadBeforeWindow =
     latestLoaded &&
     !located &&
@@ -568,74 +348,27 @@ export function ConversationView({
     conversation.lastSeq > readSeq &&
     !messages.some((m) => !m.status && m.seq === nextUnreadSeq) &&
     messages.some((m) => !m.status && m.seq > nextUnreadSeq);
-  const ackState = useRef({ allowed: true, blocked: false });
-  useEffect(() => {
-    ackState.current = {
-      allowed: !located || unreadContext,
-      blocked: searchOpen || !visible || loading,
-    };
-  }, [located, unreadContext, searchOpen, visible, loading]);
-  const dwell = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const readFailures = useRef(0);
-  // Record rows that are visible once scrolling has settled; programmatic or
-  // smooth scrolls keep rescheduling this, so transit frames never count.
-  const scheduleSeen = useCallback(() => {
-    clearTimeout(dwell.current);
-    dwell.current = setTimeout(() => {
-      const el = scrollRef.current;
-      if (!el || !ackState.current.allowed || ackState.current.blocked) return;
-      const root = el.getBoundingClientRect();
-      for (const row of el.querySelectorAll<HTMLElement>("article[data-seq]")) {
-        const rect = row.getBoundingClientRect();
-        const inside = rect.top >= root.top - 1 && rect.bottom <= root.bottom + 1;
-        const visibleHeight =
-          Math.min(rect.bottom, root.bottom) - Math.max(rect.top, root.top);
-        const tallAndCovering =
-          rect.height > root.height * 0.8 &&
-          visibleHeight >= root.height * 0.5 &&
-          visibleHeight > 0;
-        if (inside || tallAndCovering || row.dataset.own === "true")
-          seenRows.current.add(Number(row.dataset.seq));
-      }
-      const base =
-        chatStore.getSnapshot().conversations[conversation.id]?.readSeq ?? 0;
-      let end = base;
-      while (seenRows.current.has(end + 1)) end++;
-      setReadCandidate(end);
-    }, 400);
-  }, [conversation.id]);
-  useEffect(() => () => clearTimeout(dwell.current), []);
-  const lastTailId = useRef<string | undefined>(undefined);
-  useEffect(() => {
-    if (loading) return;
-    const el = scrollRef.current;
-    const tailChanged = tailId !== lastTailId.current;
-    lastTailId.current = tailId;
-    if (anchorPending && !located) {
-      const anchor = firstUnread
-        ? document.getElementById(`message-${firstUnread}`)
-        : null;
-      if (el && anchor && el.contains(anchor)) {
-        setAnchorPending(false);
-        initialScroll.current = false;
-        el.scrollTop +=
-          anchor.getBoundingClientRect().top -
-          el.getBoundingClientRect().top -
-          56;
-        setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
-        scheduleSeen();
-        return;
-      }
-      if (latestLoaded) setAnchorPending(false);
-      // Keep the current position until the latest page can be anchored.
-      else return;
-    }
-    if (!located && !locating && (initialScroll.current || (atBottom && tailChanged))) {
-      el?.scrollTo({ top: el.scrollHeight });
-      initialScroll.current = false;
-    }
-    scheduleSeen();
-  }, [
+
+  const { scheduleSeen, resetReadFailures, markLatestRead } = useReadWatermarks({
+    conversationId: conversation.id,
+    readSeq,
+    latest,
+    located,
+    unreadContext,
+    searchOpen,
+    visible,
+    loading,
+    membersOpen,
+    highlightId,
+    messages,
+    scrollRef,
+    navigationRef: navigation,
+    acknowledgementRef: acknowledgement,
+    lastReadRef: lastRead,
+    onError: setError,
+  });
+
+  useConversationScrollEffect({
     loading,
     tailId,
     atBottom,
@@ -647,271 +380,48 @@ export function ConversationView({
     visible,
     searchOpen,
     readSeq,
+    scrollRef,
+    initialScroll,
+    setAnchorPending,
+    setAtBottom,
+    setVisible,
     scheduleSeen,
-  ]);
-  useEffect(() => {
-    // Previously viewed rows can extend beyond this paged context. Acknowledge
-    // the visible window's contiguous prefix instead of stalling behind it.
-    const nextRead = Math.min(readCandidate, latest);
-    if (
-      !nextRead ||
-      nextRead <= Math.max(lastRead.current, readSeq) ||
-      generation !== chatStore.generation
-    )
-      return;
-    void api
-      .read(conversation.id, nextRead)
-      .then((result) => {
-        if (generation === chatStore.generation) {
-          readFailures.current = 0;
-          lastRead.current = Math.max(lastRead.current, result.readSeq);
-          chatStore.markRead(conversation.id, result.readSeq);
-        }
-      })
-      .catch(() => {
-        if (generation === chatStore.generation) {
-          setReadCandidate(0);
-          if (readFailures.current < 1) {
-            readFailures.current++;
-            scheduleSeen();
-          }
-        }
-      });
-  }, [
-    readCandidate,
-    latest,
-    conversation.id,
-    readSeq,
-    generation,
-    scheduleSeen,
-  ]);
-  // Explicit user choice to acknowledge skipped history through the latest
-  // loaded message; never triggered implicitly.
-  function markLatestRead() {
-    if (!latest || latest <= readSeq) return;
-    const token = chatStore.generation;
-    void api
-      .read(conversation.id, latest)
-      .then((result) => {
-        if (token === chatStore.generation) {
-          lastRead.current = Math.max(lastRead.current, result.readSeq);
-          chatStore.markRead(conversation.id, result.readSeq);
-        }
-      })
-      .catch((e) => {
-        if (token === chatStore.generation) setError(errorText(e));
-      });
-  }
-  async function older() {
-    const boundary = historyBefore.current;
-    if (!boundary || boundary.generation !== chatStore.generation || loadingOlder)
-      return;
-    // Sync can insert an isolated old edit into a trimmed cache. Only visible,
-    // contiguous history can extend the boundary of a completed history page.
-    const first = extendHistoryBoundary(boundary.seq, messages);
-    const token = chatStore.generation;
-    const operation = navigation.current;
-    const height = scrollRef.current?.scrollHeight || 0;
-    setLoadingOlder(true);
-    setError("");
-    try {
-      const page = await api.messages(conversation.id, first);
-      if (token !== chatStore.generation || operation !== navigation.current)
-        return;
-      historyBefore.current = page.messages[0]
-        ? { seq: page.messages[0].seq, generation: token }
-        : null;
-      if (located)
-        setLocated((old) =>
-          old ? reconcileMessages(old, page.messages) : old,
-        );
-      else chatStore.merge(page.messages);
-      setHasMore(page.hasMore);
-      requestAnimationFrame(() => {
-        if (
-          token === chatStore.generation &&
-          operation === navigation.current &&
-          scrollRef.current
-        )
-          scrollRef.current.scrollTop +=
-            scrollRef.current.scrollHeight - height;
-      });
-    } catch (e) {
-      if (token === chatStore.generation && operation === navigation.current)
-        setError(errorText(e));
-    } finally {
-      if (token === chatStore.generation && operation === navigation.current)
-        setLoadingOlder(false);
-    }
-  }
-  async function newer() {
-    if (!located || !unreadContext || loadingNewer || loadingOlder || locating)
-      return;
-    const token = chatStore.generation;
-    const operation = navigation.current;
-    const current = () =>
-      token === chatStore.generation && operation === navigation.current &&
-      !!chatStore.getSnapshot().conversations[conversation.id];
-    setLoadingNewer(true);
-    setError("");
-    try {
-      // The existing centered history API includes the next contiguous rows.
-      // Merge the overlap; fetching a page does not acknowledge its contents.
-      const page = await api.messagesAround(conversation.id, latest + 1);
-      if (!current()) return;
-      if (!page.messages.some((message) => message.seq > latest)) {
-        setError("后续消息暂未加载，请重试");
-        return;
-      }
-      setLocated((old) => old ? reconcileMessages(old, page.messages) : old);
-    } catch (e) {
-      if (current()) setError(errorText(e));
-    } finally {
-      if (current()) setLoadingNewer(false);
-    }
-  }
-  function submit(event?: FormEvent) {
-    event?.preventDefault();
-    const draft = trimMentionDraft(body, mentions);
-    const text = draft.body;
-    if (
-      (!text && !attachments.ready) ||
-      text.length > 8000 ||
-      attachmentBlocked
-    )
-      return;
-    const files = attachments.consume();
-    const clientMessageId = crypto.randomUUID();
-    const message: Message = {
-      id: `local:${clientMessageId}`,
-      clientMessageId,
+  });
+
+  const older = () =>
+    runLoadOlder({
       conversationId: conversation.id,
-      body: text,
-      ...(draft.mentions.length ? { mentions: draft.mentions } : {}),
-      ...(files.length ? { attachments: files } : {}),
-      senderId: user!.id,
-      senderName: user!.displayName,
-      senderKind: user!.kind,
-      seq: Number.MAX_SAFE_INTEGER,
-      createdAt: new Date().toISOString(),
-      ...(replyToId ? { replyToId } : {}),
-    };
-    void sendMessage(message, chatStore.generation);
-    writeComposerDraft(conversation.id, {
-      body: "",
-      mentions: [],
-      replyToId: "",
+      messages,
+      located,
+      loadingOlder,
+      historyBefore,
+      navigation,
+      scrollRef,
+      setLoadingOlder,
+      setError,
+      setLocated,
+      setHasMore,
+      formatError: errorText,
     });
-    if (located) returnToLatest();
-    setAtBottom(true);
-    lastTyping.current = 0;
-    sendTyping(conversation.id, false);
-    inputRef.current?.focus();
-  }
+
+  const newer = () =>
+    runLoadNewer({
+      conversationId: conversation.id,
+      latest,
+      located,
+      unreadContext,
+      loadingNewer,
+      loadingOlder,
+      locating,
+      navigation,
+      setLoadingNewer,
+      setError,
+      setLocated,
+      formatError: errorText,
+    });
+
   const canEdit = !!data?.capabilities["im.message.edit"];
   const canRetract = !!data?.capabilities["im.message.retract"];
-  function startEdit(message: Message) {
-    setActionMessageId("");
-    setEditing(message);
-    setEditBody(message.body);
-    setEditMentions(message.mentions || []);
-    setActionError("");
-  }
-  function keyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (isComposingKey(event)) return;
-    if (
-      event.key === "ArrowUp" &&
-      !event.shiftKey &&
-      !event.altKey &&
-      !event.metaKey &&
-      !event.ctrlKey &&
-      !body &&
-      !editing &&
-      !replyToId &&
-      attachments.files.length === 0 &&
-      !located &&
-      latestLoaded &&
-      latest >= conversation.lastSeq &&
-      canEdit
-    ) {
-      const contiguousFrom = latest
-        ? extendHistoryBoundary(latest, messages)
-        : Infinity;
-      const own = [...messages]
-        .reverse()
-        .find(
-          (m) =>
-            m.senderId === userId &&
-            !m.status &&
-            m.seq >= contiguousFrom &&
-            !m.retractedAt &&
-            (m.body || m.attachments?.length),
-        );
-      if (own) {
-        event.preventDefault();
-        startEdit(own);
-      }
-      return;
-    }
-    if (
-      !window.matchMedia("(pointer: coarse)").matches &&
-      event.key === "Enter" &&
-      !event.shiftKey
-    ) {
-      event.preventDefault();
-      submit();
-    }
-  }
-  async function edit(event: FormEvent) {
-    event.preventDefault();
-    if (editPending.current) return;
-    if (!editing || (!editBody.trim() && !editing.attachments?.length)) return;
-    const draft = trimMentionDraft(editBody, editMentions);
-    if (
-      draft.body === editing.body &&
-      sameMentions(draft.mentions, editing.mentions || [])
-    ) {
-      setEditing(null);
-      return;
-    }
-    const token = chatStore.generation;
-    editPending.current = true;
-    setActionBusy(true);
-    setActionError("");
-    try {
-      const result = await api.edit(
-        conversation.id,
-        editing.id,
-        draft.body,
-        draft.mentions,
-      );
-      if (token !== chatStore.generation) return;
-      chatStore.merge([result.message]);
-      setEditing(null);
-    } catch (e) {
-      if (token === chatStore.generation) setActionError(errorText(e));
-    } finally {
-      editPending.current = false;
-      setActionBusy(false);
-    }
-  }
-  async function retract() {
-    if (!retracting) return;
-    const token = chatStore.generation;
-    setActionBusy(true);
-    setActionError("");
-    try {
-      const result = await api.retract(conversation.id, retracting.id);
-      if (token !== chatStore.generation) return;
-      chatStore.merge([result.message]);
-      setRetracting(null);
-    } catch (e) {
-      if (token === chatStore.generation) setActionError(errorText(e));
-    } finally {
-      setActionBusy(false);
-    }
-  }
-  const closeRetract = useCallback(() => setRetracting(null), [setRetracting]);
   const otherTyping = typing[conversation.id] || [];
   const rovingMessageId =
     (focusedMessageId && messages.some((m) => m.id === focusedMessageId)
@@ -922,6 +432,7 @@ export function ConversationView({
       : undefined) ||
     messages.at(-1)?.id ||
     "";
+
   return (
     <section
       className="conversation-view"
@@ -929,50 +440,14 @@ export function ConversationView({
         if (event.key === "Escape") setActionMessageId("");
       }}
     >
-      <header className="conversation-header">
-        <IconButton
-          label="打开对话列表"
-          className="mobile-menu"
-          onClick={onMenu}
-        >
-          <ArrowLeft size={ICON.lg} />
-        </IconButton>
-        <span className="conversation-symbol">
-          {conversation.type === "channel" ? (
-            <Hash size={ICON.xl} />
-          ) : conversation.type === "group" ? (
-            <Users size={ICON.lg} />
-          ) : (
-            <MessageCircle size={ICON.lg} />
-          )}
-        </span>
-        <div>
-          <h1>{name}</h1>
-          <span>
-            {conversation.type === "channel"
-              ? "团队频道"
-              : conversation.type === "direct"
-                ? "私信"
-                : "小组对话"}
-          </span>
-        </div>
-        <div className="conversation-header-actions">
-          <IconButton
-            label="搜索会话"
-            onClick={() => setSearchOpen(true)}
-            aria-haspopup="dialog"
-          >
-            <Search size={ICON.lg} />
-          </IconButton>
-          <IconButton
-            label="查看会话成员"
-            onClick={onMembers}
-            aria-expanded={membersOpen}
-          >
-            <Users size={ICON.lg} />
-          </IconButton>
-        </div>
-      </header>
+      <ConversationHeader
+        conversation={conversation}
+        name={name}
+        membersOpen={membersOpen}
+        onMenu={onMenu}
+        onSearchOpen={() => setSearchOpen(true)}
+        onMembers={onMembers}
+      />
       {searchOpen && (
         <ConversationSearch
           key={`${user!.id}:${conversation.id}`}
@@ -992,36 +467,17 @@ export function ConversationView({
           }}
         />
       )}
-      {syncError && (
-        <div className="sync-banner" role="status">
-          <RefreshCw size={ICON.xs} />
-          <span>{syncError}</span>
-          <button onClick={sync}>立即重试</button>
-        </div>
-      )}
-      {(located || locating) && (
-        <div className="located-banner" role="status">
-          <span>{locating ? "正在定位消息…" : "消息上下文"}</span>
-          <button onClick={returnToLatest}>返回最新消息</button>
-        </div>
-      )}
-      {unreadBeforeWindow && (
-        <div className="unread-jump-banner" role="status">
-          <span>
-            {conversation.lastSeq - readSeq > 99
-              ? "99+"
-              : conversation.lastSeq - readSeq}{" "}
-            条新消息，部分在更早的位置
-          </span>
-          <span className="unread-jump-actions">
-            <button onClick={() => void loadUnreadContext()}>
-              <ArrowUp size={ICON.xs} />
-              跳到第一条未读
-            </button>
-            <button onClick={markLatestRead}>全部标为已读</button>
-          </span>
-        </div>
-      )}
+      <ConversationBanners
+        syncError={syncError}
+        onSync={sync}
+        located={!!located}
+        locating={locating}
+        onReturnToLatest={returnToLatest}
+        unreadBeforeWindow={unreadBeforeWindow}
+        unreadCount={conversation.lastSeq - readSeq}
+        onJumpFirstUnread={() => void loadUnreadContext()}
+        onMarkLatestRead={markLatestRead}
+      />
       <div
         className="message-scroll"
         ref={scrollRef}
@@ -1030,38 +486,17 @@ export function ConversationView({
           setAtBottom(
             !located && el.scrollHeight - el.scrollTop - el.clientHeight < 80,
           );
-          readFailures.current = 0;
+          resetReadFailures();
           scheduleSeen();
         }}
       >
         {!loading && !messages.length && !error && (
-          <div className="conversation-start">
-            <span
-              className={`conversation-start-icon ${conversation.type === "channel" ? "" : "mint"}`}
-            >
-              {conversation.type === "channel" ? (
-                <Hash size={ICON.xl} />
-              ) : (
-                <MessageCircle size={ICON.xl} />
-              )}
-            </span>
-            <h2>
-              {conversation.type === "channel"
-                ? `欢迎来到 # ${name}`
-                : `你好，${name}`}
-            </h2>
-            <p>还没有消息，打个招呼吧。</p>
-            {conversation.type === "channel" &&
-              (isWorkspaceOwner && onInvite ? (
-                <Button className="secondary small-button" onClick={onInvite}>
-                  邀请成员加入
-                </Button>
-              ) : isWorkspaceOwner === false ? (
-                <span className="conversation-invite-hint">
-                  请联系空间创建者邀请
-                </span>
-              ) : null)}
-          </div>
+          <ConversationEmptyStart
+            conversation={conversation}
+            name={name}
+            isWorkspaceOwner={isWorkspaceOwner}
+            onInvite={onInvite}
+          />
         )}
         {hasMore && (
           <button
@@ -1089,87 +524,49 @@ export function ConversationView({
             <button onClick={fetchLatest}>重新加载</button>
           </div>
         )}
-        {messages.map((message, index) => {
-          const previous = messages[index - 1];
-          const showDate =
-            !previous ||
-            new Date(previous.createdAt).toDateString() !==
-              new Date(message.createdAt).toDateString();
-          const compact =
-            !showDate &&
-            previous?.senderId === message.senderId &&
-            new Date(message.createdAt).getTime() -
-              new Date(previous.createdAt).getTime() <
-              5 * 60_000 &&
-            !message.replyToId &&
-            !previous.retractedAt;
-          const replyCandidates: LocalMessage[] = [];
-          if (message.replyToId) {
-            const cachedTarget = resolvedTargets[message.replyToId];
-            if (cachedTarget && cachedTarget.conversationId === conversation.id)
-              replyCandidates.push(cachedTarget);
-            const storeTarget = allMessages.find(
-              (m) => m.id === message.replyToId,
-            );
-            if (storeTarget) replyCandidates.push(storeTarget);
-            const viewTarget = messages.find((m) => m.id === message.replyToId);
-            if (viewTarget) replyCandidates.push(viewTarget);
-          }
-          const target = replyCandidates.length
-            ? reconcileMessages(
-                [replyCandidates[0]],
-                replyCandidates.slice(1),
-              )[0]
-            : undefined;
-          return (
-            <MessageItem
-              key={message.id}
-              message={message}
-              index={index}
-              messages={messages}
-              conversationId={conversation.id}
-              userId={userId}
-              members={members}
-              mentionMembers={mentionMembers}
-              mentionsEnabled={mentionsEnabled}
-              canEdit={canEdit}
-              canRetract={canRetract}
-              showDate={showDate}
-              compact={compact}
-              firstUnread={firstUnread}
-              entryReadSeq={entry?.readSeq ?? 0}
-              target={target}
-              isRovingTarget={message.id === rovingMessageId}
-              highlightId={highlightId}
-              actionMessageId={actionMessageId}
-              editing={editing}
-              editBody={editBody}
-              editMentions={editMentions}
-              actionBusy={actionBusy}
-              actionError={actionError}
-              inputRef={inputRef}
-              setFocusedMessageId={setFocusedMessageId}
-              setActionMessageId={setActionMessageId}
-              focusMessage={focusMessage}
-              locate={locate}
-              onEditSubmit={edit}
-              setEditBody={setEditBody}
-              setEditMentions={setEditMentions}
-              setEditing={setEditing}
-              startEdit={startEdit}
-              onReply={(id) => {
-                setActionMessageId("");
-                updateComposerDraft({ replyToId: id });
-                inputRef.current?.focus();
-              }}
-              onRetractRequest={(msg) => {
-                setActionMessageId("");
-                setRetracting(msg);
-                setActionError("");
-              }}
-            />
-          );
-        })}
+        {messages.map((message, index) => (
+          <MessageItem
+            key={message.id}
+            message={message}
+            index={index}
+            messages={messages}
+            allMessages={allMessages}
+            resolvedTargets={resolvedTargets}
+            conversationId={conversation.id}
+            userId={userId}
+            members={members}
+            mentionMembers={mentionMembers}
+            mentionsEnabled={mentionsEnabled}
+            canEdit={canEdit}
+            canRetract={canRetract}
+            firstUnread={firstUnread}
+            entryReadSeq={entry?.readSeq ?? 0}
+            isRovingTarget={message.id === rovingMessageId}
+            highlightId={highlightId}
+            actionMessageId={actionMessageId}
+            editing={editing}
+            editBody={editBody}
+            editMentions={editMentions}
+            actionBusy={actionBusy}
+            actionError={actionError}
+            inputRef={inputRef}
+            setFocusedMessageId={setFocusedMessageId}
+            setActionMessageId={setActionMessageId}
+            focusMessage={focusMessage}
+            locate={locate}
+            onEditSubmit={edit}
+            setEditBody={setEditBody}
+            setEditMentions={setEditMentions}
+            setEditing={setEditing}
+            startEdit={startEdit}
+            onReply={(id) => {
+              setActionMessageId("");
+              updateComposerDraft({ replyToId: id });
+              inputRef.current?.focus();
+            }}
+            onRetractRequest={requestRetract}
+          />
+        ))}
         {located && unreadContext && latest < conversation.lastSeq && (
           <button
             className="load-earlier load-later"
@@ -1207,12 +604,13 @@ export function ConversationView({
       )}
       <MessageComposer
         conversation={conversation}
+        user={user!}
         name={name}
         body={body}
         mentions={mentions}
         replyToId={replyToId}
         reply={reply}
-        replyError={resolvedReply?.error}
+        replyError={replyError}
         attachments={attachments}
         attachmentLimits={attachmentLimits}
         uploadsEnabled={uploadsEnabled}
@@ -1221,43 +619,31 @@ export function ConversationView({
         mentionsEnabled={mentionsEnabled}
         otherTyping={otherTyping}
         inputRef={inputRef}
+        editing={editing}
+        located={!!located}
+        latestLoaded={latestLoaded}
+        latest={latest}
+        canEdit={canEdit}
+        messages={messages}
+        sendTyping={sendTyping}
         onChangeDraft={(value, nextMentions) =>
           updateComposerDraft({ body: value, mentions: nextMentions })
         }
         onClearReply={() => updateComposerDraft({ replyToId: "" })}
-        onTypingChange={(value) => {
-          if (!value) {
-            if (lastTyping.current > 0) {
-              lastTyping.current = 0;
-              sendTyping(conversation.id, false);
-            }
-            return;
-          }
-          if (Date.now() - lastTyping.current > 1500) {
-            sendTyping(conversation.id, true);
-            lastTyping.current = Date.now();
-          }
+        onStartEdit={startEdit}
+        onSent={() => {
+          if (located) returnToLatest();
+          setAtBottom(true);
         }}
-        onKeyDown={keyDown}
-        onSubmit={submit}
       />
       {retracting && (
-        <Modal
-          title="撤回这条消息？"
-          subtitle="撤回后，所有人都会看到一条撤回提示。"
+        <RetractMessageModal
+          retracting={retracting}
+          actionError={actionError}
+          actionBusy={actionBusy}
           onClose={closeRetract}
-        >
-          <blockquote className="retract-quote">{retracting.body}</blockquote>
-          <Notice>{actionError}</Notice>
-          <div className="modal-actions">
-            <Button className="secondary" onClick={closeRetract}>
-              保留消息
-            </Button>
-            <Button className="danger" busy={actionBusy} onClick={retract}>
-              确认撤回
-            </Button>
-          </div>
-        </Modal>
+          onConfirm={() => void retract()}
+        />
       )}
     </section>
   );

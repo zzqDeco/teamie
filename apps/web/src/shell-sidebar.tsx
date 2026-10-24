@@ -1,7 +1,14 @@
+import { useEffect, useRef } from "react";
 import type { RefObject } from "react";
 import { Link } from "react-router-dom";
 import { Bell, Bot, ChevronDown, Hash, Plus, Users, X } from "lucide-react";
-import type { Conversation, Member, User, Workspace } from "@teamie/api-client";
+import type {
+  AttentionItem,
+  Conversation,
+  Member,
+  User,
+  Workspace,
+} from "@teamie/api-client";
 import { useAuth } from "./auth";
 import type { Connection } from "./chat";
 import { AccountMenu } from "./account-menu";
@@ -9,8 +16,325 @@ import { ConversationActions } from "./conversation-actions";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
 import type { DialogKind } from "./dialogs";
 import { conversationName } from "./messages";
-import { Avatar, IconButton, Logo } from "./ui";
+import { currentAttention } from "./attention";
+import { compareTimestampsDesc } from "./store";
+import type { ChatSnapshot } from "./store";
+import { Avatar, IconButton, Logo, useOverlayFocus } from "./ui";
 import { ICON } from "./icons";
+
+export function computeShellAttention({
+  workspaces,
+  snapshot,
+  userId,
+  attentionData,
+}: {
+  workspaces: Workspace[];
+  snapshot: ChatSnapshot;
+  userId: string;
+  attentionData?: {
+    unreadCount?: number;
+    channelUnreadCount?: number;
+    items?: AttentionItem[];
+  };
+}) {
+  const activeWorkspaceIds = new Set(workspaces.map((w) => w.id));
+  const allAuthorizedConversations = Object.values(
+    snapshot.conversations,
+  ).filter((c) => activeWorkspaceIds.has(c.workspaceId));
+  const directUnreadCount = allAuthorizedConversations.reduce(
+    (sum, c) =>
+      c.type !== "channel" ? sum + Math.max(0, c.lastSeq - c.readSeq) : sum,
+    0,
+  );
+  const rawChannelAttention = attentionData?.channelUnreadCount || 0;
+  let locallyResolvedChannel = 0;
+  for (const item of attentionData?.items || []) {
+    if (item.isRead || item.conversation.type !== "channel") continue;
+    const current = currentAttention(item, snapshot, userId);
+    if (
+      !current ||
+      current.isRead ||
+      current.conversation.type !== "channel"
+    ) {
+      locallyResolvedChannel += 1;
+    }
+  }
+  const channelAttentionCount = Math.max(
+    0,
+    rawChannelAttention - locallyResolvedChannel,
+  );
+  const urgentCount = directUnreadCount + channelAttentionCount;
+  const hasChannelUnread = allAuthorizedConversations.some(
+    (c) => c.type === "channel" && c.lastSeq > c.readSeq,
+  );
+  return {
+    allAuthorizedConversations,
+    urgentCount,
+    hasChannelUnread,
+  };
+}
+
+export function resolveWorkspaceTarget({
+  space,
+  rememberedId,
+  conversations,
+  isManagement,
+  currentWorkspaceId,
+}: {
+  space: Workspace;
+  rememberedId?: string;
+  conversations: Record<string, Conversation>;
+  isManagement: boolean;
+  currentWorkspaceId?: string;
+}) {
+  const remembered = rememberedId ? conversations[rememberedId] : undefined;
+  const first =
+    (remembered && remembered.workspaceId === space.id
+      ? remembered
+      : undefined) ||
+    Object.values(conversations).find(
+      (c) => c.workspaceId === space.id && c.type === "channel",
+    ) ||
+    Object.values(conversations).find((c) => c.workspaceId === space.id);
+  if (first) return route(first);
+  if (isManagement || currentWorkspaceId !== space.id)
+    return `/app/w/${space.id}/members`;
+  return null;
+}
+
+export function computePageTitle({
+  isAttentionPage,
+  isGatewayPage,
+  isUsersPage,
+  isAdminPage,
+  isAgentsPage,
+  isDirectoryPage,
+  isSettings,
+  workspace,
+  conversation,
+  userId,
+  members,
+}: {
+  isAttentionPage: boolean;
+  isGatewayPage: boolean;
+  isUsersPage: boolean;
+  isAdminPage: boolean;
+  isAgentsPage: boolean;
+  isDirectoryPage: boolean;
+  isSettings: boolean;
+  workspace?: Workspace;
+  conversation?: Conversation;
+  userId: string;
+  members: Member[];
+}) {
+  return isAttentionPage
+    ? "提及与回复"
+    : isGatewayPage
+      ? "模型网关"
+      : isUsersPage
+        ? "用户管理"
+        : isAdminPage
+          ? "注册邀请"
+          : isAgentsPage
+            ? "个人 Agent"
+            : isDirectoryPage
+              ? workspace
+                ? `${workspace.name} · 成员`
+                : "成员"
+              : isSettings
+                ? "账号设置"
+                : conversation &&
+                    workspace &&
+                    conversation.workspaceId === workspace.id
+                  ? conversation.type === "channel"
+                    ? `# ${conversationName(conversation, userId, members)}`
+                    : conversationName(conversation, userId, members)
+                  : workspace?.name || "";
+}
+
+export function useShellViewportAndFocus({
+  navigationRef,
+  membersRef,
+  mobile,
+  overlayMembers,
+  sidebar,
+  details,
+  hasOverlayModal,
+  hasConversation,
+  pathname,
+  closeSidebar,
+  closeDetails,
+}: {
+  navigationRef: RefObject<HTMLDivElement | null>;
+  membersRef: RefObject<HTMLElement | null>;
+  mobile: boolean;
+  overlayMembers: boolean;
+  sidebar: boolean;
+  details: boolean;
+  hasOverlayModal: boolean;
+  hasConversation: boolean;
+  pathname: string;
+  closeSidebar: () => void;
+  closeDetails: () => void;
+}) {
+  const sidebarFocus = useRef({ open: false, pathname });
+  useOverlayFocus(
+    navigationRef,
+    mobile && sidebar && !hasOverlayModal,
+    closeSidebar,
+  );
+  useEffect(() => {
+    const previous = sidebarFocus.current;
+    sidebarFocus.current = { open: sidebar, pathname };
+    if (
+      sidebar ||
+      !mobile ||
+      hasOverlayModal ||
+      (!previous.open && previous.pathname === pathname)
+    )
+      return;
+    const focused = document.activeElement;
+    if (focused === document.body || navigationRef.current?.contains(focused)) {
+      navigationRef.current?.parentElement
+        ?.querySelector<HTMLElement>(".app-main .mobile-menu")
+        ?.focus({ preventScroll: true });
+    }
+  }, [sidebar, mobile, hasOverlayModal, pathname, navigationRef]);
+  useOverlayFocus(
+    membersRef,
+    overlayMembers &&
+      details &&
+      !sidebar &&
+      !hasOverlayModal &&
+      hasConversation,
+    closeDetails,
+  );
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    const resize = () =>
+      document.documentElement.style.setProperty(
+        "--app-height",
+        `${viewport?.height || window.innerHeight}px`,
+      );
+    resize();
+    viewport?.addEventListener("resize", resize);
+    window.addEventListener("resize", resize);
+    return () => {
+      viewport?.removeEventListener("resize", resize);
+      window.removeEventListener("resize", resize);
+      document.documentElement.style.removeProperty("--app-height");
+    };
+  }, []);
+}
+
+export function useShellKeyboardShortcuts({
+  channels,
+  direct,
+  workspace,
+  conversationsById,
+  workspaces,
+  conversationId,
+  hasOverlayModal,
+  quickSwitcherOpen,
+  shortcutsOpen,
+  setShortcutsOpen,
+  setQuickSwitcherOpen,
+  navigate,
+}: {
+  channels: Conversation[];
+  direct: Conversation[];
+  workspace?: Workspace;
+  conversationsById: Record<string, Conversation>;
+  workspaces?: Workspace[];
+  conversationId?: string;
+  hasOverlayModal: boolean;
+  quickSwitcherOpen: boolean;
+  shortcutsOpen: boolean;
+  setShortcutsOpen: (value: boolean | ((open: boolean) => boolean)) => void;
+  setQuickSwitcherOpen: (value: boolean | ((open: boolean) => boolean)) => void;
+  navigate: (to: string) => void;
+}) {
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.isComposing || event.keyCode === 229) return;
+      const anyModalOpen = !!document.querySelector(".modal-backdrop");
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        !event.altKey &&
+        !event.shiftKey &&
+        event.key.toLowerCase() === "k"
+      ) {
+        if (anyModalOpen && !quickSwitcherOpen && !shortcutsOpen) return;
+        event.preventDefault();
+        setShortcutsOpen(false);
+        setQuickSwitcherOpen((open) => !open);
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      const inEditable =
+        !!target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable);
+      if (inEditable || hasOverlayModal || anyModalOpen) return;
+      if (
+        event.altKey &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        (event.key === "ArrowUp" || event.key === "ArrowDown")
+      ) {
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        const ordered = [...channels, ...direct];
+        const orderedWorkspaces = [
+          ...(workspace ? [workspace] : []),
+          ...(workspaces || []).filter((w) => w.id !== workspace?.id),
+        ];
+        const allOrdered = orderedWorkspaces.flatMap((ws) => {
+          if (ws.id === workspace?.id) return ordered;
+          const inWs = Object.values(conversationsById).filter(
+            (c) => c.workspaceId === ws.id,
+          );
+          return [
+            ...inWs
+              .filter((c) => c.type === "channel")
+              .sort((a, b) => a.name.localeCompare(b.name)),
+            ...inWs
+              .filter((c) => c.type !== "channel")
+              .sort((a, b) => compareTimestampsDesc(a.updatedAt, b.updatedAt)),
+          ];
+        });
+        const pool =
+          event.shiftKey || ordered.length === 0 ? allOrdered : ordered;
+        const next = pickAdjacentConversation(
+          pool,
+          conversationId,
+          direction,
+          event.shiftKey,
+        );
+        if (next) {
+          event.preventDefault();
+          navigate(route(next));
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    channels,
+    direct,
+    workspace,
+    conversationsById,
+    workspaces,
+    conversationId,
+    hasOverlayModal,
+    quickSwitcherOpen,
+    shortcutsOpen,
+    setShortcutsOpen,
+    setQuickSwitcherOpen,
+    navigate,
+  ]);
+}
 
 export function route(conversation: Conversation) {
   return `/app/w/${conversation.workspaceId}/c/${conversation.id}`;
