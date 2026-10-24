@@ -924,7 +924,7 @@ export function useConversationScrollEffect({
   searchOpen,
   readSeq,
   scrollRef,
-  initialScroll,
+  initialScrollRef,
   setAnchorPending,
   setAtBottom,
   setVisible,
@@ -942,7 +942,7 @@ export function useConversationScrollEffect({
   searchOpen: boolean;
   readSeq: number;
   scrollRef: RefObject<HTMLDivElement | null>;
-  initialScroll: RefObject<boolean>;
+  initialScrollRef: RefObject<boolean>;
   setAnchorPending: (v: boolean) => void;
   setAtBottom: (v: boolean) => void;
   setVisible: (v: boolean) => void;
@@ -976,7 +976,7 @@ export function useConversationScrollEffect({
         : null;
       if (el && anchor && el.contains(anchor)) {
         setAnchorPending(false);
-        initialScroll.current = false;
+        initialScrollRef.current = false;
         el.scrollTop +=
           anchor.getBoundingClientRect().top -
           el.getBoundingClientRect().top -
@@ -991,10 +991,10 @@ export function useConversationScrollEffect({
     if (
       !located &&
       !locating &&
-      (initialScroll.current || (atBottom && tailChanged))
+      (initialScrollRef.current || (atBottom && tailChanged))
     ) {
       el?.scrollTo({ top: el.scrollHeight });
-      initialScroll.current = false;
+      initialScrollRef.current = false;
     }
     scheduleSeen();
   }, [
@@ -1010,7 +1010,7 @@ export function useConversationScrollEffect({
     searchOpen,
     readSeq,
     scrollRef,
-    initialScroll,
+    initialScrollRef,
     setAnchorPending,
     setAtBottom,
     scheduleSeen,

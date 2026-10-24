@@ -381,7 +381,7 @@ export function ConversationView({
     searchOpen,
     readSeq,
     scrollRef,
-    initialScroll,
+    initialScrollRef: initialScroll,
     setAnchorPending,
     setAtBottom,
     setVisible,
