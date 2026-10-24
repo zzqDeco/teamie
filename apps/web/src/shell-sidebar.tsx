@@ -1,8 +1,22 @@
 import { useEffect, useRef } from "react";
 import type { RefObject } from "react";
 import { Link } from "react-router-dom";
-import { Bell, Bot, ChevronDown, Hash, Plus, Users, X } from "lucide-react";
+import {
+  ArrowLeft,
+  Bell,
+  Bot,
+  ChevronDown,
+  Hash,
+  KeyRound,
+  Menu,
+  Plus,
+  Settings,
+  ShieldCheck,
+  Users,
+  X,
+} from "lucide-react";
 import type {
+  Agent,
   AttentionItem,
   Conversation,
   Member,
@@ -14,13 +28,153 @@ import type { Connection } from "./chat";
 import { AccountMenu } from "./account-menu";
 import { ConversationActions } from "./conversation-actions";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
+import { ProfileSettings } from "./dialogs";
 import type { DialogKind } from "./dialogs";
+import { PlatformInvitations } from "./admin";
+import { PlatformUsers } from "./platform-users";
+import { ModelGatewaySettings } from "./model-gateway";
+import { AgentDetail, MyAgents } from "./agents";
+import { WorkspaceMembers } from "./members";
+import type { Participant } from "./participants";
 import { conversationName } from "./messages";
 import { currentAttention } from "./attention";
-import { compareTimestampsDesc } from "./store";
 import type { ChatSnapshot } from "./store";
 import { Avatar, IconButton, Logo, useOverlayFocus } from "./ui";
 import { ICON } from "./icons";
+
+export function ShellManagementView({
+  user,
+  isGatewayPage,
+  isUsersPage,
+  isAdminPage,
+  isAgentsPage,
+  isDirectoryPage,
+  agentId,
+  backChatRoute,
+  workspace,
+  members,
+  workspaceAgents,
+  membersLoading,
+  membersLoadError,
+  onOpenSidebar,
+  onRetryMembers,
+}: {
+  user: User;
+  isGatewayPage: boolean;
+  isUsersPage: boolean;
+  isAdminPage: boolean;
+  isAgentsPage: boolean;
+  isDirectoryPage: boolean;
+  agentId?: string;
+  backChatRoute: string;
+  workspace?: Workspace;
+  members: Participant[];
+  workspaceAgents: Agent[];
+  membersLoading: boolean;
+  membersLoadError: boolean;
+  onOpenSidebar: () => void;
+  onRetryMembers: () => void;
+}) {
+  return (
+    <>
+      <header className="settings-header">
+        <IconButton
+          label="打开频道列表"
+          className="mobile-menu"
+          onClick={onOpenSidebar}
+        >
+          <Menu size={ICON.lg} />
+        </IconButton>
+        {isGatewayPage ? (
+          <KeyRound size={ICON.md} />
+        ) : isDirectoryPage || isUsersPage ? (
+          <Users size={ICON.md} />
+        ) : isAgentsPage ? (
+          <Bot size={ICON.md} />
+        ) : isAdminPage ? (
+          <ShieldCheck size={ICON.md} />
+        ) : (
+          <Settings size={ICON.md} />
+        )}
+        <span>
+          {isGatewayPage
+            ? "模型网关"
+            : isUsersPage
+              ? "用户管理"
+              : isAdminPage
+                ? "注册邀请"
+                : isAgentsPage
+                  ? "个人 Agent"
+                  : isDirectoryPage
+                    ? "成员"
+                    : "账号设置"}
+        </span>
+        <Link to={backChatRoute}>
+          <ArrowLeft size={ICON.sm} />
+          <span>对话</span>
+        </Link>
+      </header>
+      {(isAdminPage || isGatewayPage || isUsersPage) &&
+        user.platformRole === "admin" && (
+          <nav className="admin-section-nav">
+            <Link to="/app/admin" className={isAdminPage ? "active" : ""}>
+              <ShieldCheck size={ICON.xs} />
+              注册邀请
+            </Link>
+            <Link
+              to="/app/admin/users"
+              className={isUsersPage ? "active" : ""}
+            >
+              <Users size={ICON.xs} />
+              用户管理
+            </Link>
+            <Link
+              to="/app/admin/gateway"
+              className={isGatewayPage ? "active" : ""}
+            >
+              <KeyRound size={ICON.xs} />
+              模型网关
+            </Link>
+          </nav>
+        )}
+      {isUsersPage ? (
+        <PlatformUsers />
+      ) : isGatewayPage ? (
+        <ModelGatewaySettings key={user.id} />
+      ) : isAdminPage ? (
+        <PlatformInvitations key={user.id} />
+      ) : isAgentsPage ? (
+        agentId ? (
+          <AgentDetail key={`${user.id}:${agentId}`} agentId={agentId} />
+        ) : (
+          <MyAgents key={user.id} />
+        )
+      ) : isDirectoryPage ? (
+        workspace ? (
+          <WorkspaceMembers
+            key={`${user.id}:${workspace.id}`}
+            workspace={workspace}
+            members={members}
+            agents={workspaceAgents}
+            loading={membersLoading}
+            loadError={membersLoadError}
+            onRetry={onRetryMembers}
+          />
+        ) : (
+          <div className="unavailable-view">
+            <h2>无法访问这个工作空间</h2>
+            <p>查看成员需要当前空间成员权限。</p>
+            <Link className="button" to="/app">
+              返回对话
+            </Link>
+          </div>
+        )
+      ) : (
+        <ProfileSettings />
+      )}
+    </>
+  );
+}
 
 export function computeShellAttention({
   workspaces,
@@ -225,115 +379,6 @@ export function useShellViewportAndFocus({
       document.documentElement.style.removeProperty("--app-height");
     };
   }, []);
-}
-
-export function useShellKeyboardShortcuts({
-  channels,
-  direct,
-  workspace,
-  conversationsById,
-  workspaces,
-  conversationId,
-  hasOverlayModal,
-  quickSwitcherOpen,
-  shortcutsOpen,
-  setShortcutsOpen,
-  setQuickSwitcherOpen,
-  navigate,
-}: {
-  channels: Conversation[];
-  direct: Conversation[];
-  workspace?: Workspace;
-  conversationsById: Record<string, Conversation>;
-  workspaces?: Workspace[];
-  conversationId?: string;
-  hasOverlayModal: boolean;
-  quickSwitcherOpen: boolean;
-  shortcutsOpen: boolean;
-  setShortcutsOpen: (value: boolean | ((open: boolean) => boolean)) => void;
-  setQuickSwitcherOpen: (value: boolean | ((open: boolean) => boolean)) => void;
-  navigate: (to: string) => void;
-}) {
-  useEffect(() => {
-    const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.isComposing || event.keyCode === 229) return;
-      const anyModalOpen = !!document.querySelector(".modal-backdrop");
-      if (
-        (event.metaKey || event.ctrlKey) &&
-        !event.altKey &&
-        !event.shiftKey &&
-        event.key.toLowerCase() === "k"
-      ) {
-        if (anyModalOpen && !quickSwitcherOpen && !shortcutsOpen) return;
-        event.preventDefault();
-        setShortcutsOpen(false);
-        setQuickSwitcherOpen((open) => !open);
-        return;
-      }
-      const target = event.target as HTMLElement | null;
-      const inEditable =
-        !!target &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.tagName === "SELECT" ||
-          target.isContentEditable);
-      if (inEditable || hasOverlayModal || anyModalOpen) return;
-      if (
-        event.altKey &&
-        !event.metaKey &&
-        !event.ctrlKey &&
-        (event.key === "ArrowUp" || event.key === "ArrowDown")
-      ) {
-        const direction = event.key === "ArrowDown" ? 1 : -1;
-        const ordered = [...channels, ...direct];
-        const orderedWorkspaces = [
-          ...(workspace ? [workspace] : []),
-          ...(workspaces || []).filter((w) => w.id !== workspace?.id),
-        ];
-        const allOrdered = orderedWorkspaces.flatMap((ws) => {
-          if (ws.id === workspace?.id) return ordered;
-          const inWs = Object.values(conversationsById).filter(
-            (c) => c.workspaceId === ws.id,
-          );
-          return [
-            ...inWs
-              .filter((c) => c.type === "channel")
-              .sort((a, b) => a.name.localeCompare(b.name)),
-            ...inWs
-              .filter((c) => c.type !== "channel")
-              .sort((a, b) => compareTimestampsDesc(a.updatedAt, b.updatedAt)),
-          ];
-        });
-        const pool =
-          event.shiftKey || ordered.length === 0 ? allOrdered : ordered;
-        const next = pickAdjacentConversation(
-          pool,
-          conversationId,
-          direction,
-          event.shiftKey,
-        );
-        if (next) {
-          event.preventDefault();
-          navigate(route(next));
-        }
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [
-    channels,
-    direct,
-    workspace,
-    conversationsById,
-    workspaces,
-    conversationId,
-    hasOverlayModal,
-    quickSwitcherOpen,
-    shortcutsOpen,
-    setShortcutsOpen,
-    setQuickSwitcherOpen,
-    navigate,
-  ]);
 }
 
 export function route(conversation: Conversation) {

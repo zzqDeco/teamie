@@ -13,7 +13,7 @@ import type { Conversation, Member, Workspace } from "@teamie/api-client";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
 import type { Participant } from "./participants";
 import { conversationName } from "./messages";
-import { Avatar, IconButton, Notice } from "./ui";
+import { Avatar, Button, IconButton, Modal, Notice } from "./ui";
 import { ICON } from "./icons";
 
 export function ShellMembersPane({
@@ -189,5 +189,43 @@ export function ShellMembersPane({
         )}
       </aside>
     </>
+  );
+}
+
+export function RemoveMemberModal({
+  removing,
+  removingFromGroup,
+  error,
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  removing: Member;
+  removingFromGroup: boolean;
+  error: string;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Modal
+      title={`移除 ${removing.displayName}？`}
+      subtitle={
+        removingFromGroup
+          ? "该成员将无法继续访问这个小组对话。工作空间成员资格不受影响。"
+          : "该成员将无法继续访问这个工作空间及其中的对话。可以通过新邀请重新加入。"
+      }
+      onClose={onClose}
+    >
+      <Notice>{error}</Notice>
+      <div className="modal-actions">
+        <Button className="secondary" onClick={onClose}>
+          取消
+        </Button>
+        <Button className="danger" busy={busy} onClick={onConfirm}>
+          确认移除
+        </Button>
+      </div>
+    </Modal>
   );
 }

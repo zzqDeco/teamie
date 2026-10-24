@@ -553,10 +553,10 @@ def main() -> int:
     expected_content = f"sandbox-ok-{run_suffix}:isolated\n".encode("utf-8")
     expected_sha256 = hashlib.sha256(expected_content).hexdigest()
     msg2 = post_mention(
-        f"In your Sandbox workspace, run a script that verifies no GATEWAY_RUNTIME_TOKEN or OPENAI_API_KEY "
-        f"environment variables exist and external network is disabled, then writes exact bytes "
-        f"'sandbox-ok-{run_suffix}:isolated\\n' to report-{run_suffix}.txt and exports it to this conversation "
-        f"as an attachment via im_send_message."
+        f"In your Sandbox workspace, use workspace_execute to run a script that verifies no GATEWAY_RUNTIME_TOKEN "
+        f"or OPENAI_API_KEY environment variables exist and external network is disabled, then writes exact bytes "
+        f"'sandbox-ok-{run_suffix}:isolated\\n' to report-{run_suffix}.txt, uploads it via im_upload_file, and sends "
+        f"it to this conversation as an attachment via im_send_message (attachmentIds)."
     )
     reply2 = wait_until(
         "Agent Sandbox attachment export",
@@ -573,7 +573,7 @@ def main() -> int:
     )
     att = reply2["attachments"][0]
     downloaded, dl_headers = admin.get_bytes(
-        f"/api/v1/conversations/{urllib.parse.quote(channel_id)}/attachments/{urllib.parse.quote(att['id'])}",
+        f"/api/v1/conversations/{urllib.parse.quote(channel_id)}/attachments/{urllib.parse.quote(att['id'])}/content",
         status=200,
     )
     require(

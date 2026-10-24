@@ -1,13 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  Navigate,
-  useLocation,
-  useMatch,
-  useNavigate,
-} from "react-router-dom";
+import { Navigate, useLocation, useMatch, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Hash, Menu } from "lucide-react";
 import { api } from "@teamie/api-client";
-import type { Member, Workspace } from "@teamie/api-client";
+import type { Conversation, Member, Workspace } from "@teamie/api-client";
 import { useAuth } from "./auth";
 import { errorText, useChat, useChatState } from "./chat";
 import { WorkspaceDialog } from "./dialogs";
@@ -21,32 +17,164 @@ import { setActiveNotificationContext } from "./notifications";
 import type { DialogKind } from "./dialogs";
 import { ConversationView } from "./messages";
 import { AttentionInbox, useAttentionCount } from "./attention";
-import {
-  Button,
-  Loading,
-  Logo,
-  Notice,
-} from "./ui";
+import { Button, IconButton, Loading, Logo, Notice } from "./ui";
+import { ICON } from "./icons";
 import {
   computePageTitle,
   computeShellAttention,
+  pickAdjacentConversation,
   resolveWorkspaceTarget,
   route,
+  ShellManagementView,
   ShellSidebar,
-  useShellKeyboardShortcuts,
   useShellViewportAndFocus,
 } from "./shell-sidebar";
-import { ShellMembersPane } from "./shell-members-pane";
-import {
-  parseInviteCode,
-  RemoveMemberModal,
-  ShellManagementView,
-  UnavailableConversationView,
-  useDocumentTitle,
-  useMediaQuery,
-  Welcome,
-} from "./shell-welcome";
+import { RemoveMemberModal, ShellMembersPane } from "./shell-members-pane";
+import { parseInviteCode, Welcome } from "./shell-welcome";
 export { parseInviteCode };
+
+function useDocumentTitle(
+  pageTitle: string,
+  urgentCount: number,
+  hasChannelUnread: boolean,
+) {
+  useEffect(() => {
+    const base = pageTitle ? `${pageTitle} · Teamie` : "Teamie";
+    const prefix =
+      urgentCount > 0
+        ? `(${urgentCount > 99 ? "99+" : urgentCount}) `
+        : hasChannelUnread
+          ? "• "
+          : "";
+    document.title = `${prefix}${base}`;
+  }, [pageTitle, urgentCount, hasChannelUnread]);
+  useEffect(
+    () => () => {
+      document.title = "Teamie";
+    },
+    [],
+  );
+}
+
+function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(
+    () => window.matchMedia(query).matches,
+  );
+  useEffect(() => {
+    const media = window.matchMedia(query);
+    const change = () => setMatches(media.matches);
+    change();
+    media.addEventListener("change", change);
+    return () => media.removeEventListener("change", change);
+  }, [query]);
+  return matches;
+}
+
+function UnavailableConversationView({
+  hasMatch,
+  onOpenSidebar,
+  onBack,
+}: {
+  hasMatch: boolean;
+  onOpenSidebar: () => void;
+  onBack: () => void;
+}) {
+  return (
+    <div className="unavailable-view">
+      <IconButton
+        label="打开频道列表"
+        className="mobile-menu"
+        onClick={onOpenSidebar}
+      >
+        <Menu size={ICON.lg} />
+      </IconButton>
+      <span className="large-symbol">
+        <Hash size={ICON.xl} />
+      </span>
+      <h2>{hasMatch ? "这个对话暂时无法访问" : "选择一个对话"}</h2>
+      <p>
+        {hasMatch
+          ? "你可能已离开工作空间，或尚未加入这个对话。"
+          : "打开对话列表，选择频道或私信。"}
+      </p>
+      <Button onClick={onBack}>返回对话</Button>
+    </div>
+  );
+}
+
+function useShellKeyboardShortcuts({
+  channels, direct, workspace, conversationsById, workspaces, conversationId,
+  hasOverlayModal, quickSwitcherOpen, shortcutsOpen,
+  setShortcutsOpen, setQuickSwitcherOpen, navigate,
+}: {
+  channels: Conversation[]; direct: Conversation[]; workspace?: Workspace;
+  conversationsById: Record<string, Conversation>; workspaces?: Workspace[];
+  conversationId?: string; hasOverlayModal: boolean;
+  quickSwitcherOpen: boolean; shortcutsOpen: boolean;
+  setShortcutsOpen: (value: boolean | ((open: boolean) => boolean)) => void;
+  setQuickSwitcherOpen: (value: boolean | ((open: boolean) => boolean)) => void;
+  navigate: (to: string) => void;
+}) {
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.isComposing || event.keyCode === 229) return;
+      const anyModalOpen = !!document.querySelector(".modal-backdrop");
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        !event.altKey &&
+        !event.shiftKey &&
+        event.key.toLowerCase() === "k"
+      ) {
+        if (anyModalOpen && !quickSwitcherOpen && !shortcutsOpen) return;
+        event.preventDefault();
+        setShortcutsOpen(false);
+        setQuickSwitcherOpen((open) => !open);
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      const inEditable =
+        !!target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable);
+      if (inEditable || hasOverlayModal || anyModalOpen) return;
+      if (
+        event.altKey &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        (event.key === "ArrowUp" || event.key === "ArrowDown")
+      ) {
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        const ordered = [...channels, ...direct];
+        const orderedWorkspaces = [
+          ...(workspace ? [workspace] : []),
+          ...(workspaces || []).filter((w) => w.id !== workspace?.id),
+        ];
+        const allOrdered = orderedWorkspaces.flatMap((ws) => {
+          if (ws.id === workspace?.id) return ordered;
+          const inWs = Object.values(conversationsById).filter((c) => c.workspaceId === ws.id);
+          return [
+            ...inWs.filter((c) => c.type === "channel").sort((a, b) => a.name.localeCompare(b.name)),
+            ...inWs.filter((c) => c.type !== "channel").sort((a, b) => compareTimestampsDesc(a.updatedAt, b.updatedAt)),
+          ];
+        });
+        const pool = event.shiftKey || ordered.length === 0 ? allOrdered : ordered;
+        const next = pickAdjacentConversation(pool, conversationId, direction, event.shiftKey);
+        if (next) {
+          event.preventDefault();
+          navigate(route(next));
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    channels, direct, workspace, conversationsById, workspaces, conversationId,
+    hasOverlayModal, quickSwitcherOpen, shortcutsOpen,
+    setShortcutsOpen, setQuickSwitcherOpen, navigate,
+  ]);
+}
 
 export function Shell() {
   const { user, logout } = useAuth();
@@ -68,9 +196,7 @@ export function Shell() {
   const lastConversationByWorkspace = useRef<Record<string, string>>({});
   const lastChatRoute = useRef<string>("");
   const [lastChatPath, setLastChatPath] = useState("");
-  const [recentConversationIds, setRecentConversationIds] = useState<string[]>(
-    [],
-  );
+  const [recentConversationIds, setRecentConversationIds] = useState<string[]>([]);
   const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [dialog, setDialog] = useState<DialogKind | null>(null),
@@ -89,9 +215,7 @@ export function Shell() {
           directoryMatch?.params.workspaceId ||
           legacyDirectoryMatch?.params.workspaceId),
     ) ||
-    (match || directoryMatch || legacyDirectoryMatch
-      ? undefined
-      : chat.data?.workspaces[0]);
+    (match || directoryMatch || legacyDirectoryMatch ? undefined : chat.data?.workspaces[0]);
   const owner = workspace?.createdBy === user!.id;
   const conversation = match?.params.conversationId
     ? snapshot.conversations[match.params.conversationId]
@@ -113,10 +237,7 @@ export function Shell() {
       setRecentConversationIds((prev) =>
         prev[0] === conversation.id
           ? prev
-          : [
-              conversation.id,
-              ...prev.filter((id) => id !== conversation.id),
-            ].slice(0, 20),
+          : [conversation.id, ...prev.filter((id) => id !== conversation.id)].slice(0, 20),
       );
     }
   }, [conversation, workspace]);
@@ -126,9 +247,7 @@ export function Shell() {
         ? conversation.id
         : null;
     setActiveNotificationContext(activeId, (to) => navigate(to));
-    return () => {
-      setActiveNotificationContext(undefined, null);
-    };
+    return () => { setActiveNotificationContext(undefined, null); };
   }, [conversation, workspace, navigate]);
   const conversations = Object.values(snapshot.conversations).filter(
     (c) => c.workspaceId === workspace?.id,
@@ -152,9 +271,7 @@ export function Shell() {
     enabled: !!workspace && discoveryAllowed,
     refetchInterval: 30_000,
   });
-  const workspaceAgents = discoveryAllowed
-    ? workspaceAgentsQuery.data?.agents || []
-    : [];
+  const workspaceAgents = discoveryAllowed ? workspaceAgentsQuery.data?.agents || [] : [];
   const members: Participant[] = enrichParticipants(
     membersQuery.data?.members || [],
     workspaceAgents,
@@ -182,17 +299,9 @@ export function Shell() {
   const hasOverlayModal =
     !!dialog || quickSwitcherOpen || shortcutsOpen || managingGroup || !!removing;
   useShellViewportAndFocus({
-    navigationRef,
-    membersRef,
-    mobile,
-    overlayMembers,
-    sidebar,
-    details,
-    hasOverlayModal,
-    hasConversation: !!conversation,
-    pathname: location.pathname,
-    closeSidebar,
-    closeDetails,
+    navigationRef, membersRef, mobile, overlayMembers, sidebar, details,
+    hasOverlayModal, hasConversation: !!conversation, pathname: location.pathname,
+    closeSidebar, closeDetails,
   });
   const pathname = location.pathname.replace(/\/+$/, "") || "/app";
   const caps = chat.data?.capabilities || {};
@@ -211,35 +320,17 @@ export function Shell() {
       attentionData: attentionCount.data,
     });
   const pageTitle = computePageTitle({
-    isAttentionPage,
-    isGatewayPage,
-    isUsersPage,
-    isAdminPage,
-    isAgentsPage,
-    isDirectoryPage,
-    isSettings,
-    workspace,
-    conversation,
-    userId: user!.id,
-    members,
+    isAttentionPage, isGatewayPage, isUsersPage, isAdminPage, isAgentsPage,
+    isDirectoryPage, isSettings, workspace, conversation, userId: user!.id, members,
   });
   useDocumentTitle(pageTitle, urgentCount, hasChannelUnread);
   useShellKeyboardShortcuts({
-    channels,
-    direct,
-    workspace,
-    conversationsById: snapshot.conversations,
-    workspaces: chat.data?.workspaces,
-    conversationId: conversation?.id,
-    hasOverlayModal,
-    quickSwitcherOpen,
-    shortcutsOpen,
-    setShortcutsOpen,
-    setQuickSwitcherOpen,
-    navigate,
+    channels, direct, workspace, conversationsById: snapshot.conversations,
+    workspaces: chat.data?.workspaces, conversationId: conversation?.id,
+    hasOverlayModal, quickSwitcherOpen, shortcutsOpen,
+    setShortcutsOpen, setQuickSwitcherOpen, navigate,
   });
-  const messageTarget =
-    new URLSearchParams(location.search).get("message") || "";
+  const messageTarget = new URLSearchParams(location.search).get("message") || "";
   const initialMessageId = messageTarget.length <= 128 ? messageTarget : "";
   const viewConversationId = match?.params.conversationId || "";
   const [viewKey, setViewKey] = useState({ conversation: "", target: "" });
@@ -249,15 +340,8 @@ export function Shell() {
   )
     setViewKey({ conversation: viewConversationId, target: initialMessageId });
   const isManagement =
-    isSettings ||
-    isAdminPage ||
-    isGatewayPage ||
-    isUsersPage ||
-    isAgentsPage ||
-    isDirectoryPage;
-  const backChatRoute = Object.values(snapshot.conversations).some(
-    (c) => route(c) === lastChatPath,
-  )
+    isSettings || isAdminPage || isGatewayPage || isUsersPage || isAgentsPage || isDirectoryPage;
+  const backChatRoute = Object.values(snapshot.conversations).some((c) => route(c) === lastChatPath)
     ? lastChatPath
     : "/app";
   const connectionLabel =
@@ -273,8 +357,7 @@ export function Shell() {
     setDialog(kind);
   }
   async function startDirect(member: Participant) {
-    if (!workspace || member.selectable === false || !caps["im.dm.create"])
-      return;
+    if (!workspace || member.selectable === false || !caps["im.dm.create"]) return;
     setBusy(true);
     setError("");
     const generation = chatStore.generation;
@@ -301,10 +384,7 @@ export function Shell() {
     setError("");
     try {
       if (removingFromGroup && conversation) {
-        const result = await api.removeConversationMember(
-          conversation.id,
-          removing.userId,
-        );
+        const result = await api.removeConversationMember(conversation.id, removing.userId);
         chatStore.addConversation(result.conversation);
         await chat.refresh();
       } else await api.removeMember(workspace.id, removing.userId);
@@ -343,12 +423,7 @@ export function Shell() {
   }
   if (chat.loading && !chat.data) return <Loading />;
   if (legacyDirectoryMatch)
-    return (
-      <Navigate
-        to={`/app/w/${legacyDirectoryMatch.params.workspaceId}/members`}
-        replace
-      />
-    );
+    return <Navigate to={`/app/w/${legacyDirectoryMatch.params.workspaceId}/members`} replace />;
   if (chat.error && !chat.data)
     return (
       <div className="loading-screen">
@@ -368,97 +443,52 @@ export function Shell() {
   )
     return (
       <Navigate
-        to={
-          backChatRoute !== "/app"
-            ? backChatRoute
-            : route(channels[0] || conversations[0])
-        }
+        to={backChatRoute !== "/app" ? backChatRoute : route(channels[0] || conversations[0])}
         replace
       />
     );
   if (workspaceRootMatch && chat.data) {
     const id = workspaceRootMatch.params.workspaceId!;
-    const stored = Object.values(snapshot.conversations).filter(
-      (c) => c.workspaceId === id,
-    );
+    const stored = Object.values(snapshot.conversations).filter((c) => c.workspaceId === id);
     const inWorkspace = stored.length
       ? stored
       : chat.data.conversations.filter((c) => c.workspaceId === id);
-    const first =
-      inWorkspace.find((c) => c.type === "channel") || inWorkspace[0];
-    return (
-      <Navigate
-        to={first ? route(first) : `/app/w/${id}/members`}
-        replace
-      />
-    );
+    const first = inWorkspace.find((c) => c.type === "channel") || inWorkspace[0];
+    return <Navigate to={first ? route(first) : `/app/w/${id}/members`} replace />;
   }
   if (
-    chat.data &&
-    !match &&
-    !directoryMatch &&
-    !legacyDirectoryMatch &&
-    !agentMatch &&
+    chat.data && !match && !directoryMatch && !legacyDirectoryMatch && !agentMatch &&
     ![
-      "/app",
-      "/app/agents",
-      "/app/settings",
-      "/app/profile",
-      "/app/admin",
-      "/app/admin/gateway",
-      "/app/admin/users",
-      "/app/attention",
+      "/app", "/app/agents", "/app/settings", "/app/profile",
+      "/app/admin", "/app/admin/gateway", "/app/admin/users", "/app/attention",
     ].includes(pathname)
   )
     return <Navigate to="/app" replace />;
   return (
-    <div
-      className={`app-shell ${sidebar ? "sidebar-open" : ""} ${details ? "details-open" : ""}`}
-    >
+    <div className={`app-shell ${sidebar ? "sidebar-open" : ""} ${details ? "details-open" : ""}`}>
       <ShellSidebar
-        navigationRef={navigationRef}
-        mobile={mobile}
-        sidebar={sidebar}
-        hasOverlayModal={hasOverlayModal}
-        user={user!}
-        busy={busy}
-        connection={chat.connection}
-        connectionLabel={connectionLabel}
-        isAttentionPage={isAttentionPage}
-        isAgentsPage={isAgentsPage}
+        navigationRef={navigationRef} mobile={mobile} sidebar={sidebar}
+        hasOverlayModal={hasOverlayModal} user={user!} busy={busy}
+        connection={chat.connection} connectionLabel={connectionLabel}
+        isAttentionPage={isAttentionPage} isAgentsPage={isAgentsPage}
         attentionUnreadCount={attentionCount.data?.unreadCount}
-        workspaces={chat.data?.workspaces || []}
-        workspace={workspace}
-        owner={owner}
-        caps={caps}
+        workspaces={chat.data?.workspaces || []} workspace={workspace}
+        owner={owner} caps={caps}
         allAuthorizedConversations={allAuthorizedConversations}
-        channels={channels}
-        direct={direct}
-        conversationId={conversation?.id}
-        members={members}
-        onCloseSidebar={closeSidebar}
-        onSelectWorkspace={selectWorkspace}
-        onOpenDialog={openDialog}
-        onSignOut={() => void signOut()}
-        onShortcuts={() => setShortcutsOpen(true)}
+        channels={channels} direct={direct} conversationId={conversation?.id}
+        members={members} onCloseSidebar={closeSidebar}
+        onSelectWorkspace={selectWorkspace} onOpenDialog={openDialog}
+        onSignOut={() => void signOut()} onShortcuts={() => setShortcutsOpen(true)}
       />
       {sidebar && mobile && (
-        <button
-          className="sidebar-shade"
-          onClick={() => setSidebar(false)}
-          aria-label="关闭侧栏"
-        />
+        <button className="sidebar-shade" onClick={() => setSidebar(false)} aria-label="关闭侧栏" />
       )}
       <main
         className="app-main"
-        inert={
-          (mobile && sidebar) ||
-          (overlayMembers && details && !isManagement && !!conversation)
-        }
+        inert={(mobile && sidebar) || (overlayMembers && details && !isManagement && !!conversation)}
       >
         <ConnectionBanner
-          connection={chat.connection}
-          syncError={chat.syncError}
+          connection={chat.connection} syncError={chat.syncError}
           showSyncError={!conversation || isManagement || isAttentionPage}
           onRetry={chat.reconnect ?? chat.sync}
         />
@@ -467,24 +497,16 @@ export function Shell() {
           <AttentionInbox key={user!.id} onMenu={() => setSidebar(true)} />
         ) : isManagement ? (
           <ShellManagementView
-            user={user!}
-            isGatewayPage={isGatewayPage}
-            isUsersPage={isUsersPage}
-            isAdminPage={isAdminPage}
-            isAgentsPage={isAgentsPage}
-            isDirectoryPage={isDirectoryPage}
-            agentId={agentMatch?.params.agentId}
-            backChatRoute={backChatRoute}
-            workspace={workspace}
-            members={members}
+            user={user!} isGatewayPage={isGatewayPage} isUsersPage={isUsersPage}
+            isAdminPage={isAdminPage} isAgentsPage={isAgentsPage}
+            isDirectoryPage={isDirectoryPage} agentId={agentMatch?.params.agentId}
+            backChatRoute={backChatRoute} workspace={workspace} members={members}
             workspaceAgents={workspaceAgents}
             membersLoading={
-              membersQuery.isLoading ||
-              (discoveryAllowed && workspaceAgentsQuery.isLoading)
+              membersQuery.isLoading || (discoveryAllowed && workspaceAgentsQuery.isLoading)
             }
             membersLoadError={
-              !!membersQuery.error ||
-              (discoveryAllowed && !!workspaceAgentsQuery.error)
+              !!membersQuery.error || (discoveryAllowed && !!workspaceAgentsQuery.error)
             }
             onOpenSidebar={() => setSidebar(true)}
             onRetryMembers={() => {
@@ -492,25 +514,18 @@ export function Shell() {
               if (discoveryAllowed) void workspaceAgentsQuery.refetch();
             }}
           />
-        ) : conversation &&
-          workspace &&
-          conversation.workspaceId === workspace.id ? (
+        ) : conversation && workspace && conversation.workspaceId === workspace.id ? (
           <ConversationView
             key={`${user!.id}:${conversation.id}:${viewKey.target}`}
-            conversation={conversation}
-            initialMessageId={initialMessageId}
-            onClearMessageTarget={() =>
-              navigate(location.pathname, { replace: true })
-            }
+            conversation={conversation} initialMessageId={initialMessageId}
+            onClearMessageTarget={() => navigate(location.pathname, { replace: true })}
             members={members}
             onMembers={() => {
               setSidebar(false);
               setDetails(!details);
             }}
-            membersOpen={details}
-            onMenu={() => setSidebar(true)}
-            isWorkspaceOwner={owner}
-            onInvite={() => openDialog("invite")}
+            membersOpen={details} onMenu={() => setSidebar(true)}
+            isWorkspaceOwner={owner} onInvite={() => openDialog("invite")}
           />
         ) : chat.data?.workspaces.length === 0 ? (
           <Welcome
@@ -531,22 +546,12 @@ export function Shell() {
       </main>
       {details && !isManagement && workspace && conversation && (
         <ShellMembersPane
-          membersRef={membersRef}
-          overlayMembers={overlayMembers}
-          mobile={mobile}
-          sidebar={sidebar}
-          workspace={workspace}
-          conversation={conversation}
-          userId={user!.id}
-          owner={owner}
-          caps={caps}
-          busy={busy}
-          members={members}
-          visibleMembers={visibleMembers}
-          isLoading={membersQuery.isLoading}
-          hasError={!!membersQuery.error}
-          onClose={closeDetails}
-          onStartDirect={(member) => void startDirect(member)}
+          membersRef={membersRef} overlayMembers={overlayMembers} mobile={mobile}
+          sidebar={sidebar} workspace={workspace} conversation={conversation}
+          userId={user!.id} owner={owner} caps={caps} busy={busy}
+          members={members} visibleMembers={visibleMembers}
+          isLoading={membersQuery.isLoading} hasError={!!membersQuery.error}
+          onClose={closeDetails} onStartDirect={(member) => void startDirect(member)}
           onRequestRemove={(member, fromGroup) => {
             setRemoving(member);
             setRemovingFromGroup(fromGroup);
@@ -556,21 +561,14 @@ export function Shell() {
           onInvite={() => setDialog("invite")}
         />
       )}
-      {dialog && (
-        <WorkspaceDialog
-          kind={dialog}
-          workspace={workspace}
-          onClose={closeDialog}
-        />
-      )}{" "}
+      {dialog && <WorkspaceDialog kind={dialog} workspace={workspace} onClose={closeDialog} />}{" "}
       {quickSwitcherOpen && (
         <QuickSwitcher
           workspaces={chat.data?.workspaces || []}
           conversations={allAuthorizedConversations}
           currentWorkspaceId={workspace?.id}
           discoveryAllowed={discoveryAllowed}
-          members={members}
-          userId={user!.id}
+          members={members} userId={user!.id}
           recentConversationIds={recentConversationIds}
           onSelect={(path) => {
             setQuickSwitcherOpen(false);
@@ -591,22 +589,15 @@ export function Shell() {
         />
       )}
       {shortcutsOpen && <KeyboardShortcutsModal onClose={closeShortcuts} />}
-      {managingGroup &&
-        conversation?.type === "group" &&
-        conversation.canManageMembers && (
-          <GroupMembersDialog
-            conversation={conversation}
-            members={members}
-            onClose={closeGroupManager}
-          />
-        )}
+      {managingGroup && conversation?.type === "group" && conversation.canManageMembers && (
+        <GroupMembersDialog
+          conversation={conversation} members={members} onClose={closeGroupManager}
+        />
+      )}
       {removing && (
         <RemoveMemberModal
-          removing={removing}
-          removingFromGroup={removingFromGroup}
-          error={error}
-          busy={busy}
-          onClose={closeRemoving}
+          removing={removing} removingFromGroup={removingFromGroup}
+          error={error} busy={busy} onClose={closeRemoving}
           onConfirm={() => void remove()}
         />
       )}

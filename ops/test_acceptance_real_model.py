@@ -110,7 +110,7 @@ class _MockHandler(BaseHTTPRequestHandler):
             cid = m_msg.group(1)
             self._send_json(200, {"messages": st.messages.get(cid, []), "hasMore": False})
             return
-        m_att = re.match(r"^/api/v1/conversations/([^/]+)/attachments/([^/]+)$", self.path)
+        m_att = re.match(r"^/api/v1/conversations/([^/]+)/attachments/([^/]+)/content$", self.path)
         if m_att:
             att_id = m_att.group(2)
             raw = st.attachments.get(att_id, b"")
