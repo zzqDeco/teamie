@@ -157,3 +157,19 @@ legacy/dependency non-JSON lines. Existing 10 MiB x 3 per-container rotation is
 unchanged; there is no new long-term log store or browser diagnostics endpoint.
 See [logging and trace correlation](../docs/architecture/logging.md) for fields,
 privacy, timing scopes, durable-boundary joins and acceptance limits.
+
+## Opt-in real model provider acceptance
+
+CI and disposable acceptance never call a live external model provider automatically. Once a platform administrator has authorized a real OpenAI-compatible provider (and optional Tavily web search key), run `ops/acceptance-real-model.py` explicitly to verify live gateway connectivity, foreground `@Agent` turns, Sandbox file export, optional `web_search`/`web_fetch`, and `schedule_create` self-wakeup:
+
+```sh
+TEAMIE_REAL_MODEL_ACCEPTANCE=1 \
+  TEAMIE_ACCEPTANCE_URL="https://teamie.example.com" \
+  TEAMIE_ADMIN_EMAIL="admin@example.com" \
+  TEAMIE_ADMIN_PASSWORD="..." \
+  TEAMIE_REAL_PROVIDER_BASE_URL="https://api.example.com/v1" \
+  TEAMIE_REAL_PROVIDER_API_KEY="sk-..." \
+  TEAMIE_REAL_PROVIDER_MODEL="gpt-4.1-mini" \
+  python3 ops/acceptance-real-model.py
+```
+

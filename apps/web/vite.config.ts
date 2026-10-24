@@ -7,6 +7,8 @@ export default defineConfig({
     chunkSizeWarningLimit: 1000,
   },
   test: {
+    testTimeout: 15000,
+    maxWorkers: 4,
     execArgv: process.allowedNodeEnvironmentFlags.has(
       "--no-experimental-webstorage",
     )

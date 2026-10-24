@@ -1,6 +1,6 @@
 # Agent API and execution contract — v0.3.8
 
-This contract extends the independent IM product. IM services do not depend on Eino, model configuration, runtime sessions, or sandbox state. New services use separate Go modules, PostgreSQL databases/roles, container images and authenticated Kitex contracts in `contracts/agent.thrift`.
+This contract extends the independent IM product. IM services do not depend on Eino, model configuration, runtime sessions, or sandbox state. Services use independent Go modules under `services/`, separate PostgreSQL databases/roles, container images and authenticated Thrift IDL contracts in [`contracts/agent/`](../../contracts/agent) (`model.thrift`, `http_control.thrift`, `http_gateway.thrift`, `rpc_control.thrift`, `rpc_runtime.thrift`, `rpc_gateway.thrift`, `rpc_sandbox.thrift`).
 
 ## Product decisions
 
@@ -43,10 +43,10 @@ Gateway owns encrypted provider secrets and configuration in its own database. O
 
 | Service/module | HTTP / RPC | Database | Schema ledger |
 | --- | --- | --- | --- |
-| `agent-control` | 8084 / 8884 | `teamie_agent_control` | `agent_control_schema_migrations` |
-| `agent-runtime` | 8085 / 8885 | `teamie_agent_runtime` | `agent_runtime_schema_migrations` |
-| `llm-gateway` (`agent-infra`) | 8086 / 8886 | `teamie_gateway` | `gateway_schema_migrations` |
-| `sandbox` (`agent-infra`) | 8087 / 8887 | protected execution receipts/workspaces | no SQL schema |
+| `services/agent-control` | 8084 / 8884 | `teamie_agent_control` | `agent_control_schema_migrations` |
+| `services/agent-runtime` | 8085 / 8885 | `teamie_agent_runtime` | `agent_runtime_schema_migrations` |
+| `services/llm-gateway` | 8086 / 8886 | `teamie_gateway` | `gateway_schema_migrations` |
+| `services/sandbox` | 8087 / 8887 | protected execution receipts/workspaces | no SQL schema |
 
 All versions expose private `/healthz`, `/readyz`, `/version`. Only Caddy publishes host ports. The deployment stays a single production environment.
 
