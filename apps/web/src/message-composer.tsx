@@ -264,6 +264,13 @@ export function MessageComposer({
             }
           }}
           onKeyDown={keyDown}
+          onPaste={(event) => {
+            const files = event.clipboardData?.files;
+            if (uploadsEnabled && files && files.length > 0) {
+              event.preventDefault();
+              attachments.add(Array.from(files));
+            }
+          }}
           placeholder={
             conversation.type === "channel"
               ? `发送消息到 # ${name}`

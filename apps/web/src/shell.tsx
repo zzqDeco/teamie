@@ -33,6 +33,95 @@ import { RemoveMemberModal, ShellMembersPane } from "./shell-members-pane";
 import { parseInviteCode, Welcome } from "./shell-welcome";
 export { parseInviteCode };
 
+const navStorageKey = (userId: string) => `teamie.nav.${userId}`;
+
+type PersistedShellNav = {
+  lastChatPath: string;
+  lastConversationByWorkspace: Record<string, string>;
+  recentConversationIds: string[];
+};
+
+function readPersistedShellNav(userId?: string): PersistedShellNav {
+  if (!userId) {
+    return {
+      lastChatPath: "",
+      lastConversationByWorkspace: {},
+      recentConversationIds: [],
+    };
+  }
+  try {
+    const raw = localStorage.getItem(navStorageKey(userId));
+    if (!raw) {
+      return {
+        lastChatPath: "",
+        lastConversationByWorkspace: {},
+        recentConversationIds: [],
+      };
+    }
+    const parsed = JSON.parse(raw) as Partial<PersistedShellNav>;
+    const lastChatPath =
+      typeof parsed?.lastChatPath === "string" ? parsed.lastChatPath : "";
+    const lastConversationByWorkspace: Record<string, string> = {};
+    if (
+      parsed?.lastConversationByWorkspace &&
+      typeof parsed.lastConversationByWorkspace === "object"
+    ) {
+      for (const [wsId, convId] of Object.entries(
+        parsed.lastConversationByWorkspace,
+      )) {
+        if (typeof convId === "string" && convId) {
+          lastConversationByWorkspace[wsId] = convId;
+        }
+      }
+    }
+    const recentConversationIds = Array.isArray(parsed?.recentConversationIds)
+      ? parsed.recentConversationIds
+          .filter((id): id is string => typeof id === "string" && !!id)
+          .slice(0, 20)
+      : [];
+    return {
+      lastChatPath,
+      lastConversationByWorkspace,
+      recentConversationIds,
+    };
+  } catch {
+    return {
+      lastChatPath: "",
+      lastConversationByWorkspace: {},
+      recentConversationIds: [],
+    };
+  }
+}
+
+function writePersistedShellNav(userId: string, nav: PersistedShellNav) {
+  if (!userId) return;
+  try {
+    localStorage.setItem(navStorageKey(userId), JSON.stringify(nav));
+  } catch {
+    /* Ignore storage access errors. */
+  }
+}
+
+export function clearPersistedShellNav(userId?: string) {
+  if (!userId) return;
+  try {
+    localStorage.removeItem(navStorageKey(userId));
+  } catch {
+    /* Ignore storage access errors. */
+  }
+}
+
+let trackedNavUserId = chatStore.getSnapshot().userId;
+chatStore.subscribe(() => {
+  const snap = chatStore.getSnapshot();
+  if (snap.userId !== trackedNavUserId) {
+    if (!snap.userId && trackedNavUserId) {
+      clearPersistedShellNav(trackedNavUserId);
+    }
+    trackedNavUserId = snap.userId;
+  }
+});
+
 function useDocumentTitle(
   pageTitle: string,
   urgentCount: number,
@@ -138,7 +227,20 @@ function useShellKeyboardShortcuts({
           target.tagName === "TEXTAREA" ||
           target.tagName === "SELECT" ||
           target.isContentEditable);
-      if (inEditable || hasOverlayModal || anyModalOpen) return;
+      const isComposerTextarea =
+        target instanceof HTMLTextAreaElement &&
+        (!!target.closest(".composer") ||
+          target.getAttribute("aria-label") === "消息内容");
+      const canNavigateFromComposer =
+        isComposerTextarea &&
+        target.getAttribute("aria-expanded") !== "true" &&
+        (target.value === "" ||
+          (!target.value.includes("\n") &&
+            target.selectionStart === target.selectionEnd &&
+            (target.selectionStart === 0 ||
+              target.selectionStart === target.value.length)));
+      if ((inEditable && !canNavigateFromComposer) || hasOverlayModal || anyModalOpen)
+        return;
       if (
         event.altKey &&
         !event.metaKey &&
@@ -193,10 +295,18 @@ export function Shell() {
     workspaceRootMatch = useMatch("/app/w/:workspaceId"),
     location = useLocation(),
     navigate = useNavigate();
-  const lastConversationByWorkspace = useRef<Record<string, string>>({});
-  const lastChatRoute = useRef<string>("");
-  const [lastChatPath, setLastChatPath] = useState("");
-  const [recentConversationIds, setRecentConversationIds] = useState<string[]>([]);
+  const [initialNav] = useState(() => readPersistedShellNav(user?.id));
+  const navUserIdRef = useRef(user?.id);
+  const lastConversationByWorkspace = useRef<Record<string, string>>(
+    initialNav.lastConversationByWorkspace,
+  );
+  const lastChatRoute = useRef<string>(initialNav.lastChatPath);
+  const [lastChatPath, setLastChatPath] = useState(
+    initialNav.lastChatPath,
+  );
+  const [recentConversationIds, setRecentConversationIds] = useState<string[]>(
+    initialNav.recentConversationIds,
+  );
   const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [dialog, setDialog] = useState<DialogKind | null>(null),
@@ -225,26 +335,48 @@ export function Shell() {
     ? snapshot.conversations[match.params.conversationId]
     : undefined;
   useEffect(() => {
-    lastConversationByWorkspace.current = {};
-    lastChatRoute.current = "";
-    setLastChatPath("");
-    setRecentConversationIds([]);
+    if (navUserIdRef.current && navUserIdRef.current !== user?.id) {
+      clearPersistedShellNav(navUserIdRef.current);
+    }
+    navUserIdRef.current = user?.id;
+    const restored = readPersistedShellNav(user?.id);
+    lastConversationByWorkspace.current = restored.lastConversationByWorkspace;
+    lastChatRoute.current = restored.lastChatPath;
+    setLastChatPath(restored.lastChatPath);
+    setRecentConversationIds(restored.recentConversationIds);
     setQuickSwitcherOpen(false);
     setShortcutsOpen(false);
   }, [user?.id]);
   useEffect(() => {
-    if (conversation && workspace && conversation.workspaceId === workspace.id) {
+    if (
+      conversation &&
+      workspace &&
+      conversation.workspaceId === workspace.id &&
+      user?.id
+    ) {
       const nextRoute = route(conversation);
       lastConversationByWorkspace.current[workspace.id] = conversation.id;
       lastChatRoute.current = nextRoute;
       setLastChatPath(nextRoute);
-      setRecentConversationIds((prev) =>
-        prev[0] === conversation.id
-          ? prev
-          : [conversation.id, ...prev.filter((id) => id !== conversation.id)].slice(0, 20),
-      );
+      setRecentConversationIds((prev) => {
+        const nextRecent =
+          prev[0] === conversation.id
+            ? prev
+            : [
+                conversation.id,
+                ...prev.filter((id) => id !== conversation.id),
+              ].slice(0, 20);
+        writePersistedShellNav(user.id, {
+          lastChatPath: nextRoute,
+          lastConversationByWorkspace: {
+            ...lastConversationByWorkspace.current,
+          },
+          recentConversationIds: nextRecent,
+        });
+        return nextRecent;
+      });
     }
-  }, [conversation, workspace]);
+  }, [conversation, workspace, user?.id]);
   useEffect(() => {
     const activeId =
       conversation && workspace && conversation.workspaceId === workspace.id
@@ -410,11 +542,19 @@ export function Shell() {
   }
   async function signOut() {
     const sessionToken = api.csrfToken;
+    const currentUserId = user?.id;
     setBusy(true);
     setError("");
     try {
       await logout();
-      if (!api.csrfToken) navigate("/login");
+      if (!api.csrfToken) {
+        clearPersistedShellNav(currentUserId);
+        lastConversationByWorkspace.current = {};
+        lastChatRoute.current = "";
+        setLastChatPath("");
+        setRecentConversationIds([]);
+        navigate("/login");
+      }
     } catch (e) {
       if (sessionToken === api.csrfToken) setError(errorText(e));
     } finally {

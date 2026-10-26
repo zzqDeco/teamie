@@ -10,8 +10,21 @@ import {
 import { api } from "@teamie/api-client";
 import type { Attachment, AttachmentLimits } from "@teamie/api-client";
 import { errorText } from "./chat";
+import { subscribeAttachmentPreview } from "./attachment-previews";
 import { ICON } from "./icons";
+import { Button, Modal } from "./ui";
 import "./attachments.css";
+
+const SAFE_IMAGE_MEDIA_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+]);
+
+export function isPreviewableImage(mediaType: string): boolean {
+  return SAFE_IMAGE_MEDIA_TYPES.has(mediaType.trim().toLowerCase());
+}
 
 export type DraftFile = {
   id: string;
@@ -287,6 +300,60 @@ export function MessageAttachments({
 }) {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
+  const [previewFile, setPreviewFile] = useState<Attachment | null>(null);
+  const imageIdsKey = attachments
+    .filter((attachment) => isPreviewableImage(attachment.mediaType))
+    .map((attachment) => attachment.id)
+    .join("\u0000");
+
+  const listRef = useRef<HTMLUListElement>(null);
+  const retryPreview = useRef<(id: string) => void>(() => {});
+  const [previewErrors, setPreviewErrors] = useState<Record<string, boolean>>({});
+  const session = api.csrfToken;
+  useEffect(() => {
+    setPreviewFile(null);
+    setPreviewUrls({});
+    setPreviewErrors({});
+    let active = true;
+    const subscriptions = new Map<string, () => void>();
+    function start(id: string) {
+      subscriptions.get(id)?.();
+      subscriptions.set(id, subscribeAttachmentPreview(conversationId, id, (preview) => {
+        if (!active || session !== api.csrfToken) return;
+        setPreviewUrls((previous) => {
+          const next = { ...previous };
+          if (preview.url) next[id] = preview.url; else delete next[id];
+          return next;
+        });
+        setPreviewErrors((previous) => ({ ...previous, [id]: !!preview.retryable }));
+        if (!preview.url) setPreviewFile((current) => current?.id === id ? null : current);
+      }));
+    }
+    retryPreview.current = start;
+    const observer = typeof IntersectionObserver === "undefined" ? null : new IntersectionObserver((observations) => {
+      for (const observation of observations) {
+        const id = (observation.target as HTMLElement).dataset.previewId!;
+        if (observation.isIntersecting && !subscriptions.has(id)) start(id);
+        else if (!observation.isIntersecting && subscriptions.has(id)) {
+          subscriptions.get(id)!();
+          subscriptions.delete(id);
+          setPreviewFile((current) => current?.id === id ? null : current);
+          setPreviewUrls((previous) => { const next = { ...previous }; delete next[id]; return next; });
+        }
+      }
+    }, { rootMargin: "200px" });
+    for (const element of listRef.current?.querySelectorAll<HTMLElement>("[data-preview-id]") ?? []) {
+      if (observer) observer.observe(element); else start(element.dataset.previewId!);
+    }
+    return () => {
+      active = false;
+      retryPreview.current = () => {};
+      observer?.disconnect();
+      for (const unsubscribe of subscriptions.values()) unsubscribe();
+    };
+  }, [conversationId, imageIdsKey, session]);
+
   async function download(attachment: Attachment) {
     setBusy(attachment.id);
     setError("");
@@ -304,33 +371,93 @@ export function MessageAttachments({
       setBusy("");
     }
   }
+  const activePreviewUrl = previewFile ? previewUrls[previewFile.id] : undefined;
   return (
     <>
-      <ul className="message-attachments" aria-label="消息附件">
-        {attachments.map((attachment) => (
-          <li key={attachment.id}>
-            <button
-              type="button"
-              disabled={!!busy}
-              onClick={() => void download(attachment)}
-              aria-label={`下载文件 ${attachment.filename}`}
+      <ul ref={listRef} className="message-attachments" aria-label="消息附件">
+        {attachments.map((attachment) => {
+          const previewUrl = previewUrls[attachment.id];
+          return (
+            <li
+              key={attachment.id}
+              data-preview-id={isPreviewableImage(attachment.mediaType) ? attachment.id : undefined}
+              className={previewUrl ? "attachment-image-item" : undefined}
             >
-              <FileIcon size={ICON.lg} />
-              <span className="attachment-details">
-                <span className="attachment-name">{attachment.filename}</span>
-                <span className="attachment-meta">
-                  {fileSize(attachment.sizeBytes)}
-                </span>
-              </span>
-              {busy === attachment.id ? (
-                <LoaderCircle className="spin" size={ICON.sm} />
-              ) : (
-                <Download size={ICON.sm} />
+              {previewUrl && (
+                <button
+                  type="button"
+                  className="attachment-thumbnail-button"
+                  onClick={() => setPreviewFile(attachment)}
+                  aria-label={`预览图片 ${attachment.filename}`}
+                >
+                  <img
+                    className="attachment-thumbnail"
+                    src={previewUrl}
+                    alt={attachment.filename}
+                    loading="lazy"
+                  />
+                </button>
               )}
-            </button>
-          </li>
-        ))}
+              {previewErrors[attachment.id] && (
+                <button type="button" aria-label={`重试预览 ${attachment.filename}`} onClick={() => retryPreview.current(attachment.id)}>
+                  <RefreshCw size={ICON.sm} /> 重试预览
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={!!busy}
+                onClick={() => void download(attachment)}
+                aria-label={`下载文件 ${attachment.filename}`}
+              >
+                <FileIcon size={ICON.lg} />
+                <span className="attachment-details">
+                  <span className="attachment-name">{attachment.filename}</span>
+                  <span className="attachment-meta">
+                    {fileSize(attachment.sizeBytes)}
+                  </span>
+                </span>
+                {busy === attachment.id ? (
+                  <LoaderCircle className="spin" size={ICON.sm} />
+                ) : (
+                  <Download size={ICON.sm} />
+                )}
+              </button>
+            </li>
+          );
+        })}
       </ul>
+      {previewFile && activePreviewUrl && (
+        <Modal
+          title={previewFile.filename}
+          subtitle={fileSize(previewFile.sizeBytes)}
+          onClose={() => setPreviewFile(null)}
+          className="attachment-lightbox-modal"
+        >
+          <div className="attachment-lightbox-body">
+            <img
+              className="attachment-lightbox-image"
+              src={activePreviewUrl}
+              alt={previewFile.filename}
+            />
+          </div>
+          <div className="modal-actions">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setPreviewFile(null)}
+            >
+              关闭
+            </Button>
+            <Button
+              type="button"
+              busy={busy === previewFile.id}
+              onClick={() => void download(previewFile)}
+            >
+              下载原图
+            </Button>
+          </div>
+        </Modal>
+      )}
       {error && (
         <p role="alert" className="attachment-error">
           {error}

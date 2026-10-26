@@ -783,3 +783,12 @@ describe("IDL_ROUTES and generated Thrift DTO contracts", () => {
     expect(fetch.mock.calls[3][0]).toBe(IDL_ROUTES.ListOwnedAgents.path);
   });
 });
+
+it("passes attachment cancellation and preserves Retry-After for transfer saturation", async () => {
+  const client = new TeamieClient();
+  const controller = new AbortController();
+  const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { code: "attachment_busy" } }), { status: 429, headers: { "Retry-After": "2" } }));
+  vi.stubGlobal("fetch", fetch);
+  await expect(client.attachmentContent("c", "f", controller.signal)).rejects.toMatchObject({ status: 429, retryAfterMs: 2000 });
+  expect(fetch.mock.calls[0][1].signal).toBe(controller.signal);
+});

@@ -13,6 +13,7 @@ import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "@teamie/api-client";
 import type { Session, User } from "@teamie/api-client";
 import { chatStore } from "./store";
+import { clearAttachmentPreviews } from "./attachment-previews";
 import { markSessionExpired } from "./session-notice";
 
 type Auth = {
@@ -39,6 +40,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const client = useQueryClient();
   const navigate = useNavigate();
   const reset = useCallback(() => {
+    clearAttachmentPreviews();
     generation.current += 1;
     subject.current = null;
     api.csrfToken = "";
@@ -50,7 +52,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [client]);
   const setSession = useCallback(
     (session: Session) => {
-      generation.current += 1;
+      clearAttachmentPreviews();
+    generation.current += 1;
       subject.current = session.user.id;
       client.clear();
       chatStore.begin(session.user.id);

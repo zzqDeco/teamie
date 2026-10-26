@@ -16,6 +16,7 @@ const cssFiles = [
   "mentions.css",
   "password-recovery.css",
   "feedback.css",
+  "conveniences.css",
 ];
 
 function parseHex(hex: string) {

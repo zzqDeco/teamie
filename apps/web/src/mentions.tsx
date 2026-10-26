@@ -1,5 +1,5 @@
 import { Fragment, useId, useLayoutEffect, useRef, useState } from "react";
-import type { KeyboardEvent, RefObject } from "react";
+import type { ClipboardEvent, KeyboardEvent, RefObject } from "react";
 import type { Member, Mention } from "@teamie/api-client";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
 import { Avatar } from "./ui";
@@ -115,6 +115,7 @@ export function MentionInput({
   enabled: boolean;
   inputRef?: RefObject<HTMLTextAreaElement | null>;
   onKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
+  onPaste?: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
   onTyping?: (body: string) => void;
   placeholder?: string;
   autoFocus?: boolean;
