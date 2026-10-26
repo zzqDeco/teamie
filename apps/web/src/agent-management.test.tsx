@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { Agent, User, Workspace } from "@teamie/api-client";
 import { ApiError } from "@teamie/api-client";
 import {
+  AgentInputError,
   agentProfileChanges,
   agentProfileInput,
   canConfigureModelGateway,
@@ -194,6 +195,29 @@ describe("Agent ownership and visible teams", () => {
       agentFailureText(new Error("PRIVATE-RUNTIME-SENTINEL")),
     ).not.toContain("PRIVATE-RUNTIME-SENTINEL");
   });
+  it("shows the Chinese client-side validation message instead of the generic failure", () => {
+    const failure = (run: () => unknown) => {
+      try {
+        run();
+      } catch (error) {
+        expect(error).toBeInstanceOf(AgentInputError);
+        return agentFailureText(error);
+      }
+      throw new Error("expected validation failure");
+    };
+    expect(
+      failure(() => agentProfileInput("   ", "", [], [workspace], true)),
+    ).toBe("Agent 名称需要 1 至 80 个字符。");
+    expect(
+      failure(() =>
+        agentProfileInput("伙伴", "", ["other-private-team"], [workspace], true),
+      ),
+    ).toBe("只能选择你当前已加入的工作空间，请刷新后重新选择。");
+    // Network failures are TypeErrors too, but are not validation copy.
+    expect(agentFailureText(new TypeError("Failed to fetch"))).toBe(
+      "操作未完成，请检查资料或稍后重试。",
+    );
+  });
 });
 describe("write-only gateway credentials", () => {
   it("omits empty keys to preserve the secret and requires explicit removal", () => {
@@ -258,6 +282,42 @@ describe("write-only gateway credentials", () => {
         }),
       ).toThrow();
   });
+  it("surfaces gateway validation copy, including malformed URLs, without echoing secrets", () => {
+    const failure = (value: Parameters<typeof modelGatewayInput>[0]) => {
+      try {
+        modelGatewayInput(value);
+      } catch (error) {
+        expect(error).toBeInstanceOf(AgentInputError);
+        return gatewayFailureText(error);
+      }
+      throw new Error("expected validation failure");
+    };
+    const value = {
+      baseUrl: "https://model.example.test/v1",
+      model: "model-id",
+      apiKey: "",
+      enabled: true,
+    };
+    for (const baseUrl of ["model.example.test/v1", "not a url", ""])
+      expect(failure({ ...value, baseUrl })).toBe(
+        "服务地址格式不正确，请填写完整的 http(s) 地址。",
+      );
+    const leaked = failure({
+      ...value,
+      baseUrl: "https://model.example.test/v1?api_key=example-secret",
+    });
+    expect(leaked).toBe("服务地址不得包含密钥、认证信息或查询参数。");
+    expect(leaked).not.toContain("example-secret");
+    expect(
+      failure({ ...value, apiKey: "example-secret", clearApiKey: true }),
+    ).toBe("清除密钥和填写新密钥不能同时进行。");
+    expect(failure({ ...value, contextWindowTokens: 1024 })).toBe(
+      "上下文窗口需为 4096 至 2000000 的整数。",
+    );
+    expect(gatewayFailureText(new TypeError("Failed to fetch"))).toBe(
+      "模型网关请求未完成，请检查配置或稍后重试。",
+    );
+  });
   it("never echoes a key in gateway error text or reads a saved key into the password input", () => {
     const secret = "example-sensitive-key";
     expect(
@@ -279,7 +339,7 @@ describe("write-only gateway credentials", () => {
             configured: true,
           },
         }}
-        onSave={async () => {}}
+        onSave={async () => true}
       />,
     );
     expect(html).toContain('type="password"');

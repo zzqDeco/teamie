@@ -24,7 +24,7 @@ export function ModelGatewaySettings() {
   const client = useQueryClient();
   const admin = canConfigureModelGateway(user);
   const [denied, setDenied] = useState(false),
-    [busy, setBusy] = useState(false),
+    [busy, setBusy] = useState<"save" | "test" | null>(null),
     [error, setError] = useState(""),
     [saved, setSaved] = useState(false);
   const [test, setTest] = useState<{
@@ -42,30 +42,32 @@ export function ModelGatewaySettings() {
   });
   const forbidden =
     denied || (query.error instanceof ApiError && query.error.status === 403);
-  async function save(value: GatewayFormValue) {
+  async function save(value: GatewayFormValue): Promise<boolean> {
     const sessionToken = api.csrfToken;
-    setBusy(true);
+    setBusy("save");
     setError("");
     setSaved(false);
     setTest(null);
     try {
       const response = await api.saveModelGateway(modelGatewayInput(value));
-      if (sessionToken !== api.csrfToken) return;
+      if (sessionToken !== api.csrfToken) return false;
       client.setQueryData(key, response);
       setSaved(true);
       await client.invalidateQueries({ queryKey: ["agents"] });
+      return true;
     } catch (e) {
       if (sessionToken === api.csrfToken) {
         if (e instanceof ApiError && e.status === 403) setDenied(true);
         setError(gatewayFailureText(e));
       }
+      return false;
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
   async function testConnection() {
     const sessionToken = api.csrfToken;
-    setBusy(true);
+    setBusy("test");
     setError("");
     setTest(null);
     try {
@@ -82,7 +84,7 @@ export function ModelGatewaySettings() {
         setError(gatewayFailureText(e));
       }
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
   if (!admin || forbidden)
@@ -147,13 +149,15 @@ export function ModelGatewaySettings() {
               </b>
               <p>
                 {query.data.status === "ready"
-                  ? "连接尚需测试验证。"
+                  ? test?.ok
+                    ? "连接测试已通过，Agent 可以调用模型。"
+                    : "连接尚需测试验证。"
                   : "保存并启用后，Agent 才能调用模型。"}
               </p>
             </div>
           </div>
           <Notice kind="success">{saved ? "配置已保存。" : ""}</Notice>
-          <Notice kind={test?.ok ? "success" : "info"}>
+          <Notice kind={test?.ok ? "success" : "error"}>
             {test
               ? test.ok
                 ? `连接测试通过 · ${test.model} · ${Math.round(test.latencyMs)} ms`
@@ -165,7 +169,8 @@ export function ModelGatewaySettings() {
             initial={query.data.config}
             onSave={save}
             error={error}
-            busy={busy}
+            busy={busy === "save"}
+            testing={busy === "test"}
           />
           <div className="gateway-test-panel">
             <div>
@@ -174,9 +179,11 @@ export function ModelGatewaySettings() {
             </div>
             <Button
               className="secondary"
-              busy={busy}
+              busy={busy === "test"}
               disabled={
-                !query.data.config.configured || !query.data.config.enabled
+                busy === "save" ||
+                !query.data.config.configured ||
+                !query.data.config.enabled
               }
               onClick={() => void testConnection()}
             >
