@@ -13,9 +13,11 @@ COPY contracts/gen/im/ /src/contracts/gen/im/
 COPY contracts/gen/agent/ /src/contracts/gen/agent/
 COPY services/agent-runtime/ ./
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.BuildVersion=$VERSION -X main.BuildSHA=$COMMIT_SHA -X teamie/pkg/httpx.BuildVersion=$VERSION -X teamie/pkg/httpx.BuildSHA=$COMMIT_SHA" -o /service ./cmd
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /runtimectl ./cmd/runtimectl
 
 FROM alpine:3.22
 RUN apk add --no-cache ca-certificates tzdata && addgroup -S teamie && adduser -S -G teamie teamie
 COPY --from=build /service /app/service
+COPY --from=build /runtimectl /app/runtimectl
 USER teamie
 ENTRYPOINT ["/app/service"]

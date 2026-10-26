@@ -17,7 +17,7 @@ const contextIMArgumentsKey = "context-im-arguments-v1"
 
 func contextIMTool(name string) bool {
 	switch name {
-	case "im_get_message", "im_list_messages", "im_list_conversations", "im_send_message", "im_get_attachment", "im_upload_file", "im_list_workspace_members", "im_open_direct_conversation", "schedule_create", "schedule_list", "schedule_cancel":
+	case "im_get_message", "im_list_messages", "im_list_conversations", "im_send_message", "im_get_attachment", "im_upload_file", "im_list_workspace_members", "im_open_direct_conversation", "schedule_create", "schedule_update", "schedule_list", "schedule_cancel":
 		return true
 	}
 	return false
@@ -160,7 +160,7 @@ func (a *ContextArchive) imReceiptSources(ctx context.Context, runID, call, name
 			return nil, errContextUnavailable
 		}
 		refs = append(refs, InputSource{ConversationID: conversation.ID, WorkspaceID: conversation.WorkspaceID})
-	case "schedule_create":
+	case "schedule_create", "schedule_update":
 		var created struct {
 			Schedule scheduleView `json:"schedule"`
 		}
