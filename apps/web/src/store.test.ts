@@ -367,6 +367,44 @@ describe("deferred snapshot persistence", () => {
     }
   });
 
+  it("persists outbound send, retry and discard state synchronously so a crash cannot lose a queued send", () => {
+    const { disk, setItem } = countingStorage();
+    const persistence = manualScheduler();
+    const store = new ChatStore(disk, persistence.schedule);
+    store.begin("u1");
+    store.replaceConversations([conversation]);
+    persistence.run();
+    // What a reload after a crash would read (raw, before restore migration).
+    const persisted = (): LocalMessage[] =>
+      JSON.parse(disk.getItem("teamie.sync.v1.u1") || "{}").messages?.c1 || [];
+    // Confirmed sync traffic stays deferred.
+    store.merge([message()]);
+    expect(persistence.queue).toHaveLength(1);
+    const writes = setItem.mock.calls.length;
+
+    // Optimistic send: written before the commit returns, with confirmed data.
+    store.merge([message({ id: "local:send-1", clientMessageId: "send-1", seq: Number.MAX_SAFE_INTEGER, body: "QUEUED", status: "sending" })]);
+    expect(setItem.mock.calls.length).toBe(writes + 1);
+    expect(persistence.queue).toHaveLength(0);
+    expect(persisted().find((m) => m.clientMessageId === "send-1")).toMatchObject({ body: "QUEUED", status: "sending" });
+    expect(persisted().some((m) => m.id === "m1")).toBe(true);
+
+    // Retry state change.
+    store.merge([message({ id: "local:send-1", clientMessageId: "send-1", seq: Number.MAX_SAFE_INTEGER, body: "QUEUED", status: "failed", permanent: false, error: "offline" })]);
+    expect(setItem.mock.calls.length).toBe(writes + 2);
+    expect(persisted().find((m) => m.clientMessageId === "send-1")).toMatchObject({ permanent: false, error: "offline" });
+
+    // Discard.
+    store.discardLocal("c1", "send-1");
+    expect(setItem.mock.calls.length).toBe(writes + 3);
+    expect(persisted().some((m) => m.clientMessageId === "send-1")).toBe(false);
+
+    // Further confirmed-only commits are deferred again.
+    store.merge([message({ id: "m2", clientMessageId: "r2", seq: 2 })]);
+    expect(setItem.mock.calls.length).toBe(writes + 3);
+    expect(persistence.queue).toHaveLength(1);
+  });
+
   it("defaults to an idle write within about a second, and flush writes immediately", () => {
     vi.useFakeTimers();
     const { disk, setItem } = countingStorage();

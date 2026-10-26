@@ -172,6 +172,37 @@ function recordJson<T>(record: Record<string, T>, value: (item: T) => string) {
     if (item !== undefined) parts.push(`${JSON.stringify(id)}:${value(item)}`);
   return `{${parts.join(",")}}`;
 }
+// Pending/failed outbound messages per conversation array, cached by identity.
+const outboundByList = new WeakMap<LocalMessage[], LocalMessage[]>();
+function outbound(messages: LocalMessage[] | undefined): LocalMessage[] {
+  if (!messages) return [];
+  let local = outboundByList.get(messages);
+  if (!local) {
+    local = messages.filter((m) => !!m.status);
+    outboundByList.set(messages, local);
+  }
+  return local;
+}
+/**
+ * True when a commit adds, changes or removes a locally pending/failed
+ * outbound message (optimistic send, retry state, discard, confirmation).
+ * Only conversations whose message array was replaced are inspected.
+ */
+function outboundChanged(previous: ChatSnapshot, next: ChatSnapshot) {
+  const ids = new Set([
+    ...Object.keys(previous.messages),
+    ...Object.keys(next.messages),
+  ]);
+  for (const id of ids) {
+    const before = previous.messages[id];
+    const after = next.messages[id];
+    if (before === after) continue;
+    const a = outbound(before);
+    const b = outbound(after);
+    if (a.length !== b.length || a.some((m, i) => m !== b[i])) return true;
+  }
+  return false;
+}
 export function serializeSnapshot(snapshot: ChatSnapshot): string {
   return (
     `{"userId":${JSON.stringify(snapshot.userId)}` +
@@ -224,12 +255,19 @@ export class ChatStore {
     if (this.cancelPersist) this.persist();
   };
   private commit(next: ChatSnapshot) {
+    const previous = this.snapshot;
     this.snapshot = { ...next, revision: this.snapshot.revision + 1 };
     if (next.userId && this.storage) {
       // The persisted snapshot always pairs entities with their cursor, so a
       // deferred write can lag but never tear; replay after a crash is
       // idempotent because events at or below the cursor are skipped.
-      if (!this.schedule) this.persist();
+      // Outbound sends bypass the deferral: a crash right after Enter must
+      // not lose the queued message or its idempotent clientMessageId.
+      if (
+        !this.schedule ||
+        (previous.userId === next.userId && outboundChanged(previous, next))
+      )
+        this.persist();
       else if (!this.cancelPersist)
         this.cancelPersist = this.schedule(() => {
           this.cancelPersist = undefined;
