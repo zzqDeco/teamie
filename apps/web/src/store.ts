@@ -124,15 +124,75 @@ export function reconcileMessages(
 }
 const olderOrEqual = (a: string, b: string) =>
   /^\d+$/.test(a) && /^\d+$/.test(b) ? BigInt(a) <= BigInt(b) : a === b;
+/**
+ * Schedules a deferred persistence callback and returns its canceller. Without
+ * a scheduler the store persists synchronously on every commit.
+ */
+export type PersistScheduler = (write: () => void) => () => void;
+const PERSIST_DELAY_MS = 1000;
+type IdleWindow = {
+  requestIdleCallback?: (cb: () => void, options?: { timeout: number }) => number;
+  cancelIdleCallback?: (handle: number) => void;
+};
+/** Coalesces writes into an idle period (at most ~1s later). */
+export const idlePersistScheduler: PersistScheduler = (write) => {
+  const idle = globalThis as IdleWindow;
+  if (idle.requestIdleCallback && idle.cancelIdleCallback) {
+    const cancelIdle = idle.cancelIdleCallback;
+    const handle = idle.requestIdleCallback(write, { timeout: PERSIST_DELAY_MS });
+    return () => cancelIdle(handle);
+  }
+  const handle = setTimeout(write, PERSIST_DELAY_MS);
+  return () => clearTimeout(handle);
+};
+// Serialized shards are cached by array/object identity: commits replace only
+// the conversations they change, so unchanged shards are never re-stringified.
+// The assembled value is byte-compatible with the previous single-blob format.
+const persistedMessagesJson = new WeakMap<LocalMessage[], string>();
+const persistedConversationJson = new WeakMap<Conversation, string>();
+function messagesJson(messages: LocalMessage[]) {
+  let json = persistedMessagesJson.get(messages);
+  if (json === undefined) {
+    json = JSON.stringify(trimPersistedMessages(messages));
+    persistedMessagesJson.set(messages, json);
+  }
+  return json;
+}
+function conversationJson(conversation: Conversation) {
+  let json = persistedConversationJson.get(conversation);
+  if (json === undefined) {
+    json = JSON.stringify(conversation);
+    persistedConversationJson.set(conversation, json);
+  }
+  return json;
+}
+function recordJson<T>(record: Record<string, T>, value: (item: T) => string) {
+  const parts: string[] = [];
+  for (const [id, item] of Object.entries(record))
+    if (item !== undefined) parts.push(`${JSON.stringify(id)}:${value(item)}`);
+  return `{${parts.join(",")}}`;
+}
+export function serializeSnapshot(snapshot: ChatSnapshot): string {
+  return (
+    `{"userId":${JSON.stringify(snapshot.userId)}` +
+    `,"cursor":${JSON.stringify(snapshot.cursor)}` +
+    `,"messages":${recordJson(snapshot.messages, messagesJson)}` +
+    `,"conversations":${recordJson(snapshot.conversations, conversationJson)}` +
+    `,"revision":${JSON.stringify(snapshot.revision)}}`
+  );
+}
 export class ChatStore {
   private snapshot: ChatSnapshot = empty();
   private listeners = new Set<() => void>();
   private storage?: StorageLike;
+  private schedule?: PersistScheduler;
+  private cancelPersist?: () => void;
   generation = 0;
   conversationVersion = 0;
   hasAuthoritativeConversations = false;
-  constructor(storage?: StorageLike) {
+  constructor(storage?: StorageLike, schedule?: PersistScheduler) {
     this.storage = storage;
+    this.schedule = schedule;
   }
   getSnapshot = () => this.snapshot;
   subscribe = (fn: () => void) => {
@@ -141,26 +201,40 @@ export class ChatStore {
       this.listeners.delete(fn);
     };
   };
+  private persist() {
+    this.cancelPendingPersist();
+    const snapshot = this.snapshot;
+    if (!snapshot.userId) return;
+    try {
+      this.storage?.setItem(
+        storageKey(snapshot.userId),
+        serializeSnapshot(snapshot),
+      );
+    } catch {
+      /* Sync remains correct in memory if storage is full or unavailable. */
+    }
+  }
+  private cancelPendingPersist() {
+    const cancel = this.cancelPersist;
+    this.cancelPersist = undefined;
+    cancel?.();
+  }
+  /** Writes a pending deferred snapshot now (e.g. on pagehide). */
+  flush = () => {
+    if (this.cancelPersist) this.persist();
+  };
   private commit(next: ChatSnapshot) {
     this.snapshot = { ...next, revision: this.snapshot.revision + 1 };
-    if (next.userId) {
-      try {
-        const persisted: ChatSnapshot = {
-          ...this.snapshot,
-          messages: Object.fromEntries(
-            Object.entries(this.snapshot.messages).map(([id, messages]) => [
-              id,
-              trimPersistedMessages(messages),
-            ]),
-          ),
-        };
-        this.storage?.setItem(
-          storageKey(next.userId),
-          JSON.stringify(persisted),
-        );
-      } catch {
-        /* Sync remains correct in memory if storage is full or unavailable. */
-      }
+    if (next.userId && this.storage) {
+      // The persisted snapshot always pairs entities with their cursor, so a
+      // deferred write can lag but never tear; replay after a crash is
+      // idempotent because events at or below the cursor are skipped.
+      if (!this.schedule) this.persist();
+      else if (!this.cancelPersist)
+        this.cancelPersist = this.schedule(() => {
+          this.cancelPersist = undefined;
+          this.persist();
+        });
     }
     this.listeners.forEach((fn) => fn());
   }
@@ -212,6 +286,9 @@ export class ChatStore {
     this.generation += 1;
     this.conversationVersion += 1;
     this.hasAuthoritativeConversations = false;
+    // Account isolation: a deferred write of this account must never land
+    // after logout or an account switch.
+    this.cancelPendingPersist();
     if (this.snapshot.userId) {
       try {
         this.storage?.removeItem(storageKey(this.snapshot.userId));
@@ -379,4 +456,10 @@ try {
 } catch {
   /* Private browsing may disable persistent storage. */
 }
-export const chatStore = new ChatStore(storage);
+export const chatStore = new ChatStore(storage, idlePersistScheduler);
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", chatStore.flush);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") chatStore.flush();
+  });
+}

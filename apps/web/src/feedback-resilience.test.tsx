@@ -65,6 +65,8 @@ describe("failed messages", () => {
 
     // Seed a legacy failed message without `permanent` and with raw English error text
     const rawKey = "teamie.sync.v1.me";
+    // Persistence is deferred; write the pending snapshot before editing it.
+    chatStore.flush();
     const snapshotWithLegacy = JSON.parse(localStorage.getItem(rawKey)!);
     snapshotWithLegacy.messages.room.push({
       ...message,
