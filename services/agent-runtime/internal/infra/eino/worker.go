@@ -319,7 +319,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 				activeTools = append(activeTools, webTools...)
 			}
 			if budget.ScheduledWakeups {
-				scheduleTools, err := (&Tools{Store: e.Store, Lease: lease, IM: imc, OwnerID: def.OwnerId, AgentID: def.Id, FlagsFile: e.Config.FlagsFile, Authorize: authorize}).BuildScheduleTools()
+				scheduleTools, err := (&Tools{Store: e.Store, Lease: lease, IM: imc, OwnerID: def.OwnerId, AgentID: def.Id, FlagsFile: e.Config.FlagsFile, Authorize: authorize}).BuildScheduleTools(budget.DirectMessages)
 				if err != nil {
 					return nil, err
 				}
@@ -348,7 +348,11 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 				instruction += webSearchGuidance
 			}
 			if budget.ScheduledWakeups {
-				instruction += scheduleWakeupGuidance
+				if budget.DirectMessages {
+					instruction += autonomousScheduleGuidance
+				} else {
+					instruction += scheduleWakeupGuidance
+				}
 			}
 			if budget.DirectMessages {
 				instruction += directMessageGuidance
@@ -737,6 +741,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 	defer poll.Stop()
 	lastState := ""
 	lastReport := time.Time{}
+	heartbeatEnsured := false
 	tick := func() bool {
 		if err := e.ingest(ctx, imc, lease); err != nil {
 			if errors.Is(err, ErrLeaseLost) {
@@ -747,6 +752,15 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		}
 		if err := tasks.notifications(ctx, lease); errors.Is(err, ErrLeaseLost) {
 			return false
+		}
+		if !heartbeatEnsured {
+			ensured, hbErr := e.ensureDefaultHeartbeatSchedule(ctx, def, imc, lease)
+			if errors.Is(hbErr, ErrLeaseLost) {
+				return false
+			}
+			if hbErr == nil && ensured {
+				heartbeatEnsured = true
+			}
 		}
 		if err := e.drainSchedules(ctx, lease); errors.Is(err, ErrLeaseLost) {
 			return false
