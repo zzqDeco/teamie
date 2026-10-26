@@ -5,8 +5,10 @@ import type { Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, ApiError } from "@teamie/api-client";
 import type { Bootstrap, Conversation, Member, Message, User } from "@teamie/api-client";
+import { readComposerDraft } from "./composer-drafts";
 import { ConversationView } from "./messages";
 import { chatStore } from "./store";
+import type { LocalMessage } from "./store";
 
 const user: User = {
   id: "human", kind: "human", platformRole: "user", displayName: "Human",
@@ -287,5 +289,103 @@ describe("ID-only composer replies", () => {
     expect(input().value).toBe("Unsent draft");
     await act(async () => { host.querySelector<HTMLButtonElement>('[aria-label="发送消息"]')!.click(); });
     expect(api.send).toHaveBeenCalledWith(conversation.id, expect.objectContaining({ replyToId: source.id }));
+  });
+});
+
+describe("permanently failed messages", () => {
+  const failed = (overrides: Partial<LocalMessage> = {}): LocalMessage => ({
+    id: "local:fix-me", conversationId: conversation.id, senderId: user.id,
+    senderName: user.displayName, senderKind: "human", clientMessageId: "fix-me",
+    seq: Number.MAX_SAFE_INTEGER, body: "@Peer please fix", createdAt: user.createdAt,
+    mentions: [{ userId: "peer", start: 0, end: 5 }], replyToId: source.id,
+    status: "failed", permanent: true, error: "提及的成员无效，请修改后重新发送。",
+    ...overrides,
+  });
+  const restoreButton = () =>
+    [...host.querySelectorAll<HTMLButtonElement>(".failed-status button")].find(
+      (button) => button.textContent?.includes("编辑并重发"),
+    );
+
+  it("restores body, mentions and reply into the composer, discards the failed copy and focuses input", async () => {
+    await act(async () => { chatStore.merge([failed()]); });
+    await show();
+    expect(host.textContent).toContain("@Peer please fix");
+    await act(async () => { restoreButton()!.click(); });
+    expect(input().value).toBe("@Peer please fix");
+    expect(document.activeElement).toBe(input());
+    expect(readComposerDraft(conversation.id)).toEqual({
+      body: "@Peer please fix",
+      mentions: [{ userId: "peer", start: 0, end: 5 }],
+      replyToId: source.id,
+    });
+    expect(preview()?.textContent).toContain(source.body);
+    expect(host.querySelector(".failed-status")).toBeNull();
+    expect(chatStore.getSnapshot().messages[conversation.id]?.some(
+      (message) => message.clientMessageId === "fix-me",
+    )).toBe(false);
+    await act(async () => { host.querySelector<HTMLButtonElement>('[aria-label="发送消息"]')!.click(); });
+    expect(api.send).toHaveBeenCalledWith(conversation.id, expect.objectContaining({
+      body: "@Peer please fix",
+      mentions: [{ userId: "peer", start: 0, end: 5 }],
+      replyToId: source.id,
+    }));
+  });
+
+  it("appends to an in-progress draft with shifted mention offsets", async () => {
+    await act(async () => { chatStore.merge([failed({ replyToId: undefined })]); });
+    await show();
+    await type("Keep me");
+    await act(async () => { restoreButton()!.click(); });
+    expect(input().value).toBe("Keep me\n@Peer please fix");
+    expect(readComposerDraft(conversation.id).mentions).toEqual([
+      { userId: "peer", start: 8, end: 13 },
+    ]);
+  });
+
+  it("offers editing only for permanent failures; transient failures keep retry", async () => {
+    await act(async () => { chatStore.merge([failed({ permanent: false })]); });
+    await show();
+    expect(restoreButton()).toBeUndefined();
+    expect(host.querySelector(".failed-status")?.textContent).toContain("重试");
+  });
+});
+
+describe("message copy actions", () => {
+  const button = (label: string) =>
+    host.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`);
+
+  it("copies the raw body and an absolute message deep link", async () => {
+    const writeText = vi.fn(async () => {});
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    latest[conversation.id] = [{ ...source, body: "**raw** body" }];
+    await show();
+    await act(async () => { button("复制文本")!.click(); });
+    expect(writeText).toHaveBeenLastCalledWith("**raw** body");
+    expect(host.querySelector('[role="status"].send-status')?.textContent).toBe("已复制消息文本");
+    await act(async () => { button("复制消息链接")!.click(); });
+    expect(writeText).toHaveBeenLastCalledWith(
+      `${window.location.origin}/app/w/team/c/current?message=source`,
+    );
+    expect(host.querySelector('[role="status"].send-status')?.textContent).toBe("已复制消息链接");
+    await act(async () => { vi.advanceTimersByTime(3000); });
+    expect(host.querySelector(".send-status")).toBeNull();
+  });
+
+  it("reports clipboard failures and hides text copy for retracted messages", async () => {
+    vi.stubGlobal("navigator", {
+      ...navigator,
+      clipboard: { writeText: vi.fn(async () => { throw new Error("denied"); }) },
+    });
+    latest[conversation.id] = [
+      source,
+      { ...source, id: "gone", clientMessageId: "gone-request", seq: 3, body: "", retractedAt: user.createdAt },
+    ];
+    await show();
+    expect(host.textContent).toContain("这条消息已撤回");
+    expect(host.querySelectorAll('[aria-label="复制消息链接"]')).toHaveLength(1);
+    expect(host.querySelectorAll('[aria-label="复制文本"]')).toHaveLength(1);
+    await act(async () => { button("复制文本")!.click(); });
+    const alert = host.querySelector('[role="alert"].send-status');
+    expect(alert?.textContent).toContain("无法访问剪贴板");
   });
 });

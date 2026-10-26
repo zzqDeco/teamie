@@ -592,6 +592,7 @@ export function ConversationView({
           <MessageItem
             key={message.id} message={message} index={index} messages={messages}
             allMessages={allMessages} resolvedTargets={resolvedTargets}
+            workspaceId={conversation.workspaceId}
             conversationId={conversation.id} userId={userId} members={members}
             mentionMembers={mentionMembers} mentionsEnabled={mentionsEnabled}
             canEdit={canEdit} canRetract={canRetract} firstUnread={firstUnread}

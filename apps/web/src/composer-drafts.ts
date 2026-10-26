@@ -145,6 +145,32 @@ export function writeComposerDraft(
   notifyDrafts();
 }
 
+/**
+ * Moves the sender's own undelivered text back into the composer so it can be
+ * fixed and resent. Any in-progress draft text is kept and the restored text
+ * is appended after it; mention offsets are shifted to match.
+ */
+export function restoreComposerDraft(
+  conversationId: string,
+  restored: Pick<Message, "body" | "mentions" | "replyToId">,
+) {
+  const existing = readComposerDraft(conversationId);
+  const separator = existing.body && restored.body ? "\n" : "";
+  const offset = existing.body.length + separator.length;
+  writeComposerDraft(conversationId, {
+    body: existing.body + separator + restored.body,
+    mentions: [
+      ...existing.mentions,
+      ...(restored.mentions || []).map((mention) => ({
+        ...mention,
+        start: mention.start + offset,
+        end: mention.end + offset,
+      })),
+    ],
+    replyToId: restored.replyToId || existing.replyToId,
+  });
+}
+
 export function sameMentions(a: Mention[], b: Mention[]) {
   return (
     a.length === b.length &&

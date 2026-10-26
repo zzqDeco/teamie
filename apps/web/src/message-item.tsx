@@ -1,14 +1,17 @@
-import { Fragment, useCallback, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent, RefObject } from "react";
 import {
   ArrowLeft,
   ArrowUp,
+  Copy,
   CornerUpLeft,
   Hash,
+  Link2,
   LoaderCircle,
   MessageCircle,
   MoreHorizontal,
   Pencil,
+  PencilLine,
   RefreshCw,
   Search,
   Trash2,
@@ -25,7 +28,7 @@ import { errorText, sendMessage } from "./chat";
 import { chatStore, reconcileMessages } from "./store";
 import type { LocalMessage } from "./store";
 import { MentionInput, trimMentionDraft } from "./mentions";
-import { sameMentions } from "./composer-drafts";
+import { restoreComposerDraft, sameMentions } from "./composer-drafts";
 import { MessageAttachments } from "./attachments";
 import { MessageBody } from "./markdown";
 import { Avatar, Button, date, IconButton, Modal, Notice, time } from "./ui";
@@ -130,6 +133,29 @@ export function useMessageActions(conversationId: string) {
     closeRetract,
     requestRetract,
   };
+}
+
+/** Absolute deep link that opens a conversation located at one message. */
+export function messageLink(
+  workspaceId: string,
+  conversationId: string,
+  messageId: string,
+) {
+  return `${window.location.origin}/app/w/${encodeURIComponent(workspaceId)}/c/${encodeURIComponent(conversationId)}?message=${encodeURIComponent(messageId)}`;
+}
+
+async function copyToClipboard(text: string) {
+  if (!navigator.clipboard?.writeText) throw new Error("clipboard unavailable");
+  await navigator.clipboard.writeText(text);
+}
+
+function discardFailedMessage(conversationId: string, message: LocalMessage) {
+  for (const attachment of message.attachments || []) {
+    void api
+      .deletePendingAttachment(conversationId, attachment.id)
+      .catch(() => {});
+  }
+  chatStore.discardLocal(conversationId, message.clientMessageId);
 }
 
 export function ConversationHeader({
@@ -328,6 +354,7 @@ export function MessageItem({
   messages,
   allMessages,
   resolvedTargets,
+  workspaceId,
   conversationId,
   userId,
   members,
@@ -363,6 +390,7 @@ export function MessageItem({
   messages: LocalMessage[];
   allMessages: LocalMessage[];
   resolvedTargets: Record<string, Message>;
+  workspaceId: string;
   conversationId: string;
   userId: string;
   members: Member[];
@@ -423,6 +451,26 @@ export function MessageItem({
     : undefined;
   const actionTabIndex =
     isRovingTarget || actionMessageId === message.id ? 0 : -1;
+  const [copyFeedback, setCopyFeedback] = useState<{
+    ok: boolean;
+    text: string;
+  } | null>(null);
+  useEffect(() => {
+    if (!copyFeedback) return;
+    const timer = window.setTimeout(() => setCopyFeedback(null), 2400);
+    return () => window.clearTimeout(timer);
+  }, [copyFeedback]);
+  async function copy(text: string, success: string) {
+    try {
+      await copyToClipboard(text);
+      setCopyFeedback({ ok: true, text: success });
+    } catch {
+      setCopyFeedback({
+        ok: false,
+        text: "无法访问剪贴板，请手动选择内容复制。",
+      });
+    }
+  }
   return (
     <Fragment>
       {showDate && (
@@ -627,22 +675,37 @@ export function MessageItem({
                   重试
                 </button>
               )}
-              <button
-                onClick={() => {
-                  for (const attachment of message.attachments || []) {
-                    void api
-                      .deletePendingAttachment(conversationId, attachment.id)
-                      .catch(() => {});
+              {(message as LocalMessage).permanent && !!message.body && (
+                <button
+                  title={
+                    message.attachments?.length
+                      ? "恢复文字到输入框，附件需要重新添加"
+                      : undefined
                   }
-                  chatStore.discardLocal(
-                    conversationId,
-                    message.clientMessageId,
-                  );
-                }}
+                  onClick={() => {
+                    restoreComposerDraft(conversationId, message);
+                    discardFailedMessage(conversationId, message);
+                    inputRef.current?.focus();
+                  }}
+                >
+                  <PencilLine size={ICON.xs} />
+                  编辑并重发
+                </button>
+              )}
+              <button
+                onClick={() => discardFailedMessage(conversationId, message)}
               >
                 <Trash2 size={ICON.xs} />
                 删除
               </button>
+            </span>
+          )}
+          {copyFeedback && (
+            <span
+              className={`send-status ${copyFeedback.ok ? "" : "failed-status"}`}
+              role={copyFeedback.ok ? "status" : "alert"}
+            >
+              {copyFeedback.text}
             </span>
           )}
         </div>
@@ -670,6 +733,27 @@ export function MessageItem({
                   onClick={() => onReply(message.id)}
                 >
                   <CornerUpLeft size={ICON.sm} />
+                </IconButton>
+                {!!message.body && (
+                  <IconButton
+                    label="复制文本"
+                    tabIndex={actionTabIndex}
+                    onClick={() => void copy(message.body, "已复制消息文本")}
+                  >
+                    <Copy size={ICON.xs} />
+                  </IconButton>
+                )}
+                <IconButton
+                  label="复制消息链接"
+                  tabIndex={actionTabIndex}
+                  onClick={() =>
+                    void copy(
+                      messageLink(workspaceId, conversationId, message.id),
+                      "已复制消息链接",
+                    )
+                  }
+                >
+                  <Link2 size={ICON.xs} />
                 </IconButton>
                 {message.senderId === userId && canEdit && (
                   <IconButton
