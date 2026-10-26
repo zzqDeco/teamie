@@ -86,7 +86,12 @@ This file coordinates the initial frontend, backend and deployment. The machine-
 - Retracted messages cannot gain reactions (409 `message_retracted`) and every read, including old sync events, returns them without reactions. Edits keep reactions.
 - Each effective change commits one durable `reaction.updated` sync event carrying `conversationId`, `messageId` and the complete current `reactions` list; no-op repeats create none. Reactions never allocate a message `seq`, change `lastSeq`/`updatedAt`, unread counts or read cursors, and create no attention item or browser notification.
 - Reactions are not new Agent work: Runtime continues to treat only `message.created` as fresh input, so reacting to an Agent message cannot start a turn or a reaction loop. Explicit Agent history/message reads include the ordinary `reactions` field. This change adds no Agent reaction tool.
-- `im.reactions.create` gates new reactions. Removing one's own reaction remains allowed when it is off, and persisted reactions stay visible. The browser shows reaction chips under the message (toggle on click/tap, reactor names on hover/long-press) and an emoji picker in the message action menu only when the capability is true.
+- `im.reactions.create` gates new reactions. Removing one's own reaction remains allowed when it is off, and persisted reactions stay visible. The browser always shows persisted reaction chips and reactor names under ordinary conversation ACLs, independently of the creation capability. Clicking one's own chip removes that reaction even when creation is disabled. Clicking a chip to which the caller has not reacted may add a reaction only when creation is enabled; otherwise it must not issue a PUT. The emoji picker is available only when creation is enabled.
+
+| `im.reactions.create` | Persisted chips and reactor names | Remove own reaction | Add a reaction / emoji picker |
+| --- | --- | --- | --- |
+| `true` | Visible under conversation ACLs | Allowed | Allowed |
+| `false` | Still visible under conversation ACLs | Still allowed | Disabled / hidden |
 
 ## Read receipts
 
