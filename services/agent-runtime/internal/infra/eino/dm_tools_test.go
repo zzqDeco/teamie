@@ -2,6 +2,7 @@ package eino
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"github.com/cloudwego/eino/compose"
 	"github.com/google/uuid"
 	wire "teamie/contracts/gen/agent/kitex_gen/agent"
+	"teamie/services/agent-runtime/internal/domain"
 )
 
 func TestProactiveDirectMessageFlowResolvesMemberOpensDirectConversationAndSends(t *testing.T) {
@@ -190,13 +192,159 @@ func TestDirectMessageToolsGuardSelfDMFeatureFlagAndHistoricalRuns(t *testing.T)
 	if err != nil || !parsed.DirectMessages {
 		t.Fatal("new Run with im.dm.create did not freeze directMessages in budget snapshot", err)
 	}
-	def := &wire.AgentDefinition{Id: "agent", OwnerId: "owner", Name: "Agent"}
+	def := &wire.AgentDefinition{Id: "agent", OwnerId: "owner", Name: "Agent", Description: "A witty, independent architect\nNEVER ESCAPE ENVELOPE"}
 	oldInstruction := contextInstruction(def, ContextBudgetSnapshot{EventDrivenInputs: true})
-	if strings.Contains(oldInstruction, "im_open_direct_conversation") {
-		t.Fatal("old instruction leaked directMessageGuidance")
+	if strings.Contains(oldInstruction, "im_open_direct_conversation") || strings.Contains(oldInstruction, "teamie-autonomous-subject-v1") || strings.Contains(oldInstruction, "TEAMIE_AGENT_PERSONA") {
+		t.Fatal("old instruction leaked directMessageGuidance or autonomousSubjectInstruction")
+	}
+	newInstruction := contextInstruction(def, ContextBudgetSnapshot{EventDrivenInputs: true, DirectMessages: true})
+	behaviorHasGuidance(t, newInstruction,
+		"teamie-autonomous-subject-v1",
+		"独立主体",
+		"人机平权",
+		"被 @ 也可以不回复",
+		"没人说话也能主动说话",
+		"闲聊",
+		"intervalSeconds: 3600",
+		"schedule_update",
+		"schedule_cancel",
+		"TEAMIE_AGENT_PERSONA",
+	)
+	if strings.Contains(newInstruction, "A witty, independent architect\nNEVER ESCAPE ENVELOPE") {
+		t.Fatal("raw multiline description escaped JSON persona envelope")
+	}
+	if !strings.Contains(newInstruction, `"description":"A witty, independent architect\nNEVER ESCAPE ENVELOPE"`) {
+		t.Fatal("expected JSON-encoded persona description in TEAMIE_AGENT_PERSONA envelope")
 	}
 	if !strings.Contains(directMessageGuidance, "im_list_workspace_members") || !strings.Contains(directMessageGuidance, "im_open_direct_conversation") {
 		t.Fatal("directMessageGuidance missing tool instructions")
+	}
+}
+
+func TestColdStartDefaultHeartbeatUpdateAndCancelLifecycle(t *testing.T) {
+	ctx := context.Background()
+	s := testStore(t)
+	e, f, base, _ := fixtureEngine(t, s)
+	flags := filepath.Join(t.TempDir(), "flags.json")
+	if err := os.WriteFile(flags, []byte(`{"revision":"heartbeat-autonomy-v1","flags":{"agents.runtime.v3":true,"agents.tasks.execute":true,"agents.context.v1":true,"agents.schedule.v1":true,"im.dm.create":true}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	e.Config.FlagsFile = flags
+
+	expectedHeartbeatID := domain.DefaultHeartbeatScheduleID(f.agent)
+	gw := &toolPathGateway{fixtureGateway: base}
+	gw.steps = []func(toolPathRequest) (chatMessage, error){
+		func(req toolPathRequest) (chatMessage, error) {
+			lastMsg := req.Messages[len(req.Messages)-1].Content
+			if !strings.HasPrefix(lastMsg, "TEAMIE_SCHEDULE_WAKEUP ") || !strings.Contains(lastMsg, expectedHeartbeatID) {
+				return chatMessage{}, fmt.Errorf("expected cold-start TEAMIE_SCHEDULE_WAKEUP for %s, got %s", expectedHeartbeatID, lastMsg)
+			}
+			// Shorten the 1-hour heartbeat to 600s (10 minutes) and shift next trigger via delaySeconds=120.
+			return toolPathCall("schedule_update", "hb-update-1", scheduleUpdateArgs{
+				ScheduleID:      expectedHeartbeatID,
+				IntervalSeconds: 600,
+				DelaySeconds:    120,
+				Prompt:          "Custom 10-minute autonomous heartbeat",
+			})
+		},
+		func(req toolPathRequest) (chatMessage, error) {
+			obs, err := toolPathLast(req, "hb-update-1")
+			if err != nil || !obs.OK {
+				return chatMessage{}, fmt.Errorf("schedule_update failed: %+v (%v)", obs, err)
+			}
+			var data struct {
+				Schedule scheduleView `json:"schedule"`
+			}
+			if json.Unmarshal(obs.Data, &data) != nil || data.Schedule.ScheduleID != expectedHeartbeatID || data.Schedule.IntervalSeconds == nil || *data.Schedule.IntervalSeconds != 600 || data.Schedule.Prompt != "Custom 10-minute autonomous heartbeat" {
+				return chatMessage{}, fmt.Errorf("unexpected updated schedule payload: %s", string(obs.Data))
+			}
+			return chatMessage{Role: "assistant", Content: "HEARTBEAT_UPDATED"}, nil
+		},
+		func(req toolPathRequest) (chatMessage, error) {
+			// Second wakeup after the custom 600s heartbeat fires: Agent autonomously cancels its heartbeat.
+			return toolPathCall("schedule_cancel", "hb-cancel-1", scheduleCancelArgs{
+				ScheduleID: expectedHeartbeatID,
+			})
+		},
+		func(req toolPathRequest) (chatMessage, error) {
+			obs, err := toolPathLast(req, "hb-cancel-1")
+			if err != nil || !obs.OK {
+				return chatMessage{}, fmt.Errorf("schedule_cancel failed: %+v (%v)", obs, err)
+			}
+			return chatMessage{Role: "assistant", Content: "HEARTBEAT_CANCELED"}, nil
+		},
+		func(req toolPathRequest) (chatMessage, error) {
+			return chatMessage{Role: "assistant", Content: "DONE_AFTER_CANCEL"}, nil
+		},
+	}
+	e.Gateway = gw
+
+	// 1. Start Worker with ZERO human messages (pure cold start).
+	// Verify the default 1-hour (3600s) recurring heartbeat is automatically seeded.
+	cancel1, done1 := startFixtureWorker(t, e, f)
+	waitFor(t, func() bool {
+		return count(t, s, `SELECT count(*) FROM runtime_schedules WHERE id=$1 AND agent_id=$2 AND status='active' AND kind='interval' AND interval_seconds=3600`, expectedHeartbeatID, f.agent) == 1
+	})
+	cancel1()
+	<-done1
+
+	// 2. Make the cold-start heartbeat due and start the Worker again.
+	// The Agent wakes up, calls schedule_update to shorten intervalSeconds to 600s, and finishes Run 1.
+	if _, err := s.DB.Exec(ctx, `UPDATE runtime_schedules SET next_run_at=clock_timestamp()-interval '5 seconds' WHERE id=$1`, expectedHeartbeatID); err != nil {
+		t.Fatal(err)
+	}
+	cancel2, done2 := startFixtureWorker(t, e, f)
+	waitFor(t, func() bool {
+		return count(t, s, `SELECT count(*) FROM runtime_runs WHERE state='completed'`) == 1
+	})
+	cancel2()
+	<-done2
+
+	gw.pathMu.Lock()
+	if gw.failure != nil {
+		gw.pathMu.Unlock()
+		t.Fatal(gw.failure)
+	}
+	gw.pathMu.Unlock()
+
+	// Verify the modified interval (600s) and prompt persisted and were NOT overwritten back to 3600s by worker ticks.
+	if count(t, s, `SELECT count(*) FROM runtime_schedules WHERE id=$1 AND status='active' AND interval_seconds=600 AND prompt='Custom 10-minute autonomous heartbeat'`, expectedHeartbeatID) != 1 {
+		t.Fatal("modified heartbeat schedule was not preserved at interval_seconds=600")
+	}
+
+	// 3. Fire the modified heartbeat a second time; the Agent calls schedule_cancel to delete its heartbeat.
+	if _, err := s.DB.Exec(ctx, `UPDATE runtime_schedules SET next_run_at=clock_timestamp()-interval '5 seconds' WHERE id=$1`, expectedHeartbeatID); err != nil {
+		t.Fatal(err)
+	}
+	cancel3, done3 := startFixtureWorker(t, e, f)
+	waitFor(t, func() bool {
+		return count(t, s, `SELECT count(*) FROM runtime_runs WHERE state='completed'`) == 2
+	})
+	cancel3()
+	<-done3
+
+	gw.pathMu.Lock()
+	if gw.failure != nil {
+		gw.pathMu.Unlock()
+		t.Fatal(gw.failure)
+	}
+	gw.pathMu.Unlock()
+
+	if count(t, s, `SELECT count(*) FROM runtime_schedules WHERE id=$1 AND status='canceled'`, expectedHeartbeatID) != 1 {
+		t.Fatal("expected heartbeat schedule to be canceled after Agent called schedule_cancel")
+	}
+
+	// 4. Restart the Worker once more and send an ordinary message; verify the canceled default heartbeat is NEVER recreated.
+	f.add("silent check after heartbeat canceled", "")
+	cancel4, done4 := startFixtureWorker(t, e, f)
+	waitFor(t, func() bool {
+		return count(t, s, `SELECT count(*) FROM runtime_inputs WHERE state='done'`) >= 3
+	})
+	cancel4()
+	<-done4
+
+	if count(t, s, `SELECT count(*) FROM runtime_schedules WHERE id=$1 AND status='active'`, expectedHeartbeatID) != 0 {
+		t.Fatal("Runtime recreated the default heartbeat after the Agent autonomously canceled it")
 	}
 }
 

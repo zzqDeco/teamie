@@ -37,7 +37,9 @@ func ExtractInputSources(inputs []Input) ([]InputSource, bool) {
 	seen := map[string]bool{}
 	overflow := false
 	appendRef := func(ref InputSource) {
-		if ref.ConversationID == "" || ref.MessageID == "" {
+		msgSource := ref.ConversationID != "" && ref.MessageID != ""
+		wsOnlySource := ref.WorkspaceID != "" && ref.ConversationID == "" && ref.MessageID == "" && ref.EventID == ""
+		if !msgSource && !wsOnlySource {
 			return
 		}
 		key := ref.WorkspaceID + "/" + ref.ConversationID + "/" + ref.MessageID + "/" + ref.EventID
@@ -57,19 +59,21 @@ func ExtractInputSources(inputs []Input) ([]InputSource, bool) {
 			overflow = true
 		}
 		if in.Kind != "task.notification" && in.Kind != "schedule.wakeup" {
-			ref := InputSource{
-				EventID:        in.EventID,
-				WorkspaceID:    in.WorkspaceID,
-				ConversationID: in.ConversationID,
-				MessageID:      in.MessageID,
-				ReplyToID:      in.ReplyToID,
-				SenderID:       in.SenderID,
-				SenderKind:     in.SenderKind,
+			if in.ConversationID != "" && in.MessageID != "" {
+				ref := InputSource{
+					EventID:        in.EventID,
+					WorkspaceID:    in.WorkspaceID,
+					ConversationID: in.ConversationID,
+					MessageID:      in.MessageID,
+					ReplyToID:      in.ReplyToID,
+					SenderID:       in.SenderID,
+					SenderKind:     in.SenderKind,
+				}
+				for _, attachment := range in.Attachments {
+					ref.AttachmentIDs = append(ref.AttachmentIDs, attachment.ID)
+				}
+				appendRef(ref)
 			}
-			for _, attachment := range in.Attachments {
-				ref.AttachmentIDs = append(ref.AttachmentIDs, attachment.ID)
-			}
-			appendRef(ref)
 		}
 		for _, ref := range in.SourceRefs {
 			appendRef(ref)

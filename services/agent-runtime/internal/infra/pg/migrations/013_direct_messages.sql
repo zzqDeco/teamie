@@ -1,3 +1,6 @@
+-- Cold-start heartbeats have workspace provenance and no creating Run.
+ALTER TABLE runtime_schedules ALTER COLUMN created_run_id DROP NOT NULL;
+
 -- Freeze direct-message tool admission and workspace-only provenance in schema 13.
 -- Older readers reject the new snapshot field; stop them before they can write.
 CREATE OR REPLACE FUNCTION agent_runtime_check_writer() RETURNS trigger

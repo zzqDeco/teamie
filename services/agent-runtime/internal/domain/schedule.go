@@ -10,14 +10,17 @@ import (
 
 // Schedule policy constants and quota ceilings.
 const (
-	MaxActiveSchedulesPerAgent   = 32
-	MinScheduleDelaySeconds      = 1
-	MinScheduleIntervalSeconds   = 60
-	MaxScheduleIntervalSeconds   = 30 * 24 * 3600
-	MaxScheduleHorizon           = 365 * 24 * time.Hour
-	MaxScheduleRuns              = 10000
-	MaxSchedulePromptRunes       = 4000
-	ScheduleCreateObservationKey = "schedule-create-v1"
+	MaxActiveSchedulesPerAgent      = 32
+	MinScheduleDelaySeconds         = 1
+	MinScheduleIntervalSeconds      = 60
+	MaxScheduleIntervalSeconds      = 30 * 24 * 3600
+	MaxScheduleHorizon              = 365 * 24 * time.Hour
+	MaxScheduleRuns                 = 10000
+	MaxSchedulePromptRunes          = 4000
+	DefaultHeartbeatIntervalSeconds = int64(3600)
+	DefaultHeartbeatPrompt          = "Autonomous heartbeat check-in: you are waking up on your recurring self-heartbeat. You may inspect your authorized workspaces or conversations, initiate or join a conversation or direct message if you have something worthwhile to share, advance or plan background work, adjust or cancel this heartbeat schedule (schedule_update / schedule_cancel), or simply end the turn quietly if no action is needed."
+	ScheduleCreateObservationKey    = "schedule-create-v1"
+	ScheduleUpdateObservationKey    = "schedule-update-v1"
 )
 
 // ScheduleSpec captures the caller-supplied arguments for schedule_create.
@@ -99,6 +102,11 @@ type ScheduleInputPayload struct {
 // StableScheduleID computes the deterministic schedule ID for a tool call within a Run.
 func StableScheduleID(agentID, runID, callID string) string {
 	return "sched-" + Digest([]byte(agentID+"/"+runID+"/"+callID))[:40]
+}
+
+// DefaultHeartbeatScheduleID computes the deterministic schedule ID for an Agent's cold-start 1-hour heartbeat.
+func DefaultHeartbeatScheduleID(agentID string) string {
+	return "sched-heartbeat-" + Digest([]byte("default-heartbeat/v1/"+agentID))[:32]
 }
 
 // ScheduleNotificationID returns the deterministic notification ID for a firing schedule step.
@@ -363,6 +371,132 @@ func ValidateScheduleSpec(spec ScheduleSpec, now time.Time) (ValidatedScheduleSp
 		cronExpr = strings.Join(strings.Fields(cronExpr), " ")
 		if spec.MaxRuns > 0 {
 			mr := spec.MaxRuns
+			maxRuns = &mr
+		}
+		nextRunAt = next.UTC()
+	default:
+		return ValidatedScheduleSpec{}, "invalid_arguments"
+	}
+	return ValidatedScheduleSpec{
+		Kind:            kind,
+		IntervalSeconds: intervalSeconds,
+		CronExpr:        cronExpr,
+		Timezone:        tzName,
+		Prompt:          prompt,
+		MaxRuns:         maxRuns,
+		NextRunAt:       nextRunAt,
+	}, ""
+}
+
+// ValidateScheduleUpdateSpec validates a partial/full ScheduleSpec update against an existing ScheduleItem and server wall-clock time `now`.
+// Omitted kind, prompt, timezone, or intervalSeconds/cronExpr inherit from `existing` when compatible.
+func ValidateScheduleUpdateSpec(existing ScheduleItem, patch ScheduleSpec, now time.Time) (ValidatedScheduleSpec, string) {
+	if strings.TrimSpace(patch.Kind) == "" &&
+		patch.DelaySeconds == 0 &&
+		strings.TrimSpace(patch.RunAt) == "" &&
+		patch.IntervalSeconds == 0 &&
+		strings.TrimSpace(patch.CronExpr) == "" &&
+		strings.TrimSpace(patch.Timezone) == "" &&
+		strings.TrimSpace(patch.Prompt) == "" &&
+		patch.MaxRuns == 0 {
+		return ValidatedScheduleSpec{}, "invalid_arguments"
+	}
+	promptRaw := strings.TrimSpace(patch.Prompt)
+	if promptRaw == "" {
+		promptRaw = existing.Prompt
+	}
+	tzRaw := strings.TrimSpace(patch.Timezone)
+	if tzRaw == "" {
+		tzRaw = existing.Timezone
+	}
+	prompt, tzName, errCode := ValidateSchedulePromptAndTimezone(promptRaw, tzRaw)
+	if errCode != "" {
+		return ValidatedScheduleSpec{}, errCode
+	}
+	kind := strings.TrimSpace(patch.Kind)
+	runAtRaw := strings.TrimSpace(patch.RunAt)
+	cronExpr := strings.TrimSpace(patch.CronExpr)
+	if kind == "" {
+		if cronExpr != "" {
+			kind = "cron"
+		} else {
+			kind = existing.Kind
+		}
+	}
+	var (
+		nextRunAt       time.Time
+		intervalSeconds *int64
+		maxRuns         *int
+	)
+	switch kind {
+	case "once":
+		if (patch.DelaySeconds > 0 && runAtRaw != "") || (patch.DelaySeconds <= 0 && runAtRaw == "") || patch.IntervalSeconds != 0 || cronExpr != "" || patch.MaxRuns < 0 || patch.MaxRuns > 1 {
+			return ValidatedScheduleSpec{}, "invalid_arguments"
+		}
+		if patch.DelaySeconds > 0 {
+			if patch.DelaySeconds < MinScheduleDelaySeconds || patch.DelaySeconds > MaxScheduleIntervalSeconds {
+				return ValidatedScheduleSpec{}, "invalid_arguments"
+			}
+			nextRunAt = now.UTC().Add(time.Duration(patch.DelaySeconds) * time.Second)
+		} else {
+			parsed, parseErr := time.Parse(time.RFC3339Nano, runAtRaw)
+			if parseErr != nil || !parsed.After(now) || parsed.After(now.Add(MaxScheduleHorizon)) {
+				return ValidatedScheduleSpec{}, "invalid_arguments"
+			}
+			nextRunAt = parsed.UTC()
+		}
+		oneMore := existing.RunCount + 1
+		maxRuns = &oneMore
+	case "interval":
+		if cronExpr != "" || (patch.DelaySeconds > 0 && runAtRaw != "") || patch.DelaySeconds < 0 || patch.MaxRuns < 0 || patch.MaxRuns > MaxScheduleRuns {
+			return ValidatedScheduleSpec{}, "invalid_arguments"
+		}
+		iv := patch.IntervalSeconds
+		if iv == 0 && existing.IntervalSeconds != nil {
+			iv = *existing.IntervalSeconds
+		}
+		if iv < MinScheduleIntervalSeconds || iv > MaxScheduleIntervalSeconds {
+			return ValidatedScheduleSpec{}, "invalid_arguments"
+		}
+		intervalSeconds = &iv
+		if patch.MaxRuns > 0 {
+			mr := patch.MaxRuns
+			if mr <= existing.RunCount {
+				mr = existing.RunCount + patch.MaxRuns
+			}
+			maxRuns = &mr
+		}
+		if patch.DelaySeconds > 0 {
+			if patch.DelaySeconds < MinScheduleDelaySeconds || patch.DelaySeconds > MaxScheduleIntervalSeconds {
+				return ValidatedScheduleSpec{}, "invalid_arguments"
+			}
+			nextRunAt = now.UTC().Add(time.Duration(patch.DelaySeconds) * time.Second)
+		} else if runAtRaw != "" {
+			parsed, parseErr := time.Parse(time.RFC3339Nano, runAtRaw)
+			if parseErr != nil || !parsed.After(now) || parsed.After(now.Add(MaxScheduleHorizon)) {
+				return ValidatedScheduleSpec{}, "invalid_arguments"
+			}
+			nextRunAt = parsed.UTC()
+		} else {
+			nextRunAt = now.UTC().Add(time.Duration(iv) * time.Second)
+		}
+	case "cron":
+		if cronExpr == "" && existing.Kind == "cron" {
+			cronExpr = existing.CronExpr
+		}
+		if cronExpr == "" || patch.DelaySeconds != 0 || runAtRaw != "" || patch.IntervalSeconds != 0 || patch.MaxRuns < 0 || patch.MaxRuns > MaxScheduleRuns {
+			return ValidatedScheduleSpec{}, "invalid_arguments"
+		}
+		next, cronErr := NextCronTime(cronExpr, tzName, now)
+		if cronErr != nil {
+			return ValidatedScheduleSpec{}, "invalid_cron_expression"
+		}
+		cronExpr = strings.Join(strings.Fields(cronExpr), " ")
+		if patch.MaxRuns > 0 {
+			mr := patch.MaxRuns
+			if mr <= existing.RunCount {
+				mr = existing.RunCount + patch.MaxRuns
+			}
 			maxRuns = &mr
 		}
 		nextRunAt = next.UTC()
