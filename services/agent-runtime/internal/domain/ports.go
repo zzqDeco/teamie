@@ -135,6 +135,8 @@ type ScheduleRepository interface {
 	CountActiveSchedules(ctx context.Context, agentID string) (int, error)
 	FindScheduleByID(ctx context.Context, agentID, scheduleID string) (*ScheduleItem, bool, error)
 	CreateSchedule(ctx context.Context, agentID, runID, scheduleID string, spec ValidatedScheduleSpec, sources []InputSource, overflow bool, now time.Time) (*ScheduleItem, error)
+	UpdateSchedule(ctx context.Context, agentID, scheduleID string, spec ValidatedScheduleSpec, sources []InputSource, overflow bool, now time.Time) (*ScheduleItem, error)
+	EnsureDefaultHeartbeatSchedule(ctx context.Context, lease *Lease, scheduleID string, intervalSeconds int64, prompt string, sources []InputSource) (created bool, err error)
 	ListActiveScheduleCandidates(ctx context.Context, agentID string, limit int) ([]ScheduleCandidate, error)
 	CancelActiveSchedule(ctx context.Context, agentID, scheduleID string) error
 	CancelScheduleWithLease(ctx context.Context, lease *Lease, scheduleID string) (status string, found bool, err error)
@@ -201,6 +203,7 @@ type ScheduleCoordinator interface {
 	FilterAuthorizedSchedules(ctx context.Context, agentID string, candidates []ScheduleCandidate) ([]ScheduleItem, error)
 	AuthorizeScheduleListReceipt(ctx context.Context, agentID string, cached []byte) error
 	EvaluateScheduleCreation(ctx context.Context, lease *Lease, runID, callID string, runInputs []Input, spec ScheduleSpec) (*ScheduleItem, string, error)
+	EvaluateScheduleUpdate(ctx context.Context, lease *Lease, runID, callID, scheduleID string, runInputs []Input, spec ScheduleSpec) (*ScheduleItem, string, error)
 	ValidateLease(ctx context.Context, lease *Lease) error
 	CheckRevisionPreemption(enabled, deleted bool, currentRevision, workerRevision int64) bool
 	ResolveRunContextPolicy(profile string, raw json.RawMessage) (string, json.RawMessage, error)

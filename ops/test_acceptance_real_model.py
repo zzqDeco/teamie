@@ -37,6 +37,11 @@ class _MockTeamieState:
         self.sse_stream_called = False
         self.web_search_called = False
         self.web_extract_called = False
+        self.peer_joined = False
+        self.tamper_file = False
+        self.evidence_flaw = ""
+        self.config_id = "modelcfg:v1:" + "c" * 32
+        self.rotate_stream_config = False
 
     def gateway_resp(self) -> dict:
         configured = bool(self.base_url and self.model and self.has_api_key)
@@ -182,6 +187,34 @@ class _MockHandler(BaseHTTPRequestHandler):
                 },
             )
             return
+        if self.path == "/api/v1/auth/admin/invites":
+            self._read_json(set())
+            self._send_json(201, {"invite": {"code": "single-use-fixture"}})
+            return
+        if self.path == "/api/v1/auth/register":
+            body = self._read_json({"email", "password", "displayName", "inviteCode"})
+            assert body["inviteCode"] == "single-use-fixture"
+            self._send_json(201, {"user": {"id": "u-peer", "platformRole": "user"}, "csrfToken": "peer-csrf"})
+            return
+        if re.match(r"^/api/v1/workspaces/[^/]+/invites$", self.path):
+            self._read_json(set())
+            self._send_json(201, {"code": "workspace-fixture"})
+            return
+        if self.path == "/api/v1/invites/workspace-fixture/accept":
+            self._read_json(set())
+            st.peer_joined = True
+            self._send_json(200, {})
+            return
+        if self.path == "/internal/v1/chat":
+            self._read_json({"ownerId", "agentId", "sessionId", "runId", "requestJson", "messageLimit"})
+            raw = b'{"ok":true}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("X-Teamie-Model-Config-ID", st.config_id)
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+            return
         if self.path == "/api/v1/admin/model-gateway/test":
             self._read_json(set())
             self._send_json(200, {"ok": True, "model": st.model, "latencyMs": 12})
@@ -259,7 +292,7 @@ class _MockHandler(BaseHTTPRequestHandler):
             inner = json.loads(body["requestJson"])
             assert inner.get("protocol") == "teamie-agentic-chat-v1"
             st.sse_stream_called = True
-            cfg_id = MOD.counting_config_id(st.base_url, st.model)
+            cfg_id = ("modelcfg:v1:" + "d" * 32) if st.rotate_stream_config else st.config_id
             sse_payload = (
                 'event: chunk\ndata: {"type":"chunk","responseJson":"{\\"role\\":\\"assistant\\"}"}\n\n'
                 f'event: done\ndata: {{"type":"done","modelConfigId":"{cfg_id}"}}\n\n'
@@ -292,6 +325,10 @@ class _MockHandler(BaseHTTPRequestHandler):
         if m_ws_conv:
             ws_id = m_ws_conv.group(1)
             body = self._read_json({"type", "name", "memberIds"})
+            members = set(["u-admin", *body.get("memberIds", [])])
+            if len(members) < 2 or not st.peer_joined or members != {"u-admin", "u-peer"}:
+                self._send_json(400, {"error": {"code": "invalid_members_count"}})
+                return
             cid = f"grp-{len(st.conversations) + 1}"
             conv = {
                 "id": cid,
@@ -363,6 +400,8 @@ class _MockHandler(BaseHTTPRequestHandler):
                 suffix = m_sandbox.group(1)
                 att_id = f"att-{suffix}"
                 content = f"sandbox-ok-{suffix}:isolated\n".encode("utf-8")
+                if st.tamper_file:
+                    content += b"incorrect extra bytes"
                 st.attachments[att_id] = content
                 msgs.append(
                     {
@@ -424,10 +463,116 @@ class AcceptanceRealModelTest(unittest.TestCase):
         self.base_url = f"http://127.0.0.1:{self.port}"
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
+        self.evidence_patch = mock.patch.object(MOD.Evidence, "call", autospec=True, side_effect=self.evidence_call)
+        self.evidence_patch.start()
+        self.save_patch = mock.patch.object(MOD.Evidence, "save", return_value="private-mock-receipt")
+        self.save_patch.start()
 
     def tearDown(self) -> None:
+        self.evidence_patch.stop()
+        self.save_patch.stop()
         self.server.shutdown()
         self.server.server_close()
+
+    def evidence_call(self, evidence, kind, **scope):
+        if kind == "isolation":
+            return {"version": 1, "nonce": scope["nonce"], "verified": True}
+        if kind == "task":
+            return {"version": 1, "agentId": scope["agent"], "runId": scope["run"], "taskId": scope["task"], "state": "running" if self.state.evidence_flaw == "task-running" else "completed", "success": self.state.evidence_flaw != "task-running"}
+        source = scope["message"]
+        messages = self.state.messages["ch-general-1"]
+        trigger = next(m for m in messages if m["id"] == source)
+        reply = messages[messages.index(trigger) + 1]
+        rid = "run-" + source
+        base = {"version": 1, "agentId": scope["agent"], "messageId": source, "runs": [{"id": rid, "state": "completed", "inputs": [{"messageId": source, "state": "done"}]}], "tools": [], "schedules": []}
+        def call(name, **extra):
+            return {"runId": rid, "callId": name + "-call", "name": name, "completed": True, "ok": True, **extra}
+        base["tools"].append(call("im_send_message", messageId=reply["id"], conversationId="ch-general-1"))
+        text = trigger["body"]
+        if "ACK-" in text:
+            restricted = next(c["id"] for c in self.state.conversations.values() if c["type"] == "group")
+            base["tools"].append(call("im_list_messages", ok=False, denied=True, conversationId=restricted))
+        elif "sandbox-ok-" in text:
+            base["tools"].extend([call("im_upload_file", conversationId="ch-general-1", attachmentId=reply["attachments"][0]["id"]), call("native:workspace_execute", ok=False, taskId="shell-fixture")])
+        elif "WEB-" in text:
+            base["tools"].extend([call("web_search"), call("web_fetch")])
+        elif "WAKE-" in text:
+            base["tools"].append(call("schedule_create", scheduleId="sched-fixture"))
+            base["schedules"].append({"id": "sched-fixture", "runId": rid, "runCount": 1, "lastRunAt": "2026-10-26T00:00:05Z"})
+            if self.state.evidence_flaw != "foreground-wake":
+                base["runs"].append({"id": "wake-" + rid, "state": "completed", "inputs": [{"kind": "schedule.wakeup", "scheduleId": "sched-fixture", "parentRunId": rid, "state": "done"}]})
+                base["tools"][0]["runId"] = "wake-" + rid
+        if self.state.evidence_flaw == "no-execution":
+            base["tools"] = []
+        if self.state.evidence_flaw == "wrong-run":
+            for c in base["tools"]:
+                c["runId"] = "unrelated-old-run"
+        if self.state.evidence_flaw == "no-web":
+            base["tools"] = [c for c in base["tools"] if c["name"] not in ("web_search", "web_fetch")]
+        if self.state.evidence_flaw == "no-acl":
+            base["tools"] = [c for c in base["tools"] if c["name"] != "im_list_messages"]
+        return base
+
+    def environment(self):
+        return {"TEAMIE_REAL_MODEL_ACCEPTANCE": "1", "TEAMIE_ACCEPTANCE_URL": self.base_url, "TEAMIE_ADMIN_EMAIL": "admin@example.test", "TEAMIE_ADMIN_PASSWORD": "fixture-only-password", "GATEWAY_RUNTIME_TOKEN": "rt-token-123456789012345678901234", "TEAMIE_REAL_MODEL_TIMEOUT": "1", "TEAMIE_REAL_MODEL_POLL_INTERVAL": "0.05"}
+
+    def test_singleton_group_is_rejected(self):
+        with mock.patch.dict(os.environ, self.environment(), clear=True):
+            client = MOD.Client()
+            with self.assertRaisesRegex(AssertionError, "invalid_members_count"):
+                client.call("POST", "/api/v1/workspaces/fixture/conversations", {"type": "group", "memberIds": []}, status=201)
+
+    def test_web_key_only_applies_without_changing_model_window(self):
+        self.state.web_search_enabled = False
+        self.state.has_web_search_key = False
+        self.state.context_window = 1000000
+        env = {**self.environment(), "TEAMIE_REAL_WEB_SEARCH_API_KEY": "fixture-key"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(MOD.main(), 0)
+        self.assertTrue(self.state.put_gateway_called)
+        self.assertTrue(self.state.web_search_enabled)
+        self.assertEqual(self.state.context_window, 1000000)
+
+    def test_exact_file_bytes_are_required_even_with_consistent_metadata(self):
+        self.state.tamper_file = True
+        with mock.patch.dict(os.environ, self.environment(), clear=True), self.assertRaisesRegex(AssertionError, "bytes/digest"):
+            MOD.main()
+
+    def test_markers_without_correct_durable_execution_fail(self):
+        for flaw in ("no-execution", "wrong-run", "no-acl", "no-web", "task-running", "foreground-wake"):
+            with self.subTest(flaw=flaw):
+                self.state.evidence_flaw = flaw
+                with mock.patch.dict(os.environ, self.environment(), clear=True), self.assertRaises(AssertionError):
+                    MOD.main()
+                self.assertTrue(self.state.agent_deleted)
+                self.state.agent_deleted = False
+
+    def test_non_ascii_configuration_uses_gateway_id(self):
+        self.state.model = "模型<&>\u2028\u2029"
+        with mock.patch.dict(os.environ, self.environment(), clear=True):
+            self.assertEqual(MOD.main(), 0)
+
+    def test_configuration_change_between_unary_and_stream_is_rejected(self):
+        self.state.rotate_stream_config = True
+        with mock.patch.dict(os.environ, self.environment(), clear=True), self.assertRaisesRegex(AssertionError, "Config-ID"):
+            MOD.main()
+
+    def test_partial_provider_configuration_is_rejected(self):
+        env = {**self.environment(), "TEAMIE_REAL_PROVIDER_MODEL": "partial"}
+        with mock.patch.dict(os.environ, env, clear=True), self.assertRaisesRegex(AssertionError, "all three"):
+            MOD.main()
+
+    def test_disabled_web_is_reported_as_unverified(self):
+        self.state.web_search_enabled = False
+        with mock.patch.dict(os.environ, self.environment(), clear=True):
+            self.assertEqual(MOD.main(), 2)
+        self.assertFalse(self.state.web_search_called)
+
+    def test_missing_private_probe_is_not_full_acceptance(self):
+        env = self.environment()
+        del env["GATEWAY_RUNTIME_TOKEN"]
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(MOD.main(), 2)
 
     def test_requires_explicit_opt_in_flag(self) -> None:
         with mock.patch.dict(os.environ, {}, clear=True):
