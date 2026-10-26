@@ -4,9 +4,31 @@ import { api, ApiError } from "@teamie/api-client";
 import { useAuth } from "./auth";
 import { errorText } from "./chat";
 import { passwordPolicyError } from "./password-policy";
+import { PasswordField } from "./password-field";
+import { toast } from "./toast";
 import { Button, Notice } from "./ui";
 
-type PasswordField = "currentPassword" | "newPassword" | "confirmPassword";
+type Field = "currentPassword" | "newPassword" | "confirmPassword";
+const FIELDS: Field[] = [
+  "currentPassword",
+  "newPassword",
+  "confirmPassword",
+];
+
+function fieldError(field: Field, data: FormData): string {
+  const currentPassword = String(data.get("currentPassword") || "");
+  const newPassword = String(data.get("newPassword") || "");
+  const confirmPassword = String(data.get("confirmPassword") || "");
+  if (field === "currentPassword")
+    return currentPassword ? "" : "请填写当前密码。";
+  if (field === "newPassword") {
+    const policyError = passwordPolicyError(newPassword);
+    if (policyError) return policyError;
+    return newPassword === currentPassword ? "新密码不能与当前密码相同。" : "";
+  }
+  if (!confirmPassword) return "请再次输入新密码。";
+  return newPassword !== confirmPassword ? "两次输入的新密码不一致。" : "";
+}
 
 export function PasswordSettings() {
   const { changePassword } = useAuth();
@@ -15,7 +37,7 @@ export function PasswordSettings() {
   const errorId = useId();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [invalidField, setInvalidField] = useState<PasswordField>();
+  const [invalidField, setInvalidField] = useState<Field>();
 
   useEffect(() => {
     if (!busy && invalidField) {
@@ -24,13 +46,24 @@ export function PasswordSettings() {
     }
   }, [busy, error, invalidField]);
 
-  function fail(message: string, field?: PasswordField) {
+  function fail(message: string, field?: Field) {
     setError(message);
     setInvalidField(field);
     if (!busy && field) {
       const input = formRef.current?.elements.namedItem(field);
       if (input instanceof HTMLInputElement) input.focus();
     }
+  }
+
+  function revalidate(event: FormEvent<HTMLFormElement>) {
+    // Validate on submit first, then live only for the field already in error.
+    const target = event.target as HTMLInputElement;
+    if (!invalidField || target.name !== invalidField) return;
+    const message = fieldError(invalidField, new FormData(event.currentTarget));
+    if (!message) {
+      setError("");
+      setInvalidField(undefined);
+    } else if (message !== error) setError(message);
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -40,23 +73,12 @@ export function PasswordSettings() {
     const data = new FormData(form);
     const currentPassword = String(data.get("currentPassword") || "");
     const newPassword = String(data.get("newPassword") || "");
-    const confirmPassword = String(data.get("confirmPassword") || "");
-    if (!currentPassword) {
-      fail("请填写当前密码。", "currentPassword");
-      return;
-    }
-    const policyError = passwordPolicyError(newPassword);
-    if (policyError) {
-      fail(policyError, "newPassword");
-      return;
-    }
-    if (newPassword === currentPassword) {
-      fail("新密码不能与当前密码相同。", "newPassword");
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      fail("两次输入的新密码不一致。", "confirmPassword");
-      return;
+    for (const field of FIELDS) {
+      const message = fieldError(field, data);
+      if (message) {
+        fail(message, field);
+        return;
+      }
     }
     pending.current = true;
     setBusy(true);
@@ -66,6 +88,8 @@ export function PasswordSettings() {
     try {
       await changePassword(currentPassword, newPassword);
       form.reset();
+      // A successful change clears this session; a stale response does not.
+      if (!api.csrfToken) toast.success("密码已修改，请使用新密码重新登录。");
     } catch (error) {
       if (sessionToken !== api.csrfToken) return;
       fail(
@@ -85,58 +109,46 @@ export function PasswordSettings() {
     }
   }
 
+  const inlineError = (field: Field) =>
+    invalidField === field ? error : undefined;
+
   return (
     <form
       ref={formRef}
       className="settings-form password-settings"
       onSubmit={submit}
+      onInput={revalidate}
       aria-busy={busy}
+      noValidate
     >
       <h3>修改密码</h3>
       <p className="field-help">修改后需要重新登录。</p>
       <Notice id={errorId}>{error}</Notice>
-      <label>
-        当前密码
-        <input
-          type="password"
-          name="currentPassword"
-          autoComplete="current-password"
-          aria-invalid={invalidField === "currentPassword" || undefined}
-          aria-describedby={
-            invalidField === "currentPassword" ? errorId : undefined
-          }
-          required
-          disabled={busy}
-        />
-      </label>
-      <label>
-        新密码
-        <input
-          type="password"
-          name="newPassword"
-          autoComplete="new-password"
-          placeholder="至少 12 个字符"
-          minLength={12}
-          aria-invalid={invalidField === "newPassword" || undefined}
-          aria-describedby={invalidField === "newPassword" ? errorId : undefined}
-          required
-          disabled={busy}
-        />
-      </label>
-      <label>
-        确认新密码
-        <input
-          type="password"
-          name="confirmPassword"
-          autoComplete="new-password"
-          aria-invalid={invalidField === "confirmPassword" || undefined}
-          aria-describedby={
-            invalidField === "confirmPassword" ? errorId : undefined
-          }
-          required
-          disabled={busy}
-        />
-      </label>
+      <PasswordField
+        name="currentPassword"
+        label="当前密码"
+        autoComplete="current-password"
+        error={inlineError("currentPassword")}
+        readOnly={busy}
+      />
+      <PasswordField
+        name="newPassword"
+        label="新密码"
+        autoComplete="new-password"
+        placeholder="至少 12 个字符"
+        error={inlineError("newPassword")}
+        readOnly={busy}
+        showRules
+      />
+      <PasswordField
+        name="confirmPassword"
+        label="确认新密码"
+        autoComplete="new-password"
+        error={inlineError("confirmPassword")}
+        readOnly={busy}
+        confirmOf="newPassword"
+        mismatchMessage="两次输入的新密码不一致。"
+      />
       <Button type="submit" busy={busy}>
         修改密码
       </Button>
