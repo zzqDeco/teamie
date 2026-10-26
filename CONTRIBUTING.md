@@ -54,6 +54,10 @@ All external HTTP/SSE/WebSocket DTOs and internal Kitex RPC contracts live in [`
 Whenever you modify any `.thrift` file:
 
 ```sh
+# Install the same pinned generators used by CI
+go install github.com/cloudwego/kitex/tool/cmd/kitex@v0.16.4
+go install github.com/cloudwego/thriftgo@v0.4.5
+
 # Regenerate all Go (Kitex + Hertz + router_gen.go) bindings and the TypeScript SDK
 ./ops/codegen.sh
 
@@ -61,6 +65,9 @@ Whenever you modify any `.thrift` file:
 node tools/thrift-go-http-codegen/index.mjs --check
 node tools/thrift-ts-codegen/index.mjs --check
 ```
+
+Full generation fails before changing bindings if either RPC generator is missing.
+The Node-only `--check` commands above validate HTTP route bindings and the TypeScript SDK; CI additionally regenerates every Go contract and rejects drift.
 
 Commit the `.thrift` change, regenerated `contracts/gen/{im,agent}` / `packages/api-client/src/generated.ts`, and implementation updates together in the same pull request.
 
