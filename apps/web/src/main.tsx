@@ -24,6 +24,7 @@ import "./styles.css";
 import "./layout.css";
 import "./password-recovery.css";
 import "./feedback.css";
+import "./conveniences.css";
 applyTheme();
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: true } },

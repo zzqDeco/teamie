@@ -352,6 +352,7 @@ export function RetractMessageModal({
 export function messageGrouping(
   message: LocalMessage,
   previous: LocalMessage | undefined,
+  showUnreadDivider = false,
 ) {
   const showDate =
     !previous ||
@@ -359,6 +360,7 @@ export function messageGrouping(
       new Date(message.createdAt).toDateString();
   const compact =
     !showDate &&
+    !showUnreadDivider &&
     previous?.senderId === message.senderId &&
     new Date(message.createdAt).getTime() -
       new Date(previous.createdAt).getTime() <
@@ -542,7 +544,7 @@ export const MessageItem = memo(function MessageItem({
               <Avatar name={message.senderName} seed={message.senderId} />
             )
           ) : (
-            <span>{time(message.createdAt)}</span>
+            <span className="compact-time">{time(message.createdAt)}</span>
           )}
         </div>
         <div className="message-content">

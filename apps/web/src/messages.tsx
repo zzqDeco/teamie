@@ -1,7 +1,7 @@
 import {
   useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore,
 } from "react";
-import type { FormEvent } from "react";
+import type { DragEvent, FormEvent } from "react";
 import { ArrowDown, ArrowUp, LoaderCircle } from "lucide-react";
 import { api, defaultAttachmentLimits } from "@teamie/api-client";
 import type { Conversation, Member, Mention, Message } from "@teamie/api-client";
@@ -79,6 +79,7 @@ export function ConversationView({
   const [focusedMessageId, setFocusedMessageId] = useState("");
   const [locating, setLocating] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [draggingFiles, setDraggingFiles] = useState(false);
   const closeSearch = useCallback(() => setSearchOpen(false), []);
   const navigation = useRef(0);
   const historyBefore = useRef<{ seq: number; generation: number } | null>(null);
@@ -133,6 +134,9 @@ export function ConversationView({
   });
 
   useEffect(() => () => { navigation.current++; }, [conversation.id]);
+  useEffect(() => {
+    setDraggingFiles(false);
+  }, [conversation.id, uploadsEnabled]);
   const fetchLatest = useCallback(async () => {
     const token = chatStore.generation;
     const operation = ++navigation.current;
@@ -325,6 +329,31 @@ export function ConversationView({
   }, [fetchLatest, loadContext, initialMessageId]);
 
   const latest = messages.filter((m) => !m.status).at(-1)?.seq || 0;
+  const currentLastSeq = Math.max(
+    conversation.lastSeq,
+    snapshot.conversations[conversation.id]?.lastSeq ?? 0,
+    latest,
+  );
+  const [leftBottomSeq, setLeftBottomSeq] = useState(readSeq);
+  const focusedConversationRef = useRef("");
+  useEffect(() => {
+    if (
+      loading ||
+      initialMessageId ||
+      located ||
+      locating ||
+      focusedConversationRef.current === conversation.id
+    )
+      return;
+    focusedConversationRef.current = conversation.id;
+    if (
+      !window.matchMedia?.("(pointer: coarse)").matches &&
+      !inputRef.current?.closest("[inert]") &&
+      !document.querySelector(".modal-backdrop")
+    ) {
+      inputRef.current?.focus({ preventScroll: true });
+    }
+  }, [conversation.id, initialMessageId, loading, located, locating]);
   const tailId = messages.at(-1)?.id;
   const firstUnread =
     entry && entry.lastSeq > entry.readSeq
@@ -643,13 +672,42 @@ export function ConversationView({
           : undefined;
       }
       return {
-        ...messageGrouping(message, messages[index - 1]),
+        ...messageGrouping(message, messages[index - 1], message.id === firstUnread),
         previousId: messages[index - 1]?.id,
         nextId: messages[index + 1]?.id,
         replyTarget,
       };
     });
-  }, [allMessages, conversation.id, messages, resolvedTargets]);
+  }, [allMessages, conversation.id, firstUnread, messages, resolvedTargets]);
+  const unreadBaselineSeq = Math.max(readSeq, leftBottomSeq);
+  const unreadWhileScrolledUp = useMemo(
+    () =>
+      messages.filter(
+        (m) =>
+          !m.status &&
+          !m.retractedAt &&
+          m.seq > unreadBaselineSeq &&
+          m.senderId !== userId,
+      ),
+    [messages, unreadBaselineSeq, userId],
+  );
+  const jumpUnreadCount =
+    unreadWhileScrolledUp.length +
+    Math.max(0, currentLastSeq - Math.max(latest, unreadBaselineSeq));
+  const hasUnreadMention = useMemo(
+    () =>
+      messages.some((m, index) => {
+        if (m.status || m.retractedAt || m.seq <= unreadBaselineSeq || m.senderId === userId)
+          return false;
+        if (m.mentions?.some((mention) => mention.userId === userId)) return true;
+        const target = rows[index]?.replyTarget;
+        return !!target && !target.retractedAt && target.senderId === userId;
+      }),
+    [messages, rows, unreadBaselineSeq, userId],
+  );
+  const hasFileTransfer = (event: DragEvent<HTMLElement>) =>
+    Array.from(event.dataTransfer?.types || []).includes("Files") ||
+    (event.dataTransfer?.files?.length ?? 0) > 0;
   const agentOwners = useMemo(() => {
     const owners = new Map<string, string | undefined>();
     for (const member of members)
@@ -666,7 +724,42 @@ export function ConversationView({
     <section
       className="conversation-view"
       onKeyDown={(event) => { if (event.key === "Escape") setActionMessageId(""); }}
+      onDragEnter={(event) => {
+        if (!uploadsEnabled || !hasFileTransfer(event)) return;
+        event.preventDefault();
+        setDraggingFiles(true);
+      }}
+      onDragOver={(event) => {
+        if (!uploadsEnabled || !hasFileTransfer(event)) return;
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+        if (!draggingFiles) setDraggingFiles(true);
+      }}
+      onDragLeave={(event) => {
+        const next = event.relatedTarget as Node | null;
+        if (next && event.currentTarget.contains(next)) return;
+        setDraggingFiles(false);
+      }}
+      onDrop={(event) => {
+        setDraggingFiles(false);
+        if (!uploadsEnabled || !hasFileTransfer(event)) return;
+        event.preventDefault();
+        const files = Array.from(event.dataTransfer?.files || []);
+        if (files.length > 0) {
+          attachments.add(files);
+          inputRef.current?.focus({ preventScroll: true });
+        }
+      }}
     >
+      {uploadsEnabled && draggingFiles && (
+        <div
+          className="conversation-drop-overlay"
+          role="region"
+          aria-label="释放文件以上传到当前对话"
+        >
+          <span>释放文件以上传到当前对话</span>
+        </div>
+      )}
       <ConversationHeader
         conversation={conversation} name={name} membersOpen={membersOpen}
         onMenu={onMenu} onSearchOpen={() => setSearchOpen(true)} onMembers={onMembers}
@@ -698,7 +791,11 @@ export function ConversationView({
         ref={scrollRef}
         onScroll={(event) => {
           const el = event.currentTarget;
-          setAtBottom(!located && el.scrollHeight - el.scrollTop - el.clientHeight < 80);
+          const bottom = !located && el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+          if (atBottom || bottom) {
+            setLeftBottomSeq((prev) => Math.max(prev, readSeq, currentLastSeq));
+          }
+          setAtBottom(bottom);
           readFailures.current = 0;
           scheduleSeen();
         }}
@@ -778,18 +875,17 @@ export function ConversationView({
       </div>
       {!atBottom && !located && !locating && (
         <button
-          className="jump-latest"
+          className={`jump-latest${jumpUnreadCount > 0 ? " has-unread" : ""}${hasUnreadMention ? " has-mention" : ""}`}
           onClick={() => {
-            if (located) {
-              void fetchLatest();
-              return;
-            }
+            setLeftBottomSeq((prev) => Math.max(prev, readSeq, currentLastSeq));
             setAtBottom(true);
             scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
           }}
         >
           <ArrowDown size={ICON.xs} />
-          回到最新消息
+          {jumpUnreadCount > 0
+            ? `${hasUnreadMention ? "@ " : ""}${jumpUnreadCount} 条新消息`
+            : "回到最新消息"}
         </button>
       )}
       <MessageComposer
