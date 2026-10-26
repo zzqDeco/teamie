@@ -118,3 +118,10 @@ type OutboxRepository interface {
 	ClaimNextUnpublishedOutbox(ctx context.Context) (id int64, payload []byte, found bool, err error)
 	DeleteOutboxByID(ctx context.Context, id int64) error
 }
+
+// ConversationMutation stores no request bodies or historical member lists.
+type ConversationMutation struct{ RequestHash, ConversationID string }
+type MutationRepository interface {
+	LockMutation(context.Context, string, string) (ConversationMutation, bool, error)
+	SaveMutation(context.Context, string, string, ConversationMutation) error
+}

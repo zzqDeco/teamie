@@ -39,6 +39,12 @@ func contextArgumentHashes(name, argument string) []string {
 		parsers = []any{&listWorkspaceMembersArgs{}}
 	case "im_open_direct_conversation":
 		parsers = []any{&openDirectConversationArgs{}}
+	case "im_create_group_conversation":
+		parsers = []any{&createGroupConversationArgs{}}
+	case "im_add_conversation_members":
+		parsers = []any{&addConversationMembersArgs{}}
+	case "im_retract_message":
+		parsers = []any{&retractMessageArgs{}}
 	case "web_search":
 		parsers = []any{&webSearchArgs{}}
 	case "web_fetch":
