@@ -223,6 +223,32 @@ describe("debounced composer draft persistence", () => {
   });
 });
 
+describe("stick to bottom", () => {
+  it("keeps a bottom-pinned view pinned when content grows and stops once the reader scrolls up", async () => {
+    await show(conversationWith(5, 5));
+    const scroll = scroller();
+    const content = host.querySelector<HTMLElement>(".message-scroll-content")!;
+    const active = () => resizeObservers.filter((o) => !o.disconnected);
+    expect(active().some((o) => o.targets.has(content))).toBe(true);
+
+    let height = 900;
+    Object.defineProperty(scroll, "scrollHeight", { configurable: true, get: () => height });
+    Object.defineProperty(scroll, "clientHeight", { configurable: true, value: 300 });
+    scroll.scrollTop = 600;
+    // An edit or late KaTeX/font layout makes the last row taller.
+    height = 1200;
+    await act(async () => { for (const o of active()) if (o.targets.has(content)) o.callback([]); });
+    expect(scroll.scrollTop).toBe(1200);
+
+    scroll.scrollTop = 100;
+    await act(async () => { scroll.dispatchEvent(new Event("scroll")); });
+    height = 1500;
+    await act(async () => { for (const o of active()) o.callback([]); });
+    expect(active()).toHaveLength(0);
+    expect(scroll.scrollTop).toBe(100);
+  });
+});
+
 describe("read dwell with IntersectionObserver", () => {
   it("measures only rows reported near the viewport and keeps contiguous acknowledgement", async () => {
     vi.stubGlobal("IntersectionObserver", observerClass(() => intersectionObservers));

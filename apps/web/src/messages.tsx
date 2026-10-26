@@ -119,6 +119,7 @@ export function ConversationView({
   const [atBottom, setAtBottom] = useState(true),
     [visible, setVisible] = useState(document.visibilityState === "visible");
   const scrollRef = useRef<HTMLDivElement>(null),
+    contentRef = useRef<HTMLDivElement>(null),
     inputRef = useRef<HTMLTextAreaElement>(null),
     initialScroll = useRef(true),
     lastRead = useRef(readSeq);
@@ -441,7 +442,10 @@ export function ConversationView({
     const scroll = scrollRef.current;
     if (!scroll || !atBottom || located || locating) return;
     const observer = new ResizeObserver(() => { scroll.scrollTop = scroll.scrollHeight; });
+    // The viewport shrinking (composer growth) and the content growing (edits,
+    // late KaTeX/font/image layout) both keep a view that was at bottom pinned.
     observer.observe(scroll);
+    if (contentRef.current) observer.observe(contentRef.current);
     return () => observer.disconnect();
   }, [atBottom, located, locating]);
   const lastTailId = useRef<string | undefined>(undefined);
@@ -699,76 +703,78 @@ export function ConversationView({
           scheduleSeen();
         }}
       >
-        {!loading && !messages.length && !error && (
-          <ConversationEmptyStart
-            conversation={conversation} name={name}
-            isWorkspaceOwner={isWorkspaceOwner} onInvite={onInvite}
-          />
-        )}
-        {hasMore && (
-          <button className="load-earlier" onClick={older} disabled={loadingOlder || loadingNewer}>
-            {loadingOlder ? <LoaderCircle size={ICON.xs} className="spin" /> : <ArrowUp size={ICON.xs} />}{" "}
-            加载更早的消息
-          </button>
-        )}
-        {loading && (
-          <div className="message-loading">
-            <LoaderCircle size={ICON.md} className="spin" />
-            加载消息…
-          </div>
-        )}
-        {error && (
-          <div className="message-error">
-            <Notice>{error}</Notice>
-            <button onClick={fetchLatest}>重新加载</button>
-          </div>
-        )}
-        {messages.map((message, index) => {
-          const row = rows[index];
-          const isEditing = editing?.id === message.id;
-          return (
-            <MessageItem
-              key={message.id} message={message}
-              showDate={row.showDate} compact={row.compact}
-              previousId={row.previousId} nextId={row.nextId} replyTarget={row.replyTarget}
-              workspaceId={conversation.workspaceId}
-              conversationId={conversation.id} userId={userId}
-              agentOwnerName={
-                message.senderKind === "agent" ? agentOwners.get(message.senderId) : undefined
-              }
-              mentionMembers={isEditing ? mentionMembers : noMembers}
-              mentionsEnabled={mentionsEnabled}
-              canEdit={canEdit} canRetract={canRetract}
-              showUnreadDivider={message.id === firstUnread && (entry?.readSeq ?? 0) > 0}
-              isRovingTarget={message.id === rovingMessageId}
-              highlighted={highlightId === message.id}
-              actionsOpen={actionMessageId === message.id}
-              editing={isEditing ? editing : null}
-              editBody={isEditing ? editBody : ""}
-              editMentions={isEditing ? editMentions : noMentions}
-              actionBusy={isEditing && actionBusy}
-              actionError={isEditing ? actionError : ""}
-              inputRef={inputRef}
-              setFocusedMessageId={setFocusedMessageId} setActionMessageId={setActionMessageId}
-              focusMessage={focusMessage} locate={locateStable} onEditSubmit={submitEdit}
-              setEditBody={setEditBody} setEditMentions={setEditMentions}
-              setEditing={setEditing} startEdit={startEdit}
-              onReply={replyToMessage}
-              onRetractRequest={requestRetract}
+        <div className="message-scroll-content" ref={contentRef}>
+          {!loading && !messages.length && !error && (
+            <ConversationEmptyStart
+              conversation={conversation} name={name}
+              isWorkspaceOwner={isWorkspaceOwner} onInvite={onInvite}
             />
-          );
-        })}
-        {located && unreadContext && latest < conversation.lastSeq && (
-          <button
-            className="load-earlier load-later"
-            onClick={() => void newer()}
-            disabled={loadingNewer || loadingOlder || locating}
-          >
-            {loadingNewer ? <LoaderCircle size={ICON.xs} className="spin" /> : <ArrowDown size={ICON.xs} />}{" "}
-            加载后续消息
-          </button>
-        )}
-        <div className="message-end" />
+          )}
+          {hasMore && (
+            <button className="load-earlier" onClick={older} disabled={loadingOlder || loadingNewer}>
+              {loadingOlder ? <LoaderCircle size={ICON.xs} className="spin" /> : <ArrowUp size={ICON.xs} />}{" "}
+              加载更早的消息
+            </button>
+          )}
+          {loading && (
+            <div className="message-loading">
+              <LoaderCircle size={ICON.md} className="spin" />
+              加载消息…
+            </div>
+          )}
+          {error && (
+            <div className="message-error">
+              <Notice>{error}</Notice>
+              <button onClick={fetchLatest}>重新加载</button>
+            </div>
+          )}
+          {messages.map((message, index) => {
+            const row = rows[index];
+            const isEditing = editing?.id === message.id;
+            return (
+              <MessageItem
+                key={message.id} message={message}
+                showDate={row.showDate} compact={row.compact}
+                previousId={row.previousId} nextId={row.nextId} replyTarget={row.replyTarget}
+                workspaceId={conversation.workspaceId}
+                conversationId={conversation.id} userId={userId}
+                agentOwnerName={
+                  message.senderKind === "agent" ? agentOwners.get(message.senderId) : undefined
+                }
+                mentionMembers={isEditing ? mentionMembers : noMembers}
+                mentionsEnabled={mentionsEnabled}
+                canEdit={canEdit} canRetract={canRetract}
+                showUnreadDivider={message.id === firstUnread && (entry?.readSeq ?? 0) > 0}
+                isRovingTarget={message.id === rovingMessageId}
+                highlighted={highlightId === message.id}
+                actionsOpen={actionMessageId === message.id}
+                editing={isEditing ? editing : null}
+                editBody={isEditing ? editBody : ""}
+                editMentions={isEditing ? editMentions : noMentions}
+                actionBusy={isEditing && actionBusy}
+                actionError={isEditing ? actionError : ""}
+                inputRef={inputRef}
+                setFocusedMessageId={setFocusedMessageId} setActionMessageId={setActionMessageId}
+                focusMessage={focusMessage} locate={locateStable} onEditSubmit={submitEdit}
+                setEditBody={setEditBody} setEditMentions={setEditMentions}
+                setEditing={setEditing} startEdit={startEdit}
+                onReply={replyToMessage}
+                onRetractRequest={requestRetract}
+              />
+            );
+          })}
+          {located && unreadContext && latest < conversation.lastSeq && (
+            <button
+              className="load-earlier load-later"
+              onClick={() => void newer()}
+              disabled={loadingNewer || loadingOlder || locating}
+            >
+              {loadingNewer ? <LoaderCircle size={ICON.xs} className="spin" /> : <ArrowDown size={ICON.xs} />}{" "}
+              加载后续消息
+            </button>
+          )}
+          <div className="message-end" />
+        </div>
       </div>
       {!atBottom && !located && !locating && (
         <button
