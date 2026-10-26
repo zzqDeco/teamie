@@ -68,7 +68,7 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
   }
 
   it("declares cascade @layer order and defines complete color, surface, typography, radius, shadow, spacing, z-index, and layout tokens", () => {
-    expect(tokensCss).toContain(
+    expect(readFileSync(join(srcDir, "layers.css"), "utf8")).toContain(
       "@layer tokens, base, components, features, layout, utilities;",
     );
     const required = [

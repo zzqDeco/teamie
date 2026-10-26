@@ -1,5 +1,3 @@
-@layer tokens, base, components, features, layout, utilities;
-
 @layer tokens {
   @font-face {
     font-family: "DM Sans Fallback";
@@ -11,6 +9,8 @@
   }
 
   :root {
+    --z-members-shade: 19;
+    --z-members-pane: 20;
     /* Text hierarchy — all verified >= 4.5:1 WCAG AA on #ffffff, #fbfaf8, #f7f5f9, and #ece8f3 */
     --text-strong: #302d3b;
     --text: #4a4356;

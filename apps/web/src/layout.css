@@ -40,7 +40,7 @@
   .members-shade {
     position: fixed;
     inset: 0;
-    z-index: 19;
+    z-index: var(--z-members-shade);
     background: var(--backdrop);
   }
   .gateway-advanced {
@@ -510,7 +510,7 @@
       right: 0;
       bottom: auto;
       height: var(--app-height, 100dvh);
-      z-index: 20;
+      z-index: var(--z-members-pane);
       width: min(340px, 88vw);
     }
     .navigation-sidebar {
@@ -924,7 +924,7 @@
       margin-top: 28px;
     }
     .app-shell {
-      height: 100dvh;
+      height: var(--app-height, 100dvh);
       position: fixed;
       inset: 0;
       width: 100%;
@@ -1023,7 +1023,7 @@
     .members-pane {
       width: 260px;
       box-shadow: var(--shadow-lg);
-      z-index: 10;
+      z-index: var(--z-members-pane);
     }
     .sync-banner {
       gap: 6px;
