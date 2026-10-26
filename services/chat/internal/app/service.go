@@ -11,6 +11,7 @@ import (
 // Service coordinates all Chat application use cases.
 type Service struct {
 	Tx             domain.TxManager
+	Mutations      domain.MutationRepository
 	Workspaces     domain.WorkspaceRepository
 	Conversations  domain.ConversationRepository
 	Memberships    domain.MembershipRepository

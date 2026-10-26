@@ -550,6 +550,9 @@ func RegisterChatHTTPServiceHertzServer(r *route.RouterGroup, srv ChatHTTPServer
 				if req.ID == "" {
 					req.ID = c.Param("id")
 				}
+				if v := string(c.GetHeader("Idempotency-Key")); v != "" {
+					req.IdempotencyKey = &v
+				}
 				resp, err := srv.CreateConversation(ctx, &req)
 				if err != nil {
 					m.WriteDomainError(ctx, c, err)
@@ -567,6 +570,9 @@ func RegisterChatHTTPServiceHertzServer(r *route.RouterGroup, srv ChatHTTPServer
 			}
 			if req.ID == "" {
 				req.ID = c.Param("id")
+			}
+			if v := string(c.GetHeader("Idempotency-Key")); v != "" {
+				req.IdempotencyKey = &v
 			}
 			resp, err := srv.CreateConversation(ctx, &req)
 			if err != nil {
@@ -589,6 +595,9 @@ func RegisterChatHTTPServiceHertzServer(r *route.RouterGroup, srv ChatHTTPServer
 				if req.ID == "" {
 					req.ID = c.Param("id")
 				}
+				if v := string(c.GetHeader("Idempotency-Key")); v != "" {
+					req.IdempotencyKey = &v
+				}
 				resp, err := srv.AddConversationMember(ctx, &req)
 				if err != nil {
 					m.WriteDomainError(ctx, c, err)
@@ -606,6 +615,9 @@ func RegisterChatHTTPServiceHertzServer(r *route.RouterGroup, srv ChatHTTPServer
 			}
 			if req.ID == "" {
 				req.ID = c.Param("id")
+			}
+			if v := string(c.GetHeader("Idempotency-Key")); v != "" {
+				req.IdempotencyKey = &v
 			}
 			resp, err := srv.AddConversationMember(ctx, &req)
 			if err != nil {
@@ -1423,6 +1435,9 @@ func RegisterChatHTTPServer(mux *http.ServeMux, srv ChatHTTPServer, m HTTPRespon
 				return
 			}
 			req.ID = r.PathValue("id")
+			if v := r.Header.Get("Idempotency-Key"); v != "" {
+				req.IdempotencyKey = &v
+			}
 			resp, err := srv.CreateConversation(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
@@ -1443,6 +1458,9 @@ func RegisterChatHTTPServer(mux *http.ServeMux, srv ChatHTTPServer, m HTTPRespon
 				return
 			}
 			req.ID = r.PathValue("id")
+			if v := r.Header.Get("Idempotency-Key"); v != "" {
+				req.IdempotencyKey = &v
+			}
 			resp, err := srv.AddConversationMember(r.Context(), &req)
 			if err != nil {
 				m.WriteDomainErrorHTTP(w, r, err)
