@@ -10,6 +10,7 @@ import {
 import { api } from "@teamie/api-client";
 import type { Attachment, AttachmentLimits } from "@teamie/api-client";
 import { errorText } from "./chat";
+import { subscribeAttachmentPreview } from "./attachment-previews";
 import { ICON } from "./icons";
 import { Button, Modal } from "./ui";
 import "./attachments.css";
@@ -306,36 +307,50 @@ export function MessageAttachments({
     .map((attachment) => attachment.id)
     .join("\u0000");
 
+  const listRef = useRef<HTMLUListElement>(null);
+  const retryPreview = useRef<(id: string) => void>(() => {});
+  const [previewErrors, setPreviewErrors] = useState<Record<string, boolean>>({});
+  const session = api.csrfToken;
   useEffect(() => {
     setPreviewFile(null);
-    if (!imageIdsKey) {
-      setPreviewUrls({});
-      return;
-    }
-    let active = true;
-    const createdUrls: string[] = [];
-    const ids = imageIdsKey.split("\u0000");
     setPreviewUrls({});
-    for (const id of ids) {
-      void api
-        .attachmentContent(conversationId, id)
-        .then((blob) => {
-          if (!active) return;
-          const url = URL.createObjectURL(blob);
-          createdUrls.push(url);
-          setPreviewUrls((prev) => ({ ...prev, [id]: url }));
-        })
-        .catch(() => {
-          /* Fall back to standard file card if thumbnail loading fails. */
+    setPreviewErrors({});
+    let active = true;
+    const subscriptions = new Map<string, () => void>();
+    function start(id: string) {
+      subscriptions.get(id)?.();
+      subscriptions.set(id, subscribeAttachmentPreview(conversationId, id, (preview) => {
+        if (!active || session !== api.csrfToken) return;
+        setPreviewUrls((previous) => {
+          const next = { ...previous };
+          if (preview.url) next[id] = preview.url; else delete next[id];
+          return next;
         });
+        setPreviewErrors((previous) => ({ ...previous, [id]: !!preview.retryable }));
+      }));
+    }
+    retryPreview.current = start;
+    const observer = typeof IntersectionObserver === "undefined" ? null : new IntersectionObserver((observations) => {
+      for (const observation of observations) {
+        const id = (observation.target as HTMLElement).dataset.previewId!;
+        if (observation.isIntersecting && !subscriptions.has(id)) start(id);
+        else if (!observation.isIntersecting && subscriptions.has(id)) {
+          subscriptions.get(id)!();
+          subscriptions.delete(id);
+          setPreviewUrls((previous) => { const next = { ...previous }; delete next[id]; return next; });
+        }
+      }
+    }, { rootMargin: "200px" });
+    for (const element of listRef.current?.querySelectorAll<HTMLElement>("[data-preview-id]") ?? []) {
+      if (observer) observer.observe(element); else start(element.dataset.previewId!);
     }
     return () => {
       active = false;
-      for (const url of createdUrls) {
-        URL.revokeObjectURL(url);
-      }
+      retryPreview.current = () => {};
+      observer?.disconnect();
+      for (const unsubscribe of subscriptions.values()) unsubscribe();
     };
-  }, [conversationId, imageIdsKey]);
+  }, [conversationId, imageIdsKey, session]);
 
   async function download(attachment: Attachment) {
     setBusy(attachment.id);
@@ -357,12 +372,13 @@ export function MessageAttachments({
   const activePreviewUrl = previewFile ? previewUrls[previewFile.id] : undefined;
   return (
     <>
-      <ul className="message-attachments" aria-label="消息附件">
+      <ul ref={listRef} className="message-attachments" aria-label="消息附件">
         {attachments.map((attachment) => {
           const previewUrl = previewUrls[attachment.id];
           return (
             <li
               key={attachment.id}
+              data-preview-id={isPreviewableImage(attachment.mediaType) ? attachment.id : undefined}
               className={previewUrl ? "attachment-image-item" : undefined}
             >
               {previewUrl && (
@@ -378,6 +394,11 @@ export function MessageAttachments({
                     alt={attachment.filename}
                     loading="lazy"
                   />
+                </button>
+              )}
+              {previewErrors[attachment.id] && (
+                <button type="button" aria-label={`重试预览 ${attachment.filename}`} onClick={() => retryPreview.current(attachment.id)}>
+                  <RefreshCw size={ICON.sm} /> 重试预览
                 </button>
               )}
               <button

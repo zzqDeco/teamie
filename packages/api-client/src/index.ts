@@ -233,11 +233,13 @@ export type WorkspaceSearchPage = Omit<WorkspaceSearchPageResp, "items"> & {
 export class ApiError extends Error {
   status: number;
   code: string;
-  constructor(status: number, code: string, message: string) {
+  retryAfterMs?: number;
+  constructor(status: number, code: string, message: string, retryAfterMs?: number) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
+    this.retryAfterMs = retryAfterMs;
   }
 }
 const part = encodeURIComponent;
@@ -302,10 +304,16 @@ export class TeamieClient {
         !sessionChanged
       )
         this.onForbidden?.();
+      const retryAfter = response.headers?.get("Retry-After");
+      const retryAfterMs = retryAfter
+        ? /^\d+(?:\.\d+)?$/.test(retryAfter) ? Number(retryAfter) * 1000
+          : Date.parse(retryAfter) - Date.now()
+        : undefined;
       throw new ApiError(
         response.status,
         data.error?.code ?? "request_failed",
         data.error?.message ?? `请求失败 (${response.status})`,
+        retryAfterMs !== undefined && Number.isFinite(retryAfterMs) ? Math.max(0, retryAfterMs) : undefined,
       );
     }
     const value = response.status === 204 ? undefined : responseType === "blob"
@@ -635,13 +643,13 @@ export class TeamieClient {
       }),
       { method: IDL_ROUTES.DeletePendingAttachment.method },
     );
-  attachmentContent = (conversationId: string, attachmentId: string) =>
+  attachmentContent = (conversationId: string, attachmentId: string, signal?: AbortSignal) =>
     this.#request<Blob>(
       routePath(IDL_ROUTES.DownloadAttachment, {
         id: conversationId,
         attachmentId,
       }),
-      {},
+      { signal },
       "blob",
     );
   edit = (

@@ -496,6 +496,7 @@ export const MessageItem = memo(function MessageItem({
           }
         }}
         onKeyDown={(event) => {
+          if ((event.target as HTMLElement | null)?.closest('[role="dialog"], [role="alertdialog"]')) return;
           const tag = (event.target as HTMLElement | null)?.tagName;
           if (tag === "INPUT" || tag === "TEXTAREA") return;
           if (
