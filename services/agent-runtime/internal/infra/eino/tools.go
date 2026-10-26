@@ -98,6 +98,15 @@ func (imc *IM) Call(ctx context.Context, method, path string, body any, out any)
 	return imc.callAt(ctx, imc.BaseURL, method, path, body, out)
 }
 
+// CallIdempotent binds retries to one Chat-owned mutation receipt.
+func (imc *IM) CallIdempotent(ctx context.Context, method, path, key string, body, out any) error {
+	data, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	return imc.request(ctx, imc.BaseURL, method, path, bytes.NewReader(data), "application/json", map[string]string{"Idempotency-Key": key}, out)
+}
+
 func (imc *IM) callAt(ctx context.Context, baseURL, method, path string, body any, out any) error {
 	var data []byte
 	var e error

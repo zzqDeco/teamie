@@ -120,7 +120,7 @@ func (t *Tools) BuildDirectMessageTools() ([]tool.BaseTool, error) {
 		if !directMessagesForRun(run) {
 			return nil, errors.New("direct_messages_not_admitted")
 		}
-		return t.execute(ctx, "im_open_direct_conversation", args, func(ctx context.Context, _ string) (*Observation, error) {
+		return t.execute(ctx, "im_open_direct_conversation", args, func(ctx context.Context, key string) (*Observation, error) {
 			if t.FlagsFile != "" && !runtimeFlag(t.FlagsFile, "im.dm.create") {
 				return &Observation{Error: "feature_disabled"}, nil
 			}
@@ -135,7 +135,7 @@ func (t *Tools) BuildDirectMessageTools() ([]tool.BaseTool, error) {
 				"type":      "direct",
 				"memberIds": []string{args.UserID},
 			}
-			if err := t.IM.Call(ctx, http.MethodPost, "/api/v1/workspaces/"+url.PathEscape(args.WorkspaceID)+"/conversations", body, &out); err != nil {
+			if err := t.IM.CallIdempotent(ctx, http.MethodPost, "/api/v1/workspaces/"+url.PathEscape(args.WorkspaceID)+"/conversations", key, body, &out); err != nil {
 				return deliveryFailure(err)
 			}
 			if !validUUID(out.Conversation.ID) || !validUUID(out.Conversation.WorkspaceID) {
@@ -156,7 +156,7 @@ func (t *Tools) BuildDirectMessageTools() ([]tool.BaseTool, error) {
 		if !directMessagesForRun(run) {
 			return nil, errors.New("direct_messages_not_admitted")
 		}
-		return t.execute(ctx, "im_create_group_conversation", args, func(ctx context.Context, _ string) (*Observation, error) {
+		return t.execute(ctx, "im_create_group_conversation", args, func(ctx context.Context, key string) (*Observation, error) {
 			if t.FlagsFile != "" && !runtimeFlag(t.FlagsFile, "im.group.create") {
 				return &Observation{Error: "feature_disabled"}, nil
 			}
@@ -193,7 +193,7 @@ func (t *Tools) BuildDirectMessageTools() ([]tool.BaseTool, error) {
 			if name != "" {
 				body["name"] = name
 			}
-			if err := t.IM.Call(ctx, http.MethodPost, "/api/v1/workspaces/"+url.PathEscape(args.WorkspaceID)+"/conversations", body, &out); err != nil {
+			if err := t.IM.CallIdempotent(ctx, http.MethodPost, "/api/v1/workspaces/"+url.PathEscape(args.WorkspaceID)+"/conversations", key, body, &out); err != nil {
 				return deliveryFailure(err)
 			}
 			if !validUUID(out.Conversation.ID) || !validUUID(out.Conversation.WorkspaceID) {
@@ -214,7 +214,7 @@ func (t *Tools) BuildDirectMessageTools() ([]tool.BaseTool, error) {
 		if !directMessagesForRun(run) {
 			return nil, errors.New("direct_messages_not_admitted")
 		}
-		return t.execute(ctx, "im_add_conversation_members", args, func(ctx context.Context, _ string) (*Observation, error) {
+		return t.execute(ctx, "im_add_conversation_members", args, func(ctx context.Context, key string) (*Observation, error) {
 			if t.FlagsFile != "" && !runtimeFlag(t.FlagsFile, "im.group.create") {
 				return &Observation{Error: "feature_disabled"}, nil
 			}
@@ -246,7 +246,7 @@ func (t *Tools) BuildDirectMessageTools() ([]tool.BaseTool, error) {
 			}
 			path := "/api/v1/conversations/" + url.PathEscape(args.ConversationID) + "/members"
 			for _, uid := range targets {
-				if err := t.IM.Call(ctx, http.MethodPost, path, map[string]any{"userId": uid}, &out); err != nil {
+				if err := t.IM.CallIdempotent(ctx, http.MethodPost, path, "member-"+digest([]byte(key+"/"+uid)), map[string]any{"userId": uid}, &out); err != nil {
 					return deliveryFailure(err)
 				}
 			}

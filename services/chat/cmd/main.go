@@ -58,6 +58,7 @@ func main() {
 	repo := pg.New(postgres.New(pool))
 	appSvc := &app.Service{
 		Tx:             repo,
+		Mutations:      repo,
 		Workspaces:     repo,
 		Conversations:  repo,
 		Memberships:    repo,

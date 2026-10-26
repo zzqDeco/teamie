@@ -188,6 +188,7 @@ struct CreateConversationReq {
   2: required string type (api.body="type")
   3: optional string name (api.body="name")
   4: optional list<string> memberIds (api.body="memberIds")
+  5: optional string idempotencyKey (api.header="Idempotency-Key", go.tag="json:\"-\"")
 }
 
 struct ConversationResp {
@@ -197,6 +198,7 @@ struct ConversationResp {
 struct AddConversationMemberReq {
   1: required string id (api.path="id", go.tag="json:\"-\"")
   2: required string userId (api.body="userId")
+  3: optional string idempotencyKey (api.header="Idempotency-Key", go.tag="json:\"-\"")
 }
 
 struct RemoveConversationMemberReq {
