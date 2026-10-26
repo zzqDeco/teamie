@@ -247,7 +247,10 @@ func TestHertzStreamAdapterFlushAndDisconnectCancellation(t *testing.T) {
 
 func TestHertzNativeSSEWriterStreamChat(t *testing.T) {
 	s, dummy := streamFixtureService(t, func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.Copy(io.Discard, r.Body)
+		var request struct {
+			Stream bool `json:"stream"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&request)
 		switch r.URL.Path {
 		case "/search":
 			w.Header().Set("Content-Type", "application/json")
@@ -256,6 +259,11 @@ func TestHertzNativeSSEWriterStreamChat(t *testing.T) {
 		case "/extract":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"results":[{"url":"https://www.iana.org/help/example-domains","raw_content":"# IANA Example Domains\nexample.com"}],"failed_results":[]}`))
+			return
+		}
+		if !request.Stream {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"fixture-unary","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}]}`))
 			return
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -316,10 +324,6 @@ func TestHertzNativeSSEWriterStreamChat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := s.Store.Load(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
 	py := exec.Command(
 		"python3",
 		"-c",
@@ -327,16 +331,14 @@ func TestHertzNativeSSEWriterStreamChat(t *testing.T) {
 spec = importlib.util.spec_from_file_location("m", sys.argv[1])
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
-cid = m.counting_config_id(sys.argv[3], sys.argv[4])
-assert cid == sys.argv[5], f"{cid} != {sys.argv[5]}"
-c = m.Client({"origin": sys.argv[2], "identity": sys.argv[2], "chat": sys.argv[2], "control": sys.argv[2], "gateway": sys.argv[2], "internal_gateway": sys.argv[2], "runtime_token": sys.argv[6]})
-c.verify_internal_sse_stream(sys.argv[6], "owner-1", cid)
-c.verify_internal_web_search(sys.argv[6], "owner-1")
+c = m.Client({"origin": sys.argv[2], "identity": sys.argv[2], "chat": sys.argv[2], "control": sys.argv[2], "gateway": sys.argv[2], "internal_gateway": sys.argv[2], "runtime_token": sys.argv[4]})
+cid = c.verify_internal_unary(sys.argv[4], "owner-1")
+assert cid == sys.argv[3], f"{cid} != {sys.argv[3]}"
+c.verify_internal_sse_stream(sys.argv[4], "owner-1", cid)
+c.verify_internal_web_search(sys.argv[4], "owner-1")
 `,
 		scriptPath,
 		"http://"+listener.Addr().String(),
-		cfg.BaseURL,
-		cfg.Model,
 		res.Header.Get("X-Teamie-Model-Config-ID"),
 		testToken,
 	)

@@ -3,6 +3,7 @@
 set -euo pipefail
 umask 077
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+# shellcheck source=ops/common.sh
 source "$script_dir/common.sh"
 [[ $# -gt 0 ]] || exit 2
 kind=$1
