@@ -176,3 +176,5 @@ done
   - [Phase Two: Human-Owned Agents Scope](docs/product/phase-two.md)
   - [Phase Three: Continuous Runtime & Responsive IM](docs/product/phase-three.md)
   - [Production Delivery, Backup & Recovery (`ops/README.md`)](ops/README.md)
+
+Private live-model execution acceptance and operator commands: [runbook](docs/architecture/live-model-acceptance.md).
