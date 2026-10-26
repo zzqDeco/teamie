@@ -1,203 +1,248 @@
-@font-face {
-  font-family: "DM Sans Fallback";
-  src: local("Arial"), local("Helvetica Neue"), local("Helvetica");
-  size-adjust: 99.2%;
-  ascent-override: 94%;
-  descent-override: 26%;
-  line-gap-override: 0%;
-}
+@layer tokens, base, components, features, layout, utilities;
 
-:root {
-  /* Text hierarchy — all verified >= 4.5:1 WCAG AA on #ffffff, #fbfaf8, #f7f5f9, and #ece8f3 */
-  --text-strong: #302d3b;
-  --text: #4a4356;
-  --text-muted: #5d536b;
-  --text-subtle: #6b6079;
-
-  /* Brand & interactive accents */
-  --brand: #7463d4;
-  --brand-muted: #7264bd;
-  --brand-text: #5f4fc1;
-  --brand-strong: #4f3ea6;
-  --on-brand: #ffffff;
-  --logo-accent: #d8efae;
-
-  /* Legacy variable aliases for compatibility */
-  --purple: var(--brand);
-  --purple-dark: var(--brand-text);
-  --muted: var(--text-muted);
-
-  /* Surfaces & borders (preserving warm ivory & soft lavender identity) */
-  --bg: #fbfaf8;
-  --surface: #ffffff;
-  --surface-sunken: #f7f5f9;
-  --rail: #ece8f3;
-  --lavender: #f0ecfb;
-  --hover-bg: #f2eef8;
-  --border: #eae5ee;
-  --border-strong: #ddd5e6;
-
-  /* Semantic feedback tokens (WCAG AA compliant) */
-  --danger-text: #a82e2e;
-  --danger-bg: #fdf2f2;
-  --danger-border: #e8b4b4;
-  /* Destructive button fill (5.9:1 with --on-danger; hover 7.6:1) */
-  --danger: #b03a48;
-  --danger-hover: #962f3c;
-  --on-danger: #ffffff;
-  --warning-text: #6b5322;
-  --warning-bg: #fbf6ea;
-  --warning-border: #efe5cf;
-  --success-text: #355d2d;
-  --success-bg: #eef6ea;
-  --success-border: #dcebd4;
-
-  /* Unified focus ring (6.2:1 contrast on light surfaces) */
-  --focus-ring: 2px solid var(--brand-text);
-  --focus-ring-offset: 2px;
-  --focus-halo: 0 0 0 3px rgba(116, 99, 212, 0.2);
-
-  /* Typography families & scale (Latin fixed to self-hosted DM Sans; Chinese follows platform system fonts) */
-  --font-sans:
-    "DM Sans Variable",
-    "DM Sans",
-    "DM Sans Fallback",
-    -apple-system,
-    BlinkMacSystemFont,
-    "PingFang SC",
-    "Hiragino Sans GB",
-    "Microsoft YaHei UI",
-    "Microsoft YaHei",
-    "Noto Sans CJK SC",
-    "Source Han Sans SC",
-    sans-serif;
-  --font-mono:
-    "JetBrains Mono",
-    "SFMono-Regular",
-    ui-monospace,
-    Menlo,
-    Monaco,
-    Consolas,
-    monospace;
-  --font-xs: 11px;
-  --font-sm: 12px;
-  --font-base: 13px;
-  --font-md: 14px;
-  --font-lg: 15px;
-  --font-xl: 17px;
-  --font-2xl: 20px;
-  --font-3xl: 24px;
-  --font-4xl: 30px;
-
-  /* Global root typography, colors, and font rendering */
-  color-scheme: light;
-  font-family: var(--font-sans);
-  color: var(--text-strong);
-  background: var(--bg);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  font-size: var(--font-md);
-
-  /* Border radius scale */
-  --r-xs: 4px;
-  --r-sm: 6px;
-  --r-md: 10px;
-  --r-lg: 14px;
-  --r-xl: 20px;
-  --r-pill: 999px;
-
-  /* Elevation shadow scale (#3e2e63 tint) */
-  --shadow-sm: 0 2px 6px rgba(62, 46, 99, 0.06);
-  --shadow-md: 0 6px 18px rgba(62, 46, 99, 0.09);
-  --shadow-lg: 0 14px 34px rgba(62, 46, 99, 0.12);
-  --shadow-pop: 0 18px 44px rgba(62, 46, 99, 0.16);
-
-  /* 4px-base spacing scale */
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 20px;
-  --space-6: 24px;
-  --space-8: 32px;
-  --space-12: 48px;
-}
-
-:root[data-theme="dark"] {
-  color-scheme: dark;
-
-  /* Text hierarchy — all verified >= 6.1:1 WCAG AA on #17141c, #201c27, #1c1822, and #1b1722 */
-  --text-strong: #ece8f3;
-  --text: #d6cee3;
-  --text-muted: #b7adc7;
-  --text-subtle: #a79db5;
-
-  /* Brand & interactive accents (brightened lavender-purple paired with dark on-brand text) */
-  --brand: #9d8ff0;
-  --brand-muted: #8b7ce0;
-  --brand-text: #b4a7f5;
-  --brand-strong: #cfc6fa;
-  --on-brand: #17141c;
-
-  /* Warm deep-plum surfaces & borders */
-  --bg: #17141c;
-  --surface: #201c27;
-  --surface-sunken: #1c1822;
-  --rail: #1b1722;
-  --lavender: #2a2338;
-  --hover-bg: #262033;
-  --border: #312a3d;
-  --border-strong: #3e354d;
-
-  /* Semantic feedback tokens in dark mode (WCAG AA compliant) */
-  --danger-text: #f59b9b;
-  --danger-bg: #361c20;
-  --danger-border: #5c2b31;
-  /* Destructive button fill (6.8:1 with --on-danger; hover 9.3:1) */
-  --danger: #ec7d8a;
-  --danger-hover: #f5a3ad;
-  --on-danger: #17141c;
-  --warning-text: #f0c97a;
-  --warning-bg: #332816;
-  --warning-border: #544120;
-  --success-text: #8fd682;
-  --success-bg: #1b2e19;
-  --success-border: #2c4d29;
-
-  /* Focus & elevation shadows in dark mode */
-  --focus-halo: 0 0 0 3px rgba(157, 143, 240, 0.28);
-  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.28);
-  --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.36);
-  --shadow-lg: 0 14px 34px rgba(0, 0, 0, 0.45);
-  --shadow-pop: 0 18px 44px rgba(0, 0, 0, 0.56);
-}
-
-button:focus-visible,
-a:focus-visible,
-input:focus-visible,
-textarea:focus-visible,
-select:focus-visible,
-summary:focus-visible,
-[tabindex]:focus-visible {
-  outline: var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
+@layer tokens {
+  @font-face {
+    font-family: "DM Sans Fallback";
+    src: local("Arial"), local("Helvetica Neue"), local("Helvetica");
+    size-adjust: 99.2%;
+    ascent-override: 94%;
+    descent-override: 26%;
+    line-gap-override: 0%;
   }
-  /* Loading must stay perceivable: keep a slow, linear spinner rotation. */
-  .spin {
-    animation-duration: 1.5s !important;
-    animation-iteration-count: infinite !important;
-    animation-timing-function: linear !important;
+
+  :root {
+    /* Text hierarchy — all verified >= 4.5:1 WCAG AA on #ffffff, #fbfaf8, #f7f5f9, and #ece8f3 */
+    --text-strong: #302d3b;
+    --text: #4a4356;
+    --text-muted: #5d536b;
+    --text-subtle: #6b6079;
+
+    /* Brand & interactive accents */
+    --brand: #7463d4;
+    --brand-muted: #7264bd;
+    --brand-text: #5f4fc1;
+    --brand-strong: #4f3ea6;
+    --on-brand: #ffffff;
+    --logo-accent: #d8efae;
+
+    /* Legacy variable aliases for compatibility */
+    --purple: var(--brand);
+    --purple-dark: var(--brand-text);
+    --muted: var(--text-muted);
+
+    /* Surfaces & borders (preserving warm ivory & soft lavender identity) */
+    --bg: #fbfaf8;
+    --surface: #ffffff;
+    --surface-sunken: #f7f5f9;
+    --rail: #ece8f3;
+    --lavender: #f0ecfb;
+    --hover-bg: #f2eef8;
+    --border: #eae5ee;
+    --border-strong: #ddd5e6;
+
+    /* Semantic feedback tokens (WCAG AA compliant) */
+    --danger-text: #a82e2e;
+    --danger-bg: #fdf2f2;
+    --danger-border: #e8b4b4;
+    /* Destructive button fill (5.9:1 with --on-danger; hover 7.6:1) */
+    --danger: #b03a48;
+    --danger-hover: #962f3c;
+    --on-danger: #ffffff;
+    --warning-text: #6b5322;
+    --warning-bg: #fbf6ea;
+    --warning-border: #efe5cf;
+    --success-text: #355d2d;
+    --success-bg: #eef6ea;
+    --success-border: #dcebd4;
+
+    /* Scrollbars, overlays, switches, and status indicators (WCAG non-text >= 3:1) */
+    --scrollbar-thumb: #d5cce4;
+    --scrollbar-thumb-hover: #bdb0d3;
+    --backdrop: rgba(46, 36, 61, 0.34);
+    --switch-bg: #867899;
+    --switch-on: #7463d4;
+    --status-online: #497a3d;
+    --status-connecting: #94662a;
+    --status-offline: #766888;
+    --mention-bg: rgba(116, 99, 212, 0.12);
+    --mention-self-bg: rgba(116, 99, 212, 0.22);
+
+    /* Unified focus ring (6.2:1 contrast on light surfaces) */
+    --focus-ring: 2px solid var(--brand-text);
+    --focus-ring-offset: 2px;
+    --focus-halo: 0 0 0 3px rgba(116, 99, 212, 0.2);
+
+    /* Typography families & scale (Latin fixed to self-hosted DM Sans; Chinese follows platform system fonts) */
+    --font-sans:
+      "DM Sans Variable",
+      "DM Sans",
+      "DM Sans Fallback",
+      -apple-system,
+      BlinkMacSystemFont,
+      "PingFang SC",
+      "Hiragino Sans GB",
+      "Microsoft YaHei UI",
+      "Microsoft YaHei",
+      "Noto Sans CJK SC",
+      "Source Han Sans SC",
+      sans-serif;
+    --font-mono:
+      "JetBrains Mono",
+      "SFMono-Regular",
+      ui-monospace,
+      Menlo,
+      Monaco,
+      Consolas,
+      monospace;
+    --font-xs: 11px;
+    --font-sm: 12px;
+    --font-base: 13px;
+    --font-md: 14px;
+    --font-lg: 15px;
+    --font-subhead: 16px;
+    --font-xl: 17px;
+    --font-2xl: 20px;
+    --font-3xl: 24px;
+    --font-4xl: 30px;
+    --font-5xl: 36px;
+    --font-display: 48px;
+    --font-decor: 140px;
+
+    /* Global root typography, colors, and font rendering */
+    color-scheme: light;
+    font-family: var(--font-sans);
+    color: var(--text-strong);
+    background: var(--bg);
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-size: var(--font-md);
+
+    /* Border radius scale */
+    --r-xs: 4px;
+    --r-sm: 6px;
+    --r-md: 10px;
+    --r-lg: 14px;
+    --r-xl: 20px;
+    --r-pill: 999px;
+
+    /* Elevation shadow scale (#3e2e63 tint) */
+    --shadow-sm: 0 2px 6px rgba(62, 46, 99, 0.06);
+    --shadow-md: 0 6px 18px rgba(62, 46, 99, 0.09);
+    --shadow-lg: 0 14px 34px rgba(62, 46, 99, 0.12);
+    --shadow-pop: 0 18px 44px rgba(62, 46, 99, 0.16);
+
+    /* 4px-base spacing scale */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 20px;
+    --space-6: 24px;
+    --space-8: 32px;
+    --space-12: 48px;
+
+    /* Z-index & layout dimensions */
+    --z-dropdown: 30;
+    --z-drawer: 32;
+    --z-popover: 38;
+    --z-modal: 100;
+    --z-toast: 110;
+    --header-h: 66px;
+    --header-h-mobile: 64px;
+  }
+
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+
+    /* Text hierarchy — all verified >= 6.1:1 WCAG AA on #17141c, #201c27, #1c1822, and #1b1722 */
+    --text-strong: #ece8f3;
+    --text: #d6cee3;
+    --text-muted: #b7adc7;
+    --text-subtle: #a79db5;
+
+    /* Brand & interactive accents (brightened lavender-purple paired with dark on-brand text) */
+    --brand: #9d8ff0;
+    --brand-muted: #8b7ce0;
+    --brand-text: #b4a7f5;
+    --brand-strong: #cfc6fa;
+    --on-brand: #17141c;
+
+    /* Warm deep-plum surfaces & borders */
+    --bg: #17141c;
+    --surface: #201c27;
+    --surface-sunken: #1c1822;
+    --rail: #1b1722;
+    --lavender: #2a2338;
+    --hover-bg: #262033;
+    --border: #312a3d;
+    --border-strong: #3e354d;
+
+    /* Semantic feedback tokens in dark mode (WCAG AA compliant) */
+    --danger-text: #f59b9b;
+    --danger-bg: #361c20;
+    --danger-border: #5c2b31;
+    /* Destructive button fill (6.8:1 with --on-danger; hover 9.3:1) */
+    --danger: #ec7d8a;
+    --danger-hover: #f5a3ad;
+    --on-danger: #17141c;
+    --warning-text: #f0c97a;
+    --warning-bg: #332816;
+    --warning-border: #544120;
+    --success-text: #8fd682;
+    --success-bg: #1b2e19;
+    --success-border: #2c4d29;
+
+    /* Scrollbars, overlays, switches, and status indicators in dark mode (WCAG non-text >= 3:1) */
+    --scrollbar-thumb: #463c57;
+    --scrollbar-thumb-hover: #5c4f73;
+    --backdrop: rgba(8, 6, 12, 0.62);
+    --switch-bg: #7f7295;
+    --switch-on: #9d8ff0;
+    --status-online: #7bc96f;
+    --status-connecting: #e0a958;
+    --status-offline: #988ca9;
+    --mention-bg: rgba(157, 143, 240, 0.18);
+    --mention-self-bg: rgba(157, 143, 240, 0.3);
+
+    /* Focus & elevation shadows in dark mode */
+    --focus-halo: 0 0 0 3px rgba(157, 143, 240, 0.28);
+    --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.28);
+    --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.36);
+    --shadow-lg: 0 14px 34px rgba(0, 0, 0, 0.45);
+    --shadow-pop: 0 18px 44px rgba(0, 0, 0, 0.56);
+  }
+}
+
+@layer base {
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible,
+  summary:focus-visible,
+  [tabindex]:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: var(--focus-ring-offset);
+  }
+}
+
+@layer utilities {
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+    /* Loading must stay perceivable: keep a slow, linear spinner rotation. */
+    .spin {
+      animation-duration: 1.5s !important;
+      animation-iteration-count: infinite !important;
+      animation-timing-function: linear !important;
+    }
   }
 }

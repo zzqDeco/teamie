@@ -117,13 +117,28 @@ describe("PR-6 dark mode tokens, head bootstrap & settings switcher", () => {
     vi.restoreAllMocks();
   });
 
-  it("ensures all [data-theme=dark] text and brand tokens meet WCAG AA >= 4.5:1", () => {
+  it("ensures all [data-theme=dark] text, brand, scrollbar, overlay, switch, and status tokens meet WCAG contrast", () => {
     const tokensCss = readFileSync(join(srcDir, "tokens.css"), "utf8");
     const darkBlock =
       /:root\[data-theme="dark"\]\s*\{([\s\S]*?)\}/.exec(tokensCss)?.[1] || "";
     const darkMap = new Map<string, string>();
     for (const m of darkBlock.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)) {
       darkMap.set(m[1], m[2].trim());
+    }
+
+    for (const required of [
+      "--scrollbar-thumb",
+      "--scrollbar-thumb-hover",
+      "--backdrop",
+      "--switch-bg",
+      "--switch-on",
+      "--status-online",
+      "--status-connecting",
+      "--status-offline",
+    ]) {
+      expect(darkMap.has(required), `missing dark token ${required}`).toBe(
+        true,
+      );
     }
 
     const surfaces = [
@@ -152,6 +167,22 @@ describe("PR-6 dark mode tokens, head bootstrap & settings switcher", () => {
         ).toBeGreaterThanOrEqual(4.5);
       }
     }
+    const nonTextTokens = [
+      "--switch-bg",
+      "--switch-on",
+      "--status-online",
+      "--status-connecting",
+      "--status-offline",
+    ];
+    for (const token of nonTextTokens) {
+      const fg = darkMap.get(token)!;
+      for (const bg of [...surfaces, darkMap.get("--lavender")!]) {
+        expect(
+          contrastRatio(fg, bg),
+          `dark ${token} (${fg}) on ${bg}`,
+        ).toBeGreaterThanOrEqual(3);
+      }
+    }
     expect(
       contrastRatio(darkMap.get("--on-brand")!, darkMap.get("--brand")!),
     ).toBeGreaterThanOrEqual(4.5);
@@ -166,8 +197,14 @@ describe("PR-6 dark mode tokens, head bootstrap & settings switcher", () => {
     }
   });
 
-  it("includes synchronous theme initialization script in index.html head and applies system theme when storage throws", () => {
+  it("includes dual light/dark theme-color meta tags and synchronous theme initialization script in index.html head", () => {
     const html = readFileSync(join(srcDir, "..", "index.html"), "utf8");
+    expect(html).toMatch(
+      /<meta[^>]+name="theme-color"[^>]+media="\(prefers-color-scheme:\s*light\)"[^>]+content="#7463d4"/,
+    );
+    expect(html).toMatch(
+      /<meta[^>]+name="theme-color"[^>]+media="\(prefers-color-scheme:\s*dark\)"[^>]+content="#17141c"/,
+    );
     expect(html).toContain('localStorage.getItem("teamie.theme")');
     expect(html).toContain("document.documentElement.dataset.theme");
 
