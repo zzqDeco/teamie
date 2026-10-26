@@ -181,6 +181,10 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
+      - name: Install pinned RPC code generators
+        run: |
+          go install github.com/cloudwego/kitex/tool/cmd/kitex@v0.16.4
+          go install github.com/cloudwego/thriftgo@v0.4.5
       - name: Enforce contract sync, IM independence and Clean DDD dependency boundaries
         run: |
           make gen && git diff --exit-code -- contracts/ packages/api-client/src/generated.ts
