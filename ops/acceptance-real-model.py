@@ -32,6 +32,8 @@ import json
 import os
 import re
 import secrets
+import subprocess
+from pathlib import Path
 import sys
 import time
 import urllib.error
@@ -64,21 +66,72 @@ def require(condition: bool, message: str) -> None:
         raise AssertionError(message)
 
 
-def counting_config_id(base_url: str, model_name: str) -> str:
-    base = base_url.strip().rstrip("/")
-    model = model_name.strip()
-    if not base or not model:
-        return ""
-    payload = json.dumps(
-        {
-            "version": TRANSPORT_VERSION,
-            "baseUrl": base,
-            "model": model,
-        },
-        separators=(",", ":"),
-    ).encode("utf-8")
-    digest = hashlib.sha256(payload).digest()
-    return "modelcfg:v1:" + digest[:16].hex()
+class Evidence:
+    """Run operator commands as argv, never a shell or a public diagnostic API."""
+    def __init__(self, nonce: str):
+        self.nonce = nonce
+        self.command = json.loads(os.environ.get("TEAMIE_REAL_EVIDENCE_COMMAND", json.dumps(["bash", str(Path(__file__).with_name("acceptance-evidence.sh"))])))
+        require(isinstance(self.command, list) and bool(self.command) and all(isinstance(x, str) and x for x in self.command), "Evidence command must be a JSON argv array")
+        self.records: list[dict] = []
+
+    def call(self, kind: str, **scope: str) -> dict:
+        argv = self.command + [kind]
+        for key, value in scope.items():
+            argv.extend(["--" + key, value])
+        result = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False)
+        require(result.returncode == 0, "Private acceptance evidence unavailable: " + kind)
+        require(len(result.stdout) <= 2 * 1024 * 1024, "Evidence response too large")
+        data = json.loads(result.stdout)
+        require(data.get("version") == 1, "Unsupported evidence version")
+        return data
+
+    def isolation(self) -> None:
+        data = self.call("isolation", nonce=self.nonce)
+        require(data.get("nonce") == self.nonce and data.get("verified") is True, "Sandbox isolation was not verified")
+        self.records.append({"kind": "isolation", **data})
+
+    def verify(self, scenario: str, agent: str, source: str, reply: str, conversation: str, *, restricted: str = "", attachment: str = "", timeout: float, poll_interval: float) -> None:
+        def settled():
+            data = self.call("runtime", agent=agent, message=source)
+            require(data.get("agentId") == agent and data.get("messageId") == source, "Evidence scope mismatch")
+            runs = data.get("runs", [])
+            return data if runs and all(r.get("state") == "completed" for r in runs) else None
+        data = wait_until("durable Runtime completion", settled, timeout=timeout, poll_interval=poll_interval)
+        runs = {r["id"]: r for r in data["runs"]}
+        roots = {r["id"] for r in runs.values() if any(i.get("messageId") == source and i.get("state") == "done" for i in r.get("inputs", []))}
+        require(bool(roots), "Missing consumed trigger input")
+        calls = [c for c in data.get("tools", []) if c.get("runId") in runs and c.get("completed") is True]
+        sends = [c for c in calls if c.get("name") == "im_send_message" and c.get("ok") is True and c.get("messageId") == reply and c.get("conversationId") == conversation]
+        require(bool(sends), "Reply has no matching committed send receipt")
+        if scenario == "acl":
+            require(any(c.get("name") in ("im_list_messages", "im_get_message") and c.get("denied") is True and c.get("conversationId") == restricted for c in calls), "No denied read of the restricted conversation")
+        elif scenario == "file":
+            require(any(c.get("name") == "im_upload_file" and c.get("ok") is True and c.get("attachmentId") == attachment and c.get("conversationId") == conversation for c in calls), "Attachment has no successful export receipt")
+            executed = False
+            for c in calls:
+                if c.get("name") != "native:workspace_execute" or not c.get("taskId"):
+                    continue
+                task = self.call("task", agent=agent, run=c["runId"], task=c["taskId"])
+                require(task.get("agentId") == agent and task.get("runId") == c["runId"] and task.get("taskId") == c["taskId"], "Sandbox task scope mismatch")
+                executed |= task.get("success") is True and task.get("state") == "completed"
+            require(executed, "No successful completed Sandbox execution")
+        elif scenario == "web":
+            require(all(any(c.get("name") == name and c.get("ok") is True for c in calls) for name in ("web_search", "web_fetch")), "Web reply has no successful search/fetch receipts")
+        elif scenario == "schedule":
+            created = {c.get("scheduleId"): c["runId"] for c in calls if c.get("name") == "schedule_create" and c.get("ok") is True and c.get("scheduleId")}
+            fired = {x["id"] for x in data.get("schedules", []) if x.get("id") in created and x.get("runId") == created[x["id"]] and x.get("runCount", 0) > 0 and x.get("lastRunAt")}
+            wake_runs = {r["id"] for r in runs.values() if any(i.get("kind") == "schedule.wakeup" and i.get("scheduleId") in fired and i.get("parentRunId") == created[i["scheduleId"]] and i.get("state") == "done" for i in r.get("inputs", []))}
+            require(any(c["runId"] in wake_runs and c["runId"] not in roots for c in sends), "Reply was not sent by a consumed scheduled wakeup")
+        self.records.append({"kind": scenario, **data})
+
+    def save(self, missing: list[str]) -> str:
+        root = Path(os.environ.get("TEAMIE_REAL_EVIDENCE_DIR", ".runtime"))
+        root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        path = root / ("real-acceptance-" + self.nonce + ".json")
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w") as output:
+            json.dump({"version": 1, "nonce": self.nonce, "unverified": missing, "records": self.records}, output, indent=2)
+        return str(path)
 
 
 class Client:
@@ -164,6 +217,16 @@ class Client:
             hdrs = {k.lower(): v for k, v in resp.headers.items()}
             return resp.read(), hdrs
 
+    def verify_internal_unary(self, runtime_token: str, owner_id: str) -> str:
+        inner = {"protocol": TRANSPORT_VERSION, "messages": [{"role": "user", "content_blocks": [{"type": "user_input_text", "user_input_text": {"text": "Reply with OK."}}]}], "options": {"MaxTokens": 8, "AgenticToolChoice": {"Type": "forbidden"}}, "stream": False}
+        payload = {"ownerId": owner_id, "agentId": str(uuid.uuid4()), "sessionId": str(uuid.uuid4()), "runId": str(uuid.uuid4()), "requestJson": json.dumps(inner), "messageLimit": 128}
+        request = urllib.request.Request(self.base_for("/internal/v1/chat") + "/internal/v1/chat", data=json.dumps(payload).encode(), headers={"Authorization": "Bearer " + runtime_token, "Content-Type": "application/json"}, method="POST")
+        with self.opener.open(request, timeout=60) as response:
+            require(response.status == 200 and json.load(response).get("ok") is True, "Private unary model probe failed")
+            config_id = response.headers.get("X-Teamie-Model-Config-ID", "").strip()
+            require(bool(re.fullmatch(r"modelcfg:v1:[0-9a-f]{32}", config_id)), "Gateway did not return a valid config ID")
+            return config_id
+
     def verify_internal_sse_stream(
         self,
         runtime_token: str,
@@ -247,7 +310,7 @@ class Client:
                         frames.append(json.loads(data_str))
             require(len(frames) > 0, "Expected at least one SSE data frame.")
             require(
-                any(f.get("type") == "done" for f in frames),
+                frames[-1].get("type") == "done" and frames[-1].get("modelConfigId") == bound_config_id and not any(f.get("type") == "error" for f in frames),
                 "Expected terminal SSE frame with type='done'.",
             )
 
@@ -347,10 +410,7 @@ def main() -> int:
         "Set TEAMIE_REAL_MODEL_ACCEPTANCE=1 to run live model acceptance.",
     )
     urls = get_env_config()
-    timeout = min(
-        180.0,
-        max(1.0, float(os.environ.get("TEAMIE_REAL_MODEL_TIMEOUT", "90"))),
-    )
+    timeout = max(1.0, float(os.environ.get("TEAMIE_REAL_MODEL_TIMEOUT", "180")))
     poll_interval = max(
         0.05, float(os.environ.get("TEAMIE_REAL_MODEL_POLL_INTERVAL", "1.0"))
     )
@@ -385,24 +445,21 @@ def main() -> int:
     print(
         f"[1/5] Verifying model gateway configuration and SSE contract (run={run_suffix})..."
     )
-    has_env_provider = bool(
-        provider_base_url and provider_api_key and provider_model
-    )
-    if has_env_provider:
-        gw_payload: dict = {
-            "enabled": True,
-            "baseUrl": provider_base_url,
-            "apiKey": provider_api_key,
-            "model": provider_model,
-            "contextWindowTokens": 32768,
-        }
+    evidence = Evidence(run_suffix)
+    evidence.isolation()
+    provider_fields = [provider_base_url, provider_api_key, provider_model]
+    require(not any(provider_fields) or all(provider_fields), "Provide all three TEAMIE_REAL_PROVIDER_* variables or none")
+    gw_res = admin.call("GET", "/api/v1/admin/model-gateway", status=200)
+    config = gw_res.get("config", {})
+    if all(provider_fields) or web_search_key:
+        gw_payload = {"baseUrl": config.get("baseUrl", ""), "model": config.get("model", ""), "enabled": config.get("enabled", False)}
+        if config.get("contextWindowTokens"):
+            gw_payload["contextWindowTokens"] = config["contextWindowTokens"]
+        if all(provider_fields):
+            gw_payload.update(baseUrl=provider_base_url, apiKey=provider_api_key, model=provider_model, enabled=True)
         if web_search_key:
-            gw_payload["webSearchEnabled"] = True
-            gw_payload["webSearchApiKey"] = web_search_key
-        gw_res = admin.call(
-            "PUT", "/api/v1/admin/model-gateway", gw_payload, status=200
-        )
-    else:
+            gw_payload.update(webSearchEnabled=True, webSearchApiKey=web_search_key)
+        admin.call("PUT", "/api/v1/admin/model-gateway", gw_payload, status=200)
         gw_res = admin.call("GET", "/api/v1/admin/model-gateway", status=200)
 
     config = gw_res.get("config", {})
@@ -413,34 +470,25 @@ def main() -> int:
         and config.get("configured") is True,
         "Model gateway must be enabled and ready with a stored API key (either via TEAMIE_REAL_PROVIDER_* env vars or pre-configured at /app/admin/gateway).",
     )
-    expected_config_id = counting_config_id(
-        config.get("baseUrl", ""), config.get("model", "")
-    )
     web_search_cfg = config.get("webSearch") or {}
-    web_search_active = bool(web_search_key) or bool(
+    web_search_active = bool(
         web_search_cfg.get("enabled")
         and web_search_cfg.get("hasApiKey")
         and web_search_cfg.get("configured")
     )
 
-    test_res = admin.call(
-        "POST", "/api/v1/admin/model-gateway/test", {}, status=200
-    )
-    require(
-        test_res.get("ok") is True, "Model gateway live connectivity test failed."
-    )
-
+    unverified: list[str] = []
     if urls["runtime_token"]:
-        admin.verify_internal_sse_stream(
-            runtime_token=urls["runtime_token"],
-            owner_id=admin.user["id"],
-            expected_config_id=expected_config_id,
-        )
+        expected_config_id = admin.verify_internal_unary(urls["runtime_token"], admin.user["id"])
+        admin.verify_internal_sse_stream(runtime_token=urls["runtime_token"], owner_id=admin.user["id"], expected_config_id=expected_config_id)
         if web_search_active:
-            admin.verify_internal_web_search(
-                runtime_token=urls["runtime_token"],
-                owner_id=admin.user["id"],
-            )
+            admin.verify_internal_web_search(runtime_token=urls["runtime_token"], owner_id=admin.user["id"])
+    else:
+        test_res = admin.call("POST", "/api/v1/admin/model-gateway/test", {}, status=200)
+        require(test_res.get("ok") is True, "Model gateway live connectivity test failed")
+        unverified.append("private gateway unary/SSE")
+    if not web_search_active:
+        unverified.append("web search/fetch")
 
     print(
         "[2/5] Creating isolated workspace, #general channel, and personal Agent..."
@@ -467,11 +515,18 @@ def main() -> int:
     require(channel is not None, "Default #general workspace channel not found.")
     channel_id = channel["id"]
 
+    invitation = admin.call("POST", "/api/v1/auth/admin/invites", {}, status=201)["invite"]["code"]
+    peer = Client(urls)
+    registered = peer.call("POST", "/api/v1/auth/register", {"email": f"accept-{run_suffix}@example.test", "displayName": f"Acceptance peer {run_suffix}", "password": secrets.token_urlsafe(24), "inviteCode": invitation}, status=201)
+    peer.user, peer.csrf = registered["user"], registered["csrfToken"]
+    workspace_code = admin.call("POST", f"/api/v1/workspaces/{urllib.parse.quote(workspace_id)}/invites", {}, status=201)["code"]
+    peer.call("POST", f"/api/v1/invites/{urllib.parse.quote(workspace_code)}/accept", {}, status=200)
+
     # Create a restricted group conversation where the Agent is NOT a member to verify cross-conversation ACL boundary
     restricted_group = admin.call(
         "POST",
         f"/api/v1/workspaces/{urllib.parse.quote(workspace_id)}/conversations",
-        {"type": "group", "name": f"restricted-{run_suffix}", "memberIds": []},
+        {"type": "group", "name": f"restricted-{run_suffix}", "memberIds": [peer.user["id"]]},
         status=201,
     )["conversation"]
     restricted_id = restricted_group["id"]
@@ -557,7 +612,7 @@ def main() -> int:
                 (
                     m
                     for m in latest_agent_messages(int(msg1["seq"]))
-                    if f"ACK-{run_suffix}" in m.get("body", "")
+                    if f"ACK-{run_suffix}" == m.get("body", "")
                 ),
                 None,
             ),
@@ -583,6 +638,8 @@ def main() -> int:
             not any(m.get("senderId") == agent_id for m in restricted_msgs),
             "Agent must not bypass ACLs to post in restricted group conversation.",
         )
+
+        evidence.verify("acl", agent_id, msg1["id"], reply1["id"], channel_id, restricted=restricted_id, timeout=timeout, poll_interval=poll_interval)
 
         print(
             "[4/5] Scenario 2: Sandbox isolated execution, file attachment export, and SHA-256 verification..."
@@ -630,11 +687,8 @@ def main() -> int:
                 header_sha256 == actual_sha256,
                 f"X-Attachment-SHA256 header {header_sha256} != downloaded sha256 {actual_sha256}",
             )
-        if downloaded == expected_content:
-            require(
-                actual_sha256 == expected_sha256,
-                f"Attachment SHA-256 {actual_sha256} != expected {expected_sha256}",
-            )
+        require(downloaded == expected_content and actual_sha256 == expected_sha256, "Attachment bytes/digest differ from the required output")
+        evidence.verify("file", agent_id, msg2["id"], reply2["id"], channel_id, attachment=att["id"], timeout=timeout, poll_interval=poll_interval)
 
         if web_search_active:
             print(
@@ -643,7 +697,7 @@ def main() -> int:
             msg_ws = post_mention(
                 f"Use web_search and web_fetch to look up 'IANA example domain' and reply with WEB-{run_suffix} and the cited domain."
             )
-            wait_until(
+            reply_web = wait_until(
                 "Agent web search reply",
                 lambda: next(
                     (
@@ -657,6 +711,8 @@ def main() -> int:
                 poll_interval=poll_interval,
             )
 
+            evidence.verify("web", agent_id, msg_ws["id"], reply_web["id"], channel_id, timeout=timeout, poll_interval=poll_interval)
+
         print(
             "[5/5] Scenario 4: Verifying schedule_create (TEAMIE_SCHEDULE_WAKEUP) self-wakeup..."
         )
@@ -664,7 +720,7 @@ def main() -> int:
             f"Create a one-shot schedule 5 seconds from now using schedule_create that wakes you up "
             f"(TEAMIE_SCHEDULE_WAKEUP) to send a follow-up message containing WAKE-{run_suffix} in this conversation."
         )
-        wait_until(
+        reply_wake = wait_until(
             "Agent scheduled wakeup message",
             lambda: next(
                 (
@@ -677,6 +733,8 @@ def main() -> int:
             timeout=max(timeout, 90.0) if timeout >= 15.0 else timeout,
             poll_interval=poll_interval,
         )
+        evidence.verify("schedule", agent_id, msg3["id"], reply_wake["id"], channel_id, timeout=timeout, poll_interval=poll_interval)
+        evidence.save(unverified)
     finally:
         try:
             admin.call(
@@ -687,7 +745,10 @@ def main() -> int:
         except Exception:
             pass
 
-    print("Live model provider acceptance passed all checks.")
+    if unverified:
+        print("Live acceptance incomplete; unverified: " + ", ".join(unverified))
+        return 2
+    print("Live model provider acceptance passed with private execution evidence.")
     return 0
 
 

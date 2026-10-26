@@ -78,14 +78,67 @@ func (r *Repository) FindScheduleByID(ctx context.Context, agentID, scheduleID s
 // CreateSchedule inserts a new active schedule row and returns its ScheduleItem view.
 func (r *Repository) CreateSchedule(ctx context.Context, agentID, runID, scheduleID string, spec domain.ValidatedScheduleSpec, sources []domain.InputSource, overflow bool, now time.Time) (*domain.ScheduleItem, error) {
 	refsJSON, _ := json.Marshal(sources)
+	var runIDArg any
+	if runID != "" {
+		runIDArg = runID
+	}
 	item, err := ScanScheduleItem(r.db.Conn(ctx).QueryRow(ctx,
 		`INSERT INTO runtime_schedules(id,agent_id,created_run_id,kind,interval_seconds,cron_expr,timezone,prompt,status,max_runs,run_count,next_run_at,source_refs,source_overflow,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'active',$9,0,$10,$11,$12,$13,$13) RETURNING id,kind,interval_seconds,cron_expr,timezone,prompt,status,max_runs,run_count,next_run_at,last_run_at,created_at`,
-		scheduleID, agentID, runID, spec.Kind, spec.IntervalSeconds, spec.CronExpr, spec.Timezone, spec.Prompt, spec.MaxRuns, spec.NextRunAt, refsJSON, overflow, now.UTC(),
+		scheduleID, agentID, runIDArg, spec.Kind, spec.IntervalSeconds, spec.CronExpr, spec.Timezone, spec.Prompt, spec.MaxRuns, spec.NextRunAt, refsJSON, overflow, now.UTC(),
 	))
 	if err != nil {
 		return nil, err
 	}
 	return &item, nil
+}
+
+// UpdateSchedule updates an active schedule row owned by agentID and returns its updated ScheduleItem view.
+func (r *Repository) UpdateSchedule(ctx context.Context, agentID, scheduleID string, spec domain.ValidatedScheduleSpec, sources []domain.InputSource, overflow bool, now time.Time) (*domain.ScheduleItem, error) {
+	refsJSON, _ := json.Marshal(sources)
+	item, err := ScanScheduleItem(r.db.Conn(ctx).QueryRow(ctx,
+		`UPDATE runtime_schedules SET kind=$3,interval_seconds=$4,cron_expr=$5,timezone=$6,prompt=$7,max_runs=$8,next_run_at=$9,source_refs=$10,source_overflow=$11,updated_at=$12 WHERE id=$1 AND agent_id=$2 AND status='active' RETURNING id,kind,interval_seconds,cron_expr,timezone,prompt,status,max_runs,run_count,next_run_at,last_run_at,created_at`,
+		scheduleID, agentID, spec.Kind, spec.IntervalSeconds, spec.CronExpr, spec.Timezone, spec.Prompt, spec.MaxRuns, spec.NextRunAt, refsJSON, overflow, now.UTC(),
+	))
+	if err != nil {
+		return nil, err
+	}
+	return &item, nil
+}
+
+// EnsureDefaultHeartbeatSchedule idempotently seeds an Agent's cold-start 1-hour recurring heartbeat schedule
+// under the worker lease fence if the row has never been created before (never recreating or overwriting a
+// schedule that the Agent has already modified or canceled).
+func (r *Repository) EnsureDefaultHeartbeatSchedule(ctx context.Context, lease *domain.Lease, scheduleID string, intervalSeconds int64, prompt string, sources []domain.InputSource) (bool, error) {
+	var created bool
+	err := r.WithinTx(ctx, func(txCtx context.Context) error {
+		if err := r.CheckLeaseForUpdate(txCtx, lease); err != nil {
+			return err
+		}
+		conn := r.db.Conn(txCtx)
+		var exists bool
+		if err := conn.QueryRow(txCtx, `SELECT EXISTS(SELECT 1 FROM runtime_schedules WHERE id=$1 AND agent_id=$2)`, scheduleID, lease.AgentID).Scan(&exists); err != nil {
+			return err
+		}
+		if exists {
+			return nil
+		}
+		var now time.Time
+		if err := conn.QueryRow(txCtx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
+			return err
+		}
+		nextRunAt := now.UTC().Add(time.Duration(intervalSeconds) * time.Second)
+		refsJSON, _ := json.Marshal(sources)
+		tag, err := conn.Exec(txCtx,
+			`INSERT INTO runtime_schedules(id,agent_id,created_run_id,kind,interval_seconds,cron_expr,timezone,prompt,status,max_runs,run_count,next_run_at,source_refs,source_overflow,created_at,updated_at) VALUES($1,$2,NULL,'interval',$3,'','UTC',$4,'active',NULL,0,$5,$6,false,$7,$7) ON CONFLICT (id) DO NOTHING`,
+			scheduleID, lease.AgentID, intervalSeconds, prompt, nextRunAt, refsJSON, now.UTC(),
+		)
+		if err != nil {
+			return err
+		}
+		created = tag.RowsAffected() > 0
+		return nil
+	})
+	return created, err
 }
 
 // ListActiveScheduleCandidates returns active schedules for agentID ordered by next_run_at ASC, id ASC.
@@ -233,7 +286,7 @@ func (r *Repository) DrainDueSchedules(ctx context.Context, l *domain.Lease) ([]
 		if err := conn.QueryRow(txCtx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
 			return err
 		}
-		rows, err := conn.Query(txCtx, `SELECT id,created_run_id::text,kind,interval_seconds,cron_expr,timezone,prompt,max_runs,run_count,next_run_at,source_refs,source_overflow FROM runtime_schedules WHERE agent_id=$1 AND status='active' AND next_run_at<=$2 ORDER BY next_run_at ASC, id ASC FOR UPDATE SKIP LOCKED LIMIT 16`, l.AgentID, now)
+		rows, err := conn.Query(txCtx, `SELECT id,COALESCE(created_run_id::text,''),kind,interval_seconds,cron_expr,timezone,prompt,max_runs,run_count,next_run_at,source_refs,source_overflow FROM runtime_schedules WHERE agent_id=$1 AND status='active' AND next_run_at<=$2 ORDER BY next_run_at ASC, id ASC FOR UPDATE SKIP LOCKED LIMIT 16`, l.AgentID, now)
 		if err != nil {
 			return err
 		}
