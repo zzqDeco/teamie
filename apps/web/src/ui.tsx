@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useId, useRef } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import type { ButtonHTMLAttributes, ReactNode, RefObject } from "react";
 import { LoaderCircle, X } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -45,19 +52,48 @@ export function Avatar({
     </span>
   );
 }
+export type ButtonVariant = "primary" | "secondary" | "danger" | "ghost";
+export type ButtonSize = "sm" | "md";
+const buttonVariantClass: Record<ButtonVariant, string> = {
+  primary: "",
+  secondary: "secondary",
+  danger: "danger",
+  ghost: "ghost",
+};
 export function Button({
   children,
   busy = false,
+  variant = "primary",
+  size = "md",
   className = "",
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { busy?: boolean }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & {
+  busy?: boolean;
+  variant?: ButtonVariant;
+  size?: ButtonSize;
+}) {
+  const classes = [
+    "button",
+    buttonVariantClass[variant],
+    size === "sm" ? "small-button" : "",
+    className,
+  ]
+    .filter(Boolean)
+    .join(" ");
   return (
     <button
       {...props}
       disabled={props.disabled || busy}
-      className={`button ${className}`}
+      aria-busy={busy || undefined}
+      className={classes}
     >
-      {busy && <LoaderCircle className="spin" size={ICON.sm} />} {children}
+      {busy && (
+        <>
+          <LoaderCircle className="spin" size={ICON.sm} aria-hidden="true" />
+          <span className="sr-only">处理中…</span>
+        </>
+      )}{" "}
+      {children}
     </button>
   );
 }
@@ -106,30 +142,79 @@ export function Loading({ label = "正在加载你的空间…" }: { label?: str
     </div>
   );
 }
+const FOCUSABLE_SELECTOR = [
+  "button:not(:disabled)",
+  'input:not(:disabled):not([type="hidden"])',
+  "textarea:not(:disabled)",
+  "select:not(:disabled)",
+  "a[href]",
+  "summary",
+  '[tabindex]:not([tabindex="-1"])',
+].join(", ");
+const FORM_FIELD_SELECTOR =
+  'input:not(:disabled):not([type="hidden"]), textarea:not(:disabled), select:not(:disabled)';
+type OverlayEntry = { node: HTMLElement; order: number };
+const overlayStack: OverlayEntry[] = [];
+let overlayOrder = 0;
+/**
+ * An overlay is top-most unless another open overlay is nested inside it or
+ * was opened later outside it. Only the top-most overlay handles Escape/Tab.
+ */
+function isTopOverlay(entry: OverlayEntry) {
+  return overlayStack.every(
+    (other) =>
+      other === entry ||
+      !(
+        entry.node.contains(other.node) ||
+        (other.order > entry.order && !other.node.contains(entry.node))
+      ),
+  );
+}
+function focusFirst(candidates: Iterable<HTMLElement | null | undefined>) {
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    candidate.focus({ preventScroll: true });
+    if (document.activeElement === candidate) return true;
+  }
+  return false;
+}
 export function useOverlayFocus(
   ref: RefObject<HTMLElement | null>,
   active: boolean,
   onClose: () => void,
+  { preferFormField = false }: { preferFormField?: boolean } = {},
 ) {
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
   useEffect(() => {
     if (!active) return;
     const previous = document.activeElement as HTMLElement | null;
     const node = ref.current;
     if (!node) return;
+    const entry: OverlayEntry = { node, order: ++overlayOrder };
+    overlayStack.push(entry);
     const focusables = () =>
-      Array.from(
-        node.querySelectorAll<HTMLElement>(
-          'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], [tabindex="0"]',
-        ),
-      ).filter((element) => element.getClientRects().length > 0);
+      Array.from(node.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+        (element) => element.getClientRects().length > 0,
+      );
     const autoFocusTarget = node.querySelector<HTMLElement>(
       "[data-autofocus]:not(:disabled)",
     );
-    (autoFocusTarget || focusables()[0] || node).focus({ preventScroll: true });
+    const fields = preferFormField
+      ? Array.from(node.querySelectorAll<HTMLElement>(FORM_FIELD_SELECTOR))
+      : [];
+    if (!focusFirst([autoFocusTarget, ...fields, focusables()[0]]))
+      node.focus({ preventScroll: true });
     function handle(event: KeyboardEvent) {
+      if (!isTopOverlay(entry)) return;
       if (event.key === "Escape") {
+        // Nested popovers/menus claim Escape by preventing default first.
+        if (event.defaultPrevented) return;
         event.preventDefault();
-        onClose();
+        onCloseRef.current();
+        return;
       }
       if (event.key !== "Tab") return;
       const elements = focusables();
@@ -149,10 +234,17 @@ export function useOverlayFocus(
     document.addEventListener("keydown", handle);
     return () => {
       document.removeEventListener("keydown", handle);
+      const index = overlayStack.indexOf(entry);
+      if (index >= 0) overlayStack.splice(index, 1);
       if (previous?.isConnected) previous.focus({ preventScroll: true });
     };
-  }, [active, onClose, ref]);
+  }, [active, preferFormField, ref]);
 }
+/**
+ * Every dismissal path (Escape, backdrop, close button) goes through one
+ * request: `busy` or `dismissible={false}` blocks it with a visual cue, and
+ * `dirty` asks for an inline discard confirmation instead of closing.
+ */
 export function Modal({
   title,
   subtitle,
@@ -160,6 +252,9 @@ export function Modal({
   onClose,
   className = "",
   dismissible = true,
+  busy = false,
+  dirty = false,
+  discardMessage = "放弃未保存的更改？",
 }: {
   title: string;
   subtitle?: string;
@@ -167,41 +262,121 @@ export function Modal({
   onClose: () => void;
   className?: string;
   dismissible?: boolean;
+  busy?: boolean;
+  dirty?: boolean;
+  discardMessage?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const subtitleId = useId();
-  const dismissibleRef = useRef(dismissible);
+  const discardId = useId();
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false);
+  const [blockedCue, setBlockedCue] = useState(false);
+  const returnFocus = useRef<HTMLElement | null>(null);
+  const state = useRef({ dismissible, busy, dirty, confirmingDiscard });
+  useLayoutEffect(() => {
+    state.current = { dismissible, busy, dirty, confirmingDiscard };
+  });
+  const blocked = busy || !dismissible;
+  const keepEditing = useCallback(() => {
+    setConfirmingDiscard(false);
+    const target = returnFocus.current;
+    returnFocus.current = null;
+    const node = ref.current;
+    if (target?.isConnected && node?.contains(target))
+      target.focus({ preventScroll: true });
+    else node?.focus({ preventScroll: true });
+  }, []);
+  const requestClose = useCallback(() => {
+    const current = state.current;
+    if (current.confirmingDiscard) {
+      keepEditing();
+      return;
+    }
+    if (current.busy || !current.dismissible) {
+      setBlockedCue(true);
+      return;
+    }
+    if (current.dirty) {
+      returnFocus.current = document.activeElement as HTMLElement | null;
+      setConfirmingDiscard(true);
+      return;
+    }
+    onClose();
+  }, [keepEditing, onClose]);
   useEffect(() => {
-    dismissibleRef.current = dismissible;
-  }, [dismissible]);
-  const dismiss = useCallback(() => {
-    if (dismissibleRef.current) onClose();
-  }, [onClose]);
-  useOverlayFocus(ref, true, dismiss);
+    if (!blockedCue) return;
+    const timer = window.setTimeout(() => setBlockedCue(false), 600);
+    return () => window.clearTimeout(timer);
+  }, [blockedCue]);
+  useEffect(() => {
+    if (!confirmingDiscard) return;
+    ref.current
+      ?.querySelector<HTMLElement>("[data-discard-keep]")
+      ?.focus();
+  }, [confirmingDiscard]);
+  useOverlayFocus(ref, true, requestClose, { preferFormField: true });
   return (
     <div
       className="modal-backdrop"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) dismiss();
+        if (event.target === event.currentTarget) requestClose();
       }}
     >
       <div
         ref={ref}
-        className={`modal ${className}`}
+        className={`modal ${className} ${blockedCue ? "dismiss-blocked" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={subtitle ? subtitleId : undefined}
+        aria-busy={busy || undefined}
         tabIndex={-1}
       >
-        <IconButton label="关闭弹窗" className="modal-close" onClick={onClose}>
-          <X size={ICON.lg} />
+        <IconButton
+          label="关闭弹窗"
+          className="modal-close"
+          aria-disabled={blocked || undefined}
+          onClick={requestClose}
+        >
+          <X size={ICON.lg} aria-hidden="true" />
         </IconButton>
         <div className="modal-heading">
           <h2 id={titleId}>{title}</h2>
           {subtitle && <p id={subtitleId}>{subtitle}</p>}
         </div>
+        {confirmingDiscard && (
+          <div
+            className="modal-discard"
+            role="group"
+            aria-labelledby={discardId}
+          >
+            <p id={discardId}>{discardMessage}</p>
+            <div>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                data-discard-keep
+                onClick={keepEditing}
+              >
+                保留编辑
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
+                size="sm"
+                onClick={() => {
+                  if (state.current.busy) return;
+                  setConfirmingDiscard(false);
+                  onClose();
+                }}
+              >
+                放弃
+              </Button>
+            </div>
+          </div>
+        )}
         {children}
       </div>
     </div>
