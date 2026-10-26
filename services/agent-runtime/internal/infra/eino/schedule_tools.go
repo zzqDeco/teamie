@@ -9,8 +9,9 @@ import (
 	"github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/compose"
 	"go.uber.org/zap"
-	"teamie/services/agent-runtime/internal/domain"
+	wire "teamie/contracts/gen/agent/kitex_gen/agent"
 	"teamie/pkg/observability"
+	"teamie/services/agent-runtime/internal/domain"
 )
 
 const (
@@ -24,10 +25,14 @@ const (
 )
 
 const scheduleWakeupGuidance = `
-Scheduled wakeups and deterministic clock
+Scheduled wakeups, default 1-hour heartbeat, and deterministic clock
 Every input envelope (TEAMIE_NEW_MESSAGE, TEAMIE_TASK_NOTIFICATION, TEAMIE_SCHEDULE_WAKEUP) includes a server-authored UTC RFC3339 createdAt timestamp. When you need the current wall-clock time, local timezone conversion or weekday, call runtime_clock.
-Use schedule_create to register a durable future or recurring self-wakeup (kind: "once", "interval", or "cron"), schedule_list to inspect your active schedules, and schedule_cancel to cancel a schedule you no longer need. Never use workspace_execute sleep loops or polling to wait for a future time.
-When woken by a TEAMIE_SCHEDULE_WAKEUP envelope, its body contains the self-scheduled prompt and scheduleId identifies the firing schedule. Waking up does not automatically send any IM message; send an IM message only if the scheduled task requires notifying a conversation and current destination access permits it.
+You start with a default 1-hour recurring autonomous heartbeat schedule (intervalSeconds: 3600) so you have cold-start agency even when nobody speaks to you. You have full autonomy over this heartbeat and all your schedules:
+- Use schedule_list to inspect your active schedules (including your default heartbeat).
+- Use schedule_update to modify your default heartbeat or any active schedule in place: you can shorten or lengthen intervalSeconds (60 to 2592000), shift the next trigger time via delaySeconds or runAt, switch kind between "interval", "cron", and "once", or update the wakeup prompt.
+- Use schedule_cancel to delete your default heartbeat or any schedule you no longer want (Runtime will permanently respect your update or cancellation and will never recreate the default heartbeat behind your back).
+- Use schedule_create to register additional future or recurring self-wakeups (kind: "once", "interval", or "cron"). Never use workspace_execute sleep loops or polling to wait for a future time.
+When woken by a TEAMIE_SCHEDULE_WAKEUP envelope, its body contains the self-scheduled prompt and scheduleId identifies the firing schedule. Waking up is your own autonomous time slice: you may inspect conversations, proactively speak in a channel or open a direct message, advance background work, adjust your schedules, or simply end the turn quietly without sending any IM message.
 `
 
 func scheduledWakeupsForRun(run *Run) bool {
@@ -58,6 +63,18 @@ type scheduleCreateArgs struct {
 }
 
 type scheduleListArgs struct{}
+
+type scheduleUpdateArgs struct {
+	ScheduleID      string `json:"scheduleId" jsonschema:"required,description=ID of the active schedule to modify (for example your default heartbeat scheduleId from schedule_list or TEAMIE_SCHEDULE_WAKEUP)"`
+	Kind            string `json:"kind,omitempty" jsonschema:"description=Optional new schedule mode: once, interval, or cron (defaults to the schedule's current kind if omitted)"`
+	DelaySeconds    int64  `json:"delaySeconds,omitempty" jsonschema:"description=For kind=once (or to shift the next trigger time of an interval schedule): relative delay in seconds from now (1 to 2592000)"`
+	RunAt           string `json:"runAt,omitempty" jsonschema:"description=For kind=once (or to set the exact next trigger time of an interval schedule): RFC3339 future timestamp"`
+	IntervalSeconds int64  `json:"intervalSeconds,omitempty" jsonschema:"description=For kind=interval: recurring interval in seconds (60 to 2592000, e.g. shorter like 600 or longer like 7200)"`
+	CronExpr        string `json:"cronExpr,omitempty" jsonschema:"description=For kind=cron: 5-field cron expression (minute hour dom month dow)"`
+	Timezone        string `json:"timezone,omitempty" jsonschema:"description=Optional IANA timezone for kind=cron (defaults to the schedule's current timezone or UTC)"`
+	Prompt          string `json:"prompt,omitempty" jsonschema:"description=Optional updated self-wakeup instruction or heartbeat payload (defaults to the schedule's current prompt if omitted)"`
+	MaxRuns         int    `json:"maxRuns,omitempty" jsonschema:"description=Optional maximum wakeup count for interval or cron schedules"`
+}
 
 type scheduleCancelArgs struct {
 	ScheduleID string `json:"scheduleId" jsonschema:"required,description=ID of the schedule to cancel"`
@@ -218,7 +235,107 @@ func (t *Tools) BuildScheduleTools() ([]tool.BaseTool, error) {
 		return nil, err
 	}
 
-	return []tool.BaseTool{clockTool, createTool, listTool, cancelTool}, nil
+	updateTool, err := utils.InferTool("schedule_update", "Modify an active schedule (such as your default 1-hour heartbeat) in place: shorten or lengthen intervalSeconds, change the next trigger time (delaySeconds or runAt), switch kind (interval, cron, once), or update prompt.", func(ctx context.Context, args *scheduleUpdateArgs) (*Observation, error) {
+		run, err := CurrentRun(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if !scheduledWakeupsForRun(run) {
+			return nil, errors.New("schedule_not_admitted")
+		}
+		return t.execute(ctx, "schedule_update", args, func(ctx context.Context, _ string) (*Observation, error) {
+			if t.FlagsFile != "" && !runtimeFlag(t.FlagsFile, "agents.schedule.v1") {
+				return &Observation{Error: "schedule_disabled"}, nil
+			}
+			if args == nil {
+				return &Observation{Error: "invalid_arguments"}, nil
+			}
+			archive := &ContextArchive{Store: t.Store, Lease: t.Lease, IM: t.IM, Authorize: t.Authorize}
+			callID := compose.GetToolCallID(ctx)
+			updated, code, err := t.Store.ScheduleCoordinator(archive).EvaluateScheduleUpdate(ctx, &domain.Lease{
+				AgentID: run.AgentID,
+				Owner:   t.Lease.Owner,
+				Fence:   t.Lease.Fence,
+			}, run.ID, callID, args.ScheduleID, toDomainInputs(run.Inputs), domain.ScheduleSpec{
+				Kind:            args.Kind,
+				DelaySeconds:    args.DelaySeconds,
+				RunAt:           args.RunAt,
+				IntervalSeconds: args.IntervalSeconds,
+				CronExpr:        args.CronExpr,
+				Timezone:        args.Timezone,
+				Prompt:          args.Prompt,
+				MaxRuns:         args.MaxRuns,
+			})
+			if err != nil {
+				return nil, err
+			}
+			if code != "" {
+				return &Observation{Error: code}, nil
+			}
+			return &Observation{OK: true, Data: map[string]any{"schedule": *updated}}, nil
+		})
+	}, utils.WithMarshalOutput(marshalObservation))
+	if err != nil {
+		return nil, err
+	}
+
+	return []tool.BaseTool{clockTool, createTool, updateTool, listTool, cancelTool}, nil
+}
+
+func (e *Engine) ensureDefaultHeartbeatSchedule(ctx context.Context, def *wire.AgentDefinition, imc *IM, l *Lease) (bool, error) {
+	if !runtimeFlag(e.Config.FlagsFile, "agents.schedule.v1") || !runtimeFlag(e.Config.FlagsFile, "im.dm.create") {
+		return false, nil
+	}
+	schedID := domain.DefaultHeartbeatScheduleID(l.AgentID)
+	_, found, err := e.Store.DB.FindScheduleByID(ctx, l.AgentID, schedID)
+	if err != nil {
+		return false, err
+	}
+	if found {
+		return true, nil
+	}
+	rawSources := []domain.InputSource{}
+	if def != nil {
+		for _, wsID := range def.WorkspaceIds {
+			if validUUID(wsID) {
+				rawSources = append(rawSources, domain.InputSource{WorkspaceID: wsID})
+			}
+		}
+	}
+	if len(rawSources) == 0 && imc != nil {
+		if b, bErr := imc.Bootstrap(ctx); bErr == nil && b != nil {
+			for _, ws := range b.Workspaces {
+				if validUUID(ws.ID) {
+					rawSources = append(rawSources, domain.InputSource{WorkspaceID: ws.ID})
+				}
+			}
+			for _, c := range b.Conversations {
+				if validUUID(c.WorkspaceID) {
+					rawSources = append(rawSources, domain.InputSource{WorkspaceID: c.WorkspaceID})
+				}
+			}
+		}
+	}
+	if len(rawSources) == 0 {
+		return false, nil
+	}
+	sources, err := domain.CanonicalContextSources(rawSources)
+	if err != nil || len(sources) == 0 {
+		return false, err
+	}
+	created, err := e.Store.DB.EnsureDefaultHeartbeatSchedule(ctx, l, schedID, domain.DefaultHeartbeatIntervalSeconds, domain.DefaultHeartbeatPrompt, sources)
+	if err != nil {
+		return false, err
+	}
+	if created {
+		observability.L(ctx).Info("Default heartbeat schedule seeded",
+			zap.String("event.action", "default-heartbeat-seeded"),
+			zap.String("custom.agent.id", l.AgentID),
+			zap.String("custom.schedule.id", observability.ID(schedID)),
+			zap.Int64("custom.schedule.interval_seconds", domain.DefaultHeartbeatIntervalSeconds),
+		)
+	}
+	return true, nil
 }
 
 func (e *Engine) drainSchedules(ctx context.Context, l *Lease) (failure error) {

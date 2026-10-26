@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS runtime_schedules(
  id text PRIMARY KEY,
  agent_id uuid NOT NULL,
- created_run_id uuid NOT NULL REFERENCES runtime_runs(id),
+ created_run_id uuid REFERENCES runtime_runs(id),
  kind text NOT NULL,
  interval_seconds bigint,
  cron_expr text NOT NULL DEFAULT '',
@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS runtime_schedules(
  created_at timestamptz NOT NULL DEFAULT now(),
  updated_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE runtime_schedules ALTER COLUMN created_run_id DROP NOT NULL;
 CREATE INDEX IF NOT EXISTS runtime_schedules_agent_due ON runtime_schedules(agent_id, next_run_at) WHERE status = 'active';
 CREATE OR REPLACE FUNCTION agent_runtime_check_writer() RETURNS trigger
 LANGUAGE plpgsql AS $$
