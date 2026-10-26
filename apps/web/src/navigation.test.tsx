@@ -5,7 +5,7 @@ import type { Root } from "react-dom/client";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api } from "@teamie/api-client";
+import { api, ApiError } from "@teamie/api-client";
 import type {
   Agent,
   Bootstrap,
@@ -879,6 +879,107 @@ describe("member and account navigation", () => {
     await click(".members-directory-link");
     expect(find("[data-location]").textContent).toBe("/app/w/team/members");
     expect(container.querySelector(".members-pane")).toBeNull();
+  });
+
+  it("shows direct-message failures inside the overlay members pane with per-button progress", async () => {
+    let fail!: (error: unknown) => void;
+    const create = vi.spyOn(api, "createConversation").mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          fail = reject;
+        }),
+    );
+    await mount("/app/w/team/c/general");
+    await click('[aria-label="查看会话成员"]');
+    // At overlay widths <main> is inert, so a shell-level notice is unreachable.
+    expect(find("main.app-main").hasAttribute("inert")).toBe(true);
+    await click('.members-pane [aria-label="与 设计伙伴 发起私聊"]');
+    const clicked = find<HTMLButtonElement>(
+      '.members-pane [aria-label="与 设计伙伴 发起私聊"]',
+    );
+    expect(clicked.getAttribute("aria-busy")).toBe("true");
+    expect(clicked.querySelector(".spin")).not.toBeNull();
+    const other = find<HTMLButtonElement>(
+      '.members-pane [aria-label="与 产品伙伴 发起私聊"]',
+    );
+    expect(other.disabled).toBe(true);
+    expect(other.getAttribute("aria-busy")).toBeNull();
+    await settle(() => fail(new TypeError("Failed to fetch")));
+    const alert = find('.members-pane [role="alert"]');
+    expect(alert.textContent).toBe("网络连接失败，请检查网络后重试。");
+    expect(container.querySelector("main .notice")).toBeNull();
+    expect(clicked.getAttribute("aria-busy")).toBeNull();
+    expect(other.disabled).toBe(false);
+    // Closing the pane discards the stale failure.
+    await click('.members-pane header [aria-label="关闭成员列表"]');
+    await click('[aria-label="查看会话成员"]');
+    expect(container.querySelector('.members-pane [role="alert"]')).toBeNull();
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps direct messages primary, labels removal distinctly and clears shell errors on navigation", async () => {
+    vi.spyOn(api, "removeMember").mockRejectedValue(
+      new ApiError(503, "unavailable", "Service Unavailable"),
+    );
+    await mount("/app/w/team/c/general");
+    await click('[aria-label="查看会话成员"]');
+    const remove = find<HTMLButtonElement>(
+      '.members-pane [aria-label="从工作空间移除 设计伙伴"]',
+    );
+    expect(remove.getAttribute("title")).toBe("从工作空间移除 设计伙伴");
+    expect(remove.querySelector("svg.lucide-user-minus")).not.toBeNull();
+    expect(remove.querySelector("svg.lucide-x")).toBeNull();
+    await click('.members-pane [aria-label="从工作空间移除 设计伙伴"]');
+    await click(".modal-actions .button.danger");
+    expect(find(".modal .notice.error").textContent).toContain("服务暂时不可用");
+    await click(".modal-actions .button.secondary");
+    expect(find("main .notice.error").textContent).toContain("服务暂时不可用");
+    await click('.members-pane header [aria-label="关闭成员列表"]');
+    await click('.navigation-sidebar a[href="/app/w/team/c/group"]');
+    expect(find("[data-location]").textContent).toBe("/app/w/team/c/group");
+    expect(container.querySelector("main .notice.error")).toBeNull();
+  });
+
+  it("confirms before removing a member from a group in the group manager", async () => {
+    const managed = { ...group, memberIds: [owner.id, "human"] };
+    bootstrap.conversations = [channel, managed];
+    chatStore.replaceConversations(bootstrap.conversations);
+    const removeFromGroup = vi
+      .spyOn(api, "removeConversationMember")
+      .mockResolvedValue({ conversation: { ...managed, memberIds: [owner.id] } });
+    await mount("/app/w/team/c/group");
+    await click('[aria-label="查看会话成员"]');
+    await click(".members-pane .members-invite");
+    expect(find(".modal h2").textContent).toBe("小组成员");
+    await click('.modal [aria-label="移出小组 设计伙伴"]');
+    expect(find(".modal h2").textContent).toBe("将 设计伙伴 移出小组？");
+    expect(removeFromGroup).not.toHaveBeenCalled();
+    await click(".modal-actions .button.secondary");
+    expect(find(".modal h2").textContent).toBe("小组成员");
+    expect(removeFromGroup).not.toHaveBeenCalled();
+    await click('.modal [aria-label="移出小组 设计伙伴"]');
+    await click(".modal-actions .button.danger");
+    expect(removeFromGroup).toHaveBeenCalledWith(managed.id, "human");
+    expect(find(".modal h2").textContent).toBe("小组成员");
+  });
+
+  it("offers a direct-message entry point in the empty conversations section only when allowed", async () => {
+    bootstrap.conversations = [channel];
+    chatStore.replaceConversations(bootstrap.conversations);
+    await mount("/app/w/team/c/general");
+    const empty = find(".navigation-sidebar .nav-section:last-child .sidebar-empty");
+    expect(empty.textContent).toContain("暂无私信或小组");
+    await click(".sidebar-empty-action");
+    expect(find(".modal h2").textContent).toBe("发起私信");
+    await escape();
+    await settle(() => root.unmount());
+    root = createRoot(container);
+    bootstrap.capabilities["im.dm.create"] = false;
+    await mount("/app/w/team/c/general");
+    expect(find(".navigation-sidebar .sidebar-empty:last-child").textContent).toContain(
+      "暂无私信或小组",
+    );
+    expect(container.querySelector(".sidebar-empty-action")).toBeNull();
   });
 
   it("navigates to the workspace member directory from interactive chips in AgentDetail", async () => {

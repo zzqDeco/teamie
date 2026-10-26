@@ -683,7 +683,17 @@ export function ShellSidebar({
             ))}
             {direct.length === 0 && (
               <div className="sidebar-empty">
-                {workspace ? "暂无对话" : "暂无对话"}
+                {workspace ? "暂无私信或小组" : "加入工作空间后可发起私信"}
+                {workspace && caps["im.dm.create"] && (
+                  <button
+                    type="button"
+                    className="sidebar-empty-action"
+                    onClick={() => onOpenDialog("direct")}
+                  >
+                    <Plus size={ICON.xs} aria-hidden="true" />
+                    发起私信
+                  </button>
+                )}
               </div>
             )}
           </div>

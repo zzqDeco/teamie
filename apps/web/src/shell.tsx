@@ -207,6 +207,10 @@ export function Shell() {
   const [removing, setRemoving] = useState<Member | null>(null),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
+  // Direct-message failures render inside the members pane: when it is an
+  // overlay, <main> is inert and a shell-level notice would be invisible.
+  const [directError, setDirectError] = useState(""),
+    [directBusyId, setDirectBusyId] = useState<string | null>(null);
   const workspace =
     chat.data?.workspaces.find(
       (w) =>
@@ -288,6 +292,8 @@ export function Shell() {
   useEffect(() => {
     setSidebar(false);
     setManagingGroup(false);
+    setError("");
+    setDirectError("");
     if (
       location.pathname === "/app/attention" ||
       new URLSearchParams(location.search).has("message")
@@ -295,7 +301,10 @@ export function Shell() {
       setDetails(false);
   }, [location.pathname, location.search]);
   const closeSidebar = useCallback(() => setSidebar(false), []);
-  const closeDetails = useCallback(() => setDetails(false), []);
+  const closeDetails = useCallback(() => {
+    setDetails(false);
+    setDirectError("");
+  }, []);
   const hasOverlayModal =
     !!dialog || quickSwitcherOpen || shortcutsOpen || managingGroup || !!removing;
   useShellViewportAndFocus({
@@ -359,7 +368,8 @@ export function Shell() {
   async function startDirect(member: Participant) {
     if (!workspace || member.selectable === false || !caps["im.dm.create"]) return;
     setBusy(true);
-    setError("");
+    setDirectBusyId(member.userId);
+    setDirectError("");
     const generation = chatStore.generation;
     try {
       const result = await api.createConversation(workspace.id, {
@@ -373,9 +383,10 @@ export function Shell() {
       if (overlayMembers) setDetails(false);
       navigate(route(result.conversation));
     } catch (e) {
-      if (generation === chatStore.generation) setError(errorText(e));
+      if (generation === chatStore.generation) setDirectError(errorText(e));
     } finally {
       setBusy(false);
+      setDirectBusyId(null);
     }
   }
   async function remove() {
@@ -522,6 +533,7 @@ export function Shell() {
             members={members}
             onMembers={() => {
               setSidebar(false);
+              setDirectError("");
               setDetails(!details);
             }}
             membersOpen={details} onMenu={() => setSidebar(true)}
@@ -549,6 +561,7 @@ export function Shell() {
           membersRef={membersRef} overlayMembers={overlayMembers} mobile={mobile}
           sidebar={sidebar} workspace={workspace} conversation={conversation}
           userId={user!.id} owner={owner} caps={caps} busy={busy}
+          directBusyId={directBusyId} directError={directError}
           members={members} visibleMembers={visibleMembers}
           isLoading={membersQuery.isLoading} hasError={!!membersQuery.error}
           onClose={closeDetails} onStartDirect={(member) => void startDirect(member)}
@@ -561,7 +574,7 @@ export function Shell() {
           onInvite={() => setDialog("invite")}
         />
       )}
-      {dialog && <WorkspaceDialog kind={dialog} workspace={workspace} onClose={closeDialog} />}{" "}
+      {dialog && <WorkspaceDialog kind={dialog} workspace={workspace} onClose={closeDialog} />}
       {quickSwitcherOpen && (
         <QuickSwitcher
           workspaces={chat.data?.workspaces || []}

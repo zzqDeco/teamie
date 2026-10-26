@@ -158,6 +158,12 @@ describe("PR-6 dark mode tokens, head bootstrap & settings switcher", () => {
     expect(
       contrastRatio(darkMap.get("--on-brand")!, darkMap.get("--brand-muted")!),
     ).toBeGreaterThanOrEqual(4.5);
+    for (const fill of ["--danger", "--danger-hover"]) {
+      expect(
+        contrastRatio(darkMap.get("--on-danger")!, darkMap.get(fill)!),
+        `dark --on-danger on ${fill}`,
+      ).toBeGreaterThanOrEqual(4.5);
+    }
   });
 
   it("includes synchronous theme initialization script in index.html head and applies system theme when storage throws", () => {

@@ -65,6 +65,8 @@ type ParseContext = {
   mentions: ValidMention[];
   mentionPrefix: string;
   nextKey: () => string;
+  /** Set while rendering a link label so bare URLs never nest anchors. */
+  inLink?: boolean;
 };
 
 const ESCAPABLE_PUNCTUATION = new Set(
@@ -73,6 +75,53 @@ const ESCAPABLE_PUNCTUATION = new Set(
 export const KATEX_DISPLAY_CLASS = "katex-display";
 const MAX_BLOCK_DEPTH = 16;
 const MAX_INLINE_DEPTH = 16;
+
+// Bare URLs stop at whitespace, angle brackets, mention sentinels and CJK
+// text/punctuation, which commonly abut links in Chinese messages.
+const BARE_URL_PATTERN =
+  /^https?:\/\/[^\s<>\uE000\uE001\u3000-\u303f\u3400-\u9fff\uff00-\uffef]+/i;
+const BARE_URL_TRAILING_PUNCTUATION = new Set(
+  ".,;:!?*_~'\"".split(""),
+);
+
+/**
+ * GFM-style extended autolink: returns the bare http(s) URL starting at `pos`
+ * without trailing punctuation or unbalanced closing parentheses.
+ */
+export function matchBareUrl(text: string, pos: number): string | null {
+  const ch = text[pos];
+  if (ch !== "h" && ch !== "H") return null;
+  // Like GFM, a bare URL must start a line or follow whitespace or `*_~(`;
+  // CJK text and full-width punctuation also count as boundaries.
+  const prev = text[pos - 1];
+  if (
+    prev !== undefined &&
+    !isWhitespaceChar(prev) &&
+    !"*_~(".includes(prev) &&
+    prev.charCodeAt(0) < 0x2e80
+  )
+    return null;
+  const match = BARE_URL_PATTERN.exec(text.slice(pos));
+  if (!match) return null;
+  let url = match[0];
+  for (;;) {
+    const last = url[url.length - 1];
+    if (BARE_URL_TRAILING_PUNCTUATION.has(last)) {
+      url = url.slice(0, -1);
+      continue;
+    }
+    if (last === ")") {
+      const opens = url.split("(").length - 1;
+      const closes = url.split(")").length - 1;
+      if (closes > opens) {
+        url = url.slice(0, -1);
+        continue;
+      }
+    }
+    break;
+  }
+  return /^https?:\/\/./i.test(url) ? url : null;
+}
 
 export function sanitizeLinkUrl(raw: string): string | null {
   const cleaned = raw.trim();
@@ -618,15 +667,20 @@ function renderInline(
         const rawUrl = restoreMentionsText(linkMatch.url, ctx);
         const safeUrl = sanitizeLinkUrl(rawUrl);
         if (safeUrl) {
+          const wasInLink = ctx.inLink;
+          ctx.inLink = true;
+          const label = renderInline(linkMatch.label, ctx, depth + 1);
+          ctx.inLink = wasInLink;
           nodes.push(
             <a
               key={ctx.nextKey()}
               className="markdown-link"
               href={safeUrl}
+              title={safeUrl}
               target="_blank"
               rel="noopener noreferrer"
             >
-              {renderInline(linkMatch.label, ctx, depth + 1)}
+              {label}
             </a>,
           );
         } else {
@@ -656,6 +710,7 @@ function renderInline(
               key={ctx.nextKey()}
               className="markdown-link"
               href={safeUrl}
+              title={safeUrl}
               target="_blank"
               rel="noopener noreferrer"
             >
@@ -665,6 +720,29 @@ function renderInline(
           pos += autoMatch[0].length;
           continue;
         }
+      }
+    }
+
+    // 6b. Bare http(s) URLs (GFM extended autolinks)
+    if (!ctx.inLink && (text[pos] === "h" || text[pos] === "H")) {
+      const bareUrl = matchBareUrl(text, pos);
+      const safeUrl = bareUrl ? sanitizeLinkUrl(bareUrl) : null;
+      if (bareUrl && safeUrl) {
+        flushText();
+        nodes.push(
+          <a
+            key={ctx.nextKey()}
+            className="markdown-link"
+            href={safeUrl}
+            title={safeUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {bareUrl}
+          </a>,
+        );
+        pos += bareUrl.length;
+        continue;
       }
     }
 
