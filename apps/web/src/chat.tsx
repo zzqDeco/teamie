@@ -18,6 +18,7 @@ import {
   resetNotificationSession,
 } from "./notifications";
 import { chatStore } from "./store";
+import { typingStore } from "./typing-store";
 export type Connection =
   "connecting" | "connected" | "reconnecting" | "offline";
 type Chat = {
@@ -30,10 +31,6 @@ type Chat = {
   sync: () => void;
   reconnect: () => void;
   sendTyping: (conversationId: string, value: boolean) => void;
-  typing: Record<
-    string,
-    { userId: string; displayName: string; until: number }[]
-  >;
 };
 const ChatContext = createContext<Chat | null>(null);
 const bootstrapObservation = Symbol("bootstrapObservation");
@@ -64,7 +61,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   });
   const [connection, setConnection] = useState<Connection>("connecting");
   const [syncError, setSyncError] = useState("");
-  const [typing, setTyping] = useState<Chat["typing"]>({});
   const socket = useRef<WebSocket | null>(null);
   const syncRef = useRef<() => void>(() => {});
   const reconnectRef = useRef<() => void>(() => {});
@@ -242,23 +238,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             hint.userId !== userId &&
             capabilities.current["im.typing.publish"]
           ) {
-            setTyping((old) => ({
-              ...old,
-              [hint.conversationId]: [
-                ...(old[hint.conversationId] || []).filter(
-                  (x) => x.userId !== hint.userId,
-                ),
-                ...(hint.isTyping
-                  ? [
-                      {
-                        userId: hint.userId,
-                        displayName: hint.displayName,
-                        until: Date.now() + 5000,
-                      },
-                    ]
-                  : []),
-              ],
-            }));
+            typingStore.hint(
+              hint.conversationId,
+              hint.userId,
+              hint.displayName,
+              !!hint.isTyping,
+            );
           }
         } catch {
           /* Unknown ephemeral frames cannot alter durable state. */
@@ -303,20 +288,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const interval = setInterval(() => {
       if (navigator.onLine) void sync();
     }, 10_000);
-    const typingTimer = setInterval(() => {
-      setTyping((old) => {
-        let changed = false;
-        const next: Chat["typing"] = {};
-        for (const [id, entries] of Object.entries(old)) {
-          const active = entries.filter((x) => x.until > Date.now());
-          if (active.length !== entries.length || active.length === 0)
-            changed = true;
-          if (active.length)
-            next[id] = active.length === entries.length ? entries : active;
-        }
-        return changed ? next : old;
-      });
-    }, 1000);
+    const typingTimer = setInterval(() => typingStore.expire(), 1000);
     connect();
     window.addEventListener("online", online);
     window.addEventListener("offline", offline);
@@ -326,6 +298,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       if (timer) clearTimeout(timer);
       clearInterval(interval);
       clearInterval(typingTimer);
+      typingStore.reset();
       if (ws) {
         ws.onclose = null;
         ws.close();
@@ -366,7 +339,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       sync,
       reconnect,
       sendTyping,
-      typing,
     }),
     [
       data,
@@ -378,7 +350,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       sync,
       reconnect,
       sendTyping,
-      typing,
     ],
   );
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;
