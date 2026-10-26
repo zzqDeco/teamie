@@ -53,7 +53,10 @@ type fakeSchedules struct {
 func (f *fakeSchedules) ClockNow(context.Context) (time.Time, error) {
 	return f.now, nil
 }
-func (f *fakeSchedules) FindScheduleByID(context.Context, string, string) (*domain.ScheduleItem, bool, error) {
+func (f *fakeSchedules) FindScheduleByID(_ context.Context, _, schedID string) (*domain.ScheduleItem, bool, error) {
+	if f.created != nil && f.created.ScheduleID == schedID {
+		return f.created, true, nil
+	}
 	return nil, false, nil
 }
 func (f *fakeSchedules) CountActiveSchedules(context.Context, string) (int, error) {
@@ -61,17 +64,36 @@ func (f *fakeSchedules) CountActiveSchedules(context.Context, string) (int, erro
 }
 func (f *fakeSchedules) CreateSchedule(_ context.Context, _, _, schedID string, spec domain.ValidatedScheduleSpec, _ []domain.InputSource, _ bool, now time.Time) (*domain.ScheduleItem, error) {
 	item := &domain.ScheduleItem{
-		ScheduleID: schedID,
-		Prompt:     spec.Prompt,
-		Kind:       spec.Kind,
-		Status:     "active",
-		Timezone:   spec.Timezone,
-		CronExpr:   spec.CronExpr,
-		NextRunAt:  spec.NextRunAt.UTC().Format(time.RFC3339Nano),
-		CreatedAt:  now.UTC().Format(time.RFC3339Nano),
+		ScheduleID:      schedID,
+		Prompt:          spec.Prompt,
+		Kind:            spec.Kind,
+		IntervalSeconds: spec.IntervalSeconds,
+		Status:          "active",
+		Timezone:        spec.Timezone,
+		CronExpr:        spec.CronExpr,
+		NextRunAt:       spec.NextRunAt.UTC().Format(time.RFC3339Nano),
+		CreatedAt:       now.UTC().Format(time.RFC3339Nano),
 	}
 	f.created = item
 	return item, nil
+}
+func (f *fakeSchedules) UpdateSchedule(_ context.Context, _, schedID string, spec domain.ValidatedScheduleSpec, _ []domain.InputSource, _ bool, now time.Time) (*domain.ScheduleItem, error) {
+	item := &domain.ScheduleItem{
+		ScheduleID:      schedID,
+		Prompt:          spec.Prompt,
+		Kind:            spec.Kind,
+		IntervalSeconds: spec.IntervalSeconds,
+		Status:          "active",
+		Timezone:        spec.Timezone,
+		CronExpr:        spec.CronExpr,
+		NextRunAt:       spec.NextRunAt.UTC().Format(time.RFC3339Nano),
+		CreatedAt:       now.UTC().Format(time.RFC3339Nano),
+	}
+	f.created = item
+	return item, nil
+}
+func (f *fakeSchedules) EnsureDefaultHeartbeatSchedule(context.Context, *domain.Lease, string, int64, string, []domain.InputSource) (bool, error) {
+	return true, nil
 }
 func (f *fakeSchedules) ListActiveScheduleCandidates(context.Context, string, int) ([]domain.ScheduleCandidate, error) {
 	return nil, nil
