@@ -1165,10 +1165,11 @@ func (p *ListConversationsResp) String() string {
 }
 
 type CreateConversationReq struct {
-	ID        string   `thrift:"id,1,required" json:"-"`
-	Type      string   `thrift:"type,2,required" json:"type"`
-	Name      *string  `thrift:"name,3,optional" json:"name,omitempty"`
-	MemberIds []string `thrift:"memberIds,4,optional,list<string>" json:"memberIds,omitempty"`
+	ID             string   `thrift:"id,1,required" json:"-"`
+	Type           string   `thrift:"type,2,required" json:"type"`
+	Name           *string  `thrift:"name,3,optional" json:"name,omitempty"`
+	MemberIds      []string `thrift:"memberIds,4,optional,list<string>" json:"memberIds,omitempty"`
+	IdempotencyKey *string  `thrift:"idempotencyKey,5,optional" json:"-"`
 }
 
 func NewCreateConversationReq() *CreateConversationReq {
@@ -1204,12 +1205,25 @@ func (p *CreateConversationReq) GetMemberIds() (v []string) {
 	return p.MemberIds
 }
 
+var CreateConversationReq_IdempotencyKey_DEFAULT string
+
+func (p *CreateConversationReq) GetIdempotencyKey() (v string) {
+	if !p.IsSetIdempotencyKey() {
+		return CreateConversationReq_IdempotencyKey_DEFAULT
+	}
+	return *p.IdempotencyKey
+}
+
 func (p *CreateConversationReq) IsSetName() bool {
 	return p.Name != nil
 }
 
 func (p *CreateConversationReq) IsSetMemberIds() bool {
 	return p.MemberIds != nil
+}
+
+func (p *CreateConversationReq) IsSetIdempotencyKey() bool {
+	return p.IdempotencyKey != nil
 }
 
 func (p *CreateConversationReq) String() string {
@@ -1251,8 +1265,9 @@ func (p *ConversationResp) String() string {
 }
 
 type AddConversationMemberReq struct {
-	ID     string `thrift:"id,1,required" json:"-"`
-	UserId string `thrift:"userId,2,required" json:"userId"`
+	ID             string  `thrift:"id,1,required" json:"-"`
+	UserId         string  `thrift:"userId,2,required" json:"userId"`
+	IdempotencyKey *string `thrift:"idempotencyKey,3,optional" json:"-"`
 }
 
 func NewAddConversationMemberReq() *AddConversationMemberReq {
@@ -1268,6 +1283,19 @@ func (p *AddConversationMemberReq) GetID() (v string) {
 
 func (p *AddConversationMemberReq) GetUserId() (v string) {
 	return p.UserId
+}
+
+var AddConversationMemberReq_IdempotencyKey_DEFAULT string
+
+func (p *AddConversationMemberReq) GetIdempotencyKey() (v string) {
+	if !p.IsSetIdempotencyKey() {
+		return AddConversationMemberReq_IdempotencyKey_DEFAULT
+	}
+	return *p.IdempotencyKey
+}
+
+func (p *AddConversationMemberReq) IsSetIdempotencyKey() bool {
+	return p.IdempotencyKey != nil
 }
 
 func (p *AddConversationMemberReq) String() string {

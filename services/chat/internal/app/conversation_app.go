@@ -197,8 +197,11 @@ func (s *Service) CreateConversation(ctx context.Context, userID, workspaceID, k
 
 // GroupMember adds or removes a member from a group conversation.
 func (s *Service) GroupMember(ctx context.Context, actorID, conversationID, targetUserID string, add bool) (domain.Conversation, error) {
+	return s.groupMember(ctx, actorID, conversationID, targetUserID, add, false)
+}
+func (s *Service) groupMember(ctx context.Context, actorID, conversationID, targetUserID string, add, replay bool) (domain.Conversation, error) {
 	var c domain.Conversation
-	if add {
+	if add && !replay {
 		if err := s.requireFlag("im.group.create"); err != nil {
 			return c, err
 		}
@@ -228,6 +231,10 @@ func (s *Service) GroupMember(ctx context.Context, actorID, conversationID, targ
 		}
 		if role != "owner" && !slices.Contains(ids, actorID) {
 			return domain.ErrGroupCurrentMembershipRequired()
+		}
+		if replay {
+			c.MemberIDs, c.CanManageMembers = ids, true
+			return nil
 		}
 		if add {
 			yes, existsErr := s.Workspaces.WorkspaceMemberExists(txCtx, ws, targetUserID)
