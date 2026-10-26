@@ -105,6 +105,7 @@ export function IconButton({
 }: ButtonHTMLAttributes<HTMLButtonElement> & { label: string }) {
   return (
     <button
+      type="button"
       {...props}
       className={`icon-button ${className}`}
       title={label}
