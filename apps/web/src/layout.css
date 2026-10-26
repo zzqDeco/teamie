@@ -327,6 +327,23 @@ textarea:disabled {
   padding: 10px 13px;
   color: var(--text-muted);
 }
+.sidebar-empty-action {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--brand-text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.sidebar-empty-action:hover {
+  text-decoration: underline;
+}
 .app-main {
   min-height: 0;
 }
@@ -473,9 +490,6 @@ textarea:disabled {
 }
 .member-row b > small {
   font-size: 11px;
-}
-.member-row > .remove-member {
-  opacity: 1;
 }
 .members-shade {
   position: fixed;
@@ -1066,8 +1080,8 @@ textarea:disabled {
   .workspace-header {
     padding-left: 16px;
     padding-right: 8px;
-    min-height: 64px;
-    height: 64px;
+    min-height: calc(64px + env(safe-area-inset-top));
+    height: auto;
     padding-top: env(safe-area-inset-top);
   }
   .mobile-close {
@@ -1088,8 +1102,8 @@ textarea:disabled {
     display: inline-flex;
   }
   .conversation-header {
-    height: 64px;
-    min-height: 64px;
+    height: auto;
+    min-height: calc(64px + env(safe-area-inset-top));
     padding: env(safe-area-inset-top) 10px 0 6px;
     gap: 8px;
   }
@@ -1239,8 +1253,8 @@ textarea:disabled {
     min-height: 32px;
   }
   .members-pane > header {
-    min-height: 64px;
-    height: 64px;
+    min-height: calc(64px + env(safe-area-inset-top));
+    height: auto;
     padding-top: env(safe-area-inset-top);
   }
   .members-pane > header,
@@ -1260,8 +1274,8 @@ textarea:disabled {
     min-height: 44px;
   }
   .settings-header {
-    height: 64px;
-    min-height: 64px;
+    height: auto;
+    min-height: calc(64px + env(safe-area-inset-top));
     padding: env(safe-area-inset-top) 14px 0 6px;
     font-size: 14px;
   }
@@ -1818,8 +1832,8 @@ textarea:disabled {
   flex-shrink: 0;
 }
 .member-search:focus-within {
-  outline: 2px solid var(--purple);
-  outline-offset: 2px;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 .member-search input {
   width: 100%;

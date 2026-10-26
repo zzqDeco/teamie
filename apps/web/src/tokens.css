@@ -41,6 +41,10 @@
   --danger-text: #a82e2e;
   --danger-bg: #fdf2f2;
   --danger-border: #e8b4b4;
+  /* Destructive button fill (5.9:1 with --on-danger; hover 7.6:1) */
+  --danger: #b03a48;
+  --danger-hover: #962f3c;
+  --on-danger: #ffffff;
   --warning-text: #6b5322;
   --warning-bg: #fbf6ea;
   --warning-border: #efe5cf;
@@ -151,6 +155,10 @@
   --danger-text: #f59b9b;
   --danger-bg: #361c20;
   --danger-border: #5c2b31;
+  /* Destructive button fill (6.8:1 with --on-danger; hover 9.3:1) */
+  --danger: #ec7d8a;
+  --danger-hover: #f5a3ad;
+  --on-danger: #17141c;
   --warning-text: #f0c97a;
   --warning-bg: #332816;
   --warning-border: #544120;

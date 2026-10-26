@@ -129,8 +129,11 @@ small {
   font-size: 12px;
 }
 .button.danger {
-  background: #c85564;
-  color: #ffffff;
+  background: var(--danger);
+  color: var(--on-danger);
+}
+.button.danger:hover {
+  background: var(--danger-hover);
 }
 .danger-text,
 .icon-button.danger-text {
@@ -2229,13 +2232,14 @@ label > .copy-input {
 }
 .member-dm,
 .remove-member {
-  opacity: 0;
   width: 26px;
   height: 26px;
   color: var(--text-muted);
 }
-.member-row:hover .member-dm,
-.member-row:focus-within .member-dm,
+/* "发私信" stays visible as the primary row action; removal is secondary. */
+.remove-member {
+  opacity: 0;
+}
 .member-row:hover .remove-member,
 .member-row:focus-within .remove-member {
   opacity: 1;
@@ -4235,8 +4239,8 @@ label > .copy-input {
   opacity: 0;
 }
 .visibility-option:focus-within {
-  outline: 3px solid #c9b4e7;
-  outline-offset: 2px;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 .visibility-option > span:nth-of-type(2) {
   flex: 1;
@@ -4347,8 +4351,8 @@ label > .copy-input {
   height: 1px;
 }
 .agent-enabled-switch:focus-within {
-  outline: 3px solid #d3bcec;
-  outline-offset: 2px;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 .agent-enabled-switch > span {
   flex: 1;
@@ -5611,8 +5615,8 @@ label > .copy-input {
   border-color: var(--border-strong);
 }
 .message-body .markdown-code-copy:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
   color: var(--text-strong);
   border-color: var(--brand);
 }

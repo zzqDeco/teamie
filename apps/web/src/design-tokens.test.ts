@@ -76,6 +76,9 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
       "--brand-text",
       "--brand-strong",
       "--focus-ring",
+      "--danger",
+      "--danger-hover",
+      "--on-danger",
       "--font-sans",
       "--font-mono",
       "--bg",
@@ -143,6 +146,12 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
     expect(
       contrastRatio(tokenMap.get("--brand")!, "#ffffff"),
     ).toBeGreaterThanOrEqual(4.5);
+    for (const fill of ["--danger", "--danger-hover"]) {
+      expect(
+        contrastRatio(tokenMap.get("--on-danger")!, tokenMap.get(fill)!),
+        `--on-danger on ${fill}`,
+      ).toBeGreaterThanOrEqual(4.5);
+    }
   });
 
   it("eliminates sub-11px and fractional font sizes, non-standard font weights, and unmapped low-contrast text hexes", () => {
@@ -232,6 +241,20 @@ describe("PR-5 CSS cleanup, unified focus, icon scale & self-hosted DM Sans", ()
     for (const file of cssFiles) {
       if (file === "tokens.css") continue;
       const content = readFileSync(join(srcDir, file), "utf8");
+      // --focus-ring is a full outline shorthand; nesting it in another
+      // shorthand makes the declaration invalid and drops the ring.
+      expect(content, `${file} invalid nested focus ring`).not.toMatch(
+        /outline\s*:[^;]*\S\s+var\(--focus-ring\)|outline\s*:\s*var\(--focus-ring\)\s+[^;\s]/,
+      );
+      for (const match of content.matchAll(
+        /:focus(?:-visible|-within)?[^{]*\{[^}]*outline\s*:\s*([^;]+);/g,
+      )) {
+        const value = match[1].trim();
+        expect(
+          value === "none" || value.startsWith("var(--focus-ring"),
+          `${file}: focus outline should use the --focus-ring token, got "${value}"`,
+        ).toBe(true);
+      }
       expect(content, `${file} should have no !important`).not.toContain(
         "!important",
       );
