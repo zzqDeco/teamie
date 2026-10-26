@@ -98,6 +98,15 @@ func (imc *IM) Call(ctx context.Context, method, path string, body any, out any)
 	return imc.callAt(ctx, imc.BaseURL, method, path, body, out)
 }
 
+// CallIdempotent binds retries to one Chat-owned mutation receipt.
+func (imc *IM) CallIdempotent(ctx context.Context, method, path, key string, body, out any) error {
+	data, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	return imc.request(ctx, imc.BaseURL, method, path, bytes.NewReader(data), "application/json", map[string]string{"Idempotency-Key": key}, out)
+}
+
 func (imc *IM) callAt(ctx context.Context, baseURL, method, path string, body any, out any) error {
 	var data []byte
 	var e error
@@ -195,7 +204,12 @@ type Message struct {
 	Attachments    []Attachment     `json:"attachments,omitempty"`
 	Mentions       []imtext.Mention `json:"mentions,omitempty"`
 }
+type Workspace struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
 type Bootstrap struct {
+	Workspaces    []Workspace    `json:"workspaces"`
 	Conversations []Conversation `json:"conversations"`
 	SyncCursor    string         `json:"syncCursor"`
 }
@@ -350,6 +364,61 @@ func (t *Tools) execute(ctx context.Context, name string, args any, fn func(cont
 		if name == "schedule_list" && out.OK {
 			archive := &ContextArchive{Store: t.Store, Lease: t.Lease, IM: t.IM, Authorize: t.Authorize}
 			if e = archive.authorizeScheduleListReceipt(ctx, run.AgentID, cached); e != nil {
+				return nil, e
+			}
+		}
+		if name == "schedule_update" && out.OK {
+			var receipt struct {
+				Data struct {
+					Schedule scheduleView `json:"schedule"`
+				} `json:"data"`
+			}
+			if e = json.Unmarshal(cached, &receipt); e != nil || receipt.Data.Schedule.ScheduleID == "" {
+				return nil, ErrReplayConflict
+			}
+			archive := &ContextArchive{Store: t.Store, Lease: t.Lease, IM: t.IM, Authorize: t.Authorize}
+			sources, srcErr := archive.scheduleSourcesByID(ctx, run.AgentID, receipt.Data.Schedule.ScheduleID)
+			if srcErr == nil {
+				srcErr = archive.authorizeSources(ctx, sources)
+			}
+			if srcErr != nil {
+				if errors.Is(srcErr, errContextUnavailable) {
+					_ = t.Store.Repo().CancelActiveSchedule(ctx, run.AgentID, receipt.Data.Schedule.ScheduleID)
+				}
+				return nil, srcErr
+			}
+		}
+		if name == "im_list_workspace_members" && out.OK {
+			var args listWorkspaceMembersArgs
+			if json.Unmarshal(payload, &args) != nil || !validUUID(args.WorkspaceID) {
+				return nil, ErrReplayConflict
+			}
+			archive := &ContextArchive{Store: t.Store, Lease: t.Lease, IM: t.IM, Authorize: t.Authorize}
+			if e = archive.authorizeSources(ctx, []InputSource{{WorkspaceID: args.WorkspaceID}}); e != nil {
+				return nil, e
+			}
+		}
+		if (name == "im_open_direct_conversation" || name == "im_create_group_conversation" || name == "im_add_conversation_members") && out.OK {
+			var receipt struct {
+				Data Conversation `json:"data"`
+			}
+			if e = json.Unmarshal(cached, &receipt); e != nil {
+				return nil, e
+			}
+			archive := &ContextArchive{Store: t.Store, Lease: t.Lease, IM: t.IM, Authorize: t.Authorize}
+			if e = archive.authorizeSources(ctx, []InputSource{{WorkspaceID: receipt.Data.WorkspaceID, ConversationID: receipt.Data.ID}}); e != nil {
+				return nil, e
+			}
+		}
+		if name == "im_retract_message" && out.OK {
+			var receipt struct {
+				Data Message `json:"data"`
+			}
+			if e = json.Unmarshal(cached, &receipt); e != nil {
+				return nil, e
+			}
+			archive := &ContextArchive{Store: t.Store, Lease: t.Lease, IM: t.IM, Authorize: t.Authorize}
+			if e = archive.authorizeSources(ctx, []InputSource{{ConversationID: receipt.Data.ConversationID}}); e != nil {
 				return nil, e
 			}
 		}

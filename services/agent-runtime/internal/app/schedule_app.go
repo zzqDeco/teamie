@@ -203,3 +203,119 @@ func (s *Service) EvaluateScheduleCreation(ctx context.Context, lease *domain.Le
 	}
 	return resultItem, obsErrCode, nil
 }
+
+// EvaluateScheduleUpdate coordinates idempotent in-place schedule updates within a fenced transaction.
+// It returns either the updated/recovered *domain.ScheduleItem, a user-safe observation error code, or a fatal error.
+func (s *Service) EvaluateScheduleUpdate(ctx context.Context, lease *domain.Lease, runID, callID, scheduleID string, runInputs []domain.Input, spec domain.ScheduleSpec) (*domain.ScheduleItem, string, error) {
+	id, ok := domain.ValidateScheduleCancelID(scheduleID)
+	if !ok {
+		return nil, "invalid_arguments", nil
+	}
+	var (
+		resultItem *domain.ScheduleItem
+		obsErrCode string
+	)
+	err := s.Tx.WithinTx(ctx, func(txCtx context.Context) error {
+		if err := s.Sessions.CheckLeaseForUpdate(txCtx, lease); err != nil {
+			return err
+		}
+		var recovered *domain.ScheduleItem
+		if s.ToolReceipts != nil {
+			saved, found, err := s.ToolReceipts.ReadObservation(txCtx, runID, callID, domain.ScheduleUpdateObservationKey)
+			if err != nil {
+				return err
+			}
+			if found {
+				if json.Unmarshal(saved, &recovered) != nil || recovered == nil || recovered.ScheduleID != id {
+					return domain.ErrReplayConflict
+				}
+			}
+		}
+		existing, found, getErr := s.Schedules.FindScheduleByID(txCtx, lease.AgentID, id)
+		if getErr != nil {
+			return getErr
+		}
+		if !found || existing == nil {
+			obsErrCode = "not_found"
+			return nil
+		}
+		if existing.Status != "active" && recovered == nil {
+			obsErrCode = "schedule_not_active"
+			return nil
+		}
+		createdRunID, sourceRefsJSON, sourceOverflow, metaFound, metaErr := s.Schedules.GetScheduleSourcesMeta(txCtx, lease.AgentID, id)
+		if metaErr != nil {
+			return metaErr
+		}
+		if !metaFound || s.IM == nil {
+			return domain.ErrContextUnavailable
+		}
+		var existingRefs []domain.InputSource
+		if metaFound {
+			var srcErr error
+			existingRefs, srcErr = s.ResolveScheduleRowSources(txCtx, lease.AgentID, createdRunID, sourceRefsJSON, sourceOverflow)
+			if srcErr == nil && s.IM != nil {
+				srcErr = s.IM.AuthorizeSources(txCtx, existingRefs)
+			}
+			if srcErr != nil {
+				if errors.Is(srcErr, domain.ErrContextUnavailable) {
+					_ = s.Schedules.CancelActiveSchedule(txCtx, lease.AgentID, id)
+					obsErrCode = "not_found"
+					return nil
+				}
+				return srcErr
+			}
+		}
+		if recovered != nil {
+			resultItem = recovered
+			return nil
+		}
+		now, err := s.Schedules.ClockNow(txCtx)
+		if err != nil {
+			return err
+		}
+		validated, code := domain.ValidateScheduleUpdateSpec(*existing, spec, now)
+		if code != "" {
+			obsErrCode = code
+			return nil
+		}
+		refs, overflow := domain.ExtractInputSources(runInputs)
+		if overflow || len(refs) == 0 {
+			if s.Archive == nil {
+				return domain.ErrContextUnavailable
+			}
+			var err error
+			refs, err = s.Archive.ResolveRunSources(txCtx, lease.AgentID, runID)
+			if err != nil {
+				return err
+			}
+			if len(refs) == 0 {
+				return domain.ErrContextUnavailable
+			}
+		}
+		refs, err = domain.CanonicalContextSources(append(existingRefs, refs...))
+		if err != nil {
+			return err
+		}
+		if err = s.IM.AuthorizeSources(txCtx, refs); err != nil {
+			return err
+		}
+		overflow = false
+		updated, err := s.Schedules.UpdateSchedule(txCtx, lease.AgentID, id, validated, refs, overflow, now)
+		if err != nil {
+			return err
+		}
+		if s.ToolReceipts != nil {
+			snapJSON, _ := json.Marshal(updated)
+			if err := s.ToolReceipts.SaveObservation(txCtx, lease, runID, callID, domain.ScheduleUpdateObservationKey, snapJSON); err != nil {
+				return err
+			}
+		}
+		resultItem = updated
+		return nil
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	return resultItem, obsErrCode, nil
+}

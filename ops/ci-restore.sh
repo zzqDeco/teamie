@@ -4,7 +4,7 @@ set -euo pipefail
 : "${POSTGRES_CONTAINER_ID:?disposable CI PostgreSQL container ID required}"
 scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT
-pg=(docker exec -i "$POSTGRES_CONTAINER_ID")
+pg=(docker exec -i "$POSTGRES_CONTAINER_ID" env PGOPTIONS="-c teamie.runtime_writer_schema=13")
 "${pg[@]}" env TEAMIE_VERIFY_DB_CREDENTIALS=1 POSTGRES_IDENTITY_PASSWORD=ci-identity-disposable-password \
   POSTGRES_CHAT_PASSWORD=ci-chat-disposable-password POSTGRES_AGENT_CONTROL_PASSWORD=ci-control-disposable-password \
   POSTGRES_AGENT_RUNTIME_PASSWORD=ci-runtime-disposable-password POSTGRES_GATEWAY_PASSWORD=ci-gateway-disposable-password \
@@ -47,11 +47,13 @@ SQL
     # including bytes that cannot survive a UTF-8/text-file transport.
     cat services/chat/internal/infra/pg/migrations/001_chat.sql services/chat/internal/infra/pg/migrations/002_membership_management.sql \
       services/chat/internal/infra/pg/migrations/003_attachments.sql services/chat/internal/infra/pg/migrations/004_attachment_uploads.sql \
-      services/chat/internal/infra/pg/migrations/005_mentions.sql | "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 >/dev/null
+      services/chat/internal/infra/pg/migrations/005_mentions.sql \
+      services/chat/internal/infra/pg/migrations/006_conversation_mutations.sql | "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 >/dev/null
     "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 <<'SQL'
 INSERT INTO workspaces(id,name,created_by) VALUES('restore-workspace','Restore','owner');
-INSERT INTO chat_schema_migrations(version) VALUES(2),(3),(4),(5) ON CONFLICT DO NOTHING;
+INSERT INTO chat_schema_migrations(version) VALUES(2),(3),(4),(5),(6) ON CONFLICT DO NOTHING;
 INSERT INTO conversations(id,workspace_id,type,name) VALUES('restore-conversation','restore-workspace','channel','general');
+INSERT INTO conversation_mutations(actor_id,request_key,request_hash,conversation_id) VALUES('owner','restore-group','fixture-hash','restore-conversation');
 INSERT INTO messages(id,conversation_id,sender_id,sender_name,sender_kind,client_message_id,seq,body,original_body_hash,attachments,original_attachment_ids)
 VALUES('restore-message','restore-conversation','owner','Owner','human','restore-send',1,'','fixture',
 '[{"id":"restore-attachment","filename":"binary.restore.bin","mediaType":"application/octet-stream","sizeBytes":7,"sha256":"fixture"}]','{restore-attachment}');
@@ -66,7 +68,7 @@ SQL
   if [[ $suffix == agent_runtime ]]; then
     # Exercise the actual embedded forward migrations, not a synthetic ledger.
     {
-      echo "SET teamie.runtime_writer_schema='12';"
+      echo "SET teamie.runtime_writer_schema='13';"
       cat services/agent-runtime/internal/infra/pg/migrations/*.sql
     } | "${pg[@]}" psql -U postgres -d teamie_agent_runtime -v ON_ERROR_STOP=1 >/dev/null
     runtime_context_budget=$(cat ops/fixtures/runtime-context-budget-v1.json)
@@ -114,12 +116,19 @@ VALUES('20000000-0000-4000-8000-000000000010','10000000-0000-4000-8000-000000000
 INSERT INTO runtime_runs(id,agent_id,input_key,input_json,attempt_id,context_profile,context_budget,context_head,acceptance_head)
 VALUES('20000000-0000-4000-8000-000000000011','10000000-0000-4000-8000-000000000001','restore-schedule-policy','[]',
        '30000000-0000-4000-8000-000000000011','teamie-context-v038',:'schedule_budget'::jsonb,0,0);
+INSERT INTO runtime_runs(id,agent_id,input_key,input_json,attempt_id,context_profile,context_budget,context_head,acceptance_head)
+VALUES('20000000-0000-4000-8000-000000000012','10000000-0000-4000-8000-000000000001','restore-dm-policy','[]',
+       '30000000-0000-4000-8000-000000000012','teamie-context-v038',:'schedule_budget'::jsonb||'{"directMessages":true}'::jsonb,0,0);
 INSERT INTO runtime_schedules(id,agent_id,created_run_id,kind,interval_seconds,cron_expr,timezone,prompt,status,max_runs,run_count,next_run_at,source_refs,source_overflow)
 VALUES('sched-restore-fixture','10000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000011','interval',60,'','UTC','Heartbeat check','active',3,1,'2026-10-22T12:00:00Z','[{"eventId":"42","conversationId":"40000000-0000-4000-8000-000000000001","messageId":"50000000-0000-4000-8000-000000000001"}]'::jsonb,false);
 INSERT INTO runtime_context_artifacts(agent_id,run_id,attempt_id,artifact_key,kind,content,content_hash,sources,source_event_seq)
 VALUES('10000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001',
        'transcript:restore','transcript',decode('00fffe80890a0d','hex'),repeat('a',64),
        '[{"eventId":"42","conversationId":"40000000-0000-4000-8000-000000000001","messageId":"50000000-0000-4000-8000-000000000001"}]',42);
+INSERT INTO runtime_context_artifacts(agent_id,run_id,attempt_id,artifact_key,kind,content,content_hash,sources,source_event_seq)
+VALUES('10000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000012','30000000-0000-4000-8000-000000000012',
+       'workspace:restore','tool',decode('0102','hex'),repeat('c',64),
+       '[{"workspaceId":"40000000-0000-4000-8000-000000000001"}]',42);
 INSERT INTO runtime_context_recoveries(run_id,model_step,context_profile,request_hash,streaming,error_code,decision_version,decision_json)
 VALUES('20000000-0000-4000-8000-000000000001',2,'teamie-context-v038',repeat('b',64),true,'context_overflow',1,jsonb_build_object('version',1,'action','compact_prefix','budget',:'frozen_budget'::jsonb));
 SQL
@@ -141,14 +150,17 @@ SQL
     [[ $actual == '00fffe80890a0d:binary.restore.bin:restore-attachment:restore-attachment' ]] || { echo 'Chat attachment binary restore verification failed.' >&2; exit 1; }
     actual=$("${pg[@]}" psql -U postgres -d restore_chat -At -v ON_ERROR_STOP=1 -c \
       "SELECT (SELECT string_agg(version::text,',' ORDER BY version) FROM chat_schema_migrations)||':'||(SELECT attachment_id FROM attachment_uploads WHERE uploader_id='owner' AND upload_key='restore-upload')||':'||(SELECT count(*) FROM attachment_uploads WHERE upload_key='restore-removed' AND attachment_id IS NULL);")
-    [[ $actual == '1,2,3,4,5:restore-attachment:1' ]] || { echo 'Chat upload receipts and tombstones restore verification failed.' >&2; exit 1; }
+    [[ $actual == '1,2,3,4,5,6:restore-attachment:1' ]] || { echo 'Chat upload receipts and tombstones restore verification failed.' >&2; exit 1; }
+    actual=$("${pg[@]}" psql -U postgres -d restore_chat -At -v ON_ERROR_STOP=1 -c \
+      "SELECT request_hash||':'||conversation_id FROM conversation_mutations WHERE actor_id='owner' AND request_key='restore-group';")
+    [[ $actual == 'fixture-hash:restore-conversation' ]] || { echo 'Chat conversation mutation receipt restore failed.' >&2; exit 1; }
   fi
   if [[ $suffix == agent_runtime ]]; then
     actual=$("${pg[@]}" psql -U postgres -d restore_agent_runtime -At -v ON_ERROR_STOP=1 -v frozen_budget="$runtime_context_budget" <<'SQL'
 SELECT (SELECT string_agg(version::text,',' ORDER BY version) FROM agent_runtime_schema_migrations)||':'||r.context_profile||':'||(r.context_budget=:'frozen_budget'::jsonb)::text||':'||encode(a.content,'hex')||':'||(a.sources->0->>'eventId')||':'||a.source_event_seq||':'||c.model_step||':'||c.error_code||':'||c.streaming::text||':'||(c.decision_json=jsonb_build_object('version',1,'action','compact_prefix','budget',:'frozen_budget'::jsonb))::text FROM runtime_runs r JOIN runtime_context_artifacts a ON a.run_id=r.id JOIN runtime_context_recoveries c ON c.run_id=r.id WHERE r.id='20000000-0000-4000-8000-000000000001';
 SQL
 )
-    [[ $actual == '1,2,3,4,5,6,7,8,9,10,11,12:teamie-context-v038:true:00fffe80890a0d:42:42:2:context_overflow:true:true' ]] || { echo 'Runtime frozen policy, context archive, source references and recovery tape restore failed.' >&2; exit 1; }
+    [[ $actual == '1,2,3,4,5,6,7,8,9,10,11,12,13:teamie-context-v038:true:00fffe80890a0d:42:42:2:context_overflow:true:true' ]] || { echo 'Runtime frozen policy, context archive, source references and recovery tape restore failed.' >&2; exit 1; }
     actual=$("${pg[@]}" psql -U postgres -d restore_agent_runtime -At -v ON_ERROR_STOP=1 -v frozen_budget="$runtime_context_budget" <<'SQL'
 SELECT context_budget=(:'frozen_budget'::jsonb||'{"fileDelivery":true,"structuredMentions":true}'::jsonb) FROM runtime_runs WHERE input_key='restore-file-policy';
 SQL
@@ -199,6 +211,12 @@ SELECT (SELECT context_budget=:'schedule_budget'::jsonb AND context_budget->>'sc
 SQL
 )
     [[ $actual == t ]] || { echo 'Runtime scheduled wakeups policy and schedule table restore failed.' >&2; exit 1; }
+    actual=$("${pg[@]}" psql -U postgres -d restore_agent_runtime -At -v ON_ERROR_STOP=1 -v schedule_budget="$runtime_schedule_budget" <<'SQL'
+SELECT (SELECT context_budget=(:'schedule_budget'::jsonb||'{"directMessages":true}'::jsonb) FROM runtime_runs WHERE input_key='restore-dm-policy') AND (SELECT sources='[{"workspaceId":"40000000-0000-4000-8000-000000000001"}]'::jsonb AND encode(content,'hex')='0102' FROM runtime_context_artifacts WHERE artifact_key='workspace:restore');
+SQL
+)
+    [[ $actual == t ]] || { echo 'Runtime direct-message policy restore failed.' >&2; exit 1; }
+
 
   fi
   # Ordinary owners may not connect to another service's database.

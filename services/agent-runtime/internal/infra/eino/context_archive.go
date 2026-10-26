@@ -366,6 +366,7 @@ func (a *ContextArchive) authorizeSources(ctx context.Context, refs []InputSourc
 		return errContextUnavailable
 	}
 	var conversations map[string]string
+	var workspaces map[string]bool
 	for _, ref := range refs {
 		if ref.MessageID == "" {
 			if conversations == nil {
@@ -378,9 +379,24 @@ func (a *ContextArchive) authorizeSources(ctx context.Context, refs []InputSourc
 					return err
 				}
 				conversations = map[string]string{}
+				workspaces = map[string]bool{}
+				for _, ws := range bootstrap.Workspaces {
+					if ws.ID != "" {
+						workspaces[ws.ID] = true
+					}
+				}
 				for _, conversation := range bootstrap.Conversations {
 					conversations[conversation.ID] = conversation.WorkspaceID
+					if conversation.WorkspaceID != "" {
+						workspaces[conversation.WorkspaceID] = true
+					}
 				}
+			}
+			if ref.ConversationID == "" {
+				if err := domain.VerifyWorkspaceSourceAccess(ref, workspaces); err != nil {
+					return err
+				}
+				continue
 			}
 			if err := domain.VerifyConversationSourceAccess(ref, conversations); err != nil {
 				return err

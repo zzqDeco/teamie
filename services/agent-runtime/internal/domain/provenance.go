@@ -37,7 +37,9 @@ func ExtractInputSources(inputs []Input) ([]InputSource, bool) {
 	seen := map[string]bool{}
 	overflow := false
 	appendRef := func(ref InputSource) {
-		if ref.ConversationID == "" || ref.MessageID == "" {
+		msgSource := ref.ConversationID != "" && ref.MessageID != ""
+		wsOnlySource := ref.WorkspaceID != "" && ref.ConversationID == "" && ref.MessageID == "" && ref.EventID == ""
+		if !msgSource && !wsOnlySource {
 			return
 		}
 		key := ref.WorkspaceID + "/" + ref.ConversationID + "/" + ref.MessageID + "/" + ref.EventID
@@ -57,19 +59,21 @@ func ExtractInputSources(inputs []Input) ([]InputSource, bool) {
 			overflow = true
 		}
 		if in.Kind != "task.notification" && in.Kind != "schedule.wakeup" {
-			ref := InputSource{
-				EventID:        in.EventID,
-				WorkspaceID:    in.WorkspaceID,
-				ConversationID: in.ConversationID,
-				MessageID:      in.MessageID,
-				ReplyToID:      in.ReplyToID,
-				SenderID:       in.SenderID,
-				SenderKind:     in.SenderKind,
+			if in.ConversationID != "" && in.MessageID != "" {
+				ref := InputSource{
+					EventID:        in.EventID,
+					WorkspaceID:    in.WorkspaceID,
+					ConversationID: in.ConversationID,
+					MessageID:      in.MessageID,
+					ReplyToID:      in.ReplyToID,
+					SenderID:       in.SenderID,
+					SenderKind:     in.SenderKind,
+				}
+				for _, attachment := range in.Attachments {
+					ref.AttachmentIDs = append(ref.AttachmentIDs, attachment.ID)
+				}
+				appendRef(ref)
 			}
-			for _, attachment := range in.Attachments {
-				ref.AttachmentIDs = append(ref.AttachmentIDs, attachment.ID)
-			}
-			appendRef(ref)
 		}
 		for _, ref := range in.SourceRefs {
 			appendRef(ref)
@@ -84,9 +88,11 @@ func CanonicalContextSources(refs []InputSource) ([]InputSource, error) {
 	byKey := make(map[string]InputSource, len(refs))
 	for _, ref := range refs {
 		if !ValidUUID(ref.ConversationID) || !ValidUUID(ref.MessageID) || (ref.WorkspaceID != "" && !ValidUUID(ref.WorkspaceID)) || (ref.SenderID != "" && !ValidUUID(ref.SenderID)) {
-			// A conversation-only source represents metadata from a committed
-			// im_list_conversations response, never a fabricated message ID.
-			if !ValidUUID(ref.ConversationID) || ref.MessageID != "" || ref.EventID != "" || ref.ReplyToID != "" || ref.SenderID != "" || ref.SenderKind != "" || len(ref.AttachmentIDs) != 0 || (ref.WorkspaceID != "" && !ValidUUID(ref.WorkspaceID)) {
+			// A conversation-only or workspace-only source represents metadata from a
+			// committed IM conversation/workspace tool response, never a fabricated message ID.
+			convOnly := ValidUUID(ref.ConversationID) && (ref.WorkspaceID == "" || ValidUUID(ref.WorkspaceID))
+			wsOnly := ref.ConversationID == "" && ValidUUID(ref.WorkspaceID)
+			if (!convOnly && !wsOnly) || ref.MessageID != "" || ref.EventID != "" || ref.ReplyToID != "" || ref.SenderID != "" || ref.SenderKind != "" || len(ref.AttachmentIDs) != 0 {
 				return nil, ErrContextUnavailable
 			}
 		}
@@ -99,6 +105,9 @@ func CanonicalContextSources(refs []InputSource) ([]InputSource, error) {
 		sort.Strings(ref.AttachmentIDs)
 		ref.AttachmentIDs = slices.Compact(ref.AttachmentIDs)
 		key := ref.EventID + "/" + ref.ConversationID + "/" + ref.MessageID
+		if ref.ConversationID == "" {
+			key = "workspace:" + ref.WorkspaceID
+		}
 		if old, exists := byKey[key]; exists {
 			for _, pair := range []struct {
 				old *string
@@ -140,6 +149,15 @@ func CanonicalContextSources(refs []InputSource) ([]InputSource, error) {
 func VerifyConversationSourceAccess(ref InputSource, conversationWorkspaces map[string]string) error {
 	wsID, exists := conversationWorkspaces[ref.ConversationID]
 	if !exists || (ref.WorkspaceID != "" && wsID != ref.WorkspaceID) {
+		return ErrContextUnavailable
+	}
+	return nil
+}
+
+// VerifyWorkspaceSourceAccess checks whether a workspace-only InputSource is still
+// accessible given the Agent's current workspace membership set.
+func VerifyWorkspaceSourceAccess(ref InputSource, workspaces map[string]bool) error {
+	if !ValidUUID(ref.WorkspaceID) || !workspaces[ref.WorkspaceID] {
 		return ErrContextUnavailable
 	}
 	return nil

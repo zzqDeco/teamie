@@ -206,8 +206,62 @@ describe("Markdown message rendering", () => {
     expect(blockCode?.getAttribute("data-language")).toBe("ts");
     expect(blockCode?.textContent).toContain("const formula = '$E = mc^2$';");
     expect(blockCode?.querySelector(".katex")).toBeNull();
+    expect(host.querySelector(".markdown-code-lang")?.textContent).toBe("ts");
     expect(host.querySelector("script")).toBeNull();
     expect(host.querySelector("img")).toBeNull();
+  });
+
+  it("copies fenced code block content to clipboard, shows copied feedback, resets after 1.8s, and falls back to code label", async () => {
+    vi.useFakeTimers();
+    try {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText },
+      });
+
+      const markdown = [
+        "```python",
+        "def greet(name: str) -> str:",
+        "    return f'Hello, {name}!'",
+        "```",
+        "",
+        "```",
+        "plain block without language",
+        "```",
+      ].join("\n");
+
+      await render(<MessageBody body={markdown} userId={user.id} />);
+
+      const langLabels = host.querySelectorAll(".markdown-code-lang");
+      expect(langLabels).toHaveLength(2);
+      expect(langLabels[0]?.textContent).toBe("python");
+      expect(langLabels[1]?.textContent).toBe("code");
+
+      const copyBtn = host.querySelector<HTMLButtonElement>(
+        "button.markdown-code-copy",
+      );
+      expect(copyBtn).not.toBeNull();
+      expect(copyBtn?.textContent).toBe("复制");
+
+      await act(async () => {
+        copyBtn?.click();
+      });
+
+      expect(writeText).toHaveBeenCalledWith(
+        "def greet(name: str) -> str:\n    return f'Hello, {name}!'",
+      );
+      expect(copyBtn?.textContent).toBe("已复制");
+      expect(copyBtn?.classList.contains("copied")).toBe(true);
+
+      await act(async () => {
+        vi.advanceTimersByTime(1800);
+      });
+      expect(copyBtn?.textContent).toBe("复制");
+      expect(copyBtn?.classList.contains("copied")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("renders GFM tables with alignments, inline formatting, and escaped pipes", async () => {

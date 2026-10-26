@@ -48,12 +48,17 @@ type fakeSchedules struct {
 	activeCount int
 	created     *domain.ScheduleItem
 	canceledIDs []string
+	sources     []domain.InputSource
+	updateCount int
 }
 
 func (f *fakeSchedules) ClockNow(context.Context) (time.Time, error) {
 	return f.now, nil
 }
-func (f *fakeSchedules) FindScheduleByID(context.Context, string, string) (*domain.ScheduleItem, bool, error) {
+func (f *fakeSchedules) FindScheduleByID(_ context.Context, _, schedID string) (*domain.ScheduleItem, bool, error) {
+	if f.created != nil && f.created.ScheduleID == schedID {
+		return f.created, true, nil
+	}
 	return nil, false, nil
 }
 func (f *fakeSchedules) CountActiveSchedules(context.Context, string) (int, error) {
@@ -61,14 +66,16 @@ func (f *fakeSchedules) CountActiveSchedules(context.Context, string) (int, erro
 }
 func (f *fakeSchedules) CreateSchedule(_ context.Context, _, _, schedID string, spec domain.ValidatedScheduleSpec, _ []domain.InputSource, _ bool, now time.Time) (*domain.ScheduleItem, error) {
 	item := &domain.ScheduleItem{
-		ScheduleID: schedID,
-		Prompt:     spec.Prompt,
-		Kind:       spec.Kind,
-		Status:     "active",
-		Timezone:   spec.Timezone,
-		CronExpr:   spec.CronExpr,
-		NextRunAt:  spec.NextRunAt.UTC().Format(time.RFC3339Nano),
-		CreatedAt:  now.UTC().Format(time.RFC3339Nano),
+		ScheduleID:      schedID,
+		Prompt:          spec.Prompt,
+		Kind:            spec.Kind,
+		IntervalSeconds: spec.IntervalSeconds,
+		MaxRuns:         spec.MaxRuns,
+		Status:          "active",
+		Timezone:        spec.Timezone,
+		CronExpr:        spec.CronExpr,
+		NextRunAt:       spec.NextRunAt.UTC().Format(time.RFC3339Nano),
+		CreatedAt:       now.UTC().Format(time.RFC3339Nano),
 	}
 	f.created = item
 	return item, nil
@@ -80,7 +87,8 @@ func (f *fakeSchedules) GetScheduleStatusAndParent(context.Context, string, stri
 	return "active", "", true, nil
 }
 func (f *fakeSchedules) GetScheduleSourcesMeta(context.Context, string, string) (string, []byte, bool, bool, error) {
-	return "", nil, false, false, nil
+	b, _ := json.Marshal(f.sources)
+	return "", b, false, len(f.sources) > 0, nil
 }
 func (f *fakeSchedules) CancelActiveSchedule(_ context.Context, _, scheduleID string) error {
 	f.canceledIDs = append(f.canceledIDs, scheduleID)
@@ -182,5 +190,44 @@ func TestAppServiceScheduleCreationAndAuthorization(t *testing.T) {
 	}})
 	if err != nil || len(filtered) != 0 || len(schedules.canceledIDs) != 1 {
 		t.Fatalf("expected revoked schedule to be filtered and canceled, got filtered=%v canceled=%v err=%v", filtered, schedules.canceledIDs, err)
+	}
+}
+
+func (f *fakeSchedules) UpdateSchedule(ctx context.Context, agentID, scheduleID string, spec domain.ValidatedScheduleSpec, refs []domain.InputSource, overflow bool, now time.Time) (*domain.ScheduleItem, error) {
+	f.updateCount++
+	return f.CreateSchedule(ctx, agentID, "", scheduleID, spec, refs, overflow, now)
+}
+func (f *fakeSchedules) EnsureDefaultHeartbeatSchedule(context.Context, *domain.Lease, string, int64, string, []domain.InputSource) (bool, error) {
+	return false, nil
+}
+
+func TestScheduleUpdateFailsClosedOnIncompleteSourcesAndReplayRevocation(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	iv := int64(3600)
+	workspace := "33333333-3333-3333-3333-333333333333"
+	agent := "11111111-1111-1111-1111-111111111111"
+	run := "22222222-2222-2222-2222-222222222222"
+	id := domain.DefaultHeartbeatScheduleID(agent)
+	schedules := &fakeSchedules{now: now, sources: []domain.InputSource{{WorkspaceID: workspace}}, created: &domain.ScheduleItem{ScheduleID: id, Kind: "interval", IntervalSeconds: &iv, Prompt: "old", Timezone: "UTC", Status: "active", NextRunAt: now.Add(time.Hour).Format(time.RFC3339)}}
+	im := &fakeIM{}
+	receipts := &fakeReceipts{}
+	svc := &Service{Tx: &fakeTx{}, Sessions: &fakeSessions{}, Schedules: schedules, IM: im, ToolReceipts: receipts}
+	lease := &domain.Lease{AgentID: agent}
+	patch := domain.ScheduleSpec{Prompt: "new"}
+	input := domain.Input{Kind: "schedule.wakeup", SourceOverflow: true, SourceRefs: schedules.sources}
+	if _, _, err := svc.EvaluateScheduleUpdate(ctx, lease, run, "call", id, []domain.Input{input}, patch); err != domain.ErrContextUnavailable || schedules.updateCount != 0 {
+		t.Fatalf("incomplete source set allowed update: %v", err)
+	}
+	input.SourceOverflow = false
+	if _, code, err := svc.EvaluateScheduleUpdate(ctx, lease, run, "call", id, []domain.Input{input}, patch); err != nil || code != "" || schedules.updateCount != 1 {
+		t.Fatalf("valid update failed: %s %v", code, err)
+	}
+	if _, code, err := svc.EvaluateScheduleUpdate(ctx, lease, run, "call", id, []domain.Input{input}, patch); err != nil || code != "" || schedules.updateCount != 1 {
+		t.Fatalf("replay updated twice: %s %v", code, err)
+	}
+	im.authErr = domain.ErrContextUnavailable
+	if item, code, err := svc.EvaluateScheduleUpdate(ctx, lease, run, "call", id, []domain.Input{input}, patch); err != nil || code != "not_found" || item != nil || schedules.updateCount != 1 {
+		t.Fatalf("revoked replay exposed schedule: %s %v", code, err)
 	}
 }

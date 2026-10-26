@@ -10,6 +10,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -245,12 +247,42 @@ func TestHertzStreamAdapterFlushAndDisconnectCancellation(t *testing.T) {
 
 func TestHertzNativeSSEWriterStreamChat(t *testing.T) {
 	s, dummy := streamFixtureService(t, func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.Copy(io.Discard, r.Body)
+		var request struct {
+			Stream bool `json:"stream"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&request)
+		switch r.URL.Path {
+		case "/search":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"results":[{"title":"IANA Example Domains","url":"https://www.iana.org/help/example-domains","content":"Example domains reserved by IANA","score":0.99}]}`))
+			return
+		case "/extract":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"results":[{"url":"https://www.iana.org/help/example-domains","raw_content":"# IANA Example Domains\nexample.com"}],"failed_results":[]}`))
+			return
+		}
+		if !request.Stream {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"fixture-unary","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}]}`))
+			return
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprintf(w, "data: %s\n\n", delta)
 		fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", finalDelta)
 	})
 	dummy.Close()
+	crypto := testCipher(t)
+	wsCipher, err := crypto.Encrypt("tvly-hertz-test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := s.Store.(*memoryStore)
+	store.mu.Lock()
+	store.c.WebSearchCipherKey = wsCipher
+	store.c.WebSearchEnabled = true
+	baseURL := store.c.BaseURL
+	store.mu.Unlock()
+	s.WebSearchURL = strings.TrimSuffix(baseURL, "/v1")
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -281,6 +313,37 @@ func TestHertzNativeSSEWriterStreamChat(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "event: chunk") || !strings.Contains(string(body), "event: done") {
 		t.Fatalf("expected Hertz sse.NewWriter events, got %s", string(body))
+	}
+	if !strings.HasPrefix(res.Header.Get("Content-Type"), "text/event-stream") {
+		t.Fatalf("expected text/event-stream Content-Type, got %q", res.Header.Get("Content-Type"))
+	}
+	if res.Header.Get("X-Teamie-Model-Config-ID") == "" {
+		t.Fatalf("expected X-Teamie-Model-Config-ID header, got empty (headers=%v)", res.Header)
+	}
+	scriptPath, err := filepath.Abs("../../../ops/acceptance-real-model.py")
+	if err != nil {
+		t.Fatal(err)
+	}
+	py := exec.Command(
+		"python3",
+		"-c",
+		`import importlib.util, sys
+spec = importlib.util.spec_from_file_location("m", sys.argv[1])
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+c = m.Client({"origin": sys.argv[2], "identity": sys.argv[2], "chat": sys.argv[2], "control": sys.argv[2], "gateway": sys.argv[2], "internal_gateway": sys.argv[2], "runtime_token": sys.argv[4]})
+cid = c.verify_internal_unary(sys.argv[4], "owner-1")
+assert cid == sys.argv[3], f"{cid} != {sys.argv[3]}"
+c.verify_internal_sse_stream(sys.argv[4], "owner-1", cid)
+c.verify_internal_web_search(sys.argv[4], "owner-1")
+`,
+		scriptPath,
+		"http://"+listener.Addr().String(),
+		res.Header.Get("X-Teamie-Model-Config-ID"),
+		testToken,
+	)
+	if out, err := py.CombinedOutput(); err != nil {
+		t.Fatalf("acceptance-real-model.py SSE/web-search client against real Hertz gateway failed: %v\n%s", err, string(out))
 	}
 	_ = app.RequestContext{}
 }

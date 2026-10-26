@@ -513,11 +513,18 @@ export class TeamieClient {
     this.#request<{ conversations: Conversation[] }>(
       routePath(IDL_ROUTES.ListConversations, { id }),
     );
-  addConversationMember = (id: string, userId: string) =>
+  addConversationMember = (
+    id: string,
+    userId: string,
+    idempotencyKey?: string,
+  ) =>
     this.#request<{ conversation: Conversation }>(
       routePath(IDL_ROUTES.AddConversationMember, { id }),
       {
         method: IDL_ROUTES.AddConversationMember.method,
+        ...(idempotencyKey
+          ? { headers: { "Idempotency-Key": idempotencyKey } }
+          : {}),
         body: JSON.stringify({ userId }),
       },
     );
@@ -529,11 +536,15 @@ export class TeamieClient {
   createConversation = (
     id: string,
     data: { type: Conversation["type"]; name?: string; memberIds?: string[] },
+    idempotencyKey?: string,
   ) =>
     this.#request<{ conversation: Conversation }>(
       routePath(IDL_ROUTES.CreateConversation, { id }),
       {
         method: IDL_ROUTES.CreateConversation.method,
+        ...(idempotencyKey
+          ? { headers: { "Idempotency-Key": idempotencyKey } }
+          : {}),
         body: JSON.stringify(data),
       },
     );

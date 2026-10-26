@@ -48,6 +48,7 @@ type ContextBudgetSnapshot struct {
 	EventDrivenInputs    bool   `json:"eventDrivenInputs,omitempty"`
 	WebSearch            bool   `json:"webSearch,omitempty"`
 	ScheduledWakeups     bool   `json:"scheduledWakeups,omitempty"`
+	DirectMessages       bool   `json:"directMessages,omitempty"`
 }
 
 // MakeContextBudgetSnapshot creates a new ContextBudgetSnapshot for the current budget version.
@@ -112,6 +113,7 @@ func ParseContextBudgetSnapshot(raw json.RawMessage) (ContextBudgetSnapshot, err
 	expected.EventDrivenInputs = budget.EventDrivenInputs
 	expected.WebSearch = budget.WebSearch
 	expected.ScheduledWakeups = budget.ScheduledWakeups
+	expected.DirectMessages = budget.DirectMessages
 	if err != nil || budget != expected {
 		return budget, errors.New("unsupported context budget snapshot")
 	}
