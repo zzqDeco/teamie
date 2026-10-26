@@ -12,7 +12,7 @@ import type {
   Message,
   User,
 } from "@teamie/api-client";
-import { MessageBody, sanitizeLinkUrl } from "./markdown";
+import { MessageBody, matchBareUrl, sanitizeLinkUrl } from "./markdown";
 import { ConversationView } from "./messages";
 import { chatStore } from "./store";
 
@@ -329,6 +329,48 @@ describe("Markdown message rendering", () => {
     expect(host.querySelector("img")).toBeNull();
     expect(host.querySelector("iframe")).toBeNull();
     expect(host.textContent).toContain("<img src=x onerror=alert(1)>");
+    // Every rendered link exposes its real destination to expose label spoofing.
+    expect(links[0].getAttribute("title")).toBe("https://teamie.example/docs");
+  });
+
+  it("autolinks bare http(s) URLs without trailing punctuation, outside code, with a title", async () => {
+    expect(matchBareUrl("https://a.example/x.", 0)).toBe("https://a.example/x");
+    expect(matchBareUrl("https://a.example/wiki/Foo_(bar))", 0)).toBe(
+      "https://a.example/wiki/Foo_(bar)",
+    );
+    expect(matchBareUrl("xhttps://a.example", 1)).toBeNull();
+    expect(matchBareUrl("https://", 0)).toBeNull();
+    const body = [
+      "见 https://teamie.example/docs?q=1&lang=zh。还有（https://teamie.example/a_(b)）",
+      "结尾 HTTP://Teamie.Example/Upper, 以及 https://teamie.example/path!",
+      "代码 `https://code.example/inside` 与 [文档](https://label.example) 不重复。",
+      "伪装 [https://safe.example](https://evil.example) 和 javascript:alert(1) 与 ftp://files.example",
+      "嵌入 src='https://quoted.example' 不链接",
+    ].join("\n\n");
+    await render(<MessageBody body={body} userId={user.id} />);
+    const links = [...host.querySelectorAll<HTMLAnchorElement>("a")];
+    expect(links.map((link) => link.getAttribute("href"))).toEqual([
+      "https://teamie.example/docs?q=1&lang=zh",
+      "https://teamie.example/a_(b)",
+      "HTTP://Teamie.Example/Upper",
+      "https://teamie.example/path",
+      "https://label.example",
+      "https://evil.example",
+    ]);
+    for (const link of links) {
+      expect(link.getAttribute("title")).toBe(link.getAttribute("href"));
+      expect(link.getAttribute("target")).toBe("_blank");
+      expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+    }
+    expect(links[0].textContent).toBe("https://teamie.example/docs?q=1&lang=zh");
+    expect(links[5].textContent).toBe("https://safe.example");
+    expect(links[5].querySelector("a")).toBeNull();
+    expect(host.querySelector("code")?.textContent).toBe(
+      "https://code.example/inside",
+    );
+    expect(host.textContent).toContain("。还有（");
+    expect(host.textContent).toContain("）");
+    expect(host.textContent).toContain("javascript:alert(1)");
   });
 });
 
