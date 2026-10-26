@@ -405,7 +405,7 @@ func (a *Adapter) CreateConversation(ctx context.Context, req *chatgen.CreateCon
 	if !ok {
 		return nil, domain.Err(401, "unauthenticated", "Sign in to continue")
 	}
-	c, err := a.App.CreateConversation(ctx, user.ID, req.ID, req.Type, req.GetName(), req.GetMemberIds())
+	c, err := a.App.CreateConversationWithKey(ctx, user.ID, req.ID, req.Type, req.GetName(), req.GetMemberIds(), req.GetIdempotencyKey())
 	if err != nil {
 		return nil, err
 	}
@@ -417,7 +417,7 @@ func (a *Adapter) AddConversationMember(ctx context.Context, req *chatgen.AddCon
 	if !ok {
 		return nil, domain.Err(401, "unauthenticated", "Sign in to continue")
 	}
-	c, err := a.App.GroupMember(ctx, user.ID, req.ID, req.UserId, true)
+	c, err := a.App.AddConversationMemberWithKey(ctx, user.ID, req.ID, req.UserId, req.GetIdempotencyKey())
 	if err != nil {
 		return nil, err
 	}

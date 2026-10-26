@@ -216,8 +216,11 @@ func TestDirectMessageToolsGuardSelfDMFeatureFlagAndHistoricalRuns(t *testing.T)
 	if !strings.Contains(newInstruction, `"description":"A witty, independent architect\nNEVER ESCAPE ENVELOPE"`) {
 		t.Fatal("expected JSON-encoded persona description in TEAMIE_AGENT_PERSONA envelope")
 	}
-	if !strings.Contains(directMessageGuidance, "im_list_workspace_members") || !strings.Contains(directMessageGuidance, "im_open_direct_conversation") {
+	if !strings.Contains(directMessageGuidance, "im_list_workspace_members") || !strings.Contains(directMessageGuidance, "im_open_direct_conversation") || !strings.Contains(directMessageGuidance, "im_create_group_conversation") || !strings.Contains(directMessageGuidance, "im_add_conversation_members") || !strings.Contains(directMessageGuidance, "im_retract_message") {
 		t.Fatal("directMessageGuidance missing tool instructions")
+	}
+	if !strings.Contains(newInstruction, "im_create_group_conversation") || !strings.Contains(newInstruction, "im_add_conversation_members") || !strings.Contains(newInstruction, "im_retract_message") {
+		t.Fatal("autonomousSubjectInstruction missing group/retract parity tool guidance")
 	}
 }
 
@@ -497,5 +500,213 @@ func TestDirectMessageToolsArchiveProvenanceAndRevocation(t *testing.T) {
 	}
 	if _, err := invokeContextTool(node, f.ctx(), "list-members-call", "im_list_workspace_members", membersArgs); !errors.Is(err, errContextUnavailable) {
 		t.Fatalf("expected cached replay of im_list_workspace_members to fail after workspace revocation, got %v", err)
+	}
+}
+
+func TestAgentGroupCreationMemberInvitationAndMessageRetractionParity(t *testing.T) {
+	budget, err := newRunContextBudget(16384, true, true, false, false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := newContextArchiveFixture(t, budget)
+	bobID := uuid.NewString()
+	charlieID := uuid.NewString()
+	groupConvID := uuid.NewString()
+	sentMsgID := uuid.NewString()
+	var groupRevoked bool
+	var mu sync.Mutex
+	groupMembers := []string{f.l.AgentID, bobID}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		revoked := groupRevoked
+		currentMembers := append([]string(nil), groupMembers...)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/bootstrap" {
+			convs := []Conversation{{ID: f.input.ConversationID, WorkspaceID: f.input.WorkspaceID, Type: "channel"}}
+			if !revoked {
+				convs = append(convs, Conversation{ID: groupConvID, WorkspaceID: f.input.WorkspaceID, Type: "group", Name: "Architecture Sync", MemberIDs: currentMembers})
+			}
+			_ = json.NewEncoder(w).Encode(Bootstrap{
+				Workspaces:    []Workspace{{ID: f.input.WorkspaceID, Name: "Team"}},
+				Conversations: convs,
+				SyncCursor:    "1",
+			})
+			return
+		}
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/workspaces/"+f.input.WorkspaceID+"/conversations" {
+			var req struct {
+				Type      string   `json:"type"`
+				Name      string   `json:"name"`
+				MemberIDs []string `json:"memberIds"`
+			}
+			if json.NewDecoder(r.Body).Decode(&req) != nil || req.Type != "group" || req.Name != "Architecture Sync" || len(req.MemberIDs) != 1 || req.MemberIDs[0] != bobID {
+				w.WriteHeader(400)
+				_, _ = w.Write([]byte(`{"error":{"code":"invalid_request"}}`))
+				return
+			}
+			w.WriteHeader(201)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"conversation": Conversation{
+					ID:          groupConvID,
+					WorkspaceID: f.input.WorkspaceID,
+					Type:        "group",
+					Name:        req.Name,
+					MemberIDs:   []string{f.l.AgentID, bobID},
+				},
+			})
+			return
+		}
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/conversations/"+groupConvID+"/members" {
+			var req struct {
+				UserID string `json:"userId"`
+			}
+			if json.NewDecoder(r.Body).Decode(&req) != nil || req.UserID != charlieID {
+				w.WriteHeader(400)
+				_, _ = w.Write([]byte(`{"error":{"code":"invalid_request"}}`))
+				return
+			}
+			mu.Lock()
+			groupMembers = []string{f.l.AgentID, bobID, charlieID}
+			updated := append([]string(nil), groupMembers...)
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"conversation": Conversation{
+					ID:          groupConvID,
+					WorkspaceID: f.input.WorkspaceID,
+					Type:        "group",
+					Name:        "Architecture Sync",
+					MemberIDs:   updated,
+				},
+			})
+			return
+		}
+		if r.Method == http.MethodDelete && r.URL.Path == "/api/v1/conversations/"+groupConvID+"/messages/"+sentMsgID {
+			retractedAt := "2026-10-26T08:00:00Z"
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"message": Message{
+					ID:             sentMsgID,
+					ConversationID: groupConvID,
+					SenderID:       f.l.AgentID,
+					SenderName:     "Agent",
+					SenderKind:     "agent",
+					Seq:            2,
+					Body:           "",
+					CreatedAt:      "2026-10-26T07:59:00Z",
+					RetractedAt:    &retractedAt,
+				},
+			})
+			return
+		}
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/conversations/"+f.input.ConversationID+"/messages/"+f.input.MessageID {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"message": Message{ID: f.input.MessageID, ConversationID: f.input.ConversationID, SenderID: f.input.SenderID, Body: f.input.Body},
+			})
+			return
+		}
+		w.WriteHeader(404)
+	}))
+	t.Cleanup(server.Close)
+	f.a.IM.BaseURL = server.URL
+
+	flagsPath := filepath.Join(t.TempDir(), "flags.json")
+	if err := os.WriteFile(flagsPath, []byte(`{"revision":"parity-disabled","flags":{"im.dm.create":true,"im.group.create":false,"im.message.retract":false}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	tools := &Tools{Store: f.s, Lease: f.l, IM: f.a.IM, AgentID: f.l.AgentID, FlagsFile: flagsPath}
+	dmTools, err := tools.BuildDirectMessageTools()
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := compose.NewToolNode(f.ctx(), &compose.ToolsNodeConfig{Tools: dmTools, ExecuteSequentially: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Feature flags gate group creation, member addition, and message retraction.
+	disabledGroupRes, err := invokeContextTool(node, f.ctx(), "disabled-group-call", "im_create_group_conversation", createGroupConversationArgs{WorkspaceID: f.input.WorkspaceID, Name: "Architecture Sync", MemberIDs: []string{bobID}})
+	if err != nil || !strings.Contains(disabledGroupRes, `"feature_disabled"`) {
+		t.Fatalf("expected feature_disabled when im.group.create is false, got %s (%v)", disabledGroupRes, err)
+	}
+	disabledRetractRes, err := invokeContextTool(node, f.ctx(), "disabled-retract-call", "im_retract_message", retractMessageArgs{ConversationID: groupConvID, MessageID: sentMsgID})
+	if err != nil || !strings.Contains(disabledRetractRes, `"feature_disabled"`) {
+		t.Fatalf("expected feature_disabled when im.message.retract is false, got %s (%v)", disabledRetractRes, err)
+	}
+
+	// Enable im.group.create and im.message.retract.
+	if err := os.WriteFile(flagsPath, []byte(`{"revision":"parity-enabled","flags":{"im.dm.create":true,"im.group.create":true,"im.message.retract":true}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Create group conversation (including self in MemberIDs is deduplicated/ignored cleanly).
+	createGroupArgs := createGroupConversationArgs{
+		WorkspaceID: f.input.WorkspaceID,
+		Name:        "  Architecture Sync  ",
+		MemberIDs:   []string{f.l.AgentID, bobID, bobID},
+	}
+	createGroupRes, err := invokeContextTool(node, f.ctx(), "create-group-call", "im_create_group_conversation", createGroupArgs)
+	if err != nil || !strings.Contains(createGroupRes, groupConvID) {
+		t.Fatalf("unexpected im_create_group_conversation result: %s (%v)", createGroupRes, err)
+	}
+	createGroupRef, err := f.a.ArchiveToolPath(f.ctx(), "tool_clear", contextRealIMDetail("im_create_group_conversation", "create-group-call", createGroupArgs, createGroupRes), createGroupRes)
+	if err != nil {
+		t.Fatal("failed to archive im_create_group_conversation output:", err)
+	}
+	if _, err := f.a.Read(f.ctx(), createGroupRef, 0, 0); err != nil {
+		t.Fatal("expected authorized read of archived im_create_group_conversation:", err)
+	}
+
+	// 3. Invite Charlie into the group conversation and archive its provenance.
+	addMembersArgs := addConversationMembersArgs{
+		ConversationID: groupConvID,
+		MemberIDs:      []string{charlieID},
+	}
+	addMembersRes, err := invokeContextTool(node, f.ctx(), "add-members-call", "im_add_conversation_members", addMembersArgs)
+	if err != nil || !strings.Contains(addMembersRes, charlieID) {
+		t.Fatalf("unexpected im_add_conversation_members result: %s (%v)", addMembersRes, err)
+	}
+	addMembersRef, err := f.a.ArchiveToolPath(f.ctx(), "tool_clear", contextRealIMDetail("im_add_conversation_members", "add-members-call", addMembersArgs, addMembersRes), addMembersRes)
+	if err != nil {
+		t.Fatal("failed to archive im_add_conversation_members output:", err)
+	}
+	if _, err := f.a.Read(f.ctx(), addMembersRef, 0, 0); err != nil {
+		t.Fatal("expected authorized read of archived im_add_conversation_members:", err)
+	}
+
+	// 4. Retract an Agent-authored message and archive its tombstone provenance.
+	retractArgs := retractMessageArgs{
+		ConversationID: groupConvID,
+		MessageID:      sentMsgID,
+	}
+	retractRes, err := invokeContextTool(node, f.ctx(), "retract-msg-call", "im_retract_message", retractArgs)
+	if err != nil || !strings.Contains(retractRes, `"retractedAt"`) {
+		t.Fatalf("unexpected im_retract_message result: %s (%v)", retractRes, err)
+	}
+	retractRef, err := f.a.ArchiveToolPath(f.ctx(), "tool_clear", contextRealIMDetail("im_retract_message", "retract-msg-call", retractArgs, retractRes), retractRes)
+	if err != nil {
+		t.Fatal("failed to archive im_retract_message output:", err)
+	}
+	if _, err := f.a.Read(f.ctx(), retractRef, 0, 0); err != nil {
+		t.Fatal("expected authorized read of archived im_retract_message:", err)
+	}
+
+	// 5. Revoking group membership blocks reading and cached replay for all three tools.
+	mu.Lock()
+	groupRevoked = true
+	mu.Unlock()
+	for _, ref := range []string{createGroupRef, addMembersRef, retractRef} {
+		if _, err := f.a.Read(f.ctx(), ref, 0, 0); !errors.Is(err, errContextUnavailable) {
+			t.Fatalf("expected errContextUnavailable for %s after group revocation, got %v", ref, err)
+		}
+	}
+	if _, err := invokeContextTool(node, f.ctx(), "create-group-call", "im_create_group_conversation", createGroupArgs); !errors.Is(err, errContextUnavailable) {
+		t.Fatalf("expected cached replay of im_create_group_conversation to fail after group revocation, got %v", err)
+	}
+	if _, err := invokeContextTool(node, f.ctx(), "add-members-call", "im_add_conversation_members", addMembersArgs); !errors.Is(err, errContextUnavailable) {
+		t.Fatalf("expected cached replay of im_add_conversation_members to fail after group revocation, got %v", err)
+	}
+	if _, err := invokeContextTool(node, f.ctx(), "retract-msg-call", "im_retract_message", retractArgs); !errors.Is(err, errContextUnavailable) {
+		t.Fatalf("expected cached replay of im_retract_message to fail after group revocation, got %v", err)
 	}
 }

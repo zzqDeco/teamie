@@ -334,6 +334,7 @@ export interface CreateConversationReq {
   type: string;
   name?: string;
   memberIds?: string[];
+  idempotencyKey?: string;
 }
 
 export interface ConversationResp {
@@ -343,6 +344,7 @@ export interface ConversationResp {
 export interface AddConversationMemberReq {
   id: string;
   userId: string;
+  idempotencyKey?: string;
 }
 
 export interface RemoveConversationMemberReq {

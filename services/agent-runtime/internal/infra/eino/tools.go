@@ -98,6 +98,15 @@ func (imc *IM) Call(ctx context.Context, method, path string, body any, out any)
 	return imc.callAt(ctx, imc.BaseURL, method, path, body, out)
 }
 
+// CallIdempotent binds retries to one Chat-owned mutation receipt.
+func (imc *IM) CallIdempotent(ctx context.Context, method, path, key string, body, out any) error {
+	data, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	return imc.request(ctx, imc.BaseURL, method, path, bytes.NewReader(data), "application/json", map[string]string{"Idempotency-Key": key}, out)
+}
+
 func (imc *IM) callAt(ctx context.Context, baseURL, method, path string, body any, out any) error {
 	var data []byte
 	var e error
@@ -389,7 +398,7 @@ func (t *Tools) execute(ctx context.Context, name string, args any, fn func(cont
 				return nil, e
 			}
 		}
-		if name == "im_open_direct_conversation" && out.OK {
+		if (name == "im_open_direct_conversation" || name == "im_create_group_conversation" || name == "im_add_conversation_members") && out.OK {
 			var receipt struct {
 				Data Conversation `json:"data"`
 			}
@@ -398,6 +407,18 @@ func (t *Tools) execute(ctx context.Context, name string, args any, fn func(cont
 			}
 			archive := &ContextArchive{Store: t.Store, Lease: t.Lease, IM: t.IM, Authorize: t.Authorize}
 			if e = archive.authorizeSources(ctx, []InputSource{{WorkspaceID: receipt.Data.WorkspaceID, ConversationID: receipt.Data.ID}}); e != nil {
+				return nil, e
+			}
+		}
+		if name == "im_retract_message" && out.OK {
+			var receipt struct {
+				Data Message `json:"data"`
+			}
+			if e = json.Unmarshal(cached, &receipt); e != nil {
+				return nil, e
+			}
+			archive := &ContextArchive{Store: t.Store, Lease: t.Lease, IM: t.IM, Authorize: t.Authorize}
+			if e = archive.authorizeSources(ctx, []InputSource{{ConversationID: receipt.Data.ConversationID}}); e != nil {
 				return nil, e
 			}
 		}
