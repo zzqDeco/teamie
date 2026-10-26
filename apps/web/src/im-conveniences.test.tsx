@@ -600,7 +600,12 @@ describe("PR-F IM conveniences", () => {
     await intersect(false); expect(request.mock.calls[0][2]!.aborted).toBe(true);
     await act(async () => complete(new Blob(["late"]))); expect(host.querySelector(".attachment-thumbnail")).toBeNull();
     await intersect(true); await flush(); expect(host.querySelector(".attachment-thumbnail")).not.toBeNull();
+    await act(async () => host.querySelector<HTMLButtonElement>(".attachment-thumbnail-button")!.click());
+    expect(host.querySelector('[role="dialog"]')).not.toBeNull();
     await intersect(false); expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:viewport");
     expect(host.querySelector(".attachment-thumbnail")).toBeNull();
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+    await intersect(true); await flush();
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
   });
 });

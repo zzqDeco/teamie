@@ -327,6 +327,7 @@ export function MessageAttachments({
           return next;
         });
         setPreviewErrors((previous) => ({ ...previous, [id]: !!preview.retryable }));
+        if (!preview.url) setPreviewFile((current) => current?.id === id ? null : current);
       }));
     }
     retryPreview.current = start;
@@ -337,6 +338,7 @@ export function MessageAttachments({
         else if (!observation.isIntersecting && subscriptions.has(id)) {
           subscriptions.get(id)!();
           subscriptions.delete(id);
+          setPreviewFile((current) => current?.id === id ? null : current);
           setPreviewUrls((previous) => { const next = { ...previous }; delete next[id]; return next; });
         }
       }
