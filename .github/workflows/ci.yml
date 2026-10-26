@@ -124,10 +124,13 @@ jobs:
       - name: Verify operator isolation evidence with the real Sandbox runner
         run: |
           (cd services/sandbox && go build -o "$RUNNER_TEMP/sandboxctl" ./cmd/sandboxctl)
-          probe_root=$(mktemp -d)
+          probe_root=$(sudo mktemp -d)
           trap 'sudo rm -rf "$probe_root"' EXIT
-          sudo env SANDBOX_WORKSPACE_ROOT="$probe_root" SANDBOX_RUNNER_IMAGE="$SANDBOX_TEST_RUNNER_IMAGE" \
-            "$RUNNER_TEMP/sandboxctl" isolation --nonce "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          sudo install -m 0755 "$RUNNER_TEMP/sandboxctl" "$probe_root/sandboxctl"
+          sudo mkdir "$probe_root/workspaces"
+          sudo setpriv --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs \
+            env SANDBOX_WORKSPACE_ROOT="$probe_root/workspaces" SANDBOX_RUNNER_IMAGE="$SANDBOX_TEST_RUNNER_IMAGE" \
+            "$probe_root/sandboxctl" isolation --nonce "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
       - name: Agent profile privacy and IM acceptance against fresh disposable processes
         run: bash ops/ci-agent-acceptance.sh
       - name: Restore every service database into a disposable target and verify data

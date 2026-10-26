@@ -56,7 +56,7 @@ func (p Provider) nativeModel(ctx context.Context, c domain.Config, key, raw str
 			return nil, nil, nil, domain.Err(400, "invalid_request", "Invalid message role")
 		}
 	}
-	if len(options.Tools) > 32 || len(options.DeferredTools) > 0 || options.ToolSearchTool != nil {
+	if len(options.Tools) > domain.MaxTools || len(options.DeferredTools) > 0 || options.ToolSearchTool != nil {
 		return nil, nil, nil, domain.Err(400, "invalid_request", "Unsupported tool manifest")
 	}
 	seen := map[string]bool{}

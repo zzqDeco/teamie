@@ -131,7 +131,10 @@ func probe(ctx context.Context, nonce string) (any, error) {
 	if err = os.WriteFile(filepath.Join(peer, "sentinel"), []byte(nonce), 0600); err != nil {
 		return nil, err
 	}
-	if err = os.Chown(workspace, 10001, 10001); err != nil {
+	// Match production workspace admission: the supervisor drops all Linux
+	// capabilities, so chown is unavailable. Only this private, temporary
+	// directory is writable by the isolated child; its parent stays private.
+	if err = os.Chmod(workspace, 0777); err != nil {
 		return nil, err
 	}
 	// Only fixed probe code and JSON-quoted operator scope enter the child.

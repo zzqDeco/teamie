@@ -12,6 +12,10 @@ import (
 // StreamGuardPolicy groups streaming credential-suppression and request normalization rules.
 type StreamGuardPolicy struct{}
 
+// MaxTools bounds declarations while allowing Runtime's complete tool set.
+// The transport byte and context token budgets remain independent limits.
+const MaxTools = 128
+
 // CredentialResponseError returns the canonical error when a provider leaks its credential.
 func CredentialResponseError() error {
 	return Err(502, "invalid_upstream_response", "Provider returned a credential in its response")
@@ -70,8 +74,8 @@ func NormalizeModeWithOutputLimit(raw, model string, streaming bool, outputLimit
 		return nil, Err(400, "stream_unsupported", "Use non-streaming chat completions")
 	}
 	var tools []json.RawMessage
-	if b, ok := m["tools"]; ok && (json.Unmarshal(b, &tools) != nil || len(tools) > 32) {
-		return nil, Err(400, "invalid_request", "At most 32 tools are supported")
+	if b, ok := m["tools"]; ok && (json.Unmarshal(b, &tools) != nil || len(tools) > MaxTools) {
+		return nil, Err(400, "invalid_request", "At most 128 tools are supported")
 	}
 	for _, k := range []string{"max_tokens", "max_completion_tokens"} {
 		if b, ok := m[k]; ok {
