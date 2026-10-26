@@ -163,7 +163,7 @@ func projectEvidenceTool(call *EvidenceTool, agentID, hash string, result, args 
 				ID string `json:"id"`
 			} `json:"attachment"`
 			Schedule struct {
-				ID string `json:"id"`
+				ID string `json:"scheduleId"`
 			} `json:"schedule"`
 		} `json:"data"`
 	}

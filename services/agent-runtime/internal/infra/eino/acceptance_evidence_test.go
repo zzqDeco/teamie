@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"github.com/google/uuid"
 	"strings"
+	"teamie/services/agent-runtime/internal/domain"
 	"teamie/services/agent-runtime/internal/infra/pg"
 	"testing"
 )
@@ -41,21 +42,39 @@ func TestAcceptanceEvidenceFollowsCausalRunsAndRedactsPrivateData(t *testing.T) 
 			t.Fatal(err)
 		}
 	}
+	// Serialize the production tool observation DTO, not an invented projection fixture.
+	scheduleResult, err := json.Marshal(Observation{OK: true, Data: map[string]any{"schedule": domain.ScheduleItem{ScheduleID: "sched-test", Kind: "once", Prompt: "SECRET-SCHEDULE", Status: "active"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = repo.Exec(ctx, `INSERT INTO runtime_tool_calls(run_id,call_id,name,request_hash,result) VALUES($1,'create-schedule','schedule_create','hash',$2)`, root, scheduleResult); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = repo.Exec(ctx, `INSERT INTO runtime_schedules(id,agent_id,created_run_id,kind,prompt,status,run_count,next_run_at,last_run_at) VALUES('sched-test',$1,$2,'once','SECRET-SCHEDULE','completed',1,now(),now())`, agent, root); err != nil {
+		t.Fatal(err)
+	}
 	out, err := repo.ReadAcceptanceEvidence(ctx, agent, message)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out.Runs) != 2 || len(out.Tools) != 2 {
+	if len(out.Runs) != 2 || len(out.Tools) != 3 {
 		t.Fatalf("wrong scope: %+v", out)
 	}
+	scheduled := false
 	denied := false
 	for _, call := range out.Tools {
+		if call.Name == "schedule_create" {
+			scheduled = call.OK && call.Completed && call.ScheduleID == "sched-test" && call.RunID == root
+		}
 		if call.Name == "im_list_messages" {
 			denied = call.Denied && call.ConversationID == "restricted"
 		}
 		if call.RunID == unrelated {
 			t.Fatal("unrelated run leaked")
 		}
+	}
+	if !scheduled || len(out.Schedules) != 1 || out.Schedules[0].ID != "sched-test" || out.Schedules[0].RunID != root || out.Schedules[0].RunCount != 1 || out.Schedules[0].LastRunAt == nil {
+		t.Fatalf("schedule evidence lost its creation/firing identity: %+v", out)
 	}
 	if !denied {
 		t.Fatal("missing attested denied read")
