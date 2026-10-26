@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Check, Copy } from "lucide-react";
 import katex from "katex";
@@ -213,6 +213,32 @@ function restoreMentionsText(text: string, ctx: ParseContext): string {
   });
 }
 
+// Rendered KaTeX HTML is a pure function of (formula, displayMode); a small
+// LRU avoids re-typesetting repeated formulas across rows and remounts.
+const KATEX_CACHE_LIMIT = 500;
+const katexCache = new Map<string, string>();
+function renderKatex(formula: string, displayMode: boolean): string {
+  const key = `${displayMode ? "display" : "inline"}\u0000${formula}`;
+  const cached = katexCache.get(key);
+  if (cached !== undefined) {
+    katexCache.delete(key);
+    katexCache.set(key, cached);
+    return cached;
+  }
+  const html = katex.renderToString(formula, {
+    displayMode,
+    throwOnError: false,
+    trust: false,
+    strict: "ignore",
+  });
+  katexCache.set(key, html);
+  if (katexCache.size > KATEX_CACHE_LIMIT) {
+    const oldest = katexCache.keys().next();
+    if (!oldest.done) katexCache.delete(oldest.value);
+  }
+  return html;
+}
+
 function renderMathNode(
   rawFormula: string,
   displayMode: boolean,
@@ -221,12 +247,7 @@ function renderMathNode(
   const formula = restoreMentionsText(rawFormula, ctx);
   const key = ctx.nextKey();
   try {
-    const html = katex.renderToString(formula.trim(), {
-      displayMode,
-      throwOnError: false,
-      trust: false,
-      strict: "ignore",
-    });
+    const html = renderKatex(formula.trim(), displayMode);
     return (
       <span
         key={key}
@@ -1415,15 +1436,23 @@ function renderMarkdownNodes(
   }
 }
 
-export function MessageBody({
+const noMentions: Mention[] = [];
+
+// Parsing is a pure function of (body, mentions, userId); memoizing it keeps
+// unrelated timeline re-renders from re-running the block parser.
+export const MessageBody = memo(function MessageBody({
   body,
-  mentions = [],
+  mentions = noMentions,
   userId,
 }: {
   body: string;
   mentions?: Mention[];
   userId: string;
 }) {
+  const nodes = useMemo(
+    () => (body ? renderMarkdownNodes(body, mentions, userId) : null),
+    [body, mentions, userId],
+  );
   if (!body) return null;
-  return <>{renderMarkdownNodes(body, mentions, userId)}</>;
-}
+  return <>{nodes}</>;
+});

@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent, RefObject } from "react";
 import {
   ArrowLeft,
@@ -25,7 +25,7 @@ import type {
   Message,
 } from "@teamie/api-client";
 import { errorText, sendMessage } from "./chat";
-import { chatStore, reconcileMessages } from "./store";
+import { chatStore } from "./store";
 import type { LocalMessage } from "./store";
 import { MentionInput, trimMentionDraft } from "./mentions";
 import { restoreComposerDraft, sameMentions } from "./composer-drafts";
@@ -348,25 +348,47 @@ export function RetractMessageModal({
   );
 }
 
-export function MessageItem({
+/** Date divider and compact grouping relative to the previous row. */
+export function messageGrouping(
+  message: LocalMessage,
+  previous: LocalMessage | undefined,
+) {
+  const showDate =
+    !previous ||
+    new Date(previous.createdAt).toDateString() !==
+      new Date(message.createdAt).toDateString();
+  const compact =
+    !showDate &&
+    previous?.senderId === message.senderId &&
+    new Date(message.createdAt).getTime() -
+      new Date(previous.createdAt).getTime() <
+      5 * 60_000 &&
+    !message.replyToId &&
+    !previous.retractedAt;
+  return { showDate, compact };
+}
+
+// Memoized: rows receive only primitives and referentially stable values, so a
+// timeline re-render touches just the rows whose own inputs changed.
+export const MessageItem = memo(function MessageItem({
   message,
-  index,
-  messages,
-  allMessages,
-  resolvedTargets,
+  showDate,
+  compact,
+  previousId,
+  nextId,
+  replyTarget: target,
   workspaceId,
   conversationId,
   userId,
-  members,
+  agentOwnerName,
   mentionMembers,
   mentionsEnabled,
   canEdit,
   canRetract,
-  firstUnread,
-  entryReadSeq,
+  showUnreadDivider,
   isRovingTarget,
-  highlightId,
-  actionMessageId,
+  highlighted,
+  actionsOpen,
   editing,
   editBody,
   editMentions,
@@ -386,23 +408,25 @@ export function MessageItem({
   onRetractRequest,
 }: {
   message: LocalMessage;
-  index: number;
-  messages: LocalMessage[];
-  allMessages: LocalMessage[];
-  resolvedTargets: Record<string, Message>;
+  showDate: boolean;
+  compact: boolean;
+  previousId?: string;
+  nextId?: string;
+  /** Resolved reply target (reconciled cached/store/view versions). */
+  replyTarget?: LocalMessage;
   workspaceId: string;
   conversationId: string;
   userId: string;
-  members: Member[];
+  agentOwnerName?: string;
   mentionMembers: Member[];
   mentionsEnabled: boolean;
   canEdit: boolean;
   canRetract: boolean;
-  firstUnread?: string;
-  entryReadSeq: number;
+  showUnreadDivider: boolean;
   isRovingTarget: boolean;
-  highlightId: string;
-  actionMessageId: string;
+  highlighted: boolean;
+  actionsOpen: boolean;
+  /** The message being edited, only when it is this row. */
   editing: Message | null;
   editBody: string;
   editMentions: Mention[];
@@ -423,34 +447,7 @@ export function MessageItem({
   onReply: (messageId: string) => void;
   onRetractRequest: (message: Message) => void;
 }) {
-  const previous = messages[index - 1];
-  const showDate =
-    !previous ||
-    new Date(previous.createdAt).toDateString() !==
-      new Date(message.createdAt).toDateString();
-  const compact =
-    !showDate &&
-    previous?.senderId === message.senderId &&
-    new Date(message.createdAt).getTime() -
-      new Date(previous.createdAt).getTime() <
-      5 * 60_000 &&
-    !message.replyToId &&
-    !previous.retractedAt;
-  const replyCandidates: LocalMessage[] = [];
-  if (message.replyToId) {
-    const cachedTarget = resolvedTargets[message.replyToId];
-    if (cachedTarget && cachedTarget.conversationId === conversationId)
-      replyCandidates.push(cachedTarget);
-    const storeTarget = allMessages.find((m) => m.id === message.replyToId);
-    if (storeTarget) replyCandidates.push(storeTarget);
-    const viewTarget = messages.find((m) => m.id === message.replyToId);
-    if (viewTarget) replyCandidates.push(viewTarget);
-  }
-  const target = replyCandidates.length
-    ? reconcileMessages([replyCandidates[0]], replyCandidates.slice(1))[0]
-    : undefined;
-  const actionTabIndex =
-    isRovingTarget || actionMessageId === message.id ? 0 : -1;
+  const actionTabIndex = isRovingTarget || actionsOpen ? 0 : -1;
   const [copyFeedback, setCopyFeedback] = useState<{
     ok: boolean;
     text: string;
@@ -478,7 +475,7 @@ export function MessageItem({
           <span>{date(message.createdAt)}</span>
         </div>
       )}
-      {message.id === firstUnread && entryReadSeq > 0 && (
+      {showUnreadDivider && (
         <div className="unread-divider">
           <span>以下是新消息</span>
         </div>
@@ -507,12 +504,11 @@ export function MessageItem({
             !event.ctrlKey
           ) {
             event.preventDefault();
-            const next =
-              messages[event.key === "ArrowUp" ? index - 1 : index + 1];
+            const next = event.key === "ArrowUp" ? previousId : nextId;
             if (next) {
               setActionMessageId("");
-              setFocusedMessageId(next.id);
-              focusMessage(next.id);
+              setFocusedMessageId(next);
+              focusMessage(next);
             }
             return;
           }
@@ -536,7 +532,7 @@ export function MessageItem({
             inputRef.current?.focus();
           }
         }}
-        className={`message ${highlightId === message.id ? "located" : ""} ${compact ? "compact" : ""} ${message.status || ""} ${message.retractedAt ? "retracted" : ""} ${actionMessageId === message.id ? "actions-open" : ""}`}
+        className={`message ${highlighted ? "located" : ""} ${compact ? "compact" : ""} ${message.status || ""} ${message.retractedAt ? "retracted" : ""} ${actionsOpen ? "actions-open" : ""}`}
       >
         <div className="message-avatar">
           {!compact ? (
@@ -554,12 +550,7 @@ export function MessageItem({
             <div className="message-meta">
               <b>{message.senderName}</b>
               {message.senderKind === "agent" && (
-                <AgentBadge
-                  ownerName={
-                    members.find((member) => member.userId === message.senderId)
-                      ?.ownerName
-                  }
-                />
+                <AgentBadge ownerName={agentOwnerName} />
               )}
               {message.senderId === userId && (
                 <span className="you-label">你</span>
@@ -717,12 +708,8 @@ export function MessageItem({
                 label={`消息操作：${message.senderName}`}
                 className="message-more-button"
                 tabIndex={actionTabIndex}
-                aria-expanded={actionMessageId === message.id}
-                onClick={() =>
-                  setActionMessageId(
-                    actionMessageId === message.id ? "" : message.id,
-                  )
-                }
+                aria-expanded={actionsOpen}
+                onClick={() => setActionMessageId(actionsOpen ? "" : message.id)}
               >
                 <MoreHorizontal size={ICON.md} />
               </IconButton>
@@ -780,4 +767,4 @@ export function MessageItem({
       </article>
     </Fragment>
   );
-}
+});

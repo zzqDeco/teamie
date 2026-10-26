@@ -1,9 +1,10 @@
 import {
-  useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore,
+  useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore,
 } from "react";
+import type { FormEvent } from "react";
 import { ArrowDown, ArrowUp, LoaderCircle } from "lucide-react";
 import { api, defaultAttachmentLimits } from "@teamie/api-client";
-import type { Conversation, Member, Message } from "@teamie/api-client";
+import type { Conversation, Member, Mention, Message } from "@teamie/api-client";
 import { useAttachmentDraft } from "./attachments";
 import { useAuth } from "./auth";
 import { errorText, useChat, useChatState } from "./chat";
@@ -15,16 +16,20 @@ import { Notice } from "./ui";
 import { ConversationSearch } from "./conversation-search";
 import { ICON } from "./icons";
 import {
-  clearComposerDrafts, conversationName, extendHistoryBoundary,
+  clearComposerDrafts, composerDraftEpoch, conversationName, extendHistoryBoundary,
   readComposerDraft, subscribeDrafts, useComposerReply, writeComposerDraft,
 } from "./composer-drafts";
 import type { ComposerDraft } from "./composer-drafts";
 export { clearComposerDrafts, conversationName, extendHistoryBoundary };
 import {
   ConversationBanners, ConversationEmptyStart, ConversationHeader,
-  MessageItem, RetractMessageModal, useMessageActions,
+  MessageItem, messageGrouping, RetractMessageModal, useMessageActions,
 } from "./message-item";
 import { MessageComposer } from "./message-composer";
+
+const noMessages: LocalMessage[] = [];
+const noMembers: Member[] = [];
+const noMentions: Mention[] = [];
 
 export function ConversationView({
   conversation, members, onMembers, membersOpen, onMenu,
@@ -35,14 +40,14 @@ export function ConversationView({
   onClearMessageTarget?: () => void; isWorkspaceOwner?: boolean; onInvite?: () => void;
 }) {
   const { user } = useAuth();
-  const { data, syncError, sync, sendTyping, typing } = useChat();
+  const { data, syncError, sync, sendTyping } = useChat();
   const attachmentLimits = data?.attachmentLimits || defaultAttachmentLimits;
   const attachments = useAttachmentDraft(conversation.id, attachmentLimits);
   const uploadsEnabled = !!data?.capabilities["im.attachments.upload"];
   const attachmentBlocked =
     attachments.blocked || (attachments.files.length > 0 && !uploadsEnabled);
   const snapshot = useChatState();
-  const allMessages = snapshot.messages[conversation.id] || [];
+  const allMessages = snapshot.messages[conversation.id] || noMessages;
   const readSeq = Math.max(
     conversation.readSeq,
     snapshot.conversations[conversation.id]?.readSeq ?? 0,
@@ -65,9 +70,11 @@ export function ConversationView({
   const fetchedLatest = useRef(false);
   const [located, setLocated] = useState<LocalMessage[] | null>(null);
   const [resolvedTargets, setResolvedTargets] = useState<Record<string, Message>>({});
-  const messages = located
-    ? reconcileMessages(located, allMessages.filter((m) => located.some((l) => l.id === m.id)))
-    : allMessages;
+  const messages = useMemo(() => {
+    if (!located) return allMessages;
+    const ids = new Set(located.map((l) => l.id));
+    return reconcileMessages(located, allMessages.filter((m) => ids.has(m.id)));
+  }, [located, allMessages]);
   const [highlightId, setHighlightId] = useState("");
   const [focusedMessageId, setFocusedMessageId] = useState("");
   const [locating, setLocating] = useState(false);
@@ -78,14 +85,23 @@ export function ConversationView({
   const acknowledgement = useRef<{
     id: string; seq: number; generation: number; operation: number;
   } | null>(null);
-  const { body, mentions, replyToId } = useSyncExternalStore(
+  // Composer text is owned by MessageComposer; the view subscribes only to the
+  // reply reference and the draft epoch so keystrokes never re-render it.
+  const replyToId = useSyncExternalStore(
     subscribeDrafts,
-    useCallback(() => readComposerDraft(conversation.id), [conversation.id]),
+    useCallback(() => readComposerDraft(conversation.id).replyToId, [conversation.id]),
   );
-  function updateComposerDraft(patch: Partial<ComposerDraft>) {
+  const draftEpoch = useSyncExternalStore(
+    subscribeDrafts,
+    useCallback(() => composerDraftEpoch(conversation.id), [conversation.id]),
+  );
+  const updateComposerDraft = useCallback((patch: Partial<ComposerDraft>) => {
     writeComposerDraft(conversation.id, { ...readComposerDraft(conversation.id), ...patch });
-  }
-  const mentionMembers = members.filter((member) => conversation.memberIds.includes(member.userId));
+  }, [conversation.id]);
+  const mentionMembers = useMemo(
+    () => members.filter((member) => conversation.memberIds.includes(member.userId)),
+    [members, conversation.memberIds],
+  );
   const mentionsEnabled = !!data?.capabilities["im.message.mentions"];
   const name = conversationName(conversation, user!.id, members);
   const {
@@ -103,6 +119,7 @@ export function ConversationView({
   const [atBottom, setAtBottom] = useState(true),
     [visible, setVisible] = useState(document.visibilityState === "visible");
   const scrollRef = useRef<HTMLDivElement>(null),
+    contentRef = useRef<HTMLDivElement>(null),
     inputRef = useRef<HTMLTextAreaElement>(null),
     initialScroll = useRef(true),
     lastRead = useRef(readSeq);
@@ -332,13 +349,29 @@ export function ConversationView({
       blocked: searchOpen || !visible || loading,
     };
   }, [located, unreadContext, searchOpen, visible, loading]);
+  // Rows near the viewport, tracked by IntersectionObserver so the dwell check
+  // measures only those instead of every rendered row. Without IO (jsdom,
+  // old engines) the check falls back to scanning all rows.
+  const rowVisibility = useRef<{
+    observer: IntersectionObserver;
+    observed: Set<HTMLElement>;
+    near: Set<HTMLElement>;
+    unreported: Set<HTMLElement>;
+  } | null>(null);
   const scheduleSeen = useCallback(() => {
     clearTimeout(dwell.current);
     dwell.current = setTimeout(() => {
       const el = scrollRef.current;
       if (!el || !ackState.current.allowed || ackState.current.blocked) return;
       const root = el.getBoundingClientRect();
-      for (const row of el.querySelectorAll<HTMLElement>("article[data-seq]")) {
+      const tracked = rowVisibility.current;
+      // The exact visibility test below is unchanged; IO only narrows the
+      // candidates to a superset of rows that can pass it.
+      const candidates = tracked
+        ? [...tracked.near, ...tracked.unreported]
+        : el.querySelectorAll<HTMLElement>("article[data-seq]");
+      for (const row of candidates) {
+        if (!row.dataset.seq || !el.contains(row)) continue;
         const rect = row.getBoundingClientRect();
         const inside = rect.top >= root.top - 1 && rect.bottom <= root.bottom + 1;
         const visibleHeight = Math.min(rect.bottom, root.bottom) - Math.max(rect.top, root.top);
@@ -347,6 +380,8 @@ export function ConversationView({
         if (inside || tallAndCovering || row.dataset.own === "true")
           seenRows.current.add(Number(row.dataset.seq));
       }
+      for (const row of el.querySelectorAll<HTMLElement>('article[data-seq][data-own="true"]'))
+        seenRows.current.add(Number(row.dataset.seq));
       const base = chatStore.getSnapshot().conversations[conversation.id]?.readSeq ?? 0;
       let end = base;
       while (seenRows.current.has(end + 1)) end++;
@@ -354,6 +389,49 @@ export function ConversationView({
     }, 400);
   }, [conversation.id]);
   useEffect(() => () => clearTimeout(dwell.current), []);
+  useEffect(() => {
+    const scroll = scrollRef.current;
+    if (!scroll || typeof IntersectionObserver === "undefined") return;
+    const near = new Set<HTMLElement>();
+    const unreported = new Set<HTMLElement>();
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const row = entry.target as HTMLElement;
+          unreported.delete(row);
+          if (entry.isIntersecting) near.add(row);
+          else near.delete(row);
+        }
+      },
+      // The margin keeps the candidate set a strict superset of rows within
+      // the 1px tolerance of the exact check.
+      { root: scroll, rootMargin: "64px 0px" },
+    );
+    rowVisibility.current = { observer, observed: new Set(), near, unreported };
+    return () => {
+      observer.disconnect();
+      rowVisibility.current = null;
+    };
+  }, []);
+  useEffect(() => {
+    const tracked = rowVisibility.current;
+    const scroll = scrollRef.current;
+    if (!tracked || !scroll) return;
+    for (const row of tracked.observed) {
+      if (row.isConnected) continue;
+      tracked.observer.unobserve(row);
+      tracked.observed.delete(row);
+      tracked.near.delete(row);
+      tracked.unreported.delete(row);
+    }
+    for (const row of scroll.querySelectorAll<HTMLElement>("article")) {
+      if (tracked.observed.has(row)) continue;
+      tracked.observed.add(row);
+      // Until IO reports a new row it is measured directly.
+      tracked.unreported.add(row);
+      tracked.observer.observe(row);
+    }
+  }, [messages]);
 
   useEffect(() => {
     const change = () => setVisible(document.visibilityState === "visible");
@@ -364,7 +442,10 @@ export function ConversationView({
     const scroll = scrollRef.current;
     if (!scroll || !atBottom || located || locating) return;
     const observer = new ResizeObserver(() => { scroll.scrollTop = scroll.scrollHeight; });
+    // The viewport shrinking (composer growth) and the content growing (edits,
+    // late KaTeX/font/image layout) both keep a view that was at bottom pinned.
     observer.observe(scroll);
+    if (contentRef.current) observer.observe(contentRef.current);
     return () => observer.disconnect();
   }, [atBottom, located, locating]);
   const lastTailId = useRef<string | undefined>(undefined);
@@ -516,7 +597,65 @@ export function ConversationView({
   }
   const canEdit = !!data?.capabilities["im.message.edit"];
   const canRetract = !!data?.capabilities["im.message.retract"];
-  const otherTyping = typing[conversation.id] || [];
+  // Stable handlers keep memoized rows from re-rendering when unrelated view
+  // state changes; the refs always hold the latest closures.
+  const locateRef = useRef(locate);
+  const editRef = useRef(edit);
+  useLayoutEffect(() => {
+    locateRef.current = locate;
+    editRef.current = edit;
+  });
+  const locateStable = useCallback((id: string) => locateRef.current(id), []);
+  const submitEdit = useCallback((event: FormEvent) => editRef.current(event), []);
+  const replyToMessage = useCallback((id: string) => {
+    setActionMessageId("");
+    updateComposerDraft({ replyToId: id });
+    inputRef.current?.focus();
+  }, [setActionMessageId, updateComposerDraft]);
+  const clearReply = useCallback(
+    () => updateComposerDraft({ replyToId: "" }),
+    [updateComposerDraft],
+  );
+  // Grouping and reply targets derive from neighbours/other rows; computing
+  // them once per message list (with id maps) keeps each row's props primitive
+  // or referentially stable and avoids an O(n²) reply lookup.
+  const rows = useMemo(() => {
+    const firstById = (list: LocalMessage[]) => {
+      const map = new Map<string, LocalMessage>();
+      for (const m of list) if (!map.has(m.id)) map.set(m.id, m);
+      return map;
+    };
+    const storeById = firstById(allMessages);
+    const viewById = messages === allMessages ? storeById : firstById(messages);
+    return messages.map((message, index) => {
+      let replyTarget: LocalMessage | undefined;
+      if (message.replyToId) {
+        const candidates: LocalMessage[] = [];
+        const cachedTarget = resolvedTargets[message.replyToId];
+        if (cachedTarget && cachedTarget.conversationId === conversation.id)
+          candidates.push(cachedTarget);
+        const storeTarget = storeById.get(message.replyToId);
+        if (storeTarget) candidates.push(storeTarget);
+        const viewTarget = viewById.get(message.replyToId);
+        if (viewTarget) candidates.push(viewTarget);
+        replyTarget = candidates.length
+          ? reconcileMessages([candidates[0]], candidates.slice(1))[0]
+          : undefined;
+      }
+      return {
+        ...messageGrouping(message, messages[index - 1]),
+        previousId: messages[index - 1]?.id,
+        nextId: messages[index + 1]?.id,
+        replyTarget,
+      };
+    });
+  }, [allMessages, conversation.id, messages, resolvedTargets]);
+  const agentOwners = useMemo(() => {
+    const owners = new Map<string, string | undefined>();
+    for (const member of members)
+      if (!owners.has(member.userId)) owners.set(member.userId, member.ownerName);
+    return owners;
+  }, [members]);
   const rovingMessageId =
     (focusedMessageId && messages.some((m) => m.id === focusedMessageId) ? focusedMessageId : undefined) ||
     (highlightId && messages.some((m) => m.id === highlightId) ? highlightId : undefined) ||
@@ -564,65 +703,78 @@ export function ConversationView({
           scheduleSeen();
         }}
       >
-        {!loading && !messages.length && !error && (
-          <ConversationEmptyStart
-            conversation={conversation} name={name}
-            isWorkspaceOwner={isWorkspaceOwner} onInvite={onInvite}
-          />
-        )}
-        {hasMore && (
-          <button className="load-earlier" onClick={older} disabled={loadingOlder || loadingNewer}>
-            {loadingOlder ? <LoaderCircle size={ICON.xs} className="spin" /> : <ArrowUp size={ICON.xs} />}{" "}
-            加载更早的消息
-          </button>
-        )}
-        {loading && (
-          <div className="message-loading">
-            <LoaderCircle size={ICON.md} className="spin" />
-            加载消息…
-          </div>
-        )}
-        {error && (
-          <div className="message-error">
-            <Notice>{error}</Notice>
-            <button onClick={fetchLatest}>重新加载</button>
-          </div>
-        )}
-        {messages.map((message, index) => (
-          <MessageItem
-            key={message.id} message={message} index={index} messages={messages}
-            allMessages={allMessages} resolvedTargets={resolvedTargets}
-            workspaceId={conversation.workspaceId}
-            conversationId={conversation.id} userId={userId} members={members}
-            mentionMembers={mentionMembers} mentionsEnabled={mentionsEnabled}
-            canEdit={canEdit} canRetract={canRetract} firstUnread={firstUnread}
-            entryReadSeq={entry?.readSeq ?? 0} isRovingTarget={message.id === rovingMessageId}
-            highlightId={highlightId} actionMessageId={actionMessageId} editing={editing}
-            editBody={editBody} editMentions={editMentions} actionBusy={actionBusy}
-            actionError={actionError} inputRef={inputRef}
-            setFocusedMessageId={setFocusedMessageId} setActionMessageId={setActionMessageId}
-            focusMessage={focusMessage} locate={locate} onEditSubmit={edit}
-            setEditBody={setEditBody} setEditMentions={setEditMentions}
-            setEditing={setEditing} startEdit={startEdit}
-            onReply={(id) => {
-              setActionMessageId("");
-              updateComposerDraft({ replyToId: id });
-              inputRef.current?.focus();
-            }}
-            onRetractRequest={requestRetract}
-          />
-        ))}
-        {located && unreadContext && latest < conversation.lastSeq && (
-          <button
-            className="load-earlier load-later"
-            onClick={() => void newer()}
-            disabled={loadingNewer || loadingOlder || locating}
-          >
-            {loadingNewer ? <LoaderCircle size={ICON.xs} className="spin" /> : <ArrowDown size={ICON.xs} />}{" "}
-            加载后续消息
-          </button>
-        )}
-        <div className="message-end" />
+        <div className="message-scroll-content" ref={contentRef}>
+          {!loading && !messages.length && !error && (
+            <ConversationEmptyStart
+              conversation={conversation} name={name}
+              isWorkspaceOwner={isWorkspaceOwner} onInvite={onInvite}
+            />
+          )}
+          {hasMore && (
+            <button className="load-earlier" onClick={older} disabled={loadingOlder || loadingNewer}>
+              {loadingOlder ? <LoaderCircle size={ICON.xs} className="spin" /> : <ArrowUp size={ICON.xs} />}{" "}
+              加载更早的消息
+            </button>
+          )}
+          {loading && (
+            <div className="message-loading">
+              <LoaderCircle size={ICON.md} className="spin" />
+              加载消息…
+            </div>
+          )}
+          {error && (
+            <div className="message-error">
+              <Notice>{error}</Notice>
+              <button onClick={fetchLatest}>重新加载</button>
+            </div>
+          )}
+          {messages.map((message, index) => {
+            const row = rows[index];
+            const isEditing = editing?.id === message.id;
+            return (
+              <MessageItem
+                key={message.id} message={message}
+                showDate={row.showDate} compact={row.compact}
+                previousId={row.previousId} nextId={row.nextId} replyTarget={row.replyTarget}
+                workspaceId={conversation.workspaceId}
+                conversationId={conversation.id} userId={userId}
+                agentOwnerName={
+                  message.senderKind === "agent" ? agentOwners.get(message.senderId) : undefined
+                }
+                mentionMembers={isEditing ? mentionMembers : noMembers}
+                mentionsEnabled={mentionsEnabled}
+                canEdit={canEdit} canRetract={canRetract}
+                showUnreadDivider={message.id === firstUnread && (entry?.readSeq ?? 0) > 0}
+                isRovingTarget={message.id === rovingMessageId}
+                highlighted={highlightId === message.id}
+                actionsOpen={actionMessageId === message.id}
+                editing={isEditing ? editing : null}
+                editBody={isEditing ? editBody : ""}
+                editMentions={isEditing ? editMentions : noMentions}
+                actionBusy={isEditing && actionBusy}
+                actionError={isEditing ? actionError : ""}
+                inputRef={inputRef}
+                setFocusedMessageId={setFocusedMessageId} setActionMessageId={setActionMessageId}
+                focusMessage={focusMessage} locate={locateStable} onEditSubmit={submitEdit}
+                setEditBody={setEditBody} setEditMentions={setEditMentions}
+                setEditing={setEditing} startEdit={startEdit}
+                onReply={replyToMessage}
+                onRetractRequest={requestRetract}
+              />
+            );
+          })}
+          {located && unreadContext && latest < conversation.lastSeq && (
+            <button
+              className="load-earlier load-later"
+              onClick={() => void newer()}
+              disabled={loadingNewer || loadingOlder || locating}
+            >
+              {loadingNewer ? <LoaderCircle size={ICON.xs} className="spin" /> : <ArrowDown size={ICON.xs} />}{" "}
+              加载后续消息
+            </button>
+          )}
+          <div className="message-end" />
+        </div>
       </div>
       {!atBottom && !located && !locating && (
         <button
@@ -641,18 +793,16 @@ export function ConversationView({
         </button>
       )}
       <MessageComposer
-        conversation={conversation} user={user!} name={name} body={body}
-        mentions={mentions} replyToId={replyToId} reply={reply} replyError={replyError}
+        key={`${conversation.id}\u0000${draftEpoch}`} draftEpoch={draftEpoch}
+        conversation={conversation} user={user!} name={name}
+        replyToId={replyToId} reply={reply} replyError={replyError}
         attachments={attachments} attachmentLimits={attachmentLimits}
         uploadsEnabled={uploadsEnabled} attachmentBlocked={attachmentBlocked}
         mentionMembers={mentionMembers} mentionsEnabled={mentionsEnabled}
-        otherTyping={otherTyping} inputRef={inputRef} editing={editing}
+        inputRef={inputRef} editing={editing}
         located={!!located} latestLoaded={latestLoaded} latest={latest}
         canEdit={canEdit} messages={messages} sendTyping={sendTyping}
-        onChangeDraft={(value, nextMentions) =>
-          updateComposerDraft({ body: value, mentions: nextMentions })
-        }
-        onClearReply={() => updateComposerDraft({ replyToId: "" })}
+        onClearReply={clearReply}
         onStartEdit={startEdit}
         onSent={() => {
           if (located) returnToLatest();

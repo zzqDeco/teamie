@@ -158,6 +158,8 @@ describe("ID-only composer replies", () => {
     expect(api.message).toHaveBeenLastCalledWith(conversation.id, source.id, expect.any(AbortSignal));
     expect(preview()?.textContent).toContain(current.body);
     expect(chatStore.getSnapshot().messages[conversation.id] || []).toEqual([]);
+    // Persistence is deferred; write the pending snapshot before inspecting it.
+    chatStore.flush();
     expect(localStorage.getItem(`teamie.sync.v1.${user.id}`)).not.toContain(current.body);
     expect(host.querySelectorAll(".message")).toHaveLength(0);
     await act(async () => { chatStore.merge([{ ...current, body: "", retractedAt: "2026-10-17T00:02:00Z" }]); });

@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest";
-import { ChatStore, reconcileMessages } from "./store";
-import type { LocalMessage, StorageLike } from "./store";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  ChatStore,
+  idlePersistScheduler,
+  reconcileMessages,
+  serializeSnapshot,
+} from "./store";
+import type { LocalMessage, PersistScheduler, StorageLike } from "./store";
 import type { Conversation } from "@teamie/api-client";
 const message = (changes: Partial<LocalMessage> = {}): LocalMessage => ({
   id: "m1",
@@ -295,5 +300,149 @@ describe("durable message reconciliation", () => {
       clientMessageId: "req-pending",
       status: "failed",
     });
+  });
+});
+describe("deferred snapshot persistence", () => {
+  const manualScheduler = () => {
+    const queue: Array<() => void> = [];
+    const schedule: PersistScheduler = (write) => {
+      queue.push(write);
+      return () => {
+        const index = queue.indexOf(write);
+        if (index >= 0) queue.splice(index, 1);
+      };
+    };
+    return { schedule, queue, run: () => queue.splice(0).forEach((write) => write()) };
+  };
+  const countingStorage = () => {
+    const disk = storage();
+    const setItem = vi.fn(disk.setItem);
+    return { disk: { ...disk, setItem }, setItem };
+  };
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("coalesces commits into one write that pairs entities with their cursor", () => {
+    const { disk, setItem } = countingStorage();
+    const persistence = manualScheduler();
+    const store = new ChatStore(disk, persistence.schedule);
+    store.begin("u1");
+    store.replaceConversations([conversation]);
+    store.merge([message()]);
+    store.apply({
+      events: [{ id: "5", type: "message.created", message: message({ id: "m2", clientMessageId: "r2", seq: 2 }), createdAt: message().createdAt }],
+      cursor: "5", hasMore: false,
+    });
+    expect(setItem).not.toHaveBeenCalled();
+    expect(persistence.queue).toHaveLength(1);
+    persistence.run();
+    expect(setItem).toHaveBeenCalledTimes(1);
+    const restored = new ChatStore(disk);
+    restored.begin("u1");
+    expect(restored.getSnapshot().cursor).toBe("5");
+    expect(restored.getSnapshot().messages.c1).toHaveLength(2);
+  });
+
+  it.each(["logout", "account switch"])("removes the account snapshot immediately and cancels its pending write on %s", (change) => {
+    const { disk, setItem } = countingStorage();
+    const persistence = manualScheduler();
+    const store = new ChatStore(disk, persistence.schedule);
+    store.begin("u1");
+    store.merge([message()]);
+    store.flush();
+    expect(disk.getItem("teamie.sync.v1.u1")).toContain("hello");
+    store.merge([message({ id: "m2", clientMessageId: "r2", seq: 2, body: "PRIVATE_U1" })]);
+    expect(persistence.queue).toHaveLength(1);
+    if (change === "logout") store.clear();
+    else store.begin("u2");
+    expect(disk.getItem("teamie.sync.v1.u1")).toBeNull();
+    const writes = setItem.mock.calls.length;
+    persistence.run();
+    store.flush();
+    expect(disk.getItem("teamie.sync.v1.u1")).toBeNull();
+    for (const [key, value] of setItem.mock.calls.slice(writes)) {
+      expect(key).not.toBe("teamie.sync.v1.u1");
+      expect(value).not.toContain("PRIVATE_U1");
+    }
+  });
+
+  it("persists outbound send, retry and discard state synchronously so a crash cannot lose a queued send", () => {
+    const { disk, setItem } = countingStorage();
+    const persistence = manualScheduler();
+    const store = new ChatStore(disk, persistence.schedule);
+    store.begin("u1");
+    store.replaceConversations([conversation]);
+    persistence.run();
+    // What a reload after a crash would read (raw, before restore migration).
+    const persisted = (): LocalMessage[] =>
+      JSON.parse(disk.getItem("teamie.sync.v1.u1") || "{}").messages?.c1 || [];
+    // Confirmed sync traffic stays deferred.
+    store.merge([message()]);
+    expect(persistence.queue).toHaveLength(1);
+    const writes = setItem.mock.calls.length;
+
+    // Optimistic send: written before the commit returns, with confirmed data.
+    store.merge([message({ id: "local:send-1", clientMessageId: "send-1", seq: Number.MAX_SAFE_INTEGER, body: "QUEUED", status: "sending" })]);
+    expect(setItem.mock.calls.length).toBe(writes + 1);
+    expect(persistence.queue).toHaveLength(0);
+    expect(persisted().find((m) => m.clientMessageId === "send-1")).toMatchObject({ body: "QUEUED", status: "sending" });
+    expect(persisted().some((m) => m.id === "m1")).toBe(true);
+
+    // Retry state change.
+    store.merge([message({ id: "local:send-1", clientMessageId: "send-1", seq: Number.MAX_SAFE_INTEGER, body: "QUEUED", status: "failed", permanent: false, error: "offline" })]);
+    expect(setItem.mock.calls.length).toBe(writes + 2);
+    expect(persisted().find((m) => m.clientMessageId === "send-1")).toMatchObject({ permanent: false, error: "offline" });
+
+    // Discard.
+    store.discardLocal("c1", "send-1");
+    expect(setItem.mock.calls.length).toBe(writes + 3);
+    expect(persisted().some((m) => m.clientMessageId === "send-1")).toBe(false);
+
+    // Further confirmed-only commits are deferred again.
+    store.merge([message({ id: "m2", clientMessageId: "r2", seq: 2 })]);
+    expect(setItem.mock.calls.length).toBe(writes + 3);
+    expect(persistence.queue).toHaveLength(1);
+  });
+
+  it("defaults to an idle write within about a second, and flush writes immediately", () => {
+    vi.useFakeTimers();
+    const { disk, setItem } = countingStorage();
+    const store = new ChatStore(disk, idlePersistScheduler);
+    store.begin("u1");
+    store.merge([message()]);
+    vi.advanceTimersByTime(999);
+    expect(setItem).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(setItem).toHaveBeenCalledTimes(1);
+    store.merge([message({ id: "m2", clientMessageId: "r2", seq: 2 })]);
+    store.flush();
+    expect(setItem).toHaveBeenCalledTimes(2);
+    vi.advanceTimersByTime(2000);
+    expect(setItem).toHaveBeenCalledTimes(2);
+  });
+
+  it("serializes byte-for-byte like the previous whole-snapshot format and re-stringifies only changed shards", () => {
+    const persistence = manualScheduler();
+    const store = new ChatStore(storage(), persistence.schedule);
+    store.begin("u1");
+    store.replaceConversations([conversation, { ...conversation, id: "c2" }]);
+    store.merge([
+      message(),
+      message({ id: "m2", conversationId: "c2", clientMessageId: "r2", status: "sending", seq: Number.MAX_SAFE_INTEGER }),
+    ]);
+    // Below 200 messages per conversation trimming is a no-op, so the previous
+    // format is exactly JSON.stringify(snapshot).
+    const legacy = (snapshot: ReturnType<typeof store.getSnapshot>) =>
+      JSON.stringify(snapshot);
+    expect(serializeSnapshot(store.getSnapshot())).toBe(legacy(store.getSnapshot()));
+    const stringify = vi.spyOn(JSON, "stringify");
+    store.merge([message({ id: "m3", clientMessageId: "r3", seq: 3 })]);
+    serializeSnapshot(store.getSnapshot());
+    const shardWrites = stringify.mock.calls.filter(([value]) => Array.isArray(value));
+    expect(shardWrites).toHaveLength(1);
+    expect((shardWrites[0][0] as LocalMessage[]).map((m) => m.id)).toEqual(["m1", "m3"]);
+    stringify.mockRestore();
+    expect(serializeSnapshot(store.getSnapshot())).toBe(legacy(store.getSnapshot()));
   });
 });

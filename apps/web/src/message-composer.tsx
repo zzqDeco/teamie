@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { FormEvent, KeyboardEvent, RefObject } from "react";
 import { CornerUpLeft, SendHorizontal, X } from "lucide-react";
 import type {
@@ -15,7 +15,16 @@ import type { LocalMessage } from "./store";
 import { AttachmentDraft, AttachmentPicker } from "./attachments";
 import type { useAttachmentDraft } from "./attachments";
 import { isComposingKey, MentionInput, trimMentionDraft } from "./mentions";
-import { extendHistoryBoundary, writeComposerDraft } from "./composer-drafts";
+import {
+  composerTextRevision,
+  extendHistoryBoundary,
+  flushComposerDrafts,
+  readComposerDraft,
+  subscribeDrafts,
+  writeComposerDraft,
+  writeComposerText,
+} from "./composer-drafts";
+import { useTypingUsers } from "./typing-store";
 import { IconButton } from "./ui";
 import { ICON } from "./icons";
 
@@ -23,8 +32,7 @@ export function MessageComposer({
   conversation,
   user,
   name,
-  body,
-  mentions,
+  draftEpoch,
   replyToId,
   reply,
   replyError,
@@ -34,7 +42,6 @@ export function MessageComposer({
   attachmentBlocked,
   mentionMembers,
   mentionsEnabled,
-  otherTyping,
   inputRef,
   editing,
   located,
@@ -43,7 +50,6 @@ export function MessageComposer({
   canEdit,
   messages,
   sendTyping,
-  onChangeDraft,
   onClearReply,
   onStartEdit,
   onSent,
@@ -51,8 +57,8 @@ export function MessageComposer({
   conversation: Conversation;
   user: User;
   name: string;
-  body: string;
-  mentions: Mention[];
+  /** Draft generation from `composerDraftEpoch`; the parent remounts on change. */
+  draftEpoch: string;
   replyToId: string;
   reply?: Message;
   replyError?: string;
@@ -62,7 +68,6 @@ export function MessageComposer({
   attachmentBlocked: boolean;
   mentionMembers: Member[];
   mentionsEnabled: boolean;
-  otherTyping: Array<{ userId: string; displayName: string }>;
   inputRef: RefObject<HTMLTextAreaElement | null>;
   editing: Message | null;
   located: boolean;
@@ -71,12 +76,36 @@ export function MessageComposer({
   canEdit: boolean;
   messages: LocalMessage[];
   sendTyping: (conversationId: string, active: boolean) => void;
-  onChangeDraft: (body: string, mentions: Mention[]) => void;
   onClearReply: () => void;
   onStartEdit: (message: Message) => void;
   onSent: () => void;
 }) {
   const lastTyping = useRef(0);
+  // Text lives here so keystrokes re-render only the composer, not the
+  // conversation timeline. The parent remounts this component per
+  // conversation and draft epoch, so the initial read is always current.
+  // Restoring a failed message replaces the stored text from outside; the
+  // revision change reloads it here without remounting the textarea.
+  const textRevision = useSyncExternalStore(
+    subscribeDrafts,
+    useCallback(() => composerTextRevision(conversation.id), [conversation.id]),
+  );
+  const [draft, setDraft] = useState(() => {
+    const stored = readComposerDraft(conversation.id);
+    return { body: stored.body, mentions: stored.mentions, revision: textRevision };
+  });
+  if (draft.revision !== textRevision) {
+    const stored = readComposerDraft(conversation.id);
+    setDraft({ body: stored.body, mentions: stored.mentions, revision: textRevision });
+  }
+  const { body, mentions } = draft;
+
+  function changeDraft(value: string, nextMentions: Mention[]) {
+    setDraft({ body: value, mentions: nextMentions, revision: textRevision });
+    writeComposerText(conversation.id, draftEpoch, value, nextMentions);
+  }
+
+  useEffect(() => () => flushComposerDrafts(), []);
 
   useEffect(
     () => () => {
@@ -95,8 +124,8 @@ export function MessageComposer({
 
   function submit(event?: FormEvent) {
     event?.preventDefault();
-    const draft = trimMentionDraft(body, mentions);
-    const text = draft.body;
+    const trimmed = trimMentionDraft(body, mentions);
+    const text = trimmed.body;
     if (
       (!text && !attachments.ready) ||
       text.length > 8000 ||
@@ -110,7 +139,7 @@ export function MessageComposer({
       clientMessageId,
       conversationId: conversation.id,
       body: text,
-      ...(draft.mentions.length ? { mentions: draft.mentions } : {}),
+      ...(trimmed.mentions.length ? { mentions: trimmed.mentions } : {}),
       ...(files.length ? { attachments: files } : {}),
       senderId: user.id,
       senderName: user.displayName,
@@ -125,6 +154,7 @@ export function MessageComposer({
       mentions: [],
       replyToId: "",
     });
+    setDraft({ body: "", mentions: [], revision: textRevision });
     lastTyping.current = 0;
     sendTyping(conversation.id, false);
     onSent();
@@ -211,12 +241,13 @@ export function MessageComposer({
       <form
         className={`composer ${replyToId ? "with-reply" : ""}`}
         onSubmit={submit}
+        onBlur={flushComposerDrafts}
       >
         <MentionInput
           inputRef={inputRef}
           value={body}
           mentions={mentions}
-          onChange={onChangeDraft}
+          onChange={changeDraft}
           members={mentionMembers}
           enabled={mentionsEnabled}
           onTyping={(value) => {
@@ -267,15 +298,23 @@ export function MessageComposer({
         </div>
       </form>
       <div className="composer-footer">
-        <span>
-          {otherTyping.length
-            ? `${otherTyping.map((x) => x.displayName).join("、")} 正在输入…`
-            : ""}
-        </span>
+        <TypingIndicator conversationId={conversation.id} />
         <span>
           <kbd>Enter</kbd> 发送 · <kbd>Shift + Enter</kbd> 换行
         </span>
       </div>
     </div>
+  );
+}
+
+/** Subscribes to typing hints itself so they never re-render the timeline. */
+function TypingIndicator({ conversationId }: { conversationId: string }) {
+  const otherTyping = useTypingUsers(conversationId);
+  return (
+    <span>
+      {otherTyping.length
+        ? `${otherTyping.map((x) => x.displayName).join("、")} 正在输入…`
+        : ""}
+    </span>
   );
 }

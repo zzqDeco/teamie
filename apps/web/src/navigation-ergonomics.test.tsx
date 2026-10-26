@@ -588,7 +588,7 @@ describe("PR-3 navigation & notification ergonomics", () => {
     );
   });
 
-  it("persists composer drafts synchronously in sessionStorage, retains drafts across stale localStorage restore, and clears them on logout", async () => {
+  it("persists composer drafts in sessionStorage by pagehide, retains drafts across stale localStorage restore, and clears them on logout", async () => {
     await mount("/app/w/team/c/general");
     const textarea = container.querySelector<HTMLTextAreaElement>(
       'textarea[aria-label="消息内容"]',
@@ -604,6 +604,8 @@ describe("PR-3 navigation & notification ergonomics", () => {
       setter?.call(textarea, "未发送的草稿内容");
       textarea!.dispatchEvent(new Event("input", { bubbles: true }));
     });
+    // Keystrokes persist debounced; leaving the page writes them immediately.
+    window.dispatchEvent(new Event("pagehide"));
     expect(sessionStorage.getItem("teamie.drafts.v1:owner")).toContain(
       "未发送的草稿内容",
     );
