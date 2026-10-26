@@ -358,6 +358,27 @@ func (t *Tools) execute(ctx context.Context, name string, args any, fn func(cont
 				return nil, e
 			}
 		}
+		if name == "schedule_update" && out.OK {
+			var receipt struct {
+				Data struct {
+					Schedule scheduleView `json:"schedule"`
+				} `json:"data"`
+			}
+			if e = json.Unmarshal(cached, &receipt); e != nil || receipt.Data.Schedule.ScheduleID == "" {
+				return nil, ErrReplayConflict
+			}
+			archive := &ContextArchive{Store: t.Store, Lease: t.Lease, IM: t.IM, Authorize: t.Authorize}
+			sources, srcErr := archive.scheduleSourcesByID(ctx, run.AgentID, receipt.Data.Schedule.ScheduleID)
+			if srcErr == nil {
+				srcErr = archive.authorizeSources(ctx, sources)
+			}
+			if srcErr != nil {
+				if errors.Is(srcErr, errContextUnavailable) {
+					_ = t.Store.Repo().CancelActiveSchedule(ctx, run.AgentID, receipt.Data.Schedule.ScheduleID)
+				}
+				return nil, srcErr
+			}
+		}
 		if name == "im_list_workspace_members" && out.OK {
 			var args listWorkspaceMembersArgs
 			if json.Unmarshal(payload, &args) != nil || !validUUID(args.WorkspaceID) {

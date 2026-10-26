@@ -11,8 +11,10 @@ COPY pkg/ /src/pkg/
 COPY contracts/gen/agent/ /src/contracts/gen/agent/
 COPY services/sandbox/ ./
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X teamie/pkg/httpx.BuildVersion=$VERSION -X teamie/pkg/httpx.BuildSHA=$COMMIT_SHA" -o /service ./cmd
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /sandboxctl ./cmd/sandboxctl
 
 FROM alpine:3.22
 RUN apk add --no-cache ca-certificates tzdata
 COPY --from=build /service /app/service
+COPY --from=build /sandboxctl /app/sandboxctl
 ENTRYPOINT ["/app/service"]

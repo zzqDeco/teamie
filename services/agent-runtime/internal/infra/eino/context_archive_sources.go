@@ -47,6 +47,8 @@ func contextArgumentHashes(name, argument string) []string {
 		parsers = []any{&runtimeClockArgs{}}
 	case "schedule_create":
 		parsers = []any{&scheduleCreateArgs{}}
+	case "schedule_update":
+		parsers = []any{&scheduleUpdateArgs{}}
 	case "schedule_list":
 		parsers = []any{&scheduleListArgs{}}
 	case "schedule_cancel":
