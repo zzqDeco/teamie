@@ -10,6 +10,7 @@ import { AgentAvatar, AgentBadge } from "./agent-ui";
 import { Avatar, Button, Modal, Notice } from "./ui";
 import type { Participant } from "./participants";
 import { ICON } from "./icons";
+import { toast } from "./toast";
 export function ParticipantIdentity({ member }: { member: Member }) {
   return (
     <>
@@ -76,6 +77,7 @@ export function GroupMembersDialog({
         : await api.addConversationMember(conversation.id, member.userId);
       if (generation !== chatStore.generation) return false;
       chatStore.addConversation(result.conversation);
+      if (!remove) toast.success(`已将 ${member.displayName} 加入小组`);
       await Promise.all([
         refresh(),
         client.invalidateQueries({ queryKey: ["members"] }),

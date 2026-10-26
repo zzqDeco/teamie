@@ -170,7 +170,7 @@ describe("connection banner", () => {
 });
 
 describe("modal dismissal", () => {
-  it("ignores Escape and backdrop clicks when not dismissible but keeps the close button", async () => {
+  it("blocks Escape, backdrop and the close button alike when not dismissible", async () => {
     const close = vi.fn();
     await act(async () => {
       root.render(<Modal title="T" onClose={close} dismissible={false}><input /></Modal>);
@@ -178,9 +178,9 @@ describe("modal dismissal", () => {
     await act(async () => {
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
       host.querySelector(".modal-backdrop")!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      host.querySelector<HTMLButtonElement>(".modal-close")!.click();
     });
     expect(close).not.toHaveBeenCalled();
-    await act(async () => { host.querySelector<HTMLButtonElement>(".modal-close")!.click(); });
-    expect(close).toHaveBeenCalledTimes(1);
+    expect(host.querySelector(".modal-close")!.getAttribute("aria-disabled")).toBe("true");
   });
 });

@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { Home, Menu, Plus } from "lucide-react";
 import { Button, IconButton } from "./ui";
+import { FieldError } from "./password-field";
 import { ICON } from "./icons";
 
 export function parseInviteCode(raw: string): string {
@@ -32,6 +33,9 @@ export function Welcome({
   const navigate = useNavigate();
   const [inviteInput, setInviteInput] = useState("");
   const inviteCode = parseInviteCode(inviteInput);
+  const inputId = useId();
+  const hintId = useId();
+  const unparsable = !!inviteInput.trim() && !inviteCode;
   function submitInvite(event: FormEvent) {
     event.preventDefault();
     if (!inviteCode) return;
@@ -58,26 +62,36 @@ export function Welcome({
         <p>
           创建一个团队，开始协作。
           <br />
-          已有团队邀请？输入邀请链接或邀请码即可加入。
+          已有工作空间邀请？粘贴工作空间邀请链接即可加入。
         </p>
         <Button onClick={onCreate}>
           <Plus size={ICON.md} />
           创建工作空间
         </Button>
         <form className="welcome-join-form" onSubmit={submitInvite}>
+          <label htmlFor={inputId}>加入工作空间：粘贴工作空间邀请链接</label>
           <input
+            id={inputId}
             value={inviteInput}
             onChange={(event) => setInviteInput(event.target.value)}
-            placeholder="粘贴邀请链接或输入邀请码"
-            aria-label="邀请链接或邀请码"
+            placeholder="https://…/join/…"
+            autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            aria-invalid={unparsable || undefined}
+            aria-describedby={unparsable ? hintId : undefined}
           />
-          <Button
-            type="submit"
-            className="secondary"
-            disabled={!inviteCode}
-          >
-            加入团队
+          <Button type="submit" variant="secondary" disabled={!inviteCode}>
+            加入工作空间
           </Button>
+          <FieldError
+            id={hintId}
+            message={
+              unparsable
+                ? "请粘贴 /join/ 开头的工作空间邀请链接，注册邀请码请在注册页使用"
+                : undefined
+            }
+          />
         </form>
       </div>
     </div>

@@ -194,4 +194,10 @@ summary:focus-visible,
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+  /* Loading must stay perceivable: keep a slow, linear spinner rotation. */
+  .spin {
+    animation-duration: 1.5s !important;
+    animation-iteration-count: infinite !important;
+    animation-timing-function: linear !important;
+  }
 }

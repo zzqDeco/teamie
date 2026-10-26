@@ -17,11 +17,13 @@ import { ForgotPassword, ResetPassword } from "./password-recovery";
 import { Shell } from "./shell";
 import { applyTheme, useThemePreference } from "./theme";
 import { Button, Loading, Logo, Notice } from "./ui";
+import { Toaster } from "./toast";
 import "@fontsource-variable/dm-sans";
 import "./tokens.css";
 import "./styles.css";
 import "./layout.css";
 import "./password-recovery.css";
+import "./feedback.css";
 applyTheme();
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: true } },
@@ -89,6 +91,7 @@ createRoot(document.getElementById("root")!).render(
       <BrowserRouter>
         <AuthProvider>
           <App />
+          <Toaster />
         </AuthProvider>
       </BrowserRouter>
     </QueryClientProvider>

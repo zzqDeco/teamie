@@ -393,6 +393,18 @@ func TestInputArrivesWhileModelRunsBeyondProcessingPage(t *testing.T) {
 	e, f, base, _ := fixtureEngine(t, s)
 	gateway := &blockingGatewayFixture{fixtureGateway: base, first: make(chan struct{}), release: make(chan struct{})}
 	e.Gateway = gateway
+	// A poll at cursor 5 can only start after the preceding tick has ingested
+	// and pushed the fifth event. Database persistence alone precedes Push.
+	nextPoll := make(chan struct{})
+	var pollOnce sync.Once
+	im := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/sync" && r.URL.Query().Get("cursor") == "5" {
+			pollOnce.Do(func() { close(nextPoll) })
+		}
+		f.serve(w, r)
+	}))
+	defer im.Close()
+	e.Config.IMURL = im.URL
 	for i := 0; i < 4; i++ {
 		f.add("silent initial "+string(rune('a'+i)), "")
 	}
@@ -407,7 +419,11 @@ func TestInputArrivesWhileModelRunsBeyondProcessingPage(t *testing.T) {
 	waitFor(t, func() bool { return count(t, s, `SELECT count(*) FROM runtime_inputs WHERE state='pending'`) == 1 })
 	// The processing batch fills the former LIMIT 4 page. The fifth input must
 	// already be pushed into the active native loop before the model completes.
-	time.Sleep(100 * time.Millisecond)
+	select {
+	case <-nextPoll:
+	case <-time.After(5 * time.Second):
+		t.Fatal("fifth input was not pushed while the original model call waited")
+	}
 	close(gateway.release)
 	waitFor(t, func() bool {
 		return count(t, s, `SELECT count(*) FROM runtime_runs WHERE state='interrupted' AND safe_error='new_input'`) == 1 && count(t, s, `SELECT count(*) FROM runtime_runs WHERE state='completed'`) == 1

@@ -21,6 +21,7 @@ import type {
 import { useAuth } from "./auth";
 import { errorText } from "./chat";
 import { Button, IconButton, Modal, Notice } from "./ui";
+import { toast } from "./toast";
 import { ICON } from "./icons";
 export type InviteStatus = "available" | "used" | "revoked" | "expired";
 export function registrationInviteStatus(
@@ -112,6 +113,7 @@ export function PlatformInvitations() {
       if (sessionToken !== api.csrfToken) return;
       if (created?.invite.id === revoking.id) setCreated(null);
       setRevoking(null);
+      toast.success(`已撤销邀请码 #${revoking.id.slice(-8)}`);
       await client.invalidateQueries({ queryKey: key });
     } catch (e) {
       if (sessionToken === api.csrfToken) {
@@ -127,6 +129,7 @@ export function PlatformInvitations() {
     try {
       await navigator.clipboard.writeText(value);
       setCopied(target);
+      toast.success(target === "code" ? "邀请码已复制" : "邀请链接已复制");
     } catch {
       setError("复制未成功，请选中内容后手动复制。");
     }
@@ -248,7 +251,7 @@ export function PlatformInvitations() {
             </button>
           </div>
           {copied && (
-            <span className="copy-confirmation" role="status">
+            <span className="copy-confirmation">
               {copied === "code" ? "邀请码" : "邀请链接"}已复制。
             </span>
           )}
@@ -279,7 +282,8 @@ export function PlatformInvitations() {
           <div className="admin-empty">
             <Notice>邀请码记录加载失败，请重新刷新。</Notice>
             <Button
-              className="secondary small-button"
+              variant="secondary"
+              size="sm"
               onClick={() => void query.refetch()}
             >
               重新加载
@@ -368,6 +372,7 @@ export function PlatformInvitations() {
           title="撤销这个注册邀请？"
           subtitle="撤销后，这个邀请码与对应注册链接将立即失效。已注册的账户不会受影响。"
           onClose={closeRevoke}
+          dismissible={!busy}
         >
           <div className="revoke-details">
             <span>邀请码编号</span>
@@ -376,10 +381,15 @@ export function PlatformInvitations() {
           </div>
           <Notice>{error}</Notice>
           <div className="modal-actions">
-            <Button className="secondary" onClick={closeRevoke}>
+            <Button
+              variant="secondary"
+              onClick={closeRevoke}
+              disabled={busy}
+              data-autofocus
+            >
               保留邀请
             </Button>
-            <Button className="danger" busy={busy} onClick={revoke}>
+            <Button variant="danger" busy={busy} onClick={revoke}>
               确认撤销
             </Button>
           </div>

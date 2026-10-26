@@ -6,6 +6,7 @@ import { api, ApiError } from "@teamie/api-client";
 import type { PasswordResetInspection } from "@teamie/api-client";
 import { useAuth } from "./auth";
 import { passwordPolicyError } from "./password-policy";
+import { PasswordField } from "./password-field";
 import { Button, Logo, Notice } from "./ui";
 import { ICON } from "./icons";
 
@@ -58,7 +59,14 @@ function fragmentToken(fragment: string) {
   return values.length === 1 ? values[0] : "";
 }
 type ResetState = "checking" | "valid" | "invalid" | "expired" | "error" | "success";
-type PasswordField = "newPassword" | "confirmPassword";
+type Field = "newPassword" | "confirmPassword";
+function resetFieldError(field: Field, data: FormData): string {
+  const newPassword = String(data.get("newPassword") || "");
+  const confirmation = String(data.get("confirmPassword") || "");
+  if (field === "newPassword") return passwordPolicyError(newPassword);
+  if (!confirmation) return "请再次输入新密码。";
+  return newPassword !== confirmation ? "两次输入的新密码不一致。" : "";
+}
 
 export function ResetPassword() {
   const location = useLocation();
@@ -89,7 +97,7 @@ function ResetPasswordForm({ fragment }: { fragment: string }) {
   const [attempt, setAttempt] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [invalidField, setInvalidField] = useState<PasswordField>();
+  const [invalidField, setInvalidField] = useState<Field>();
   const formRef = useRef<HTMLFormElement>(null);
   const pending = useRef(false);
   const mounted = useRef(false);
@@ -133,6 +141,16 @@ function ResetPasswordForm({ fragment }: { fragment: string }) {
     }
   }, [busy, error, invalidField]);
 
+  function revalidate(event: FormEvent<HTMLFormElement>) {
+    const target = event.target as HTMLInputElement;
+    if (!invalidField || target.name !== invalidField) return;
+    const message = resetFieldError(invalidField, new FormData(event.currentTarget));
+    if (!message) {
+      setError("");
+      setInvalidField(undefined);
+    } else if (message !== error) setError(message);
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (pending.current || loading || state !== "valid" || !inspection) return;
@@ -143,15 +161,15 @@ function ResetPasswordForm({ fragment }: { fragment: string }) {
     const form = event.currentTarget;
     const data = new FormData(form);
     const newPassword = String(data.get("newPassword") || "");
-    const confirmation = String(data.get("confirmPassword") || "");
-    const policyError = passwordPolicyError(newPassword);
-    if (policyError || newPassword !== confirmation) {
-      setError(policyError || "两次输入的新密码不一致。");
-      const field = policyError ? "newPassword" : "confirmPassword";
-      setInvalidField(field);
-      const input = form.elements.namedItem(field);
-      if (input instanceof HTMLInputElement) input.focus();
-      return;
+    for (const field of ["newPassword", "confirmPassword"] as const) {
+      const message = resetFieldError(field, data);
+      if (message) {
+        setError(message);
+        setInvalidField(field);
+        const input = form.elements.namedItem(field);
+        if (input instanceof HTMLInputElement) input.focus();
+        return;
+      }
     }
     pending.current = true;
     setBusy(true);
@@ -213,10 +231,10 @@ function ResetPasswordForm({ fragment }: { fragment: string }) {
         <>
           <div className="reset-account"><b>{inspection.account.displayName}</b><span>{inspection.account.emailMasked}</span></div>
           <p className="reset-expiry">链接有效期至 {new Date(inspection.expiresAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })}</p>
-          <form ref={formRef} onSubmit={submit} aria-busy={busy}>
+          <form ref={formRef} onSubmit={submit} onInput={revalidate} aria-busy={busy} noValidate>
             <Notice id={errorId}>{error}</Notice>
-            <label>新密码<input type="password" name="newPassword" autoComplete="new-password" placeholder="至少 12 个字符" minLength={12} required disabled={busy} aria-invalid={invalidField === "newPassword" || undefined} aria-describedby={invalidField === "newPassword" ? errorId : undefined} /></label>
-            <label>确认新密码<input type="password" name="confirmPassword" autoComplete="new-password" placeholder="再次输入新密码" required disabled={busy} aria-invalid={invalidField === "confirmPassword" || undefined} aria-describedby={invalidField === "confirmPassword" ? errorId : undefined} /></label>
+            <PasswordField name="newPassword" label="新密码" autoComplete="new-password" placeholder="至少 12 个字符" readOnly={busy} error={invalidField === "newPassword" ? error : undefined} showRules />
+            <PasswordField name="confirmPassword" label="确认新密码" autoComplete="new-password" placeholder="再次输入新密码" readOnly={busy} error={invalidField === "confirmPassword" ? error : undefined} confirmOf="newPassword" mismatchMessage="两次输入的新密码不一致。" />
             <small className="field-help reset-session-help">重置后，该账号原有的登录会话将失效。</small>
             <Button type="submit" className="full-width" busy={busy} disabled={loading}>重置密码<ArrowRight size={ICON.md} /></Button>
           </form>

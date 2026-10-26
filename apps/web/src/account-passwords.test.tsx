@@ -315,7 +315,10 @@ describe("account password settings", () => {
     });
     expect(api.changePassword).toHaveBeenCalledExactlyOnceWith(currentPassword, newPassword);
     expect(find<HTMLButtonElement>('.password-settings button[type="submit"]').disabled).toBe(true);
-    expect(Array.from(form.querySelectorAll("input"), (input) => input.disabled)).toEqual([true, true, true]);
+    // Inputs stay focusable while pending (disabling would drop focus to body).
+    expect(Array.from(form.querySelectorAll("input"), (input) => input.disabled)).toEqual([false, false, false]);
+    expect(Array.from(form.querySelectorAll("input"), (input) => input.readOnly)).toEqual([true, true, true]);
+    expect(Array.from(form.querySelectorAll("input"), (input) => input.getAttribute("aria-disabled"))).toEqual(["true", "true", "true"]);
     await settle(() => finish());
     expect(find("[data-location]").textContent).toBe("/login?passwordChanged=1");
   });
