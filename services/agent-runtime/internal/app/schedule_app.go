@@ -219,12 +219,15 @@ func (s *Service) EvaluateScheduleUpdate(ctx context.Context, lease *domain.Leas
 		if err := s.Sessions.CheckLeaseForUpdate(txCtx, lease); err != nil {
 			return err
 		}
+		var recovered *domain.ScheduleItem
 		if s.ToolReceipts != nil {
-			if savedSnapshot, found, obsErr := s.ToolReceipts.ReadObservation(txCtx, runID, callID, domain.ScheduleUpdateObservationKey); obsErr == nil && found {
-				var recovered domain.ScheduleItem
-				if json.Unmarshal(savedSnapshot, &recovered) == nil && recovered.ScheduleID == id {
-					resultItem = &recovered
-					return nil
+			saved, found, err := s.ToolReceipts.ReadObservation(txCtx, runID, callID, domain.ScheduleUpdateObservationKey)
+			if err != nil {
+				return err
+			}
+			if found {
+				if json.Unmarshal(saved, &recovered) != nil || recovered == nil || recovered.ScheduleID != id {
+					return domain.ErrReplayConflict
 				}
 			}
 		}
@@ -236,13 +239,16 @@ func (s *Service) EvaluateScheduleUpdate(ctx context.Context, lease *domain.Leas
 			obsErrCode = "not_found"
 			return nil
 		}
-		if existing.Status != "active" {
+		if existing.Status != "active" && recovered == nil {
 			obsErrCode = "schedule_not_active"
 			return nil
 		}
 		createdRunID, sourceRefsJSON, sourceOverflow, metaFound, metaErr := s.Schedules.GetScheduleSourcesMeta(txCtx, lease.AgentID, id)
 		if metaErr != nil {
 			return metaErr
+		}
+		if !metaFound || s.IM == nil {
+			return domain.ErrContextUnavailable
 		}
 		var existingRefs []domain.InputSource
 		if metaFound {
@@ -260,6 +266,10 @@ func (s *Service) EvaluateScheduleUpdate(ctx context.Context, lease *domain.Leas
 				return srcErr
 			}
 		}
+		if recovered != nil {
+			resultItem = recovered
+			return nil
+		}
 		now, err := s.Schedules.ClockNow(txCtx)
 		if err != nil {
 			return err
@@ -271,22 +281,26 @@ func (s *Service) EvaluateScheduleUpdate(ctx context.Context, lease *domain.Leas
 		}
 		refs, overflow := domain.ExtractInputSources(runInputs)
 		if overflow || len(refs) == 0 {
-			if s.Archive != nil {
-				resolved, srcErr := s.Archive.ResolveRunSources(txCtx, lease.AgentID, runID)
-				if srcErr == nil && len(resolved) > 0 {
-					refs, overflow = resolved, false
-				}
+			if s.Archive == nil {
+				return domain.ErrContextUnavailable
+			}
+			var err error
+			refs, err = s.Archive.ResolveRunSources(txCtx, lease.AgentID, runID)
+			if err != nil {
+				return err
+			}
+			if len(refs) == 0 {
+				return domain.ErrContextUnavailable
 			}
 		}
-		if len(existingRefs) > 0 {
-			combined := append(append([]domain.InputSource{}, existingRefs...), refs...)
-			if canon, canonErr := domain.CanonicalContextSources(combined); canonErr == nil && len(canon) > 0 {
-				refs = canon
-				overflow = false
-			} else if len(refs) == 0 {
-				refs = existingRefs
-			}
+		refs, err = domain.CanonicalContextSources(append(existingRefs, refs...))
+		if err != nil {
+			return err
 		}
+		if err = s.IM.AuthorizeSources(txCtx, refs); err != nil {
+			return err
+		}
+		overflow = false
 		updated, err := s.Schedules.UpdateSchedule(txCtx, lease.AgentID, id, validated, refs, overflow, now)
 		if err != nil {
 			return err

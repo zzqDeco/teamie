@@ -197,7 +197,7 @@ func TestDirectMessageToolsGuardSelfDMFeatureFlagAndHistoricalRuns(t *testing.T)
 	if strings.Contains(oldInstruction, "im_open_direct_conversation") || strings.Contains(oldInstruction, "teamie-autonomous-subject-v1") || strings.Contains(oldInstruction, "TEAMIE_AGENT_PERSONA") {
 		t.Fatal("old instruction leaked directMessageGuidance or autonomousSubjectInstruction")
 	}
-	newInstruction := contextInstruction(def, ContextBudgetSnapshot{EventDrivenInputs: true, DirectMessages: true})
+	newInstruction := contextInstruction(def, ContextBudgetSnapshot{EventDrivenInputs: true, DirectMessages: true, ScheduledWakeups: true})
 	behaviorHasGuidance(t, newInstruction,
 		"teamie-autonomous-subject-v1",
 		"独立主体",

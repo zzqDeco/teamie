@@ -101,12 +101,12 @@ type ScheduleInputPayload struct {
 
 // StableScheduleID computes the deterministic schedule ID for a tool call within a Run.
 func StableScheduleID(agentID, runID, callID string) string {
-	return "sched-" + Digest([]byte(agentID+"/"+runID+"/"+callID))[:40]
+	return "sched-" + Digest([]byte(agentID + "/" + runID + "/" + callID))[:40]
 }
 
 // DefaultHeartbeatScheduleID computes the deterministic schedule ID for an Agent's cold-start 1-hour heartbeat.
 func DefaultHeartbeatScheduleID(agentID string) string {
-	return "sched-heartbeat-" + Digest([]byte("default-heartbeat/v1/"+agentID))[:32]
+	return "sched-heartbeat-" + Digest([]byte("default-heartbeat/v1/" + agentID))[:32]
 }
 
 // ScheduleNotificationID returns the deterministic notification ID for a firing schedule step.
@@ -428,8 +428,16 @@ func ValidateScheduleUpdateSpec(existing ScheduleItem, patch ScheduleSpec, now t
 		intervalSeconds *int64
 		maxRuns         *int
 	)
+	if existing.MaxRuns != nil {
+		value := *existing.MaxRuns
+		maxRuns = &value
+	}
+	reschedule := patch.Kind != "" && patch.Kind != existing.Kind || patch.DelaySeconds != 0 || runAtRaw != "" || patch.IntervalSeconds != 0 || cronExpr != "" || patch.Timezone != ""
 	switch kind {
 	case "once":
+		if !reschedule {
+			runAtRaw = existing.NextRunAt
+		}
 		if (patch.DelaySeconds > 0 && runAtRaw != "") || (patch.DelaySeconds <= 0 && runAtRaw == "") || patch.IntervalSeconds != 0 || cronExpr != "" || patch.MaxRuns < 0 || patch.MaxRuns > 1 {
 			return ValidatedScheduleSpec{}, "invalid_arguments"
 		}
@@ -502,6 +510,13 @@ func ValidateScheduleUpdateSpec(existing ScheduleItem, patch ScheduleSpec, now t
 		nextRunAt = next.UTC()
 	default:
 		return ValidatedScheduleSpec{}, "invalid_arguments"
+	}
+	if !reschedule {
+		previous, err := time.Parse(time.RFC3339Nano, existing.NextRunAt)
+		if err != nil {
+			return ValidatedScheduleSpec{}, "invalid_arguments"
+		}
+		nextRunAt = previous
 	}
 	return ValidatedScheduleSpec{
 		Kind:            kind,

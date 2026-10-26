@@ -319,7 +319,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 				activeTools = append(activeTools, webTools...)
 			}
 			if budget.ScheduledWakeups {
-				scheduleTools, err := (&Tools{Store: e.Store, Lease: lease, IM: imc, OwnerID: def.OwnerId, AgentID: def.Id, FlagsFile: e.Config.FlagsFile, Authorize: authorize}).BuildScheduleTools()
+				scheduleTools, err := (&Tools{Store: e.Store, Lease: lease, IM: imc, OwnerID: def.OwnerId, AgentID: def.Id, FlagsFile: e.Config.FlagsFile, Authorize: authorize}).BuildScheduleTools(budget.DirectMessages)
 				if err != nil {
 					return nil, err
 				}
@@ -348,7 +348,11 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 				instruction += webSearchGuidance
 			}
 			if budget.ScheduledWakeups {
-				instruction += scheduleWakeupGuidance
+				if budget.DirectMessages {
+					instruction += autonomousScheduleGuidance
+				} else {
+					instruction += scheduleWakeupGuidance
+				}
 			}
 			if budget.DirectMessages {
 				instruction += directMessageGuidance

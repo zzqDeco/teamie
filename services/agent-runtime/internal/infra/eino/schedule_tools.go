@@ -25,6 +25,13 @@ const (
 )
 
 const scheduleWakeupGuidance = `
+Scheduled wakeups and deterministic clock
+Every input envelope (TEAMIE_NEW_MESSAGE, TEAMIE_TASK_NOTIFICATION, TEAMIE_SCHEDULE_WAKEUP) includes a server-authored UTC RFC3339 createdAt timestamp. When you need the current wall-clock time, local timezone conversion or weekday, call runtime_clock.
+Use schedule_create to register a durable future or recurring self-wakeup (kind: "once", "interval", or "cron"), schedule_list to inspect your active schedules, and schedule_cancel to cancel a schedule you no longer need. Never use workspace_execute sleep loops or polling to wait for a future time.
+When woken by a TEAMIE_SCHEDULE_WAKEUP envelope, its body contains the self-scheduled prompt and scheduleId identifies the firing schedule. Waking up does not automatically send any IM message; send an IM message only if the scheduled task requires notifying a conversation and current destination access permits it.
+`
+
+const autonomousScheduleGuidance = `
 Scheduled wakeups, default 1-hour heartbeat, and deterministic clock
 Every input envelope (TEAMIE_NEW_MESSAGE, TEAMIE_TASK_NOTIFICATION, TEAMIE_SCHEDULE_WAKEUP) includes a server-authored UTC RFC3339 createdAt timestamp. When you need the current wall-clock time, local timezone conversion or weekday, call runtime_clock.
 You start with a default 1-hour recurring autonomous heartbeat schedule (intervalSeconds: 3600) so you have cold-start agency even when nobody speaks to you. You have full autonomy over this heartbeat and all your schedules:
@@ -90,7 +97,7 @@ func nextCronTime(expr, tzName string, after time.Time) (time.Time, error) {
 	return domain.NextCronTime(expr, tzName, after)
 }
 
-func (t *Tools) BuildScheduleTools() ([]tool.BaseTool, error) {
+func (t *Tools) BuildScheduleTools(autonomous ...bool) ([]tool.BaseTool, error) {
 	clockTool, err := utils.InferTool("runtime_clock", "Return the current server UTC and local time, timezone offset, weekday and unix timestamp. Call this whenever you need current wall-clock time or local timezone alignment.", func(ctx context.Context, args *runtimeClockArgs) (*Observation, error) {
 		run, err := CurrentRun(ctx)
 		if err != nil {
@@ -235,12 +242,16 @@ func (t *Tools) BuildScheduleTools() ([]tool.BaseTool, error) {
 		return nil, err
 	}
 
+	if len(autonomous) == 0 || !autonomous[0] {
+		return []tool.BaseTool{clockTool, createTool, listTool, cancelTool}, nil
+	}
+
 	updateTool, err := utils.InferTool("schedule_update", "Modify an active schedule (such as your default 1-hour heartbeat) in place: shorten or lengthen intervalSeconds, change the next trigger time (delaySeconds or runAt), switch kind (interval, cron, once), or update prompt.", func(ctx context.Context, args *scheduleUpdateArgs) (*Observation, error) {
 		run, err := CurrentRun(ctx)
 		if err != nil {
 			return nil, err
 		}
-		if !scheduledWakeupsForRun(run) {
+		if !scheduledWakeupsForRun(run) || !directMessagesForRun(run) {
 			return nil, errors.New("schedule_not_admitted")
 		}
 		return t.execute(ctx, "schedule_update", args, func(ctx context.Context, _ string) (*Observation, error) {
