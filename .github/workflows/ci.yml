@@ -124,7 +124,7 @@ jobs:
       - name: Verify operator isolation evidence with the real Sandbox runner
         run: |
           (cd services/sandbox && go build -o "$RUNNER_TEMP/sandboxctl" ./cmd/sandboxctl)
-          probe_root=$(mktemp -d)
+          probe_root=$(sudo mktemp -d)
           trap 'sudo rm -rf "$probe_root"' EXIT
           sudo setpriv --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs \
             env SANDBOX_WORKSPACE_ROOT="$probe_root" SANDBOX_RUNNER_IMAGE="$SANDBOX_TEST_RUNNER_IMAGE" \
