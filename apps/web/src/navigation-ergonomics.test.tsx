@@ -423,7 +423,7 @@ describe("PR-3 navigation & notification ergonomics", () => {
     await mount("/app");
 
     const input = container.querySelector<HTMLInputElement>(
-      'input[aria-label="邀请链接或邀请码"]',
+      ".welcome-join-form input",
     );
     expect(input).toBeTruthy();
     await act(async () => {

@@ -140,7 +140,13 @@ export function WorkspaceDialog({
       title={titles[kind][0]}
       subtitle={titles[kind][1]}
       onClose={onClose}
-      dismissible={!busy && !dirty && !(invite && !copied)}
+      busy={busy}
+      dirty={dirty || (!!invite && !copied)}
+      discardMessage={
+        invite && !copied
+          ? "邀请链接还没有复制，确定关闭吗？"
+          : "放弃未保存的更改？"
+      }
     >
       <form onSubmit={submit} onInput={() => setDirty(true)}>
         <Notice>{error}</Notice>
@@ -272,7 +278,7 @@ export function WorkspaceDialog({
           </div>
         )}
         <div className="modal-actions">
-          <Button type="button" className="secondary" onClick={onClose}>
+          <Button type="button" variant="secondary" onClick={onClose}>
             {invite ? "完成" : "取消"}
           </Button>
           {!invite && (
@@ -291,7 +297,7 @@ export function WorkspaceDialog({
                 : kind === "workspace"
                   ? "创建工作空间"
                   : kind === "direct"
-                    ? "开始私聊"
+                    ? "开始私信"
                     : kind === "group"
                       ? "创建小组"
                       : "创建频道"}

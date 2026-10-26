@@ -54,7 +54,7 @@ export function WorkspaceVisibilityFields({
     <fieldset className="agent-visibility" disabled={disabled}>
       <legend>
         <Eye size={ICON.sm} />
-        可见团队
+        可见工作空间
       </legend>
       <p>选择的团队成员可以发现此 Agent。</p>
       {workspaces.length ? (

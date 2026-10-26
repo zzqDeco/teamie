@@ -33,6 +33,7 @@ import {
   snapshotAgentProfile,
 } from "./agent-management";
 import { Button, Modal, Notice } from "./ui";
+import { toast } from "./toast";
 import { ICON } from "./icons";
 const queryRetry = (count: number, error: Error) =>
   !(error instanceof ApiError && [401, 403, 404].includes(error.status)) &&
@@ -73,7 +74,7 @@ function WorkspaceChips({
       ) : (
         <span className="private-agent-chip">
           <Eye size={ICON.xs} />
-          未选择团队
+          未选择工作空间
         </span>
       )}
     </div>
@@ -144,6 +145,11 @@ function AgentProfileDialog({
       ]);
       navigate(`/app/agents/${response.agent.id}`);
       onClose();
+      toast.success(
+        initialAgent
+          ? `已保存「${response.agent.name}」的资料`
+          : `已创建 Agent「${response.agent.name}」`,
+      );
     } catch (e) {
       if (sessionToken === api.csrfToken) setError(agentFailureText(e));
     } finally {
@@ -154,7 +160,8 @@ function AgentProfileDialog({
     <Modal
       title={initialAgent ? "编辑 Agent 资料" : "创建 Agent"}
       onClose={onClose}
-      dismissible={!busy && !dirty}
+      busy={busy}
+      dirty={dirty}
     >
       <form onSubmit={submit} onInput={() => setDirty(true)}>
         <Notice>{error}</Notice>
@@ -212,7 +219,7 @@ function AgentProfileDialog({
           <i />
         </label>
         <div className="modal-actions">
-          <Button type="button" className="secondary" onClick={onClose}>
+          <Button type="button" variant="secondary" onClick={onClose}>
             取消
           </Button>
           <Button type="submit" busy={busy} disabled={!name.trim()}>
@@ -262,7 +269,7 @@ export function MyAgents() {
       ) : query.error ? (
         <div className="agents-empty">
           <Notice>Agent 列表暂时无法加载，请稍后重试。</Notice>
-          <Button className="secondary" onClick={() => void query.refetch()}>
+          <Button variant="secondary" onClick={() => void query.refetch()}>
             重新加载
           </Button>
         </div>
@@ -351,6 +358,11 @@ export function AgentDetail({ agentId }: { agentId: string }) {
       });
       if (token !== api.csrfToken) return;
       client.setQueryData(["agent", user!.id, agentId], response);
+      toast.success(
+        response.agent.enabled
+          ? `已启用「${response.agent.name}」`
+          : `已停用「${response.agent.name}」`,
+      );
       await Promise.all([
         client.invalidateQueries({ queryKey: ["agents"] }),
         client.invalidateQueries({ queryKey: ["workspaceAgents"] }),
@@ -378,6 +390,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         client.invalidateQueries({ queryKey: ["bootstrap"] }),
       ]);
       navigate("/app/agents", { replace: true });
+      toast.success(`已删除「${agent.name}」`);
     } catch (e) {
       if (token === api.csrfToken) setError(agentFailureText(e));
     } finally {
@@ -442,12 +455,12 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         <div className="agent-detail-actions">
           {editable && (
             <>
-              <Button className="secondary" onClick={() => setEditing(true)}>
+              <Button variant="secondary" onClick={() => setEditing(true)}>
                 <Pencil size={ICON.xs} />
                 编辑资料
               </Button>
               <Button
-                className={agent.enabled ? "secondary" : ""}
+                variant={agent.enabled ? "secondary" : "primary"}
                 busy={busy}
                 disabled={!agent.enabled && !canEnable}
                 aria-describedby={
@@ -482,7 +495,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
           <h2>团队可见范围</h2>
           {editable && (
             <button onClick={() => setEditing(true)}>
-              调整可见团队 <Pencil size={ICON.xs} />
+              调整可见工作空间 <Pencil size={ICON.xs} />
             </button>
           )}
         </header>
@@ -499,7 +512,8 @@ export function AgentDetail({ agentId }: { agentId: string }) {
             <p>删除后停止工作，保留已有消息。</p>
           </div>
           <Button
-            className="secondary danger-text"
+            variant="secondary"
+            className="danger-text"
             onClick={() => setDeleting(true)}
           >
             <Trash2 size={ICON.xs} />
@@ -519,14 +533,20 @@ export function AgentDetail({ agentId }: { agentId: string }) {
           title={`删除「${agent.name}」？`}
           subtitle="删除后，这个 Agent 将停止工作并从发现列表移除，已有聊天消息仍会保留。"
           onClose={closeDelete}
+          dismissible={!busy}
         >
           <Notice>{error}</Notice>
           <div className="modal-actions">
-            <Button className="secondary" onClick={closeDelete}>
+            <Button
+              variant="secondary"
+              onClick={closeDelete}
+              disabled={busy}
+              data-autofocus
+            >
               保留 Agent
             </Button>
             <Button
-              className="danger"
+              variant="danger"
               busy={busy}
               onClick={() => void remove()}
             >
