@@ -402,7 +402,7 @@ describe("PR-F IM conveniences", () => {
 
     // Only the PNG is fetched for inline preview; SVG is never auto-fetched
     expect(downloadSpy).toHaveBeenCalledTimes(1);
-    expect(downloadSpy).toHaveBeenCalledWith(channelOne.id, rasterAttachment.id);
+    expect(downloadSpy).toHaveBeenCalledWith(channelOne.id, rasterAttachment.id, expect.any(AbortSignal));
     expect(createUrl).toHaveBeenCalledWith(blob);
 
     const thumb = host.querySelector<HTMLImageElement>("img.attachment-thumbnail");
@@ -561,5 +561,46 @@ describe("PR-F IM conveniences", () => {
       chatStore.clear();
     });
     expect(localStorage.getItem(`teamie.nav.${owner.id}`)).toBeNull();
+  });
+  it("Escape from a timeline image lightbox closes the modal", async () => {
+    vi.spyOn(api, "attachmentContent").mockResolvedValue(new Blob(["png"], { type: "image/png" }));
+    vi.stubGlobal("URL", class extends URL { static createObjectURL = vi.fn(() => "blob:probe"); static revokeObjectURL = vi.fn(); });
+    vi.mocked(api.messages).mockResolvedValue({ messages: [makeMessage(1, peer.id, "picture", { attachments: [rasterAttachment] }), makeMessage(2)], hasMore: false });
+    await mountConversation();
+    await act(async () => { const button = host.querySelector<HTMLButtonElement>(".attachment-thumbnail-button")!; button.focus(); button.click(); });
+    const trigger = host.querySelector<HTMLButtonElement>(".attachment-thumbnail-button")!;
+    const close = host.querySelector<HTMLButtonElement>('[role="dialog"] button')!;
+    expect(close).toBeTruthy();
+    await act(async () => { close.focus(); close.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true })); });
+    expect(host.querySelector('[role="dialog"]')!.contains(document.activeElement)).toBe(true);
+    const dialogButtons = host.querySelectorAll<HTMLButtonElement>('[role="dialog"] button');
+    await act(async () => { dialogButtons[dialogButtons.length - 1].focus(); document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true })); });
+    expect(host.querySelector('[role="dialog"]')!.contains(document.activeElement)).toBe(true);
+    await act(async () => { close.focus(); close.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); });
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("starts previews near the viewport, aborts them on exit, and releases rendered images", async () => {
+    const observed: Element[] = [];
+    let callback!: IntersectionObserverCallback;
+    let observer!: IntersectionObserver;
+    vi.stubGlobal("IntersectionObserver", class {
+      constructor(cb: IntersectionObserverCallback) { callback = cb; observer = this as unknown as IntersectionObserver; }
+      observe(element: Element) { observed.push(element); }
+      disconnect() {}
+    });
+    vi.stubGlobal("URL", class extends URL { static createObjectURL = vi.fn(() => "blob:viewport"); static revokeObjectURL = vi.fn(); });
+    let complete!: (blob: Blob) => void;
+    const request = vi.spyOn(api, "attachmentContent").mockImplementationOnce(() => new Promise<Blob>((resolve) => { complete = resolve; })).mockResolvedValue(new Blob(["png"]));
+    await act(async () => root.render(<MessageAttachments conversationId={channelOne.id} attachments={[rasterAttachment]} />));
+    expect(request).not.toHaveBeenCalled();
+    const intersect = async (visible: boolean) => act(async () => callback([{ target: observed[0], isIntersecting: visible } as IntersectionObserverEntry], observer));
+    await intersect(true); expect(request).toHaveBeenCalledTimes(1);
+    await intersect(false); expect(request.mock.calls[0][2]!.aborted).toBe(true);
+    await act(async () => complete(new Blob(["late"]))); expect(host.querySelector(".attachment-thumbnail")).toBeNull();
+    await intersect(true); await flush(); expect(host.querySelector(".attachment-thumbnail")).not.toBeNull();
+    await intersect(false); expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:viewport");
+    expect(host.querySelector(".attachment-thumbnail")).toBeNull();
   });
 });
