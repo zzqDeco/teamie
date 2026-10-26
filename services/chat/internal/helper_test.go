@@ -194,6 +194,7 @@ func (s *Store) App(identity httpx.Identity, controlToken string) *app.Service {
 	}
 	return &app.Service{
 		Tx:             repo,
+		Mutations:      repo,
 		Workspaces:     repo,
 		Conversations:  repo,
 		Memberships:    repo,

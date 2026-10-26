@@ -173,9 +173,11 @@ func projectEvidenceTool(call *EvidenceTool, agentID, hash string, result, args 
 	call.OK = obs.OK
 	call.Denied = !obs.OK && (obs.Error == "forbidden" || obs.Error == "not_found")
 	switch call.Name {
-	case "im_send_message":
+	case "im_send_message", "im_retract_message":
 		call.MessageID = obs.Data.ID
 		call.ConversationID = obs.Data.ConversationID
+	case "im_open_direct_conversation", "im_create_group_conversation", "im_add_conversation_members":
+		call.ConversationID = obs.Data.ID
 	case "im_upload_file":
 		call.AttachmentID = obs.Data.Attachment.ID
 		call.ConversationID = obs.Data.ConversationID
