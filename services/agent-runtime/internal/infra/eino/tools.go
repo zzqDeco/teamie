@@ -389,7 +389,7 @@ func (t *Tools) execute(ctx context.Context, name string, args any, fn func(cont
 				return nil, e
 			}
 		}
-		if name == "im_open_direct_conversation" && out.OK {
+		if (name == "im_open_direct_conversation" || name == "im_create_group_conversation" || name == "im_add_conversation_members") && out.OK {
 			var receipt struct {
 				Data Conversation `json:"data"`
 			}
@@ -398,6 +398,18 @@ func (t *Tools) execute(ctx context.Context, name string, args any, fn func(cont
 			}
 			archive := &ContextArchive{Store: t.Store, Lease: t.Lease, IM: t.IM, Authorize: t.Authorize}
 			if e = archive.authorizeSources(ctx, []InputSource{{WorkspaceID: receipt.Data.WorkspaceID, ConversationID: receipt.Data.ID}}); e != nil {
+				return nil, e
+			}
+		}
+		if name == "im_retract_message" && out.OK {
+			var receipt struct {
+				Data Message `json:"data"`
+			}
+			if e = json.Unmarshal(cached, &receipt); e != nil {
+				return nil, e
+			}
+			archive := &ContextArchive{Store: t.Store, Lease: t.Lease, IM: t.IM, Authorize: t.Authorize}
+			if e = archive.authorizeSources(ctx, []InputSource{{ConversationID: receipt.Data.ConversationID}}); e != nil {
 				return nil, e
 			}
 		}

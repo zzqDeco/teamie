@@ -17,7 +17,7 @@ const contextIMArgumentsKey = "context-im-arguments-v1"
 
 func contextIMTool(name string) bool {
 	switch name {
-	case "im_get_message", "im_list_messages", "im_list_conversations", "im_send_message", "im_get_attachment", "im_upload_file", "im_list_workspace_members", "im_open_direct_conversation", "schedule_create", "schedule_update", "schedule_list", "schedule_cancel":
+	case "im_get_message", "im_list_messages", "im_list_conversations", "im_send_message", "im_get_attachment", "im_upload_file", "im_list_workspace_members", "im_open_direct_conversation", "im_create_group_conversation", "im_add_conversation_members", "im_retract_message", "schedule_create", "schedule_update", "schedule_list", "schedule_cancel":
 		return true
 	}
 	return false
@@ -154,12 +154,18 @@ func (a *ContextArchive) imReceiptSources(ctx context.Context, runID, call, name
 			return nil, errContextUnavailable
 		}
 		refs = append(refs, InputSource{WorkspaceID: page.WorkspaceID})
-	case "im_open_direct_conversation":
+	case "im_open_direct_conversation", "im_create_group_conversation", "im_add_conversation_members":
 		var conversation Conversation
 		if json.Unmarshal(observation.Data, &conversation) != nil || !validUUID(conversation.ID) || !validUUID(conversation.WorkspaceID) {
 			return nil, errContextUnavailable
 		}
 		refs = append(refs, InputSource{ConversationID: conversation.ID, WorkspaceID: conversation.WorkspaceID})
+	case "im_retract_message":
+		var message Message
+		if json.Unmarshal(observation.Data, &message) != nil || !validUUID(message.ID) || !validUUID(message.ConversationID) || message.RetractedAt == nil || message.Body != "" || len(message.Attachments) != 0 {
+			return nil, errContextUnavailable
+		}
+		refs = append(refs, InputSource{ConversationID: message.ConversationID})
 	case "schedule_create", "schedule_update":
 		var created struct {
 			Schedule scheduleView `json:"schedule"`
