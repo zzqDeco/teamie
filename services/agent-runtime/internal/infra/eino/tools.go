@@ -195,7 +195,12 @@ type Message struct {
 	Attachments    []Attachment     `json:"attachments,omitempty"`
 	Mentions       []imtext.Mention `json:"mentions,omitempty"`
 }
+type Workspace struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
 type Bootstrap struct {
+	Workspaces    []Workspace    `json:"workspaces"`
 	Conversations []Conversation `json:"conversations"`
 	SyncCursor    string         `json:"syncCursor"`
 }
@@ -350,6 +355,28 @@ func (t *Tools) execute(ctx context.Context, name string, args any, fn func(cont
 		if name == "schedule_list" && out.OK {
 			archive := &ContextArchive{Store: t.Store, Lease: t.Lease, IM: t.IM, Authorize: t.Authorize}
 			if e = archive.authorizeScheduleListReceipt(ctx, run.AgentID, cached); e != nil {
+				return nil, e
+			}
+		}
+		if name == "im_list_workspace_members" && out.OK {
+			var args listWorkspaceMembersArgs
+			if json.Unmarshal(payload, &args) != nil || !validUUID(args.WorkspaceID) {
+				return nil, ErrReplayConflict
+			}
+			archive := &ContextArchive{Store: t.Store, Lease: t.Lease, IM: t.IM, Authorize: t.Authorize}
+			if e = archive.authorizeSources(ctx, []InputSource{{WorkspaceID: args.WorkspaceID}}); e != nil {
+				return nil, e
+			}
+		}
+		if name == "im_open_direct_conversation" && out.OK {
+			var receipt struct {
+				Data Conversation `json:"data"`
+			}
+			if e = json.Unmarshal(cached, &receipt); e != nil {
+				return nil, e
+			}
+			archive := &ContextArchive{Store: t.Store, Lease: t.Lease, IM: t.IM, Authorize: t.Authorize}
+			if e = archive.authorizeSources(ctx, []InputSource{{WorkspaceID: receipt.Data.WorkspaceID, ConversationID: receipt.Data.ID}}); e != nil {
 				return nil, e
 			}
 		}

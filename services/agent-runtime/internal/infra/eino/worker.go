@@ -325,6 +325,13 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 				}
 				activeTools = append(activeTools, scheduleTools...)
 			}
+			if budget.DirectMessages {
+				dmTools, err := (&Tools{Store: e.Store, Lease: lease, IM: imc, OwnerID: def.OwnerId, AgentID: def.Id, FlagsFile: e.Config.FlagsFile, Authorize: authorize}).BuildDirectMessageTools()
+				if err != nil {
+					return nil, err
+				}
+				activeTools = append(activeTools, dmTools...)
+			}
 			pipeline, err := NewContextPipeline(ctx, ContextPipelineConfig{Model: gatewayModel, Budget: budget, Backend: archive, ArchivePath: archive.Path, ArchiveToolPath: archive.ArchiveToolPath, ArchiveTranscript: archive.ArchiveTranscript})
 			if err != nil {
 				return nil, err
@@ -342,6 +349,9 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 			}
 			if budget.ScheduledWakeups {
 				instruction += scheduleWakeupGuidance
+			}
+			if budget.DirectMessages {
+				instruction += directMessageGuidance
 			}
 			return adk.NewTypedChatModelAgent(ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{Name: "teamie_agent", Description: "A user-owned Teamie participant", Instruction: instruction, Model: gatewayModel, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: activeTools, ExecuteSequentially: true}}, MaxIterations: math.MaxInt, Handlers: handlers, ModelRetryConfig: pipeline.RetryConfig()})
 		}
@@ -457,7 +467,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		// their persisted selection even when the flag or gateway changes.
 		if e.Config.FlagsFile != "" && runtimeFlag(e.Config.FlagsFile, "agents.context.v1") {
 			profile = contextProfileV1
-			budget, err = newRunContextBudget(int(contextWindow.Load()), runtimeFlag(e.Config.FlagsFile, "agents.files.deliver.v1"), runtimeFlag(e.Config.FlagsFile, "agents.mentions.v1"), runtimeFlag(e.Config.FlagsFile, "agents.web.v1"), runtimeFlag(e.Config.FlagsFile, "agents.schedule.v1"))
+			budget, err = newRunContextBudget(int(contextWindow.Load()), runtimeFlag(e.Config.FlagsFile, "agents.files.deliver.v1"), runtimeFlag(e.Config.FlagsFile, "agents.mentions.v1"), runtimeFlag(e.Config.FlagsFile, "agents.web.v1"), runtimeFlag(e.Config.FlagsFile, "agents.schedule.v1"), runtimeFlag(e.Config.FlagsFile, "im.dm.create"))
 			if err != nil {
 				return nil, nil, nil, err
 			}

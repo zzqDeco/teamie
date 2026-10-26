@@ -17,7 +17,7 @@ const contextIMArgumentsKey = "context-im-arguments-v1"
 
 func contextIMTool(name string) bool {
 	switch name {
-	case "im_get_message", "im_list_messages", "im_list_conversations", "im_send_message", "im_get_attachment", "im_upload_file", "schedule_create", "schedule_list", "schedule_cancel":
+	case "im_get_message", "im_list_messages", "im_list_conversations", "im_send_message", "im_get_attachment", "im_upload_file", "im_list_workspace_members", "im_open_direct_conversation", "schedule_create", "schedule_list", "schedule_cancel":
 		return true
 	}
 	return false
@@ -145,6 +145,21 @@ func (a *ContextArchive) imReceiptSources(ctx context.Context, runID, call, name
 			return nil, err
 		}
 		refs = append(refs, actual...)
+	case "im_list_workspace_members":
+		var page struct {
+			WorkspaceID string            `json:"workspaceId"`
+			Members     []WorkspaceMember `json:"members"`
+		}
+		if json.Unmarshal(observation.Data, &page) != nil || !validUUID(page.WorkspaceID) || page.Members == nil {
+			return nil, errContextUnavailable
+		}
+		refs = append(refs, InputSource{WorkspaceID: page.WorkspaceID})
+	case "im_open_direct_conversation":
+		var conversation Conversation
+		if json.Unmarshal(observation.Data, &conversation) != nil || !validUUID(conversation.ID) || !validUUID(conversation.WorkspaceID) {
+			return nil, errContextUnavailable
+		}
+		refs = append(refs, InputSource{ConversationID: conversation.ID, WorkspaceID: conversation.WorkspaceID})
 	case "schedule_create":
 		var created struct {
 			Schedule scheduleView `json:"schedule"`

@@ -41,6 +41,7 @@ type ContextBudgetSnapshot struct {
 	EventDrivenInputs    bool   `json:"eventDrivenInputs,omitempty"`
 	WebSearch            bool   `json:"webSearch,omitempty"`
 	ScheduledWakeups     bool   `json:"scheduledWakeups,omitempty"`
+	DirectMessages       bool   `json:"directMessages,omitempty"`
 }
 
 func makeContextBudgetSnapshot(window int) (ContextBudgetSnapshot, error) {

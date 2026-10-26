@@ -35,6 +35,10 @@ func contextArgumentHashes(name, argument string) []string {
 		parsers = []any{&getAttachmentArgs{}}
 	case "im_upload_file":
 		parsers = []any{&uploadFileArgs{}}
+	case "im_list_workspace_members":
+		parsers = []any{&listWorkspaceMembersArgs{}}
+	case "im_open_direct_conversation":
+		parsers = []any{&openDirectConversationArgs{}}
 	case "web_search":
 		parsers = []any{&webSearchArgs{}}
 	case "web_fetch":
