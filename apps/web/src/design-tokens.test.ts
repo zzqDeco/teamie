@@ -67,7 +67,10 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
     tokenMap.set(match[1], match[2].trim());
   }
 
-  it("defines complete color, surface, typography, radius, shadow, and spacing tokens", () => {
+  it("declares cascade @layer order and defines complete color, surface, typography, radius, shadow, spacing, z-index, and layout tokens", () => {
+    expect(readFileSync(join(srcDir, "layers.css"), "utf8")).toContain(
+      "@layer tokens, base, components, features, layout, utilities;",
+    );
     const required = [
       "--text-strong",
       "--text",
@@ -81,8 +84,25 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
       "--danger",
       "--danger-hover",
       "--on-danger",
+      "--scrollbar-thumb",
+      "--scrollbar-thumb-hover",
+      "--backdrop",
+      "--switch-bg",
+      "--switch-on",
+      "--status-online",
+      "--status-connecting",
+      "--status-offline",
       "--font-sans",
       "--font-mono",
+      "--font-xs",
+      "--font-sm",
+      "--font-base",
+      "--font-md",
+      "--font-lg",
+      "--font-xl",
+      "--font-2xl",
+      "--font-3xl",
+      "--font-4xl",
       "--bg",
       "--surface",
       "--surface-sunken",
@@ -108,6 +128,13 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
       "--space-6",
       "--space-8",
       "--space-12",
+      "--z-dropdown",
+      "--z-drawer",
+      "--z-popover",
+      "--z-modal",
+      "--z-toast",
+      "--header-h",
+      "--header-h-mobile",
     ];
     for (const name of required) {
       expect(tokenMap.has(name), `missing token ${name}`).toBe(true);
@@ -118,7 +145,7 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
     expect(tokensCss).toContain("font-size: var(--font-md);");
   });
 
-  it("ensures every text token meets WCAG AA >= 4.5:1 across all light surfaces", () => {
+  it("ensures every text token meets WCAG AA >= 4.5:1 and non-text UI tokens meet >= 3:1 across all light surfaces", () => {
     const surfaces = [
       "#ffffff",
       tokenMap.get("--bg")!,
@@ -145,6 +172,22 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
         ).toBeGreaterThanOrEqual(4.5);
       }
     }
+    const nonTextTokens = [
+      "--switch-bg",
+      "--switch-on",
+      "--status-online",
+      "--status-connecting",
+      "--status-offline",
+    ];
+    for (const token of nonTextTokens) {
+      const fg = tokenMap.get(token)!;
+      for (const bg of [...surfaces, tokenMap.get("--lavender")!]) {
+        expect(
+          contrastRatio(fg, bg),
+          `${token} (${fg}) on ${bg}`,
+        ).toBeGreaterThanOrEqual(3);
+      }
+    }
     expect(
       contrastRatio(tokenMap.get("--brand")!, "#ffffff"),
     ).toBeGreaterThanOrEqual(4.5);
@@ -156,20 +199,27 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
     }
   });
 
-  it("eliminates sub-11px and fractional font sizes, non-standard font weights, and unmapped low-contrast text hexes", () => {
-    const decorativeAllowlist = new Set(["#e2daef", "#e4d9ed", "#e2d3ee"]);
+  it("enforces @layer blocks, token-only font-size declarations, standard font weights, and zero raw hex colors outside tokens.css", () => {
     for (const file of cssFiles) {
       const content = readFileSync(join(srcDir, file), "utf8");
+      expect(content, `${file} must declare @layer`).toMatch(/@layer\s+\w+/);
       for (const match of content.matchAll(/font-size\s*:\s*([^;}\n]+)/gi)) {
-        const pxMatch = /^(\d+(?:\.\d+)?)px/.exec(match[1].trim());
+        const value = match[1].trim();
+        const pxMatch = /^(\d+(?:\.\d+)?)px/.exec(value);
         if (pxMatch) {
           const px = Number(pxMatch[1]);
-          expect(px, `${file}: font-size ${match[1]}`).toBeGreaterThanOrEqual(
-            11,
-          );
+          expect(px, `${file}: font-size ${value}`).toBeGreaterThanOrEqual(11);
           expect(
             Number.isInteger(px),
-            `${file}: fractional font-size ${match[1]}`,
+            `${file}: fractional font-size ${value}`,
+          ).toBe(true);
+        }
+        if (file !== "tokens.css") {
+          expect(
+            value.startsWith("var(--font-") ||
+              value.startsWith("clamp(") ||
+              value === "inherit",
+            `${file}: raw font-size "${value}" must use var(--font-*) or clamp(...)`,
           ).toBe(true);
         }
       }
@@ -181,19 +231,10 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
         ).toBe(true);
       }
       if (file === "tokens.css") continue;
-      for (const match of content.matchAll(
-        /(?<![-\w])color\s*:\s*(#[0-9a-fA-F]{3,8})/g,
-      )) {
-        const hex = match[1].toLowerCase();
-        if (decorativeAllowlist.has(hex)) continue;
-        const rgb = parseHex(hex);
-        if (!rgb) continue;
-        // Any remaining literal hex must be white/light on a dark button/badge surface
-        expect(
-          luminance(rgb),
-          `${file}: unmapped text color ${hex}`,
-        ).toBeGreaterThan(0.62);
-      }
+      expect(
+        [...content.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map((m) => m[0]),
+        `${file} should contain zero raw hex color literals`,
+      ).toEqual([]);
     }
   });
 });
@@ -263,7 +304,7 @@ describe("PR-5 CSS cleanup, unified focus, icon scale & self-hosted DM Sans", ()
     }
   });
 
-  it("standardizes Lucide icon sizes onto ICON scale {14, 16, 18, 20, 24}", () => {
+  it("standardizes Lucide icon sizes onto ICON scale {14, 16, 18, 20, 24} with no raw numeric size expressions", () => {
     expect(ICON).toEqual({
       xs: 14,
       sm: 16,
@@ -276,10 +317,17 @@ describe("PR-5 CSS cleanup, unified focus, icon scale & self-hosted DM Sans", ()
     );
     for (const file of tsxFiles) {
       const content = readFileSync(join(srcDir, file), "utf8");
-      expect(
-        [...content.matchAll(/size=\{\d+\}/g)],
-        `${file} raw numeric icon size`,
-      ).toEqual([]);
+      for (const match of content.matchAll(/size=\{([^}]+)\}/g)) {
+        const expr = match[1].trim();
+        expect(
+          /\b\d+\b/.test(expr),
+          `${file}: raw numeric icon size expression size={${expr}}`,
+        ).toBe(false);
+        expect(
+          expr.includes("ICON"),
+          `${file}: icon size={${expr}} must use ICON scale`,
+        ).toBe(true);
+      }
     }
   });
 });

@@ -1,371 +1,375 @@
 /* Feedback primitives: toast, modal dismissal, button states and form fields. */
 
-/* Toasts */
-.toaster {
-  position: fixed;
-  z-index: 200;
-  top: max(var(--space-4), env(safe-area-inset-top));
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(
-    420px,
-    calc(
-      100vw - 2 * var(--space-4) - env(safe-area-inset-left) -
-        env(safe-area-inset-right)
-    )
-  );
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  pointer-events: none;
-}
-.toast-region {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-.toast {
-  pointer-events: auto;
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-2) var(--space-3) var(--space-4);
-  background: var(--surface);
-  color: var(--text-strong);
-  border: 1px solid var(--border-strong);
-  border-left: 4px solid var(--brand);
-  border-radius: var(--r-md);
-  box-shadow: var(--shadow-pop);
-  font-size: var(--font-md);
-  line-height: 1.5;
-}
-.toast.success {
-  border-left-color: var(--success-text);
-}
-.toast.error {
-  border-left-color: var(--danger-text);
-}
-.toast-icon {
-  margin-top: 2px;
-  color: var(--brand-text);
-}
-.toast.success .toast-icon {
-  color: var(--success-text);
-}
-.toast.error .toast-icon {
-  color: var(--danger-text);
-}
-.toast-message {
-  flex: 1;
-  min-width: 0;
-  padding-top: 1px;
-  overflow-wrap: anywhere;
-}
-.toast-action,
-.toast-close {
-  flex-shrink: 0;
-  min-height: 32px;
-  border-radius: var(--r-sm);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.toast-action {
-  padding: 0 var(--space-2);
-  color: var(--brand-text);
-  font-weight: 600;
-  font-size: var(--font-base);
-}
-.toast-close {
-  min-width: 32px;
-  color: var(--text-muted);
-}
-.toast-action:hover,
-.toast-close:hover {
-  background: var(--hover-bg);
-  color: var(--text-strong);
-}
-@media (prefers-reduced-motion: no-preference) {
+@layer features {
+  /* Toasts */
+  .toaster {
+    position: fixed;
+    z-index: var(--z-toast);
+    top: max(var(--space-4), env(safe-area-inset-top));
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(
+      420px,
+      calc(
+        100vw - 2 * var(--space-4) - env(safe-area-inset-left) -
+          env(safe-area-inset-right)
+      )
+    );
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    pointer-events: none;
+  }
+  .toast-region {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
   .toast {
-    animation: toast-in 0.18s ease-out;
+    pointer-events: auto;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-2) var(--space-3) var(--space-4);
+    background: var(--surface);
+    color: var(--text-strong);
+    border: 1px solid var(--border-strong);
+    border-left: 4px solid var(--brand);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-pop);
+    font-size: var(--font-md);
+    line-height: 1.5;
   }
-}
-@keyframes toast-in {
-  from {
-    opacity: 0;
-    transform: translateY(-6px);
+  .toast.success {
+    border-left-color: var(--success-text);
   }
-  to {
-    opacity: 1;
-    transform: none;
+  .toast.error {
+    border-left-color: var(--danger-text);
   }
-}
-
-/* Modal dismissal */
-.modal > .modal-close {
-  top: 10px;
-  right: 10px;
-  width: 36px;
-  height: 36px;
-  min-width: 36px;
-  min-height: 36px;
-}
-.modal > .modal-close[aria-disabled="true"] {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-.modal > .modal-close[aria-disabled="true"]:hover {
-  background: transparent;
-  color: var(--text-subtle);
-}
-.modal.dismiss-blocked {
-  box-shadow: var(--shadow-pop), var(--focus-halo);
-}
-@media (prefers-reduced-motion: no-preference) {
-  .modal.dismiss-blocked {
-    animation: modal-nudge 0.3s ease-in-out;
+  .toast-icon {
+    margin-top: 2px;
+    color: var(--brand-text);
   }
-}
-@keyframes modal-nudge {
-  25% {
-    transform: translateX(-4px);
+  .toast.success .toast-icon {
+    color: var(--success-text);
   }
-  75% {
-    transform: translateX(4px);
+  .toast.error .toast-icon {
+    color: var(--danger-text);
   }
-}
-.modal-discard {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2) var(--space-3);
-  margin-bottom: var(--space-4);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--warning-border);
-  border-radius: var(--r-md);
-  background: var(--warning-bg);
-  color: var(--warning-text);
-}
-.modal-discard > p {
-  font-size: var(--font-base);
-  font-weight: 600;
-}
-.modal-discard > div {
-  display: flex;
-  gap: var(--space-2);
-}
-
-/* Button states */
-.button[aria-busy="true"]:disabled {
-  opacity: 0.85;
-  cursor: progress;
-}
-.button.secondary:hover:not(:disabled) {
-  background: var(--hover-bg);
-  border-color: var(--brand-muted);
-  color: var(--text-strong);
-  box-shadow: none;
-}
-.button.secondary:active:not(:disabled),
-.button.ghost:active:not(:disabled) {
-  background: var(--lavender);
-}
-.button.ghost {
-  background: transparent;
-  border-color: transparent;
-  color: var(--text-muted);
-}
-.button.ghost:hover:not(:disabled) {
-  background: var(--hover-bg);
-  color: var(--text-strong);
-  box-shadow: none;
-}
-.button.danger:hover:not(:disabled) {
-  filter: brightness(0.92);
-}
-.button.danger:active:not(:disabled) {
-  filter: brightness(0.85);
-}
-
-/* Inline field feedback */
-.field-error,
-.field-warning {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  margin-top: var(--space-2);
-  font-size: var(--font-sm);
-  font-weight: 500;
-  line-height: 1.5;
-  text-align: left;
-}
-.field-error {
-  color: var(--danger-text);
-}
-.field-warning {
-  color: var(--warning-text);
-}
-label:has(+ .field-error) {
-  margin-bottom: 0;
-}
-label + .field-error {
-  margin-bottom: 18px;
-}
-input[aria-invalid="true"] {
-  border-color: var(--danger-text);
-}
-
-/* Password field */
-.password-field {
-  margin-bottom: 18px;
-}
-.password-field > label {
-  margin-bottom: 0;
-}
-.password-input {
-  position: relative;
-  margin-top: 9px;
-}
-.password-input > input {
-  padding-right: 48px;
-}
-.password-toggle {
-  position: absolute;
-  top: 50%;
-  right: 4px;
-  transform: translateY(-50%);
-  width: 40px;
-  height: 40px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--r-sm);
-  color: var(--text-muted);
-}
-.password-toggle:hover {
-  background: var(--hover-bg);
-  color: var(--text-strong);
-}
-.password-toggle[aria-pressed="true"] {
-  color: var(--brand-text);
-}
-.password-rules {
-  list-style: none;
-  margin: var(--space-2) 0 0;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-4);
-  font-size: var(--font-sm);
-  color: var(--text-muted);
-}
-.password-rules > li {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-}
-.password-rules > li.met {
-  color: var(--success-text);
-}
-
-/* Registration invite summary */
-.invite-summary {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--space-1) var(--space-3);
-  margin-bottom: 18px;
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-md);
-  background: var(--surface-sunken);
-}
-.invite-summary-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  font-size: var(--font-sm);
-  font-weight: 600;
-  color: var(--text-muted);
-}
-.invite-summary-text > code {
-  font-family: var(--font-mono);
-  font-size: var(--font-md);
-  font-weight: 500;
-  color: var(--text-strong);
-  overflow-wrap: anywhere;
-}
-.invite-summary-edit {
-  min-height: 36px;
-  padding: 0 var(--space-3);
-  border-radius: var(--r-sm);
-  color: var(--brand-text);
-  font-size: var(--font-base);
-  font-weight: 600;
-}
-.invite-summary-edit:hover:not(:disabled) {
-  background: var(--hover-bg);
-}
-.invite-summary > .field-help {
-  grid-column: 1 / -1;
-  margin-top: 0;
-}
-
-/* Join and welcome invitation entry */
-.join-register-link {
-  display: inline-block;
-  margin-top: var(--space-3);
-  padding: var(--space-2);
-  color: var(--brand-text);
-  font-size: var(--font-base);
-  font-weight: 600;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-.join-card > .button + .button {
-  margin-top: var(--space-3);
-}
-.welcome-join-form {
-  flex-wrap: wrap;
-  width: min(100%, 420px);
-}
-.welcome-join-form > label {
-  flex-basis: 100%;
-  margin: 0;
-  text-align: left;
-  color: var(--text-muted);
-}
-.welcome-join-form > .field-error {
-  flex-basis: 100%;
-  margin-top: 0;
-}
-
-@media (pointer: coarse) {
-  .modal > .modal-close {
-    width: 44px;
-    height: 44px;
-    min-width: 44px;
-    min-height: 44px;
-    top: 6px;
-    right: 6px;
-  }
-  .modal-heading {
-    padding-right: 40px;
+  .toast-message {
+    flex: 1;
+    min-width: 0;
+    padding-top: 1px;
+    overflow-wrap: anywhere;
   }
   .toast-action,
   .toast-close {
-    min-height: 44px;
+    flex-shrink: 0;
+    min-height: 32px;
+    border-radius: var(--r-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .toast-action {
+    padding: 0 var(--space-2);
+    color: var(--brand-text);
+    font-weight: 600;
+    font-size: var(--font-base);
   }
   .toast-close {
-    min-width: 44px;
+    min-width: 32px;
+    color: var(--text-muted);
+  }
+  .toast-action:hover,
+  .toast-close:hover {
+    background: var(--hover-bg);
+    color: var(--text-strong);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .toast {
+      animation: toast-in 0.18s ease-out;
+    }
+  }
+  @keyframes toast-in {
+    from {
+      opacity: 0;
+      transform: translateY(-6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  /* Modal dismissal */
+  .modal > .modal-close {
+    top: 10px;
+    right: 10px;
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
+  }
+  .modal > .modal-close[aria-disabled="true"] {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .modal > .modal-close[aria-disabled="true"]:hover {
+    background: transparent;
+    color: var(--text-subtle);
+  }
+  .modal.dismiss-blocked {
+    box-shadow: var(--shadow-pop), var(--focus-halo);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .modal.dismiss-blocked {
+      animation: modal-nudge 0.3s ease-in-out;
+    }
+  }
+  @keyframes modal-nudge {
+    25% {
+      transform: translateX(-4px);
+    }
+    75% {
+      transform: translateX(4px);
+    }
+  }
+  .modal-discard {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2) var(--space-3);
+    margin-bottom: var(--space-4);
+    padding: var(--space-3) var(--space-4);
+    border: 1px solid var(--warning-border);
+    border-radius: var(--r-md);
+    background: var(--warning-bg);
+    color: var(--warning-text);
+  }
+  .modal-discard > p {
+    font-size: var(--font-base);
+    font-weight: 600;
+  }
+  .modal-discard > div {
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  /* Button states */
+  .button[aria-busy="true"]:disabled {
+    opacity: 0.85;
+    cursor: progress;
+  }
+  .button.secondary:hover:not(:disabled) {
+    background: var(--hover-bg);
+    border-color: var(--brand-muted);
+    color: var(--text-strong);
+    box-shadow: none;
+  }
+  .button.secondary:active:not(:disabled),
+  .button.ghost:active:not(:disabled) {
+    background: var(--lavender);
+  }
+  .button.ghost {
+    background: transparent;
+    border-color: transparent;
+    color: var(--text-muted);
+  }
+  .button.ghost:hover:not(:disabled) {
+    background: var(--hover-bg);
+    color: var(--text-strong);
+    box-shadow: none;
+  }
+  .button.danger:hover:not(:disabled) {
+    filter: brightness(0.92);
+  }
+  .button.danger:active:not(:disabled) {
+    filter: brightness(0.85);
+  }
+
+  /* Inline field feedback */
+  .field-error,
+  .field-warning {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    margin-top: var(--space-2);
+    font-size: var(--font-sm);
+    font-weight: 500;
+    line-height: 1.5;
+    text-align: left;
+  }
+  .field-error {
+    color: var(--danger-text);
+  }
+  .field-warning {
+    color: var(--warning-text);
+  }
+  label:has(+ .field-error) {
+    margin-bottom: 0;
+  }
+  label + .field-error {
+    margin-bottom: 18px;
+  }
+  input[aria-invalid="true"] {
+    border-color: var(--danger-text);
+  }
+
+  /* Password field */
+  .password-field {
+    margin-bottom: 18px;
+  }
+  .password-field > label {
+    margin-bottom: 0;
+  }
+  .password-input {
+    position: relative;
+    margin-top: 9px;
+  }
+  .password-input > input {
+    padding-right: var(--space-12);
   }
   .password-toggle {
-    width: 44px;
-    height: 44px;
+    position: absolute;
+    top: 50%;
+    right: var(--space-1);
+    transform: translateY(-50%);
+    width: 40px;
+    height: 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--r-sm);
+    color: var(--text-muted);
+  }
+  .password-toggle:hover {
+    background: var(--hover-bg);
+    color: var(--text-strong);
+  }
+  .password-toggle[aria-pressed="true"] {
+    color: var(--brand-text);
+  }
+  .password-rules {
+    list-style: none;
+    margin: var(--space-2) 0 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-4);
+    font-size: var(--font-sm);
+    color: var(--text-muted);
+  }
+  .password-rules > li {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+  }
+  .password-rules > li.met {
+    color: var(--success-text);
+  }
+
+  /* Registration invite summary */
+  .invite-summary {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--space-1) var(--space-3);
+    margin-bottom: 18px;
+    padding: var(--space-3) var(--space-4);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-md);
+    background: var(--surface-sunken);
+  }
+  .invite-summary-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    font-size: var(--font-sm);
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+  .invite-summary-text > code {
+    font-family: var(--font-mono);
+    font-size: var(--font-md);
+    font-weight: 500;
+    color: var(--text-strong);
+    overflow-wrap: anywhere;
+  }
+  .invite-summary-edit {
+    min-height: 36px;
+    padding: 0 var(--space-3);
+    border-radius: var(--r-sm);
+    color: var(--brand-text);
+    font-size: var(--font-base);
+    font-weight: 600;
+  }
+  .invite-summary-edit:hover:not(:disabled) {
+    background: var(--hover-bg);
+  }
+  .invite-summary > .field-help {
+    grid-column: 1 / -1;
+    margin-top: 0;
+  }
+
+  /* Join and welcome invitation entry */
+  .join-register-link {
+    display: inline-block;
+    margin-top: var(--space-3);
+    padding: var(--space-2);
+    color: var(--brand-text);
+    font-size: var(--font-base);
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .join-card > .button + .button {
+    margin-top: var(--space-3);
+  }
+  .welcome-join-form {
+    flex-wrap: wrap;
+    width: min(100%, 420px);
+  }
+  .welcome-join-form > label {
+    flex-basis: 100%;
+    margin: 0;
+    text-align: left;
+    color: var(--text-muted);
+  }
+  .welcome-join-form > .field-error {
+    flex-basis: 100%;
+    margin-top: 0;
+  }
+}
+
+@layer layout {
+  @media (pointer: coarse) {
+    .modal > .modal-close {
+      width: 44px;
+      height: 44px;
+      min-width: 44px;
+      min-height: 44px;
+      top: 6px;
+      right: 6px;
+    }
+    .modal-heading {
+      padding-right: 40px;
+    }
+    .toast-action,
+    .toast-close {
+      min-height: 44px;
+    }
+    .toast-close {
+      min-width: 44px;
+    }
+    .password-toggle {
+      width: 44px;
+      height: 44px;
+    }
   }
 }

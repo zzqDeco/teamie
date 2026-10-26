@@ -17,7 +17,7 @@ export function AgentBadge({
       className={`agent-badge ${compact ? "compact" : ""}`}
       title={ownerName ? `Agent · 由 ${ownerName} 创建` : "Agent"}
     >
-      <Bot size={compact ? 10 : 12} />
+      <Bot size={ICON.xs} />
       <span>Agent</span>
       {ownerName && !compact && <small>由 {ownerName} 创建</small>}
     </span>
@@ -35,7 +35,7 @@ export function AgentAvatar({
       className={`avatar agent-avatar ${size} ${disabled ? "disabled" : ""}`}
       aria-hidden="true"
     >
-      <Bot size={size === "large" ? 31 : size === "small" ? 15 : 20} />
+      <Bot size={size === "large" ? ICON.lg : size === "small" ? ICON.xs : ICON.sm} />
     </span>
   );
 }

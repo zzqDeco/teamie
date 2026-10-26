@@ -1,3 +1,4 @@
+import "./layers.css";
 import { StrictMode } from "react";
 import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";

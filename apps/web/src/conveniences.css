@@ -1,3 +1,4 @@
+@layer layout {
 .conversation-drop-overlay {
   position: absolute;
   inset: var(--space-3);
@@ -166,4 +167,5 @@
     font-size: var(--font-xs);
     color: var(--text-subtle);
   }
+}
 }

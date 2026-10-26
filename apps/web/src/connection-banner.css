@@ -1,37 +1,42 @@
-.connection-banner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 20px;
-  font-size: 13px;
-  line-height: 1.5;
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--border);
-  background: var(--lavender);
-  color: var(--text);
-}
-.connection-banner.offline {
-  background: var(--warning-bg);
-  border-bottom-color: var(--warning-border);
-  color: var(--warning-text);
-}
-.connection-banner.restored {
-  background: var(--success-bg);
-  border-bottom-color: var(--success-border);
-  color: var(--success-text);
-}
-.connection-banner button {
-  margin-left: auto;
-  border: 0;
-  background: transparent;
-  color: var(--brand-text);
-  font-weight: 600;
-  font-size: 13px;
-  min-height: 32px;
-  cursor: pointer;
-}
-@media (max-width: 780px) {
+@layer features {
   .connection-banner {
-    padding: 8px 14px;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-5);
+    font-size: var(--font-base);
+    line-height: 1.5;
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--border);
+    background: var(--lavender);
+    color: var(--text);
+  }
+  .connection-banner.offline {
+    background: var(--warning-bg);
+    border-bottom-color: var(--warning-border);
+    color: var(--warning-text);
+  }
+  .connection-banner.restored {
+    background: var(--success-bg);
+    border-bottom-color: var(--success-border);
+    color: var(--success-text);
+  }
+  .connection-banner button {
+    margin-left: auto;
+    border: 0;
+    background: transparent;
+    color: var(--brand-text);
+    font-weight: 600;
+    font-size: var(--font-base);
+    min-height: 32px;
+    cursor: pointer;
+  }
+}
+
+@layer layout {
+  @media (max-width: 780px) {
+    .connection-banner {
+      padding: var(--space-2) 14px;
+    }
   }
 }
