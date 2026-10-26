@@ -5,6 +5,7 @@ import {
   MessageCircle,
   Plus,
   ShieldCheck,
+  UserMinus,
   UserPlus,
   Users,
   X,
@@ -27,6 +28,8 @@ export function ShellMembersPane({
   owner,
   caps,
   busy,
+  directBusyId = null,
+  directError = "",
   members,
   visibleMembers,
   isLoading,
@@ -47,6 +50,10 @@ export function ShellMembersPane({
   owner: boolean;
   caps: Record<string, boolean>;
   busy: boolean;
+  /** Member whose direct conversation is being opened. */
+  directBusyId?: string | null;
+  /** Failure starting a direct conversation from this pane. */
+  directError?: string;
   members: Participant[];
   visibleMembers: Participant[];
   isLoading: boolean;
@@ -106,6 +113,7 @@ export function ShellMembersPane({
             </div>
           )}
           {hasError && <Notice>成员暂时无法加载。</Notice>}
+          <Notice>{directError}</Notice>
           {visibleMembers.map((member) => (
             <div className="member-row" key={member.userId}>
               {member.kind === "agent" ? (
@@ -141,9 +149,14 @@ export function ShellMembersPane({
                     className="member-dm"
                     label={`与 ${member.displayName} 发起私聊`}
                     disabled={busy}
+                    aria-busy={directBusyId === member.userId || undefined}
                     onClick={() => onStartDirect(member)}
                   >
-                    <MessageCircle size={ICON.xs} />
+                    {directBusyId === member.userId ? (
+                      <LoaderCircle size={ICON.xs} className="spin" />
+                    ) : (
+                      <MessageCircle size={ICON.xs} />
+                    )}
                   </IconButton>
                 )}
               {((conversation.type === "group" &&
@@ -154,12 +167,12 @@ export function ShellMembersPane({
                 member.userId !== userId && (
                   <IconButton
                     className="remove-member"
-                    label={`${conversation.type === "group" ? "从小组" : "从空间"}移除 ${member.displayName}`}
+                    label={`${conversation.type === "group" ? "移出小组" : "从工作空间移除"} ${member.displayName}`}
                     onClick={() =>
                       onRequestRemove(member, conversation.type === "group")
                     }
                   >
-                    <X size={ICON.xs} />
+                    <UserMinus size={ICON.xs} />
                   </IconButton>
                 )}
             </div>

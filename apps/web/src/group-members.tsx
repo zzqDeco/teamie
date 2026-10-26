@@ -53,7 +53,8 @@ export function GroupMembersDialog({
   const { data, refresh } = useChat();
   const client = useQueryClient();
   const [busyId, setBusyId] = useState(""),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [confirmingRemoval, setConfirmingRemoval] = useState<Member | null>(null);
   const current = members.filter((member) =>
     conversation.memberIds.includes(member.userId),
   );
@@ -64,8 +65,8 @@ export function GroupMembersDialog({
       member.selectable !== false,
   );
   const addAllowed = !!data?.capabilities["im.group.create"];
-  async function change(member: Member, remove = false) {
-    if (!conversation.canManageMembers) return;
+  async function change(member: Member, remove = false): Promise<boolean> {
+    if (!conversation.canManageMembers) return false;
     setBusyId(member.userId);
     setError("");
     const generation = chatStore.generation;
@@ -73,20 +74,60 @@ export function GroupMembersDialog({
       const result = remove
         ? await api.removeConversationMember(conversation.id, member.userId)
         : await api.addConversationMember(conversation.id, member.userId);
-      if (generation !== chatStore.generation) return;
+      if (generation !== chatStore.generation) return false;
       chatStore.addConversation(result.conversation);
       await Promise.all([
         refresh(),
         client.invalidateQueries({ queryKey: ["members"] }),
       ]);
+      return true;
     } catch (e) {
       if (generation === chatStore.generation) setError(errorText(e));
+      return false;
     } finally {
       setBusyId("");
     }
   }
+  async function confirmRemoval(member: Member) {
+    if (await change(member, true)) setConfirmingRemoval(null);
+  }
+  if (confirmingRemoval)
+    return (
+      <Modal
+        key="confirm-removal"
+        title={`将 ${confirmingRemoval.displayName} 移出小组？`}
+        subtitle="移出后，该成员将无法继续访问这个小组对话。工作空间成员资格不受影响。"
+        onClose={() => {
+          setError("");
+          setConfirmingRemoval(null);
+        }}
+        dismissible={!busyId}
+      >
+        <Notice>{error}</Notice>
+        <div className="modal-actions">
+          <Button
+            className="secondary"
+            disabled={!!busyId}
+            onClick={() => {
+              setError("");
+              setConfirmingRemoval(null);
+            }}
+          >
+            取消
+          </Button>
+          <Button
+            className="danger"
+            busy={busyId === confirmingRemoval.userId}
+            onClick={() => void confirmRemoval(confirmingRemoval)}
+          >
+            确认移出
+          </Button>
+        </div>
+      </Modal>
+    );
   return (
     <Modal
+      key="group-members"
       title="小组成员"
       subtitle="移出后，成员将无法访问此对话。"
       onClose={onClose}
@@ -106,9 +147,12 @@ export function GroupMembersDialog({
                 <button
                   className="group-member-remove"
                   disabled={!!busyId}
-                  onClick={() => void change(member, true)}
-                  title={`从小组移除 ${member.displayName}`}
-                  aria-label={`从小组移除 ${member.displayName}`}
+                  onClick={() => {
+                    setError("");
+                    setConfirmingRemoval(member);
+                  }}
+                  title={`移出小组 ${member.displayName}`}
+                  aria-label={`移出小组 ${member.displayName}`}
                 >
                   {busyId === member.userId ? (
                     <LoaderCircle className="spin" size={ICON.xs} />
