@@ -121,6 +121,13 @@ jobs:
           for module in contracts/gen/agent services/agent-control services/agent-runtime services/llm-gateway services/sandbox; do
             (cd "$module" && go test -race -timeout 300s ./... && go vet ./... && go build ./...)
           done
+      - name: Verify operator isolation evidence with the real Sandbox runner
+        run: |
+          (cd services/sandbox && go build -o "$RUNNER_TEMP/sandboxctl" ./cmd/sandboxctl)
+          probe_root=$(mktemp -d)
+          trap 'sudo rm -rf "$probe_root"' EXIT
+          sudo env SANDBOX_WORKSPACE_ROOT="$probe_root" SANDBOX_RUNNER_IMAGE="$SANDBOX_TEST_RUNNER_IMAGE" \
+            "$RUNNER_TEMP/sandboxctl" isolation --nonce "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
       - name: Agent profile privacy and IM acceptance against fresh disposable processes
         run: bash ops/ci-agent-acceptance.sh
       - name: Restore every service database into a disposable target and verify data
