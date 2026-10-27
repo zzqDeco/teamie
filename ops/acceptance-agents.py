@@ -60,7 +60,7 @@ def loopback_url(value: str) -> None:
 def base_for(path: str) -> str:
     if path.startswith("/api/v1/auth/"):
         return IDENTITY
-    if path.startswith("/api/v1/admin/model-gateway"):
+    if path.startswith("/api/v1/admin/model-gateway") or path.startswith("/api/v1/model-gateway"):
         return GATEWAY
     if path.startswith("/api/v1/agents") or re.match(r"^/api/v1/workspaces/[^/]+/agents(?:[/?]|$)", path):
         return CONTROL
@@ -161,7 +161,9 @@ def secret_redacted(value: dict, forbidden: str) -> None:
 
 
 def public_profile(profile: dict, workspace: str | None = None) -> None:
-    require(set(profile) == {"id", "principalId", "ownerId", "ownerName", "name", "description", "workspaceIds", "enabled", "createdAt", "updatedAt"}, "Agent responses must contain exactly the public profile fields")
+    allowed = {"id", "principalId", "ownerId", "ownerName", "name", "description", "workspaceIds", "enabled", "createdAt", "updatedAt", "modelId"}
+    required = allowed - {"modelId"}
+    require(required <= set(profile) <= allowed, "Agent responses must contain only the public profile fields")
     require(profile["principalId"] == profile["id"] and bool(profile["ownerId"]) and bool(profile["ownerName"]), "Public Agent profile must retain participant and owner provenance")
     require(isinstance(profile["workspaceIds"], list) and isinstance(profile["enabled"], bool), "Agent visibility and enabled state must retain public types")
     if workspace is not None:

@@ -20,6 +20,7 @@ import (
 type AdminAuth = rpcclient.AdminAuth
 
 type Config = domain.Config
+type ModelProfile = domain.ModelProfile
 type Usage = domain.Usage
 type Store = domain.ConfigStore
 type Cipher = domain.Cipher

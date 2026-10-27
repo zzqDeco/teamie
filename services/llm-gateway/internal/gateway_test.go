@@ -215,3 +215,153 @@ func TestCanceledAttemptDoesNotCancelNewAttempt(t *testing.T) {
 		t.Fatal(next, calls)
 	}
 }
+
+func TestMultiModelRoutingSmoothFallbackAndConcurrentForegroundCalls(t *testing.T) {
+	defaultKey := "fixture-default-key"
+	r1Key := "fixture-r1-key"
+	var mu sync.Mutex
+	var observedModels []string
+	inFlight := make(chan struct{}, 2)
+	releaseBoth := make(chan struct{})
+	fixture := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Model string `json:"model"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		mu.Lock()
+		observedModels = append(observedModels, body.Model)
+		mu.Unlock()
+		if body.Model == "concurrent-model" {
+			inFlight <- struct{}{}
+			<-releaseBoth
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-multi","object":"chat.completion","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":3}}`))
+	}))
+	defer fixture.Close()
+
+	crypto := testCipher(t)
+	encDefault, _ := crypto.Encrypt(defaultKey)
+	encR1, _ := crypto.Encrypt(r1Key)
+	cfg := Config{
+		BaseURL:        fixture.URL + "/v1",
+		Model:          "gpt-4o-default",
+		CipherKey:      encDefault,
+		Enabled:        true,
+		DefaultModelID: "default",
+		Models: []ModelProfile{
+			{
+				ID:                  "default",
+				DisplayName:         "Default GPT-4o",
+				BaseURL:             fixture.URL + "/v1",
+				Model:               "gpt-4o-default",
+				ContextWindowTokens: 16384,
+				CipherKey:           encDefault,
+				Enabled:             true,
+			},
+			{
+				ID:                  "deepseek-r1",
+				DisplayName:         "DeepSeek R1",
+				BaseURL:             fixture.URL + "/v1",
+				Model:               "deepseek-reasoner",
+				ContextWindowTokens: 65536,
+				CipherKey:           encR1,
+				Enabled:             true,
+			},
+			{
+				ID:                  "disabled-model",
+				DisplayName:         "Disabled Model",
+				BaseURL:             fixture.URL + "/v1",
+				Model:               "should-not-be-used",
+				ContextWindowTokens: 16384,
+				CipherKey:           encR1,
+				Enabled:             false,
+			},
+			{
+				ID:                  "concurrent",
+				DisplayName:         "Concurrent Model",
+				BaseURL:             fixture.URL + "/v1",
+				Model:               "concurrent-model",
+				ContextWindowTokens: 16384,
+				CipherKey:           encDefault,
+				Enabled:             true,
+			},
+		},
+	}
+	store := &memoryStore{c: cfg}
+	s := New(store, crypto, testToken)
+	s.Provider = Provider{HTTP: fixture.Client()}
+
+	// 1. Explicit enabled modelId routes to deepseek-reasoner.
+	r1ModelID := "deepseek-r1"
+	resp1, err := fixtureHTTPChat(t, s, context.Background(), &agent.GatewayChatRequest{
+		ServiceToken: testToken,
+		OwnerId:      "owner",
+		AgentId:      "agent-1",
+		SessionId:    "s-1",
+		RunId:        "r-1",
+		ModelId:      &r1ModelID,
+		RequestJson:  fixtureNativeRequest(`{"messages":[{"role":"user","content":"hi"}]}`, false),
+	})
+	if err != nil || !resp1.Ok {
+		t.Fatalf("expected deepseek-r1 call to succeed: %+v %v", resp1, err)
+	}
+
+	// 2. Disabled or deleted modelId smoothly falls back to the platform default model (gpt-4o-default).
+	for _, fallbackID := range []string{"disabled-model", "deleted-model", ""} {
+		idCopy := fallbackID
+		respFallback, err := fixtureHTTPChat(t, s, context.Background(), &agent.GatewayChatRequest{
+			ServiceToken: testToken,
+			OwnerId:      "owner",
+			AgentId:      "agent-1",
+			SessionId:    "s-1",
+			RunId:        "r-fallback-" + fallbackID,
+			ModelId:      &idCopy,
+			RequestJson:  fixtureNativeRequest(`{"messages":[{"role":"user","content":"hi"}]}`, false),
+		})
+		if err != nil || !respFallback.Ok {
+			t.Fatalf("expected fallback for %q to succeed: %+v %v", fallbackID, respFallback, err)
+		}
+	}
+	mu.Lock()
+	if len(observedModels) != 4 || observedModels[0] != "deepseek-reasoner" || observedModels[1] != "gpt-4o-default" || observedModels[2] != "gpt-4o-default" || observedModels[3] != "gpt-4o-default" {
+		t.Fatalf("unexpected routed models: %v", observedModels)
+	}
+	mu.Unlock()
+
+	// 3. Two concurrent foreground model calls execute in parallel without 429 gateway_busy blocking.
+	concModelID := "concurrent"
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for _, agentID := range []string{"agent-a", "agent-b"} {
+		wg.Add(1)
+		go func(aid string) {
+			defer wg.Done()
+			res, e := fixtureHTTPChat(t, s, context.Background(), &agent.GatewayChatRequest{
+				ServiceToken: testToken,
+				OwnerId:      "owner",
+				AgentId:      aid,
+				SessionId:    "session-" + aid,
+				RunId:        "run-" + aid,
+				ModelId:      &concModelID,
+				RequestJson:  fixtureNativeRequest(`{"messages":[{"role":"user","content":"parallel"}]}`, false),
+			})
+			if e != nil || !res.Ok {
+				errs <- io.EOF
+			}
+		}(agentID)
+	}
+	for i := 0; i < 2; i++ {
+		select {
+		case <-inFlight:
+		case <-time.After(3 * time.Second):
+			t.Fatal("expected both concurrent foreground model calls to reach upstream simultaneously")
+		}
+	}
+	close(releaseBoth)
+	wg.Wait()
+	close(errs)
+	for e := range errs {
+		t.Fatalf("concurrent foreground model call failed: %v", e)
+	}
+}

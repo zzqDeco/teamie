@@ -302,7 +302,7 @@ func fixtureEngine(t *testing.T, s *Store) (*Engine, *fixtureIM, *fixtureGateway
 	imf, httpserver := newFixtureIM(t)
 	gw := &fixtureGateway{ready: true}
 	cp := &fixtureControl{}
-	return &Engine{Store: s, Config: Config{IMURL: httpserver.URL, IMToken: "fixture-im-secret", ControlToken: "fixture-cp-secret", GatewayToken: "fixture-gw-secret", SandboxToken: "fixture-sb-secret"}, Control: cp, Gateway: gw, Sandbox: &fixtureSandbox{}, Identity: &fixtureIdentity{}, slots: make(chan struct{}, 1), owner: uuid.NewString()}, imf, gw, cp
+	return &Engine{Store: s, Config: Config{IMURL: httpserver.URL, IMToken: "fixture-im-secret", ControlToken: "fixture-cp-secret", GatewayToken: "fixture-gw-secret", SandboxToken: "fixture-sb-secret"}, Control: cp, Gateway: gw, Sandbox: &fixtureSandbox{}, Identity: &fixtureIdentity{}, owner: uuid.NewString()}, imf, gw, cp
 }
 func startFixtureWorker(t *testing.T, e *Engine, f *fixtureIM) (context.CancelFunc, chan struct{}) {
 	t.Helper()

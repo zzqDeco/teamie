@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"teamie/services/llm-gateway/internal/domain"
@@ -23,8 +24,10 @@ type Service struct {
 	Token        string
 	WebSearchURL string
 	slots        chan struct{}
+	inFlight     atomic.Int64
 	webSlots     chan struct{}
 	mu           sync.Mutex
+	modelSeq     uint64
 	webSeq       uint64
 	active       map[string]context.CancelFunc
 	canceled     map[string]time.Time
@@ -39,7 +42,6 @@ func New(store domain.ConfigStore, cipher domain.Cipher, model domain.UpstreamMo
 		WebSearch:    webSearch,
 		Token:        token,
 		WebSearchURL: domain.DefaultTavilyBaseURL,
-		slots:        make(chan struct{}, 1),
 		webSlots:     make(chan struct{}, 4),
 		active:       make(map[string]context.CancelFunc),
 		canceled:     make(map[string]time.Time),
@@ -49,9 +51,6 @@ func New(store domain.ConfigStore, cipher domain.Cipher, model domain.UpstreamMo
 func (s *Service) ensureInit() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.slots == nil {
-		s.slots = make(chan struct{}, 1)
-	}
 	if s.webSlots == nil {
 		s.webSlots = make(chan struct{}, 4)
 	}
@@ -63,10 +62,13 @@ func (s *Service) ensureInit() {
 	}
 }
 
-// InFlightSlots returns the number of currently occupied foreground model slots.
+// InFlightSlots returns the number of currently occupied foreground model calls.
 func (s *Service) InFlightSlots() int {
 	s.ensureInit()
-	return len(s.slots)
+	if s.slots != nil {
+		return len(s.slots)
+	}
+	return int(s.inFlight.Load())
 }
 
 // AuthorizeBearer checks a service Bearer Authorization header against s.Token.
@@ -89,15 +91,31 @@ func (s *Service) ValidateUnaryChat(serviceToken, ownerID, agentID, sessionID, r
 	return domain.Err(400, "protocol_unsupported", "Model generation requires the private HTTP transport")
 }
 
-// AcquireSlot attempts to acquire the single foreground model execution slot.
+// AcquireSlot tracks an in-flight model execution call (or acquires a bounded slot if configured).
 func (s *Service) AcquireSlot() (func(), bool) {
 	s.ensureInit()
-	select {
-	case s.slots <- struct{}{}:
-		return func() { <-s.slots }, true
-	default:
-		return nil, false
+	if s.slots != nil {
+		select {
+		case s.slots <- struct{}{}:
+			s.inFlight.Add(1)
+			var once sync.Once
+			return func() {
+				once.Do(func() {
+					<-s.slots
+					s.inFlight.Add(-1)
+				})
+			}, true
+		default:
+			return nil, false
+		}
 	}
+	s.inFlight.Add(1)
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.inFlight.Add(-1)
+		})
+	}, true
 }
 
 // AcquireWebSlot attempts to acquire a web-search execution slot.
@@ -117,7 +135,9 @@ func (s *Service) RegisterRunCancel(ctx context.Context, agentID, runID string) 
 	ctx, cancel := context.WithCancel(ctx)
 	index := agentID + "/" + runID
 	s.mu.Lock()
-	s.active[index] = cancel
+	s.modelSeq++
+	modelKey := index + "/model/" + strconv.FormatUint(s.modelSeq, 10)
+	s.active[modelKey] = cancel
 	if at, ok := s.canceled[index]; ok && time.Since(at) < 2*time.Minute {
 		cancel()
 	}
@@ -125,7 +145,7 @@ func (s *Service) RegisterRunCancel(ctx context.Context, agentID, runID string) 
 	return ctx, func() {
 		cancel()
 		s.mu.Lock()
-		delete(s.active, index)
+		delete(s.active, modelKey)
 		s.mu.Unlock()
 	}
 }
@@ -178,9 +198,10 @@ func (s *Service) CancelRun(agentID, runID string) {
 	if cancel := s.active[index]; cancel != nil {
 		cancels = append(cancels, cancel)
 	}
-	prefix := index + "/web/"
+	modelPrefix := index + "/model/"
+	webPrefix := index + "/web/"
 	for key, cancel := range s.active {
-		if strings.HasPrefix(key, prefix) && cancel != nil {
+		if (strings.HasPrefix(key, modelPrefix) || strings.HasPrefix(key, webPrefix)) && cancel != nil {
 			cancels = append(cancels, cancel)
 		}
 	}

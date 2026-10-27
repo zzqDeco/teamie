@@ -5,9 +5,8 @@ import (
 	"sync"
 )
 
-// The host has one model slot. A worker reserves initial admission, then each
-// model operation owns its permit only until completion. Agent Session writers
-// remain independently fenced and serial while other Sessions make progress.
+// Each Agent Session writer remains independently fenced and serial while other
+// Sessions make progress concurrently unless a bounded slots channel is set.
 type frontSlot struct {
 	mu    sync.Mutex
 	slots chan struct{}
@@ -15,7 +14,10 @@ type frontSlot struct {
 }
 
 func (f *frontSlot) acquire(ctx context.Context) error {
-	if f == nil {
+	if f == nil || f.slots == nil {
+		if ctx != nil {
+			return ctx.Err()
+		}
 		return nil
 	}
 	f.mu.Lock()
@@ -32,7 +34,7 @@ func (f *frontSlot) acquire(ctx context.Context) error {
 	}
 }
 func (f *frontSlot) release() {
-	if f == nil {
+	if f == nil || f.slots == nil {
 		return
 	}
 	f.mu.Lock()
@@ -47,7 +49,12 @@ func (f *frontSlot) release() {
 // A stream may expose its terminal error before its producer has cleaned up.
 // Its release must therefore never act on a later call's shared held flag.
 func (f *frontSlot) modelPermit(ctx context.Context) (func(), error) {
-	if f == nil {
+	if f == nil || f.slots == nil {
+		if ctx != nil {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		return func() {}, nil
 	}
 	f.mu.Lock()

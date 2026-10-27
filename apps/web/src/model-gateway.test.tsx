@@ -263,4 +263,67 @@ describe("model gateway settings page", () => {
       "sk-keep-me",
     );
   });
+
+  it("renders multi-model catalog profiles and supports creating, setting default, testing, and deleting models", async () => {
+    const multiGateway: ModelGateway = {
+      ...gateway,
+      defaultModelId: "default",
+      models: [
+        {
+          id: "default",
+          displayName: "GPT-4o",
+          description: "通用默认模型",
+          baseUrl: "https://model.example.test/v1",
+          model: "gpt-4o",
+          contextWindowTokens: 16384,
+          hasApiKey: true,
+          enabled: true,
+          configured: true,
+          isDefault: true,
+          updatedAt: "2026-10-16T00:00:00Z",
+        },
+        {
+          id: "deepseek-r1",
+          displayName: "DeepSeek R1",
+          description: "深度推理模型",
+          baseUrl: "https://deepseek.example.test/v1",
+          model: "deepseek-reasoner",
+          contextWindowTokens: 65536,
+          hasApiKey: true,
+          enabled: true,
+          configured: true,
+          isDefault: false,
+          updatedAt: "2026-10-16T00:00:00Z",
+        },
+      ],
+    };
+    vi.spyOn(api, "modelGateway").mockResolvedValue(multiGateway);
+    const updateSpy = vi
+      .spyOn(api, "updateModelProfile")
+      .mockResolvedValue({
+        ...multiGateway,
+        defaultModelId: "deepseek-r1",
+      });
+    const testSpy = vi
+      .spyOn(api, "testModelProfile")
+      .mockResolvedValue({ ok: true, model: "deepseek-reasoner", latencyMs: 45 });
+    const deleteSpy = vi
+      .spyOn(api, "deleteModelProfile")
+      .mockResolvedValue(gateway);
+    await renderSettings();
+    expect(find(".gateway-models-section").textContent).toContain("DeepSeek R1");
+    await click(buttonByText("设为默认"));
+    expect(updateSpy).toHaveBeenCalledWith("deepseek-r1", { isDefault: true });
+    const testButtons = [...document.body.querySelectorAll("button")].filter(
+      (b) => b.textContent?.trim() === "测试此模型",
+    );
+    await click(testButtons[1]!);
+    expect(testSpy).toHaveBeenCalledWith("deepseek-r1");
+    expect(find(".notice.success").textContent).toContain("deepseek-reasoner");
+    const deleteButtons = [...document.body.querySelectorAll("button")].filter(
+      (b) => b.textContent?.trim() === "移除",
+    );
+    await click(deleteButtons[1]!);
+    expect(deleteSpy).toHaveBeenCalledWith("deepseek-r1");
+  });
 });

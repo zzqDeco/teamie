@@ -18,6 +18,7 @@ type PublicAgentDTO struct {
 	Enabled      bool     `thrift:"enabled,8,required" json:"enabled"`
 	CreatedAt    string   `thrift:"createdAt,9,required" json:"createdAt"`
 	UpdatedAt    string   `thrift:"updatedAt,10,required" json:"updatedAt"`
+	ModelId      *string  `thrift:"modelId,11,optional" json:"modelId,omitempty"`
 }
 
 func NewPublicAgentDTO() *PublicAgentDTO {
@@ -65,6 +66,19 @@ func (p *PublicAgentDTO) GetCreatedAt() (v string) {
 
 func (p *PublicAgentDTO) GetUpdatedAt() (v string) {
 	return p.UpdatedAt
+}
+
+var PublicAgentDTO_ModelId_DEFAULT string
+
+func (p *PublicAgentDTO) GetModelId() (v string) {
+	if !p.IsSetModelId() {
+		return PublicAgentDTO_ModelId_DEFAULT
+	}
+	return *p.ModelId
+}
+
+func (p *PublicAgentDTO) IsSetModelId() bool {
+	return p.ModelId != nil
 }
 
 func (p *PublicAgentDTO) String() string {
@@ -118,6 +132,7 @@ type CreateAgentReq struct {
 	Description  *string  `thrift:"description,2,optional" json:"description,omitempty"`
 	WorkspaceIds []string `thrift:"workspaceIds,3,optional,list<string>" json:"workspaceIds,omitempty"`
 	Enabled      *bool    `thrift:"enabled,4,optional" json:"enabled,omitempty"`
+	ModelId      *string  `thrift:"modelId,5,optional" json:"modelId,omitempty"`
 }
 
 func NewCreateAgentReq() *CreateAgentReq {
@@ -163,6 +178,15 @@ func (p *CreateAgentReq) GetEnabled() (v bool) {
 	return *p.Enabled
 }
 
+var CreateAgentReq_ModelId_DEFAULT string
+
+func (p *CreateAgentReq) GetModelId() (v string) {
+	if !p.IsSetModelId() {
+		return CreateAgentReq_ModelId_DEFAULT
+	}
+	return *p.ModelId
+}
+
 func (p *CreateAgentReq) IsSetName() bool {
 	return p.Name != nil
 }
@@ -177,6 +201,10 @@ func (p *CreateAgentReq) IsSetWorkspaceIds() bool {
 
 func (p *CreateAgentReq) IsSetEnabled() bool {
 	return p.Enabled != nil
+}
+
+func (p *CreateAgentReq) IsSetModelId() bool {
+	return p.ModelId != nil
 }
 
 func (p *CreateAgentReq) String() string {
@@ -214,6 +242,7 @@ type UpdateAgentReq struct {
 	Description  *string  `thrift:"description,3,optional" json:"description,omitempty"`
 	WorkspaceIds []string `thrift:"workspaceIds,4,optional,list<string>" json:"workspaceIds,omitempty"`
 	Enabled      *bool    `thrift:"enabled,5,optional" json:"enabled,omitempty"`
+	ModelId      *string  `thrift:"modelId,6,optional" json:"modelId,omitempty"`
 }
 
 func NewUpdateAgentReq() *UpdateAgentReq {
@@ -263,6 +292,15 @@ func (p *UpdateAgentReq) GetEnabled() (v bool) {
 	return *p.Enabled
 }
 
+var UpdateAgentReq_ModelId_DEFAULT string
+
+func (p *UpdateAgentReq) GetModelId() (v string) {
+	if !p.IsSetModelId() {
+		return UpdateAgentReq_ModelId_DEFAULT
+	}
+	return *p.ModelId
+}
+
 func (p *UpdateAgentReq) IsSetName() bool {
 	return p.Name != nil
 }
@@ -277,6 +315,10 @@ func (p *UpdateAgentReq) IsSetWorkspaceIds() bool {
 
 func (p *UpdateAgentReq) IsSetEnabled() bool {
 	return p.Enabled != nil
+}
+
+func (p *UpdateAgentReq) IsSetModelId() bool {
+	return p.ModelId != nil
 }
 
 func (p *UpdateAgentReq) String() string {

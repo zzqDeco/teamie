@@ -620,6 +620,92 @@ describe("Agent and model gateway boundaries", () => {
     expect(fetch.mock.calls[0][0]).toBe("/api/v1/admin/model-gateway/test");
     expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({});
   });
+  it("exposes a public model catalog without provider URLs or secrets and supports admin model profile CRUD", async () => {
+    const unsafeCatalog = {
+      defaultModelId: "deepseek-r1",
+      models: [
+        {
+          id: "deepseek-r1",
+          displayName: "DeepSeek R1",
+          description: "推理模型",
+          contextWindowTokens: 65536,
+          isDefault: true,
+          baseUrl: "https://never-returned-base-url.example.test/v1",
+          apiKey: "sk-never-returned-secret",
+          model: "deepseek-reasoner",
+        },
+      ],
+    };
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(unsafeCatalog), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            config: {
+              baseUrl: "https://model.example.test/v1",
+              model: "deepseek-reasoner",
+              hasApiKey: true,
+              enabled: true,
+              configured: true,
+              updatedAt: "2026-10-16T07:00:00Z",
+            },
+            status: "ready",
+            defaultModelId: "deepseek-r1",
+            models: [
+              {
+                id: "deepseek-r1",
+                displayName: "DeepSeek R1",
+                description: "推理模型",
+                baseUrl: "https://model.example.test/v1",
+                model: "deepseek-reasoner",
+                contextWindowTokens: 65536,
+                hasApiKey: true,
+                enabled: true,
+                configured: true,
+                isDefault: true,
+                updatedAt: "2026-10-16T07:00:00Z",
+                apiKey: "sk-never-returned-secret",
+              },
+            ],
+          }),
+          { status: 201 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetch);
+    const client = new TeamieClient();
+    client.csrfToken = "admin-session";
+    const catalog = await client.modelCatalog();
+    expect(catalog).toEqual({
+      defaultModelId: "deepseek-r1",
+      models: [
+        {
+          id: "deepseek-r1",
+          displayName: "DeepSeek R1",
+          description: "推理模型",
+          contextWindowTokens: 65536,
+          isDefault: true,
+        },
+      ],
+    });
+    expect(JSON.stringify(catalog)).not.toContain("never-returned");
+    const created = await client.createModelProfile({
+      id: "deepseek-r1",
+      displayName: "DeepSeek R1",
+      baseUrl: "https://model.example.test/v1",
+      model: "deepseek-reasoner",
+      apiKey: "sk-write-only",
+      enabled: true,
+      contextWindowTokens: 65536,
+      isDefault: true,
+    });
+    expect(JSON.stringify(created)).not.toContain("sk-never-returned-secret");
+    expect(created.models?.[0]?.id).toBe("deepseek-r1");
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/model-gateway/catalog");
+    expect(fetch.mock.calls[1][0]).toBe("/api/v1/admin/model-gateway/models");
+  });
 });
 
 describe("IDL_ROUTES and generated Thrift DTO contracts", () => {

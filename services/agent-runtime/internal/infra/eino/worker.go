@@ -67,7 +67,7 @@ func New(store *Store, c Config) (*Engine, error) {
 	if e != nil {
 		return nil, e
 	}
-	return &Engine{Store: store, Config: c, Control: cp, Gateway: gw, Sandbox: sb, Identity: id, slots: make(chan struct{}, 1), owner: uuid.NewString()}, nil
+	return &Engine{Store: store, Config: c, Control: cp, Gateway: gw, Sandbox: sb, Identity: id, owner: uuid.NewString()}, nil
 }
 func (e *Engine) Ready(ctx context.Context) error {
 	if err := e.Store.DB.Ping(ctx); err != nil {
@@ -229,7 +229,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 	// Typing and normal IM calls share credentials: issuance rotates the
 	// principal's single token and must never create competing token caches.
 	imc := &IM{BaseURL: e.Config.IMURL, RealtimeURL: e.Config.IMRealtimeURL, ServiceKey: e.Config.IMToken, AgentID: def.Id, Identity: e.Identity}
-	gatewayModel := &GatewayModel{Client: e.Gateway, Token: e.Config.GatewayToken, OwnerID: def.OwnerId, AgentID: def.Id, Store: e.Store, Lease: lease, Authorize: authorize, StreamURL: e.Config.GatewayStreamURL, ContextWindow: func() int { return int(contextWindow.Load()) }}
+	gatewayModel := &GatewayModel{Client: e.Gateway, Token: e.Config.GatewayToken, OwnerID: def.OwnerId, AgentID: def.Id, ModelID: def.GetModelId(), Store: e.Store, Lease: lease, Authorize: authorize, StreamURL: e.Config.GatewayStreamURL, ContextWindow: func() int { return int(contextWindow.Load()) }}
 	tools, err := (&Tools{Store: e.Store, Lease: lease, IM: imc, Sandbox: e.Sandbox, SandboxToken: e.Config.SandboxToken, Authorize: authorize}).BuildIM()
 	if err != nil {
 		e.report(ctx, def.Id, "error", "tool_failed", false)
@@ -790,7 +790,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 			return true
 		}
 		pc, c := context.WithTimeout(ctx, 3*time.Second)
-		ping, err := e.Gateway.Ping(pc, &wire.PingRequest{ServiceToken: &e.Config.GatewayToken})
+		ping, err := e.Gateway.Ping(pc, &wire.PingRequest{ServiceToken: &e.Config.GatewayToken, ModelId: def.ModelId})
 		c()
 		ready := err == nil && ping.Ready && ping.GetConfigured() && ping.GetEnabled()
 		if ready && ping.ContextWindowTokens != nil && ping.GetContextWindowTokens() >= 4096 {

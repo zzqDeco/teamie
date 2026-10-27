@@ -1,6 +1,7 @@
 import {
   IDL_ROUTES,
   type AdminModelConfigResp,
+  type AdminModelProfileDTO,
   type AdminUserPageResp,
   type AgentListResp,
   type AgentResp,
@@ -12,6 +13,7 @@ import {
   type BootstrapResp,
   type ChangePasswordReq,
   type ConversationDTO,
+  type CreateAdminModelProfileReq,
   type CreateAgentReq,
   type CreatePasswordResetLinkResp,
   type CreateWorkspaceReq,
@@ -25,10 +27,12 @@ import {
   type MemberDTO,
   type MentionDTO,
   type MessageDTO,
+  type ModelCatalogResp,
   type ModelConfigDTO,
   type PasswordResetDTO,
   type PasswordResetInspectionResp,
   type PublicAgentDTO,
+  type PublicModelOptionDTO,
   type RegisterReq,
   type RegistrationInviteDTO,
   type RegistrationMetadataResp,
@@ -38,6 +42,7 @@ import {
   type SyncResp,
   type TestAdminModelConfigResp,
   type UpdateAdminModelConfigReq,
+  type UpdateAdminModelProfileReq,
   type UpdateProfileReq,
   type UserDTO,
   type WebSearchConfigDTO,
@@ -98,6 +103,7 @@ function publicAgent(value: Agent, workspaceId?: string): Agent {
     enabled: value.enabled,
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
+    ...(value.modelId ? { modelId: value.modelId } : {}),
   };
 }
 export type AgentProfileInput = {
@@ -105,6 +111,7 @@ export type AgentProfileInput = {
   description?: string;
   workspaceIds: string[];
   enabled?: boolean;
+  modelId?: string;
 };
 function publicAgentProfile(
   value: Partial<AgentProfileInput>,
@@ -118,9 +125,15 @@ function publicAgentProfile(
       ? {}
       : { workspaceIds: [...value.workspaceIds] }),
     ...(value.enabled === undefined ? {} : { enabled: value.enabled }),
+    ...(value.modelId === undefined ? {} : { modelId: value.modelId }),
   };
 }
 export type WebSearchGatewayConfig = WebSearchConfigDTO;
+export type AdminModelProfile = AdminModelProfileDTO;
+export type PublicModelOption = PublicModelOptionDTO;
+export type ModelCatalog = ModelCatalogResp;
+export type CreateModelProfileInput = CreateAdminModelProfileReq;
+export type UpdateModelProfileInput = Omit<UpdateAdminModelProfileReq, "id">;
 export type ModelGatewayConfig = Omit<
   ModelConfigDTO,
   "contextWindowTokens" | "webSearch"
@@ -139,6 +152,35 @@ export type ModelGatewayInput = Omit<
   clearApiKey?: boolean;
   clearWebSearchApiKey?: boolean;
 };
+function publicAdminModelProfile(
+  model: AdminModelProfile,
+): AdminModelProfile {
+  return {
+    id: model.id,
+    displayName: model.displayName,
+    description: model.description,
+    baseUrl: model.baseUrl,
+    model: model.model,
+    contextWindowTokens: model.contextWindowTokens,
+    hasApiKey: model.hasApiKey,
+    enabled: model.enabled,
+    configured: model.configured,
+    isDefault: model.isDefault,
+    updatedAt: model.updatedAt,
+  };
+}
+function publicModelCatalog(value: ModelCatalog): ModelCatalog {
+  return {
+    models: (value.models || []).map((item) => ({
+      id: item.id,
+      displayName: item.displayName,
+      description: item.description,
+      contextWindowTokens: item.contextWindowTokens,
+      isDefault: item.isDefault,
+    })),
+    ...(value.defaultModelId ? { defaultModelId: value.defaultModelId } : {}),
+  };
+}
 function publicModelGateway(value: ModelGateway): ModelGateway {
   // Project only public metadata even if a server accidentally adds a secret field.
   return {
@@ -164,6 +206,12 @@ function publicModelGateway(value: ModelGateway): ModelGateway {
           }),
     },
     status: value.status,
+    ...(value.models === undefined
+      ? {}
+      : { models: value.models.map(publicAdminModelProfile) }),
+    ...(value.defaultModelId === undefined
+      ? {}
+      : { defaultModelId: value.defaultModelId }),
   };
 }
 export type Attachment = AttachmentDTO;
@@ -438,6 +486,10 @@ export class TeamieClient {
       )
     ).agents.map((agent) => publicAgent(agent, id)),
   });
+  modelCatalog = async () =>
+    publicModelCatalog(
+      await this.#request<ModelCatalog>(IDL_ROUTES.GetModelCatalog.clientPath),
+    );
   modelGateway = async () =>
     publicModelGateway(
       await this.#request<ModelGateway>(
@@ -458,6 +510,41 @@ export class TeamieClient {
     this.#request<TestAdminModelConfigResp>(
       IDL_ROUTES.TestAdminModelConfig.clientPath,
       { method: IDL_ROUTES.TestAdminModelConfig.method, body: JSON.stringify({}) },
+    );
+  createModelProfile = async (input: CreateModelProfileInput) =>
+    publicModelGateway(
+      await this.#request<ModelGateway>(
+        IDL_ROUTES.CreateAdminModelProfile.clientPath,
+        {
+          method: IDL_ROUTES.CreateAdminModelProfile.method,
+          body: JSON.stringify(input),
+        },
+      ),
+    );
+  updateModelProfile = async (id: string, input: UpdateModelProfileInput) =>
+    publicModelGateway(
+      await this.#request<ModelGateway>(
+        routePath(IDL_ROUTES.UpdateAdminModelProfile, { id }),
+        {
+          method: IDL_ROUTES.UpdateAdminModelProfile.method,
+          body: JSON.stringify(input),
+        },
+      ),
+    );
+  deleteModelProfile = async (id: string) =>
+    publicModelGateway(
+      await this.#request<ModelGateway>(
+        routePath(IDL_ROUTES.DeleteAdminModelProfile, { id }),
+        { method: IDL_ROUTES.DeleteAdminModelProfile.method },
+      ),
+    );
+  testModelProfile = (id: string) =>
+    this.#request<TestAdminModelConfigResp>(
+      routePath(IDL_ROUTES.TestAdminModelProfile, { id }),
+      {
+        method: IDL_ROUTES.TestAdminModelProfile.method,
+        body: JSON.stringify({}),
+      },
     );
   login = (email: string, password: string) =>
     this.#request<Session>(IDL_ROUTES.Login.clientPath, {

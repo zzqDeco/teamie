@@ -145,6 +145,17 @@ describe("Agent ownership and visible teams", () => {
     expect(
       agentProfileChanges(initial, { ...profile, description: "新的简介" }),
     ).toEqual({ description: "新的简介" });
+    expect(
+      agentProfileChanges(initial, { ...profile, modelId: "deepseek-r1" }),
+    ).toEqual({ modelId: "deepseek-r1" });
+    const initialWithModel = snapshotAgentProfile({
+      ...agent,
+      workspaceIds: [workspace.id, "second-team"],
+      modelId: "deepseek-r1",
+    });
+    expect(
+      agentProfileChanges(initialWithModel, { ...profile, modelId: "" }),
+    ).toEqual({ modelId: "" });
   });
   it("enriches people and Agents through the same participant list with provenance, excluding disabled Agents from new selection", () => {
     const participants = enrichParticipants(

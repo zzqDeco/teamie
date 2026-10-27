@@ -103,7 +103,7 @@ func (m *GatewayModel) Stream(ctx context.Context, input []*schema.AgenticMessag
 		return nil, &ModelError{Code: "gateway_stream_unavailable", Retry: true}
 	}
 	phase = "gateway-request"
-	body, _ := json.Marshal(modeltransport.CallRequest{OwnerID: m.OwnerID, AgentID: m.AgentID, SessionID: "agent:" + m.AgentID, RunID: executionID(run), RequestJSON: string(request), MessageLimit: modelInputMessageLimit(run)})
+	body, _ := json.Marshal(modeltransport.CallRequest{OwnerID: m.OwnerID, AgentID: m.AgentID, SessionID: "agent:" + m.AgentID, RunID: executionID(run), RequestJSON: string(request), MessageLimit: modelInputMessageLimit(run), ModelID: strings.TrimSpace(m.ModelID)})
 	requestCtx, cancel := context.WithCancel(ctx)
 	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, m.StreamURL, bytes.NewReader(body))
 	if err != nil {

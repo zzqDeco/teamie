@@ -21,11 +21,42 @@ struct ModelConfigDTO {
   8: required string updatedAt (api.body="updatedAt")
 }
 
+struct AdminModelProfileDTO {
+  1: required string id (api.body="id")
+  2: required string displayName (api.body="displayName")
+  3: required string description (api.body="description")
+  4: required string baseUrl (api.body="baseUrl")
+  5: required string model (api.body="model")
+  6: required i64 contextWindowTokens (api.body="contextWindowTokens")
+  7: required bool hasApiKey (api.body="hasApiKey")
+  8: required bool enabled (api.body="enabled")
+  9: required bool configured (api.body="configured")
+  10: required bool isDefault (api.body="isDefault")
+  11: required string updatedAt (api.body="updatedAt")
+}
+
+struct GetModelCatalogReq {}
+
+struct PublicModelOptionDTO {
+  1: required string id (api.body="id")
+  2: required string displayName (api.body="displayName")
+  3: required string description (api.body="description")
+  4: required i64 contextWindowTokens (api.body="contextWindowTokens")
+  5: required bool isDefault (api.body="isDefault")
+}
+
+struct ModelCatalogResp {
+  1: required list<PublicModelOptionDTO> models (api.body="models")
+  2: optional string defaultModelId (api.body="defaultModelId")
+}
+
 struct GetAdminModelConfigReq {}
 
 struct AdminModelConfigResp {
   1: required ModelConfigDTO config (api.body="config")
   2: required string status (api.body="status")
+  3: optional list<AdminModelProfileDTO> models (api.body="models")
+  4: optional string defaultModelId (api.body="defaultModelId")
 }
 
 struct UpdateAdminModelConfigReq {
@@ -38,6 +69,39 @@ struct UpdateAdminModelConfigReq {
   7: optional bool webSearchEnabled (api.body="webSearchEnabled")
   8: optional string webSearchApiKey (api.body="webSearchApiKey")
   9: optional bool clearWebSearchApiKey (api.body="clearWebSearchApiKey")
+}
+
+struct CreateAdminModelProfileReq {
+  1: optional string id (api.body="id")
+  2: optional string displayName (api.body="displayName")
+  3: optional string description (api.body="description")
+  4: required string baseUrl (api.body="baseUrl")
+  5: required string model (api.body="model")
+  6: optional string apiKey (api.body="apiKey")
+  7: required bool enabled (api.body="enabled")
+  8: optional i64 contextWindowTokens (api.body="contextWindowTokens")
+  9: optional bool isDefault (api.body="isDefault")
+}
+
+struct UpdateAdminModelProfileReq {
+  1: required string id (api.path="id", go.tag="json:\"-\"")
+  2: optional string displayName (api.body="displayName")
+  3: optional string description (api.body="description")
+  4: optional string baseUrl (api.body="baseUrl")
+  5: optional string model (api.body="model")
+  6: optional string apiKey (api.body="apiKey")
+  7: optional bool clearApiKey (api.body="clearApiKey")
+  8: optional bool enabled (api.body="enabled")
+  9: optional i64 contextWindowTokens (api.body="contextWindowTokens")
+  10: optional bool isDefault (api.body="isDefault")
+}
+
+struct DeleteAdminModelProfileReq {
+  1: required string id (api.path="id", go.tag="json:\"-\"")
+}
+
+struct TestAdminModelProfileReq {
+  1: required string id (api.path="id", go.tag="json:\"-\"")
 }
 
 struct TestAdminModelConfigReq {}
@@ -56,6 +120,7 @@ struct ChatCallReq {
   5: required string requestJson (api.body="requestJson")
   6: optional i32 messageLimit (api.body="messageLimit")
   7: optional string expectedModelConfigId (api.header="X-Teamie-Model-Config-Id")
+  8: optional string modelId (api.body="modelId")
 }
 
 struct ChatCallResp {
@@ -132,9 +197,14 @@ struct WebExtractResp {
 }
 
 service ModelGatewayHTTPService {
+  ModelCatalogResp GetModelCatalog(1: GetModelCatalogReq req) (api.get="/api/v1/model-gateway/catalog")
   AdminModelConfigResp GetAdminModelConfig(1: GetAdminModelConfigReq req) (api.get="/api/v1/admin/model-gateway")
   AdminModelConfigResp UpdateAdminModelConfig(1: UpdateAdminModelConfigReq req) (api.put="/api/v1/admin/model-gateway")
   TestAdminModelConfigResp TestAdminModelConfig(1: TestAdminModelConfigReq req) (api.post="/api/v1/admin/model-gateway/test")
+  AdminModelConfigResp CreateAdminModelProfile(1: CreateAdminModelProfileReq req) (api.post="/api/v1/admin/model-gateway/models", api.status="201")
+  AdminModelConfigResp UpdateAdminModelProfile(1: UpdateAdminModelProfileReq req) (api.patch="/api/v1/admin/model-gateway/models/:id")
+  AdminModelConfigResp DeleteAdminModelProfile(1: DeleteAdminModelProfileReq req) (api.delete="/api/v1/admin/model-gateway/models/:id")
+  TestAdminModelConfigResp TestAdminModelProfile(1: TestAdminModelProfileReq req) (api.post="/api/v1/admin/model-gateway/models/:id/test")
   ChatCallResp GenerateChat(1: ChatCallReq req) (api.post="/internal/v1/chat")
   StreamEventFrameDTO StreamChat(1: ChatCallReq req) (api.post="/internal/v1/chat/stream")
   WebSearchResp WebSearch(1: WebSearchReq req) (api.post="/internal/v1/web/search")

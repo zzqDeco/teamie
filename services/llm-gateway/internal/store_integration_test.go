@@ -76,15 +76,15 @@ func TestPostgresEncryptedPersistenceUsageAndKeyPreservation(t *testing.T) {
 	if e != nil || c.ContextWindow() != 131072 || !c.WebSearchEnabled || !c.WebSearchConfigured() {
 		t.Fatal("omitted context or web search metadata was not preserved", c.ContextWindow(), c.WebSearchEnabled, e)
 	}
-	if e = store.Record(ctx, Usage{OwnerID: "owner", AgentID: "agent", SessionID: "session", RunID: "run", Status: "success", PromptTokens: 12, CompletionTokens: 8, LatencyMS: 3}); e != nil {
+	if e = store.Record(ctx, Usage{OwnerID: "owner", AgentID: "agent", SessionID: "session", RunID: "run", ModelID: "default", Status: "success", PromptTokens: 12, CompletionTokens: 8, LatencyMS: 3}); e != nil {
 		t.Fatal(e)
 	}
-	var owner, status string
+	var owner, status, modelID string
 	var version, count int
 	_ = store.DB.QueryRow(ctx, "SELECT max(version) FROM gateway_schema_migrations").Scan(&version)
 	_ = store.DB.QueryRow(ctx, "SELECT count(*) FROM gateway_usage").Scan(&count)
-	_ = store.DB.QueryRow(ctx, "SELECT owner_id,status FROM gateway_usage LIMIT 1").Scan(&owner, &status)
-	if version != 3 || count != 1 || owner != "owner" || status != "success" || c.ContextWindow() != 131072 {
-		t.Fatal(version, count, owner, status)
+	_ = store.DB.QueryRow(ctx, "SELECT owner_id,status,model_id FROM gateway_usage LIMIT 1").Scan(&owner, &status, &modelID)
+	if version != 4 || count != 1 || owner != "owner" || status != "success" || modelID != "default" || c.ContextWindow() != 131072 {
+		t.Fatal(version, count, owner, status, modelID)
 	}
 }

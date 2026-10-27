@@ -52,6 +52,7 @@ func (s *Service) CallChat(ctx context.Context, owner, agentID, sessionID, runID
 	if err != nil {
 		return fail(err, "")
 	}
+	c = c.ResolveModel(RequestedModelID(ctx))
 	if !c.Configured() {
 		return fail(domain.Err(409, "model_unconfigured", "An administrator must configure the model gateway"), "")
 	}
@@ -100,6 +101,7 @@ func (s *Service) CallChat(ctx context.Context, owner, agentID, sessionID, runID
 		AgentID:          agentID,
 		SessionID:        sessionID,
 		RunID:            runID,
+		ModelID:          c.DefaultModelID,
 		Status:           status,
 		PromptTokens:     prompt,
 		CompletionTokens: completion,
@@ -145,6 +147,7 @@ func (s *Service) StreamChat(ctx context.Context, owner, agentID, sessionID, run
 	if err != nil {
 		return terminal(err)
 	}
+	c = c.ResolveModel(RequestedModelID(ctx))
 	if !c.Configured() {
 		return terminal(domain.Err(409, "model_unconfigured", "An administrator must configure the model gateway"))
 	}
@@ -190,6 +193,7 @@ func (s *Service) StreamChat(ctx context.Context, owner, agentID, sessionID, run
 		AgentID:          agentID,
 		SessionID:        sessionID,
 		RunID:            runID,
+		ModelID:          c.DefaultModelID,
 		Status:           status,
 		PromptTokens:     prompt,
 		CompletionTokens: completion,

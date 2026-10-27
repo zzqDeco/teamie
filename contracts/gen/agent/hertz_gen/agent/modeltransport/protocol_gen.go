@@ -42,6 +42,7 @@ type CallRequest struct {
 	RunID       string `json:"runId"`
 	RequestJSON string `json:"requestJson"`
 	MessageLimit int `json:"messageLimit,omitempty"`
+	ModelID     string `json:"modelId,omitempty"`
 }
 
 func (r CallRequest) InputMessageLimit() int {

@@ -8,3 +8,8 @@ ALTER TABLE gateway_config ADD COLUMN IF NOT EXISTS context_window_tokens BIGINT
 INSERT INTO gateway_schema_migrations(version)VALUES(2)ON CONFLICT DO NOTHING;
 ALTER TABLE gateway_config ADD COLUMN IF NOT EXISTS web_search_encrypted_key BYTEA, ADD COLUMN IF NOT EXISTS web_search_enabled BOOLEAN NOT NULL DEFAULT false;
 INSERT INTO gateway_schema_migrations(version)VALUES(3)ON CONFLICT DO NOTHING;
+CREATE TABLE IF NOT EXISTS gateway_models(id TEXT PRIMARY KEY,display_name TEXT NOT NULL DEFAULT '',description TEXT NOT NULL DEFAULT '',base_url TEXT NOT NULL DEFAULT '',model TEXT NOT NULL DEFAULT '',encrypted_key BYTEA,context_window_tokens BIGINT NOT NULL DEFAULT 16384 CHECK(context_window_tokens BETWEEN 4096 AND 2000000),enabled BOOLEAN NOT NULL DEFAULT true,created_at TIMESTAMPTZ NOT NULL DEFAULT now(),updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
+ALTER TABLE gateway_config ADD COLUMN IF NOT EXISTS default_model_id TEXT NOT NULL DEFAULT 'default';
+INSERT INTO gateway_models(id,display_name,description,base_url,model,encrypted_key,context_window_tokens,enabled,created_at,updated_at)SELECT 'default',model,'',base_url,model,encrypted_key,context_window_tokens,enabled,updated_at,updated_at FROM gateway_config WHERE id AND base_url<>'' AND model<>'' AND encrypted_key IS NOT NULL ON CONFLICT(id)DO NOTHING;
+ALTER TABLE gateway_usage ADD COLUMN IF NOT EXISTS model_id TEXT NOT NULL DEFAULT '';
+INSERT INTO gateway_schema_migrations(version)VALUES(4)ON CONFLICT DO NOTHING;

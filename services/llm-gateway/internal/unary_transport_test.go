@@ -26,7 +26,7 @@ import (
 
 func fixtureHTTPChat(t *testing.T, s *Service, ctx context.Context, in *agent.GatewayChatRequest) (*agent.GatewayChatResponse, error) {
 	t.Helper()
-	raw, _ := json.Marshal(modeltransport.CallRequest{OwnerID: in.OwnerId, AgentID: in.AgentId, SessionID: in.SessionId, RunID: in.RunId, RequestJSON: in.RequestJson})
+	raw, _ := json.Marshal(modeltransport.CallRequest{OwnerID: in.OwnerId, AgentID: in.AgentId, SessionID: in.SessionId, RunID: in.RunId, RequestJSON: in.RequestJson, ModelID: in.GetModelId()})
 	r, _ := http.NewRequestWithContext(ctx, http.MethodPost, modeltransport.GeneratePath, bytes.NewReader(raw))
 	r.Header.Set("Authorization", "Bearer "+in.ServiceToken)
 	w := httptest.NewRecorder()
