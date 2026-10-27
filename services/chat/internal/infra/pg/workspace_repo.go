@@ -143,13 +143,34 @@ func (r *Repository) FindMemberAndDelegatedIDs(ctx context.Context, workspaceID,
 }
 
 func (r *Repository) DeleteConversationMembersInWorkspace(ctx context.Context, workspaceID string, userIDs []string) error {
-	_, err := r.DB.Conn(ctx).Exec(ctx, "DELETE FROM conversation_members cm USING conversations c WHERE cm.conversation_id=c.id AND c.workspace_id=$1 AND cm.user_id=ANY($2)", workspaceID, userIDs)
+	conn := r.DB.Conn(ctx)
+	if _, err := conn.Exec(ctx, "DELETE FROM conversation_notification_levels nl USING conversations c WHERE nl.conversation_id=c.id AND c.workspace_id=$1 AND nl.user_id=ANY($2)", workspaceID, userIDs); err != nil {
+		return err
+	}
+	_, err := conn.Exec(ctx, "DELETE FROM conversation_members cm USING conversations c WHERE cm.conversation_id=c.id AND c.workspace_id=$1 AND cm.user_id=ANY($2)", workspaceID, userIDs)
 	return err
 }
 
 func (r *Repository) DeleteWorkspaceMembers(ctx context.Context, workspaceID string, userIDs []string) error {
 	_, err := r.DB.Conn(ctx).Exec(ctx, "DELETE FROM workspace_members WHERE workspace_id=$1 AND user_id=ANY($2)", workspaceID, userIDs)
 	return err
+}
+
+func (r *Repository) SharedWorkspaceMemberIDs(ctx context.Context, userID string) ([]string, error) {
+	rows, err := r.DB.Conn(ctx).Query(ctx, "SELECT DISTINCT wm2.user_id FROM workspace_members wm1 JOIN workspace_members wm2 ON wm1.workspace_id=wm2.workspace_id WHERE wm1.user_id=$1 ORDER BY wm2.user_id", userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err = rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 func (r *Repository) ParticipantWorkspaces(ctx context.Context, userID string) ([]string, error) {

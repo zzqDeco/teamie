@@ -1,4 +1,128 @@
-import type { Conversation, Message, SyncPage } from "@teamie/api-client";
+import type {
+  AttentionItem,
+  Conversation,
+  Message,
+  NotificationLevel,
+  Reaction,
+  SyncPage,
+} from "@teamie/api-client";
+
+export function effectiveNotificationLevel(
+  conversation?: Pick<Conversation, "notificationLevel"> | null,
+): NotificationLevel {
+  const level = conversation?.notificationLevel;
+  return level === "mentions" || level === "none" ? level : "all";
+}
+
+export type ConversationUnreadSummary = {
+  level: NotificationLevel;
+  muted: boolean;
+  rawUnread: number;
+  mentionUnread: number;
+  hasUnread: boolean;
+  badgeCount: number;
+  badgePrefix: string;
+  contributesToWorkspaceDot: boolean;
+  contributesToUrgentCount: number;
+  contributesToChannelUnreadDot: boolean;
+};
+
+export function summarizeConversationUnread(
+  conversation: Conversation,
+  snapshot: ChatSnapshot,
+  userId: string,
+  attentionItems?: ReadonlyArray<AttentionItem>,
+): ConversationUnreadSummary {
+  const level = effectiveNotificationLevel(conversation);
+  const rawUnread = Math.max(0, conversation.lastSeq - conversation.readSeq);
+  if (level === "none") {
+    return {
+      level,
+      muted: true,
+      rawUnread,
+      mentionUnread: 0,
+      hasUnread: false,
+      badgeCount: 0,
+      badgePrefix: "",
+      contributesToWorkspaceDot: false,
+      contributesToUrgentCount: 0,
+      contributesToChannelUnreadDot: false,
+    };
+  }
+  const mentionMessageIds = new Set<string>();
+  if (attentionItems) {
+    for (const item of attentionItems) {
+      if (
+        item.conversation.id === conversation.id &&
+        !item.isRead &&
+        !item.message.retractedAt &&
+        item.message.seq > conversation.readSeq &&
+        item.message.senderId !== userId
+      ) {
+        mentionMessageIds.add(item.message.id);
+      }
+    }
+  }
+  const cached = snapshot.messages[conversation.id] || [];
+  if (rawUnread > 0 && cached.length > 0) {
+    const byId = new Map<string, LocalMessage>();
+    for (const m of cached) {
+      if (!byId.has(m.id)) byId.set(m.id, m);
+    }
+    for (const m of cached) {
+      if (
+        m.status ||
+        m.retractedAt ||
+        m.seq <= conversation.readSeq ||
+        m.senderId === userId
+      ) {
+        continue;
+      }
+      const isMention = Boolean(
+        m.mentions?.some((mention) => mention.userId === userId),
+      );
+      let isReplyToMe = false;
+      if (m.replyToId) {
+        const parent = byId.get(m.replyToId);
+        if (parent && !parent.retractedAt && parent.senderId === userId) {
+          isReplyToMe = true;
+        }
+      }
+      if (isMention || isReplyToMe) {
+        mentionMessageIds.add(m.id);
+      }
+    }
+  }
+  const mentionUnread = mentionMessageIds.size;
+  if (level === "mentions") {
+    return {
+      level,
+      muted: false,
+      rawUnread,
+      mentionUnread,
+      hasUnread: mentionUnread > 0,
+      badgeCount: mentionUnread,
+      badgePrefix: mentionUnread > 0 ? "@ " : "",
+      contributesToWorkspaceDot: mentionUnread > 0,
+      contributesToUrgentCount: mentionUnread,
+      contributesToChannelUnreadDot: false,
+    };
+  }
+  // level === "all"
+  const isChannel = conversation.type === "channel";
+  return {
+    level,
+    muted: false,
+    rawUnread,
+    mentionUnread,
+    hasUnread: rawUnread > 0,
+    badgeCount: rawUnread,
+    badgePrefix: mentionUnread > 0 ? "@ " : "",
+    contributesToWorkspaceDot: rawUnread > 0,
+    contributesToUrgentCount: isChannel ? mentionUnread : rawUnread,
+    contributesToChannelUnreadDot: isChannel && rawUnread > 0,
+  };
+}
 
 export type LocalMessage = Message & {
   status?: "sending" | "failed";
@@ -85,6 +209,7 @@ export function reconcileMessages(
           body: "",
           attachments: undefined,
           mentions: undefined,
+          reactions: undefined,
         }
       : incomingMessage;
     const key = clientKey(message);
@@ -105,7 +230,14 @@ export function reconcileMessages(
       if (!old.status && message.status) continue;
       if (!old.status && !message.status && version(old) > version(message))
         continue;
-      output[index] = message.retractedAt ? { ...message, body: "" } : message;
+      output[index] = message.retractedAt
+        ? { ...message, body: "", reactions: undefined }
+        : {
+            ...message,
+            ...(message.reactions === undefined && old.reactions !== undefined
+              ? { reactions: old.reactions }
+              : {}),
+          };
       if (old.id !== message.id) byId.delete(old.id);
       const oldKey = clientKey(old);
       if (oldKey !== key) byClientKey.delete(oldKey);
@@ -408,6 +540,8 @@ export class ChatStore {
               lastSeq: Math.max(c.lastSeq, old?.lastSeq ?? 0),
               readSeq: Math.max(c.readSeq, old?.readSeq ?? 0),
               updatedAt: newerTimestamp(old?.updatedAt, c.updatedAt),
+              notificationLevel:
+                c.notificationLevel ?? old?.notificationLevel ?? "all",
             },
           ];
         }),
@@ -429,6 +563,30 @@ export class ChatStore {
     const conversation = this.snapshot.conversations[id];
     if (conversation && seq > conversation.readSeq)
       this.addConversation({ ...conversation, readSeq: seq });
+  }
+  setReactions(conversationId: string, messageId: string, reactions: Reaction[]) {
+    const list = this.snapshot.messages[conversationId];
+    if (!list) return;
+    let changed = false;
+    const nextList = list.map((m) => {
+      if (m.id !== messageId || m.retractedAt) return m;
+      changed = true;
+      return { ...m, reactions };
+    });
+    if (!changed) return;
+    this.commit({
+      ...this.snapshot,
+      messages: {
+        ...this.snapshot.messages,
+        [conversationId]: nextList,
+      },
+    });
+  }
+  setNotificationLevel(conversationId: string, notificationLevel: NotificationLevel) {
+    const conversation = this.snapshot.conversations[conversationId];
+    if (!conversation || conversation.notificationLevel === notificationLevel)
+      return;
+    this.addConversation({ ...conversation, notificationLevel });
   }
   apply(page: SyncPage) {
     if (
@@ -481,6 +639,31 @@ export class ChatStore {
         next.conversations[event.conversationId] = {
           ...c,
           readSeq: Math.max(c.readSeq, event.readSeq || 0),
+        };
+      }
+      if (
+        event.type === "reaction.updated" &&
+        event.conversationId &&
+        event.messageId &&
+        next.messages[event.conversationId]
+      ) {
+        const list = next.messages[event.conversationId];
+        next.messages[event.conversationId] = list.map((m) =>
+          m.id === event.messageId && !m.retractedAt
+            ? { ...m, reactions: event.reactions || [] }
+            : m,
+        );
+      }
+      if (
+        event.type === "preference.updated" &&
+        event.conversationId &&
+        event.notificationLevel &&
+        next.conversations[event.conversationId]
+      ) {
+        const c = next.conversations[event.conversationId];
+        next.conversations[event.conversationId] = {
+          ...c,
+          notificationLevel: event.notificationLevel,
         };
       }
     }

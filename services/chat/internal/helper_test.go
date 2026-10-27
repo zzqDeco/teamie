@@ -37,6 +37,10 @@ type Workspace = domain.Workspace
 type Conversation = domain.Conversation
 type Attachment = domain.Attachment
 type Member = domain.Member
+type Reaction = domain.Reaction
+type ReadReceipts = domain.ReadReceipts
+type ReadSeqCount = domain.ReadSeqCount
+type MemberReadReceipt = domain.MemberReadReceipt
 type AttentionConversation = domain.AttentionConversation
 
 type Message struct {
@@ -54,17 +58,21 @@ type Message struct {
 	RetractedAt     *time.Time       `json:"retractedAt,omitempty"`
 	Attachments     []Attachment     `json:"attachments,omitempty"`
 	Mentions        []imtext.Mention `json:"mentions,omitempty"`
+	Reactions       []Reaction       `json:"reactions,omitempty"`
 }
 
 type Event struct {
-	ID             string        `json:"id"`
-	Type           string        `json:"type"`
-	ConversationID string        `json:"conversationId,omitempty"`
-	WorkspaceID    string        `json:"workspaceId,omitempty"`
-	Message        *Message      `json:"message,omitempty"`
-	Conversation   *Conversation `json:"conversation,omitempty"`
-	ReadSeq        *int64        `json:"readSeq,omitempty"`
-	CreatedAt      time.Time     `json:"createdAt"`
+	ID                string        `json:"id"`
+	Type              string        `json:"type"`
+	ConversationID    string        `json:"conversationId,omitempty"`
+	WorkspaceID       string        `json:"workspaceId,omitempty"`
+	Message           *Message      `json:"message,omitempty"`
+	Conversation      *Conversation `json:"conversation,omitempty"`
+	ReadSeq           *int64        `json:"readSeq,omitempty"`
+	MessageID         string        `json:"messageId,omitempty"`
+	Reactions         []Reaction    `json:"reactions,omitempty"`
+	NotificationLevel *string       `json:"notificationLevel,omitempty"`
+	CreatedAt         time.Time     `json:"createdAt"`
 }
 
 type WorkspaceSearchItem struct {
@@ -152,6 +160,7 @@ func fromDomainMessage(m domain.Message) Message {
 		RetractedAt:     m.RetractedAt,
 		Attachments:     m.Attachments,
 		Mentions:        fromDomainMentions(m.Mentions),
+		Reactions:       m.Reactions,
 	}
 }
 
@@ -170,14 +179,17 @@ func fromDomainEvent(ev domain.Event) Event {
 		msg = &m
 	}
 	return Event{
-		ID:             ev.ID,
-		Type:           ev.Type,
-		ConversationID: ev.ConversationID,
-		WorkspaceID:    ev.WorkspaceID,
-		Message:        msg,
-		Conversation:   ev.Conversation,
-		ReadSeq:        ev.ReadSeq,
-		CreatedAt:      ev.CreatedAt,
+		ID:                ev.ID,
+		Type:              ev.Type,
+		ConversationID:    ev.ConversationID,
+		WorkspaceID:       ev.WorkspaceID,
+		Message:           msg,
+		Conversation:      ev.Conversation,
+		ReadSeq:           ev.ReadSeq,
+		MessageID:         ev.MessageID,
+		Reactions:         ev.Reactions,
+		NotificationLevel: ev.NotificationLevel,
+		CreatedAt:         ev.CreatedAt,
 	}
 }
 
@@ -487,6 +499,12 @@ func (h *RPC) server() *rpcadapter.Server {
 
 func (h *RPC) CheckAccess(ctx context.Context, r *im.AccessRequest) (*im.AccessResponse, error) {
 	return h.server().CheckAccess(ctx, r)
+}
+func (h *RPC) CheckWorkspaceAccess(ctx context.Context, r *im.WorkspaceAccessRequest) (*im.WorkspaceAccessResponse, error) {
+	return h.server().CheckWorkspaceAccess(ctx, r)
+}
+func (h *RPC) GetSharedWorkspaceMembers(ctx context.Context, r *im.SharedWorkspaceMembersRequest) (*im.SharedWorkspaceMembersResponse, error) {
+	return h.server().GetSharedWorkspaceMembers(ctx, r)
 }
 func (h *RPC) Ping(ctx context.Context, r *im.PingRequest) (*im.PingResponse, error) {
 	return h.server().Ping(ctx, r)

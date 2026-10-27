@@ -48,18 +48,21 @@ type RealtimeWSServer = RealtimeWSService
 const (
 	PatternConnectWS = "GET /api/v1/ws"
 	PatternPublishTyping = "POST /api/v1/conversations/{id}/typing"
+	PatternGetWorkspacePresence = "GET /api/v1/workspaces/{id}/presence"
 )
 
-// RealtimeWSServiceRoutes lists all 2 route specifications declared on RealtimeWSService.
+// RealtimeWSServiceRoutes lists all 3 route specifications declared on RealtimeWSService.
 var RealtimeWSServiceRoutes = []RouteSpec{
 	{Name: "ConnectWS", Method: "GET", Path: "/api/v1/ws", MuxPattern: PatternConnectWS, RequestType: "ConnectWSReq", ResponseType: "EmptyResp"},
 	{Name: "PublishTyping", Method: "POST", Path: "/api/v1/conversations/:id/typing", MuxPattern: PatternPublishTyping, RequestType: "PublishTypingReq", ResponseType: "EmptyResp"},
+	{Name: "GetWorkspacePresence", Method: "GET", Path: "/api/v1/workspaces/:id/presence", MuxPattern: PatternGetWorkspacePresence, RequestType: "GetWorkspacePresenceReq", ResponseType: "WorkspacePresenceResp"},
 }
 
 // RealtimeWSServiceRouteHandlers binds every endpoint in RealtimeWSService to an http.HandlerFunc.
 type RealtimeWSServiceRouteHandlers struct {
 	ConnectWS http.HandlerFunc
 	PublishTyping http.HandlerFunc
+	GetWorkspacePresence http.HandlerFunc
 }
 
 // RegisterRealtimeWSServiceRoutes registers all RealtimeWSService endpoints on mux and panics if any IDL endpoint handler is nil.
@@ -72,6 +75,10 @@ func RegisterRealtimeWSServiceRoutes(mux *http.ServeMux, h RealtimeWSServiceRout
 		panic("RealtimeWSServiceRouteHandlers.PublishTyping (" + PatternPublishTyping + ") is nil")
 	}
 	mux.HandleFunc(PatternPublishTyping, h.PublishTyping)
+	if h.GetWorkspacePresence == nil {
+		panic("RealtimeWSServiceRouteHandlers.GetWorkspacePresence (" + PatternGetWorkspacePresence + ") is nil")
+	}
+	mux.HandleFunc(PatternGetWorkspacePresence, h.GetWorkspacePresence)
 }
 
 // RegisterRealtimeWSServiceHertzServer registers RealtimeWSServer endpoints on a native Hertz route.RouterGroup.
@@ -155,6 +162,45 @@ func RegisterRealtimeWSServiceHertzServer(r *route.RouterGroup, srv RealtimeWSSe
 			m.WriteOK(ctx, c, resp)
 		})
 	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "GetWorkspacePresence", Method: "GET", Path: "/api/v1/workspaces/:id/presence", MuxPattern: PatternGetWorkspacePresence, RequestType: "GetWorkspacePresenceReq", ResponseType: "WorkspacePresenceResp"}); hfn != nil {
+			r.GET("/api/v1/workspaces/:id/presence", hfn)
+		} else {
+			r.GET("/api/v1/workspaces/:id/presence", func(ctx context.Context, c *app.RequestContext) {
+				var req GetWorkspacePresenceReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				resp, err := srv.GetWorkspacePresence(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.GET("/api/v1/workspaces/:id/presence", func(ctx context.Context, c *app.RequestContext) {
+			var req GetWorkspacePresenceReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			resp, err := srv.GetWorkspacePresence(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
 }
 
 // RegisterRealtimeWSServer binds RealtimeWSServer methods using HTTPResponder with optional per-route handler overrides.
@@ -201,6 +247,22 @@ func RegisterRealtimeWSServer(mux *http.ServeMux, srv RealtimeWSServer, m HTTPRe
 			fn = mw.WrapRoute(RouteSpec{Name: "PublishTyping", Method: "POST", Path: "/api/v1/conversations/:id/typing", MuxPattern: PatternPublishTyping, RequestType: "PublishTypingReq", ResponseType: "EmptyResp"}, fn)
 		}
 		h.PublishTyping = fn
+	}
+	if h.GetWorkspacePresence == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req GetWorkspacePresenceReq
+			req.ID = r.PathValue("id")
+			resp, err := srv.GetWorkspacePresence(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "GetWorkspacePresence", Method: "GET", Path: "/api/v1/workspaces/:id/presence", MuxPattern: PatternGetWorkspacePresence, RequestType: "GetWorkspacePresenceReq", ResponseType: "WorkspacePresenceResp"}, fn)
+		}
+		h.GetWorkspacePresence = fn
 	}
 	RegisterRealtimeWSServiceRoutes(mux, h)
 }

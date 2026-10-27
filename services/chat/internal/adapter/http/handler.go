@@ -112,17 +112,22 @@ func toConversationDTO(c domain.Conversation) *chatgen.ConversationDTO {
 	if members == nil {
 		members = []string{}
 	}
+	level := c.NotificationLevel
+	if level == "" {
+		level = "all"
+	}
 	return &chatgen.ConversationDTO{
-		ID:               c.ID,
-		WorkspaceId:      c.WorkspaceID,
-		Type:             c.Type,
-		Name:             c.Name,
-		MemberIds:        members,
-		LastSeq:          c.LastSeq,
-		ReadSeq:          c.ReadSeq,
-		UpdatedAt:        c.UpdatedAt.UTC().Format(time.RFC3339Nano),
-		CreatedBy:        optString(c.CreatedBy),
-		CanManageMembers: c.CanManageMembers,
+		ID:                c.ID,
+		WorkspaceId:       c.WorkspaceID,
+		Type:              c.Type,
+		Name:              c.Name,
+		MemberIds:         members,
+		LastSeq:           c.LastSeq,
+		ReadSeq:           c.ReadSeq,
+		UpdatedAt:         c.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		CreatedBy:         optString(c.CreatedBy),
+		CanManageMembers:  c.CanManageMembers,
+		NotificationLevel: &level,
 	}
 }
 
@@ -162,6 +167,25 @@ func fromMentionDTOs(ms []*chatgen.MentionDTO) ([]domain.Mention, error) {
 	return out, nil
 }
 
+func toReactionDTOs(rs []domain.Reaction) []*chatgen.ReactionDTO {
+	if len(rs) == 0 {
+		return nil
+	}
+	out := make([]*chatgen.ReactionDTO, 0, len(rs))
+	for _, r := range rs {
+		uids := r.UserIDs
+		if uids == nil {
+			uids = []string{}
+		}
+		out = append(out, &chatgen.ReactionDTO{
+			Emoji:   r.Emoji,
+			Count:   r.Count,
+			UserIds: uids,
+		})
+	}
+	return out
+}
+
 func toMessageDTO(m domain.Message) *chatgen.MessageDTO {
 	var attachments []*chatgen.AttachmentDTO
 	if len(m.Attachments) > 0 {
@@ -192,6 +216,7 @@ func toMessageDTO(m domain.Message) *chatgen.MessageDTO {
 		RetractedAt:     formatOptTime(m.RetractedAt),
 		Attachments:     attachments,
 		Mentions:        mentions,
+		Reactions:       toReactionDTOs(m.Reactions),
 	}
 }
 
@@ -204,15 +229,22 @@ func toEventDTO(ev domain.Event) *chatgen.EventDTO {
 	if ev.Conversation != nil {
 		conv = toConversationDTO(*ev.Conversation)
 	}
+	reactions := toReactionDTOs(ev.Reactions)
+	if ev.Type == "reaction.updated" && reactions == nil {
+		reactions = []*chatgen.ReactionDTO{}
+	}
 	return &chatgen.EventDTO{
-		ID:             ev.ID,
-		Type:           ev.Type,
-		ConversationId: optString(ev.ConversationID),
-		WorkspaceId:    optString(ev.WorkspaceID),
-		Message:        msg,
-		Conversation:   conv,
-		ReadSeq:        ev.ReadSeq,
-		CreatedAt:      ev.CreatedAt.UTC().Format(time.RFC3339Nano),
+		ID:                ev.ID,
+		Type:              ev.Type,
+		ConversationId:    optString(ev.ConversationID),
+		WorkspaceId:       optString(ev.WorkspaceID),
+		Message:           msg,
+		Conversation:      conv,
+		ReadSeq:           ev.ReadSeq,
+		MessageId:         optString(ev.MessageID),
+		Reactions:         reactions,
+		NotificationLevel: ev.NotificationLevel,
+		CreatedAt:         ev.CreatedAt.UTC().Format(time.RFC3339Nano),
 	}
 }
 
@@ -556,6 +588,38 @@ func (a *Adapter) RetractMessage(ctx context.Context, req *chatgen.RetractMessag
 	return &chatgen.MessageResp{Message: toMessageDTO(msg)}, nil
 }
 
+func (a *Adapter) PutReaction(ctx context.Context, req *chatgen.PutReactionReq) (*chatgen.ReactionsResp, error) {
+	user, ok := actorFromContext(ctx)
+	if !ok {
+		return nil, domain.Err(401, "unauthenticated", "Sign in to continue")
+	}
+	reactions, err := a.App.AddReaction(ctx, user.ID, req.ID, req.MessageId, req.Emoji)
+	if err != nil {
+		return nil, err
+	}
+	dtos := toReactionDTOs(reactions)
+	if dtos == nil {
+		dtos = []*chatgen.ReactionDTO{}
+	}
+	return &chatgen.ReactionsResp{Reactions: dtos}, nil
+}
+
+func (a *Adapter) DeleteReaction(ctx context.Context, req *chatgen.DeleteReactionReq) (*chatgen.ReactionsResp, error) {
+	user, ok := actorFromContext(ctx)
+	if !ok {
+		return nil, domain.Err(401, "unauthenticated", "Sign in to continue")
+	}
+	reactions, err := a.App.RemoveReaction(ctx, user.ID, req.ID, req.MessageId, req.Emoji)
+	if err != nil {
+		return nil, err
+	}
+	dtos := toReactionDTOs(reactions)
+	if dtos == nil {
+		dtos = []*chatgen.ReactionDTO{}
+	}
+	return &chatgen.ReactionsResp{Reactions: dtos}, nil
+}
+
 func (a *Adapter) MarkRead(ctx context.Context, req *chatgen.MarkReadReq) (*chatgen.MarkReadResp, error) {
 	user, ok := actorFromContext(ctx)
 	if !ok {
@@ -566,6 +630,55 @@ func (a *Adapter) MarkRead(ctx context.Context, req *chatgen.MarkReadReq) (*chat
 		return nil, err
 	}
 	return &chatgen.MarkReadResp{ReadSeq: seq}, nil
+}
+
+func (a *Adapter) GetReadReceipts(ctx context.Context, req *chatgen.GetReadReceiptsReq) (*chatgen.ReadReceiptsResp, error) {
+	user, ok := actorFromContext(ctx)
+	if !ok {
+		return nil, domain.Err(401, "unauthenticated", "Sign in to continue")
+	}
+	rr, err := a.App.ReadReceipts(ctx, user.ID, req.ID)
+	if err != nil {
+		return nil, err
+	}
+	counts := make([]*chatgen.ReadSeqCountDTO, 0, len(rr.ReadSeqCounts))
+	for _, sc := range rr.ReadSeqCounts {
+		counts = append(counts, &chatgen.ReadSeqCountDTO{
+			ReadSeq: sc.ReadSeq,
+			Count:   sc.Count,
+		})
+	}
+	var members []*chatgen.MemberReadReceiptDTO
+	if rr.Members != nil {
+		members = make([]*chatgen.MemberReadReceiptDTO, 0, len(rr.Members))
+		for _, m := range rr.Members {
+			members = append(members, &chatgen.MemberReadReceiptDTO{
+				UserId:  m.UserID,
+				ReadSeq: m.ReadSeq,
+			})
+		}
+	}
+	return &chatgen.ReadReceiptsResp{
+		ConversationId: rr.ConversationID,
+		EligibleCount:  rr.EligibleCount,
+		ReadSeqCounts:  counts,
+		Members:        members,
+	}, nil
+}
+
+func (a *Adapter) SetNotificationLevel(ctx context.Context, req *chatgen.SetNotificationLevelReq) (*chatgen.NotificationLevelResp, error) {
+	user, ok := actorFromContext(ctx)
+	if !ok {
+		return nil, domain.Err(401, "unauthenticated", "Sign in to continue")
+	}
+	level, err := a.App.SetNotificationLevel(ctx, user.ID, req.ID, req.Level)
+	if err != nil {
+		return nil, err
+	}
+	return &chatgen.NotificationLevelResp{
+		ConversationId:    req.ID,
+		NotificationLevel: level,
+	}, nil
 }
 
 func (a *Adapter) SearchWorkspaceMessages(ctx context.Context, req *chatgen.SearchWorkspaceMessagesReq) (*chatgen.WorkspaceSearchPageResp, error) {

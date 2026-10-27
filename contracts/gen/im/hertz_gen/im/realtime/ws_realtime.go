@@ -42,6 +42,7 @@ type RealtimeClientFrame struct {
 	Type           string  `thrift:"type,1,required" json:"type"`
 	ConversationId *string `thrift:"conversationId,2,optional" json:"conversationId,omitempty"`
 	IsTyping       *bool   `thrift:"isTyping,3,optional" json:"isTyping,omitempty"`
+	State          *string `thrift:"state,4,optional" json:"state,omitempty"`
 }
 
 func NewRealtimeClientFrame() *RealtimeClientFrame {
@@ -73,12 +74,25 @@ func (p *RealtimeClientFrame) GetIsTyping() (v bool) {
 	return *p.IsTyping
 }
 
+var RealtimeClientFrame_State_DEFAULT string
+
+func (p *RealtimeClientFrame) GetState() (v string) {
+	if !p.IsSetState() {
+		return RealtimeClientFrame_State_DEFAULT
+	}
+	return *p.State
+}
+
 func (p *RealtimeClientFrame) IsSetConversationId() bool {
 	return p.ConversationId != nil
 }
 
 func (p *RealtimeClientFrame) IsSetIsTyping() bool {
 	return p.IsTyping != nil
+}
+
+func (p *RealtimeClientFrame) IsSetState() bool {
+	return p.State != nil
 }
 
 func (p *RealtimeClientFrame) String() string {
@@ -94,6 +108,7 @@ type RealtimeServerFrame struct {
 	UserId         *string `thrift:"userId,3,optional" json:"userId,omitempty"`
 	DisplayName    *string `thrift:"displayName,4,optional" json:"displayName,omitempty"`
 	IsTyping       *bool   `thrift:"isTyping,5,optional" json:"isTyping,omitempty"`
+	State          *string `thrift:"state,6,optional" json:"state,omitempty"`
 }
 
 func NewRealtimeServerFrame() *RealtimeServerFrame {
@@ -143,6 +158,15 @@ func (p *RealtimeServerFrame) GetIsTyping() (v bool) {
 	return *p.IsTyping
 }
 
+var RealtimeServerFrame_State_DEFAULT string
+
+func (p *RealtimeServerFrame) GetState() (v string) {
+	if !p.IsSetState() {
+		return RealtimeServerFrame_State_DEFAULT
+	}
+	return *p.State
+}
+
 func (p *RealtimeServerFrame) IsSetConversationId() bool {
 	return p.ConversationId != nil
 }
@@ -157,6 +181,10 @@ func (p *RealtimeServerFrame) IsSetDisplayName() bool {
 
 func (p *RealtimeServerFrame) IsSetIsTyping() bool {
 	return p.IsTyping != nil
+}
+
+func (p *RealtimeServerFrame) IsSetState() bool {
+	return p.State != nil
 }
 
 func (p *RealtimeServerFrame) String() string {
@@ -202,6 +230,77 @@ func (p *PublishTypingReq) String() string {
 	return fmt.Sprintf("PublishTypingReq(%+v)", *p)
 }
 
+type PresenceItemDTO struct {
+	UserId string `thrift:"userId,1,required" json:"userId"`
+	State  string `thrift:"state,2,required" json:"state"`
+}
+
+func NewPresenceItemDTO() *PresenceItemDTO {
+	return &PresenceItemDTO{}
+}
+
+func (p *PresenceItemDTO) InitDefault() {
+}
+
+func (p *PresenceItemDTO) GetUserId() (v string) {
+	return p.UserId
+}
+
+func (p *PresenceItemDTO) GetState() (v string) {
+	return p.State
+}
+
+func (p *PresenceItemDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PresenceItemDTO(%+v)", *p)
+}
+
+type GetWorkspacePresenceReq struct {
+	ID string `thrift:"id,1,required" json:"id"`
+}
+
+func NewGetWorkspacePresenceReq() *GetWorkspacePresenceReq {
+	return &GetWorkspacePresenceReq{}
+}
+
+func (p *GetWorkspacePresenceReq) InitDefault() {
+}
+
+func (p *GetWorkspacePresenceReq) GetID() (v string) {
+	return p.ID
+}
+
+func (p *GetWorkspacePresenceReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("GetWorkspacePresenceReq(%+v)", *p)
+}
+
+type WorkspacePresenceResp struct {
+	Items []*PresenceItemDTO `thrift:"items,1,required,list<PresenceItemDTO>" json:"items"`
+}
+
+func NewWorkspacePresenceResp() *WorkspacePresenceResp {
+	return &WorkspacePresenceResp{}
+}
+
+func (p *WorkspacePresenceResp) InitDefault() {
+}
+
+func (p *WorkspacePresenceResp) GetItems() (v []*PresenceItemDTO) {
+	return p.Items
+}
+
+func (p *WorkspacePresenceResp) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("WorkspacePresenceResp(%+v)", *p)
+}
+
 type EmptyResp struct {
 }
 
@@ -223,4 +322,6 @@ type RealtimeWSService interface {
 	ConnectWS(ctx context.Context, req *ConnectWSReq) (r *EmptyResp, err error)
 
 	PublishTyping(ctx context.Context, req *PublishTypingReq) (r *EmptyResp, err error)
+
+	GetWorkspacePresence(ctx context.Context, req *GetWorkspacePresenceReq) (r *WorkspacePresenceResp, err error)
 }

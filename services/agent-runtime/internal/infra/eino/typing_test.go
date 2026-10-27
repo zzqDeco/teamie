@@ -482,3 +482,66 @@ func TestNativeTurnTypingWaitsForModelSlotAndClearsOnCompletion(t *testing.T) {
 		t.Fatalf("idle restart manufactured typing: %#v", events[before:])
 	}
 }
+
+func TestReadReceiptFlusherCoalescesToTwoSecondsAndRetriesAfterTransientFailure(t *testing.T) {
+	now := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+	flusher := &readReceiptFlusher{now: func() time.Time { return now }}
+	agentID := uuid.NewString()
+	convID := uuid.NewString()
+
+	type call struct {
+		convID string
+		seq    int64
+	}
+	var calls []call
+	var failNext bool
+
+	markRead := func(_ context.Context, c string, seq int64) error {
+		calls = append(calls, call{c, seq})
+		if failNext {
+			return &APIError{Status: 503, Code: "im_unavailable"}
+		}
+		return nil
+	}
+
+	flusher.recordInputs(agentID, []Input{
+		{ConversationID: convID, Seq: 1},
+		{ConversationID: convID, Seq: 3},
+	})
+	flusher.flush(context.Background(), agentID, markRead)
+	if len(calls) != 1 || calls[0] != (call{convID, 3}) {
+		t.Fatalf("initial flush calls = %#v, want [{%s 3}]", calls, convID)
+	}
+
+	// Within 2s window: new inputs are recorded and coalesced without sending HTTP.
+	now = now.Add(500 * time.Millisecond)
+	flusher.recordInputs(agentID, []Input{
+		{ConversationID: convID, Seq: 4},
+		{ConversationID: convID, Seq: 6},
+	})
+	flusher.flush(context.Background(), agentID, markRead)
+	if len(calls) != 1 {
+		t.Fatalf("coalesced window emitted unexpected call: %#v", calls)
+	}
+
+	// After 2s window: transient failure preserves pendingSeq for next tick.
+	now = now.Add(1600 * time.Millisecond)
+	failNext = true
+	flusher.flush(context.Background(), agentID, markRead)
+	if len(calls) != 2 || calls[1] != (call{convID, 6}) {
+		t.Fatalf("retry attempt calls = %#v", calls)
+	}
+
+	// Next tick succeeds and advances ackedSeq so subsequent ticks are no-ops.
+	failNext = false
+	now = now.Add(time.Second)
+	flusher.flush(context.Background(), agentID, markRead)
+	if len(calls) != 3 || calls[2] != (call{convID, 6}) {
+		t.Fatalf("post-recovery flush calls = %#v", calls)
+	}
+	now = now.Add(5 * time.Second)
+	flusher.flush(context.Background(), agentID, markRead)
+	if len(calls) != 3 {
+		t.Fatalf("duplicate flush after ack: %#v", calls)
+	}
+}

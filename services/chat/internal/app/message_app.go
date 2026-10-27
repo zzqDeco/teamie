@@ -285,10 +285,108 @@ func (s *Service) Read(ctx context.Context, userID, conversationID string, seq i
 		}); err != nil {
 			return err
 		}
+		if s.Flags != nil && s.Flags.Enabled("im.read_receipts.view") {
+			other := make([]string, 0, len(c.MemberIDs))
+			for _, id := range c.MemberIDs {
+				if id != userID {
+					other = append(other, id)
+				}
+			}
+			if len(other) > 0 {
+				if err = s.Conversations.EnqueueOutboxHint(txCtx, map[string]any{
+					"type":           "receipts.changed",
+					"conversationId": conversationID,
+					"userIds":        other,
+				}); err != nil {
+					return err
+				}
+			}
+		}
 		result = seq
 		return nil
 	})
 	return result, err
+}
+
+// AddReaction adds the caller's Unicode emoji reaction idempotently.
+func (s *Service) AddReaction(ctx context.Context, userID, conversationID, messageID, emoji string) ([]domain.Reaction, error) {
+	if err := s.requireFlag("im.reactions.create"); err != nil {
+		return nil, err
+	}
+	if err := domain.ValidateReactionEmoji(emoji); err != nil {
+		return nil, err
+	}
+	var out []domain.Reaction
+	err := s.Tx.WithinTx(ctx, func(txCtx context.Context) error {
+		c, err := s.Conversations.LockConversation(txCtx, conversationID, userID)
+		if err != nil {
+			return err
+		}
+		var changed bool
+		out, changed, err = s.Messages.AddReaction(txCtx, conversationID, messageID, userID, emoji)
+		if err != nil || !changed {
+			return err
+		}
+		return s.Conversations.Fanout(txCtx, c.MemberIDs, domain.Event{
+			Type:           "reaction.updated",
+			WorkspaceID:    c.WorkspaceID,
+			ConversationID: conversationID,
+			MessageID:      messageID,
+			Reactions:      out,
+		})
+	})
+	return out, err
+}
+
+// RemoveReaction removes the caller's Unicode emoji reaction idempotently.
+func (s *Service) RemoveReaction(ctx context.Context, userID, conversationID, messageID, emoji string) ([]domain.Reaction, error) {
+	if err := domain.ValidateReactionEmoji(emoji); err != nil {
+		return nil, err
+	}
+	var out []domain.Reaction
+	err := s.Tx.WithinTx(ctx, func(txCtx context.Context) error {
+		c, err := s.Conversations.LockConversation(txCtx, conversationID, userID)
+		if err != nil {
+			return err
+		}
+		var changed bool
+		out, changed, err = s.Messages.RemoveReaction(txCtx, conversationID, messageID, userID, emoji)
+		if err != nil || !changed {
+			return err
+		}
+		return s.Conversations.Fanout(txCtx, c.MemberIDs, domain.Event{
+			Type:           "reaction.updated",
+			WorkspaceID:    c.WorkspaceID,
+			ConversationID: conversationID,
+			MessageID:      messageID,
+			Reactions:      out,
+		})
+	})
+	return out, err
+}
+
+// ReadReceipts returns conversation read receipts for an authorized member.
+func (s *Service) ReadReceipts(ctx context.Context, userID, conversationID string) (domain.ReadReceipts, error) {
+	if err := s.requireFlag("im.read_receipts.view"); err != nil {
+		return domain.ReadReceipts{}, err
+	}
+	var out domain.ReadReceipts
+	err := s.Tx.WithinTx(ctx, func(txCtx context.Context) error {
+		ws, err := s.Conversations.GetConversationWorkspaceID(txCtx, conversationID)
+		if err != nil {
+			return err
+		}
+		if err = s.Workspaces.WorkspaceLock(txCtx, ws, userID, false, false); err != nil {
+			return err
+		}
+		c, err := s.Conversations.ConversationAccess(txCtx, conversationID, userID)
+		if err != nil {
+			return err
+		}
+		out, err = s.Conversations.QueryReadReceipts(txCtx, c, userID)
+		return err
+	})
+	return out, err
 }
 
 // SearchWorkspaceMessages searches unretracted messages across authorized conversations in a workspace.

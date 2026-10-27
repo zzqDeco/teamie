@@ -190,6 +190,7 @@ export interface ConversationDTO {
   updatedAt: string;
   createdBy?: string;
   canManageMembers: boolean;
+  notificationLevel?: string;
 }
 
 export interface AttachmentDTO {
@@ -211,6 +212,12 @@ export interface MentionDTO {
   end: number;
 }
 
+export interface ReactionDTO {
+  emoji: string;
+  count: number;
+  userIds: string[];
+}
+
 export interface MessageDTO {
   id: string;
   conversationId: string;
@@ -226,6 +233,7 @@ export interface MessageDTO {
   retractedAt?: string;
   attachments?: AttachmentDTO[];
   mentions?: MentionDTO[];
+  reactions?: ReactionDTO[];
 }
 
 export interface EventDTO {
@@ -237,6 +245,9 @@ export interface EventDTO {
   conversation?: ConversationDTO;
   readSeq?: number;
   createdAt: string;
+  messageId?: string;
+  reactions?: ReactionDTO[];
+  notificationLevel?: string;
 }
 
 export interface AttentionConversationDTO {
@@ -405,6 +416,53 @@ export interface MarkReadResp {
   readSeq: number;
 }
 
+export interface PutReactionReq {
+  id: string;
+  messageId: string;
+  emoji: string;
+}
+
+export interface DeleteReactionReq {
+  id: string;
+  messageId: string;
+  emoji: string;
+}
+
+export interface ReactionsResp {
+  reactions: ReactionDTO[];
+}
+
+export interface ReadSeqCountDTO {
+  readSeq: number;
+  count: number;
+}
+
+export interface MemberReadReceiptDTO {
+  userId: string;
+  readSeq: number;
+}
+
+export interface GetReadReceiptsReq {
+  id: string;
+}
+
+export interface ReadReceiptsResp {
+  conversationId: string;
+  eligibleCount: number;
+  readSeqCounts: ReadSeqCountDTO[];
+  members?: MemberReadReceiptDTO[];
+}
+
+export interface SetNotificationLevelReq {
+  id: string;
+  level: string;
+}
+
+export interface NotificationLevelResp {
+  conversationId: string;
+  notificationLevel: string;
+}
+
 export interface SearchWorkspaceMessagesReq {
   id: string;
   q?: string;
@@ -484,6 +542,7 @@ export interface RealtimeClientFrame {
   type: string;
   conversationId?: string;
   isTyping?: boolean;
+  state?: string;
 }
 
 export interface RealtimeServerFrame {
@@ -492,11 +551,25 @@ export interface RealtimeServerFrame {
   userId?: string;
   displayName?: string;
   isTyping?: boolean;
+  state?: string;
 }
 
 export interface PublishTypingReq {
   id: string;
   isTyping?: boolean;
+}
+
+export interface PresenceItemDTO {
+  userId: string;
+  state: string;
+}
+
+export interface GetWorkspacePresenceReq {
+  id: string;
+}
+
+export interface WorkspacePresenceResp {
+  items: PresenceItemDTO[];
 }
 
 // ============================================================================
@@ -877,6 +950,24 @@ export const IDL_ROUTES = {
     requestType: "RetractMessageReq",
     responseType: "MessageResp",
   },
+  PutReaction: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "PUT",
+    path: "/api/v1/conversations/:id/messages/:messageId/reactions/:emoji",
+    clientPath: "/conversations/:id/messages/:messageId/reactions/:emoji",
+    requestType: "PutReactionReq",
+    responseType: "ReactionsResp",
+  },
+  DeleteReaction: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "DELETE",
+    path: "/api/v1/conversations/:id/messages/:messageId/reactions/:emoji",
+    clientPath: "/conversations/:id/messages/:messageId/reactions/:emoji",
+    requestType: "DeleteReactionReq",
+    responseType: "ReactionsResp",
+  },
   MarkRead: {
     service: "ChatHTTPService",
     namespace: "im.chat",
@@ -885,6 +976,24 @@ export const IDL_ROUTES = {
     clientPath: "/conversations/:id/read",
     requestType: "MarkReadReq",
     responseType: "MarkReadResp",
+  },
+  GetReadReceipts: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "GET",
+    path: "/api/v1/conversations/:id/read-receipts",
+    clientPath: "/conversations/:id/read-receipts",
+    requestType: "GetReadReceiptsReq",
+    responseType: "ReadReceiptsResp",
+  },
+  SetNotificationLevel: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "PUT",
+    path: "/api/v1/conversations/:id/notification-level",
+    clientPath: "/conversations/:id/notification-level",
+    requestType: "SetNotificationLevelReq",
+    responseType: "NotificationLevelResp",
   },
   SearchWorkspaceMessages: {
     service: "ChatHTTPService",
@@ -966,6 +1075,15 @@ export const IDL_ROUTES = {
     clientPath: "/conversations/:id/typing",
     requestType: "PublishTypingReq",
     responseType: "EmptyResp",
+  },
+  GetWorkspacePresence: {
+    service: "RealtimeWSService",
+    namespace: "im.realtime",
+    method: "GET",
+    path: "/api/v1/workspaces/:id/presence",
+    clientPath: "/workspaces/:id/presence",
+    requestType: "GetWorkspacePresenceReq",
+    responseType: "WorkspacePresenceResp",
   },
   ListOwnedAgents: {
     service: "AgentControlHTTPService",

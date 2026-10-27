@@ -125,7 +125,7 @@ Successful retries return current conversation metadata under the same read/mana
 - The level is browser presentation only. It never changes message access, history, read cursors, the `/api/v1/attention` projection or counts, Agent runtime input, or what other participants see.
 - Browser unread model: "relevant" means a direct or group message, or a message that mentions or replies to the caller. Under `all`, direct/group conversations show a count badge, channels with unread messages are bold without a count, and channels with relevant unread messages show an `@` badge with that count. Under `mentions`, only relevant messages produce badges; other unread activity is not bold. Under `none`, the conversation is dimmed with a mute icon and shows no badge or bold. The sidebar, document title counts, workspace dots and in-tab browser notifications all use this one selector. The rail inbox badge and `/app/attention` keep the attention API's counts regardless of level.
 - When `im.notifications.configure` is off, persisted levels are still returned and honored; only changes are rejected with 403 `feature_disabled`.
-- Chat schema 6 adds the reaction and notification-level tables without altering existing messages, attachments, receipts or annotations. Read receipts and presence add no schema.
+- Chat schema 7 adds the reaction and notification-level tables without altering existing messages, attachments, receipts or annotations. Read receipts and presence add no schema.
 
 ## Conversation files
 

@@ -54,6 +54,10 @@ func ErrForbidden() error {
 	return Err(403, "forbidden", "Conversation access is required")
 }
 
+func ErrNotFound() error {
+	return Err(404, "not_found", "Workspace was not found")
+}
+
 func ErrRealtimeUnavailable() error {
 	return Err(503, "realtime_unavailable", "Typing is temporarily unavailable")
 }
@@ -82,7 +86,20 @@ type AccessResult struct {
 	TypingEnabled bool
 }
 
-// Event (also aliased as Hint) represents a realtime wakeup or ephemeral typing signal.
+// WorkspaceAccessResult represents the workspace ACL check result from Chat.
+type WorkspaceAccessResult struct {
+	Allowed         bool
+	MemberIDs       []string
+	PresenceEnabled bool
+}
+
+// PresenceItem represents a human member's active presence state.
+type PresenceItem struct {
+	UserID string `json:"userId"`
+	State  string `json:"state"`
+}
+
+// Event (also aliased as Hint) represents a realtime wakeup, receipt hint, presence signal, or ephemeral typing signal.
 type Event struct {
 	Type           string   `json:"type"`
 	UserIDs        []string `json:"userIds,omitempty"`
@@ -90,6 +107,7 @@ type Event struct {
 	UserID         string   `json:"userId,omitempty"`
 	DisplayName    string   `json:"displayName,omitempty"`
 	IsTyping       bool     `json:"isTyping"`
+	State          string   `json:"state,omitempty"`
 }
 
 // Hint is an alias for Event for compatibility with existing callers.

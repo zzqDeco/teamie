@@ -23,12 +23,19 @@ import {
   type LoginReq,
   type MarkReadResp,
   type MemberDTO,
+  type MemberReadReceiptDTO,
   type MentionDTO,
   type MessageDTO,
   type ModelConfigDTO,
+  type NotificationLevelResp,
   type PasswordResetDTO,
   type PasswordResetInspectionResp,
+  type PresenceItemDTO,
   type PublicAgentDTO,
+  type ReactionDTO,
+  type ReactionsResp,
+  type ReadReceiptsResp,
+  type ReadSeqCountDTO,
   type RegisterReq,
   type RegistrationInviteDTO,
   type RegistrationMetadataResp,
@@ -42,6 +49,7 @@ import {
   type UserDTO,
   type WebSearchConfigDTO,
   type WorkspaceDTO,
+  type WorkspacePresenceResp,
   type WorkspaceSearchItemDTO,
   type WorkspaceSearchPageResp,
 } from "./generated";
@@ -70,12 +78,14 @@ export type PasswordResetLink = PasswordResetDTO;
 export type CreatedPasswordResetLink = CreatePasswordResetLinkResp;
 export type PasswordResetInspection = PasswordResetInspectionResp;
 export type Workspace = WorkspaceDTO;
+export type NotificationLevel = "all" | "mentions" | "none";
 export type Conversation = Omit<
   ConversationDTO,
-  "type" | "canManageMembers"
+  "type" | "canManageMembers" | "notificationLevel"
 > & {
   type: "channel" | "direct" | "group";
   canManageMembers?: boolean;
+  notificationLevel?: NotificationLevel;
 };
 export type Member = Omit<MemberDTO, "role" | "kind"> & {
   role: "owner" | "member";
@@ -173,6 +183,14 @@ export const defaultAttachmentLimits: AttachmentLimits = {
   maxFilesPerMessage: 8,
 };
 export type Mention = MentionDTO;
+export type Reaction = ReactionDTO;
+export type ReadSeqCount = ReadSeqCountDTO;
+export type MemberReadReceipt = MemberReadReceiptDTO;
+export type ReadReceipts = ReadReceiptsResp;
+export type PresenceState = "online" | "away" | "offline";
+export type PresenceItem = Omit<PresenceItemDTO, "state"> & {
+  state: "online" | "away";
+};
 export type Message = Omit<MessageDTO, "senderKind"> & {
   senderKind: "human" | "agent";
 };
@@ -187,7 +205,7 @@ export type Bootstrap = Omit<
 };
 export type SyncEvent = Omit<
   EventDTO,
-  "type" | "message" | "conversation"
+  "type" | "message" | "conversation" | "notificationLevel"
 > & {
   type:
     | "message.created"
@@ -195,9 +213,12 @@ export type SyncEvent = Omit<
     | "message.retracted"
     | "conversation.created"
     | "membership.changed"
-    | "read.updated";
+    | "read.updated"
+    | "reaction.updated"
+    | "preference.updated";
   message?: Message;
   conversation?: Conversation;
+  notificationLevel?: NotificationLevel;
 };
 export type SyncPage = Omit<SyncResp, "events"> & {
   events: SyncEvent[];
@@ -691,6 +712,45 @@ export class TeamieClient {
     this.#request<MarkReadResp>(routePath(IDL_ROUTES.MarkRead, { id }), {
       method: IDL_ROUTES.MarkRead.method,
       body: JSON.stringify({ seq }),
+    });
+  putReaction = (conversationId: string, messageId: string, emoji: string) =>
+    this.#request<ReactionsResp>(
+      routePath(IDL_ROUTES.PutReaction, { id: conversationId, messageId }),
+      {
+        method: IDL_ROUTES.PutReaction.method,
+        body: JSON.stringify({ emoji }),
+      },
+    );
+  deleteReaction = (conversationId: string, messageId: string, emoji: string) =>
+    this.#request<ReactionsResp>(
+      routePath(IDL_ROUTES.DeleteReaction, { id: conversationId, messageId }),
+      {
+        method: IDL_ROUTES.DeleteReaction.method,
+        body: JSON.stringify({ emoji }),
+      },
+    );
+  readReceipts = (conversationId: string, signal?: AbortSignal) =>
+    this.#request<ReadReceipts>(
+      routePath(IDL_ROUTES.GetReadReceipts, { id: conversationId }),
+      { signal },
+    );
+  setNotificationLevel = (
+    conversationId: string,
+    level: NotificationLevel,
+  ) =>
+    this.#request<
+      Omit<NotificationLevelResp, "notificationLevel"> & {
+        notificationLevel: NotificationLevel;
+      }
+    >(routePath(IDL_ROUTES.SetNotificationLevel, { id: conversationId }), {
+      method: IDL_ROUTES.SetNotificationLevel.method,
+      body: JSON.stringify({ level }),
+    });
+  workspacePresence = (workspaceId: string, signal?: AbortSignal) =>
+    this.#request<
+      Omit<WorkspacePresenceResp, "items"> & { items: PresenceItem[] }
+    >(routePath(IDL_ROUTES.GetWorkspacePresence, { id: workspaceId }), {
+      signal,
     });
   sync = (cursor: string) =>
     this.#request<SyncPage>(

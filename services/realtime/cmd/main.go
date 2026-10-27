@@ -38,12 +38,15 @@ func main() {
 	defer rdb.Close()
 
 	var policy domain.TypingTracker
+	var presence domain.PresenceTracker
 	streamApp := &app.StreamApp{
-		Identity: rpcclient.IdentityValidator{Identity: identityClient},
-		Chat:     rpcclient.ChatAuthority{Chat: chatClient},
-		Flags:    redisinfra.FlagsProvider{Flags: &cfgFlags},
-		Bus:      redisinfra.RedisBus{Client: rdb},
-		Policy:   &policy,
+		Identity:      rpcclient.IdentityValidator{Identity: identityClient},
+		Chat:          rpcclient.ChatAuthority{Chat: chatClient},
+		Flags:         redisinfra.FlagsProvider{Flags: &cfgFlags},
+		Bus:           redisinfra.RedisBus{Client: rdb},
+		Policy:        &policy,
+		Presence:      &presence,
+		PresenceStore: redisinfra.RedisPresenceStore{Client: rdb},
 	}
 
 	adapter := &wsadapter.Adapter{

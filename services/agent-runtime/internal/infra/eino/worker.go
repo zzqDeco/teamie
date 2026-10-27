@@ -31,14 +31,15 @@ import (
 
 type Config struct{ ControlAddr, GatewayAddr, SandboxAddr, IdentityAddr, IMURL, IMRealtimeURL, ControlToken, GatewayToken, SandboxToken, IMToken, FlagsFile, GatewayStreamURL string }
 type Engine struct {
-	Store    *Store
-	Config   Config
-	Control  agentcontrolservice.Client
-	Gateway  modelgatewayservice.Client
-	Sandbox  sandboxservice.Client
-	Identity identityservice.Client
-	slots    chan struct{}
-	owner    string
+	Store       *Store
+	Config      Config
+	Control     agentcontrolservice.Client
+	Gateway     modelgatewayservice.Client
+	Sandbox     sandboxservice.Client
+	Identity    identityservice.Client
+	slots       chan struct{}
+	owner       string
+	readFlusher readReceiptFlusher
 }
 
 func New(store *Store, c Config) (*Engine, error) {
@@ -931,6 +932,8 @@ func (e *Engine) ingest(ctx context.Context, imc *IM, l *Lease) (failure error) 
 	for _, input := range inputs {
 		observability.L(ctx).Info("Agent input persisted", zap.String("event.action", "agent-input-persisted"), zap.String("custom.agent.id", l.AgentID), zap.String("custom.input.event_id", input.EventID), zap.String("custom.im.message_id", input.MessageID), zap.String("custom.im.conversation_id", input.ConversationID))
 	}
+	e.readFlusher.recordInputs(l.AgentID, inputs)
+	e.readFlusher.flush(ctx, l.AgentID, imc.MarkRead)
 	return nil
 }
 func finalizeSummary(ctx context.Context, original []*schema.AgenticMessage, summary *schema.AgenticMessage) ([]*schema.AgenticMessage, error) {

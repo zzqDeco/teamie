@@ -276,7 +276,9 @@ def main() -> None:
     require(bootstrap["user"].get("platformRole") == "admin", "platform role propagates through real Identity RPC")
     require(not bootstrap["capabilities"].get("auth.public_signup", False), "public signup never bypasses invitation-only policy")
     require(bootstrap["capabilities"].get("im.attachments.upload") and bootstrap.get("attachmentLimits") == {"maxFileBytes": 4194304, "maxFilesPerMessage": 8}, "implemented attachment capability and limits")
-    for key in ("im.reactions.create", "im.threads.create"):
+    for key in ("im.reactions.create", "im.read_receipts.view", "im.presence.publish", "im.notifications.configure"):
+        require(bootstrap["capabilities"].get(key, False), f"enabled IM capability {key}")
+    for key in ("im.threads.create",):
         require(not bootstrap["capabilities"].get(key, False), "unsupported feature remains unavailable")
     print("PASS workspace invite admission and authorization")
 

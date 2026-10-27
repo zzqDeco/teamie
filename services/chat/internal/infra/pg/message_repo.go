@@ -9,9 +9,74 @@ import (
 	"teamie/services/chat/internal/domain"
 )
 
+func (r *Repository) loadReactionsByMessageIDs(ctx context.Context, messageIDs []string) (map[string][]domain.Reaction, error) {
+	if len(messageIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := r.DB.Conn(ctx).Query(ctx, "SELECT message_id,emoji,user_id FROM message_reactions WHERE message_id=ANY($1::text[]) ORDER BY message_id,seq ASC", messageIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make(map[string][]domain.Reaction)
+	indexByMsgEmoji := make(map[string]map[string]int)
+	for rows.Next() {
+		var mid, emoji, uid string
+		if err = rows.Scan(&mid, &emoji, &uid); err != nil {
+			return nil, err
+		}
+		emojiIdx, ok := indexByMsgEmoji[mid]
+		if !ok {
+			emojiIdx = make(map[string]int)
+			indexByMsgEmoji[mid] = emojiIdx
+		}
+		if idx, exists := emojiIdx[emoji]; exists {
+			result[mid][idx].UserIDs = append(result[mid][idx].UserIDs, uid)
+			result[mid][idx].Count = int64(len(result[mid][idx].UserIDs))
+		} else {
+			emojiIdx[emoji] = len(result[mid])
+			result[mid] = append(result[mid], domain.Reaction{
+				Emoji:   emoji,
+				Count:   1,
+				UserIDs: []string{uid},
+			})
+		}
+	}
+	return result, rows.Err()
+}
+
+func (r *Repository) populateMessageReactions(ctx context.Context, msgs []domain.Message) error {
+	ids := make([]string, 0, len(msgs))
+	for _, m := range msgs {
+		if m.RetractedAt == nil {
+			ids = append(ids, m.ID)
+		}
+	}
+	byID, err := r.loadReactionsByMessageIDs(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for i := range msgs {
+		if msgs[i].RetractedAt == nil {
+			msgs[i].Reactions = byID[msgs[i].ID]
+		}
+	}
+	return nil
+}
+
 func (r *Repository) GetMessage(ctx context.Context, conversationID, messageID string) (domain.Message, error) {
 	m, err := scanMessage(r.DB.Conn(ctx).QueryRow(ctx, "SELECT "+messageColumns+" FROM messages WHERE id=$1 AND conversation_id=$2", messageID, conversationID))
-	return m, notFound(err)
+	if err != nil {
+		return m, notFound(err)
+	}
+	if m.RetractedAt == nil {
+		byID, rErr := r.loadReactionsByMessageIDs(ctx, []string{m.ID})
+		if rErr != nil {
+			return m, rErr
+		}
+		m.Reactions = byID[m.ID]
+	}
+	return m, nil
 }
 
 func (r *Repository) FindMessageBySenderClientID(ctx context.Context, senderID, clientMessageID string) (domain.Message, string, []string, []domain.Mention, bool, error) {
@@ -22,6 +87,13 @@ func (r *Repository) FindMessageBySenderClientID(ctx context.Context, senderID, 
 	}
 	if err != nil {
 		return domain.Message{}, "", nil, nil, false, err
+	}
+	if m.RetractedAt == nil {
+		byID, rErr := r.loadReactionsByMessageIDs(ctx, []string{m.ID})
+		if rErr != nil {
+			return domain.Message{}, "", nil, nil, false, rErr
+		}
+		m.Reactions = byID[m.ID]
 	}
 	var hash string
 	var originalIDs []string
@@ -59,6 +131,9 @@ func (r *Repository) RetractMessageAndDeleteAttachments(ctx context.Context, mes
 	if _, err := conn.Exec(ctx, "UPDATE messages SET body='',attachments='[]',mentions='[]',retracted_at=$2 WHERE id=$1", messageID, retractedAt); err != nil {
 		return err
 	}
+	if _, err := conn.Exec(ctx, "DELETE FROM message_reactions WHERE message_id=$1", messageID); err != nil {
+		return err
+	}
 	_, err := conn.Exec(ctx, "DELETE FROM attachments WHERE message_id=$1", messageID)
 	return err
 }
@@ -66,6 +141,67 @@ func (r *Repository) RetractMessageAndDeleteAttachments(ctx context.Context, mes
 func (r *Repository) UpdateMessageBodyAndMentions(ctx context.Context, messageID, body string, editedAt time.Time, mentions []domain.Mention) error {
 	_, err := r.DB.Conn(ctx).Exec(ctx, "UPDATE messages SET body=$2,edited_at=$3,mentions=$4 WHERE id=$1", messageID, body, editedAt, mentions)
 	return err
+}
+
+func (r *Repository) AddReaction(ctx context.Context, conversationID, messageID, userID, emoji string) ([]domain.Reaction, bool, error) {
+	conn := r.DB.Conn(ctx)
+	var retractedAt *time.Time
+	if err := conn.QueryRow(ctx, "SELECT retracted_at FROM messages WHERE id=$1 AND conversation_id=$2 FOR UPDATE", messageID, conversationID).Scan(&retractedAt); err != nil {
+		return nil, false, notFound(err)
+	}
+	if retractedAt != nil {
+		return nil, false, domain.ErrMessageRetracted()
+	}
+	var alreadyHasEmoji bool
+	if err := conn.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM message_reactions WHERE message_id=$1 AND emoji=$2)", messageID, emoji).Scan(&alreadyHasEmoji); err != nil {
+		return nil, false, err
+	}
+	if !alreadyHasEmoji {
+		var distinctCount int
+		if err := conn.QueryRow(ctx, "SELECT count(DISTINCT emoji) FROM message_reactions WHERE message_id=$1", messageID).Scan(&distinctCount); err != nil {
+			return nil, false, err
+		}
+		if distinctCount >= 20 {
+			return nil, false, domain.ErrReactionLimit()
+		}
+	}
+	tag, err := conn.Exec(ctx, "INSERT INTO message_reactions(conversation_id,message_id,emoji,user_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING", conversationID, messageID, emoji, userID)
+	if err != nil {
+		return nil, false, err
+	}
+	byID, err := r.loadReactionsByMessageIDs(ctx, []string{messageID})
+	if err != nil {
+		return nil, false, err
+	}
+	reactions := byID[messageID]
+	if reactions == nil {
+		reactions = []domain.Reaction{}
+	}
+	return reactions, tag.RowsAffected() > 0, nil
+}
+
+func (r *Repository) RemoveReaction(ctx context.Context, conversationID, messageID, userID, emoji string) ([]domain.Reaction, bool, error) {
+	conn := r.DB.Conn(ctx)
+	var retractedAt *time.Time
+	if err := conn.QueryRow(ctx, "SELECT retracted_at FROM messages WHERE id=$1 AND conversation_id=$2 FOR UPDATE", messageID, conversationID).Scan(&retractedAt); err != nil {
+		return nil, false, notFound(err)
+	}
+	if retractedAt != nil {
+		return []domain.Reaction{}, false, nil
+	}
+	tag, err := conn.Exec(ctx, "DELETE FROM message_reactions WHERE message_id=$1 AND emoji=$2 AND user_id=$3", messageID, emoji, userID)
+	if err != nil {
+		return nil, false, err
+	}
+	byID, err := r.loadReactionsByMessageIDs(ctx, []string{messageID})
+	if err != nil {
+		return nil, false, err
+	}
+	reactions := byID[messageID]
+	if reactions == nil {
+		reactions = []domain.Reaction{}
+	}
+	return reactions, tag.RowsAffected() > 0, nil
 }
 
 func (r *Repository) QueryMessageHistory(ctx context.Context, conversationID string, before, around int64, query string, limit int, filesOnly bool) ([]domain.Message, bool, error) {
@@ -95,6 +231,9 @@ func (r *Repository) QueryMessageHistory(ctx context.Context, conversationID str
 	}
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
 		out[i], out[j] = out[j], out[i]
+	}
+	if err = r.populateMessageReactions(ctx, out); err != nil {
+		return nil, false, err
 	}
 	return out, more, nil
 }
@@ -174,6 +313,17 @@ FROM page p JOIN messages m ON m.id=p.id JOIN conversations c ON c.id=m.conversa
 	if err = json.Unmarshal(rawItems, &items); err != nil {
 		return nil, err
 	}
+	ids := make([]string, 0, len(items))
+	for _, it := range items {
+		ids = append(ids, it.Message.ID)
+	}
+	byID, err := r.loadReactionsByMessageIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		items[i].Message.Reactions = byID[items[i].Message.ID]
+	}
 	return items, nil
 }
 
@@ -222,6 +372,17 @@ SELECT (SELECT count(*) FROM candidates WHERE unread),
 	items := []domain.AttentionItem{}
 	if err = json.Unmarshal(rawItems, &items); err != nil {
 		return 0, 0, nil, err
+	}
+	ids := make([]string, 0, len(items))
+	for _, it := range items {
+		ids = append(ids, it.Message.ID)
+	}
+	byID, err := r.loadReactionsByMessageIDs(ctx, ids)
+	if err != nil {
+		return 0, 0, nil, err
+	}
+	for i := range items {
+		items[i].Message.Reactions = byID[items[i].Message.ID]
 	}
 	return unreadCount, channelUnreadCount, items, nil
 }

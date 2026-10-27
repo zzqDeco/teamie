@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { chatStore } from "./store";
+import { chatStore, effectiveNotificationLevel } from "./store";
 import type { ChatSnapshot } from "./store";
 
 export const NOTIFICATION_STORAGE_KEY = "teamie.notifications";
@@ -218,10 +218,14 @@ export function notifySyncedMessages(
       continue;
     }
 
+    const level = effectiveNotificationLevel(conversation);
+    if (level === "none") continue;
+
     const isMention = Boolean(
       message.mentions?.some((mention) => mention.userId === currentUserId),
     );
     const isDirect = conversation.type === "direct";
+    const isGroup = conversation.type === "group";
     let isReplyToMe = false;
     if (message.replyToId) {
       const parent = cached.find((m) => m.id === message.replyToId);
@@ -229,7 +233,11 @@ export function notifySyncedMessages(
         isReplyToMe = true;
       }
     }
-    if (!isMention && !isDirect && !isReplyToMe) continue;
+    if (level === "mentions") {
+      if (!isMention && !isReplyToMe) continue;
+    } else if (!isMention && !isDirect && !isGroup && !isReplyToMe) {
+      continue;
+    }
 
     if (!isTabInBackground() && getCurrentConversationId() === conversation.id) {
       continue;

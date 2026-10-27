@@ -3,6 +3,10 @@ import type { FormEvent, RefObject } from "react";
 import {
   ArrowLeft,
   ArrowUp,
+  AtSign,
+  Bell,
+  BellOff,
+  Check,
   Copy,
   CornerUpLeft,
   Hash,
@@ -14,6 +18,7 @@ import {
   PencilLine,
   RefreshCw,
   Search,
+  SmilePlus,
   Trash2,
   Users,
 } from "lucide-react";
@@ -23,10 +28,18 @@ import type {
   Member,
   Mention,
   Message,
+  NotificationLevel,
 } from "@teamie/api-client";
 import { errorText, sendMessage } from "./chat";
-import { chatStore } from "./store";
+import { chatStore, effectiveNotificationLevel } from "./store";
 import type { LocalMessage } from "./store";
+import {
+  COMMON_REACTION_EMOJIS,
+  computeMessageReadSummary,
+  formatPresenceLabel,
+  useConversationReceipts,
+  useUserPresence,
+} from "./engagement-store";
 import { MentionInput, trimMentionDraft } from "./mentions";
 import { restoreComposerDraft, sameMentions } from "./composer-drafts";
 import { MessageAttachments } from "./attachments";
@@ -158,6 +171,34 @@ function discardFailedMessage(conversationId: string, message: LocalMessage) {
   chatStore.discardLocal(conversationId, message.clientMessageId);
 }
 
+const NOTIFICATION_LEVEL_OPTIONS: ReadonlyArray<{
+  value: NotificationLevel;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "all",
+    label: "全部消息",
+    description: "接收所有新消息提醒与未读徽标",
+  },
+  {
+    value: "mentions",
+    label: "仅 @提及与回复",
+    description: "仅在被 @提及或回复时显示徽标与提醒",
+  },
+  {
+    value: "none",
+    label: "静音",
+    description: "隐藏未读徽标、工作空间红点与桌面通知",
+  },
+];
+
+function notificationLevelLabel(level: NotificationLevel): string {
+  if (level === "mentions") return "仅 @提及与回复";
+  if (level === "none") return "静音";
+  return "全部消息";
+}
+
 export function ConversationHeader({
   conversation,
   name,
@@ -165,6 +206,10 @@ export function ConversationHeader({
   onMenu,
   onSearchOpen,
   onMembers,
+  members,
+  userId,
+  canConfigureNotifications = false,
+  presenceEnabled = false,
 }: {
   conversation: Conversation;
   name: string;
@@ -172,7 +217,78 @@ export function ConversationHeader({
   onMenu: () => void;
   onSearchOpen: () => void;
   onMembers: () => void;
+  members?: Member[];
+  userId?: string;
+  canConfigureNotifications?: boolean;
+  presenceEnabled?: boolean;
 }) {
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [notifBusy, setNotifBusy] = useState(false);
+  const notifWrapRef = useRef<HTMLDivElement>(null);
+  const level = effectiveNotificationLevel(conversation);
+  const otherMember =
+    conversation.type === "direct" && members && userId
+      ? members.find(
+          (m) =>
+            m.userId !== userId && conversation.memberIds.includes(m.userId),
+        )
+      : undefined;
+  const otherHumanId =
+    otherMember?.kind === "human" ? otherMember.userId : undefined;
+  const peerPresence = useUserPresence(
+    otherHumanId,
+    !!presenceEnabled && !!otherHumanId,
+  );
+
+  useEffect(() => {
+    setNotifOpen(false);
+  }, [conversation.id]);
+
+  useEffect(() => {
+    if (!notifOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (
+        event.target instanceof Node &&
+        !notifWrapRef.current?.contains(event.target)
+      ) {
+        setNotifOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        setNotifOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [notifOpen]);
+
+  async function selectNotificationLevel(next: NotificationLevel) {
+    if (notifBusy) return;
+    setNotifOpen(false);
+    if (next === level) return;
+    const token = chatStore.generation;
+    setNotifBusy(true);
+    try {
+      const result = await api.setNotificationLevel(conversation.id, next);
+      if (token === chatStore.generation) {
+        chatStore.setNotificationLevel(
+          conversation.id,
+          result.notificationLevel,
+        );
+      }
+    } catch {
+      // Keep current level if request fails
+    } finally {
+      setNotifBusy(false);
+    }
+  }
+
   return (
     <header className="conversation-header">
       <IconButton
@@ -199,9 +315,80 @@ export function ConversationHeader({
             : conversation.type === "direct"
               ? "私信"
               : "小组对话"}
+          {presenceEnabled && otherHumanId && (
+            <span
+              className={`header-presence presence-${peerPresence}`}
+              aria-label={`对方状态：${formatPresenceLabel(peerPresence)}`}
+            >
+              {" · "}
+              <i
+                className={`presence-dot presence-${peerPresence}`}
+                aria-hidden="true"
+              />
+              {formatPresenceLabel(peerPresence)}
+            </span>
+          )}
         </span>
       </div>
       <div className="conversation-header-actions">
+        {canConfigureNotifications ? (
+          <div className="notification-level-control" ref={notifWrapRef}>
+            <IconButton
+              label={`会话通知设置（当前：${notificationLevelLabel(level)}）`}
+              aria-haspopup="menu"
+              aria-expanded={notifOpen}
+              disabled={notifBusy}
+              onClick={() => setNotifOpen((open) => !open)}
+            >
+              {level === "none" ? (
+                <BellOff size={ICON.lg} />
+              ) : level === "mentions" ? (
+                <AtSign size={ICON.lg} />
+              ) : (
+                <Bell size={ICON.lg} />
+              )}
+            </IconButton>
+            {notifOpen && (
+              <div
+                className="notification-level-menu"
+                role="menu"
+                aria-label="会话通知级别"
+              >
+                {NOTIFICATION_LEVEL_OPTIONS.map((option) => {
+                  const active = level === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={active}
+                      className={`notification-level-option ${active ? "active" : ""}`}
+                      onClick={() => void selectNotificationLevel(option.value)}
+                    >
+                      <div className="notification-level-option-text">
+                        <b>{option.label}</b>
+                        <span>{option.description}</span>
+                      </div>
+                      {active && <Check size={ICON.sm} aria-hidden="true" />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ) : level !== "all" ? (
+          <span
+            className="notification-level-readonly"
+            title={`会话通知：${notificationLevelLabel(level)}`}
+            aria-label={`会话通知：${notificationLevelLabel(level)}`}
+          >
+            {level === "none" ? (
+              <BellOff size={ICON.sm} />
+            ) : (
+              <AtSign size={ICON.sm} />
+            )}
+          </span>
+        ) : null}
         <IconButton
           label="搜索会话"
           onClick={onSearchOpen}
@@ -370,6 +557,127 @@ export function messageGrouping(
   return { showDate, compact };
 }
 
+const emptyMembers: Member[] = [];
+
+function OwnMessageReadReceipt({
+  conversationId,
+  conversationType,
+  seq,
+  userId,
+  senderReadSeq,
+  allMembers,
+  isLatestOwn,
+}: {
+  conversationId: string;
+  conversationType: Conversation["type"];
+  seq: number;
+  userId: string;
+  senderReadSeq: number;
+  allMembers: Member[];
+  isLatestOwn: boolean;
+}) {
+  const receipts = useConversationReceipts(conversationId, true);
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const summary = computeMessageReadSummary({
+    receipts,
+    seq,
+    senderId: userId,
+    senderReadSeq,
+    conversationType,
+    members: allMembers,
+  });
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (
+        event.target instanceof Node &&
+        !wrapRef.current?.contains(event.target)
+      ) {
+        setOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        setOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [open]);
+
+  if (!summary || !summary.label) return null;
+
+  const visibilityClass = isLatestOwn ? "persistent" : "on-hover";
+  const statusClass = summary.readCount > 0 ? "is-read" : "is-unread";
+
+  if (conversationType === "group") {
+    return (
+      <div
+        className={`message-read-receipt-wrap ${visibilityClass}`}
+        ref={wrapRef}
+      >
+        <button
+          type="button"
+          className={`message-read-receipt is-interactive ${statusClass}`}
+          aria-expanded={open}
+          aria-label={`已读回执：${summary.label}`}
+          onClick={() => setOpen((current) => !current)}
+        >
+          {summary.label}
+        </button>
+        {open && (
+          <div
+            className="read-receipt-popover"
+            role="dialog"
+            aria-label="群聊已读详情"
+          >
+            <div className="read-receipt-section">
+              <b>已读 ({summary.readMembers.length})</b>
+              {summary.readMembers.length > 0 ? (
+                <ul>
+                  {summary.readMembers.map((member) => (
+                    <li key={member.userId}>{member.displayName}</li>
+                  ))}
+                </ul>
+              ) : (
+                <span>暂无成员已读</span>
+              )}
+            </div>
+            <div className="read-receipt-section">
+              <b>未读 ({summary.unreadMembers.length})</b>
+              {summary.unreadMembers.length > 0 ? (
+                <ul>
+                  {summary.unreadMembers.map((member) => (
+                    <li key={member.userId}>{member.displayName}</li>
+                  ))}
+                </ul>
+              ) : (
+                <span>全部成员已读</span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <span
+      className={`message-read-receipt ${visibilityClass} ${statusClass}`}
+      aria-label={`已读状态：${summary.label}`}
+    >
+      {summary.label}
+    </span>
+  );
+}
+
 // Memoized: rows receive only primitives and referentially stable values, so a
 // timeline re-render touches just the rows whose own inputs changed.
 export const MessageItem = memo(function MessageItem({
@@ -381,12 +689,18 @@ export const MessageItem = memo(function MessageItem({
   replyTarget: target,
   workspaceId,
   conversationId,
+  conversationType = "channel",
   userId,
   agentOwnerName,
   mentionMembers,
+  allMembers = emptyMembers,
   mentionsEnabled,
   canEdit,
   canRetract,
+  canReact = false,
+  canViewReceipts = false,
+  isLatestOwn = false,
+  senderReadSeq = 0,
   showUnreadDivider,
   isRovingTarget,
   highlighted,
@@ -418,12 +732,18 @@ export const MessageItem = memo(function MessageItem({
   replyTarget?: LocalMessage;
   workspaceId: string;
   conversationId: string;
+  conversationType?: Conversation["type"];
   userId: string;
   agentOwnerName?: string;
   mentionMembers: Member[];
+  allMembers?: Member[];
   mentionsEnabled: boolean;
   canEdit: boolean;
   canRetract: boolean;
+  canReact?: boolean;
+  canViewReceipts?: boolean;
+  isLatestOwn?: boolean;
+  senderReadSeq?: number;
   showUnreadDivider: boolean;
   isRovingTarget: boolean;
   highlighted: boolean;
@@ -454,11 +774,63 @@ export const MessageItem = memo(function MessageItem({
     ok: boolean;
     text: string;
   } | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [reactionBusy, setReactionBusy] = useState(false);
+  const pickerWrapRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     if (!copyFeedback) return;
     const timer = window.setTimeout(() => setCopyFeedback(null), 2400);
     return () => window.clearTimeout(timer);
   }, [copyFeedback]);
+
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (
+        event.target instanceof Node &&
+        !pickerWrapRef.current?.contains(event.target)
+      ) {
+        setPickerOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        setPickerOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [pickerOpen]);
+
+  async function toggleReaction(emoji: string) {
+    if (!canReact || reactionBusy || message.retractedAt || message.status) {
+      return;
+    }
+    setPickerOpen(false);
+    const existing = message.reactions?.find((item) => item.emoji === emoji);
+    const reactedByMe = !!existing?.userIds.includes(userId);
+    const token = chatStore.generation;
+    setReactionBusy(true);
+    try {
+      const result = reactedByMe
+        ? await api.deleteReaction(conversationId, message.id, emoji)
+        : await api.putReaction(conversationId, message.id, emoji);
+      if (token === chatStore.generation) {
+        chatStore.setReactions(conversationId, message.id, result.reactions);
+      }
+    } catch {
+      // Ignore transient reaction toggle failures
+    } finally {
+      setReactionBusy(false);
+    }
+  }
+
   async function copy(text: string, success: string) {
     try {
       await copyToClipboard(text);
@@ -531,11 +903,12 @@ export const MessageItem = memo(function MessageItem({
           if (event.key === "Escape") {
             event.preventDefault();
             event.stopPropagation();
+            setPickerOpen(false);
             setActionMessageId("");
             inputRef.current?.focus();
           }
         }}
-        className={`message ${highlighted ? "located" : ""} ${compact ? "compact" : ""} ${message.status || ""} ${message.retractedAt ? "retracted" : ""} ${actionsOpen ? "actions-open" : ""}`}
+        className={`message ${highlighted ? "located" : ""} ${compact ? "compact" : ""} ${message.status || ""} ${message.retractedAt ? "retracted" : ""} ${actionsOpen || pickerOpen ? "actions-open" : ""}`}
       >
         <div className="message-avatar">
           {!compact ? (
@@ -648,6 +1021,52 @@ export const MessageItem = memo(function MessageItem({
               attachments={message.attachments}
             />
           )}
+          {!message.retractedAt &&
+            !!message.reactions &&
+            message.reactions.length > 0 && (
+              <div className="message-reactions" role="group" aria-label="表情回应">
+                {message.reactions.map((reaction) => {
+                  const active = reaction.userIds.includes(userId);
+                  const reactorNames = reaction.userIds.map((uid) => {
+                    if (uid === userId) return "你";
+                    return (
+                      allMembers.find((member) => member.userId === uid)
+                        ?.displayName || "成员"
+                    );
+                  });
+                  const tooltip = `${reactorNames.join("、")} 回应了 ${reaction.emoji}`;
+                  return (
+                    <button
+                      key={reaction.emoji}
+                      type="button"
+                      className={`reaction-chip ${active ? "active" : ""}`}
+                      disabled={!canReact || reactionBusy}
+                      aria-pressed={active}
+                      title={tooltip}
+                      aria-label={`${reaction.emoji} ${reaction.count} 人回应：${reactorNames.join("、")}`}
+                      onClick={() => void toggleReaction(reaction.emoji)}
+                    >
+                      <span className="reaction-chip-emoji">{reaction.emoji}</span>
+                      <span className="reaction-chip-count">{reaction.count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          {!message.retractedAt &&
+            !message.status &&
+            message.senderId === userId &&
+            canViewReceipts && (
+              <OwnMessageReadReceipt
+                conversationId={conversationId}
+                conversationType={conversationType}
+                seq={message.seq}
+                userId={userId}
+                senderReadSeq={senderReadSeq}
+                allMembers={allMembers}
+                isLatestOwn={isLatestOwn}
+              />
+            )}
           {message.status === "sending" && (
             <span className="send-status">
               <LoaderCircle size={ICON.xs} className="spin" /> 正在发送
@@ -717,6 +1136,46 @@ export const MessageItem = memo(function MessageItem({
                 <MoreHorizontal size={ICON.md} />
               </IconButton>
               <div className="message-actions">
+                {canReact && (
+                  <div className="reaction-picker-wrap" ref={pickerWrapRef}>
+                    <IconButton
+                      label="添加表情回应"
+                      tabIndex={actionTabIndex}
+                      aria-expanded={pickerOpen}
+                      aria-haspopup="menu"
+                      disabled={reactionBusy}
+                      onClick={() => setPickerOpen((open) => !open)}
+                    >
+                      <SmilePlus size={ICON.sm} />
+                    </IconButton>
+                    {pickerOpen && (
+                      <div
+                        className="reaction-picker-popover"
+                        role="menu"
+                        aria-label="选择表情回应"
+                      >
+                        {COMMON_REACTION_EMOJIS.map((emoji) => {
+                          const active =
+                            !!message.reactions
+                              ?.find((item) => item.emoji === emoji)
+                              ?.userIds.includes(userId);
+                          return (
+                            <button
+                              key={emoji}
+                              type="button"
+                              role="menuitem"
+                              className={`reaction-picker-emoji ${active ? "active" : ""}`}
+                              aria-label={`表情回应 ${emoji}`}
+                              onClick={() => void toggleReaction(emoji)}
+                            >
+                              {emoji}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
                 <IconButton
                   label={`回复 ${message.senderName}`}
                   tabIndex={actionTabIndex}

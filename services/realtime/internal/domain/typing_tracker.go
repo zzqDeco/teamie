@@ -7,8 +7,9 @@ import (
 )
 
 const (
-	TypingMinimumInterval = 300 * time.Millisecond
-	TypingTTL             = 5 * time.Second
+	TypingMinimumInterval  = 300 * time.Millisecond
+	TypingTTL              = 5 * time.Second
+	ReceiptMinimumInterval = time.Second
 )
 
 // TypingKey uniquely identifies a participant's typing stream in a conversation.
@@ -28,11 +29,14 @@ type typingGate struct {
 }
 
 // TypingTracker (aliased as TypingPolicy) enforces per-(user, conversation) signal
-// serialization, positive start coalescing, immediate unthrottled stop, and idle gate expiration.
+// serialization, positive start coalescing, immediate unthrottled stop, idle gate expiration,
+// and per-conversation receipt-hint coalescing.
 type TypingTracker struct {
-	Interval time.Duration
-	mu       sync.Mutex
-	gates    map[string]*typingGate
+	Interval        time.Duration
+	ReceiptInterval time.Duration
+	mu              sync.Mutex
+	gates           map[string]*typingGate
+	receiptGates    map[string]time.Time
 }
 
 // TypingPolicy is an alias for TypingTracker.
@@ -43,6 +47,38 @@ func (p *TypingTracker) interval() time.Duration {
 		return p.Interval
 	}
 	return TypingMinimumInterval
+}
+
+func (p *TypingTracker) receiptInterval() time.Duration {
+	if p != nil && p.ReceiptInterval > 0 {
+		return p.ReceiptInterval
+	}
+	return ReceiptMinimumInterval
+}
+
+// AdmitReceiptHint reports whether a receipts.changed hint for conversationID should be delivered
+// or coalesced (at most one per conversation per second).
+func (p *TypingTracker) AdmitReceiptHint(conversationID string) bool {
+	if p == nil || conversationID == "" {
+		return true
+	}
+	minInterval := p.receiptInterval()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.receiptGates == nil {
+		p.receiptGates = make(map[string]time.Time)
+	}
+	now := time.Now()
+	for id, last := range p.receiptGates {
+		if now.Sub(last) >= minInterval {
+			delete(p.receiptGates, id)
+		}
+	}
+	if last, ok := p.receiptGates[conversationID]; ok && now.Sub(last) < minInterval {
+		return false
+	}
+	p.receiptGates[conversationID] = now
+	return true
 }
 
 // Lock acquires the per-(user, conversation) serialization gate.

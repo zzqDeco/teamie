@@ -31,7 +31,7 @@ func (s *Service) CreateWorkspace(ctx context.Context, userID, name string) (dom
 		if _, err = s.Workspaces.InsertWorkspaceMember(txCtx, ws.ID, userID, "owner", nil, false); err != nil {
 			return err
 		}
-		c = domain.Conversation{ID: domain.NewID(), WorkspaceID: ws.ID, Type: "channel", Name: "general", CreatedBy: userID, MemberIDs: []string{userID}}
+		c = domain.Conversation{ID: domain.NewID(), WorkspaceID: ws.ID, Type: "channel", Name: "general", CreatedBy: userID, MemberIDs: []string{userID}, NotificationLevel: "all"}
 		updatedAt, err := s.Conversations.InsertConversation(txCtx, c, "")
 		if err != nil {
 			return err
@@ -196,6 +196,11 @@ func (s *Service) WorkspaceParticipants(ctx context.Context, workspaceID, reques
 		return memberErr
 	})
 	return out, err
+}
+
+// SharedWorkspaceMembers lists distinct member IDs sharing any workspace with userID.
+func (s *Service) SharedWorkspaceMembers(ctx context.Context, userID string) ([]string, error) {
+	return s.Workspaces.SharedWorkspaceMemberIDs(ctx, userID)
 }
 
 // SetPrincipalWorkspaces reconciles delegated workspace memberships for an agent principal.

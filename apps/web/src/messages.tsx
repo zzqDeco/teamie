@@ -26,6 +26,7 @@ import {
   MessageItem, messageGrouping, RetractMessageModal, useMessageActions,
 } from "./message-item";
 import { MessageComposer } from "./message-composer";
+import { useConversationReceiptsSync } from "./engagement-store";
 
 const noMessages: LocalMessage[] = [];
 const noMembers: Member[] = [];
@@ -626,6 +627,20 @@ export function ConversationView({
   }
   const canEdit = !!data?.capabilities["im.message.edit"];
   const canRetract = !!data?.capabilities["im.message.retract"];
+  const canReact = !!data?.capabilities["im.reactions.create"];
+  const canViewReceipts = !!data?.capabilities["im.read_receipts.view"];
+  const canConfigureNotifications = !!data?.capabilities["im.notifications.configure"];
+  const presenceEnabled = !!data?.capabilities["im.presence.publish"];
+  const latestOwnMessageId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (!m.status && !m.retractedAt && m.senderId === userId) {
+        return m.id;
+      }
+    }
+    return "";
+  }, [messages, userId]);
+  useConversationReceiptsSync(conversation.id, canViewReceipts, !!latestOwnMessageId);
   // Stable handlers keep memoized rows from re-rendering when unrelated view
   // state changes; the refs always hold the latest closures.
   const locateRef = useRef(locate);
@@ -763,6 +778,9 @@ export function ConversationView({
       <ConversationHeader
         conversation={conversation} name={name} membersOpen={membersOpen}
         onMenu={onMenu} onSearchOpen={() => setSearchOpen(true)} onMembers={onMembers}
+        members={mentionMembers} userId={userId}
+        canConfigureNotifications={canConfigureNotifications}
+        presenceEnabled={presenceEnabled}
       />
       {searchOpen && (
         <ConversationSearch
@@ -834,13 +852,20 @@ export function ConversationView({
                 showDate={row.showDate} compact={row.compact}
                 previousId={row.previousId} nextId={row.nextId} replyTarget={row.replyTarget}
                 workspaceId={conversation.workspaceId}
-                conversationId={conversation.id} userId={userId}
+                conversationId={conversation.id}
+                conversationType={conversation.type}
+                userId={userId}
                 agentOwnerName={
                   message.senderKind === "agent" ? agentOwners.get(message.senderId) : undefined
                 }
                 mentionMembers={isEditing ? mentionMembers : noMembers}
+                allMembers={mentionMembers}
                 mentionsEnabled={mentionsEnabled}
                 canEdit={canEdit} canRetract={canRetract}
+                canReact={canReact}
+                canViewReceipts={canViewReceipts}
+                isLatestOwn={message.id === latestOwnMessageId}
+                senderReadSeq={message.senderId === userId ? readSeq : 0}
                 showUnreadDivider={message.id === firstUnread && (entry?.readSeq ?? 0) > 0}
                 isRovingTarget={message.id === rovingMessageId}
                 highlighted={highlightId === message.id}
