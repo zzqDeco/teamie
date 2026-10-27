@@ -86,6 +86,7 @@ struct MessageDTO {
   13: optional list<AttachmentDTO> attachments (api.body="attachments")
   14: optional list<MentionDTO> mentions (api.body="mentions")
   15: optional list<ReactionDTO> reactions (api.body="reactions")
+  16: optional string reactionsVersion (api.body="reactionsVersion")
 }
 
 struct EventDTO {
@@ -100,6 +101,7 @@ struct EventDTO {
   9: optional string messageId (api.body="messageId")
   10: optional list<ReactionDTO> reactions (api.body="reactions")
   11: optional string notificationLevel (api.body="notificationLevel")
+  12: optional string reactionsVersion (api.body="reactionsVersion")
 }
 
 struct AttentionConversationDTO {
@@ -284,6 +286,7 @@ struct DeleteReactionReq {
 
 struct ReactionsResp {
   1: required list<ReactionDTO> reactions (api.body="reactions")
+  2: required string reactionsVersion (api.body="reactionsVersion")
 }
 
 struct ReadSeqCountDTO {
@@ -335,11 +338,17 @@ struct GetAttentionReq {
   3: optional string unreadOnly (api.query="unreadOnly")
 }
 
+struct AttentionUnreadDTO {
+  1: required string conversationId (api.body="conversationId")
+  2: required i64 unreadCount (api.body="unreadCount")
+}
+
 struct AttentionPageResp {
   1: required list<AttentionItemDTO> items (api.body="items")
   2: optional string cursor (api.body="cursor")
   3: required i64 unreadCount (api.body="unreadCount")
   4: required i64 channelUnreadCount (api.body="channelUnreadCount")
+  5: optional list<AttentionUnreadDTO> attentionUnreadByConversation (api.body="attentionUnreadByConversation")
 }
 
 struct SyncReq {

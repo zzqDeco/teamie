@@ -379,21 +379,22 @@ func (p *ReactionDTO) String() string {
 }
 
 type MessageDTO struct {
-	ID              string           `thrift:"id,1,required" json:"id"`
-	ConversationId  string           `thrift:"conversationId,2,required" json:"conversationId"`
-	SenderId        string           `thrift:"senderId,3,required" json:"senderId"`
-	SenderName      string           `thrift:"senderName,4,required" json:"senderName"`
-	SenderKind      string           `thrift:"senderKind,5,required" json:"senderKind"`
-	ClientMessageId string           `thrift:"clientMessageId,6,required" json:"clientMessageId"`
-	Seq             int64            `thrift:"seq,7,required" json:"seq"`
-	Body            string           `thrift:"body,8,required" json:"body"`
-	ReplyToId       *string          `thrift:"replyToId,9,optional" json:"replyToId,omitempty"`
-	CreatedAt       string           `thrift:"createdAt,10,required" json:"createdAt"`
-	EditedAt        *string          `thrift:"editedAt,11,optional" json:"editedAt,omitempty"`
-	RetractedAt     *string          `thrift:"retractedAt,12,optional" json:"retractedAt,omitempty"`
-	Attachments     []*AttachmentDTO `thrift:"attachments,13,optional,list<AttachmentDTO>" json:"attachments,omitempty"`
-	Mentions        []*MentionDTO    `thrift:"mentions,14,optional,list<MentionDTO>" json:"mentions,omitempty"`
-	Reactions       []*ReactionDTO   `thrift:"reactions,15,optional,list<ReactionDTO>" json:"reactions,omitempty"`
+	ID               string           `thrift:"id,1,required" json:"id"`
+	ConversationId   string           `thrift:"conversationId,2,required" json:"conversationId"`
+	SenderId         string           `thrift:"senderId,3,required" json:"senderId"`
+	SenderName       string           `thrift:"senderName,4,required" json:"senderName"`
+	SenderKind       string           `thrift:"senderKind,5,required" json:"senderKind"`
+	ClientMessageId  string           `thrift:"clientMessageId,6,required" json:"clientMessageId"`
+	Seq              int64            `thrift:"seq,7,required" json:"seq"`
+	Body             string           `thrift:"body,8,required" json:"body"`
+	ReplyToId        *string          `thrift:"replyToId,9,optional" json:"replyToId,omitempty"`
+	CreatedAt        string           `thrift:"createdAt,10,required" json:"createdAt"`
+	EditedAt         *string          `thrift:"editedAt,11,optional" json:"editedAt,omitempty"`
+	RetractedAt      *string          `thrift:"retractedAt,12,optional" json:"retractedAt,omitempty"`
+	Attachments      []*AttachmentDTO `thrift:"attachments,13,optional,list<AttachmentDTO>" json:"attachments,omitempty"`
+	Mentions         []*MentionDTO    `thrift:"mentions,14,optional,list<MentionDTO>" json:"mentions,omitempty"`
+	Reactions        []*ReactionDTO   `thrift:"reactions,15,optional,list<ReactionDTO>" json:"reactions,omitempty"`
+	ReactionsVersion *string          `thrift:"reactionsVersion,16,optional" json:"reactionsVersion,omitempty"`
 }
 
 func NewMessageDTO() *MessageDTO {
@@ -493,6 +494,15 @@ func (p *MessageDTO) GetReactions() (v []*ReactionDTO) {
 	return p.Reactions
 }
 
+var MessageDTO_ReactionsVersion_DEFAULT string
+
+func (p *MessageDTO) GetReactionsVersion() (v string) {
+	if !p.IsSetReactionsVersion() {
+		return MessageDTO_ReactionsVersion_DEFAULT
+	}
+	return *p.ReactionsVersion
+}
+
 func (p *MessageDTO) IsSetReplyToId() bool {
 	return p.ReplyToId != nil
 }
@@ -517,6 +527,10 @@ func (p *MessageDTO) IsSetReactions() bool {
 	return p.Reactions != nil
 }
 
+func (p *MessageDTO) IsSetReactionsVersion() bool {
+	return p.ReactionsVersion != nil
+}
+
 func (p *MessageDTO) String() string {
 	if p == nil {
 		return "<nil>"
@@ -536,6 +550,7 @@ type EventDTO struct {
 	MessageId         *string          `thrift:"messageId,9,optional" json:"messageId,omitempty"`
 	Reactions         []*ReactionDTO   `thrift:"reactions,10,optional,list<ReactionDTO>" json:"reactions,omitempty"`
 	NotificationLevel *string          `thrift:"notificationLevel,11,optional" json:"notificationLevel,omitempty"`
+	ReactionsVersion  *string          `thrift:"reactionsVersion,12,optional" json:"reactionsVersion,omitempty"`
 }
 
 func NewEventDTO() *EventDTO {
@@ -629,6 +644,15 @@ func (p *EventDTO) GetNotificationLevel() (v string) {
 	return *p.NotificationLevel
 }
 
+var EventDTO_ReactionsVersion_DEFAULT string
+
+func (p *EventDTO) GetReactionsVersion() (v string) {
+	if !p.IsSetReactionsVersion() {
+		return EventDTO_ReactionsVersion_DEFAULT
+	}
+	return *p.ReactionsVersion
+}
+
 func (p *EventDTO) IsSetConversationId() bool {
 	return p.ConversationId != nil
 }
@@ -659,6 +683,10 @@ func (p *EventDTO) IsSetReactions() bool {
 
 func (p *EventDTO) IsSetNotificationLevel() bool {
 	return p.NotificationLevel != nil
+}
+
+func (p *EventDTO) IsSetReactionsVersion() bool {
+	return p.ReactionsVersion != nil
 }
 
 func (p *EventDTO) String() string {
@@ -1872,7 +1900,8 @@ func (p *DeleteReactionReq) String() string {
 }
 
 type ReactionsResp struct {
-	Reactions []*ReactionDTO `thrift:"reactions,1,required,list<ReactionDTO>" json:"reactions"`
+	Reactions        []*ReactionDTO `thrift:"reactions,1,required,list<ReactionDTO>" json:"reactions"`
+	ReactionsVersion string         `thrift:"reactionsVersion,2,required" json:"reactionsVersion"`
 }
 
 func NewReactionsResp() *ReactionsResp {
@@ -1884,6 +1913,10 @@ func (p *ReactionsResp) InitDefault() {
 
 func (p *ReactionsResp) GetReactions() (v []*ReactionDTO) {
 	return p.Reactions
+}
+
+func (p *ReactionsResp) GetReactionsVersion() (v string) {
+	return p.ReactionsVersion
 }
 
 func (p *ReactionsResp) String() string {
@@ -2228,11 +2261,39 @@ func (p *GetAttentionReq) String() string {
 	return fmt.Sprintf("GetAttentionReq(%+v)", *p)
 }
 
+type AttentionUnreadDTO struct {
+	ConversationId string `thrift:"conversationId,1,required" json:"conversationId"`
+	UnreadCount    int64  `thrift:"unreadCount,2,required" json:"unreadCount"`
+}
+
+func NewAttentionUnreadDTO() *AttentionUnreadDTO {
+	return &AttentionUnreadDTO{}
+}
+
+func (p *AttentionUnreadDTO) InitDefault() {
+}
+
+func (p *AttentionUnreadDTO) GetConversationId() (v string) {
+	return p.ConversationId
+}
+
+func (p *AttentionUnreadDTO) GetUnreadCount() (v int64) {
+	return p.UnreadCount
+}
+
+func (p *AttentionUnreadDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AttentionUnreadDTO(%+v)", *p)
+}
+
 type AttentionPageResp struct {
-	Items              []*AttentionItemDTO `thrift:"items,1,required,list<AttentionItemDTO>" json:"items"`
-	Cursor             *string             `thrift:"cursor,2,optional" json:"cursor,omitempty"`
-	UnreadCount        int64               `thrift:"unreadCount,3,required" json:"unreadCount"`
-	ChannelUnreadCount int64               `thrift:"channelUnreadCount,4,required" json:"channelUnreadCount"`
+	Items                         []*AttentionItemDTO   `thrift:"items,1,required,list<AttentionItemDTO>" json:"items"`
+	Cursor                        *string               `thrift:"cursor,2,optional" json:"cursor,omitempty"`
+	UnreadCount                   int64                 `thrift:"unreadCount,3,required" json:"unreadCount"`
+	ChannelUnreadCount            int64                 `thrift:"channelUnreadCount,4,required" json:"channelUnreadCount"`
+	AttentionUnreadByConversation []*AttentionUnreadDTO `thrift:"attentionUnreadByConversation,5,optional,list<AttentionUnreadDTO>" json:"attentionUnreadByConversation,omitempty"`
 }
 
 func NewAttentionPageResp() *AttentionPageResp {
@@ -2263,8 +2324,21 @@ func (p *AttentionPageResp) GetChannelUnreadCount() (v int64) {
 	return p.ChannelUnreadCount
 }
 
+var AttentionPageResp_AttentionUnreadByConversation_DEFAULT []*AttentionUnreadDTO
+
+func (p *AttentionPageResp) GetAttentionUnreadByConversation() (v []*AttentionUnreadDTO) {
+	if !p.IsSetAttentionUnreadByConversation() {
+		return AttentionPageResp_AttentionUnreadByConversation_DEFAULT
+	}
+	return p.AttentionUnreadByConversation
+}
+
 func (p *AttentionPageResp) IsSetCursor() bool {
 	return p.Cursor != nil
+}
+
+func (p *AttentionPageResp) IsSetAttentionUnreadByConversation() bool {
+	return p.AttentionUnreadByConversation != nil
 }
 
 func (p *AttentionPageResp) String() string {

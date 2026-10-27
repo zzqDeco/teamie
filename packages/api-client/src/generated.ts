@@ -234,6 +234,7 @@ export interface MessageDTO {
   attachments?: AttachmentDTO[];
   mentions?: MentionDTO[];
   reactions?: ReactionDTO[];
+  reactionsVersion?: string;
 }
 
 export interface EventDTO {
@@ -248,6 +249,7 @@ export interface EventDTO {
   messageId?: string;
   reactions?: ReactionDTO[];
   notificationLevel?: string;
+  reactionsVersion?: string;
 }
 
 export interface AttentionConversationDTO {
@@ -430,6 +432,7 @@ export interface DeleteReactionReq {
 
 export interface ReactionsResp {
   reactions: ReactionDTO[];
+  reactionsVersion: string;
 }
 
 export interface ReadSeqCountDTO {
@@ -481,11 +484,17 @@ export interface GetAttentionReq {
   unreadOnly?: string;
 }
 
+export interface AttentionUnreadDTO {
+  conversationId: string;
+  unreadCount: number;
+}
+
 export interface AttentionPageResp {
   items: AttentionItemDTO[];
   cursor?: string;
   unreadCount: number;
   channelUnreadCount: number;
+  attentionUnreadByConversation?: AttentionUnreadDTO[];
 }
 
 export interface SyncReq {
