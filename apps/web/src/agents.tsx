@@ -291,6 +291,21 @@ export function MyAgents() {
   const agents = (query.data?.agents || []).filter((agent) =>
     canManageAgent(user, agent),
   );
+  const catalogQuery = useQuery<ModelCatalog>({
+    queryKey: ["modelCatalog", user!.id],
+    queryFn: () =>
+      api.modelCatalog().catch((): ModelCatalog => ({ models: [] })),
+    enabled: agents.some((item) => Boolean(item.modelId?.trim())),
+    retry: false,
+  });
+  const catalogModels = catalogQuery.data?.models || [];
+  const resolveModelLabel = (id?: string) => {
+    const trimmed = id?.trim();
+    if (!trimmed) return "";
+    return (
+      catalogModels.find((item) => item.id === trimmed)?.displayName || trimmed
+    );
+  };
   const canCreate =
     !!data?.capabilities["agents.enabled"] &&
     !!data.capabilities["agents.create"];
@@ -334,7 +349,14 @@ export function MyAgents() {
                 <AgentEnabledStatus enabled={agent.enabled} />
               </div>
               <h2>{agent.name}</h2>
-              <AgentBadge compact />
+              <div className="agent-card-badges">
+                <AgentBadge compact />
+                {resolveModelLabel(agent.modelId) && (
+                  <span className="agent-model-chip">
+                    {resolveModelLabel(agent.modelId)}
+                  </span>
+                )}
+              </div>
               {agent.description && <p>{agent.description}</p>}
               <WorkspaceChips
                 ids={agent.workspaceIds}
@@ -391,6 +413,18 @@ export function AgentDetail({ agentId }: { agentId: string }) {
     retry: queryRetry,
   });
   const agent = query.data?.agent;
+  const catalogQuery = useQuery<ModelCatalog>({
+    queryKey: ["modelCatalog", user!.id],
+    queryFn: () =>
+      api.modelCatalog().catch((): ModelCatalog => ({ models: [] })),
+    enabled: Boolean(agent?.modelId?.trim()),
+    retry: false,
+  });
+  const catalogModels = catalogQuery.data?.models || [];
+  const resolvedModelLabel = agent?.modelId?.trim()
+    ? catalogModels.find((item) => item.id === agent.modelId?.trim())
+        ?.displayName || agent.modelId.trim()
+    : "";
   const allowed = !!agent && canManageAgent(user, agent);
   const editable = !!data?.capabilities["agents.update"];
   const deletable = !!data?.capabilities["agents.delete"];
@@ -496,6 +530,9 @@ export function AgentDetail({ agentId }: { agentId: string }) {
           <div className="agent-detail-labels">
             <AgentBadge compact />
             <AgentEnabledStatus enabled={agent.enabled} />
+            {resolvedModelLabel && (
+              <span className="agent-model-chip">{resolvedModelLabel}</span>
+            )}
           </div>
           <h1>{agent.name}</h1>
           {agent.description && <p>{agent.description}</p>}

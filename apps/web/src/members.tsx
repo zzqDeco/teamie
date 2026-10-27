@@ -151,22 +151,32 @@ export function WorkspaceMembers({
             return (
               <li key={member.userId} className="member-directory-row">
                 <div className="member-directory-identity">
-                  <ParticipantIdentity member={member} />
-                  {self && <span className="member-self-label">你</span>}
-                  {humanPresence && (
-                    <span
-                      className={`member-presence-badge presence-${humanPresence}`}
-                      aria-label={`在线状态：${formatPresenceLabel(humanPresence)}`}
-                    >
-                      <i className={`presence-dot presence-${humanPresence}`} aria-hidden="true" />
-                      {formatPresenceLabel(humanPresence)}
-                    </span>
-                  )}
-                  {member.kind === "agent" && member.selectable === false && (
-                    <span className="member-unavailable">
-                      {agent && !agent.enabled ? "已停用" : "暂不可添加"}
-                    </span>
-                  )}
+                  <ParticipantIdentity
+                    member={member}
+                    badges={
+                      <>
+                        {self && <span className="member-self-label">你</span>}
+                        {humanPresence && (
+                          <span
+                            className={`member-presence-badge presence-${humanPresence}`}
+                            aria-label={`在线状态：${formatPresenceLabel(humanPresence)}`}
+                          >
+                            <i
+                              className={`presence-dot presence-${humanPresence}`}
+                              aria-hidden="true"
+                            />
+                            {formatPresenceLabel(humanPresence)}
+                          </span>
+                        )}
+                        {member.kind === "agent" &&
+                          member.selectable === false && (
+                            <span className="member-unavailable">
+                              {agent && !agent.enabled ? "已停用" : "暂不可添加"}
+                            </span>
+                          )}
+                      </>
+                    }
+                  />
                 </div>
                 <div className="member-directory-actions">
                   {!self && data?.capabilities["im.dm.create"] && (

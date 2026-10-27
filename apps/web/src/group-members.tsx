@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Check, LoaderCircle, Plus, UserMinus, Users } from "lucide-react";
 import { api } from "@teamie/api-client";
@@ -11,7 +12,13 @@ import { Avatar, Button, Modal, Notice } from "./ui";
 import type { Participant } from "./participants";
 import { ICON } from "./icons";
 import { toast } from "./toast";
-export function ParticipantIdentity({ member }: { member: Member }) {
+export function ParticipantIdentity({
+  member,
+  badges,
+}: {
+  member: Member;
+  badges?: ReactNode;
+}) {
   return (
     <>
       {member.kind === "agent" ? (
@@ -27,6 +34,7 @@ export function ParticipantIdentity({ member }: { member: Member }) {
           {member.kind === "agent" && (
             <AgentBadge compact ownerName={member.ownerName} />
           )}
+          {badges}
         </b>
         <small>
           {member.kind === "agent"

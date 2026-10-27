@@ -7,6 +7,7 @@ import {
   Bell,
   BellOff,
   Check,
+  CheckCheck,
   Copy,
   CornerUpLeft,
   Hash,
@@ -316,17 +317,21 @@ export function ConversationHeader({
               ? "私信"
               : "小组对话"}
           {presenceEnabled && otherHumanId && (
-            <span
-              className={`header-presence presence-${peerPresence}`}
-              aria-label={`对方状态：${formatPresenceLabel(peerPresence)}`}
-            >
-              {" · "}
-              <i
-                className={`presence-dot presence-${peerPresence}`}
-                aria-hidden="true"
-              />
-              {formatPresenceLabel(peerPresence)}
-            </span>
+            <>
+              <span className="header-presence-sep" aria-hidden="true">
+                ·
+              </span>
+              <span
+                className={`header-presence presence-${peerPresence}`}
+                aria-label={`对方状态：${formatPresenceLabel(peerPresence)}`}
+              >
+                <i
+                  className={`presence-dot presence-${peerPresence}`}
+                  aria-hidden="true"
+                />
+                {formatPresenceLabel(peerPresence)}
+              </span>
+            </>
           )}
         </span>
       </div>
@@ -335,6 +340,7 @@ export function ConversationHeader({
           <div className="notification-level-control" ref={notifWrapRef}>
             <IconButton
               label={`会话通知设置（当前：${notificationLevelLabel(level)}）`}
+              className={level !== "all" ? "is-customized" : undefined}
               aria-haspopup="menu"
               aria-expanded={notifOpen}
               disabled={notifBusy}
@@ -630,6 +636,11 @@ function OwnMessageReadReceipt({
           aria-label={`已读回执：${summary.label}`}
           onClick={() => setOpen((current) => !current)}
         >
+          {summary.readCount > 0 ? (
+            <CheckCheck size={ICON.xs} aria-hidden="true" />
+          ) : (
+            <Check size={ICON.xs} aria-hidden="true" />
+          )}
           {summary.label}
         </button>
         {open && (
@@ -673,6 +684,11 @@ function OwnMessageReadReceipt({
       className={`message-read-receipt ${visibilityClass} ${statusClass}`}
       aria-label={`已读状态：${summary.label}`}
     >
+      {summary.readCount > 0 ? (
+        <CheckCheck size={ICON.xs} aria-hidden="true" />
+      ) : (
+        <Check size={ICON.xs} aria-hidden="true" />
+      )}
       {summary.label}
     </span>
   );

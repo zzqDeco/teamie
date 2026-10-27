@@ -91,29 +91,31 @@ function ModelProfileDialog({
         autoComplete="off"
       >
         <Notice>{error}</Notice>
-        {!initial && (
+        <div className="gateway-form-row">
           <label>
-            模型标识 <span className="optional">选填 · 留空自动生成</span>
+            显示名称
             <input
-              name="profileId"
-              value={id}
-              onChange={(e) => setId(e.target.value)}
-              placeholder="例如：deepseek-r1"
+              name="profileDisplayName"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder="例如：DeepSeek R1（推理）"
               autoComplete="off"
+              required
             />
           </label>
-        )}
-        <label>
-          显示名称
-          <input
-            name="profileDisplayName"
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="例如：DeepSeek R1（推理）"
-            autoComplete="off"
-            required
-          />
-        </label>
+          {!initial && (
+            <label>
+              模型标识 <span className="optional">留空自动生成</span>
+              <input
+                name="profileId"
+                value={id}
+                onChange={(e) => setId(e.target.value)}
+                placeholder="例如：deepseek-r1"
+                autoComplete="off"
+              />
+            </label>
+          )}
+        </div>
         <label>
           简介 <span className="optional">选填</span>
           <input
@@ -136,17 +138,33 @@ function ModelProfileDialog({
             required
           />
         </label>
-        <label>
-          上游模型 ID
-          <input
-            name="profileModel"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            placeholder="服务支持的模型名称"
-            autoComplete="off"
-            required
-          />
-        </label>
+        <div className="gateway-form-row">
+          <label>
+            上游模型 ID
+            <input
+              name="profileModel"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder="服务支持的模型名称"
+              autoComplete="off"
+              required
+            />
+          </label>
+          <label>
+            上下文窗口（Token）
+            <input
+              type="number"
+              name="profileContextWindow"
+              min={4096}
+              max={2000000}
+              step={1}
+              value={contextWindowTokens}
+              onChange={(e) => setContextWindowTokens(Number(e.target.value))}
+              required
+              disabled={busy}
+            />
+          </label>
+        </div>
         <label>
           API Key{" "}
           <span className="optional">
@@ -182,20 +200,6 @@ function ModelProfileDialog({
             <span>清除已保存的 API Key</span>
           </label>
         )}
-        <label>
-          上下文窗口（Token）
-          <input
-            type="number"
-            name="profileContextWindow"
-            min={4096}
-            max={2000000}
-            step={1}
-            value={contextWindowTokens}
-            onChange={(e) => setContextWindowTokens(Number(e.target.value))}
-            required
-            disabled={busy}
-          />
-        </label>
         <label className="agent-enabled-switch">
           <input
             type="checkbox"
@@ -468,7 +472,6 @@ export function ModelGatewaySettings() {
               </div>
               <Button
                 type="button"
-                variant="secondary"
                 onClick={() => setCreatingModel(true)}
               >
                 <Plus size={ICON.xs} />

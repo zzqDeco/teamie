@@ -22,6 +22,7 @@
   }
   input {
     font: inherit;
+    font-weight: 400;
     -webkit-tap-highlight-color: transparent;
     outline: none;
     color: var(--text);
@@ -29,6 +30,7 @@
   }
   textarea {
     font: inherit;
+    font-weight: 400;
     -webkit-tap-highlight-color: transparent;
     outline: none;
     color: var(--text);
@@ -44,13 +46,23 @@
   }
   select {
     font: inherit;
+    font-weight: 400;
+    color: var(--text);
+    appearance: none;
+    -webkit-appearance: none;
     outline: none;
     border: 1px solid var(--border-strong);
-    background: var(--surface);
+    background-color: var(--surface);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www%2Ew3%2Eorg/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23787282' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 13px center;
+    background-size: 16px 16px;
     border-radius: var(--r-md);
     width: 100%;
-    padding: 12px 14px;
+    min-height: 44px;
+    padding: 10px 38px 10px 14px;
     display: block;
+    cursor: pointer;
     transition: border-color 0.15s, box-shadow 0.15s;
     font-size: var(--font-base);
     min-width: 0;
@@ -109,6 +121,8 @@
     font-size: var(--font-base);
   }
   label > input,
+  label > select,
+  label > textarea,
   label > .input-icon,
   label > .copy-input {
     margin-top: 9px;
@@ -119,8 +133,10 @@
     min-height: 100%;
   }
   input:disabled,
+  select:disabled,
   textarea:disabled {
     opacity: 0.65;
+    cursor: not-allowed;
   }
   @keyframes spin {
     to {
@@ -394,13 +410,25 @@
     color: var(--text-muted);
     font-size: var(--font-base);
   }
-  .modal input {
-    padding: 12px;
-    font-size: var(--font-lg);
+  .modal input:not([type="checkbox"]),
+  .modal select,
+  .modal textarea {
+    font-size: var(--font-md);
     min-height: 44px;
     color: var(--text);
   }
-  .modal input::placeholder {
+  .modal input:not([type="checkbox"]) {
+    padding: 11px 14px;
+  }
+  .modal select {
+    padding: 10px 38px 10px 14px;
+  }
+  .modal textarea {
+    padding: 11px 14px;
+    line-height: 1.55;
+  }
+  .modal input::placeholder,
+  .modal textarea::placeholder {
     color: var(--text-muted);
   }
   .modal-actions {
@@ -1882,7 +1910,7 @@
   .conversation-link > svg {
     color: var(--text-muted);
   }
-  .conversation-link > span:not(.avatar):not(.group-avatar):not(.unread-badge) {
+  .conversation-link > span:not(.avatar):not(.group-avatar):not(.unread-badge):not(.agent-badge) {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2020,7 +2048,8 @@
     gap: 10px;
     flex-shrink: 0;
   }
-  .conversation-header-actions > .icon-button {
+  .conversation-header-actions > .icon-button,
+  .conversation-header-actions .notification-level-control > .icon-button {
     color: var(--text-muted);
     width: 38px;
     height: 38px;
@@ -2287,7 +2316,8 @@
     min-height: 32px;
   }
   .message:hover .message-actions,
-  .message:focus-within .message-actions {
+  .message:focus-within .message-actions,
+  .message.actions-open .message-actions {
     opacity: 1;
     pointer-events: auto;
   }
@@ -2622,13 +2652,14 @@
     position: relative;
     padding: 9px 0;
   }
-  .member-row > .avatar {
+  .member-row > .avatar,
+  .member-row > .avatar-with-presence > .avatar {
     width: 31px;
     height: 31px;
     font-size: var(--font-sm);
     border-radius: var(--r-md);
   }
-  .member-row > div {
+  .member-row > div:not(.avatar-with-presence) {
     flex: 1;
     min-width: 0;
   }
@@ -2646,7 +2677,7 @@
     margin-left: 6px;
     font-size: var(--font-xs);
   }
-  .member-row > div > span {
+  .member-row > div:not(.avatar-with-presence) > span {
     display: block;
     margin-top: 3px;
     font-size: var(--font-xs);
