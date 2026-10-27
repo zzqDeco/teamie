@@ -56,7 +56,7 @@ func (s *StreamApp) CheckConnectionCapacity(clients []domain.Client, userID stri
 }
 
 func (s *StreamApp) deliverReceiptToUser(ctx context.Context, clients []domain.Client, conversationID, userID string) {
-	if conversationID == "" || userID == "" || (s.Flags != nil && !s.Flags.ReadReceiptsViewEnabled()) {
+	if ctx.Err() != nil || conversationID == "" || userID == "" || (s.Flags != nil && !s.Flags.ReadReceiptsViewEnabled()) {
 		return
 	}
 	var targets []domain.Client
@@ -73,6 +73,9 @@ func (s *StreamApp) deliverReceiptToUser(ctx context.Context, clients []domain.C
 		if err != nil || !access.Allowed {
 			return
 		}
+	}
+	if ctx.Err() != nil {
+		return
 	}
 	ev := domain.Event{
 		Type:           "receipts.changed",
@@ -101,8 +104,8 @@ func (s *StreamApp) Deliver(ctx context.Context, clients []domain.Client, hint d
 		convID := hint.ConversationID
 		admitted := hint.UserIDs
 		if s.Policy != nil {
-			admitted = s.Policy.ScheduleReceiptHints(convID, hint.UserIDs, func(uid string) {
-				tCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			admitted = s.Policy.ScheduleReceiptHints(convID, hint.UserIDs, func(lifecycle context.Context, uid string) {
+				tCtx, cancel := context.WithTimeout(lifecycle, 3*time.Second)
 				defer cancel()
 				cur := clients
 				if s.Clients != nil {

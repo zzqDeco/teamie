@@ -42,6 +42,10 @@ type TypingTracker struct {
 	mu              sync.Mutex
 	gates           map[string]*typingGate
 	receiptGates    map[string]*receiptGate
+	receiptContext  context.Context
+	receiptCancel   context.CancelFunc
+	receiptClosed   bool
+	receiptWait     sync.WaitGroup
 }
 
 // TypingPolicy is an alias for TypingTracker.
@@ -64,15 +68,19 @@ func (p *TypingTracker) receiptInterval() time.Duration {
 // ScheduleReceiptHints evaluates per-(conversationID, userID) coalescing for receipts.changed hints.
 // Recipients outside the throttle window are returned for immediate delivery; throttled recipients
 // are scheduled for a single trailing invalidation via onTrailing when their window expires.
-func (p *TypingTracker) ScheduleReceiptHints(conversationID string, userIDs []string, onTrailing func(userID string)) []string {
+func (p *TypingTracker) ScheduleReceiptHints(conversationID string, userIDs []string, onTrailing func(context.Context, string)) []string {
 	if p == nil || conversationID == "" || len(userIDs) == 0 {
 		return userIDs
 	}
 	minInterval := p.receiptInterval()
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.receiptClosed {
+		return nil
+	}
 	if p.receiptGates == nil {
 		p.receiptGates = make(map[string]*receiptGate)
+		p.receiptContext, p.receiptCancel = context.WithCancel(context.Background())
 	}
 	now := time.Now()
 	for k, gate := range p.receiptGates {
@@ -98,7 +106,9 @@ func (p *TypingTracker) ScheduleReceiptHints(conversationID string, userIDs []st
 		elapsed := now.Sub(gate.lastSent)
 		if elapsed >= minInterval {
 			if gate.timer != nil {
-				gate.timer.Stop()
+				if gate.timer.Stop() {
+					p.receiptWait.Done()
+				}
 				gate.timer = nil
 			}
 			gate.lastSent = now
@@ -110,18 +120,46 @@ func (p *TypingTracker) ScheduleReceiptHints(conversationID string, userIDs []st
 			u := uid
 			k := key
 			g := gate
-			gate.timer = time.AfterFunc(delay, func() {
+			p.receiptWait.Add(1)
+			var scheduled *time.Timer
+			scheduled = time.AfterFunc(delay, func() {
+				defer p.receiptWait.Done()
 				p.mu.Lock()
-				if p.receiptGates[k] == g {
-					g.lastSent = time.Now()
-					g.timer = nil
+				if p.receiptClosed || p.receiptGates[k] != g || g.timer != scheduled {
+					p.mu.Unlock()
+					return
 				}
+				g.lastSent = time.Now()
+				g.timer = nil
 				p.mu.Unlock()
-				onTrailing(u)
+				onTrailing(p.receiptContext, u)
 			})
+			gate.timer = scheduled
 		}
 	}
 	return immediate
+}
+
+// CloseReceiptHints cancels queued and in-flight hints and joins every scheduled
+// callback. No receipt work is admitted after shutdown; typing is unaffected.
+func (p *TypingTracker) CloseReceiptHints() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	p.receiptClosed = true
+	if p.receiptCancel != nil {
+		p.receiptCancel()
+	}
+	for _, gate := range p.receiptGates {
+		if gate.timer != nil && gate.timer.Stop() {
+			p.receiptWait.Done()
+		}
+		gate.timer = nil
+	}
+	p.receiptGates = nil
+	p.mu.Unlock()
+	p.receiptWait.Wait()
 }
 
 // AdmitReceiptHint reports whether a receipts.changed hint for conversationID should be delivered

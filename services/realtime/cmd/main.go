@@ -57,8 +57,16 @@ func main() {
 	streamApp.Clients = adapter.ActiveClients
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go redisinfra.RunSubscriber(ctx, rdb, streamApp, adapter.ActiveClients, adapter.CloseAll)
+	subscriberDone := make(chan struct{})
+	defer func() {
+		cancel()
+		policy.CloseReceiptHints()
+		<-subscriberDone
+	}()
+	go func() {
+		defer close(subscriberDone)
+		redisinfra.RunSubscriber(ctx, rdb, streamApp, adapter.ActiveClients, adapter.CloseAll)
+	}()
 
 	httpx.Serve(httpx.Env("HTTP_ADDR", ":8083"), adapter.Routes())
 }
