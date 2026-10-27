@@ -179,12 +179,12 @@ const NOTIFICATION_LEVEL_OPTIONS: ReadonlyArray<{
   {
     value: "all",
     label: "全部消息",
-    description: "接收所有新消息提醒与未读徽标",
+    description: "显示全部未读，提醒相关消息",
   },
   {
     value: "mentions",
-    label: "仅 @提及与回复",
-    description: "仅在被 @提及或回复时显示徽标与提醒",
+    label: "相关消息",
+    description: "私聊、群聊、@提及与回复",
   },
   {
     value: "none",
@@ -194,7 +194,7 @@ const NOTIFICATION_LEVEL_OPTIONS: ReadonlyArray<{
 ];
 
 function notificationLevelLabel(level: NotificationLevel): string {
-  if (level === "mentions") return "仅 @提及与回复";
+  if (level === "mentions") return "相关消息";
   if (level === "none") return "静音";
   return "全部消息";
 }
