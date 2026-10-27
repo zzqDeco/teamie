@@ -5,9 +5,19 @@ import { describe, expect, it } from "vitest";
 import { ICON } from "./icons";
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
+const modularStyleFiles = [
+  "styles/base.css",
+  "styles/primitives.css",
+  "styles/public.css",
+  "styles/shell.css",
+  "styles/chat.css",
+  "styles/members.css",
+  "styles/agents.css",
+  "styles/utilities.css",
+];
 const cssFiles = [
   "tokens.css",
-  "styles.css",
+  ...modularStyleFiles,
   "layout.css",
   "attention.css",
   "attachments.css",
@@ -240,7 +250,7 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
 });
 
 describe("PR-5 CSS cleanup, unified focus, icon scale & self-hosted DM Sans", () => {
-  it("contains zero unreferenced CSS classes in styles.css and layout.css", () => {
+  it("contains zero unreferenced CSS classes across all modular and feature stylesheets", () => {
     const allFiles = readdirSync(srcDir);
     const tsFiles = allFiles.filter(
       (f) => f.endsWith(".ts") || f.endsWith(".tsx"),
@@ -250,7 +260,8 @@ describe("PR-5 CSS cleanup, unified focus, icon scale & self-hosted DM Sans", ()
     for (const f of tsFiles) {
       corpus += readFileSync(join(srcDir, f), "utf8") + "\n";
     }
-    for (const cssFile of ["styles.css", "layout.css"]) {
+    for (const cssFile of cssFiles) {
+      if (cssFile === "tokens.css") continue;
       const content = readFileSync(join(srcDir, cssFile), "utf8");
       const classes = new Set<string>();
       for (const m of content.matchAll(/\.([a-zA-Z_-][a-zA-Z0-9_-]*)/g)) {
@@ -259,6 +270,56 @@ describe("PR-5 CSS cleanup, unified focus, icon scale & self-hosted DM Sans", ()
       const unreferenced = [...classes].filter((cls) => !corpus.includes(cls));
       expect(unreferenced, `${cssFile} unreferenced classes`).toEqual([]);
     }
+  });
+
+  it("enforces bidirectional CSS/TSX className contract, modular stylesheet size bounds, and bans fragile unclassed container selectors", () => {
+    const barrelCss = readFileSync(join(srcDir, "styles.css"), "utf8");
+    for (const modFile of modularStyleFiles) {
+      expect(barrelCss).toContain(`@import "./${modFile}";`);
+    }
+
+    const definedClasses = new Set<string>();
+    for (const cssFile of cssFiles) {
+      const content = readFileSync(join(srcDir, cssFile), "utf8");
+      const lineCount = content.split("\n").length;
+      expect(
+        lineCount,
+        `${cssFile} (${lineCount} lines) exceeds modular 1,800-line ceiling`,
+      ).toBeLessThanOrEqual(1800);
+      expect(
+        content,
+        `${cssFile} must not use fragile unclassed > div structural selectors on member/agent rows`,
+      ).not.toMatch(/\.member-row\s*>\s*div\b|\.agent-detail-heading\s*>\s*div\b/);
+      for (const m of content.matchAll(/\.([a-zA-Z_-][a-zA-Z0-9_-]*)/g)) {
+        definedClasses.add(m[1]);
+      }
+    }
+
+    const nonTestTsx = readdirSync(srcDir).filter(
+      (f) => f.endsWith(".tsx") && !f.endsWith(".test.tsx"),
+    );
+    const undefinedTokens: string[] = [];
+    for (const file of nonTestTsx) {
+      const content = readFileSync(join(srcDir, file), "utf8");
+      for (const m of content.matchAll(/className="([^"{}$]+)"/g)) {
+        for (const token of m[1].trim().split(/\s+/)) {
+          if (token && !definedClasses.has(token)) {
+            undefinedTokens.push(`${file}: "${token}"`);
+          }
+        }
+      }
+      for (const m of content.matchAll(/className=\{`([^`]+)`\}/g)) {
+        const stripped = m[1].replace(/\$\{[^}]+\}/g, " ");
+        for (const token of stripped.trim().split(/\s+/)) {
+          if (token && !token.endsWith("-") && !definedClasses.has(token)) {
+            undefinedTokens.push(`${file}: "${token}"`);
+          }
+        }
+      }
+    }
+    expect(undefinedTokens, "TSX className tokens missing CSS rules").toEqual(
+      [],
+    );
   });
 
   it("self-hosts Latin DM Sans, keeps Chinese on system fonts, and removes external Google Fonts @import", () => {

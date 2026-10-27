@@ -45,7 +45,11 @@ import {
   summarizeConversationUnread,
 } from "./store";
 import type { ChatSnapshot } from "./store";
-import { formatPresenceLabel, useUserPresence } from "./engagement-store";
+import {
+  formatPresenceLabel,
+  presenceClassName,
+  useUserPresence,
+} from "./engagement-store";
 import { Avatar, IconButton, Logo, useOverlayFocus } from "./ui";
 import { ICON } from "./icons";
 
@@ -459,7 +463,7 @@ function ConversationItem({
             seed={conversation.memberIds.find((id) => id !== user!.id)}
           />
           <i
-            className={`presence-dot presence-${presenceState}`}
+            className={`presence-dot ${presenceClassName(presenceState)}`}
             title={formatPresenceLabel(presenceState)}
             aria-label={formatPresenceLabel(presenceState)}
           />

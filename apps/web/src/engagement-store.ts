@@ -78,6 +78,16 @@ export function formatPresenceLabel(state: PresenceState): string {
   return state === "online" ? "在线" : state === "away" ? "离开" : "离线";
 }
 
+export function presenceClassName(
+  state: PresenceState,
+): "presence-online" | "presence-away" | "presence-offline" {
+  return state === "online"
+    ? "presence-online"
+    : state === "away"
+      ? "presence-away"
+      : "presence-offline";
+}
+
 export function useUserPresence(
   userId: string | undefined,
   enabled: boolean,

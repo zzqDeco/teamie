@@ -525,7 +525,7 @@
       gap: 16px;
       flex-wrap: wrap;
     }
-    .agent-detail-heading > div:not(.agent-detail-actions) {
+    .agent-detail-summary {
       flex-basis: calc(100% - 92px);
     }
     .agent-detail-actions {
@@ -1505,7 +1505,7 @@
     .member-row b {
       font-size: var(--font-md);
     }
-    .member-row > div > span {
+    .member-row > .member-row-info > span {
       font-size: var(--font-sm);
     }
     .members-invite {
@@ -1536,7 +1536,7 @@
       height: 56px;
       border-radius: var(--r-xl);
     }
-    .agent-detail-heading > div:not(.agent-detail-actions) {
+    .agent-detail-summary {
       flex-basis: calc(100% - 70px);
     }
     .agent-detail-heading h1 {

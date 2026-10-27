@@ -38,6 +38,7 @@ import {
   COMMON_REACTION_EMOJIS,
   computeMessageReadSummary,
   formatPresenceLabel,
+  presenceClassName,
   useConversationReceipts,
   useUserPresence,
 } from "./engagement-store";
@@ -322,11 +323,11 @@ export function ConversationHeader({
                 ·
               </span>
               <span
-                className={`header-presence presence-${peerPresence}`}
+                className={`header-presence ${presenceClassName(peerPresence)}`}
                 aria-label={`对方状态：${formatPresenceLabel(peerPresence)}`}
               >
                 <i
-                  className={`presence-dot presence-${peerPresence}`}
+                  className={`presence-dot ${presenceClassName(peerPresence)}`}
                   aria-hidden="true"
                 />
                 {formatPresenceLabel(peerPresence)}

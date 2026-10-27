@@ -26,7 +26,7 @@ import {
 import type { ModelProfileFormValue } from "./agent-management";
 import { AgentEnabledStatus, WebSearchConfigurationFields } from "./agent-ui";
 import type { WebSearchFormValue } from "./agent-ui";
-import { Button, Modal, Notice } from "./ui";
+import { Button, FormRow, Modal, Notice, SwitchField } from "./ui";
 import { ICON } from "./icons";
 
 function ModelProfileDialog({
@@ -91,7 +91,7 @@ function ModelProfileDialog({
         autoComplete="off"
       >
         <Notice>{error}</Notice>
-        <div className="gateway-form-row">
+        <FormRow>
           <label>
             显示名称
             <input
@@ -115,7 +115,7 @@ function ModelProfileDialog({
               />
             </label>
           )}
-        </div>
+        </FormRow>
         <label>
           简介 <span className="optional">选填</span>
           <input
@@ -138,7 +138,7 @@ function ModelProfileDialog({
             required
           />
         </label>
-        <div className="gateway-form-row">
+        <FormRow>
           <label>
             上游模型 ID
             <input
@@ -164,7 +164,7 @@ function ModelProfileDialog({
               disabled={busy}
             />
           </label>
-        </div>
+        </FormRow>
         <label>
           API Key{" "}
           <span className="optional">
@@ -200,19 +200,13 @@ function ModelProfileDialog({
             <span>清除已保存的 API Key</span>
           </label>
         )}
-        <label className="agent-enabled-switch">
-          <input
-            type="checkbox"
-            name="profileEnabled"
-            checked={enabled}
-            onChange={(e) => setEnabled(e.target.checked)}
-          />
-          <span>
-            <b>启用该模型</b>
-            <small>启用且配置密钥后，用户创建 Agent 时可选择此模型。</small>
-          </span>
-          <i />
-        </label>
+        <SwitchField
+          name="profileEnabled"
+          checked={enabled}
+          title="启用该模型"
+          description="启用且配置密钥后，用户创建 Agent 时可选择此模型。"
+          onChange={setEnabled}
+        />
         <div className="modal-actions">
           <Button type="button" variant="secondary" onClick={onClose}>
             取消

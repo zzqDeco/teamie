@@ -1,0 +1,36 @@
+/* Utilities layer: single-purpose helper classes. */
+
+@layer utilities {
+  .muted {
+    color: var(--text-muted);
+  }
+  .purple {
+    color: var(--purple);
+  }
+  .full-width {
+    width: 100%;
+  }
+  .spin {
+    animation: spin 1s linear infinite;
+  }
+  .danger-text,
+  .icon-button.danger-text {
+    color: var(--danger-text);
+  }
+  .danger-hover:hover,
+  .icon-button.danger-hover:hover {
+    background: var(--danger-bg);
+    color: var(--danger-text);
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+}

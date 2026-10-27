@@ -32,7 +32,7 @@ import {
   canManageAgent,
   snapshotAgentProfile,
 } from "./agent-management";
-import { Button, Modal, Notice } from "./ui";
+import { BadgePill, Button, Modal, Notice, SwitchField } from "./ui";
 import { toast } from "./toast";
 import { ICON } from "./icons";
 const queryRetry = (count: number, error: Error) =>
@@ -240,32 +240,21 @@ function AgentProfileDialog({
           onChange={setWorkspaceIds}
           disabled={busy}
         />
-        <label className="agent-enabled-switch">
-          <input
-            type="checkbox"
-            checked={enabled}
-            disabled={busy || (!initialAgent?.enabled && !data?.capabilities["agents.enabled"])}
-            aria-describedby={
-              !initialAgent?.enabled && !data?.capabilities["agents.enabled"]
-                ? "agent-enable-disabled-reason"
-                : undefined
-            }
-            onChange={(e) => setEnabled(e.target.checked)}
-          />
-          <span>
-            <b>启用 Agent</b>
-            <small>处理已加入对话中的新消息</small>
-            {!initialAgent?.enabled && !data?.capabilities["agents.enabled"] && (
-              <small
-                id="agent-enable-disabled-reason"
-                className="agent-disabled-reason"
-              >
-                平台暂未开放启用 Agent
-              </small>
-            )}
-          </span>
-          <i />
-        </label>
+        <SwitchField
+          checked={enabled}
+          disabled={
+            busy || (!initialAgent?.enabled && !data?.capabilities["agents.enabled"])
+          }
+          title="启用 Agent"
+          description="处理已加入对话中的新消息"
+          reason={
+            !initialAgent?.enabled && !data?.capabilities["agents.enabled"]
+              ? "平台暂未开放启用 Agent"
+              : undefined
+          }
+          reasonId="agent-enable-disabled-reason"
+          onChange={setEnabled}
+        />
         <div className="modal-actions">
           <Button type="button" variant="secondary" onClick={onClose}>
             取消
@@ -352,9 +341,9 @@ export function MyAgents() {
               <div className="agent-card-badges">
                 <AgentBadge compact />
                 {resolveModelLabel(agent.modelId) && (
-                  <span className="agent-model-chip">
+                  <BadgePill className="agent-model-chip">
                     {resolveModelLabel(agent.modelId)}
-                  </span>
+                  </BadgePill>
                 )}
               </div>
               {agent.description && <p>{agent.description}</p>}
@@ -526,12 +515,14 @@ export function AgentDetail({ agentId }: { agentId: string }) {
       </Link>
       <div className="agent-detail-heading">
         <AgentAvatar size="large" disabled={!agent.enabled} />
-        <div>
+        <div className="agent-detail-summary">
           <div className="agent-detail-labels">
             <AgentBadge compact />
             <AgentEnabledStatus enabled={agent.enabled} />
             {resolvedModelLabel && (
-              <span className="agent-model-chip">{resolvedModelLabel}</span>
+              <BadgePill className="agent-model-chip">
+                {resolvedModelLabel}
+              </BadgePill>
             )}
           </div>
           <h1>{agent.name}</h1>

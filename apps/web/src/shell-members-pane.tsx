@@ -14,7 +14,11 @@ import type { Conversation, Member, Workspace } from "@teamie/api-client";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
 import type { Participant } from "./participants";
 import { conversationName } from "./messages";
-import { formatPresenceLabel, usePresenceMap } from "./engagement-store";
+import {
+  formatPresenceLabel,
+  presenceClassName,
+  usePresenceMap,
+} from "./engagement-store";
 import { Avatar, Button, IconButton, Modal, Notice } from "./ui";
 import { ICON } from "./icons";
 
@@ -130,7 +134,7 @@ export function ShellMembersPane({
                 <div className="avatar-with-presence">
                   <Avatar name={member.displayName} seed={member.userId} />
                   <i
-                    className={`presence-dot presence-${humanPresence}`}
+                    className={`presence-dot ${presenceClassName(humanPresence)}`}
                     title={formatPresenceLabel(humanPresence)}
                     aria-label={formatPresenceLabel(humanPresence)}
                   />
@@ -138,7 +142,7 @@ export function ShellMembersPane({
               ) : (
                 <Avatar name={member.displayName} seed={member.userId} />
               )}
-              <div>
+              <div className="member-row-info">
                 <b>
                   {member.displayName}
                   {member.userId === userId && <small>你</small>}
