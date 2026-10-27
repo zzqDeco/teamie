@@ -8,7 +8,7 @@ import (
 
 // Record inserts a model usage audit record via the context-aware connection/tx.
 func (s *PGStore) Record(ctx context.Context, u domain.Usage) error {
-	_, err := s.DB.Conn(ctx).Exec(ctx, `INSERT INTO gateway_usage(owner_id,agent_id,session_id,run_id,status,prompt_tokens,completion_tokens,latency_ms)VALUES($1,$2,$3,$4,$5,$6,$7,$8);`, u.OwnerID, u.AgentID, u.SessionID, u.RunID, u.Status, u.PromptTokens, u.CompletionTokens, u.LatencyMS)
+	_, err := s.DB.Conn(ctx).Exec(ctx, `INSERT INTO gateway_usage(owner_id,agent_id,session_id,run_id,model_id,status,prompt_tokens,completion_tokens,latency_ms)VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9);`, u.OwnerID, u.AgentID, u.SessionID, u.RunID, u.ModelID, u.Status, u.PromptTokens, u.CompletionTokens, u.LatencyMS)
 	return err
 }
 

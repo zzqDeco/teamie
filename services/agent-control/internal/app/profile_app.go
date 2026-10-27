@@ -43,11 +43,16 @@ func (s *Service) Create(ctx context.Context, owner string, in domain.Changes) (
 	if in.Description != nil {
 		description = *in.Description
 	}
+	modelID := ""
+	if in.ModelID != nil {
+		modelID = *in.ModelID
+	}
 	a, err := s.Agents.Insert(ctx, domain.Agent{
 		ID:            domain.NewID(),
 		OwnerID:       owner,
 		Name:          *in.Name,
 		Description:   description,
+		ModelID:       modelID,
 		WorkspaceIDs:  *in.WorkspaceIDs,
 		Enabled:       enabled,
 		PolicyEnabled: s.flagEnabled("agents.enabled"),
@@ -69,7 +74,7 @@ func (s *Service) Update(ctx context.Context, owner, id string, in domain.Change
 	if err := s.requireFlag("agents.update"); err != nil {
 		return domain.Agent{}, err
 	}
-	if in.Name == nil && in.Description == nil && in.WorkspaceIDs == nil && in.Enabled == nil {
+	if in.Name == nil && in.Description == nil && in.ModelID == nil && in.WorkspaceIDs == nil && in.Enabled == nil {
 		return domain.Agent{}, domain.ErrInvalidRequest("No Agent changes provided")
 	}
 	if in.Enabled != nil && *in.Enabled {
@@ -91,6 +96,9 @@ func (s *Service) Update(ctx context.Context, owner, id string, in domain.Change
 		}
 		if in.Description != nil {
 			a.Description = *in.Description
+		}
+		if in.ModelID != nil {
+			a.ModelID = *in.ModelID
 		}
 		if in.WorkspaceIDs != nil && !slices.Equal(domain.Normalized(a.WorkspaceIDs), *in.WorkspaceIDs) {
 			a.WorkspaceIDs = *in.WorkspaceIDs

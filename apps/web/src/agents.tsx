@@ -16,7 +16,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { api, ApiError } from "@teamie/api-client";
-import type { Agent, Workspace } from "@teamie/api-client";
+import type { Agent, ModelCatalog, Workspace } from "@teamie/api-client";
 import { useAuth } from "./auth";
 import { useChat } from "./chat";
 import {
@@ -100,7 +100,18 @@ function AgentProfileDialog({
   );
   const [name, setName] = useState(initialAgent?.name || ""),
     [description, setDescription] = useState(initialAgent?.description || ""),
+    [modelId, setModelId] = useState(initialAgent?.modelId || ""),
     [enabled, setEnabled] = useState(initialAgent?.enabled ?? true);
+  const catalogQuery = useQuery<ModelCatalog>({
+    queryKey: ["modelCatalog", user!.id],
+    queryFn: () =>
+      api.modelCatalog().catch((): ModelCatalog => ({ models: [] })),
+    retry: false,
+  });
+  const catalogModels = catalogQuery.data?.models || [];
+  const defaultModel = catalogModels.find(
+    (item) => item.isDefault || item.id === catalogQuery.data?.defaultModelId,
+  );
   const [workspaceIds, setWorkspaceIds] = useState(
     initialAgent
       ? initialAgent.workspaceIds.filter((id) =>
@@ -119,12 +130,19 @@ function AgentProfileDialog({
     setError("");
     const sessionToken = api.csrfToken;
     try {
+      const effectiveModelId =
+        initialAgent !== undefined
+          ? modelId
+          : modelId.trim()
+            ? modelId.trim()
+            : undefined;
       const profile = agentProfileInput(
         name,
         description,
         workspaceIds,
         workspaces,
         enabled,
+        effectiveModelId,
       );
       const changes = initialAgent
         ? agentProfileChanges(initialAgent, profile)
@@ -185,6 +203,36 @@ function AgentProfileDialog({
             rows={3}
             placeholder="简单介绍它的职责"
           />
+        </label>
+        <label>
+          运行模型 <span className="optional">选填</span>
+          <select
+            name="agentModelId"
+            value={modelId}
+            onChange={(e) => setModelId(e.target.value)}
+            disabled={busy}
+          >
+            <option value="">
+              {defaultModel
+                ? `平台默认模型（${defaultModel.displayName}）`
+                : "平台默认模型"}
+            </option>
+            {catalogModels.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.displayName}
+                {item.isDefault ? " · 默认" : ""}
+                {item.description ? ` — ${item.description}` : ""}
+              </option>
+            ))}
+            {modelId && !catalogModels.some((item) => item.id === modelId) && (
+              <option value={modelId}>
+                {modelId}（已下线，将自动回退到平台默认模型）
+              </option>
+            )}
+          </select>
+          <small className="field-help">
+            若所选模型停用或移除，将自动平滑回退到平台默认模型继续运行。
+          </small>
         </label>
         <WorkspaceVisibilityFields
           workspaces={workspaces}

@@ -623,6 +623,7 @@ function renderModelTransportGo(gatewayRoutes) {
     '\tRunID       string `json:"runId"`',
     '\tRequestJSON string `json:"requestJson"`',
     '\tMessageLimit int `json:"messageLimit,omitempty"`',
+    '\tModelID     string `json:"modelId,omitempty"`',
     "}",
     "",
     "func (r CallRequest) InputMessageLimit() int {",

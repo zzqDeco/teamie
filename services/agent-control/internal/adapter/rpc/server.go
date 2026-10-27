@@ -35,6 +35,10 @@ func ToDefinition(a domain.Agent, globalEnabled bool) *agent.AgentDefinition {
 		v := a.DeletedAt.Format(time.RFC3339Nano)
 		d.DeletedAt = &v
 	}
+	if a.ModelID != "" {
+		v := a.ModelID
+		d.ModelId = &v
+	}
 	return d
 }
 

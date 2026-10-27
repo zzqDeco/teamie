@@ -18,6 +18,7 @@ type Agent struct {
 	OwnerName                 string     `json:"ownerName"`
 	Name                      string     `json:"name"`
 	Description               string     `json:"description"`
+	ModelID                   string     `json:"modelId,omitempty"`
 	WorkspaceIDs              []string   `json:"workspaceIds"`
 	Enabled                   bool       `json:"enabled"`
 	Revision                  int64      `json:"revision"`
@@ -44,11 +45,12 @@ func (a Agent) EffectiveEnabled(globalEnabled bool) bool {
 type Changes struct {
 	Name         *string   `json:"name"`
 	Description  *string   `json:"description"`
+	ModelID      *string   `json:"modelId"`
 	WorkspaceIDs *[]string `json:"workspaceIds"`
 	Enabled      *bool     `json:"enabled"`
 }
 
-// PublicAgent is the 10-field browser contract. Internal runtime state, session
+// PublicAgent is the browser contract. Internal runtime state, session
 // IDs, revisions, and unrequested workspace memberships never enter PublicAgent.
 type PublicAgent struct {
 	ID           string    `json:"id"`
@@ -57,13 +59,14 @@ type PublicAgent struct {
 	OwnerName    string    `json:"ownerName"`
 	Name         string    `json:"name"`
 	Description  string    `json:"description"`
+	ModelID      string    `json:"modelId,omitempty"`
 	WorkspaceIDs []string  `json:"workspaceIds"`
 	Enabled      bool      `json:"enabled"`
 	CreatedAt    time.Time `json:"createdAt"`
 	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
-// PublicProfile projects an Agent into its safe 10-field public representation.
+// PublicProfile projects an Agent into its safe public representation.
 func PublicProfile(a Agent) PublicAgent {
 	return PublicAgent{
 		ID:           a.ID,
@@ -72,6 +75,7 @@ func PublicProfile(a Agent) PublicAgent {
 		OwnerName:    a.OwnerName,
 		Name:         a.Name,
 		Description:  a.Description,
+		ModelID:      a.ModelID,
 		WorkspaceIDs: append([]string{}, a.WorkspaceIDs...),
 		Enabled:      a.Enabled,
 		CreatedAt:    a.CreatedAt,
@@ -145,6 +149,24 @@ func Bounded(v string, min, max int) bool {
 	return n >= min && n <= max
 }
 
+// ValidModelID checks whether an optional model profile ID is empty (default) or a safe identifier ([a-zA-Z0-9._-], 1..64 chars).
+func ValidModelID(id string) bool {
+	if id == "" {
+		return true
+	}
+	if len(id) > 64 {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		ch := id[i]
+		isAlphaNum := (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')
+		if !isAlphaNum && ch != '-' && ch != '_' && ch != '.' {
+			return false
+		}
+	}
+	return id != "." && id != ".."
+}
+
 // ValidateFields validates and normalizes the non-RPC fields of Changes.
 func ValidateFields(in *Changes, create bool) error {
 	if create && (in.Name == nil || in.WorkspaceIDs == nil) {
@@ -158,6 +180,12 @@ func ValidateFields(in *Changes, create bool) error {
 	}
 	if in.Description != nil && len([]rune(*in.Description)) > 1000 {
 		return ErrInvalidDescription()
+	}
+	if in.ModelID != nil {
+		*in.ModelID = strings.TrimSpace(*in.ModelID)
+		if !ValidModelID(*in.ModelID) {
+			return ErrInvalidRequest("Invalid model ID")
+		}
 	}
 	if in.WorkspaceIDs != nil {
 		if len(*in.WorkspaceIDs) > 100 {

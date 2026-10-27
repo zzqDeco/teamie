@@ -12,7 +12,7 @@ Security invariants:
   passwords, or raw prompts/model outputs.
 - Verifies full Eino v0.10.0-alpha.35 runtime execution end-to-end through the
   public IM, Control Plane, and internal Gateway SSE contracts:
-  1. Model Gateway connectivity (`GET/PUT /api/v1/admin/model-gateway` + `/test`)
+  1. Model Gateway connectivity (`GET /api/v1/admin/model-gateway` + scoped model/search updates + `/test`)
      and Hertz native `sse.NewWriter` streaming (`POST /internal/v1/chat/stream`
      with `Accept: text/event-stream` and `X-Teamie-Model-Config-ID`).
   2. Scenario 1: `#general` channel `@Agent` turn, `im_send_message` with
@@ -451,15 +451,19 @@ def main() -> int:
     require(not any(provider_fields) or all(provider_fields), "Provide all three TEAMIE_REAL_PROVIDER_* variables or none")
     gw_res = admin.call("GET", "/api/v1/admin/model-gateway", status=200)
     config = gw_res.get("config", {})
-    if all(provider_fields) or web_search_key:
-        gw_payload = {"baseUrl": config.get("baseUrl", ""), "model": config.get("model", ""), "enabled": config.get("enabled", False)}
+    if all(provider_fields):
+        model_id = "acceptance-provider"
+        gw_payload = {"baseUrl": provider_base_url, "apiKey": provider_api_key, "model": provider_model, "enabled": True}
         if config.get("contextWindowTokens"):
             gw_payload["contextWindowTokens"] = config["contextWindowTokens"]
-        if all(provider_fields):
-            gw_payload.update(baseUrl=provider_base_url, apiKey=provider_api_key, model=provider_model, enabled=True)
-        if web_search_key:
-            gw_payload.update(webSearchEnabled=True, webSearchApiKey=web_search_key)
-        admin.call("PUT", "/api/v1/admin/model-gateway", gw_payload, status=200)
+        if any(model.get("id") == model_id for model in gw_res.get("models", [])):
+            admin.call("PATCH", f"/api/v1/admin/model-gateway/models/{model_id}", gw_payload, status=200)
+        else:
+            admin.call("POST", "/api/v1/admin/model-gateway/models", {**gw_payload, "id":model_id}, status=201)
+        admin.call("PUT", "/api/v1/admin/model-gateway/routing", {"defaultModelId":model_id}, status=200)
+    if web_search_key:
+        admin.call("PATCH", "/api/v1/admin/model-gateway/web-search", {"enabled":True,"apiKey":web_search_key}, status=200)
+    if all(provider_fields) or web_search_key:
         gw_res = admin.call("GET", "/api/v1/admin/model-gateway", status=200)
 
     config = gw_res.get("config", {})

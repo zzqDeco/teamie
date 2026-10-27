@@ -12,6 +12,7 @@ struct AgentDefinition {
   8: required string createdAt
   9: required string updatedAt
   10: optional string deletedAt
+  11: optional string modelId
 }
 struct Ack { 1: required bool ok }
 struct CancelRequest {
@@ -19,7 +20,10 @@ struct CancelRequest {
   2: required string agentId
   3: required string runId
 }
-struct PingRequest { 1: optional string serviceToken }
+struct PingRequest {
+  1: optional string serviceToken
+  2: optional string modelId
+}
 struct PingResponse {
   1: required bool ready
   2: optional bool configured

@@ -46,6 +46,9 @@ export default defineConfig({
       "/api/v1/admin/model-gateway": {
         target: process.env.GATEWAY_HTTP_ORIGIN || "http://localhost:8086",
       },
+      "/api/v1/model-gateway": {
+        target: process.env.GATEWAY_HTTP_ORIGIN || "http://localhost:8086",
+      },
       "/api": {
         target: process.env.CHAT_HTTP_ORIGIN || "http://localhost:8082",
       },

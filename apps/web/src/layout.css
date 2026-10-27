@@ -43,22 +43,6 @@
     z-index: var(--z-members-shade);
     background: var(--backdrop);
   }
-  .gateway-advanced {
-    border-top: 1px solid var(--border);
-    padding-top: 16px;
-    margin-top: 20px;
-  }
-  .gateway-advanced > summary {
-    cursor: pointer;
-    font-size: var(--font-base);
-    color: var(--text-muted);
-    min-height: 36px;
-  }
-  .gateway-advanced > label {
-    display: block;
-    margin-top: 10px;
-    font-size: var(--font-base);
-  }
   .admin-table-wrap {
     overflow: auto;
   }
@@ -1653,9 +1637,6 @@
     .group-member-remove {
       min-height: 44px;
       min-width: 44px;
-    }
-    .gateway-advanced > summary {
-      min-height: 44px;
     }
     .admin-table-wrap {
       overflow: visible;

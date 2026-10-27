@@ -18,15 +18,15 @@ import (
 	"github.com/cloudwego/hertz/pkg/common/adaptor"
 	"github.com/cloudwego/kitex/client"
 	kitexserver "github.com/cloudwego/kitex/server"
-	rpcx "teamie/services/llm-gateway/internal/infra/rpcclient"
+	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
 	"teamie/contracts/gen/agent/kitex_gen/agent"
 	"teamie/contracts/gen/agent/kitex_gen/agent/modelgatewayservice"
-	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
+	rpcx "teamie/services/llm-gateway/internal/infra/rpcclient"
 )
 
 func fixtureHTTPChat(t *testing.T, s *Service, ctx context.Context, in *agent.GatewayChatRequest) (*agent.GatewayChatResponse, error) {
 	t.Helper()
-	raw, _ := json.Marshal(modeltransport.CallRequest{OwnerID: in.OwnerId, AgentID: in.AgentId, SessionID: in.SessionId, RunID: in.RunId, RequestJSON: in.RequestJson})
+	raw, _ := json.Marshal(modeltransport.CallRequest{OwnerID: in.OwnerId, AgentID: in.AgentId, SessionID: in.SessionId, RunID: in.RunId, RequestJSON: in.RequestJson, ModelID: in.GetModelId()})
 	r, _ := http.NewRequestWithContext(ctx, http.MethodPost, modeltransport.GeneratePath, bytes.NewReader(raw))
 	r.Header.Set("Authorization", "Bearer "+in.ServiceToken)
 	w := httptest.NewRecorder()
@@ -282,12 +282,10 @@ func TestGatewayExposesAndRotatesModelConfigIDAcrossUnaryStreamAndPing(t *testin
 	}
 
 	// Rotate model in store while keeping ContextWindowTokens unchanged -> ModelConfigId must change.
-	cfg, err := s.Store.Load(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg.Model = "rotated-model-b"
-	if _, err := s.Store.Save(context.Background(), cfg, nil, false, s.Cipher); err != nil {
+	if _, err := s.Store.UpdateModels(context.Background(), func(models []ModelProfile) ([]ModelProfile, error) {
+		models[0].Model = "rotated-model-b"
+		return models, nil
+	}); err != nil {
 		t.Fatal(err)
 	}
 	pingB, err := s.Ping(context.Background(), &agent.PingRequest{ServiceToken: &s.Token})

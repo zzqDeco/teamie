@@ -33,7 +33,7 @@ class _MockTeamieState:
         self.agent_id = ""
         self.agent_name = ""
         self.agent_deleted = False
-        self.put_gateway_called = False
+        self.config_write_called = False
         self.sse_stream_called = False
         self.web_search_called = False
         self.web_extract_called = False
@@ -132,33 +132,23 @@ class _MockHandler(BaseHTTPRequestHandler):
         self._send_json(404, {"error": {"code": "not_found"}})
 
     def do_PUT(self) -> None:
+        if self.path == "/api/v1/admin/model-gateway/routing":
+            self._read_json({"defaultModelId"})
+            self._send_json(200, self.state.gateway_resp())
+            return
+        self._send_json(409, {"error":{"code":"config_api_changed"}})
+
+    def do_PATCH(self) -> None:
         st = self.state
-        if self.path == "/api/v1/admin/model-gateway":
-            body = self._read_json(
-                {
-                    "baseUrl",
-                    "model",
-                    "apiKey",
-                    "enabled",
-                    "clearApiKey",
-                    "contextWindowTokens",
-                    "webSearchEnabled",
-                    "webSearchApiKey",
-                    "clearWebSearchApiKey",
-                }
-            )
-            st.put_gateway_called = True
-            st.base_url = body["baseUrl"]
-            st.model = body["model"]
-            st.enabled = bool(body["enabled"])
-            st.has_api_key = bool(body.get("apiKey")) or st.has_api_key
-            st.context_window = int(body.get("contextWindowTokens", st.context_window))
-            if "webSearchEnabled" in body:
-                st.web_search_enabled = bool(body["webSearchEnabled"])
-            st.has_web_search_key = bool(body.get("webSearchApiKey")) or st.has_web_search_key
+        if self.path == "/api/v1/admin/model-gateway/web-search":
+            body = self._read_json({"enabled","apiKey","clearApiKey"})
+            st.config_write_called = True
+            if "enabled" in body:
+                st.web_search_enabled = bool(body["enabled"])
+            st.has_web_search_key = bool(body.get("apiKey")) or st.has_web_search_key
             self._send_json(200, st.gateway_resp())
             return
-        self._send_json(404, {"error": {"code": "not_found"}})
+        self._send_json(404, {"error":{"code":"not_found"}})
 
     def do_DELETE(self) -> None:
         st = self.state
@@ -172,6 +162,16 @@ class _MockHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         st = self.state
+        if self.path == "/api/v1/admin/model-gateway/models":
+            body = self._read_json({"id","baseUrl","model","apiKey","enabled","contextWindowTokens"})
+            st.config_write_called = True
+            st.base_url = body["baseUrl"]
+            st.model = body["model"]
+            st.enabled = bool(body["enabled"])
+            st.has_api_key = bool(body.get("apiKey")) or st.has_api_key
+            st.context_window = int(body.get("contextWindowTokens",st.context_window))
+            self._send_json(201, st.gateway_resp())
+            return
         if self.path == "/api/v1/auth/login":
             body = self._read_json({"email", "password"})
             self._send_json(
@@ -529,7 +529,7 @@ class AcceptanceRealModelTest(unittest.TestCase):
         env = {**self.environment(), "TEAMIE_REAL_WEB_SEARCH_API_KEY": "fixture-key"}
         with mock.patch.dict(os.environ, env, clear=True):
             self.assertEqual(MOD.main(), 0)
-        self.assertTrue(self.state.put_gateway_called)
+        self.assertTrue(self.state.config_write_called)
         self.assertTrue(self.state.web_search_enabled)
         self.assertEqual(self.state.context_window, 1000000)
 
@@ -596,7 +596,7 @@ class AcceptanceRealModelTest(unittest.TestCase):
         with mock.patch.dict(os.environ, env, clear=True):
             rc = MOD.main()
         self.assertEqual(rc, 0)
-        self.assertTrue(self.state.put_gateway_called)
+        self.assertTrue(self.state.config_write_called)
         self.assertTrue(self.state.sse_stream_called)
         self.assertTrue(self.state.web_search_called)
         self.assertTrue(self.state.web_extract_called)
@@ -615,7 +615,7 @@ class AcceptanceRealModelTest(unittest.TestCase):
         with mock.patch.dict(os.environ, env, clear=True):
             rc = MOD.main()
         self.assertEqual(rc, 0)
-        self.assertFalse(self.state.put_gateway_called)
+        self.assertFalse(self.state.config_write_called)
         self.assertTrue(self.state.sse_stream_called)
         self.assertTrue(self.state.web_search_called)
         self.assertTrue(self.state.web_extract_called)

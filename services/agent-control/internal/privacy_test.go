@@ -29,7 +29,11 @@ func publicRequest(h http.Handler, method, path, token, body string) *httptest.R
 func requirePublicProfile(t *testing.T, profile map[string]any, workspaces []string) {
 	t.Helper()
 	fields := []string{"id", "principalId", "ownerId", "ownerName", "name", "description", "workspaceIds", "enabled", "createdAt", "updatedAt"}
-	if len(profile) != len(fields) {
+	expectedLen := len(fields)
+	if _, hasModelID := profile["modelId"]; hasModelID {
+		expectedLen++
+	}
+	if len(profile) != expectedLen {
 		t.Fatalf("unexpected public profile fields: %v", profile)
 	}
 	for _, field := range fields {

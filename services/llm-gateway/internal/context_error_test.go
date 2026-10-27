@@ -57,7 +57,7 @@ func TestOfficialProviderContextFailureUnaryAndStreaming(t *testing.T) {
 					}))
 					defer fixture.Close()
 					provider := Provider{HTTP: fixture.Client()}
-					config := Config{BaseURL: fixture.URL + "/v1", Model: "fixture"}
+					config := ResolvedModel{BaseURL: fixture.URL + "/v1", Model: "fixture"}
 					var err error
 					raw := fixtureNativeRequest(`{"messages":[{"role":"user","content":"fixture"}]}`, streaming)
 					if streaming {
@@ -83,7 +83,7 @@ func TestContextErrorDoesNotPromoteOtherHTTPFailures(t *testing.T) {
 			w.WriteHeader(status)
 			json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": "context_length_exceeded"}})
 		}))
-		_, _, _, err := (Provider{HTTP: fixture.Client()}).Chat(context.Background(), Config{BaseURL: fixture.URL + "/v1", Model: "fixture"}, "fixture-key", fixtureNativeRequest(`{"messages":[{"role":"user","content":"fixture"}]}`, false))
+		_, _, _, err := (Provider{HTTP: fixture.Client()}).Chat(context.Background(), ResolvedModel{BaseURL: fixture.URL + "/v1", Model: "fixture"}, "fixture-key", fixtureNativeRequest(`{"messages":[{"role":"user","content":"fixture"}]}`, false))
 		fixture.Close()
 		if err == nil || guardErrorCode(err) == "context_overflow" {
 			t.Fatal("unrelated HTTP failure triggered compaction", status, err)

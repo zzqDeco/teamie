@@ -7,6 +7,7 @@ struct GatewayChatRequest {
   4: required string sessionId
   5: required string runId
   6: required string requestJson
+  7: optional string modelId
 }
 struct GatewayChatResponse {
   1: required bool ok

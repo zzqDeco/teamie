@@ -587,6 +587,7 @@ export interface PublicAgentDTO {
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
+  modelId?: string;
 }
 
 export type ListOwnedAgentsReq = Record<string, never>;
@@ -600,6 +601,7 @@ export interface CreateAgentReq {
   description?: string;
   workspaceIds?: string[];
   enabled?: boolean;
+  modelId?: string;
 }
 
 export interface GetAgentProfileReq {
@@ -612,6 +614,7 @@ export interface UpdateAgentReq {
   description?: string;
   workspaceIds?: string[];
   enabled?: boolean;
+  modelId?: string;
 }
 
 export interface DeleteAgentReq {
@@ -635,6 +638,22 @@ export interface WebSearchConfigDTO {
   enabled: boolean;
   hasApiKey: boolean;
   configured: boolean;
+  updatedAt?: string;
+}
+
+export interface ModelRoutingConfigDTO {
+  defaultModelId: string;
+  effectiveModelId: string;
+}
+
+export interface UpdateAdminModelRoutingReq {
+  defaultModelId: string;
+}
+
+export interface UpdateAdminWebSearchConfigReq {
+  enabled?: boolean;
+  apiKey?: string;
+  clearApiKey?: boolean;
 }
 
 export interface ModelConfigDTO {
@@ -648,11 +667,44 @@ export interface ModelConfigDTO {
   updatedAt: string;
 }
 
+export interface AdminModelProfileDTO {
+  id: string;
+  displayName: string;
+  description: string;
+  baseUrl: string;
+  model: string;
+  contextWindowTokens: number;
+  hasApiKey: boolean;
+  enabled: boolean;
+  configured: boolean;
+  isDefault: boolean;
+  updatedAt: string;
+}
+
+export type GetModelCatalogReq = Record<string, never>;
+
+export interface PublicModelOptionDTO {
+  id: string;
+  displayName: string;
+  description: string;
+  contextWindowTokens: number;
+  isDefault: boolean;
+}
+
+export interface ModelCatalogResp {
+  models: PublicModelOptionDTO[];
+  defaultModelId?: string;
+}
+
 export type GetAdminModelConfigReq = Record<string, never>;
 
 export interface AdminModelConfigResp {
   config: ModelConfigDTO;
   status: string;
+  models?: AdminModelProfileDTO[];
+  defaultModelId?: string;
+  routing: ModelRoutingConfigDTO;
+  webSearch: WebSearchConfigDTO;
 }
 
 export interface UpdateAdminModelConfigReq {
@@ -665,6 +717,37 @@ export interface UpdateAdminModelConfigReq {
   webSearchEnabled?: boolean;
   webSearchApiKey?: string;
   clearWebSearchApiKey?: boolean;
+}
+
+export interface CreateAdminModelProfileReq {
+  id?: string;
+  displayName?: string;
+  description?: string;
+  baseUrl: string;
+  model: string;
+  apiKey?: string;
+  enabled: boolean;
+  contextWindowTokens?: number;
+}
+
+export interface UpdateAdminModelProfileReq {
+  id: string;
+  displayName?: string;
+  description?: string;
+  baseUrl?: string;
+  model?: string;
+  apiKey?: string;
+  clearApiKey?: boolean;
+  enabled?: boolean;
+  contextWindowTokens?: number;
+}
+
+export interface DeleteAdminModelProfileReq {
+  id: string;
+}
+
+export interface TestAdminModelProfileReq {
+  id: string;
 }
 
 export type TestAdminModelConfigReq = Record<string, never>;
@@ -1139,6 +1222,15 @@ export const IDL_ROUTES = {
     requestType: "ListWorkspaceAgentsReq",
     responseType: "AgentListResp",
   },
+  GetModelCatalog: {
+    service: "ModelGatewayHTTPService",
+    namespace: "agent.gateway",
+    method: "GET",
+    path: "/api/v1/model-gateway/catalog",
+    clientPath: "/model-gateway/catalog",
+    requestType: "GetModelCatalogReq",
+    responseType: "ModelCatalogResp",
+  },
   GetAdminModelConfig: {
     service: "ModelGatewayHTTPService",
     namespace: "agent.gateway",
@@ -1146,6 +1238,24 @@ export const IDL_ROUTES = {
     path: "/api/v1/admin/model-gateway",
     clientPath: "/admin/model-gateway",
     requestType: "GetAdminModelConfigReq",
+    responseType: "AdminModelConfigResp",
+  },
+  UpdateAdminWebSearchConfig: {
+    service: "ModelGatewayHTTPService",
+    namespace: "agent.gateway",
+    method: "PATCH",
+    path: "/api/v1/admin/model-gateway/web-search",
+    clientPath: "/admin/model-gateway/web-search",
+    requestType: "UpdateAdminWebSearchConfigReq",
+    responseType: "AdminModelConfigResp",
+  },
+  UpdateAdminModelRouting: {
+    service: "ModelGatewayHTTPService",
+    namespace: "agent.gateway",
+    method: "PUT",
+    path: "/api/v1/admin/model-gateway/routing",
+    clientPath: "/admin/model-gateway/routing",
+    requestType: "UpdateAdminModelRoutingReq",
     responseType: "AdminModelConfigResp",
   },
   UpdateAdminModelConfig: {
@@ -1164,6 +1274,42 @@ export const IDL_ROUTES = {
     path: "/api/v1/admin/model-gateway/test",
     clientPath: "/admin/model-gateway/test",
     requestType: "TestAdminModelConfigReq",
+    responseType: "TestAdminModelConfigResp",
+  },
+  CreateAdminModelProfile: {
+    service: "ModelGatewayHTTPService",
+    namespace: "agent.gateway",
+    method: "POST",
+    path: "/api/v1/admin/model-gateway/models",
+    clientPath: "/admin/model-gateway/models",
+    requestType: "CreateAdminModelProfileReq",
+    responseType: "AdminModelConfigResp",
+  },
+  UpdateAdminModelProfile: {
+    service: "ModelGatewayHTTPService",
+    namespace: "agent.gateway",
+    method: "PATCH",
+    path: "/api/v1/admin/model-gateway/models/:id",
+    clientPath: "/admin/model-gateway/models/:id",
+    requestType: "UpdateAdminModelProfileReq",
+    responseType: "AdminModelConfigResp",
+  },
+  DeleteAdminModelProfile: {
+    service: "ModelGatewayHTTPService",
+    namespace: "agent.gateway",
+    method: "DELETE",
+    path: "/api/v1/admin/model-gateway/models/:id",
+    clientPath: "/admin/model-gateway/models/:id",
+    requestType: "DeleteAdminModelProfileReq",
+    responseType: "AdminModelConfigResp",
+  },
+  TestAdminModelProfile: {
+    service: "ModelGatewayHTTPService",
+    namespace: "agent.gateway",
+    method: "POST",
+    path: "/api/v1/admin/model-gateway/models/:id/test",
+    clientPath: "/admin/model-gateway/models/:id/test",
+    requestType: "TestAdminModelProfileReq",
     responseType: "TestAdminModelConfigResp",
   },
 } as const;

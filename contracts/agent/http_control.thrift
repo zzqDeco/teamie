@@ -15,6 +15,7 @@ struct PublicAgentDTO {
   8: required bool enabled (api.body="enabled")
   9: required string createdAt (api.body="createdAt")
   10: required string updatedAt (api.body="updatedAt")
+  11: optional string modelId (api.body="modelId")
 }
 
 struct ListOwnedAgentsReq {}
@@ -28,6 +29,7 @@ struct CreateAgentReq {
   2: optional string description (api.body="description")
   3: optional list<string> workspaceIds (api.body="workspaceIds")
   4: optional bool enabled (api.body="enabled")
+  5: optional string modelId (api.body="modelId")
 }
 
 struct GetAgentProfileReq {
@@ -40,6 +42,7 @@ struct UpdateAgentReq {
   3: optional string description (api.body="description")
   4: optional list<string> workspaceIds (api.body="workspaceIds")
   5: optional bool enabled (api.body="enabled")
+  6: optional string modelId (api.body="modelId")
 }
 
 struct DeleteAgentReq {

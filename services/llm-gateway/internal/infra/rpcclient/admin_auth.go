@@ -31,10 +31,13 @@ func NewAdminAuth(addr, origin string) (AdminAuth, error) {
 	return AdminAuth{Identity: c, Origin: origin}, err
 }
 
-func (a AdminAuth) Require(r *http.Request) (*im.User, error) {
+func (a AdminAuth) RequireUser(r *http.Request) (*im.User, error) {
 	cookie, err := r.Cookie(httpx.CookieName)
 	if err != nil || len(cookie.Value) != 64 {
 		return nil, httpx.Err(401, "unauthorized", "Authentication required")
+	}
+	if a.Identity == nil {
+		return nil, httpx.Err(503, "identity_unavailable", "Authentication is temporarily unavailable")
 	}
 	s, err := a.Identity.ValidateSession(r.Context(), &im.SessionRequest{Token: cookie.Value})
 	if err != nil {
@@ -48,8 +51,8 @@ func (a AdminAuth) Require(r *http.Request) (*im.User, error) {
 			return nil, httpx.Err(401, "session_changed", "Browser session changed")
 		}
 	}
-	if s.User.Kind != "human" || s.User.PlatformRole != "admin" {
-		return nil, httpx.Err(403, "forbidden", "Administrator access required")
+	if s.User.Kind != "human" {
+		return nil, httpx.Err(403, "forbidden", "Human browser session required")
 	}
 	if r.Method != "GET" && r.Method != "HEAD" {
 		if r.Header.Get("Origin") != a.Origin {
@@ -60,4 +63,15 @@ func (a AdminAuth) Require(r *http.Request) (*im.User, error) {
 		}
 	}
 	return s.User, nil
+}
+
+func (a AdminAuth) Require(r *http.Request) (*im.User, error) {
+	u, err := a.RequireUser(r)
+	if err != nil {
+		return nil, err
+	}
+	if u.PlatformRole != "admin" {
+		return nil, httpx.Err(403, "forbidden", "Administrator access required")
+	}
+	return u, nil
 }

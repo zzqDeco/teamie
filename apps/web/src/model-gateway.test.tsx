@@ -7,8 +7,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@teamie/api-client";
 import type { ModelGateway, User } from "@teamie/api-client";
-import { GatewayConfigurationFields } from "./agent-ui";
-import type { GatewayFormValue } from "./agent-ui";
+import { WebSearchConfigurationFields } from "./agent-ui";
+import type { WebSearchFormValue } from "./agent-ui";
 import { ModelGatewaySettings } from "./model-gateway";
 
 const admin: User = {
@@ -35,6 +35,8 @@ const initial = {
   },
 };
 const gateway: ModelGateway = {
+  routing: { defaultModelId: "default", effectiveModelId: "default" },
+  webSearch: initial.webSearch,
   status: "ready",
   config: {
     ...initial,
@@ -90,97 +92,55 @@ async function submit() {
   });
 }
 async function renderFields(
-  onSave: (value: GatewayFormValue) => Promise<boolean>,
+  onSave: (value: WebSearchFormValue) => Promise<boolean>,
 ) {
   await act(async () => {
-    root.render(<GatewayConfigurationFields initial={initial} onSave={onSave} />);
+    root.render(
+      <WebSearchConfigurationFields
+        initial={initial.webSearch}
+        onSave={onSave}
+      />,
+    );
   });
 }
 
-describe("model gateway configuration form", () => {
-  it("keeps typed secrets after a failed save and clears them only after success", async () => {
-    const onSave = vi
-      .fn<(value: GatewayFormValue) => Promise<boolean>>()
+describe("independent web search form", () => {
+  it("keeps a typed search key after failed save and clears it only after success", async () => {
+    const save = vi
+      .fn<(value: WebSearchFormValue) => Promise<boolean>>()
       .mockResolvedValueOnce(false)
       .mockResolvedValueOnce(true);
-    await renderFields(onSave);
-    await type('[name="gatewayApiKey"]', "sk-new-secret");
-    await type('[name="gatewayWebSearchApiKey"]', "tvly-new-secret");
+    await renderFields(save);
+    await type('[name="gatewayWebSearchApiKey"]', "search-secret");
     await submit();
-    expect(onSave).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        apiKey: "sk-new-secret",
-        webSearchApiKey: "tvly-new-secret",
-      }),
-    );
-    expect(find<HTMLInputElement>('[name="gatewayApiKey"]').value).toBe(
-      "sk-new-secret",
-    );
+    expect(save).toHaveBeenLastCalledWith({
+      enabled: true,
+      apiKey: "search-secret",
+    });
     expect(
       find<HTMLInputElement>('[name="gatewayWebSearchApiKey"]').value,
-    ).toBe("tvly-new-secret");
+    ).toBe("search-secret");
     await submit();
-    expect(onSave).toHaveBeenCalledTimes(2);
-    expect(find<HTMLInputElement>('[name="gatewayApiKey"]').value).toBe("");
     expect(
       find<HTMLInputElement>('[name="gatewayWebSearchApiKey"]').value,
     ).toBe("");
+    expect(document.querySelector('[name="gatewayBaseUrl"]')).toBeNull();
   });
-
-  it("confirms before disabling the gateway or clearing saved keys", async () => {
-    const onSave = vi
-      .fn<(value: GatewayFormValue) => Promise<boolean>>()
+  it("clears only the search key after explicit confirmation", async () => {
+    const save = vi
+      .fn<(value: WebSearchFormValue) => Promise<boolean>>()
       .mockResolvedValue(true);
-    await renderFields(onSave);
-    // An ordinary save of an enabled gateway needs no confirmation.
-    await submit();
-    expect(onSave).toHaveBeenCalledTimes(1);
-    expect(document.querySelector('[role="dialog"]')).toBeNull();
-
-    const enabledSwitch = find<HTMLInputElement>(
-      ".agent-enabled-switch input:not([name])",
-    );
-    await click(enabledSwitch);
-    expect(enabledSwitch.checked).toBe(false);
-    await submit();
-    const dialog = find('[role="dialog"]');
-    expect(dialog.textContent).toContain("所有 Agent 将暂停调用模型");
-    expect(onSave).toHaveBeenCalledTimes(1);
-    await click(buttonByText("取消"));
-    expect(document.querySelector('[role="dialog"]')).toBeNull();
-    expect(onSave).toHaveBeenCalledTimes(1);
-
-    await click(enabledSwitch);
-    await click(find('.gateway-clear-key input[type="checkbox"]'));
+    await renderFields(save);
     await click(find('[name="gatewayClearWebSearchApiKey"]'));
     await submit();
-    const impacts = find('[role="dialog"]').textContent;
-    expect(impacts).toContain("清除 API Key");
-    expect(impacts).toContain("清除 Tavily API Key");
-    expect(impacts).not.toContain("停用模型网关");
+    expect(save).not.toHaveBeenCalled();
+    expect(find('[role="dialog"]').textContent).not.toContain("模型");
     await click(buttonByText("确认保存"));
-    expect(onSave).toHaveBeenCalledTimes(2);
-    expect(onSave).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        enabled: true,
-        clearApiKey: true,
-        clearWebSearchApiKey: true,
-      }),
-    );
-    expect(document.querySelector('[role="dialog"]')).toBeNull();
-  });
-
-  it("opens the collapsed advanced section when its required field blocks submit", async () => {
-    const onSave = vi
-      .fn<(value: GatewayFormValue) => Promise<boolean>>()
-      .mockResolvedValue(true);
-    await renderFields(onSave);
-    const details = find<HTMLDetailsElement>(".gateway-advanced");
-    expect(details.open).toBe(false);
-    await type('[name="gatewayContextWindow"]', "");
-    await submit();
-    expect(onSave).not.toHaveBeenCalled();
-    expect(details.open).toBe(true);
+    expect(save).toHaveBeenLastCalledWith({
+      enabled: true,
+      apiKey: "",
+      clearApiKey: true,
+    });
   });
 });
 
@@ -224,8 +184,8 @@ describe("model gateway settings page", () => {
     await click(testButton);
     // Only the clicked action shows progress; Save is locked, not spinning.
     expect(testButton.querySelector(".spin")).not.toBeNull();
-    const saveButton = buttonByText("保存配置");
-    expect(saveButton.disabled).toBe(true);
+    const saveButton = buttonByText("保存搜索设置");
+    expect(saveButton.disabled).toBe(false);
     expect(saveButton.querySelector(".spin")).toBeNull();
     await act(async () => {
       finishTest({ ok: true, model: "model-id", latencyMs: 120 });
@@ -234,7 +194,7 @@ describe("model gateway settings page", () => {
     expect(find(".gateway-saved-state").textContent).toContain(
       "连接测试已通过",
     );
-    expect(buttonByText("保存配置").disabled).toBe(false);
+    expect(buttonByText("保存搜索设置").disabled).toBe(false);
 
     await click(buttonByText("测试连接"));
     await act(async () => {
@@ -248,19 +208,92 @@ describe("model gateway settings page", () => {
     );
   });
 
-  it("shows client-side validation copy from the page and keeps the key after a failed save", async () => {
-    vi.spyOn(api, "modelGateway").mockResolvedValue(gateway);
-    const save = vi.spyOn(api, "saveModelGateway");
+  it("saves only search fields while the configured default is disabled and a fallback is active", async () => {
+    const disabledDefault = {
+      ...gateway,
+      routing: { defaultModelId: "a", effectiveModelId: "b" },
+    };
+    vi.spyOn(api, "modelGateway").mockResolvedValue(disabledDefault);
+    const search = vi
+      .spyOn(api, "saveWebSearch")
+      .mockResolvedValue(disabledDefault);
+    const model = vi.spyOn(api, "updateModelProfile");
+    const routing = vi.spyOn(api, "saveModelRouting");
     await renderSettings();
-    await type('[name="gatewayBaseUrl"]', "https://user:pw@model.example.test/v1");
-    await type('[name="gatewayApiKey"]', "sk-keep-me");
+    await type('[name="gatewayWebSearchApiKey"]', "new-search-key");
     await submit();
-    expect(save).not.toHaveBeenCalled();
-    expect(find(".gateway-configuration-form .notice.error").textContent).toBe(
-      "服务地址不得包含密钥、认证信息或查询参数。",
+    expect(search).toHaveBeenCalledWith({
+      enabled: true,
+      apiKey: "new-search-key",
+    });
+    expect(model).not.toHaveBeenCalled();
+    expect(routing).not.toHaveBeenCalled();
+  });
+
+  it("renders multi-model catalog profiles and supports creating, setting default, testing, and deleting models", async () => {
+    const multiGateway: ModelGateway = {
+      ...gateway,
+      defaultModelId: "default",
+      models: [
+        {
+          id: "default",
+          displayName: "GPT-4o",
+          description: "通用默认模型",
+          baseUrl: "https://model.example.test/v1",
+          model: "gpt-4o",
+          contextWindowTokens: 16384,
+          hasApiKey: true,
+          enabled: true,
+          configured: true,
+          isDefault: true,
+          updatedAt: "2026-10-16T00:00:00Z",
+        },
+        {
+          id: "deepseek-r1",
+          displayName: "DeepSeek R1",
+          description: "深度推理模型",
+          baseUrl: "https://deepseek.example.test/v1",
+          model: "deepseek-reasoner",
+          contextWindowTokens: 65536,
+          hasApiKey: true,
+          enabled: true,
+          configured: true,
+          isDefault: false,
+          updatedAt: "2026-10-16T00:00:00Z",
+        },
+      ],
+    };
+    vi.spyOn(api, "modelGateway").mockResolvedValue(multiGateway);
+    const updateSpy = vi.spyOn(api, "saveModelRouting").mockResolvedValue({
+      ...multiGateway,
+      defaultModelId: "deepseek-r1",
+    });
+    const testSpy = vi
+      .spyOn(api, "testModelProfile")
+      .mockResolvedValue({
+        ok: true,
+        model: "deepseek-reasoner",
+        latencyMs: 45,
+      });
+    const deleteSpy = vi
+      .spyOn(api, "deleteModelProfile")
+      .mockResolvedValue(gateway);
+    await renderSettings();
+    expect(find(".gateway-models-section").textContent).toContain(
+      "DeepSeek R1",
     );
-    expect(find<HTMLInputElement>('[name="gatewayApiKey"]').value).toBe(
-      "sk-keep-me",
+    await click(buttonByText("设为默认"));
+    expect(updateSpy).toHaveBeenCalledWith({ defaultModelId: "deepseek-r1" });
+    const testButtons = [...document.body.querySelectorAll("button")].filter(
+      (b) => b.textContent?.trim() === "测试此模型",
     );
+    await click(testButtons[1]!);
+    expect(testSpy).toHaveBeenCalledWith("deepseek-r1");
+    expect(find(".notice.success").textContent).toContain("deepseek-reasoner");
+    const deleteButtons = [...document.body.querySelectorAll("button")].filter(
+      (b) => b.textContent?.trim() === "移除",
+    );
+    await click(deleteButtons[1]!);
+    expect(deleteSpy).toHaveBeenCalledWith("deepseek-r1");
   });
 });
