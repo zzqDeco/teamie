@@ -271,7 +271,7 @@ describe("IM engagement suite: reactions, read receipts, presence, and notificat
     });
     const deleteSpy = vi.spyOn(api, "deleteReaction").mockResolvedValue({
       reactions: [],
-      reactionsVersion: "2",
+      reactionsVersion: "3",
     });
 
     await act(async () => {
@@ -322,6 +322,7 @@ describe("IM engagement suite: reactions, read receipts, presence, and notificat
           {
             id: "11",
             type: "reaction.updated",
+            reactionsVersion: "2",
             workspaceId: workspace.id,
             conversationId: conv.id,
             messageId: m1.id,
@@ -357,7 +358,7 @@ describe("IM engagement suite: reactions, read receipts, presence, and notificat
       chatStore.setReactions(conv.id, m1.id, [
         { emoji: "🔥", count: 2, userIds: [peerAlice.userId, peerBob.userId] },
         { emoji: "👀", count: 1, userIds: [selfUser.id] },
-      ]);
+      ], "4");
       root.render(
         <MemoryRouter>
           <ConversationView

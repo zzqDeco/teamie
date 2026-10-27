@@ -1,3 +1,6 @@
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS reactions_version bigint NOT NULL DEFAULT 0
+  CHECK (reactions_version >= 0);
+
 CREATE TABLE IF NOT EXISTS message_reactions (
   conversation_id text NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
   message_id text NOT NULL REFERENCES messages(id) ON DELETE CASCADE,

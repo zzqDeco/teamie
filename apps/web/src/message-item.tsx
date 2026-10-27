@@ -818,14 +818,15 @@ export const MessageItem = memo(function MessageItem({
       return;
     }
     setPickerOpen(false);
-    const token = chatStore.generation;
+    const scope = chatStore.reactionScope(conversationId);
+    if (!scope) return;
     setReactionBusy(true);
     try {
       const result = reactedByMe
         ? await api.deleteReaction(conversationId, message.id, emoji)
         : await api.putReaction(conversationId, message.id, emoji);
-      if (token === chatStore.generation) {
-        chatStore.setReactions(conversationId, message.id, result.reactions);
+      if (chatStore.reactionScopeCurrent(scope)) {
+        chatStore.setReactions(conversationId, message.id, result.reactions, result.reactionsVersion, scope);
       }
     } catch {
       // Ignore transient reaction toggle failures

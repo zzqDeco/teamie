@@ -498,7 +498,7 @@ export function errorText(error: unknown) {
     invalid_reply: "引用回复的目标消息不在当前对话中，请移除引用后重新发送。",
     invalid_client_message_id: "消息标识无效，请删除后重新发送。",
     message_retracted: "已撤回的消息无法继续操作。",
-    too_many_reactions: "单条消息最多可添加 16 种不同表情回应。",
+    reaction_limit: "单条消息最多可添加 20 种不同表情回应。",
     email_exists: "此邮箱已注册，请直接登录。",
     email_in_use: "此邮箱已注册，请直接登录。",
     invalid_email: "邮箱格式不正确，请检查后重试。",

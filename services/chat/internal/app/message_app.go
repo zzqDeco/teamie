@@ -232,6 +232,12 @@ func (s *Service) ChangeAnnotatedMessage(ctx context.Context, userID, conversati
 			if err = s.Messages.RetractMessageAndDeleteAttachments(txCtx, messageID, now); err != nil {
 				return err
 			}
+			// The response and durable event must use the cleared list and the
+			// revision committed by the same retraction transaction.
+			m, err = s.Messages.GetMessage(txCtx, conversationID, messageID)
+			if err != nil {
+				return err
+			}
 		} else {
 			if m.RetractedAt != nil {
 				return domain.ErrMessageRetracted()
@@ -306,63 +312,6 @@ func (s *Service) Read(ctx context.Context, userID, conversationID string, seq i
 		return nil
 	})
 	return result, err
-}
-
-// AddReaction adds the caller's Unicode emoji reaction idempotently.
-func (s *Service) AddReaction(ctx context.Context, userID, conversationID, messageID, emoji string) ([]domain.Reaction, error) {
-	if err := s.requireFlag("im.reactions.create"); err != nil {
-		return nil, err
-	}
-	if err := domain.ValidateReactionEmoji(emoji); err != nil {
-		return nil, err
-	}
-	var out []domain.Reaction
-	err := s.Tx.WithinTx(ctx, func(txCtx context.Context) error {
-		c, err := s.Conversations.LockConversation(txCtx, conversationID, userID)
-		if err != nil {
-			return err
-		}
-		var changed bool
-		out, changed, err = s.Messages.AddReaction(txCtx, conversationID, messageID, userID, emoji)
-		if err != nil || !changed {
-			return err
-		}
-		return s.Conversations.Fanout(txCtx, c.MemberIDs, domain.Event{
-			Type:           "reaction.updated",
-			WorkspaceID:    c.WorkspaceID,
-			ConversationID: conversationID,
-			MessageID:      messageID,
-			Reactions:      out,
-		})
-	})
-	return out, err
-}
-
-// RemoveReaction removes the caller's Unicode emoji reaction idempotently.
-func (s *Service) RemoveReaction(ctx context.Context, userID, conversationID, messageID, emoji string) ([]domain.Reaction, error) {
-	if err := domain.ValidateReactionEmoji(emoji); err != nil {
-		return nil, err
-	}
-	var out []domain.Reaction
-	err := s.Tx.WithinTx(ctx, func(txCtx context.Context) error {
-		c, err := s.Conversations.LockConversation(txCtx, conversationID, userID)
-		if err != nil {
-			return err
-		}
-		var changed bool
-		out, changed, err = s.Messages.RemoveReaction(txCtx, conversationID, messageID, userID, emoji)
-		if err != nil || !changed {
-			return err
-		}
-		return s.Conversations.Fanout(txCtx, c.MemberIDs, domain.Event{
-			Type:           "reaction.updated",
-			WorkspaceID:    c.WorkspaceID,
-			ConversationID: conversationID,
-			MessageID:      messageID,
-			Reactions:      out,
-		})
-	})
-	return out, err
 }
 
 // ReadReceipts returns conversation read receipts for an authorized member.

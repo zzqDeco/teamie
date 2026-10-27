@@ -93,8 +93,8 @@ type MessageRepository interface {
 	SetMessageInitialAttachments(ctx context.Context, messageID string, attachments []Attachment, originalIDs []string) error
 	RetractMessageAndDeleteAttachments(ctx context.Context, messageID string, retractedAt time.Time) error
 	UpdateMessageBodyAndMentions(ctx context.Context, messageID, body string, editedAt time.Time, mentions []Mention) error
-	AddReaction(ctx context.Context, conversationID, messageID, userID, emoji string) ([]Reaction, bool, error)
-	RemoveReaction(ctx context.Context, conversationID, messageID, userID, emoji string) ([]Reaction, bool, error)
+	AddReaction(ctx context.Context, conversationID, messageID, userID, emoji string) (ReactionState, bool, error)
+	RemoveReaction(ctx context.Context, conversationID, messageID, userID, emoji string) (ReactionState, bool, error)
 	QueryMessageHistory(ctx context.Context, conversationID string, before, around int64, query string, limit int, filesOnly bool) ([]Message, bool, error)
 	SearchWorkspaceCandidateIDs(ctx context.Context, userID, workspaceID, query string, before any, cursorID string, limit int) ([]string, error)
 	LockSearchConversationsForShare(ctx context.Context, userID, workspaceID string, candidateMessageIDs []string) ([]string, error)

@@ -289,7 +289,7 @@ func (r *Repository) Fanout(ctx context.Context, ids []string, event domain.Even
 }
 
 func (r *Repository) QuerySyncEvents(ctx context.Context, userID string, afterID, upToID int64, limit int) ([]domain.Event, int64, error) {
-	rows, err := r.DB.Conn(ctx).Query(ctx, `SELECT e.id,e.payload,COALESCE(m.retracted_at IS NOT NULL,false),(e.payload->>'type'='membership.changed' OR (EXISTS(SELECT 1 FROM workspace_members wm WHERE wm.workspace_id=e.workspace_id AND wm.user_id=$1) AND (e.conversation_id IS NULL OR EXISTS(SELECT 1 FROM conversations c WHERE c.id=e.conversation_id AND (c.type='channel' OR EXISTS(SELECT 1 FROM conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id=$1)))))) AS allowed FROM sync_events e LEFT JOIN messages m ON m.id=COALESCE(e.payload#>>'{message,id}',e.payload->>'messageId') WHERE e.user_id=$1 AND e.id>$2 AND e.id<=$3 ORDER BY e.id LIMIT $4`, userID, afterID, upToID, limit)
+	rows, err := r.DB.Conn(ctx).Query(ctx, `SELECT e.id,e.payload,m.retracted_at,COALESCE(m.reactions_version,0),(e.payload->>'type'='membership.changed' OR (EXISTS(SELECT 1 FROM workspace_members wm WHERE wm.workspace_id=e.workspace_id AND wm.user_id=$1) AND (e.conversation_id IS NULL OR EXISTS(SELECT 1 FROM conversations c WHERE c.id=e.conversation_id AND (c.type='channel' OR EXISTS(SELECT 1 FROM conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id=$1)))))) AS allowed FROM sync_events e LEFT JOIN messages m ON m.id=COALESCE(e.payload#>>'{message,id}',e.payload->>'messageId') WHERE e.user_id=$1 AND e.id>$2 AND e.id<=$3 ORDER BY e.id LIMIT $4`, userID, afterID, upToID, limit)
 	if err != nil {
 		return nil, afterID, err
 	}
@@ -299,8 +299,10 @@ func (r *Repository) QuerySyncEvents(ctx context.Context, userID string, afterID
 	for rows.Next() {
 		var id int64
 		var b []byte
-		var allowed, deleted bool
-		if err = rows.Scan(&id, &b, &deleted, &allowed); err != nil {
+		var allowed bool
+		var retractedAt *time.Time
+		var reactionsVersion int64
+		if err = rows.Scan(&id, &b, &retractedAt, &reactionsVersion, &allowed); err != nil {
 			return nil, afterID, err
 		}
 		n = id
@@ -311,15 +313,18 @@ func (r *Repository) QuerySyncEvents(ctx context.Context, userID string, afterID
 		if err = json.Unmarshal(b, &ev); err != nil {
 			return nil, afterID, fmt.Errorf("decode persisted event: %w", err)
 		}
-		if deleted {
+		if retractedAt != nil {
 			if ev.Message != nil {
 				ev.Message.Body = ""
 				ev.Message.Attachments = nil
 				ev.Message.Mentions = nil
 				ev.Message.Reactions = nil
+				ev.Message.RetractedAt = retractedAt
+				ev.Message.ReactionsVersion = reactionsVersion
 			}
 			if ev.Type == "reaction.updated" {
 				ev.Reactions = nil
+				ev.ReactionsVersion = reactionsVersion
 			}
 		}
 		out = append(out, ev)

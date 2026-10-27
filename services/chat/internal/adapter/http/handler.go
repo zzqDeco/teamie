@@ -167,6 +167,18 @@ func fromMentionDTOs(ms []*chatgen.MentionDTO) ([]domain.Mention, error) {
 	return out, nil
 }
 
+func reactionVersionDTO(version int64) *string {
+	value := strconv.FormatInt(version, 10)
+	return &value
+}
+
+func eventReactionVersionDTO(event domain.Event) *string {
+	if event.Type != "reaction.updated" {
+		return nil
+	}
+	return reactionVersionDTO(event.ReactionsVersion)
+}
+
 func toReactionDTOs(rs []domain.Reaction) []*chatgen.ReactionDTO {
 	if len(rs) == 0 {
 		return nil
@@ -202,21 +214,22 @@ func toMessageDTO(m domain.Message) *chatgen.MessageDTO {
 		}
 	}
 	return &chatgen.MessageDTO{
-		ID:              m.ID,
-		ConversationId:  m.ConversationID,
-		SenderId:        m.SenderID,
-		SenderName:      m.SenderName,
-		SenderKind:      m.SenderKind,
-		ClientMessageId: m.ClientMessageID,
-		Seq:             m.Seq,
-		Body:            m.Body,
-		ReplyToId:       m.ReplyToID,
-		CreatedAt:       m.CreatedAt.UTC().Format(time.RFC3339Nano),
-		EditedAt:        formatOptTime(m.EditedAt),
-		RetractedAt:     formatOptTime(m.RetractedAt),
-		Attachments:     attachments,
-		Mentions:        mentions,
-		Reactions:       toReactionDTOs(m.Reactions),
+		ID:               m.ID,
+		ConversationId:   m.ConversationID,
+		SenderId:         m.SenderID,
+		SenderName:       m.SenderName,
+		SenderKind:       m.SenderKind,
+		ClientMessageId:  m.ClientMessageID,
+		Seq:              m.Seq,
+		Body:             m.Body,
+		ReplyToId:        m.ReplyToID,
+		CreatedAt:        m.CreatedAt.UTC().Format(time.RFC3339Nano),
+		EditedAt:         formatOptTime(m.EditedAt),
+		RetractedAt:      formatOptTime(m.RetractedAt),
+		Attachments:      attachments,
+		Mentions:         mentions,
+		Reactions:        toReactionDTOs(m.Reactions),
+		ReactionsVersion: reactionVersionDTO(m.ReactionsVersion),
 	}
 }
 
@@ -243,6 +256,7 @@ func toEventDTO(ev domain.Event) *chatgen.EventDTO {
 		ReadSeq:           ev.ReadSeq,
 		MessageId:         optString(ev.MessageID),
 		Reactions:         reactions,
+		ReactionsVersion:  eventReactionVersionDTO(ev),
 		NotificationLevel: ev.NotificationLevel,
 		CreatedAt:         ev.CreatedAt.UTC().Format(time.RFC3339Nano),
 	}
@@ -593,15 +607,15 @@ func (a *Adapter) PutReaction(ctx context.Context, req *chatgen.PutReactionReq) 
 	if !ok {
 		return nil, domain.Err(401, "unauthenticated", "Sign in to continue")
 	}
-	reactions, err := a.App.AddReaction(ctx, user.ID, req.ID, req.MessageId, req.Emoji)
+	state, err := a.App.AddReaction(ctx, user.ID, req.ID, req.MessageId, req.Emoji)
 	if err != nil {
 		return nil, err
 	}
-	dtos := toReactionDTOs(reactions)
+	dtos := toReactionDTOs(state.Reactions)
 	if dtos == nil {
 		dtos = []*chatgen.ReactionDTO{}
 	}
-	return &chatgen.ReactionsResp{Reactions: dtos}, nil
+	return &chatgen.ReactionsResp{Reactions: dtos, ReactionsVersion: strconv.FormatInt(state.ReactionsVersion, 10)}, nil
 }
 
 func (a *Adapter) DeleteReaction(ctx context.Context, req *chatgen.DeleteReactionReq) (*chatgen.ReactionsResp, error) {
@@ -609,15 +623,15 @@ func (a *Adapter) DeleteReaction(ctx context.Context, req *chatgen.DeleteReactio
 	if !ok {
 		return nil, domain.Err(401, "unauthenticated", "Sign in to continue")
 	}
-	reactions, err := a.App.RemoveReaction(ctx, user.ID, req.ID, req.MessageId, req.Emoji)
+	state, err := a.App.RemoveReaction(ctx, user.ID, req.ID, req.MessageId, req.Emoji)
 	if err != nil {
 		return nil, err
 	}
-	dtos := toReactionDTOs(reactions)
+	dtos := toReactionDTOs(state.Reactions)
 	if dtos == nil {
 		dtos = []*chatgen.ReactionDTO{}
 	}
-	return &chatgen.ReactionsResp{Reactions: dtos}, nil
+	return &chatgen.ReactionsResp{Reactions: dtos, ReactionsVersion: strconv.FormatInt(state.ReactionsVersion, 10)}, nil
 }
 
 func (a *Adapter) MarkRead(ctx context.Context, req *chatgen.MarkReadReq) (*chatgen.MarkReadResp, error) {

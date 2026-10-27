@@ -15,6 +15,7 @@ type Event struct {
 	ReadSeq           *int64        `json:"readSeq,omitempty"`
 	MessageID         string        `json:"messageId,omitempty"`
 	Reactions         []Reaction    `json:"reactions,omitempty"`
+	ReactionsVersion  int64         `json:"reactionsVersion,omitempty,string"`
 	NotificationLevel *string       `json:"notificationLevel,omitempty"`
 	CreatedAt         time.Time     `json:"createdAt"`
 }
