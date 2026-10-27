@@ -48,10 +48,13 @@ func (s *Service) CallChat(ctx context.Context, owner, agentID, sessionID, runID
 		outcome.Result = failedChatResult(err, cfgID)
 		return outcome
 	}
-	c, err := s.Store.Load(ctx)
+	unlockAdmission := s.lockModelAdmission()
+	defer unlockAdmission()
+	settings, err := s.Store.Load(ctx)
 	if err != nil {
 		return fail(err, "")
 	}
+	c := settings.ResolveModel(RequestedModelID(ctx))
 	if !c.Configured() {
 		return fail(domain.Err(409, "model_unconfigured", "An administrator must configure the model gateway"), "")
 	}
@@ -71,8 +74,9 @@ func (s *Service) CallChat(ctx context.Context, owner, agentID, sessionID, runID
 	if err != nil {
 		return fail(domain.ErrWithCause(503, "credential_unavailable", "Saved model credential could not be decrypted", err), configID)
 	}
-	callCtx, cleanup := s.RegisterRunCancel(ctx, agentID, runID)
+	callCtx, cleanup := s.RegisterRunCancel(ctx, agentID, runID, c.ID)
 	defer cleanup()
+	unlockAdmission()
 
 	start := time.Now()
 	outcome.Phase = "provider-generate"
@@ -100,6 +104,7 @@ func (s *Service) CallChat(ctx context.Context, owner, agentID, sessionID, runID
 		AgentID:          agentID,
 		SessionID:        sessionID,
 		RunID:            runID,
+		ModelID:          c.ID,
 		Status:           status,
 		PromptTokens:     prompt,
 		CompletionTokens: completion,
@@ -114,6 +119,8 @@ func (s *Service) CallChat(ctx context.Context, owner, agentID, sessionID, runID
 // StreamChat executes an NDJSON streaming model inference call with slot admission, cancellation tracking, and usage auditing.
 func (s *Service) StreamChat(ctx context.Context, owner, agentID, sessionID, runID, expectedConfigID, raw string, onConfigID func(string), emit func(domain.StreamEvent) error, messageLimits ...int) StreamOutcome {
 	s.ensureInit()
+	unlockAdmission := s.lockModelAdmission()
+	defer unlockAdmission()
 	outcome := StreamOutcome{Phase: "admission"}
 	var configID string
 	writeEvent := func(ev domain.StreamEvent) error {
@@ -124,6 +131,7 @@ func (s *Service) StreamChat(ctx context.Context, owner, agentID, sessionID, run
 		return emit(ev)
 	}
 	terminal := func(err error) StreamOutcome {
+		unlockAdmission() // Response writes must not block catalog changes, including admission errors.
 		outcome.Failure = err
 		if err == nil {
 			if wErr := writeEvent(domain.StreamEvent{Type: "done", ModelConfigID: configID}); wErr != nil {
@@ -141,10 +149,11 @@ func (s *Service) StreamChat(ctx context.Context, owner, agentID, sessionID, run
 		})
 		return outcome
 	}
-	c, err := s.Store.Load(ctx)
+	settings, err := s.Store.Load(ctx)
 	if err != nil {
 		return terminal(err)
 	}
+	c := settings.ResolveModel(RequestedModelID(ctx))
 	if !c.Configured() {
 		return terminal(domain.Err(409, "model_unconfigured", "An administrator must configure the model gateway"))
 	}
@@ -167,8 +176,9 @@ func (s *Service) StreamChat(ctx context.Context, owner, agentID, sessionID, run
 	if err != nil {
 		return terminal(domain.ErrWithCause(503, "credential_unavailable", "Saved model credential could not be decrypted", err))
 	}
-	callCtx, cleanup := s.RegisterRunCancel(ctx, agentID, runID)
+	callCtx, cleanup := s.RegisterRunCancel(ctx, agentID, runID, c.ID)
 	defer cleanup()
+	unlockAdmission()
 
 	start := time.Now()
 	outcome.Phase = "provider-stream"
@@ -190,6 +200,7 @@ func (s *Service) StreamChat(ctx context.Context, owner, agentID, sessionID, run
 		AgentID:          agentID,
 		SessionID:        sessionID,
 		RunID:            runID,
+		ModelID:          c.ID,
 		Status:           status,
 		PromptTokens:     prompt,
 		CompletionTokens: completion,

@@ -308,9 +308,10 @@ class AgentManifestTest(unittest.TestCase):
         previous["version"]="v0.3.23"
         previous["source"]["ref"]="refs/heads/release/v0.3.23"
         previous["schema"]={"identity":3,"chat":5,"agent_control":1,"agent_runtime":11,"gateway":3}
-        current=self.modern()
+        current=copy.deepcopy(previous)
         current["version"]="v0.3.24"
         current["source"]["ref"]="refs/heads/release/v0.3.24"
+        current["schema"]={"identity":3,"chat":5,"agent_control":1,"agent_runtime":13,"gateway":3}
         self.assertEqual(current["schema"]["agent_runtime"],13)
         self.assertEqual(current["schema"]["gateway"],3)
         manifest.validate(previous)
@@ -319,6 +320,23 @@ class AgentManifestTest(unittest.TestCase):
             manifest.check_transition(previous,current,rollback=True)
         with self.assertRaisesRegex(ValueError,"identical schema versions"):
             manifest.compatible(current,previous)
+
+    def test_multi_model_gateway_and_control_schema_rejects_image_only_rollback(self):
+        previous = self.modern()
+        previous["version"] = "v0.3.30"
+        previous["source"]["ref"] = "refs/heads/release/v0.3.30"
+        previous["schema"] = {"identity": 3, "chat": 6, "agent_control": 1, "agent_runtime": 13, "gateway": 3}
+        current = self.modern()
+        current["version"] = "v0.3.31"
+        current["source"]["ref"] = "refs/heads/release/v0.3.31"
+        self.assertEqual(current["schema"]["agent_control"], 2)
+        self.assertEqual(current["schema"]["gateway"], 5)
+        manifest.validate(previous)
+        manifest.check_transition(current, previous, previous)
+        with self.assertRaisesRegex(ValueError, "identical schema versions"):
+            manifest.check_transition(previous, current, rollback=True)
+        with self.assertRaisesRegex(ValueError, "identical schema versions"):
+            manifest.compatible(current, previous)
 
     def test_direct_message_schema_fences_previous_writer_and_allows_same_schema_rollback(self):
         previous = self.modern()

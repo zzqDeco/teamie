@@ -89,7 +89,7 @@ func TestOfficialAgenticUnaryOptionsBlocksAndMetadata(t *testing.T) {
 	messages[1].Extra = map[string]any{"_eino_msg_id": "private-audit", "audit": "private-audit"}
 	max, temp, topP, bypass := 33, float32(0.25), float32(0.8), "runtime-bypass"
 	opts := model.Options{Model: &bypass, MaxTokens: &max, Temperature: &temp, TopP: &topP, Stop: []string{"stop-here"}, Tools: []*schema.ToolInfo{{Name: "im_send_message", Desc: "Send explicitly", ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{"body": {Type: schema.String, Required: true}})}}, AgenticToolChoice: &schema.AgenticToolChoice{Type: schema.ToolChoiceForced, Forced: &schema.AgenticForcedToolChoice{Tools: []*schema.AllowedTool{{FunctionName: "im_send_message"}}}}}
-	raw, prompt, completion, e := (Provider{HTTP: fixture.Client()}).Chat(context.Background(), Config{BaseURL: fixture.URL + "/custom/v1", Model: "admin-chosen"}, key, nativeRequest(t, messages, opts, false))
+	raw, prompt, completion, e := (Provider{HTTP: fixture.Client()}).Chat(context.Background(), ResolvedModel{BaseURL: fixture.URL + "/custom/v1", Model: "admin-chosen"}, key, nativeRequest(t, messages, opts, false))
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -120,7 +120,7 @@ func TestOfficialAgenticStreamKeepsOrderedBlocksToolIdentityAndMeta(t *testing.T
 	defer fixture.Close()
 	var chunks []*schema.AgenticMessage
 	raw := nativeRequest(t, []*schema.AgenticMessage{schema.UserAgenticMessage("hello")}, model.Options{}, true)
-	prompt, completion, e := (Provider{HTTP: fixture.Client()}).Stream(context.Background(), Config{BaseURL: fixture.URL + "/v1", Model: "admin"}, "synthetic-stream-key", raw, func(b string) error {
+	prompt, completion, e := (Provider{HTTP: fixture.Client()}).Stream(context.Background(), ResolvedModel{BaseURL: fixture.URL + "/v1", Model: "admin"}, "synthetic-stream-key", raw, func(b string) error {
 		var m schema.AgenticMessage
 		if err := (&schema.HumanReadableSerializer{}).Unmarshal([]byte(b), &m); err != nil {
 			return err
@@ -146,7 +146,7 @@ func TestOfficialAgenticStreamKeepsOrderedBlocksToolIdentityAndMeta(t *testing.T
 
 func TestModelProtocolMismatchAndToolPolicyFailBeforeProvider(t *testing.T) {
 	provider := Provider{HTTP: NewHTTPClient()}
-	config := Config{BaseURL: "https://provider.example/v1", Model: "chosen"}
+	config := ResolvedModel{BaseURL: "https://provider.example/v1", Model: "chosen"}
 	for _, raw := range []string{`{"messages":[]}`, `{"protocol":"other","messages":[],"options":{},"stream":false}`, nativeRequest(t, []*schema.AgenticMessage{schema.UserAgenticMessage("hi")}, model.Options{AgenticToolChoice: &schema.AgenticToolChoice{Type: schema.ToolChoiceForced, Forced: &schema.AgenticForcedToolChoice{Tools: []*schema.AllowedTool{{ServerTool: &schema.AllowedServerTool{}}}}}}, false)} {
 		if _, _, _, e := provider.Chat(context.Background(), config, "synthetic-key", raw); e == nil {
 			t.Fatal("incompatible model protocol/tool policy reached provider")
@@ -178,7 +178,7 @@ func TestOfficialToolChoicesAndManifestsRemainRequestScoped(t *testing.T) {
 			tools = append(tools, &schema.ToolInfo{Name: test.name + "_alternative"})
 		}
 		raw := nativeRequest(t, []*schema.AgenticMessage{schema.UserAgenticMessage("same source")}, model.Options{Tools: tools, AgenticToolChoice: &schema.AgenticToolChoice{Type: test.choice}}, false)
-		if _, _, _, e := provider.Chat(context.Background(), Config{BaseURL: fixture.URL + "/v1", Model: "admin"}, "synthetic-key", raw); e != nil {
+		if _, _, _, e := provider.Chat(context.Background(), ResolvedModel{BaseURL: fixture.URL + "/v1", Model: "admin"}, "synthetic-key", raw); e != nil {
 			t.Fatal(e)
 		}
 		last := <-observed

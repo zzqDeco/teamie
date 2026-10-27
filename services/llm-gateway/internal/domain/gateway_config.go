@@ -5,7 +5,6 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"strings"
 	"time"
 )
@@ -45,115 +44,188 @@ func CountingConfigID(baseURL, modelName string) string {
 	return "modelcfg:v1:" + hex.EncodeToString(sum[:16])
 }
 
-// Config is the domain entity for platform-administered model and web-search settings.
-type Config struct {
+// ModelProfile represents a single administrator-configured model option in the gateway.
+type ModelProfile struct {
+	ID                  string    `json:"id"`
+	DisplayName         string    `json:"displayName"`
+	Description         string    `json:"description"`
 	BaseURL             string    `json:"baseUrl"`
 	Model               string    `json:"model"`
 	CipherKey           []byte    `json:"-"`
-	Enabled             bool      `json:"enabled"`
-	UpdatedAt           time.Time `json:"updatedAt"`
 	ContextWindowTokens int64     `json:"contextWindowTokens"`
-	WebSearchCipherKey  []byte    `json:"-"`
-	WebSearchEnabled    bool      `json:"webSearchEnabled"`
-	WebSearchEnabledSet bool      `json:"-"`
-	WebSearchAPIKey     *string   `json:"-"`
-	ClearWebSearchKey   bool      `json:"-"`
+	Enabled             bool      `json:"enabled"`
+	CreatedAt           time.Time `json:"createdAt"`
+	UpdatedAt           time.Time `json:"updatedAt"`
 }
 
-func (c Config) ContextWindow() int64 {
-	if c.ContextWindowTokens == 0 {
+func (m ModelProfile) ContextWindow() int64 {
+	if m.ContextWindowTokens == 0 {
 		return DefaultContextWindow
 	}
-	return c.ContextWindowTokens
+	return m.ContextWindowTokens
 }
 
-func (c Config) Configured() bool {
-	return c.BaseURL != "" && c.Model != "" && len(c.CipherKey) > 0
+func (m ModelProfile) Configured() bool {
+	return m.BaseURL != "" && m.Model != "" && len(m.CipherKey) > 0
 }
 
-func (c Config) WebSearchConfigured() bool {
-	return len(c.WebSearchCipherKey) > 0
-}
-
-func (c Config) CountingConfigID() string {
-	if !c.Configured() {
+func (m ModelProfile) CountingConfigID() string {
+	if !m.Configured() {
 		return ""
 	}
-	return CountingConfigID(c.BaseURL, c.Model)
+	return CountingConfigID(m.BaseURL, m.Model)
 }
 
-func (c Config) Status() string {
-	if !c.Configured() {
+// ValidModelID checks whether a model profile ID is a safe URL-path identifier ([a-zA-Z0-9._-], 1..64 chars).
+func ValidModelID(id string) bool {
+	if len(id) == 0 || len(id) > 64 {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		ch := id[i]
+		isAlphaNum := (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')
+		if !isAlphaNum && ch != '-' && ch != '_' && ch != '.' {
+			return false
+		}
+	}
+	return id != "." && id != ".."
+}
+
+// SuggestModelID derives a clean URL-safe model ID slug from displayName or modelName, avoiding existing IDs.
+func SuggestModelID(displayName, modelName string, existing []ModelProfile) string {
+	slugify := func(s string) string {
+		var b strings.Builder
+		lastDash := false
+		for _, r := range strings.ToLower(strings.TrimSpace(s)) {
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+				b.WriteRune(r)
+				lastDash = false
+			} else if !lastDash && b.Len() > 0 {
+				b.WriteByte('-')
+				lastDash = true
+			}
+			if b.Len() >= 48 {
+				break
+			}
+		}
+		return strings.Trim(b.String(), "-")
+	}
+	base := slugify(modelName)
+	if base == "" {
+		base = slugify(displayName)
+	}
+	if base == "" {
+		base = "model"
+	}
+	taken := make(map[string]bool, len(existing))
+	for _, m := range existing {
+		taken[m.ID] = true
+	}
+	if !taken[base] {
+		return base
+	}
+	for i := 2; i < 1000; i++ {
+		candidate := base + "-" + strconvItoa(i)
+		if !taken[candidate] {
+			return candidate
+		}
+	}
+	return base
+}
+
+func strconvItoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(buf[i:])
+}
+
+// ModelRoutingConfig stores administrator intent independently of model availability.
+// An unavailable selected default stays selected; resolution never changes it.
+type ModelRoutingConfig struct {
+	DefaultModelID string
+	UpdatedAt      time.Time
+}
+
+// WebSearchConfig owns only the search capability's state and credential.
+type WebSearchConfig struct {
+	CipherKey []byte `json:"-"`
+	Enabled   bool
+	UpdatedAt time.Time
+}
+
+func (c WebSearchConfig) Configured() bool { return len(c.CipherKey) > 0 }
+
+// Config is a read snapshot. Writes use separate catalog, routing and search ports.
+type Config struct {
+	Models    []ModelProfile
+	Routing   ModelRoutingConfig
+	WebSearch WebSearchConfig
+}
+
+// ResolvedModel is a per-call model snapshot, never a configuration write command.
+type ResolvedModel ModelProfile
+
+func (m ResolvedModel) Configured() bool         { return ModelProfile(m).Configured() }
+func (m ResolvedModel) ContextWindow() int64     { return ModelProfile(m).ContextWindow() }
+func (m ResolvedModel) CountingConfigID() string { return ModelProfile(m).CountingConfigID() }
+func (m ResolvedModel) Status() string {
+	if !m.Configured() {
 		return "unconfigured"
 	}
-	if c.Enabled {
-		return "ready"
+	if !m.Enabled {
+		return "disabled"
 	}
-	return "disabled"
+	return "ready"
 }
 
-func (c Config) View() map[string]any {
-	return map[string]any{
-		"config": map[string]any{
-			"baseUrl":             c.BaseURL,
-			"model":               c.Model,
-			"contextWindowTokens": c.ContextWindow(),
-			"hasApiKey":           len(c.CipherKey) > 0,
-			"enabled":             c.Enabled,
-			"configured":          c.Configured(),
-			"webSearch": map[string]any{
-				"provider":   "tavily",
-				"enabled":    c.WebSearchEnabled,
-				"hasApiKey":  len(c.WebSearchCipherKey) > 0,
-				"configured": c.WebSearchConfigured(),
-			},
-			"updatedAt": c.UpdatedAt,
-		},
-		"status": c.Status(),
-	}
-}
+func (c Config) EffectiveDefaultModelID() string { return c.ResolveModel("").ID }
 
-// MergeSavedConfig applies key preservation, explicit key clearing, encryption,
-// and context-window invariants when updating gateway configuration.
-func MergeSavedConfig(old, c Config, key *string, clear bool, crypto Cipher) (Config, error) {
-	var err error
-	c.CipherKey = old.CipherKey
-	c.WebSearchCipherKey = old.WebSearchCipherKey
-	if !c.WebSearchEnabledSet && !c.WebSearchEnabled {
-		c.WebSearchEnabled = old.WebSearchEnabled
+// ResolveModel falls back without mutating routing, catalog entries or search settings.
+func (c Config) ResolveModel(requestedModelID string) ResolvedModel {
+	available := func(id string) (ResolvedModel, bool) {
+		for _, m := range c.Models {
+			if m.ID == id && m.Configured() && m.Enabled {
+				return ResolvedModel(m), true
+			}
+		}
+		return ResolvedModel{}, false
 	}
-	if c.ContextWindowTokens == 0 {
-		c.ContextWindowTokens = old.ContextWindow()
+	if m, ok := available(strings.TrimSpace(requestedModelID)); ok {
+		return m
 	}
-	if c.ContextWindowTokens < MinContextWindow || c.ContextWindowTokens > MaxContextWindow {
-		return Config{}, errors.New("invalid context window")
+	if m, ok := available(c.Routing.DefaultModelID); ok {
+		return m
 	}
-	if clear {
-		c.CipherKey = nil
-	}
-	if key != nil {
-		c.CipherKey, err = crypto.Encrypt(*key)
-		if err != nil {
-			return Config{}, err
+	for _, m := range c.Models {
+		if m.Configured() && m.Enabled {
+			return ResolvedModel(m)
 		}
 	}
-	if c.ClearWebSearchKey {
-		c.WebSearchCipherKey = nil
-	}
-	if c.WebSearchAPIKey != nil {
-		c.WebSearchCipherKey, err = crypto.Encrypt(*c.WebSearchAPIKey)
-		if err != nil {
-			return Config{}, err
+	// Preserve disabled/unconfigured status when no usable model exists.
+	for _, m := range c.Models {
+		if m.ID == c.Routing.DefaultModelID {
+			return ResolvedModel(m)
 		}
 	}
-	return c, nil
+	if len(c.Models) > 0 {
+		return ResolvedModel(c.Models[0])
+	}
+	return ResolvedModel{}
 }
 
 // Usage represents a single model call audit record.
 type Usage struct {
-	OwnerID, AgentID, SessionID, RunID, Status string
-	PromptTokens, CompletionTokens             int64
-	LatencyMS                                  int64
+	OwnerID, AgentID, SessionID, RunID, ModelID, Status string
+	PromptTokens, CompletionTokens                      int64
+	LatencyMS                                           int64
 }
 
 // StreamEvent is the private NDJSON transport event emitted during a streaming model call.

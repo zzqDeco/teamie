@@ -40,7 +40,7 @@ func streamFixtureService(t *testing.T, handler http.HandlerFunc) (*Service, *ht
 	if e != nil {
 		t.Fatal(e)
 	}
-	store := &memoryStore{c: Config{BaseURL: fixture.URL + "/v1", Model: "chosen-model", CipherKey: encrypted, Enabled: true}}
+	store := &memoryStore{c: singleModel(ModelProfile{BaseURL: fixture.URL + "/v1", Model: "chosen-model", CipherKey: encrypted, Enabled: true})}
 	s := New(store, crypto, testToken)
 	s.Provider = Provider{HTTP: fixture.Client()}
 	return s, httptest.NewServer(s.Routes(rpcx.AdminAuth{}))
@@ -278,9 +278,9 @@ func TestHertzNativeSSEWriterStreamChat(t *testing.T) {
 	}
 	store := s.Store.(*memoryStore)
 	store.mu.Lock()
-	store.c.WebSearchCipherKey = wsCipher
-	store.c.WebSearchEnabled = true
-	baseURL := store.c.BaseURL
+	store.c.WebSearch.CipherKey = wsCipher
+	store.c.WebSearch.Enabled = true
+	baseURL := store.c.Models[0].BaseURL
 	store.mu.Unlock()
 	s.WebSearchURL = strings.TrimSuffix(baseURL, "/v1")
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

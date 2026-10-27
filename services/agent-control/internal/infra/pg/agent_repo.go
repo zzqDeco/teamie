@@ -15,17 +15,21 @@ import (
 //go:embed migrations/001_agents.sql
 var SchemaV1 string
 
+//go:embed migrations/002_agent_model_id.sql
+var SchemaV2 string
+
 // Migrate applies all Agent Control Plane PostgreSQL schema migrations under advisory lock 704201.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	if err := postgres.Migrate(ctx, pool, 704201, "agent_control_schema_migrations", []postgres.Migration{
 		{Version: 1, SQL: SchemaV1},
+		{Version: 2, SQL: SchemaV2},
 	}); err != nil {
 		return domain.ErrSchemaUnavailable(err)
 	}
 	return nil
 }
 
-const columns = "id,owner_id,name,description,workspace_ids,enabled,revision,created_at,updated_at,deleted_at,runtime_state,last_active_at,last_error,membership_revision,applied_revision,applied_membership_revision,policy_enabled"
+const columns = "id,owner_id,name,description,model_id,workspace_ids,enabled,revision,created_at,updated_at,deleted_at,runtime_state,last_active_at,last_error,membership_revision,applied_revision,applied_membership_revision,policy_enabled"
 
 type scanner interface {
 	Scan(...any) error
@@ -38,6 +42,7 @@ func scanAgent(row scanner) (domain.Agent, error) {
 		&a.OwnerID,
 		&a.Name,
 		&a.Description,
+		&a.ModelID,
 		&a.WorkspaceIDs,
 		&a.Enabled,
 		&a.Revision,
@@ -89,8 +94,8 @@ func (r *Repository) Ping(ctx context.Context) error {
 func (r *Repository) Insert(ctx context.Context, a domain.Agent) (domain.Agent, error) {
 	return scanAgent(r.db.Conn(ctx).QueryRow(
 		ctx,
-		"INSERT INTO agents(id,owner_id,name,description,workspace_ids,enabled,policy_enabled) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING "+columns,
-		a.ID, a.OwnerID, a.Name, a.Description, a.WorkspaceIDs, a.Enabled, a.PolicyEnabled,
+		"INSERT INTO agents(id,owner_id,name,description,model_id,workspace_ids,enabled,policy_enabled) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING "+columns,
+		a.ID, a.OwnerID, a.Name, a.Description, a.ModelID, a.WorkspaceIDs, a.Enabled, a.PolicyEnabled,
 	))
 }
 
@@ -121,8 +126,8 @@ func (r *Repository) GetByIDForUpdate(ctx context.Context, id string) (domain.Ag
 func (r *Repository) UpdateProfile(ctx context.Context, a domain.Agent) error {
 	_, err := r.db.Conn(ctx).Exec(
 		ctx,
-		"UPDATE agents SET name=$2,description=$3,workspace_ids=$4,enabled=$5,membership_revision=$6,revision=revision+1,runtime_state=CASE WHEN $5 THEN 'provisioning' ELSE 'disabled' END,last_error='',updated_at=now() WHERE id=$1",
-		a.ID, a.Name, a.Description, a.WorkspaceIDs, a.Enabled, a.MembershipRevision,
+		"UPDATE agents SET name=$2,description=$3,model_id=$4,workspace_ids=$5,enabled=$6,membership_revision=$7,revision=revision+1,runtime_state=CASE WHEN $6 THEN 'provisioning' ELSE 'disabled' END,last_error='',updated_at=now() WHERE id=$1",
+		a.ID, a.Name, a.Description, a.ModelID, a.WorkspaceIDs, a.Enabled, a.MembershipRevision,
 	)
 	return err
 }

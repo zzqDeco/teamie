@@ -20,6 +20,10 @@ import (
 type AdminAuth = rpcclient.AdminAuth
 
 type Config = domain.Config
+type ModelProfile = domain.ModelProfile
+type ResolvedModel = domain.ResolvedModel
+type ModelRoutingConfig = domain.ModelRoutingConfig
+type WebSearchConfig = domain.WebSearchConfig
 type Usage = domain.Usage
 type Store = domain.ConfigStore
 type Cipher = domain.Cipher
@@ -39,12 +43,17 @@ func NewCipher(master string) (Cipher, error) { return kms.NewCipher(master) }
 func Open(ctx context.Context, url string) (*pg.PGStore, error) {
 	return pg.Open(ctx, url)
 }
-func mergeSavedConfig(old, c Config, key *string, clear bool, cipher Cipher) (Config, error) {
-	return domain.MergeSavedConfig(old, c, key, clear, cipher)
+func singleModel(m ModelProfile) Config {
+	if m.ID == "" {
+		m.ID = "default"
+	}
+	return Config{Models: []ModelProfile{m}, Routing: ModelRoutingConfig{DefaultModelID: m.ID}}
 }
-func PublicIP(ip net.IP) bool                          { return domain.PublicIP(ip) }
-func ValidateEndpoint(ctx context.Context, raw string) error { return domain.ValidateEndpoint(ctx, raw) }
-func NewHTTPClient() *http.Client                      { return upstream.NewHTTPClient() }
+func PublicIP(ip net.IP) bool { return domain.PublicIP(ip) }
+func ValidateEndpoint(ctx context.Context, raw string) error {
+	return domain.ValidateEndpoint(ctx, raw)
+}
+func NewHTTPClient() *http.Client { return upstream.NewHTTPClient() }
 func normalizeRequest(raw, model string) ([]byte, error) {
 	return domain.NormalizeModeWithOutputLimit(raw, model, false, 4096)
 }
@@ -83,10 +92,10 @@ type dynamicProvider struct {
 	s *Service
 }
 
-func (d dynamicProvider) Chat(ctx context.Context, c Config, key, raw string, messageLimits ...int) (string, int64, int64, error) {
+func (d dynamicProvider) Chat(ctx context.Context, c ResolvedModel, key, raw string, messageLimits ...int) (string, int64, int64, error) {
 	return d.s.Provider.Chat(ctx, c, key, raw, messageLimits...)
 }
-func (d dynamicProvider) Stream(ctx context.Context, c Config, key, raw string, emit func(string) error, messageLimits ...int) (int64, int64, error) {
+func (d dynamicProvider) Stream(ctx context.Context, c ResolvedModel, key, raw string, emit func(string) error, messageLimits ...int) (int64, int64, error) {
 	return d.s.Provider.Stream(ctx, c, key, raw, emit, messageLimits...)
 }
 func (d dynamicProvider) Search(ctx context.Context, baseURL, apiKey string, payload map[string]any, maxResults int) ([]domain.WebSearchItem, int, error) {
@@ -130,7 +139,6 @@ func New(store Store, cipher Cipher, token string) *Service {
 }
 
 func (s *Service) Routes(auth AdminAuth) http.Handler {
-	s.App.WebSearchURL = s.WebSearchURL
 	return s.HTTP.Routes(auth)
 }
 

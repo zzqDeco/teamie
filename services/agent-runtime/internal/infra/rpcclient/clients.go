@@ -56,6 +56,7 @@ func toDomainProfile(a *wire.AgentDefinition) domain.AgentProfile {
 		OwnerID:         a.OwnerId,
 		DisplayName:     a.Name,
 		RoleDescription: a.Description,
+		ModelID:         a.GetModelId(),
 		WorkspaceIDs:    append([]string(nil), a.WorkspaceIds...),
 		Enabled:         a.Enabled,
 		Deleted:         a.DeletedAt != nil,

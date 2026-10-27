@@ -16,8 +16,8 @@ import (
 	"github.com/cloudwego/hertz/pkg/route"
 	"go.uber.org/zap"
 	gatewaygen "teamie/contracts/gen/agent/hertz_gen/agent/gateway"
-	"teamie/contracts/gen/agent/kitex_gen/agent"
 	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
+	"teamie/contracts/gen/agent/kitex_gen/agent"
 	"teamie/contracts/gen/im/kitex_gen/im"
 	"teamie/pkg/httpx"
 	"teamie/pkg/observability"
@@ -25,9 +25,13 @@ import (
 	"teamie/services/llm-gateway/internal/domain"
 )
 
-// AdminAuthorizer authenticates human platform administrators on HTTP requests.
+// AdminAuthorizer authenticates human platform administrators and regular human users on HTTP requests.
 type AdminAuthorizer interface {
 	Require(r *http.Request) (*im.User, error)
+}
+
+type userAuthorizer interface {
+	RequireUser(r *http.Request) (*im.User, error)
 }
 
 var _ gatewaygen.ModelGatewayHTTPService = (*Adapter)(nil)
@@ -45,24 +49,86 @@ func New(svc *app.Service) *Adapter {
 func ptr[T any](v T) *T { return &v }
 
 func toAdminModelConfigResp(c domain.Config) *gatewaygen.AdminModelConfigResp {
-	return &gatewaygen.AdminModelConfigResp{
+	effDefault := c.EffectiveDefaultModelID()
+	rawModels := c.Models
+	resolved := c.ResolveModel("")
+	dtos := make([]*gatewaygen.AdminModelProfileDTO, 0, len(rawModels))
+	for _, m := range rawModels {
+		displayName := m.DisplayName
+		if displayName == "" {
+			displayName = m.Model
+		}
+		dtos = append(dtos, &gatewaygen.AdminModelProfileDTO{
+			ID:                  m.ID,
+			DisplayName:         displayName,
+			Description:         m.Description,
+			BaseUrl:             m.BaseURL,
+			Model:               m.Model,
+			ContextWindowTokens: m.ContextWindow(),
+			HasApiKey:           len(m.CipherKey) > 0,
+			Enabled:             m.Enabled,
+			Configured:          m.Configured(),
+			IsDefault:           m.ID == c.Routing.DefaultModelID,
+			UpdatedAt:           m.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		})
+	}
+	resp := &gatewaygen.AdminModelConfigResp{
 		Config: &gatewaygen.ModelConfigDTO{
-			BaseUrl:             c.BaseURL,
-			Model:               c.Model,
-			ContextWindowTokens: c.ContextWindow(),
-			HasApiKey:           len(c.CipherKey) > 0,
-			Enabled:             c.Enabled,
-			Configured:          c.Configured(),
+			BaseUrl:             resolved.BaseURL,
+			Model:               resolved.Model,
+			ContextWindowTokens: resolved.ContextWindow(),
+			HasApiKey:           len(resolved.CipherKey) > 0,
+			Enabled:             resolved.Enabled,
+			Configured:          resolved.Configured(),
 			WebSearch: &gatewaygen.WebSearchConfigDTO{
 				Provider:   "tavily",
-				Enabled:    c.WebSearchEnabled,
-				HasApiKey:  len(c.WebSearchCipherKey) > 0,
-				Configured: c.WebSearchConfigured(),
+				Enabled:    c.WebSearch.Enabled,
+				HasApiKey:  len(c.WebSearch.CipherKey) > 0,
+				Configured: c.WebSearch.Configured(),
 			},
-			UpdatedAt: c.UpdatedAt.UTC().Format(time.RFC3339Nano),
+			UpdatedAt: resolved.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		},
-		Status: c.Status(),
+		Routing:   &gatewaygen.ModelRoutingConfigDTO{DefaultModelId: c.Routing.DefaultModelID, EffectiveModelId: effDefault},
+		WebSearch: &gatewaygen.WebSearchConfigDTO{Provider: "tavily", Enabled: c.WebSearch.Enabled, HasApiKey: c.WebSearch.Configured(), Configured: c.WebSearch.Configured(), UpdatedAt: ptr(c.WebSearch.UpdatedAt.UTC().Format(time.RFC3339Nano))},
+		Status:    resolved.Status(),
+		Models:    dtos,
 	}
+	if effDefault != "" {
+		resp.DefaultModelId = &effDefault
+	}
+	return resp
+}
+
+func (a *Adapter) GetModelCatalog(ctx context.Context, _ *gatewaygen.GetModelCatalogReq) (*gatewaygen.ModelCatalogResp, error) {
+	c, err := a.App.LoadConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	effDefault := c.EffectiveDefaultModelID()
+	items := make([]*gatewaygen.PublicModelOptionDTO, 0)
+	for _, m := range c.Models {
+		if !m.Configured() || !m.Enabled {
+			continue
+		}
+		displayName := m.DisplayName
+		if displayName == "" {
+			displayName = m.Model
+		}
+		items = append(items, &gatewaygen.PublicModelOptionDTO{
+			ID:                  m.ID,
+			DisplayName:         displayName,
+			Description:         m.Description,
+			ContextWindowTokens: m.ContextWindow(),
+			IsDefault:           m.ID == effDefault,
+		})
+	}
+	resp := &gatewaygen.ModelCatalogResp{
+		Models: items,
+	}
+	if len(items) > 0 && effDefault != "" {
+		resp.DefaultModelId = &effDefault
+	}
+	return resp, nil
 }
 
 func (a *Adapter) GetAdminModelConfig(ctx context.Context, _ *gatewaygen.GetAdminModelConfigReq) (*gatewaygen.AdminModelConfigResp, error) {
@@ -73,21 +139,77 @@ func (a *Adapter) GetAdminModelConfig(ctx context.Context, _ *gatewaygen.GetAdmi
 	return toAdminModelConfigResp(c), nil
 }
 
-func (a *Adapter) UpdateAdminModelConfig(ctx context.Context, req *gatewaygen.UpdateAdminModelConfigReq) (*gatewaygen.AdminModelConfigResp, error) {
+func (a *Adapter) UpdateAdminModelConfig(context.Context, *gatewaygen.UpdateAdminModelConfigReq) (*gatewaygen.AdminModelConfigResp, error) {
+	return nil, domain.Err(409, "config_api_changed", "Refresh this page to update model, routing or web search settings separately")
+}
+
+func (a *Adapter) UpdateAdminWebSearchConfig(ctx context.Context, req *gatewaygen.UpdateAdminWebSearchConfigReq) (*gatewaygen.AdminModelConfigResp, error) {
+	if req == nil {
+		return nil, domain.Err(400, "invalid_request", "Invalid web search configuration")
+	}
+	c, err := a.App.UpdateWebSearch(ctx, app.UpdateWebSearchInput{Enabled: req.Enabled, APIKey: req.ApiKey, ClearAPIKey: req.GetClearApiKey()})
+	if err != nil {
+		return nil, err
+	}
+	return toAdminModelConfigResp(c), nil
+}
+func (a *Adapter) UpdateAdminModelRouting(ctx context.Context, req *gatewaygen.UpdateAdminModelRoutingReq) (*gatewaygen.AdminModelConfigResp, error) {
+	if req == nil {
+		return nil, domain.Err(400, "invalid_request", "Invalid routing configuration")
+	}
+	c, err := a.App.UpdateRouting(ctx, req.DefaultModelId)
+	if err != nil {
+		return nil, err
+	}
+	return toAdminModelConfigResp(c), nil
+}
+
+func (a *Adapter) CreateAdminModelProfile(ctx context.Context, req *gatewaygen.CreateAdminModelProfileReq) (*gatewaygen.AdminModelConfigResp, error) {
 	if req == nil {
 		return nil, domain.Err(400, "invalid_request", "Invalid model configuration")
 	}
-	c, err := a.App.SaveConfig(ctx, app.SaveConfigInput{
-		BaseURL:              req.BaseUrl,
-		Model:                req.Model,
-		APIKey:               req.ApiKey,
-		Enabled:              req.Enabled,
-		ClearAPIKey:          req.GetClearApiKey(),
-		ContextWindowTokens:  req.ContextWindowTokens,
-		WebSearchEnabled:     req.WebSearchEnabled,
-		WebSearchAPIKey:      req.WebSearchApiKey,
-		ClearWebSearchAPIKey: req.GetClearWebSearchApiKey(),
+	c, err := a.App.CreateModelProfile(ctx, app.CreateModelProfileInput{
+		ID:                  req.GetID(),
+		DisplayName:         req.GetDisplayName(),
+		Description:         req.GetDescription(),
+		BaseURL:             req.BaseUrl,
+		Model:               req.Model,
+		APIKey:              req.ApiKey,
+		Enabled:             req.Enabled,
+		ContextWindowTokens: req.ContextWindowTokens,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return toAdminModelConfigResp(c), nil
+}
+
+func (a *Adapter) UpdateAdminModelProfile(ctx context.Context, req *gatewaygen.UpdateAdminModelProfileReq) (*gatewaygen.AdminModelConfigResp, error) {
+	if req == nil {
+		return nil, domain.Err(400, "invalid_request", "Invalid model configuration")
+	}
+	c, err := a.App.UpdateModelProfile(ctx, app.UpdateModelProfileInput{
+		ID:                  req.ID,
+		DisplayName:         req.DisplayName,
+		Description:         req.Description,
+		BaseURL:             req.BaseUrl,
+		Model:               req.Model,
+		APIKey:              req.ApiKey,
+		ClearAPIKey:         req.GetClearApiKey(),
+		Enabled:             req.Enabled,
+		ContextWindowTokens: req.ContextWindowTokens,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return toAdminModelConfigResp(c), nil
+}
+
+func (a *Adapter) DeleteAdminModelProfile(ctx context.Context, req *gatewaygen.DeleteAdminModelProfileReq) (*gatewaygen.AdminModelConfigResp, error) {
+	if req == nil {
+		return nil, domain.Err(400, "invalid_request", "Invalid model configuration")
+	}
+	c, err := a.App.DeleteModelProfile(ctx, req.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -108,13 +230,27 @@ func adminOwnerFromContext(ctx context.Context) string {
 }
 
 func (a *Adapter) TestAdminModelConfig(ctx context.Context, _ *gatewaygen.TestAdminModelConfigReq) (*gatewaygen.TestAdminModelConfigResp, error) {
-	return a.testAdminModelConfigWithOwner(ctx, adminOwnerFromContext(ctx))
+	return a.testAdminModelConfigWithOwner(ctx, adminOwnerFromContext(ctx), "")
 }
 
-func (a *Adapter) testAdminModelConfigWithOwner(ctx context.Context, owner string) (*gatewaygen.TestAdminModelConfigResp, error) {
+func (a *Adapter) TestAdminModelProfile(ctx context.Context, req *gatewaygen.TestAdminModelProfileReq) (*gatewaygen.TestAdminModelConfigResp, error) {
+	if req == nil {
+		return nil, domain.Err(400, "invalid_request", "Invalid model ID")
+	}
+	if _, err := a.App.ResolveModelProfileForTest(ctx, req.ID); err != nil {
+		return nil, err
+	}
+	return a.testAdminModelConfigWithOwner(ctx, adminOwnerFromContext(ctx), req.ID)
+}
+
+func (a *Adapter) testAdminModelConfigWithOwner(ctx context.Context, owner, modelID string) (*gatewaygen.TestAdminModelConfigResp, error) {
 	c, err := a.App.LoadConfig(ctx)
 	if err != nil {
 		return nil, err
+	}
+	resolved := c.ResolveModel(modelID)
+	if modelID != "" {
+		ctx = app.WithRequestedModelID(ctx, modelID)
 	}
 	start := time.Now()
 	raw, _ := json.Marshal(modeltransport.Request{
@@ -128,7 +264,7 @@ func (a *Adapter) testAdminModelConfigWithOwner(ctx context.Context, owner strin
 	}
 	return &gatewaygen.TestAdminModelConfigResp{
 		Ok:        true,
-		Model:     c.Model,
+		Model:     resolved.Model,
 		LatencyMs: time.Since(start).Milliseconds(),
 	}, nil
 }
@@ -139,6 +275,9 @@ func (a *Adapter) GenerateChat(ctx context.Context, req *gatewaygen.ChatCallReq)
 	}
 	if req.GetExpectedModelConfigId() != "" {
 		ctx = app.WithExpectedModelConfigID(ctx, req.GetExpectedModelConfigId())
+	}
+	if req.GetModelId() != "" {
+		ctx = app.WithRequestedModelID(ctx, req.GetModelId())
 	}
 	limit := domain.InputMessageLimit(int(req.GetMessageLimit()))
 	res := a.callWithObservability(ctx, req.OwnerId, req.AgentId, req.SessionId, req.RunId, req.RequestJson, limit)
@@ -160,6 +299,9 @@ func (a *Adapter) StreamChat(_ context.Context, _ *gatewaygen.ChatCallReq) (*gat
 func (a *Adapter) StreamChatSSE(ctx context.Context, c *hertzapp.RequestContext, req *gatewaygen.ChatCallReq) error {
 	if req == nil || !domain.ValidID(req.OwnerId) || !domain.ValidID(req.AgentId) || !domain.ValidID(req.SessionId) || !domain.ValidID(req.RunId) || req.GetMessageLimit() < 0 || int(req.GetMessageLimit()) > modeltransport.MaxInputMessages {
 		return domain.Err(400, "invalid_request", "Invalid model request")
+	}
+	if req.GetModelId() != "" {
+		ctx = app.WithRequestedModelID(ctx, req.GetModelId())
 	}
 	ctx, operation := gatewayOperation(ctx, req.AgentId, req.SessionId, req.RunId, true)
 	writer := sse.NewWriter(c)
@@ -434,6 +576,10 @@ func (a *Adapter) streamHTTP(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	ctx := r.Context()
+	if in.ModelID != "" {
+		ctx = app.WithRequestedModelID(ctx, in.ModelID)
+	}
 	if strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
 		msgLimit := int32(in.MessageLimit)
 		req := &gatewaygen.ChatCallReq{
@@ -444,15 +590,18 @@ func (a *Adapter) streamHTTP(w http.ResponseWriter, r *http.Request) {
 			RequestJson:  in.RequestJSON,
 			MessageLimit: &msgLimit,
 		}
+		if in.ModelID != "" {
+			req.ModelId = &in.ModelID
+		}
 		if expected := r.Header.Get(modeltransport.ModelConfigIDHeader); expected != "" {
 			req.ExpectedModelConfigId = &expected
 		}
 		sseCtx := hertzapp.NewContext(0)
 		sseCtx.Response.HijackWriter(&httpSSEExtWriter{w: w, rc: sseCtx})
-		_ = a.StreamChatSSE(r.Context(), sseCtx, req)
+		_ = a.StreamChatSSE(ctx, sseCtx, req)
 		return
 	}
-	ctx, operation := gatewayOperation(r.Context(), in.AgentID, in.SessionID, in.RunID, true)
+	ctx, operation := gatewayOperation(ctx, in.AgentID, in.SessionID, in.RunID, true)
 	r = r.WithContext(ctx)
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.Header().Set("Cache-Control", "no-store")
@@ -551,6 +700,25 @@ func (gr gatewayResponder) WrapRoute(route gatewaygen.RouteSpec, next http.Handl
 			}
 			observability.AnnotateHTTP(w, zap.String("user.id", u.Id))
 			next(w, r.WithContext(withAdminOwner(r.Context(), u.Id)))
+		}
+	}
+	if strings.HasPrefix(route.Path, "/api/v1/model-gateway/") {
+		return func(w http.ResponseWriter, r *http.Request) {
+			var (
+				u   *im.User
+				err error
+			)
+			if ua, ok := gr.auth.(userAuthorizer); ok {
+				u, err = ua.RequireUser(r)
+			} else {
+				u, err = gr.auth.Require(r)
+			}
+			if err != nil {
+				httpx.Fail(w, err)
+				return
+			}
+			observability.AnnotateHTTP(w, zap.String("user.id", u.Id))
+			next(w, r)
 		}
 	}
 	return func(w http.ResponseWriter, r *http.Request) {

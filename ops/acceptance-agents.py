@@ -60,7 +60,7 @@ def loopback_url(value: str) -> None:
 def base_for(path: str) -> str:
     if path.startswith("/api/v1/auth/"):
         return IDENTITY
-    if path.startswith("/api/v1/admin/model-gateway"):
+    if path.startswith("/api/v1/admin/model-gateway") or path.startswith("/api/v1/model-gateway"):
         return GATEWAY
     if path.startswith("/api/v1/agents") or re.match(r"^/api/v1/workspaces/[^/]+/agents(?:[/?]|$)", path):
         return CONTROL
@@ -161,7 +161,9 @@ def secret_redacted(value: dict, forbidden: str) -> None:
 
 
 def public_profile(profile: dict, workspace: str | None = None) -> None:
-    require(set(profile) == {"id", "principalId", "ownerId", "ownerName", "name", "description", "workspaceIds", "enabled", "createdAt", "updatedAt"}, "Agent responses must contain exactly the public profile fields")
+    allowed = {"id", "principalId", "ownerId", "ownerName", "name", "description", "workspaceIds", "enabled", "createdAt", "updatedAt", "modelId"}
+    required = allowed - {"modelId"}
+    require(required <= set(profile) <= allowed, "Agent responses must contain only the public profile fields")
     require(profile["principalId"] == profile["id"] and bool(profile["ownerId"]) and bool(profile["ownerName"]), "Public Agent profile must retain participant and owner provenance")
     require(isinstance(profile["workspaceIds"], list) and isinstance(profile["enabled"], bool), "Agent visibility and enabled state must retain public types")
     if workspace is not None:
@@ -254,20 +256,21 @@ def main() -> None:
     # A public literal avoids local proxy fake-IP DNS answers. This address is
     # never requested: configuration remains disabled and /test is not called.
     settings = {"baseUrl": "https://1.1.1.1/v1", "model": "acceptance-never-call", "apiKey": fake_key, "enabled": False, "contextWindowTokens": 32768}
-    admin.call("PUT", gateway_path, settings, status=403, csrf=False)
-    admin.call("PUT", gateway_path, settings, status=403, origin="https://untrusted.example.invalid")
-    saved = admin.call("PUT", gateway_path, settings)
+    admin.call("POST", gateway_path + "/models", {**settings,"id":"acceptance-model"}, status=403, csrf=False)
+    admin.call("POST", gateway_path + "/models", {**settings,"id":"acceptance-model"}, status=403, origin="https://untrusted.example.invalid")
+    saved = admin.call("POST", gateway_path + "/models", {**settings,"id":"acceptance-model"}, status=201)
     secret_redacted(saved, fake_key)
     require(saved["status"] == "disabled" and saved["config"]["configured"] and saved["config"]["hasApiKey"] and not saved["config"]["enabled"], "Disabled-only fixture save must retain credentials without enabling a provider")
     read = admin.call("GET", gateway_path)
     secret_redacted(read, fake_key)
-    preserved = admin.call("PUT", gateway_path, {"baseUrl": settings["baseUrl"], "model": settings["model"], "enabled": False})
+    preserved = admin.call("PATCH", gateway_path + "/models/acceptance-model", {"baseUrl": settings["baseUrl"], "model": settings["model"], "enabled": False})
     secret_redacted(preserved, fake_key)
     require(preserved["config"]["hasApiKey"], "Omitting a key must preserve it")
     require(preserved["config"].get("contextWindowTokens") == 32768, "Omitting model capacity must preserve administrator configuration")
-    cleared = admin.call("PUT", gateway_path, {"baseUrl": settings["baseUrl"], "model": settings["model"], "enabled": False, "clearApiKey": True})
+    cleared = admin.call("PATCH", gateway_path + "/models/acceptance-model", {"baseUrl": settings["baseUrl"], "model": settings["model"], "enabled": False, "clearApiKey": True})
     secret_redacted(cleared, fake_key)
     require(cleared["status"] == "unconfigured" and not cleared["config"]["hasApiKey"] and not cleared["config"]["configured"], "Explicit removal returns to unconfigured state")
+    admin.call("DELETE", gateway_path + "/models/acceptance-model")
     print("PASS gateway administrator authorization, Origin/CSRF, write-only redaction and unconfigured state (no provider call)", flush=True)
 
     shared = owner.call("POST", "/api/v1/workspaces", {"name": "Agent shared " + suffix}, status=201)

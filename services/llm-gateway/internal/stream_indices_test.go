@@ -94,7 +94,7 @@ func TestOfficialStreamPreservesInterleavedToolIdentity(t *testing.T) {
 			typesByIndex := map[int]schema.ContentBlockType{}
 			toolIndices := map[int]bool{}
 			raw := nativeRequest(t, []*schema.AgenticMessage{schema.UserAgenticMessage("synthetic file request")}, model.Options{}, true)
-			prompt, completion, err := (Provider{HTTP: fixture.Client()}).Stream(context.Background(), Config{BaseURL: fixture.URL + "/v1", Model: "fixture"}, "synthetic-stream-key", raw, func(body string) error {
+			prompt, completion, err := (Provider{HTTP: fixture.Client()}).Stream(context.Background(), ResolvedModel{BaseURL: fixture.URL + "/v1", Model: "fixture"}, "synthetic-stream-key", raw, func(body string) error {
 				var chunk schema.AgenticMessage
 				if err := (&schema.HumanReadableSerializer{}).Unmarshal([]byte(body), &chunk); err != nil {
 					return err
@@ -173,7 +173,7 @@ func TestOfficialStreamConcurrentCallsAndNilTerminalMetadata(t *testing.T) {
 					t.Parallel()
 					var chunks []*schema.AgenticMessage
 					raw := nativeRequest(t, []*schema.AgenticMessage{schema.UserAgenticMessage("synthetic interleaving")}, model.Options{}, true)
-					_, _, err := provider.Stream(context.Background(), Config{BaseURL: fixture.URL + "/v1", Model: "fixture"}, "synthetic-key", raw, func(body string) error {
+					_, _, err := provider.Stream(context.Background(), ResolvedModel{BaseURL: fixture.URL + "/v1", Model: "fixture"}, "synthetic-key", raw, func(body string) error {
 						var chunk schema.AgenticMessage
 						if err := (&schema.HumanReadableSerializer{}).Unmarshal([]byte(body), &chunk); err != nil {
 							return err

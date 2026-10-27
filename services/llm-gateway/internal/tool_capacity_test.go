@@ -35,7 +35,7 @@ func TestExpandedToolManifestReachesProvider(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			s := New(&memoryStore{c: Config{BaseURL: fixture.URL + "/v1", Model: "configured", CipherKey: key, Enabled: true}}, crypto, testToken)
+			s := New(&memoryStore{c: singleModel(ModelProfile{BaseURL: fixture.URL + "/v1", Model: "configured", CipherKey: key, Enabled: true})}, crypto, testToken)
 			s.Provider = Provider{HTTP: fixture.Client()}
 			tools := make([]any, size)
 			for i := range tools {

@@ -18,6 +18,7 @@ type AgentDefinition struct {
 	CreatedAt    string   `thrift:"createdAt,8,required" frugal:"8,required,string" json:"createdAt"`
 	UpdatedAt    string   `thrift:"updatedAt,9,required" frugal:"9,required,string" json:"updatedAt"`
 	DeletedAt    *string  `thrift:"deletedAt,10,optional" frugal:"10,optional,string" json:"deletedAt,omitempty"`
+	ModelId      *string  `thrift:"modelId,11,optional" frugal:"11,optional,string" json:"modelId,omitempty"`
 }
 
 func NewAgentDefinition() *AgentDefinition {
@@ -71,6 +72,15 @@ func (p *AgentDefinition) GetDeletedAt() (v string) {
 	}
 	return *p.DeletedAt
 }
+
+var AgentDefinition_ModelId_DEFAULT string
+
+func (p *AgentDefinition) GetModelId() (v string) {
+	if !p.IsSetModelId() {
+		return AgentDefinition_ModelId_DEFAULT
+	}
+	return *p.ModelId
+}
 func (p *AgentDefinition) SetId(val string) {
 	p.Id = val
 }
@@ -101,9 +111,16 @@ func (p *AgentDefinition) SetUpdatedAt(val string) {
 func (p *AgentDefinition) SetDeletedAt(val *string) {
 	p.DeletedAt = val
 }
+func (p *AgentDefinition) SetModelId(val *string) {
+	p.ModelId = val
+}
 
 func (p *AgentDefinition) IsSetDeletedAt() bool {
 	return p.DeletedAt != nil
+}
+
+func (p *AgentDefinition) IsSetModelId() bool {
+	return p.ModelId != nil
 }
 
 func (p *AgentDefinition) String() string {
@@ -124,6 +141,7 @@ var fieldIDToName_AgentDefinition = map[int16]string{
 	8:  "createdAt",
 	9:  "updatedAt",
 	10: "deletedAt",
+	11: "modelId",
 }
 
 type Ack struct {
@@ -204,6 +222,7 @@ var fieldIDToName_CancelRequest = map[int16]string{
 
 type PingRequest struct {
 	ServiceToken *string `thrift:"serviceToken,1,optional" frugal:"1,optional,string" json:"serviceToken,omitempty"`
+	ModelId      *string `thrift:"modelId,2,optional" frugal:"2,optional,string" json:"modelId,omitempty"`
 }
 
 func NewPingRequest() *PingRequest {
@@ -221,12 +240,28 @@ func (p *PingRequest) GetServiceToken() (v string) {
 	}
 	return *p.ServiceToken
 }
+
+var PingRequest_ModelId_DEFAULT string
+
+func (p *PingRequest) GetModelId() (v string) {
+	if !p.IsSetModelId() {
+		return PingRequest_ModelId_DEFAULT
+	}
+	return *p.ModelId
+}
 func (p *PingRequest) SetServiceToken(val *string) {
 	p.ServiceToken = val
+}
+func (p *PingRequest) SetModelId(val *string) {
+	p.ModelId = val
 }
 
 func (p *PingRequest) IsSetServiceToken() bool {
 	return p.ServiceToken != nil
+}
+
+func (p *PingRequest) IsSetModelId() bool {
+	return p.ModelId != nil
 }
 
 func (p *PingRequest) String() string {
@@ -238,6 +273,7 @@ func (p *PingRequest) String() string {
 
 var fieldIDToName_PingRequest = map[int16]string{
 	1: "serviceToken",
+	2: "modelId",
 }
 
 type PingResponse struct {
@@ -770,12 +806,13 @@ var fieldIDToName_RuntimeResponse = map[int16]string{
 }
 
 type GatewayChatRequest struct {
-	ServiceToken string `thrift:"serviceToken,1,required" frugal:"1,required,string" json:"serviceToken"`
-	OwnerId      string `thrift:"ownerId,2,required" frugal:"2,required,string" json:"ownerId"`
-	AgentId      string `thrift:"agentId,3,required" frugal:"3,required,string" json:"agentId"`
-	SessionId    string `thrift:"sessionId,4,required" frugal:"4,required,string" json:"sessionId"`
-	RunId        string `thrift:"runId,5,required" frugal:"5,required,string" json:"runId"`
-	RequestJson  string `thrift:"requestJson,6,required" frugal:"6,required,string" json:"requestJson"`
+	ServiceToken string  `thrift:"serviceToken,1,required" frugal:"1,required,string" json:"serviceToken"`
+	OwnerId      string  `thrift:"ownerId,2,required" frugal:"2,required,string" json:"ownerId"`
+	AgentId      string  `thrift:"agentId,3,required" frugal:"3,required,string" json:"agentId"`
+	SessionId    string  `thrift:"sessionId,4,required" frugal:"4,required,string" json:"sessionId"`
+	RunId        string  `thrift:"runId,5,required" frugal:"5,required,string" json:"runId"`
+	RequestJson  string  `thrift:"requestJson,6,required" frugal:"6,required,string" json:"requestJson"`
+	ModelId      *string `thrift:"modelId,7,optional" frugal:"7,optional,string" json:"modelId,omitempty"`
 }
 
 func NewGatewayChatRequest() *GatewayChatRequest {
@@ -808,6 +845,15 @@ func (p *GatewayChatRequest) GetRunId() (v string) {
 func (p *GatewayChatRequest) GetRequestJson() (v string) {
 	return p.RequestJson
 }
+
+var GatewayChatRequest_ModelId_DEFAULT string
+
+func (p *GatewayChatRequest) GetModelId() (v string) {
+	if !p.IsSetModelId() {
+		return GatewayChatRequest_ModelId_DEFAULT
+	}
+	return *p.ModelId
+}
 func (p *GatewayChatRequest) SetServiceToken(val string) {
 	p.ServiceToken = val
 }
@@ -826,6 +872,13 @@ func (p *GatewayChatRequest) SetRunId(val string) {
 func (p *GatewayChatRequest) SetRequestJson(val string) {
 	p.RequestJson = val
 }
+func (p *GatewayChatRequest) SetModelId(val *string) {
+	p.ModelId = val
+}
+
+func (p *GatewayChatRequest) IsSetModelId() bool {
+	return p.ModelId != nil
+}
 
 func (p *GatewayChatRequest) String() string {
 	if p == nil {
@@ -841,6 +894,7 @@ var fieldIDToName_GatewayChatRequest = map[int16]string{
 	4: "sessionId",
 	5: "runId",
 	6: "requestJson",
+	7: "modelId",
 }
 
 type GatewayChatResponse struct {

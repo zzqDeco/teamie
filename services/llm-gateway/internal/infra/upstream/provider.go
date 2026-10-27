@@ -29,7 +29,7 @@ type Provider struct {
 
 // The gateway is the only provider codec. Runtime sends native blocks and
 // request-scoped tool definitions; credentials and model policy stay here.
-func (p Provider) nativeModel(ctx context.Context, c domain.Config, key, raw string, streaming bool, messageLimits ...int) (model.AgenticModel, []*schema.AgenticMessage, []model.Option, error) {
+func (p Provider) nativeModel(ctx context.Context, c domain.ResolvedModel, key, raw string, streaming bool, messageLimits ...int) (model.AgenticModel, []*schema.AgenticMessage, []model.Option, error) {
 	if len(raw) > domain.MaxRequestBytes {
 		return nil, nil, nil, domain.Err(413, "request_too_large", "Model request is too large")
 	}
@@ -155,7 +155,7 @@ func providerError(ctx context.Context, err error) error {
 	return domain.ErrWithCause(502, "invalid_upstream_response", "Provider returned an invalid model response", err)
 }
 
-func (p Provider) Chat(ctx context.Context, c domain.Config, key, raw string, messageLimits ...int) (string, int64, int64, error) {
+func (p Provider) Chat(ctx context.Context, c domain.ResolvedModel, key, raw string, messageLimits ...int) (string, int64, int64, error) {
 	if ctx.Err() != nil {
 		return "", 0, 0, domain.StreamError(ctx, "")
 	}
@@ -182,7 +182,7 @@ func (p Provider) Chat(ctx context.Context, c domain.Config, key, raw string, me
 // The official extension emits actual incremental reasoning, text and function
 // blocks. Closing this function always cancels its upstream context before
 // closing the official reader, including when the downstream write fails.
-func (p Provider) Stream(ctx context.Context, c domain.Config, key, raw string, emit func(string) error, messageLimits ...int) (prompt, completion int64, err error) {
+func (p Provider) Stream(ctx context.Context, c domain.ResolvedModel, key, raw string, emit func(string) error, messageLimits ...int) (prompt, completion int64, err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	chat, input, opts, err := p.nativeModel(ctx, c, key, raw, true, messageLimits...)
@@ -222,7 +222,7 @@ func (p Provider) Stream(ctx context.Context, c domain.Config, key, raw string, 
 type providerBoundary struct {
 	next         http.RoundTripper
 	key          string
-	config       domain.Config
+	config       domain.ResolvedModel
 	streaming    bool
 	messageLimit int
 }

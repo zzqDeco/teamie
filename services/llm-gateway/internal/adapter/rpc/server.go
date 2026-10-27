@@ -49,7 +49,7 @@ func (s *Server) Ping(ctx context.Context, r *agent.PingRequest) (*agent.PingRes
 	if r == nil {
 		return &agent.PingResponse{Ready: false}, nil
 	}
-	st := s.App.Ping(ctx, r.GetServiceToken())
+	st := s.App.Ping(ctx, r.GetServiceToken(), r.GetModelId())
 	if !st.Ready && st.Configured == nil {
 		return &agent.PingResponse{Ready: false}, nil
 	}

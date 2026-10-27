@@ -1,6 +1,7 @@
 import {
   IDL_ROUTES,
   type AdminModelConfigResp,
+  type AdminModelProfileDTO,
   type AdminUserPageResp,
   type AgentListResp,
   type AgentResp,
@@ -12,6 +13,7 @@ import {
   type BootstrapResp,
   type ChangePasswordReq,
   type ConversationDTO,
+  type CreateAdminModelProfileReq,
   type CreateAgentReq,
   type CreatePasswordResetLinkResp,
   type CreateWorkspaceReq,
@@ -25,10 +27,12 @@ import {
   type MemberDTO,
   type MentionDTO,
   type MessageDTO,
+  type ModelCatalogResp,
   type ModelConfigDTO,
   type PasswordResetDTO,
   type PasswordResetInspectionResp,
   type PublicAgentDTO,
+  type PublicModelOptionDTO,
   type RegisterReq,
   type RegistrationInviteDTO,
   type RegistrationMetadataResp,
@@ -37,7 +41,9 @@ import {
   type SessionResp,
   type SyncResp,
   type TestAdminModelConfigResp,
-  type UpdateAdminModelConfigReq,
+  type UpdateAdminWebSearchConfigReq,
+  type UpdateAdminModelRoutingReq,
+  type UpdateAdminModelProfileReq,
   type UpdateProfileReq,
   type UserDTO,
   type WebSearchConfigDTO,
@@ -98,6 +104,7 @@ function publicAgent(value: Agent, workspaceId?: string): Agent {
     enabled: value.enabled,
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
+    ...(value.modelId ? { modelId: value.modelId } : {}),
   };
 }
 export type AgentProfileInput = {
@@ -105,6 +112,7 @@ export type AgentProfileInput = {
   description?: string;
   workspaceIds: string[];
   enabled?: boolean;
+  modelId?: string;
 };
 function publicAgentProfile(
   value: Partial<AgentProfileInput>,
@@ -118,9 +126,15 @@ function publicAgentProfile(
       ? {}
       : { workspaceIds: [...value.workspaceIds] }),
     ...(value.enabled === undefined ? {} : { enabled: value.enabled }),
+    ...(value.modelId === undefined ? {} : { modelId: value.modelId }),
   };
 }
 export type WebSearchGatewayConfig = WebSearchConfigDTO;
+export type AdminModelProfile = AdminModelProfileDTO;
+export type PublicModelOption = PublicModelOptionDTO;
+export type ModelCatalog = ModelCatalogResp;
+export type CreateModelProfileInput = CreateAdminModelProfileReq;
+export type UpdateModelProfileInput = Omit<UpdateAdminModelProfileReq, "id">;
 export type ModelGatewayConfig = Omit<
   ModelConfigDTO,
   "contextWindowTokens" | "webSearch"
@@ -132,13 +146,35 @@ export type ModelGateway = Omit<AdminModelConfigResp, "config" | "status"> & {
   config: ModelGatewayConfig;
   status: "unconfigured" | "ready" | "disabled";
 };
-export type ModelGatewayInput = Omit<
-  UpdateAdminModelConfigReq,
-  "clearApiKey" | "clearWebSearchApiKey"
-> & {
-  clearApiKey?: boolean;
-  clearWebSearchApiKey?: boolean;
-};
+export type WebSearchInput = UpdateAdminWebSearchConfigReq;
+export type ModelRoutingInput = UpdateAdminModelRoutingReq;
+function publicAdminModelProfile(model: AdminModelProfile): AdminModelProfile {
+  return {
+    id: model.id,
+    displayName: model.displayName,
+    description: model.description,
+    baseUrl: model.baseUrl,
+    model: model.model,
+    contextWindowTokens: model.contextWindowTokens,
+    hasApiKey: model.hasApiKey,
+    enabled: model.enabled,
+    configured: model.configured,
+    isDefault: model.isDefault,
+    updatedAt: model.updatedAt,
+  };
+}
+function publicModelCatalog(value: ModelCatalog): ModelCatalog {
+  return {
+    models: (value.models || []).map((item) => ({
+      id: item.id,
+      displayName: item.displayName,
+      description: item.description,
+      contextWindowTokens: item.contextWindowTokens,
+      isDefault: item.isDefault,
+    })),
+    ...(value.defaultModelId ? { defaultModelId: value.defaultModelId } : {}),
+  };
+}
 function publicModelGateway(value: ModelGateway): ModelGateway {
   // Project only public metadata even if a server accidentally adds a secret field.
   return {
@@ -163,7 +199,26 @@ function publicModelGateway(value: ModelGateway): ModelGateway {
             },
           }),
     },
+    routing: {
+      defaultModelId: value.routing.defaultModelId,
+      effectiveModelId: value.routing.effectiveModelId,
+    },
+    webSearch: {
+      provider: value.webSearch.provider,
+      hasApiKey: value.webSearch.hasApiKey,
+      enabled: value.webSearch.enabled,
+      configured: value.webSearch.configured,
+      ...(value.webSearch.updatedAt
+        ? { updatedAt: value.webSearch.updatedAt }
+        : {}),
+    },
     status: value.status,
+    ...(value.models === undefined
+      ? {}
+      : { models: value.models.map(publicAdminModelProfile) }),
+    ...(value.defaultModelId === undefined
+      ? {}
+      : { defaultModelId: value.defaultModelId }),
   };
 }
 export type Attachment = AttachmentDTO;
@@ -185,10 +240,7 @@ export type Bootstrap = Omit<
   conversations: Conversation[];
   attachmentLimits?: AttachmentLimits;
 };
-export type SyncEvent = Omit<
-  EventDTO,
-  "type" | "message" | "conversation"
-> & {
+export type SyncEvent = Omit<EventDTO, "type" | "message" | "conversation"> & {
   type:
     | "message.created"
     | "message.updated"
@@ -234,7 +286,12 @@ export class ApiError extends Error {
   status: number;
   code: string;
   retryAfterMs?: number;
-  constructor(status: number, code: string, message: string, retryAfterMs?: number) {
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    retryAfterMs?: number,
+  ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
@@ -283,9 +340,12 @@ export class TeamieClient {
     });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
-      const current = authentication === "session" && sessionToken === this.csrfToken;
-      const sessionChanged = data.error?.code === "session_changed" ||
-        response.status === 403 && ["csrf_failed", "invalid_csrf"].includes(data.error?.code);
+      const current =
+        authentication === "session" && sessionToken === this.csrfToken;
+      const sessionChanged =
+        data.error?.code === "session_changed" ||
+        (response.status === 403 &&
+          ["csrf_failed", "invalid_csrf"].includes(data.error?.code));
       if (current && sessionChanged) this.onSessionChanged?.();
       if (
         authentication === "session" &&
@@ -306,19 +366,31 @@ export class TeamieClient {
         this.onForbidden?.();
       const retryAfter = response.headers?.get("Retry-After");
       const retryAfterMs = retryAfter
-        ? /^\d+(?:\.\d+)?$/.test(retryAfter) ? Number(retryAfter) * 1000
+        ? /^\d+(?:\.\d+)?$/.test(retryAfter)
+          ? Number(retryAfter) * 1000
           : Date.parse(retryAfter) - Date.now()
         : undefined;
       throw new ApiError(
         response.status,
         data.error?.code ?? "request_failed",
         data.error?.message ?? `请求失败 (${response.status})`,
-        retryAfterMs !== undefined && Number.isFinite(retryAfterMs) ? Math.max(0, retryAfterMs) : undefined,
+        retryAfterMs !== undefined && Number.isFinite(retryAfterMs)
+          ? Math.max(0, retryAfterMs)
+          : undefined,
       );
     }
-    const value = response.status === 204 ? undefined : responseType === "blob"
-      ? await response.blob() : await response.json();
-    if (response.status !== 204 && authentication === "session" && !/^\/auth\/(?:login|register|session)$/.test(path) && sessionToken !== this.csrfToken)
+    const value =
+      response.status === 204
+        ? undefined
+        : responseType === "blob"
+          ? await response.blob()
+          : await response.json();
+    if (
+      response.status !== 204 &&
+      authentication === "session" &&
+      !/^\/auth\/(?:login|register|session)$/.test(path) &&
+      sessionToken !== this.csrfToken
+    )
       throw new ApiError(409, "stale_session", "账号已变化，请重试。");
     return value as T;
   }
@@ -366,7 +438,10 @@ export class TeamieClient {
   createPasswordResetLink = (userId: string) =>
     this.#request<CreatedPasswordResetLink>(
       routePath(IDL_ROUTES.CreatePasswordResetLink, { id: userId }),
-      { method: IDL_ROUTES.CreatePasswordResetLink.method, body: JSON.stringify({}) },
+      {
+        method: IDL_ROUTES.CreatePasswordResetLink.method,
+        body: JSON.stringify({}),
+      },
     );
   inspectPasswordReset = (token: string) =>
     this.#request<PasswordResetInspection>(
@@ -438,26 +513,78 @@ export class TeamieClient {
       )
     ).agents.map((agent) => publicAgent(agent, id)),
   });
+  modelCatalog = async () =>
+    publicModelCatalog(
+      await this.#request<ModelCatalog>(IDL_ROUTES.GetModelCatalog.clientPath),
+    );
   modelGateway = async () =>
     publicModelGateway(
       await this.#request<ModelGateway>(
         IDL_ROUTES.GetAdminModelConfig.clientPath,
       ),
     );
-  saveModelGateway = async (config: ModelGatewayInput) =>
+  saveWebSearch = async (input: WebSearchInput) =>
     publicModelGateway(
       await this.#request<ModelGateway>(
-        IDL_ROUTES.UpdateAdminModelConfig.clientPath,
+        IDL_ROUTES.UpdateAdminWebSearchConfig.clientPath,
         {
-          method: IDL_ROUTES.UpdateAdminModelConfig.method,
-          body: JSON.stringify(config),
+          method: IDL_ROUTES.UpdateAdminWebSearchConfig.method,
+          body: JSON.stringify(input),
+        },
+      ),
+    );
+  saveModelRouting = async (input: ModelRoutingInput) =>
+    publicModelGateway(
+      await this.#request<ModelGateway>(
+        IDL_ROUTES.UpdateAdminModelRouting.clientPath,
+        {
+          method: IDL_ROUTES.UpdateAdminModelRouting.method,
+          body: JSON.stringify(input),
         },
       ),
     );
   testModelGateway = () =>
     this.#request<TestAdminModelConfigResp>(
       IDL_ROUTES.TestAdminModelConfig.clientPath,
-      { method: IDL_ROUTES.TestAdminModelConfig.method, body: JSON.stringify({}) },
+      {
+        method: IDL_ROUTES.TestAdminModelConfig.method,
+        body: JSON.stringify({}),
+      },
+    );
+  createModelProfile = async (input: CreateModelProfileInput) =>
+    publicModelGateway(
+      await this.#request<ModelGateway>(
+        IDL_ROUTES.CreateAdminModelProfile.clientPath,
+        {
+          method: IDL_ROUTES.CreateAdminModelProfile.method,
+          body: JSON.stringify(input),
+        },
+      ),
+    );
+  updateModelProfile = async (id: string, input: UpdateModelProfileInput) =>
+    publicModelGateway(
+      await this.#request<ModelGateway>(
+        routePath(IDL_ROUTES.UpdateAdminModelProfile, { id }),
+        {
+          method: IDL_ROUTES.UpdateAdminModelProfile.method,
+          body: JSON.stringify(input),
+        },
+      ),
+    );
+  deleteModelProfile = async (id: string) =>
+    publicModelGateway(
+      await this.#request<ModelGateway>(
+        routePath(IDL_ROUTES.DeleteAdminModelProfile, { id }),
+        { method: IDL_ROUTES.DeleteAdminModelProfile.method },
+      ),
+    );
+  testModelProfile = (id: string) =>
+    this.#request<TestAdminModelConfigResp>(
+      routePath(IDL_ROUTES.TestAdminModelProfile, { id }),
+      {
+        method: IDL_ROUTES.TestAdminModelProfile.method,
+        body: JSON.stringify({}),
+      },
     );
   login = (email: string, password: string) =>
     this.#request<Session>(IDL_ROUTES.Login.clientPath, {
@@ -654,7 +781,11 @@ export class TeamieClient {
       }),
       { method: IDL_ROUTES.DeletePendingAttachment.method },
     );
-  attachmentContent = (conversationId: string, attachmentId: string, signal?: AbortSignal) =>
+  attachmentContent = (
+    conversationId: string,
+    attachmentId: string,
+    signal?: AbortSignal,
+  ) =>
     this.#request<Blob>(
       routePath(IDL_ROUTES.DownloadAttachment, {
         id: conversationId,

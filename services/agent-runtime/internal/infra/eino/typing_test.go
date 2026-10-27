@@ -411,6 +411,7 @@ func TestNativeTurnTypingWaitsForModelSlotAndClearsOnCompletion(t *testing.T) {
 	other := uuid.NewString()
 	blocking := &typingGatewayFixture{fixtureGateway: base, entered: make(chan struct{}, 2), release: make(chan struct{}, 2)}
 	e.Gateway = blocking
+	e.slots = make(chan struct{}, 1)
 	e.slots <- struct{}{} // Another Agent holds the host's foreground slot.
 	cancel, done := startFixtureWorker(t, e, f)
 	waitFor(t, func() bool { return count(t, s, "SELECT count(*) FROM runtime_runs WHERE state='running'") == 1 })

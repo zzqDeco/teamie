@@ -51,7 +51,7 @@ func toPublicAgentDTO(p domain.PublicAgent) *controlgen.PublicAgentDTO {
 	if ws == nil {
 		ws = []string{}
 	}
-	return &controlgen.PublicAgentDTO{
+	dto := &controlgen.PublicAgentDTO{
 		ID:           p.ID,
 		PrincipalId:  p.PrincipalID,
 		OwnerId:      p.OwnerID,
@@ -63,6 +63,11 @@ func toPublicAgentDTO(p domain.PublicAgent) *controlgen.PublicAgentDTO {
 		CreatedAt:    p.CreatedAt.Format(time.RFC3339Nano),
 		UpdatedAt:    p.UpdatedAt.Format(time.RFC3339Nano),
 	}
+	if p.ModelID != "" {
+		id := p.ModelID
+		dto.ModelId = &id
+	}
+	return dto
 }
 
 func toPublicAgentDTOList(agents []domain.Agent, workspaceID string) []*controlgen.PublicAgentDTO {
@@ -78,6 +83,7 @@ func toCreateChanges(req *controlgen.CreateAgentReq) domain.Changes {
 	ch := domain.Changes{
 		Name:        req.Name,
 		Description: req.Description,
+		ModelID:     req.ModelId,
 		Enabled:     req.Enabled,
 	}
 	if req.WorkspaceIds != nil {
@@ -91,6 +97,7 @@ func toUpdateChanges(req *controlgen.UpdateAgentReq) domain.Changes {
 	ch := domain.Changes{
 		Name:        req.Name,
 		Description: req.Description,
+		ModelID:     req.ModelId,
 		Enabled:     req.Enabled,
 	}
 	if req.WorkspaceIds != nil {

@@ -43,6 +43,7 @@ func (e *ModelError) DiagnosticMessage() string {
 type GatewayModel struct {
 	Client                  modelgatewayservice.Client
 	Token, OwnerID, AgentID string
+	ModelID                 string
 	StreamURL               string
 	ContextWindow           func() int
 	ModelConfigID           func() string
@@ -52,7 +53,7 @@ type GatewayModel struct {
 	Authorize               func(context.Context) error
 }
 
-func safeGatewayPing(ctx context.Context, client modelgatewayservice.Client, token string) (resp *wire.PingResponse, err error) {
+func safeGatewayPing(ctx context.Context, client modelgatewayservice.Client, token string, modelIDs ...string) (resp *wire.PingResponse, err error) {
 	if client == nil {
 		return nil, errors.New("nil gateway client")
 	}
@@ -62,7 +63,12 @@ func safeGatewayPing(ctx context.Context, client modelgatewayservice.Client, tok
 			err = errors.New("gateway ping unimplemented")
 		}
 	}()
-	return client.Ping(ctx, &wire.PingRequest{ServiceToken: &token})
+	req := &wire.PingRequest{ServiceToken: &token}
+	if len(modelIDs) > 0 && strings.TrimSpace(modelIDs[0]) != "" {
+		id := strings.TrimSpace(modelIDs[0])
+		req.ModelId = &id
+	}
+	return client.Ping(ctx, req)
 }
 
 func (m *GatewayModel) liveModelConfigID(ctx context.Context) (string, bool) {
@@ -75,7 +81,7 @@ func (m *GatewayModel) liveModelConfigID(ctx context.Context) (string, bool) {
 	}
 	if hasRPC {
 		pc, cancel := context.WithTimeout(ctx, 2*time.Second)
-		ping, err := safeGatewayPing(pc, m.Client, m.Token)
+		ping, err := safeGatewayPing(pc, m.Client, m.Token, m.ModelID)
 		cancel()
 		if err == nil && ping != nil && ping.Ready && ping.GetConfigured() && ping.GetEnabled() {
 			if id := strings.TrimSpace(ping.GetModelConfigId()); id != "" {
@@ -186,7 +192,11 @@ func (m *GatewayModel) Generate(ctx context.Context, messages []*schema.AgenticM
 	}
 	reqConfigID := adm.ConfigID
 	phase = "gateway-request"
-	response, e := m.Client.Chat(withExpectedModelConfigID(ctx, reqConfigID), &wire.GatewayChatRequest{ServiceToken: m.Token, OwnerId: m.OwnerID, AgentId: m.AgentID, SessionId: "agent:" + m.AgentID, RunId: executionID(run), RequestJson: string(request)})
+	chatReq := &wire.GatewayChatRequest{ServiceToken: m.Token, OwnerId: m.OwnerID, AgentId: m.AgentID, SessionId: "agent:" + m.AgentID, RunId: executionID(run), RequestJson: string(request)}
+	if trimmedModelID := strings.TrimSpace(m.ModelID); trimmedModelID != "" {
+		chatReq.ModelId = &trimmedModelID
+	}
+	response, e := m.Client.Chat(withExpectedModelConfigID(ctx, reqConfigID), chatReq)
 	if e != nil {
 		var gatewayError *ModelError
 		if errors.As(e, &gatewayError) {
