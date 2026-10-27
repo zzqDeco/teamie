@@ -120,6 +120,10 @@ func (e *Engine) CancelAgentTasks(ctx context.Context, agentID string) {
 }
 
 func (e *Engine) WorkAgent(ctx context.Context, profile domain.AgentProfile, lease *domain.Lease) {
+	e.work(ctx, agentDefinition(profile), lease)
+}
+
+func agentDefinition(profile domain.AgentProfile) *wire.AgentDefinition {
 	def := &wire.AgentDefinition{
 		Id:           profile.ID,
 		OwnerId:      profile.OwnerID,
@@ -129,11 +133,15 @@ func (e *Engine) WorkAgent(ctx context.Context, profile domain.AgentProfile, lea
 		Enabled:      profile.Enabled,
 		Revision:     profile.Revision,
 	}
+	if profile.ModelID != "" {
+		id := profile.ModelID
+		def.ModelId = &id
+	}
 	if profile.Deleted {
 		del := "deleted"
 		def.DeletedAt = &del
 	}
-	e.work(ctx, def, lease)
+	return def
 }
 
 type turnGuard struct {

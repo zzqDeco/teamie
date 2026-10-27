@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GOPATH_BIN="$(go env GOPATH)/bin"
-export PATH="${GOPATH_BIN}:${PATH}"
+export PATH="${PATH}:${GOPATH_BIN}"
 
 if ! command -v node >/dev/null 2>&1; then
   echo "missing required codegen binary: node" >&2

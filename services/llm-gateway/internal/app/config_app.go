@@ -48,19 +48,6 @@ type PingStatus struct {
 	ModelConfigID       *string
 }
 
-// SaveConfigInput holds the administrator configuration update command.
-type SaveConfigInput struct {
-	BaseURL              string
-	Model                string
-	APIKey               *string
-	Enabled              bool
-	ClearAPIKey          bool
-	ContextWindowTokens  *int64
-	WebSearchEnabled     *bool
-	WebSearchAPIKey      *string
-	ClearWebSearchAPIKey bool
-}
-
 // CreateModelProfileInput holds the command to create a new model profile.
 type CreateModelProfileInput struct {
 	ID                  string
@@ -71,7 +58,6 @@ type CreateModelProfileInput struct {
 	APIKey              *string
 	Enabled             bool
 	ContextWindowTokens *int64
-	IsDefault           bool
 }
 
 // UpdateModelProfileInput holds the command to update an existing model profile.
@@ -85,7 +71,6 @@ type UpdateModelProfileInput struct {
 	ClearAPIKey         bool
 	Enabled             *bool
 	ContextWindowTokens *int64
-	IsDefault           *bool
 }
 
 // Ping checks service token and returns current gateway configuration readiness for the requested model (or default fallback).
@@ -98,11 +83,11 @@ func (s *Service) Ping(ctx context.Context, serviceToken string, modelIDs ...str
 	if len(modelIDs) > 0 {
 		requestedModelID = modelIDs[0]
 	}
-	c = c.ResolveModel(requestedModelID)
-	configured, enabled := c.Configured(), c.Enabled
-	cw := c.ContextWindow()
+	resolved := c.ResolveModel(requestedModelID)
+	configured, enabled := resolved.Configured(), resolved.Enabled
+	cw := resolved.ContextWindow()
 	var configID *string
-	if id := c.CountingConfigID(); id != "" {
+	if id := resolved.CountingConfigID(); id != "" {
 		configID = &id
 	}
 	return PingStatus{
@@ -117,48 +102,6 @@ func (s *Service) Ping(ctx context.Context, serviceToken string, modelIDs ...str
 // LoadConfig loads the persisted gateway configuration.
 func (s *Service) LoadConfig(ctx context.Context) (domain.Config, error) {
 	return s.Store.Load(ctx)
-}
-
-// SaveConfig validates and persists updated administrator gateway configuration.
-func (s *Service) SaveConfig(ctx context.Context, in SaveConfigInput) (domain.Config, error) {
-	s.ensureInit()
-	in.BaseURL = strings.TrimRight(strings.TrimSpace(in.BaseURL), "/")
-	in.Model = strings.TrimSpace(in.Model)
-	if len(in.Model) > 160 || strings.ContainsAny(in.Model, "\r\n\x00") ||
-		in.APIKey != nil && (in.ClearAPIKey || len(*in.APIKey) == 0 || len(*in.APIKey) > 16384 || strings.ContainsAny(*in.APIKey, "\r\n\x00")) {
-		return domain.Config{}, domain.Err(400, "invalid_request", "Invalid model configuration")
-	}
-	if in.WebSearchAPIKey != nil && (in.ClearWebSearchAPIKey || len(*in.WebSearchAPIKey) == 0 || len(*in.WebSearchAPIKey) > 16384 || strings.ContainsAny(*in.WebSearchAPIKey, "\r\n\x00")) {
-		return domain.Config{}, domain.Err(400, "invalid_request", "Invalid web search configuration")
-	}
-	if in.ContextWindowTokens != nil && (*in.ContextWindowTokens < domain.MinContextWindow || *in.ContextWindowTokens > domain.MaxContextWindow) {
-		return domain.Config{}, domain.Err(400, "invalid_request", "Context window must be between 4096 and 2000000 tokens")
-	}
-	validateCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	if err := domain.ValidateEndpoint(validateCtx, in.BaseURL); err != nil {
-		return domain.Config{}, err
-	}
-	c := domain.Config{
-		BaseURL:           in.BaseURL,
-		Model:             in.Model,
-		Enabled:           in.Enabled,
-		WebSearchAPIKey:   in.WebSearchAPIKey,
-		ClearWebSearchKey: in.ClearWebSearchAPIKey,
-	}
-	if in.WebSearchEnabled != nil {
-		c.WebSearchEnabled = *in.WebSearchEnabled
-		c.WebSearchEnabledSet = true
-	}
-	if in.ContextWindowTokens != nil {
-		c.ContextWindowTokens = *in.ContextWindowTokens
-	}
-	saved, err := s.Store.Save(validateCtx, c, in.APIKey, in.ClearAPIKey, s.Cipher)
-	if err != nil {
-		return domain.Config{}, err
-	}
-	s.CancelDisabledActiveRuns(saved)
-	return saved, nil
 }
 
 // CreateModelProfile validates and adds a new model profile to the gateway catalog.
@@ -192,65 +135,48 @@ func (s *Service) CreateModelProfile(ctx context.Context, in CreateModelProfileI
 	if err := domain.ValidateEndpoint(validateCtx, in.BaseURL); err != nil {
 		return domain.Config{}, err
 	}
-	cmd := domain.Config{
-		ModelsMutation: func(old domain.Config, crypto domain.Cipher) (domain.Config, error) {
-			models := old.EffectiveModels()
-			id := in.ID
-			if id == "" {
-				id = domain.SuggestModelID(in.DisplayName, in.Model, models)
-			} else {
-				for _, m := range models {
-					if m.ID == id {
-						return domain.Config{}, domain.Err(409, "model_exists", "Model ID already exists")
-					}
+	saved, err := s.Store.UpdateModels(validateCtx, func(models []domain.ModelProfile) ([]domain.ModelProfile, error) {
+		id := in.ID
+		if id == "" {
+			id = domain.SuggestModelID(in.DisplayName, in.Model, models)
+		} else {
+			for _, m := range models {
+				if m.ID == id {
+					return nil, domain.Err(409, "model_exists", "Model ID already exists")
 				}
 			}
-			var cipherKey []byte
-			if in.APIKey != nil {
-				enc, err := crypto.Encrypt(*in.APIKey)
-				if err != nil {
-					return domain.Config{}, err
-				}
-				cipherKey = enc
-			} else {
-				for _, m := range models {
-					if m.BaseURL == in.BaseURL && len(m.CipherKey) > 0 {
-						cipherKey = m.CipherKey
-						break
-					}
-				}
+		}
+		var cipherKey []byte
+		if in.APIKey != nil {
+			enc, err := s.Cipher.Encrypt(*in.APIKey)
+			if err != nil {
+				return nil, err
 			}
-			displayName := in.DisplayName
-			if displayName == "" {
-				displayName = in.Model
-			}
-			now := time.Now().UTC()
-			profile := domain.ModelProfile{
-				ID:                  id,
-				DisplayName:         displayName,
-				Description:         in.Description,
-				BaseURL:             in.BaseURL,
-				Model:               in.Model,
-				CipherKey:           cipherKey,
-				ContextWindowTokens: cw,
-				Enabled:             in.Enabled,
-				CreatedAt:           now,
-				UpdatedAt:           now,
-			}
-			next := old
-			next.Models = append(models, profile)
-			if in.IsDefault || len(models) == 0 || next.DefaultModelID == "" {
-				next.DefaultModelID = id
-			}
-			next.SyncPrimaryFromModels()
-			return next, nil
-		},
-	}
-	saved, err := s.Store.Save(validateCtx, cmd, nil, false, s.Cipher)
+			cipherKey = enc
+		}
+		displayName := in.DisplayName
+		if displayName == "" {
+			displayName = in.Model
+		}
+		now := time.Now().UTC()
+		profile := domain.ModelProfile{
+			ID:                  id,
+			DisplayName:         displayName,
+			Description:         in.Description,
+			BaseURL:             in.BaseURL,
+			Model:               in.Model,
+			CipherKey:           cipherKey,
+			ContextWindowTokens: cw,
+			Enabled:             in.Enabled,
+			CreatedAt:           now,
+			UpdatedAt:           now,
+		}
+		return append(models, profile), nil
+	})
 	if err != nil {
 		return domain.Config{}, err
 	}
-	s.CancelDisabledActiveRuns(saved)
+	s.cancelUnavailableModels(saved)
 	return saved, nil
 }
 
@@ -297,67 +223,57 @@ func (s *Service) UpdateModelProfile(ctx context.Context, in UpdateModelProfileI
 		}
 		in.BaseURL = &trimmed
 	}
-	cmd := domain.Config{
-		ModelsMutation: func(old domain.Config, crypto domain.Cipher) (domain.Config, error) {
-			models := old.EffectiveModels()
-			idx := -1
-			for i, m := range models {
-				if m.ID == in.ID {
-					idx = i
-					break
-				}
+	saved, err := s.Store.UpdateModels(validateCtx, func(models []domain.ModelProfile) ([]domain.ModelProfile, error) {
+		idx := -1
+		for i, m := range models {
+			if m.ID == in.ID {
+				idx = i
+				break
 			}
-			if idx < 0 {
-				return domain.Config{}, domain.Err(404, "not_found", "Model profile not found")
+		}
+		if idx < 0 {
+			return nil, domain.Err(404, "not_found", "Model profile not found")
+		}
+		m := models[idx]
+		if in.BaseURL != nil {
+			m.BaseURL = *in.BaseURL
+		}
+		if in.Model != nil {
+			m.Model = *in.Model
+		}
+		if in.DisplayName != nil {
+			m.DisplayName = *in.DisplayName
+			if m.DisplayName == "" {
+				m.DisplayName = m.Model
 			}
-			m := models[idx]
-			if in.BaseURL != nil {
-				m.BaseURL = *in.BaseURL
+		}
+		if in.Description != nil {
+			m.Description = *in.Description
+		}
+		if in.ContextWindowTokens != nil {
+			m.ContextWindowTokens = *in.ContextWindowTokens
+		}
+		if in.Enabled != nil {
+			m.Enabled = *in.Enabled
+		}
+		if in.ClearAPIKey {
+			m.CipherKey = nil
+		}
+		if in.APIKey != nil {
+			enc, err := s.Cipher.Encrypt(*in.APIKey)
+			if err != nil {
+				return nil, err
 			}
-			if in.Model != nil {
-				m.Model = *in.Model
-			}
-			if in.DisplayName != nil {
-				m.DisplayName = *in.DisplayName
-				if m.DisplayName == "" {
-					m.DisplayName = m.Model
-				}
-			}
-			if in.Description != nil {
-				m.Description = *in.Description
-			}
-			if in.ContextWindowTokens != nil {
-				m.ContextWindowTokens = *in.ContextWindowTokens
-			}
-			if in.Enabled != nil {
-				m.Enabled = *in.Enabled
-			}
-			if in.ClearAPIKey {
-				m.CipherKey = nil
-			}
-			if in.APIKey != nil {
-				enc, err := crypto.Encrypt(*in.APIKey)
-				if err != nil {
-					return domain.Config{}, err
-				}
-				m.CipherKey = enc
-			}
-			m.UpdatedAt = time.Now().UTC()
-			models[idx] = m
-			next := old
-			next.Models = models
-			if in.IsDefault != nil && *in.IsDefault {
-				next.DefaultModelID = m.ID
-			}
-			next.SyncPrimaryFromModels()
-			return next, nil
-		},
-	}
-	saved, err := s.Store.Save(validateCtx, cmd, nil, false, s.Cipher)
+			m.CipherKey = enc
+		}
+		m.UpdatedAt = time.Now().UTC()
+		models[idx] = m
+		return models, nil
+	})
 	if err != nil {
 		return domain.Config{}, err
 	}
-	s.CancelDisabledActiveRuns(saved)
+	s.cancelUnavailableModels(saved)
 	return saved, nil
 }
 
@@ -368,32 +284,25 @@ func (s *Service) DeleteModelProfile(ctx context.Context, id string) (domain.Con
 	if !domain.ValidModelID(id) {
 		return domain.Config{}, domain.Err(400, "invalid_request", "Invalid model ID")
 	}
-	cmd := domain.Config{
-		ModelsMutation: func(old domain.Config, _ domain.Cipher) (domain.Config, error) {
-			models := old.EffectiveModels()
-			filtered := make([]domain.ModelProfile, 0, len(models))
-			found := false
-			for _, m := range models {
-				if m.ID == id {
-					found = true
-					continue
-				}
-				filtered = append(filtered, m)
+	saved, err := s.Store.UpdateModels(ctx, func(models []domain.ModelProfile) ([]domain.ModelProfile, error) {
+		filtered := make([]domain.ModelProfile, 0, len(models))
+		found := false
+		for _, m := range models {
+			if m.ID == id {
+				found = true
+				continue
 			}
-			if !found {
-				return domain.Config{}, domain.Err(404, "not_found", "Model profile not found")
-			}
-			next := old
-			next.Models = filtered
-			next.SyncPrimaryFromModels()
-			return next, nil
-		},
-	}
-	saved, err := s.Store.Save(ctx, cmd, nil, false, s.Cipher)
+			filtered = append(filtered, m)
+		}
+		if !found {
+			return nil, domain.Err(404, "not_found", "Model profile not found")
+		}
+		return filtered, nil
+	})
 	if err != nil {
 		return domain.Config{}, err
 	}
-	s.CancelDisabledActiveRuns(saved)
+	s.cancelUnavailableModels(saved)
 	return saved, nil
 }
 
@@ -407,7 +316,7 @@ func (s *Service) ResolveModelProfileForTest(ctx context.Context, id string) (do
 	if err != nil {
 		return domain.ModelProfile{}, err
 	}
-	for _, m := range c.EffectiveModels() {
+	for _, m := range c.Models {
 		if m.ID == id {
 			if !m.Configured() {
 				return domain.ModelProfile{}, domain.Err(409, "model_unconfigured", "The selected model profile is not configured")
@@ -421,17 +330,64 @@ func (s *Service) ResolveModelProfileForTest(ctx context.Context, id string) (do
 	return domain.ModelProfile{}, domain.Err(404, "not_found", "Model profile not found")
 }
 
-// CancelDisabledActiveRuns cancels in-flight model or web-search calls when disabled or unconfigured.
-func (s *Service) CancelDisabledActiveRuns(c domain.Config) {
-	s.ensureInit()
-	if !c.Enabled || !c.Configured() || !c.WebSearchEnabled || !c.WebSearchConfigured() {
-		s.mu.Lock()
-		for key, cancel := range s.active {
-			isWeb := strings.Contains(key, "/web/")
-			if (!isWeb && (!c.Enabled || !c.Configured())) || (isWeb && (!c.WebSearchEnabled || !c.WebSearchConfigured())) {
-				cancel()
-			}
+// UpdateRouting changes only the administrator's selected default model.
+func (s *Service) UpdateRouting(ctx context.Context, id string) (domain.Config, error) {
+	id = strings.TrimSpace(id)
+	if id != "" && !domain.ValidModelID(id) {
+		return domain.Config{}, domain.Err(400, "invalid_request", "Invalid model ID")
+	}
+	return s.Store.UpdateRouting(ctx, domain.ModelRoutingConfig{DefaultModelID: id})
+}
+
+type UpdateWebSearchInput struct {
+	Enabled     *bool
+	APIKey      *string
+	ClearAPIKey bool
+}
+
+// UpdateWebSearch mutates only search settings; the returned snapshot is read-only.
+func (s *Service) UpdateWebSearch(ctx context.Context, in UpdateWebSearchInput) (domain.Config, error) {
+	if in.APIKey != nil && (in.ClearAPIKey || len(*in.APIKey) == 0 || len(*in.APIKey) > 16384 || strings.ContainsAny(*in.APIKey, "\r\n\x00")) {
+		return domain.Config{}, domain.Err(400, "invalid_request", "Invalid web search API key")
+	}
+	saved, err := s.Store.UpdateWebSearch(ctx, func(old domain.WebSearchConfig) (domain.WebSearchConfig, error) {
+		if in.Enabled != nil {
+			old.Enabled = *in.Enabled
 		}
-		s.mu.Unlock()
+		if in.ClearAPIKey {
+			old.CipherKey = nil
+		}
+		if in.APIKey != nil {
+			encrypted, err := s.Cipher.Encrypt(*in.APIKey)
+			if err != nil {
+				return domain.WebSearchConfig{}, err
+			}
+			old.CipherKey = encrypted
+		}
+		return old, nil
+	})
+	if err != nil {
+		return domain.Config{}, err
+	}
+	if !saved.WebSearch.Enabled || !saved.WebSearch.Configured() {
+		s.cancelActiveCalls(true)
+	}
+	return saved, nil
+}
+
+func (s *Service) cancelUnavailableModels(c domain.Config) {
+	m := c.ResolveModel("")
+	if !m.Enabled || !m.Configured() {
+		s.cancelActiveCalls(false)
+	}
+}
+func (s *Service) cancelActiveCalls(web bool) {
+	s.ensureInit()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key, cancel := range s.active {
+		if strings.Contains(key, "/web/") == web {
+			cancel()
+		}
 	}
 }

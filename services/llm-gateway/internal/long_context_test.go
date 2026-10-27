@@ -14,9 +14,9 @@ import (
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
-	rpcx "teamie/services/llm-gateway/internal/infra/rpcclient"
-	"teamie/contracts/gen/agent/kitex_gen/agent"
 	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
+	"teamie/contracts/gen/agent/kitex_gen/agent"
+	rpcx "teamie/services/llm-gateway/internal/infra/rpcclient"
 )
 
 func TestGatewayPreservesFrozenOutputAfterWindowDecrease(t *testing.T) {
@@ -42,7 +42,7 @@ func TestGatewayPreservesFrozenOutputAfterWindowDecrease(t *testing.T) {
 				}))
 				defer fixture.Close()
 				provider := Provider{HTTP: fixture.Client()}
-				config := Config{BaseURL: fixture.URL + "/v1", Model: "chosen-model", ContextWindowTokens: 4096}
+				config := ResolvedModel{BaseURL: fixture.URL + "/v1", Model: "chosen-model", ContextWindowTokens: 4096}
 				raw := nativeRequest(t, []*schema.AgenticMessage{schema.UserAgenticMessage("frozen request")}, model.Options{MaxTokens: &requested}, streaming)
 				var err error
 				if streaming {
@@ -103,7 +103,7 @@ func TestLongContextCrossesActualHertzAndOfficialProviderBoundaries(t *testing.T
 			})
 			unused.Close()
 			store := s.Store.(*memoryStore)
-			store.c.ContextWindowTokens = 1_000_000
+			store.c.Models[0].ContextWindowTokens = 1_000_000
 			base := serveUnaryHertz(t, s.Routes(rpcx.AdminAuth{}))
 			messages := make([]*schema.AgenticMessage, 0, 301)
 			for i := 0; i < 300; i++ {

@@ -48,6 +48,8 @@ type ModelGatewayHTTPServer = ModelGatewayHTTPService
 const (
 	PatternGetModelCatalog = "GET /api/v1/model-gateway/catalog"
 	PatternGetAdminModelConfig = "GET /api/v1/admin/model-gateway"
+	PatternUpdateAdminWebSearchConfig = "PATCH /api/v1/admin/model-gateway/web-search"
+	PatternUpdateAdminModelRouting = "PUT /api/v1/admin/model-gateway/routing"
 	PatternUpdateAdminModelConfig = "PUT /api/v1/admin/model-gateway"
 	PatternTestAdminModelConfig = "POST /api/v1/admin/model-gateway/test"
 	PatternCreateAdminModelProfile = "POST /api/v1/admin/model-gateway/models"
@@ -60,10 +62,12 @@ const (
 	PatternWebExtract = "POST /internal/v1/web/extract"
 )
 
-// ModelGatewayHTTPServiceRoutes lists all 12 route specifications declared on ModelGatewayHTTPService.
+// ModelGatewayHTTPServiceRoutes lists all 14 route specifications declared on ModelGatewayHTTPService.
 var ModelGatewayHTTPServiceRoutes = []RouteSpec{
 	{Name: "GetModelCatalog", Method: "GET", Path: "/api/v1/model-gateway/catalog", MuxPattern: PatternGetModelCatalog, RequestType: "GetModelCatalogReq", ResponseType: "ModelCatalogResp"},
 	{Name: "GetAdminModelConfig", Method: "GET", Path: "/api/v1/admin/model-gateway", MuxPattern: PatternGetAdminModelConfig, RequestType: "GetAdminModelConfigReq", ResponseType: "AdminModelConfigResp"},
+	{Name: "UpdateAdminWebSearchConfig", Method: "PATCH", Path: "/api/v1/admin/model-gateway/web-search", MuxPattern: PatternUpdateAdminWebSearchConfig, RequestType: "UpdateAdminWebSearchConfigReq", ResponseType: "AdminModelConfigResp"},
+	{Name: "UpdateAdminModelRouting", Method: "PUT", Path: "/api/v1/admin/model-gateway/routing", MuxPattern: PatternUpdateAdminModelRouting, RequestType: "UpdateAdminModelRoutingReq", ResponseType: "AdminModelConfigResp"},
 	{Name: "UpdateAdminModelConfig", Method: "PUT", Path: "/api/v1/admin/model-gateway", MuxPattern: PatternUpdateAdminModelConfig, RequestType: "UpdateAdminModelConfigReq", ResponseType: "AdminModelConfigResp"},
 	{Name: "TestAdminModelConfig", Method: "POST", Path: "/api/v1/admin/model-gateway/test", MuxPattern: PatternTestAdminModelConfig, RequestType: "TestAdminModelConfigReq", ResponseType: "TestAdminModelConfigResp"},
 	{Name: "CreateAdminModelProfile", Method: "POST", Path: "/api/v1/admin/model-gateway/models", MuxPattern: PatternCreateAdminModelProfile, RequestType: "CreateAdminModelProfileReq", ResponseType: "AdminModelConfigResp"},
@@ -80,6 +84,8 @@ var ModelGatewayHTTPServiceRoutes = []RouteSpec{
 type ModelGatewayHTTPServiceRouteHandlers struct {
 	GetModelCatalog http.HandlerFunc
 	GetAdminModelConfig http.HandlerFunc
+	UpdateAdminWebSearchConfig http.HandlerFunc
+	UpdateAdminModelRouting http.HandlerFunc
 	UpdateAdminModelConfig http.HandlerFunc
 	TestAdminModelConfig http.HandlerFunc
 	CreateAdminModelProfile http.HandlerFunc
@@ -102,6 +108,14 @@ func RegisterModelGatewayHTTPServiceRoutes(mux *http.ServeMux, h ModelGatewayHTT
 		panic("ModelGatewayHTTPServiceRouteHandlers.GetAdminModelConfig (" + PatternGetAdminModelConfig + ") is nil")
 	}
 	mux.HandleFunc(PatternGetAdminModelConfig, h.GetAdminModelConfig)
+	if h.UpdateAdminWebSearchConfig == nil {
+		panic("ModelGatewayHTTPServiceRouteHandlers.UpdateAdminWebSearchConfig (" + PatternUpdateAdminWebSearchConfig + ") is nil")
+	}
+	mux.HandleFunc(PatternUpdateAdminWebSearchConfig, h.UpdateAdminWebSearchConfig)
+	if h.UpdateAdminModelRouting == nil {
+		panic("ModelGatewayHTTPServiceRouteHandlers.UpdateAdminModelRouting (" + PatternUpdateAdminModelRouting + ") is nil")
+	}
+	mux.HandleFunc(PatternUpdateAdminModelRouting, h.UpdateAdminModelRouting)
 	if h.UpdateAdminModelConfig == nil {
 		panic("ModelGatewayHTTPServiceRouteHandlers.UpdateAdminModelConfig (" + PatternUpdateAdminModelConfig + ") is nil")
 	}
@@ -206,6 +220,72 @@ func RegisterModelGatewayHTTPServiceHertzServer(r *route.RouterGroup, srv ModelG
 				return
 			}
 			resp, err := srv.GetAdminModelConfig(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "UpdateAdminWebSearchConfig", Method: "PATCH", Path: "/api/v1/admin/model-gateway/web-search", MuxPattern: PatternUpdateAdminWebSearchConfig, RequestType: "UpdateAdminWebSearchConfigReq", ResponseType: "AdminModelConfigResp"}); hfn != nil {
+			r.PATCH("/api/v1/admin/model-gateway/web-search", hfn)
+		} else {
+			r.PATCH("/api/v1/admin/model-gateway/web-search", func(ctx context.Context, c *app.RequestContext) {
+				var req UpdateAdminWebSearchConfigReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				resp, err := srv.UpdateAdminWebSearchConfig(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.PATCH("/api/v1/admin/model-gateway/web-search", func(ctx context.Context, c *app.RequestContext) {
+			var req UpdateAdminWebSearchConfigReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			resp, err := srv.UpdateAdminWebSearchConfig(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "UpdateAdminModelRouting", Method: "PUT", Path: "/api/v1/admin/model-gateway/routing", MuxPattern: PatternUpdateAdminModelRouting, RequestType: "UpdateAdminModelRoutingReq", ResponseType: "AdminModelConfigResp"}); hfn != nil {
+			r.PUT("/api/v1/admin/model-gateway/routing", hfn)
+		} else {
+			r.PUT("/api/v1/admin/model-gateway/routing", func(ctx context.Context, c *app.RequestContext) {
+				var req UpdateAdminModelRoutingReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				resp, err := srv.UpdateAdminModelRouting(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.PUT("/api/v1/admin/model-gateway/routing", func(ctx context.Context, c *app.RequestContext) {
+			var req UpdateAdminModelRoutingReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			resp, err := srv.UpdateAdminModelRouting(ctx, &req)
 			if err != nil {
 				m.WriteDomainError(ctx, c, err)
 				return
@@ -611,6 +691,44 @@ func RegisterModelGatewayHTTPServer(mux *http.ServeMux, srv ModelGatewayHTTPServ
 			fn = mw.WrapRoute(RouteSpec{Name: "GetAdminModelConfig", Method: "GET", Path: "/api/v1/admin/model-gateway", MuxPattern: PatternGetAdminModelConfig, RequestType: "GetAdminModelConfigReq", ResponseType: "AdminModelConfigResp"}, fn)
 		}
 		h.GetAdminModelConfig = fn
+	}
+	if h.UpdateAdminWebSearchConfig == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req UpdateAdminWebSearchConfigReq
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
+			}
+			resp, err := srv.UpdateAdminWebSearchConfig(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "UpdateAdminWebSearchConfig", Method: "PATCH", Path: "/api/v1/admin/model-gateway/web-search", MuxPattern: PatternUpdateAdminWebSearchConfig, RequestType: "UpdateAdminWebSearchConfigReq", ResponseType: "AdminModelConfigResp"}, fn)
+		}
+		h.UpdateAdminWebSearchConfig = fn
+	}
+	if h.UpdateAdminModelRouting == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req UpdateAdminModelRoutingReq
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
+			}
+			resp, err := srv.UpdateAdminModelRouting(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "UpdateAdminModelRouting", Method: "PUT", Path: "/api/v1/admin/model-gateway/routing", MuxPattern: PatternUpdateAdminModelRouting, RequestType: "UpdateAdminModelRoutingReq", ResponseType: "AdminModelConfigResp"}, fn)
+		}
+		h.UpdateAdminModelRouting = fn
 	}
 	if h.UpdateAdminModelConfig == nil {
 		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

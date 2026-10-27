@@ -56,7 +56,7 @@ func TestStreamCredentialGuardDecodedAndSplitFields(t *testing.T) {
 			}))
 			defer fixture.Close()
 			var received []string
-			_, _, err := (Provider{HTTP: fixture.Client()}).Stream(context.Background(), Config{BaseURL: fixture.URL + "/v1", Model: "fixture"}, key, fixtureNativeRequest(`{"messages":[{"role":"user","content":"hello"}]}`, true), func(raw string) error { received = append(received, raw); return nil })
+			_, _, err := (Provider{HTTP: fixture.Client()}).Stream(context.Background(), ResolvedModel{BaseURL: fixture.URL + "/v1", Model: "fixture"}, key, fixtureNativeRequest(`{"messages":[{"role":"user","content":"hello"}]}`, true), func(raw string) error { received = append(received, raw); return nil })
 			if guardErrorCode(err) != "invalid_upstream_response" {
 				t.Fatal("credential response was not rejected with a safe code")
 			}
@@ -98,7 +98,7 @@ func TestStreamCredentialPrefixMismatchFlushesBeforeCompletion(t *testing.T) {
 	received := make(chan string, 3)
 	done := make(chan error, 1)
 	go func() {
-		_, _, e := (Provider{HTTP: fixture.Client()}).Stream(ctx, Config{BaseURL: fixture.URL + "/v1", Model: "fixture"}, key, fixtureNativeRequest(`{"messages":[{"role":"user","content":"hello"}]}`, true), func(raw string) error { received <- raw; return nil })
+		_, _, e := (Provider{HTTP: fixture.Client()}).Stream(ctx, ResolvedModel{BaseURL: fixture.URL + "/v1", Model: "fixture"}, key, fixtureNativeRequest(`{"messages":[{"role":"user","content":"hello"}]}`, true), func(raw string) error { received <- raw; return nil })
 		done <- e
 	}()
 	for i := 0; i < 2; i++ {
@@ -164,7 +164,7 @@ func TestUnaryCredentialGuardUnicodeEscapes(t *testing.T) {
 			_, _ = io.Copy(io.Discard, r.Body)
 			_ = json.NewEncoder(w).Encode(map[string]any{"object": "chat.completion", "choices": []any{map[string]any{"message": message, "finish_reason": "stop"}}, "usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1}})
 		}))
-		body, _, _, err := (Provider{HTTP: fixture.Client()}).Chat(context.Background(), Config{BaseURL: fixture.URL + "/v1", Model: "fixture"}, key, fixtureNativeRequest(`{"messages":[{"role":"user","content":"hello"}]}`, false))
+		body, _, _, err := (Provider{HTTP: fixture.Client()}).Chat(context.Background(), ResolvedModel{BaseURL: fixture.URL + "/v1", Model: "fixture"}, key, fixtureNativeRequest(`{"messages":[{"role":"user","content":"hello"}]}`, false))
 		fixture.Close()
 		if body != "" || guardErrorCode(err) != "invalid_upstream_response" {
 			t.Fatal("encoded unary credential was forwarded")

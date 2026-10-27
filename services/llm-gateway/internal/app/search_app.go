@@ -74,10 +74,10 @@ func (s *Service) ExecuteWebSearch(ctx context.Context, in domain.WebSearchInput
 	if err != nil {
 		return fail(err)
 	}
-	if !c.WebSearchConfigured() {
+	if !c.WebSearch.Configured() {
 		return fail(domain.Err(409, "web_search_unconfigured", "An administrator must configure the web search provider"))
 	}
-	if !c.WebSearchEnabled {
+	if !c.WebSearch.Enabled {
 		return fail(domain.Err(409, "web_search_disabled", "Web search is disabled"))
 	}
 	release, ok := s.AcquireWebSlot()
@@ -85,7 +85,7 @@ func (s *Service) ExecuteWebSearch(ctx context.Context, in domain.WebSearchInput
 		return fail(domain.Err(429, "gateway_busy", "Web search gateway is busy"))
 	}
 	defer release()
-	apiKey, err := s.Cipher.Decrypt(c.WebSearchCipherKey)
+	apiKey, err := s.Cipher.Decrypt(c.WebSearch.CipherKey)
 	if err != nil {
 		return fail(domain.ErrWithCause(503, "credential_unavailable", "Saved web search credential could not be decrypted", err))
 	}
@@ -141,10 +141,10 @@ func (s *Service) ExecuteWebExtract(ctx context.Context, in domain.WebExtractInp
 	if err != nil {
 		return fail(err, nil)
 	}
-	if !c.WebSearchConfigured() {
+	if !c.WebSearch.Configured() {
 		return fail(domain.Err(409, "web_search_unconfigured", "An administrator must configure the web search provider"), nil)
 	}
-	if !c.WebSearchEnabled {
+	if !c.WebSearch.Enabled {
 		return fail(domain.Err(409, "web_search_disabled", "Web search is disabled"), nil)
 	}
 	release, ok := s.AcquireWebSlot()
@@ -152,7 +152,7 @@ func (s *Service) ExecuteWebExtract(ctx context.Context, in domain.WebExtractInp
 		return fail(domain.Err(429, "gateway_busy", "Web search gateway is busy"), nil)
 	}
 	defer release()
-	apiKey, err := s.Cipher.Decrypt(c.WebSearchCipherKey)
+	apiKey, err := s.Cipher.Decrypt(c.WebSearch.CipherKey)
 	if err != nil {
 		return fail(domain.ErrWithCause(503, "credential_unavailable", "Saved web search credential could not be decrypted", err), nil)
 	}

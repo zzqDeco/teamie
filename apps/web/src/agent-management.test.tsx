@@ -10,13 +10,14 @@ import {
   canManageAgent,
   agentFailureText,
   gatewayFailureText,
-  modelGatewayInput,
+  modelProfileUpdateInput,
+  webSearchInput,
   snapshotAgentProfile,
 } from "./agent-management";
 import {
   AgentBadge,
   AgentEnabledStatus,
-  GatewayConfigurationFields,
+  WebSearchConfigurationFields,
   WorkspaceVisibilityFields,
 } from "./agent-ui";
 import { enrichParticipants } from "./participants";
@@ -221,7 +222,13 @@ describe("Agent ownership and visible teams", () => {
     ).toBe("Agent 名称需要 1 至 80 个字符。");
     expect(
       failure(() =>
-        agentProfileInput("伙伴", "", ["other-private-team"], [workspace], true),
+        agentProfileInput(
+          "伙伴",
+          "",
+          ["other-private-team"],
+          [workspace],
+          true,
+        ),
       ),
     ).toBe("只能选择你当前已加入的工作空间，请刷新后重新选择。");
     // Network failures are TypeErrors too, but are not validation copy.
@@ -230,134 +237,94 @@ describe("Agent ownership and visible teams", () => {
     );
   });
 });
-describe("write-only gateway credentials", () => {
-  it("omits empty keys to preserve the secret and requires explicit removal", () => {
-    const value = {
-      baseUrl: "https://model.example.test/v1",
-      model: "model-id",
-      apiKey: "",
-      enabled: true,
-    };
-    expect(modelGatewayInput(value)).not.toHaveProperty("apiKey");
-    expect(modelGatewayInput({ ...value, clearApiKey: true })).toMatchObject({
-      clearApiKey: true,
-    });
+describe("independent gateway configuration commands", () => {
+  const model = {
+    displayName: "A",
+    description: "",
+    baseUrl: "https://model.example.test/v1",
+    model: "model-a",
+    enabled: true,
+    apiKey: "",
+  };
+  it("preserves omitted model keys and uses explicit removal", () => {
+    expect(modelProfileUpdateInput(model)).not.toHaveProperty("apiKey");
+    expect(
+      modelProfileUpdateInput({ ...model, clearApiKey: true }),
+    ).toMatchObject({ clearApiKey: true });
     expect(() =>
-      modelGatewayInput({
-        ...value,
-        apiKey: "example-secret",
+      modelProfileUpdateInput({
+        ...model,
+        apiKey: "secret",
         clearApiKey: true,
       }),
     ).toThrow();
-    expect(
-      modelGatewayInput({
-        ...value,
-        webSearchEnabled: true,
-        webSearchApiKey: "  tvly-secret  ",
-      }),
-    ).toMatchObject({
-      webSearchEnabled: true,
-      webSearchApiKey: "tvly-secret",
+  });
+  it("search commands never contain model or routing fields, including stale form properties", () => {
+    const form = { ...model, apiKey: " search-key ", defaultModelId: "a" };
+    expect(webSearchInput(form)).toEqual({
+      enabled: true,
+      apiKey: "search-key",
     });
     expect(
-      modelGatewayInput({
-        ...value,
-        webSearchEnabled: false,
-        webSearchApiKey: "",
-        clearWebSearchApiKey: true,
-      }),
-    ).toMatchObject({
-      webSearchEnabled: false,
-      clearWebSearchApiKey: true,
-    });
+      webSearchInput({ enabled: false, apiKey: "", clearApiKey: true }),
+    ).toEqual({ enabled: false, clearApiKey: true });
     expect(() =>
-      modelGatewayInput({
-        ...value,
-        webSearchApiKey: "tvly-secret",
-        clearWebSearchApiKey: true,
-      }),
+      webSearchInput({ enabled: true, apiKey: "secret", clearApiKey: true }),
     ).toThrow();
   });
-  it("rejects credentials or tokens placed in provider URLs", () => {
+  it("rejects credentials in provider URLs and invalid windows with safe errors", () => {
     for (const baseUrl of [
-      "https://user:password@model.example.test/v1",
-      "https://model.example.test/v1?api_key=example-secret",
-      "https://model.example.test/v1#example-secret",
-    ])
-      expect(() =>
-        modelGatewayInput({
-          baseUrl,
-          model: "model-id",
-          apiKey: "",
-          enabled: true,
-        }),
-      ).toThrow();
-  });
-  it("surfaces gateway validation copy, including malformed URLs, without echoing secrets", () => {
-    const failure = (value: Parameters<typeof modelGatewayInput>[0]) => {
+      "not a url",
+      "https://user:secret@example.test/v1",
+      "https://example.test/v1?key=secret",
+      "https://example.test/v1#secret",
+    ]) {
       try {
-        modelGatewayInput(value);
-      } catch (error) {
-        expect(error).toBeInstanceOf(AgentInputError);
-        return gatewayFailureText(error);
+        modelProfileUpdateInput({ ...model, baseUrl });
+        throw new Error("accepted invalid URL");
+      } catch (e) {
+        expect(e).toBeInstanceOf(AgentInputError);
+        expect(gatewayFailureText(e)).not.toContain("secret");
       }
-      throw new Error("expected validation failure");
-    };
-    const value = {
-      baseUrl: "https://model.example.test/v1",
-      model: "model-id",
-      apiKey: "",
-      enabled: true,
-    };
-    for (const baseUrl of ["model.example.test/v1", "not a url", ""])
-      expect(failure({ ...value, baseUrl })).toBe(
-        "服务地址格式不正确，请填写完整的 http(s) 地址。",
-      );
-    const leaked = failure({
-      ...value,
-      baseUrl: "https://model.example.test/v1?api_key=example-secret",
-    });
-    expect(leaked).toBe("服务地址不得包含密钥、认证信息或查询参数。");
-    expect(leaked).not.toContain("example-secret");
+    }
+    expect(() =>
+      modelProfileUpdateInput({ ...model, contextWindowTokens: 1024 }),
+    ).toThrow("上下文窗口");
     expect(
-      failure({ ...value, apiKey: "example-secret", clearApiKey: true }),
-    ).toBe("清除密钥和填写新密钥不能同时进行。");
-    expect(failure({ ...value, contextWindowTokens: 1024 })).toBe(
-      "上下文窗口需为 4096 至 2000000 的整数。",
-    );
-    expect(gatewayFailureText(new TypeError("Failed to fetch"))).toBe(
-      "模型网关请求未完成，请检查配置或稍后重试。",
-    );
+      gatewayFailureText(new ApiError(500, "provider_failure", "private-key")),
+    ).not.toContain("private-key");
   });
-  it("never echoes a key in gateway error text or reads a saved key into the password input", () => {
-    const secret = "example-sensitive-key";
-    expect(
-      gatewayFailureText(
-        new ApiError(500, "provider_failure", `provider echoed ${secret}`),
-      ),
-    ).not.toContain(secret);
+  it("never loads saved search secrets or model inputs into the search form", () => {
     const html = renderToStaticMarkup(
-      <GatewayConfigurationFields
+      <WebSearchConfigurationFields
         initial={{
-          baseUrl: "https://model.example.test/v1",
-          model: "model-id",
+          provider: "tavily",
           hasApiKey: true,
           enabled: true,
-          webSearch: {
-            provider: "tavily",
-            hasApiKey: true,
-            enabled: true,
-            configured: true,
-          },
+          configured: true,
         }}
         onSave={async () => true}
       />,
     );
-    expect(html).toContain('type="password"');
-    expect(html).toContain('name="gatewayApiKey"');
     expect(html).toContain('name="gatewayWebSearchApiKey"');
-    expect(html).toContain('name="gatewayClearWebSearchApiKey"');
-    expect(html).not.toContain(secret);
+    expect(html).not.toContain('name="gatewayApiKey"');
+    expect(html).not.toContain('name="gatewayBaseUrl"');
     expect(html).toContain("留空保留");
+  });
+  it.each(["GPT4", "_model", "-model", ".model"])(
+    "accepts backend-valid catalog ID %s while editing unrelated profile fields",
+    (id) => {
+      const profile = agentProfileInput("New name", "", [], [], true, id);
+      expect(profile.modelId).toBe(id);
+      expect(
+        agentProfileChanges(
+          snapshotAgentProfile({ ...agent, workspaceIds: [], modelId: id }),
+          profile,
+        ),
+      ).toEqual({ name: "New name", description: "" });
+    },
+  );
+  it.each([".", "..", "a/b"])("rejects invalid catalog ID %s", (id) => {
+    expect(() => agentProfileInput("Name", "", [], [], true, id)).toThrow();
   });
 });

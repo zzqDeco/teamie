@@ -47,7 +47,7 @@ func TestOfficialQwenSummaryDisablesThinkingWithoutChangingOrdinaryTurns(t *test
 				opts.Tools = []*schema.ToolInfo{{Name: "im_send_message"}}
 			}
 			raw := nativeRequest(t, []*schema.AgenticMessage{schema.UserAgenticMessage("synthetic private input")}, opts, false)
-			if _, _, _, err := (Provider{HTTP: fixture.Client()}).Chat(context.Background(), Config{BaseURL: fixture.URL + "/v1", Model: test.model}, "synthetic-summary-key", raw); err != nil {
+			if _, _, _, err := (Provider{HTTP: fixture.Client()}).Chat(context.Background(), ResolvedModel{BaseURL: fixture.URL + "/v1", Model: test.model}, "synthetic-summary-key", raw); err != nil {
 				t.Fatal(err)
 			}
 			request := <-observed

@@ -5,7 +5,6 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"strings"
 	"time"
 )
@@ -148,319 +147,78 @@ func strconvItoa(n int) string {
 	return string(buf[i:])
 }
 
-// Config is the domain entity for platform-administered model and web-search settings.
+// ModelRoutingConfig stores administrator intent independently of model availability.
+// An unavailable selected default stays selected; resolution never changes it.
+type ModelRoutingConfig struct {
+	DefaultModelID string
+	UpdatedAt      time.Time
+}
+
+// WebSearchConfig owns only the search capability's state and credential.
+type WebSearchConfig struct {
+	CipherKey []byte `json:"-"`
+	Enabled   bool
+	UpdatedAt time.Time
+}
+
+func (c WebSearchConfig) Configured() bool { return len(c.CipherKey) > 0 }
+
+// Config is a read snapshot. Writes use separate catalog, routing and search ports.
 type Config struct {
-	BaseURL             string                               `json:"baseUrl"`
-	Model               string                               `json:"model"`
-	CipherKey           []byte                               `json:"-"`
-	Enabled             bool                                 `json:"enabled"`
-	UpdatedAt           time.Time                            `json:"updatedAt"`
-	ContextWindowTokens int64                                `json:"contextWindowTokens"`
-	WebSearchCipherKey  []byte                               `json:"-"`
-	WebSearchEnabled    bool                                 `json:"webSearchEnabled"`
-	WebSearchEnabledSet bool                                 `json:"-"`
-	WebSearchAPIKey     *string                              `json:"-"`
-	ClearWebSearchKey   bool                                 `json:"-"`
-	DefaultModelID      string                               `json:"defaultModelId,omitempty"`
-	Models              []ModelProfile                       `json:"models,omitempty"`
-	ModelsMutation      func(old Config, c Cipher) (Config, error) `json:"-"`
+	Models    []ModelProfile
+	Routing   ModelRoutingConfig
+	WebSearch WebSearchConfig
 }
 
-func (c Config) EffectiveModels() []ModelProfile {
-	if len(c.Models) > 0 {
-		out := make([]ModelProfile, len(c.Models))
-		copy(out, c.Models)
-		return out
-	}
-	if c.BaseURL == "" && c.Model == "" && len(c.CipherKey) == 0 {
-		return nil
-	}
-	defID := strings.TrimSpace(c.DefaultModelID)
-	if defID == "" {
-		defID = "default"
-	}
-	return []ModelProfile{{
-		ID:                  defID,
-		DisplayName:         c.Model,
-		Description:         "",
-		BaseURL:             c.BaseURL,
-		Model:               c.Model,
-		CipherKey:           c.CipherKey,
-		ContextWindowTokens: c.ContextWindow(),
-		Enabled:             c.Enabled,
-		CreatedAt:           c.UpdatedAt,
-		UpdatedAt:           c.UpdatedAt,
-	}}
-}
+// ResolvedModel is a per-call model snapshot, never a configuration write command.
+type ResolvedModel ModelProfile
 
-func (c Config) EffectiveDefaultModelID() string {
-	models := c.EffectiveModels()
-	if len(models) == 0 {
-		return ""
-	}
-	defID := strings.TrimSpace(c.DefaultModelID)
-	if defID != "" {
-		for _, m := range models {
-			if m.ID == defID && m.Configured() && m.Enabled {
-				return m.ID
-			}
-		}
-	}
-	for _, m := range models {
-		if m.Configured() && m.Enabled {
-			return m.ID
-		}
-	}
-	if defID != "" {
-		for _, m := range models {
-			if m.ID == defID {
-				return m.ID
-			}
-		}
-	}
-	return models[0].ID
-}
-
-func (c Config) withModelProfile(m ModelProfile) Config {
-	out := c
-	out.BaseURL = m.BaseURL
-	out.Model = m.Model
-	out.CipherKey = m.CipherKey
-	out.ContextWindowTokens = m.ContextWindow()
-	out.Enabled = m.Enabled
-	out.DefaultModelID = m.ID
-	if !m.UpdatedAt.IsZero() {
-		out.UpdatedAt = m.UpdatedAt
-	}
-	return out
-}
-
-// ResolveModel resolves requestedModelID to its active ModelProfile configuration.
-// When requestedModelID is empty, deleted, unconfigured, or disabled, it smoothly
-// falls back to the platform's current default model.
-func (c Config) ResolveModel(requestedModelID string) Config {
-	models := c.EffectiveModels()
-	if len(models) == 0 {
-		return c
-	}
-	reqID := strings.TrimSpace(requestedModelID)
-	if reqID != "" {
-		for _, m := range models {
-			if m.ID == reqID && m.Configured() && m.Enabled {
-				return c.withModelProfile(m)
-			}
-		}
-	}
-	defID := strings.TrimSpace(c.DefaultModelID)
-	if defID != "" {
-		for _, m := range models {
-			if m.ID == defID && m.Configured() && m.Enabled {
-				return c.withModelProfile(m)
-			}
-		}
-	}
-	for _, m := range models {
-		if m.Configured() && m.Enabled {
-			return c.withModelProfile(m)
-		}
-	}
-	if defID != "" {
-		for _, m := range models {
-			if m.ID == defID {
-				return c.withModelProfile(m)
-			}
-		}
-	}
-	return c.withModelProfile(models[0])
-}
-
-// SyncPrimaryFromModels updates the top-level primary Config fields from c.Models and c.DefaultModelID.
-func (c *Config) SyncPrimaryFromModels() {
-	if len(c.Models) == 0 {
-		c.DefaultModelID = "default"
-		c.BaseURL = ""
-		c.Model = ""
-		c.CipherKey = nil
-		c.Enabled = false
-		if c.ContextWindowTokens == 0 {
-			c.ContextWindowTokens = DefaultContextWindow
-		}
-		return
-	}
-	effID := c.EffectiveDefaultModelID()
-	if strings.TrimSpace(c.DefaultModelID) == "" {
-		c.DefaultModelID = effID
-	} else {
-		found := false
-		for _, m := range c.Models {
-			if m.ID == c.DefaultModelID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			c.DefaultModelID = effID
-		}
-	}
-	var primary ModelProfile
-	found := false
-	for _, m := range c.Models {
-		if m.ID == effID {
-			primary = m
-			found = true
-			break
-		}
-	}
-	if !found {
-		primary = c.Models[0]
-	}
-	c.BaseURL = primary.BaseURL
-	c.Model = primary.Model
-	c.CipherKey = primary.CipherKey
-	c.ContextWindowTokens = primary.ContextWindow()
-	c.Enabled = primary.Enabled
-}
-
-func (c Config) ContextWindow() int64 {
-	if c.ContextWindowTokens == 0 {
-		return DefaultContextWindow
-	}
-	return c.ContextWindowTokens
-}
-
-func (c Config) Configured() bool {
-	return c.BaseURL != "" && c.Model != "" && len(c.CipherKey) > 0
-}
-
-func (c Config) WebSearchConfigured() bool {
-	return len(c.WebSearchCipherKey) > 0
-}
-
-func (c Config) CountingConfigID() string {
-	if !c.Configured() {
-		return ""
-	}
-	return CountingConfigID(c.BaseURL, c.Model)
-}
-
-func (c Config) Status() string {
-	if !c.Configured() {
+func (m ResolvedModel) Configured() bool         { return ModelProfile(m).Configured() }
+func (m ResolvedModel) ContextWindow() int64     { return ModelProfile(m).ContextWindow() }
+func (m ResolvedModel) CountingConfigID() string { return ModelProfile(m).CountingConfigID() }
+func (m ResolvedModel) Status() string {
+	if !m.Configured() {
 		return "unconfigured"
 	}
-	if c.Enabled {
-		return "ready"
+	if !m.Enabled {
+		return "disabled"
 	}
-	return "disabled"
+	return "ready"
 }
 
-func (c Config) View() map[string]any {
-	return map[string]any{
-		"config": map[string]any{
-			"baseUrl":             c.BaseURL,
-			"model":               c.Model,
-			"contextWindowTokens": c.ContextWindow(),
-			"hasApiKey":           len(c.CipherKey) > 0,
-			"enabled":             c.Enabled,
-			"configured":          c.Configured(),
-			"webSearch": map[string]any{
-				"provider":   "tavily",
-				"enabled":    c.WebSearchEnabled,
-				"hasApiKey":  len(c.WebSearchCipherKey) > 0,
-				"configured": c.WebSearchConfigured(),
-			},
-			"updatedAt": c.UpdatedAt,
-		},
-		"status": c.Status(),
-	}
-}
+func (c Config) EffectiveDefaultModelID() string { return c.ResolveModel("").ID }
 
-// MergeSavedConfig applies key preservation, explicit key clearing, encryption,
-// and context-window invariants when updating gateway configuration.
-func MergeSavedConfig(old, c Config, key *string, clear bool, crypto Cipher) (Config, error) {
-	if c.ModelsMutation != nil {
-		return c.ModelsMutation(old, crypto)
-	}
-	var err error
-	c.CipherKey = old.CipherKey
-	c.WebSearchCipherKey = old.WebSearchCipherKey
-	if !c.WebSearchEnabledSet && !c.WebSearchEnabled {
-		c.WebSearchEnabled = old.WebSearchEnabled
-	}
-	if c.ContextWindowTokens == 0 {
-		c.ContextWindowTokens = old.ContextWindow()
-	}
-	if c.ContextWindowTokens < MinContextWindow || c.ContextWindowTokens > MaxContextWindow {
-		return Config{}, errors.New("invalid context window")
-	}
-	if clear {
-		c.CipherKey = nil
-	}
-	if key != nil {
-		c.CipherKey, err = crypto.Encrypt(*key)
-		if err != nil {
-			return Config{}, err
-		}
-	}
-	if c.ClearWebSearchKey {
-		c.WebSearchCipherKey = nil
-	}
-	if c.WebSearchAPIKey != nil {
-		c.WebSearchCipherKey, err = crypto.Encrypt(*c.WebSearchAPIKey)
-		if err != nil {
-			return Config{}, err
-		}
-	}
-	defID := strings.TrimSpace(old.DefaultModelID)
-	if defID == "" {
-		defID = "default"
-	}
-	c.DefaultModelID = defID
-	c.Models = make([]ModelProfile, len(old.Models))
-	copy(c.Models, old.Models)
-	if clear && len(c.CipherKey) == 0 {
-		filtered := c.Models[:0]
+// ResolveModel falls back without mutating routing, catalog entries or search settings.
+func (c Config) ResolveModel(requestedModelID string) ResolvedModel {
+	available := func(id string) (ResolvedModel, bool) {
 		for _, m := range c.Models {
-			if m.ID != defID {
-				filtered = append(filtered, m)
+			if m.ID == id && m.Configured() && m.Enabled {
+				return ResolvedModel(m), true
 			}
 		}
-		c.Models = filtered
-		if len(c.Models) > 0 {
-			c.SyncPrimaryFromModels()
-		}
-	} else if c.BaseURL != "" || c.Model != "" || len(c.CipherKey) > 0 {
-		now := time.Now().UTC()
-		updated := false
-		for i := range c.Models {
-			if c.Models[i].ID == defID {
-				if c.Models[i].DisplayName == "" || c.Models[i].DisplayName == old.Model {
-					c.Models[i].DisplayName = c.Model
-				}
-				c.Models[i].BaseURL = c.BaseURL
-				c.Models[i].Model = c.Model
-				c.Models[i].CipherKey = c.CipherKey
-				c.Models[i].ContextWindowTokens = c.ContextWindow()
-				c.Models[i].Enabled = c.Enabled
-				c.Models[i].UpdatedAt = now
-				updated = true
-				break
-			}
-		}
-		if !updated {
-			c.Models = append(c.Models, ModelProfile{
-				ID:                  defID,
-				DisplayName:         c.Model,
-				BaseURL:             c.BaseURL,
-				Model:               c.Model,
-				CipherKey:           c.CipherKey,
-				ContextWindowTokens: c.ContextWindow(),
-				Enabled:             c.Enabled,
-				CreatedAt:           now,
-				UpdatedAt:           now,
-			})
+		return ResolvedModel{}, false
+	}
+	if m, ok := available(strings.TrimSpace(requestedModelID)); ok {
+		return m
+	}
+	if m, ok := available(c.Routing.DefaultModelID); ok {
+		return m
+	}
+	for _, m := range c.Models {
+		if m.Configured() && m.Enabled {
+			return ResolvedModel(m)
 		}
 	}
-	return c, nil
+	// Preserve disabled/unconfigured status when no usable model exists.
+	for _, m := range c.Models {
+		if m.ID == c.Routing.DefaultModelID {
+			return ResolvedModel(m)
+		}
+	}
+	if len(c.Models) > 0 {
+		return ResolvedModel(c.Models[0])
+	}
+	return ResolvedModel{}
 }
 
 // Usage represents a single model call audit record.

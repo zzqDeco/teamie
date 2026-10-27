@@ -7,16 +7,18 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
+	"teamie/services/llm-gateway/internal/app"
 	"testing"
 	"time"
 	"unicode/utf8"
 
 	"github.com/cloudwego/kitex/client/callopt"
-	rpcx "teamie/services/llm-gateway/internal/infra/rpcclient"
-	"teamie/contracts/gen/agent/kitex_gen/agent"
 	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
+	"teamie/contracts/gen/agent/kitex_gen/agent"
 	"teamie/contracts/gen/im/kitex_gen/im"
+	rpcx "teamie/services/llm-gateway/internal/infra/rpcclient"
 )
 
 type stubSessionValidator struct{}
@@ -39,81 +41,88 @@ func testAdminAuth() rpcx.AdminAuth {
 
 func TestWebSearchAdminConfigRedactionAndPreservation(t *testing.T) {
 	crypto := testCipher(t)
-	store := &memoryStore{}
-	s := New(store, crypto, testToken)
-	srv := httptest.NewServer(s.Routes(testAdminAuth()))
-	defer srv.Close()
-
-	doAdmin := func(method, body string) (int, map[string]any, string) {
-		var reader io.Reader
-		if body != "" {
-			reader = strings.NewReader(body)
+	aKey, _ := crypto.Encrypt("fixture-a")
+	bKey, _ := crypto.Encrypt("fixture-b")
+	store := &memoryStore{c: Config{Models: []ModelProfile{
+		{ID: "a", BaseURL: "https://1.1.1.1/v1", Model: "a", CipherKey: aKey, Enabled: false},
+		{ID: "b", BaseURL: "https://1.1.1.1/v1", Model: "b", CipherKey: bKey, Enabled: true},
+	}, Routing: ModelRoutingConfig{DefaultModelID: "a"}}}
+	service := New(store, crypto, testToken)
+	handler := service.Routes(testAdminAuth())
+	do := func(method, path, body string, authenticated, csrf bool) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, "https://teamie.example/api/v1/admin/model-gateway"+path, strings.NewReader(body))
+		if authenticated {
+			req.AddCookie(&http.Cookie{Name: "teamie_session", Value: strings.Repeat("a", 64)})
 		}
-		req, err := http.NewRequest(method, srv.URL+"/api/v1/admin/model-gateway", reader)
-		if err != nil {
-			t.Fatal(err)
-		}
-		req.AddCookie(&http.Cookie{Name: "teamie_session", Value: strings.Repeat("a", 64)})
 		req.Header.Set("Origin", "https://teamie.example")
-		req.Header.Set("X-CSRF-Token", testToken)
-		if body != "" {
-			req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", "application/json")
+		if csrf {
+			req.Header.Set("X-CSRF-Token", testToken)
 		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
+		out := httptest.NewRecorder()
+		handler.ServeHTTP(out, req)
+		return out
+	}
+	for _, path := range []string{"/web-search", "/routing"} {
+		method, body := http.MethodPatch, `{"enabled":false}`
+		if path == "/routing" {
+			method, body = http.MethodPut, `{"defaultModelId":"b"}`
 		}
-		defer resp.Body.Close()
-		raw, _ := io.ReadAll(resp.Body)
-		var out map[string]any
-		_ = json.Unmarshal(raw, &out)
-		return resp.StatusCode, out, string(raw)
+		if got := do(method, path, body, false, true); got.Code != 401 {
+			t.Fatal("unauthenticated write accepted", got.Code)
+		}
+		if got := do(method, path, body, true, false); got.Code != 403 {
+			t.Fatal("write without CSRF accepted", got.Code)
+		}
 	}
-
-	status, initial, _ := doAdmin(http.MethodGet, "")
-	if status != 200 {
-		t.Fatalf("unexpected status: %d", status)
+	before, _ := store.Load(context.Background())
+	key := "fixture-search-secret"
+	saved := do(http.MethodPatch, "/web-search", `{"enabled":true,"apiKey":"`+key+`"}`, true, true)
+	if saved.Code != 200 || strings.Contains(saved.Body.String(), key) {
+		t.Fatal("search save failed or leaked secret", saved.Code)
 	}
-	cfg := initial["config"].(map[string]any)
-	ws := cfg["webSearch"].(map[string]any)
-	if ws["provider"] != "tavily" || ws["enabled"] != false || ws["hasApiKey"] != false || ws["configured"] != false {
-		t.Fatalf("unexpected initial webSearch view: %+v", ws)
+	after, _ := store.Load(context.Background())
+	if !reflect.DeepEqual(before.Models, after.Models) || before.Routing != after.Routing {
+		t.Fatal("search changed models or routing")
 	}
-
-	secretKey := "tvly-secret-fixture-key-999"
-	status, saved, rawSaved := doAdmin(http.MethodPut, `{"baseUrl":"https://1.1.1.1/v1","model":"gpt-test","enabled":false,"webSearchEnabled":true,"webSearchApiKey":"`+secretKey+`"}`)
-	if status != 200 || strings.Contains(rawSaved, secretKey) {
-		t.Fatalf("save failed or leaked key: status=%d body=%s", status, rawSaved)
+	if got := do(http.MethodPatch, "/web-search", `{"enabled":false}`, true, true); got.Code != 200 {
+		t.Fatal(got.Code)
 	}
-	ws = saved["config"].(map[string]any)["webSearch"].(map[string]any)
-	if ws["enabled"] != true || ws["hasApiKey"] != true || ws["configured"] != true {
-		t.Fatalf("unexpected saved webSearch view: %+v", ws)
+	after, _ = store.Load(context.Background())
+	plain, _ := crypto.Decrypt(after.WebSearch.CipherKey)
+	if plain != key || after.WebSearch.Enabled {
+		t.Fatal("omitted search key not preserved")
 	}
-
-	// Omitting webSearch fields when updating model settings must preserve them.
-	status, preserved, rawPreserved := doAdmin(http.MethodPut, `{"baseUrl":"https://1.1.1.1/v1","model":"gpt-next","enabled":false}`)
-	if status != 200 || strings.Contains(rawPreserved, secretKey) {
-		t.Fatalf("preserve failed: status=%d body=%s", status, rawPreserved)
+	if got := do(http.MethodPatch, "/web-search", `{"apiKey":"fixture-new","clearApiKey":true}`, true, true); got.Code != 400 {
+		t.Fatal("conflicting credential intent accepted")
 	}
-	ws = preserved["config"].(map[string]any)["webSearch"].(map[string]any)
-	if ws["enabled"] != true || ws["hasApiKey"] != true || ws["configured"] != true {
-		t.Fatalf("omitted webSearch config was not preserved: %+v", ws)
+	// A stale whole-config form is rejected before any writes.
+	before, _ = store.Load(context.Background())
+	if got := do(http.MethodPut, "", `{"baseUrl":"https://1.1.1.1/v1","model":"b","enabled":true,"webSearchEnabled":true}`, true, true); got.Code != 409 {
+		t.Fatal("legacy write should require refresh", got.Code)
 	}
-
-	// Simultaneous key and clear must fail with 400.
-	status, _, _ = doAdmin(http.MethodPut, `{"baseUrl":"https://1.1.1.1/v1","model":"gpt-next","enabled":false,"webSearchApiKey":"tvly-new","clearWebSearchApiKey":true}`)
-	if status != 400 {
-		t.Fatalf("expected 400 when setting and clearing key simultaneously, got %d", status)
+	after, _ = store.Load(context.Background())
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("retired config endpoint changed settings")
 	}
-
-	// Explicit clear removes the key and disables configured state.
-	status, cleared, _ := doAdmin(http.MethodPut, `{"baseUrl":"https://1.1.1.1/v1","model":"gpt-next","enabled":false,"webSearchEnabled":false,"clearWebSearchApiKey":true}`)
-	if status != 200 {
-		t.Fatalf("clear failed: %d", status)
+	if got := do(http.MethodPatch, "/web-search", `{"enabled":false,"clearApiKey":true}`, true, true); got.Code != 200 {
+		t.Fatal(got.Code)
 	}
-	ws = cleared["config"].(map[string]any)["webSearch"].(map[string]any)
-	if ws["enabled"] != false || ws["hasApiKey"] != false || ws["configured"] != false {
-		t.Fatalf("expected cleared webSearch state, got %+v", ws)
+	after, _ = store.Load(context.Background())
+	if after.WebSearch.Configured() {
+		t.Fatal("explicit search key clear failed")
+	}
+	// Search cancellation is independent even when there are no usable models.
+	modelCtx, done := service.App.RegisterRunCancel(context.Background(), "a", "run")
+	defer done()
+	webCtx, webDone := service.App.RegisterWebCancel(context.Background(), "a", "run")
+	defer webDone()
+	no := false
+	if _, err := service.App.UpdateWebSearch(context.Background(), app.UpdateWebSearchInput{Enabled: &no}); err != nil {
+		t.Fatal(err)
+	}
+	if modelCtx.Err() != nil || webCtx.Err() == nil {
+		t.Fatal("search update crossed cancellation boundary")
 	}
 }
 
@@ -147,7 +156,7 @@ func TestTavilySearchAndExtractProtocolAndValidation(t *testing.T) {
 
 	crypto := testCipher(t)
 	encryptedWebKey, _ := crypto.Encrypt(tavilyKey)
-	store := &memoryStore{c: Config{WebSearchCipherKey: encryptedWebKey, WebSearchEnabled: true}}
+	store := &memoryStore{c: Config{WebSearch: WebSearchConfig{CipherKey: encryptedWebKey, Enabled: true}}}
 	s := New(store, crypto, testToken)
 	s.WebSearchURL = upstream.URL
 	s.Provider = Provider{HTTP: upstream.Client()}
@@ -266,7 +275,7 @@ func TestWebSearchCancellationStopsInFlightTavilyRequest(t *testing.T) {
 
 	crypto := testCipher(t)
 	encryptedWebKey, _ := crypto.Encrypt("tvly-cancel-key")
-	store := &memoryStore{c: Config{WebSearchCipherKey: encryptedWebKey, WebSearchEnabled: true}}
+	store := &memoryStore{c: Config{WebSearch: WebSearchConfig{CipherKey: encryptedWebKey, Enabled: true}}}
 	s := New(store, crypto, testToken)
 	s.WebSearchURL = upstream.URL
 	s.Provider = Provider{HTTP: upstream.Client()}

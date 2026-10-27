@@ -2,13 +2,13 @@ import type {
   Agent,
   AgentProfileInput,
   CreateModelProfileInput,
-  ModelGatewayInput,
+  WebSearchInput,
   UpdateModelProfileInput,
   User,
   Workspace,
 } from "@teamie/api-client";
-import type { GatewayFormValue } from "./agent-ui";
-const MODEL_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+import type { WebSearchFormValue } from "./agent-ui";
+const MODEL_ID_PATTERN = /^(?!\.{1,2}$)[a-zA-Z0-9._-]{1,64}$/;
 /**
  * Client-side validation failure whose message is safe, user-facing Chinese
  * text. Failure text helpers show it verbatim; any other error (API, network,
@@ -136,29 +136,14 @@ function validateContextWindowTokens(tokens?: number) {
   )
     throw new AgentInputError("上下文窗口需为 4096 至 2000000 的整数。");
 }
-export function modelGatewayInput(value: GatewayFormValue): ModelGatewayInput {
+export function webSearchInput(value: WebSearchFormValue): WebSearchInput {
   const key = value.apiKey.trim();
-  const webKey = (value.webSearchApiKey ?? "").trim();
-  const baseUrl = validateProviderBaseUrl(value.baseUrl);
   if (value.clearApiKey && key)
     throw new AgentInputError("清除密钥和填写新密钥不能同时进行。");
-  if (value.clearWebSearchApiKey && webKey)
-    throw new AgentInputError("清除联网搜索密钥和填写新密钥不能同时进行。");
-  validateContextWindowTokens(value.contextWindowTokens);
   return {
-    baseUrl,
-    model: value.model.trim(),
     enabled: value.enabled,
-    ...(value.contextWindowTokens === undefined
-      ? {}
-      : { contextWindowTokens: value.contextWindowTokens }),
     ...(key ? { apiKey: key } : {}),
     ...(value.clearApiKey ? { clearApiKey: true } : {}),
-    ...(value.webSearchEnabled === undefined
-      ? {}
-      : { webSearchEnabled: value.webSearchEnabled }),
-    ...(webKey ? { webSearchApiKey: webKey } : {}),
-    ...(value.clearWebSearchApiKey ? { clearWebSearchApiKey: true } : {}),
   };
 }
 export type ModelProfileFormValue = {
@@ -171,7 +156,6 @@ export type ModelProfileFormValue = {
   clearApiKey?: boolean;
   enabled: boolean;
   contextWindowTokens?: number;
-  isDefault?: boolean;
 };
 export function modelProfileCreateInput(
   value: ModelProfileFormValue,
@@ -179,7 +163,7 @@ export function modelProfileCreateInput(
   const id = (value.id ?? "").trim();
   if (id && !MODEL_ID_PATTERN.test(id))
     throw new AgentInputError(
-      "模型标识需由小写字母、数字、点、下划线或连字符组成（1-64 位）。",
+      "模型标识需由字母、数字、点、下划线或连字符组成（1-64 位），不能为 . 或 ..。",
     );
   const baseUrl = validateProviderBaseUrl(value.baseUrl);
   const model = value.model.trim();
@@ -199,7 +183,6 @@ export function modelProfileCreateInput(
     ...(value.contextWindowTokens === undefined
       ? {}
       : { contextWindowTokens: value.contextWindowTokens }),
-    ...(value.isDefault === undefined ? {} : { isDefault: value.isDefault }),
   };
 }
 export function modelProfileUpdateInput(
@@ -223,7 +206,6 @@ export function modelProfileUpdateInput(
     ...(value.contextWindowTokens === undefined
       ? {}
       : { contextWindowTokens: value.contextWindowTokens }),
-    ...(value.isDefault === undefined ? {} : { isDefault: value.isDefault }),
   };
 }
 export function gatewayFailureText(error: unknown): string {

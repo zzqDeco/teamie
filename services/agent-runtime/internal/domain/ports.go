@@ -11,6 +11,7 @@ type AgentProfile struct {
 	ID              string
 	OwnerID         string
 	DisplayName     string
+	ModelID         string
 	RoleDescription string
 	SystemPrompt    string
 	WorkspaceIDs    []string

@@ -88,3 +88,5 @@ Only `production` is deployed; disposable CI databases do not constitute a secon
 The public IP uses the configured Let's Encrypt ACME `shortlived` issuer and `TLS_SERVER_NAME`/`default_sni` for non-SNI clients. Public trusted HTTPS and renewal are separate acceptance gates. Internal-CA or disabled-verification checks do not establish public trust.
 
 Memory/CPU limits are initial budgets for a 2-vCPU/2-GB host, not measured capacity claims. Connections, queues, concurrent turns and execution children are bounded. A single host is not highly available. Same-disk backups cover some mistakes but not host loss; off-host storage remains future operational work.
+
+Gateway administrator configuration uses independent model-profile, routing-policy and web-search commands and stores. Fallback resolution is read-only; search saves cannot alter model credentials or enabled state. See [model gateway](model-gateway.md#independent-administrator-configuration).

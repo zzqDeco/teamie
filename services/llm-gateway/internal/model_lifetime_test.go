@@ -31,7 +31,7 @@ func lifetimeService(t *testing.T, transport http.RoundTripper) *Service {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(&memoryStore{c: Config{BaseURL: "https://provider.example/v1", Model: "fixture", Enabled: true, CipherKey: encrypted}}, cipher, testToken)
+	s := New(&memoryStore{c: singleModel(ModelProfile{BaseURL: "https://provider.example/v1", Model: "fixture", Enabled: true, CipherKey: encrypted})}, cipher, testToken)
 	// The adapter must use the owning context in either mode, even when it
 	// receives a client originally configured for bounded ordinary HTTP work.
 	s.Provider.HTTP = &http.Client{Transport: transport, Timeout: 50 * time.Second}
@@ -189,12 +189,12 @@ func TestOfficialProviderWaitsForDelayedTLSHeaders(t *testing.T) {
 			var err error
 			if streaming {
 				var chunks int
-				_, _, err = provider.Stream(ctx, Config{BaseURL: fixture.URL + "/v1", Model: "fixture"}, "synthetic-delayed-key", request, func(string) error { chunks++; return nil })
+				_, _, err = provider.Stream(ctx, ResolvedModel{BaseURL: fixture.URL + "/v1", Model: "fixture"}, "synthetic-delayed-key", request, func(string) error { chunks++; return nil })
 				if err == nil && chunks == 0 {
 					t.Fatal("no delayed stream output")
 				}
 			} else {
-				_, _, _, err = provider.Chat(ctx, Config{BaseURL: fixture.URL + "/v1", Model: "fixture"}, "synthetic-delayed-key", request)
+				_, _, _, err = provider.Chat(ctx, ResolvedModel{BaseURL: fixture.URL + "/v1", Model: "fixture"}, "synthetic-delayed-key", request)
 			}
 			if err != nil || time.Since(start) < 51*time.Second {
 				t.Fatalf("delayed TLS response failed after %s: %v", time.Since(start), err)

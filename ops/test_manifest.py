@@ -330,7 +330,7 @@ class AgentManifestTest(unittest.TestCase):
         current["version"] = "v0.3.31"
         current["source"]["ref"] = "refs/heads/release/v0.3.31"
         self.assertEqual(current["schema"]["agent_control"], 2)
-        self.assertEqual(current["schema"]["gateway"], 4)
+        self.assertEqual(current["schema"]["gateway"], 5)
         manifest.validate(previous)
         manifest.check_transition(current, previous, previous)
         with self.assertRaisesRegex(ValueError, "identical schema versions"):

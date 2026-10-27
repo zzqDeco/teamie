@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"teamie/contracts/gen/agent/kitex_gen/agent"
+	"teamie/services/llm-gateway/internal/app"
 	"testing"
 	"time"
 )
@@ -28,15 +29,31 @@ func (m *memoryStore) Load(context.Context) (Config, error) {
 	defer m.mu.Unlock()
 	return m.c, nil
 }
-func (m *memoryStore) Save(_ context.Context, c Config, key *string, clear bool, crypto Cipher) (Config, error) {
+func (m *memoryStore) UpdateModels(_ context.Context, change func([]ModelProfile) ([]ModelProfile, error)) (Config, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	merged, e := mergeSavedConfig(m.c, c, key, clear, crypto)
-	if e != nil {
-		return Config{}, e
+	models, err := change(append([]ModelProfile(nil), m.c.Models...))
+	if err != nil {
+		return Config{}, err
 	}
-	m.c = merged
-	return merged, nil
+	m.c.Models = models
+	return m.c, nil
+}
+func (m *memoryStore) UpdateRouting(_ context.Context, routing ModelRoutingConfig) (Config, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.c.Routing = routing
+	return m.c, nil
+}
+func (m *memoryStore) UpdateWebSearch(_ context.Context, change func(WebSearchConfig) (WebSearchConfig, error)) (Config, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c, err := change(m.c.WebSearch)
+	if err != nil {
+		return Config{}, err
+	}
+	m.c.WebSearch = c
+	return m.c, nil
 }
 func (m *memoryStore) Record(_ context.Context, u Usage) error {
 	m.mu.Lock()
@@ -72,19 +89,29 @@ func TestEncryptionAndWriteOnlyConfig(t *testing.T) {
 		t.Fatal("modified ciphertext accepted")
 	}
 	store := &memoryStore{}
-	c, _ := store.Save(context.Background(), Config{BaseURL: "https://example.com/v1", Model: "model", Enabled: true}, &key, false, crypto)
-	view, _ := json.Marshal(c.View())
+	service := New(store, crypto, testToken)
+	c, err := service.App.CreateModelProfile(context.Background(), app.CreateModelProfileInput{ID: "default", BaseURL: "https://1.1.1.1/v1", Model: "model", Enabled: true, APIKey: &key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dto, err := service.HTTP.GetAdminModelConfig(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, _ := json.Marshal(dto)
 	if strings.Contains(string(view), key) || !strings.Contains(string(view), `"hasApiKey":true`) {
 		t.Fatal(string(view))
 	}
-	c, _ = store.Save(context.Background(), Config{BaseURL: "https://example.com/v1", Model: "next", Enabled: true}, nil, false, crypto)
-	if !c.Configured() {
-		t.Fatal("omitted key was removed")
+	name := "next"
+	c, err = service.App.UpdateModelProfile(context.Background(), app.UpdateModelProfileInput{ID: "default", Model: &name})
+	if err != nil || !c.ResolveModel("").Configured() {
+		t.Fatal("omitted model key was removed", err)
 	}
-	c, _ = store.Save(context.Background(), c, nil, true, crypto)
-	if c.Configured() {
-		t.Fatal("explicit clear failed")
+	c, err = service.App.UpdateModelProfile(context.Background(), app.UpdateModelProfileInput{ID: "default", ClearAPIKey: true})
+	if err != nil || c.ResolveModel("").Configured() {
+		t.Fatal("explicit model key clear failed", err)
 	}
+
 }
 func TestEndpointPolicy(t *testing.T) {
 	for _, raw := range []string{"http://example.com/v1", "https://user:key@example.com/v1", "https://127.0.0.1/v1", "https://169.254.169.254/latest", "https://[::1]/v1", "https://example.com/v1?token=secret", "https://example.com/v1#key", "https://example.com/v1/chat/completions"} {
@@ -115,7 +142,7 @@ func TestProtocolFixtureModelLimitsToolsAndUsage(t *testing.T) {
 	defer fixture.Close()
 	crypto := testCipher(t)
 	encrypted, _ := crypto.Encrypt(key)
-	store := &memoryStore{c: Config{BaseURL: fixture.URL + "/v1", Model: "configured", CipherKey: encrypted, Enabled: true}}
+	store := &memoryStore{c: singleModel(ModelProfile{BaseURL: fixture.URL + "/v1", Model: "configured", CipherKey: encrypted, Enabled: true})}
 	s := New(store, crypto, testToken)
 	s.Provider = Provider{HTTP: fixture.Client()}
 	r, e := fixtureHTTPChat(t, s, context.Background(), &agent.GatewayChatRequest{ServiceToken: testToken, OwnerId: "owner", AgentId: "agent", SessionId: "session", RunId: "run", RequestJson: fixtureNativeRequest(`{"model":"bypass","messages":[{"role":"user","content":"hello"}],"max_tokens":262144,"tools":[{"type":"function","function":{"name":"exec","parameters":{"type":"object"}}}]}`, false)})
@@ -157,7 +184,7 @@ func TestCancellationAndRedactedUpstreamErrors(t *testing.T) {
 	defer fixture.Close()
 	crypto := testCipher(t)
 	encrypted, _ := crypto.Encrypt(key)
-	s := New(&memoryStore{c: Config{BaseURL: fixture.URL, Model: "fixture", CipherKey: encrypted, Enabled: true}}, crypto, testToken)
+	s := New(&memoryStore{c: singleModel(ModelProfile{BaseURL: fixture.URL, Model: "fixture", CipherKey: encrypted, Enabled: true})}, crypto, testToken)
 	s.Provider = Provider{HTTP: fixture.Client()}
 	done := make(chan *agent.GatewayChatResponse, 1)
 	go func() {
@@ -201,7 +228,7 @@ func TestCanceledAttemptDoesNotCancelNewAttempt(t *testing.T) {
 	defer fixture.Close()
 	crypto := testCipher(t)
 	encrypted, _ := crypto.Encrypt(key)
-	s := New(&memoryStore{c: Config{BaseURL: fixture.URL, Model: "fixture", Enabled: true, CipherKey: encrypted}}, crypto, testToken)
+	s := New(&memoryStore{c: singleModel(ModelProfile{BaseURL: fixture.URL, Model: "fixture", Enabled: true, CipherKey: encrypted})}, crypto, testToken)
 	s.Provider = Provider{HTTP: fixture.Client()}
 	_, _ = s.Cancel(context.Background(), &agent.CancelRequest{ServiceToken: testToken, AgentId: "a", RunId: "durable-run:attempt-1"})
 	req := &agent.GatewayChatRequest{ServiceToken: testToken, OwnerId: "owner", AgentId: "a", SessionId: "session", RunId: "durable-run:attempt-1", RequestJson: fixtureNativeRequest(`{"messages":[{"role":"user","content":"hi"}]}`, false)}
@@ -244,11 +271,7 @@ func TestMultiModelRoutingSmoothFallbackAndConcurrentForegroundCalls(t *testing.
 	encDefault, _ := crypto.Encrypt(defaultKey)
 	encR1, _ := crypto.Encrypt(r1Key)
 	cfg := Config{
-		BaseURL:        fixture.URL + "/v1",
-		Model:          "gpt-4o-default",
-		CipherKey:      encDefault,
-		Enabled:        true,
-		DefaultModelID: "default",
+		Routing: ModelRoutingConfig{DefaultModelID: "default"},
 		Models: []ModelProfile{
 			{
 				ID:                  "default",

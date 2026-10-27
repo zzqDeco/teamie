@@ -10,6 +10,22 @@ ALTER TABLE gateway_config ADD COLUMN IF NOT EXISTS web_search_encrypted_key BYT
 INSERT INTO gateway_schema_migrations(version)VALUES(3)ON CONFLICT DO NOTHING;
 CREATE TABLE IF NOT EXISTS gateway_models(id TEXT PRIMARY KEY,display_name TEXT NOT NULL DEFAULT '',description TEXT NOT NULL DEFAULT '',base_url TEXT NOT NULL DEFAULT '',model TEXT NOT NULL DEFAULT '',encrypted_key BYTEA,context_window_tokens BIGINT NOT NULL DEFAULT 16384 CHECK(context_window_tokens BETWEEN 4096 AND 2000000),enabled BOOLEAN NOT NULL DEFAULT true,created_at TIMESTAMPTZ NOT NULL DEFAULT now(),updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
 ALTER TABLE gateway_config ADD COLUMN IF NOT EXISTS default_model_id TEXT NOT NULL DEFAULT 'default';
+DO $$ BEGIN
+IF NOT EXISTS (SELECT 1 FROM gateway_schema_migrations WHERE version=4) THEN
 INSERT INTO gateway_models(id,display_name,description,base_url,model,encrypted_key,context_window_tokens,enabled,created_at,updated_at)SELECT 'default',model,'',base_url,model,encrypted_key,context_window_tokens,enabled,updated_at,updated_at FROM gateway_config WHERE id AND base_url<>'' AND model<>'' AND encrypted_key IS NOT NULL ON CONFLICT(id)DO NOTHING;
+END IF;
+END $$;
 ALTER TABLE gateway_usage ADD COLUMN IF NOT EXISTS model_id TEXT NOT NULL DEFAULT '';
 INSERT INTO gateway_schema_migrations(version)VALUES(4)ON CONFLICT DO NOTHING;
+
+-- Split durable settings once. The legacy singleton is retained as an immutable
+-- migration source; live code never synchronizes a resolved model back into it.
+CREATE TABLE IF NOT EXISTS gateway_model_routing(id BOOLEAN PRIMARY KEY DEFAULT true CHECK(id),default_model_id TEXT NOT NULL DEFAULT '',updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS gateway_web_search_config(id BOOLEAN PRIMARY KEY DEFAULT true CHECK(id),encrypted_key BYTEA,enabled BOOLEAN NOT NULL DEFAULT false,updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
+DO $$ BEGIN
+IF NOT EXISTS (SELECT 1 FROM gateway_schema_migrations WHERE version=5) THEN
+    INSERT INTO gateway_model_routing(id,default_model_id,updated_at) SELECT id,default_model_id,updated_at FROM gateway_config ON CONFLICT(id) DO NOTHING;
+    INSERT INTO gateway_web_search_config(id,encrypted_key,enabled,updated_at) SELECT id,web_search_encrypted_key,web_search_enabled,updated_at FROM gateway_config ON CONFLICT(id) DO NOTHING;
+    INSERT INTO gateway_schema_migrations(version) VALUES(5);
+END IF;
+END $$;

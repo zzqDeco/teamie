@@ -16,8 +16,8 @@ import (
 	"github.com/cloudwego/hertz/pkg/route"
 	"go.uber.org/zap"
 	gatewaygen "teamie/contracts/gen/agent/hertz_gen/agent/gateway"
-	"teamie/contracts/gen/agent/kitex_gen/agent"
 	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
+	"teamie/contracts/gen/agent/kitex_gen/agent"
 	"teamie/contracts/gen/im/kitex_gen/im"
 	"teamie/pkg/httpx"
 	"teamie/pkg/observability"
@@ -50,7 +50,8 @@ func ptr[T any](v T) *T { return &v }
 
 func toAdminModelConfigResp(c domain.Config) *gatewaygen.AdminModelConfigResp {
 	effDefault := c.EffectiveDefaultModelID()
-	rawModels := c.EffectiveModels()
+	rawModels := c.Models
+	resolved := c.ResolveModel("")
 	dtos := make([]*gatewaygen.AdminModelProfileDTO, 0, len(rawModels))
 	for _, m := range rawModels {
 		displayName := m.DisplayName
@@ -67,28 +68,30 @@ func toAdminModelConfigResp(c domain.Config) *gatewaygen.AdminModelConfigResp {
 			HasApiKey:           len(m.CipherKey) > 0,
 			Enabled:             m.Enabled,
 			Configured:          m.Configured(),
-			IsDefault:           m.ID == effDefault,
+			IsDefault:           m.ID == c.Routing.DefaultModelID,
 			UpdatedAt:           m.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		})
 	}
 	resp := &gatewaygen.AdminModelConfigResp{
 		Config: &gatewaygen.ModelConfigDTO{
-			BaseUrl:             c.BaseURL,
-			Model:               c.Model,
-			ContextWindowTokens: c.ContextWindow(),
-			HasApiKey:           len(c.CipherKey) > 0,
-			Enabled:             c.Enabled,
-			Configured:          c.Configured(),
+			BaseUrl:             resolved.BaseURL,
+			Model:               resolved.Model,
+			ContextWindowTokens: resolved.ContextWindow(),
+			HasApiKey:           len(resolved.CipherKey) > 0,
+			Enabled:             resolved.Enabled,
+			Configured:          resolved.Configured(),
 			WebSearch: &gatewaygen.WebSearchConfigDTO{
 				Provider:   "tavily",
-				Enabled:    c.WebSearchEnabled,
-				HasApiKey:  len(c.WebSearchCipherKey) > 0,
-				Configured: c.WebSearchConfigured(),
+				Enabled:    c.WebSearch.Enabled,
+				HasApiKey:  len(c.WebSearch.CipherKey) > 0,
+				Configured: c.WebSearch.Configured(),
 			},
-			UpdatedAt: c.UpdatedAt.UTC().Format(time.RFC3339Nano),
+			UpdatedAt: resolved.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		},
-		Status: c.Status(),
-		Models: dtos,
+		Routing:   &gatewaygen.ModelRoutingConfigDTO{DefaultModelId: c.Routing.DefaultModelID, EffectiveModelId: effDefault},
+		WebSearch: &gatewaygen.WebSearchConfigDTO{Provider: "tavily", Enabled: c.WebSearch.Enabled, HasApiKey: c.WebSearch.Configured(), Configured: c.WebSearch.Configured(), UpdatedAt: ptr(c.WebSearch.UpdatedAt.UTC().Format(time.RFC3339Nano))},
+		Status:    resolved.Status(),
+		Models:    dtos,
 	}
 	if effDefault != "" {
 		resp.DefaultModelId = &effDefault
@@ -103,7 +106,7 @@ func (a *Adapter) GetModelCatalog(ctx context.Context, _ *gatewaygen.GetModelCat
 	}
 	effDefault := c.EffectiveDefaultModelID()
 	items := make([]*gatewaygen.PublicModelOptionDTO, 0)
-	for _, m := range c.EffectiveModels() {
+	for _, m := range c.Models {
 		if !m.Configured() || !m.Enabled {
 			continue
 		}
@@ -136,21 +139,25 @@ func (a *Adapter) GetAdminModelConfig(ctx context.Context, _ *gatewaygen.GetAdmi
 	return toAdminModelConfigResp(c), nil
 }
 
-func (a *Adapter) UpdateAdminModelConfig(ctx context.Context, req *gatewaygen.UpdateAdminModelConfigReq) (*gatewaygen.AdminModelConfigResp, error) {
+func (a *Adapter) UpdateAdminModelConfig(context.Context, *gatewaygen.UpdateAdminModelConfigReq) (*gatewaygen.AdminModelConfigResp, error) {
+	return nil, domain.Err(409, "config_api_changed", "Refresh this page to update model, routing or web search settings separately")
+}
+
+func (a *Adapter) UpdateAdminWebSearchConfig(ctx context.Context, req *gatewaygen.UpdateAdminWebSearchConfigReq) (*gatewaygen.AdminModelConfigResp, error) {
 	if req == nil {
-		return nil, domain.Err(400, "invalid_request", "Invalid model configuration")
+		return nil, domain.Err(400, "invalid_request", "Invalid web search configuration")
 	}
-	c, err := a.App.SaveConfig(ctx, app.SaveConfigInput{
-		BaseURL:              req.BaseUrl,
-		Model:                req.Model,
-		APIKey:               req.ApiKey,
-		Enabled:              req.Enabled,
-		ClearAPIKey:          req.GetClearApiKey(),
-		ContextWindowTokens:  req.ContextWindowTokens,
-		WebSearchEnabled:     req.WebSearchEnabled,
-		WebSearchAPIKey:      req.WebSearchApiKey,
-		ClearWebSearchAPIKey: req.GetClearWebSearchApiKey(),
-	})
+	c, err := a.App.UpdateWebSearch(ctx, app.UpdateWebSearchInput{Enabled: req.Enabled, APIKey: req.ApiKey, ClearAPIKey: req.GetClearApiKey()})
+	if err != nil {
+		return nil, err
+	}
+	return toAdminModelConfigResp(c), nil
+}
+func (a *Adapter) UpdateAdminModelRouting(ctx context.Context, req *gatewaygen.UpdateAdminModelRoutingReq) (*gatewaygen.AdminModelConfigResp, error) {
+	if req == nil {
+		return nil, domain.Err(400, "invalid_request", "Invalid routing configuration")
+	}
+	c, err := a.App.UpdateRouting(ctx, req.DefaultModelId)
 	if err != nil {
 		return nil, err
 	}
@@ -170,7 +177,6 @@ func (a *Adapter) CreateAdminModelProfile(ctx context.Context, req *gatewaygen.C
 		APIKey:              req.ApiKey,
 		Enabled:             req.Enabled,
 		ContextWindowTokens: req.ContextWindowTokens,
-		IsDefault:           req.GetIsDefault(),
 	})
 	if err != nil {
 		return nil, err
@@ -192,7 +198,6 @@ func (a *Adapter) UpdateAdminModelProfile(ctx context.Context, req *gatewaygen.U
 		ClearAPIKey:         req.GetClearApiKey(),
 		Enabled:             req.Enabled,
 		ContextWindowTokens: req.ContextWindowTokens,
-		IsDefault:           req.IsDefault,
 	})
 	if err != nil {
 		return nil, err

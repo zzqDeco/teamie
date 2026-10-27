@@ -19,13 +19,13 @@ import { useAuth } from "./auth";
 import {
   canConfigureModelGateway,
   gatewayFailureText,
-  modelGatewayInput,
+  webSearchInput,
   modelProfileCreateInput,
   modelProfileUpdateInput,
 } from "./agent-management";
 import type { ModelProfileFormValue } from "./agent-management";
-import { AgentEnabledStatus, GatewayConfigurationFields } from "./agent-ui";
-import type { GatewayFormValue } from "./agent-ui";
+import { AgentEnabledStatus, WebSearchConfigurationFields } from "./agent-ui";
+import type { WebSearchFormValue } from "./agent-ui";
 import { Button, Modal, Notice } from "./ui";
 import { ICON } from "./icons";
 
@@ -49,7 +49,6 @@ function ModelProfileDialog({
       initial?.contextWindowTokens ?? 16384,
     ),
     [enabled, setEnabled] = useState(initial?.enabled ?? true),
-    [isDefault, setIsDefault] = useState(initial?.isDefault ?? false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [dirty, setDirty] = useState(false);
@@ -69,7 +68,6 @@ function ModelProfileDialog({
         ...(clearApiKey ? { clearApiKey: true } : {}),
         enabled,
         contextWindowTokens,
-        isDefault,
       });
       if (ok) onClose();
     } catch (e) {
@@ -211,19 +209,6 @@ function ModelProfileDialog({
           </span>
           <i />
         </label>
-        <label className="agent-enabled-switch">
-          <input
-            type="checkbox"
-            name="profileIsDefault"
-            checked={isDefault}
-            onChange={(e) => setIsDefault(e.target.checked)}
-          />
-          <span>
-            <b>设为平台默认模型</b>
-            <small>未指定模型的 Agent 或所选模型停用时将自动使用默认模型。</small>
-          </span>
-          <i />
-        </label>
         <div className="modal-actions">
           <Button type="button" variant="secondary" onClick={onClose}>
             取消
@@ -242,7 +227,8 @@ export function ModelGatewaySettings() {
   const client = useQueryClient();
   const admin = canConfigureModelGateway(user);
   const [denied, setDenied] = useState(false),
-    [busy, setBusy] = useState<"save" | "test" | null>(null),
+    [searchBusy, setSearchBusy] = useState(false),
+    [testing, setTesting] = useState(false),
     [modelBusyId, setModelBusyId] = useState<string | null>(null),
     [creatingModel, setCreatingModel] = useState(false),
     [editingModel, setEditingModel] = useState<AdminModelProfile | null>(null),
@@ -263,21 +249,22 @@ export function ModelGatewaySettings() {
   });
   const forbidden =
     denied || (query.error instanceof ApiError && query.error.status === 403);
-  async function syncGatewayResponse(response: Awaited<ReturnType<typeof api.modelGateway>>) {
+  async function syncGatewayResponse(
+    response: Awaited<ReturnType<typeof api.modelGateway>>,
+  ) {
     client.setQueryData(key, response);
     await Promise.all([
       client.invalidateQueries({ queryKey: ["modelCatalog"] }),
       client.invalidateQueries({ queryKey: ["agents"] }),
     ]);
   }
-  async function save(value: GatewayFormValue): Promise<boolean> {
+  async function save(value: WebSearchFormValue): Promise<boolean> {
     const sessionToken = api.csrfToken;
-    setBusy("save");
+    setSearchBusy(true);
     setError("");
     setSaved(false);
-    setTest(null);
     try {
-      const response = await api.saveModelGateway(modelGatewayInput(value));
+      const response = await api.saveWebSearch(webSearchInput(value));
       if (sessionToken !== api.csrfToken) return false;
       await syncGatewayResponse(response);
       setSaved(true);
@@ -289,12 +276,12 @@ export function ModelGatewaySettings() {
       }
       return false;
     } finally {
-      setBusy(null);
+      setSearchBusy(false);
     }
   }
   async function testConnection() {
     const sessionToken = api.csrfToken;
-    setBusy("test");
+    setTesting(true);
     setError("");
     setTest(null);
     try {
@@ -311,10 +298,12 @@ export function ModelGatewaySettings() {
         setError(gatewayFailureText(e));
       }
     } finally {
-      setBusy(null);
+      setTesting(false);
     }
   }
-  async function handleCreateModel(value: ModelProfileFormValue): Promise<boolean> {
+  async function handleCreateModel(
+    value: ModelProfileFormValue,
+  ): Promise<boolean> {
     const sessionToken = api.csrfToken;
     const input = modelProfileCreateInput(value);
     const response = await api.createModelProfile(input);
@@ -340,8 +329,8 @@ export function ModelGatewaySettings() {
     setModelBusyId(profileId);
     setError("");
     try {
-      const response = await api.updateModelProfile(profileId, {
-        isDefault: true,
+      const response = await api.saveModelRouting({
+        defaultModelId: profileId,
       });
       if (sessionToken === api.csrfToken) {
         await syncGatewayResponse(response);
@@ -472,7 +461,8 @@ export function ModelGatewaySettings() {
               <div>
                 <h2>可选模型目录</h2>
                 <p>
-                  配置多个可用模型供创建 Agent 时选择；若所选模型停用或移除，Agent
+                  配置多个可用模型供创建 Agent
+                  时选择；若所选模型停用或移除，Agent
                   会自动平滑回退到平台默认模型。
                 </p>
               </div>
@@ -556,13 +546,12 @@ export function ModelGatewaySettings() {
               </div>
             )}
           </section>
-          <GatewayConfigurationFields
-            key={`${user!.id}:${query.data.config.updatedAt}`}
-            initial={query.data.config}
+          <WebSearchConfigurationFields
+            key={`${user!.id}:${query.data.webSearch.updatedAt}`}
+            initial={query.data.webSearch}
             onSave={save}
             error={error}
-            busy={busy === "save"}
-            testing={busy === "test"}
+            busy={searchBusy}
           />
           <div className="gateway-test-panel">
             <div>
@@ -571,11 +560,9 @@ export function ModelGatewaySettings() {
             </div>
             <Button
               className="secondary"
-              busy={busy === "test"}
+              busy={testing}
               disabled={
-                busy === "save" ||
-                !query.data.config.configured ||
-                !query.data.config.enabled
+                !query.data.config.configured || !query.data.config.enabled
               }
               onClick={() => void testConnection()}
             >
@@ -590,6 +577,7 @@ export function ModelGatewaySettings() {
           )}
           {editingModel && (
             <ModelProfileDialog
+              key={editingModel.id}
               initial={editingModel}
               onSave={(value) => handleUpdateModel(editingModel.id, value)}
               onClose={() => setEditingModel(null)}

@@ -8,10 +8,11 @@ import (
 )
 
 type WebSearchConfigDTO struct {
-	Provider   string `thrift:"provider,1,required" json:"provider"`
-	Enabled    bool   `thrift:"enabled,2,required" json:"enabled"`
-	HasApiKey  bool   `thrift:"hasApiKey,3,required" json:"hasApiKey"`
-	Configured bool   `thrift:"configured,4,required" json:"configured"`
+	Provider   string  `thrift:"provider,1,required" json:"provider"`
+	Enabled    bool    `thrift:"enabled,2,required" json:"enabled"`
+	HasApiKey  bool    `thrift:"hasApiKey,3,required" json:"hasApiKey"`
+	Configured bool    `thrift:"configured,4,required" json:"configured"`
+	UpdatedAt  *string `thrift:"updatedAt,5,optional" json:"updatedAt,omitempty"`
 }
 
 func NewWebSearchConfigDTO() *WebSearchConfigDTO {
@@ -37,11 +38,132 @@ func (p *WebSearchConfigDTO) GetConfigured() (v bool) {
 	return p.Configured
 }
 
+var WebSearchConfigDTO_UpdatedAt_DEFAULT string
+
+func (p *WebSearchConfigDTO) GetUpdatedAt() (v string) {
+	if !p.IsSetUpdatedAt() {
+		return WebSearchConfigDTO_UpdatedAt_DEFAULT
+	}
+	return *p.UpdatedAt
+}
+
+func (p *WebSearchConfigDTO) IsSetUpdatedAt() bool {
+	return p.UpdatedAt != nil
+}
+
 func (p *WebSearchConfigDTO) String() string {
 	if p == nil {
 		return "<nil>"
 	}
 	return fmt.Sprintf("WebSearchConfigDTO(%+v)", *p)
+}
+
+type ModelRoutingConfigDTO struct {
+	DefaultModelId   string `thrift:"defaultModelId,1,required" json:"defaultModelId"`
+	EffectiveModelId string `thrift:"effectiveModelId,2,required" json:"effectiveModelId"`
+}
+
+func NewModelRoutingConfigDTO() *ModelRoutingConfigDTO {
+	return &ModelRoutingConfigDTO{}
+}
+
+func (p *ModelRoutingConfigDTO) InitDefault() {
+}
+
+func (p *ModelRoutingConfigDTO) GetDefaultModelId() (v string) {
+	return p.DefaultModelId
+}
+
+func (p *ModelRoutingConfigDTO) GetEffectiveModelId() (v string) {
+	return p.EffectiveModelId
+}
+
+func (p *ModelRoutingConfigDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ModelRoutingConfigDTO(%+v)", *p)
+}
+
+type UpdateAdminModelRoutingReq struct {
+	DefaultModelId string `thrift:"defaultModelId,1,required" json:"defaultModelId"`
+}
+
+func NewUpdateAdminModelRoutingReq() *UpdateAdminModelRoutingReq {
+	return &UpdateAdminModelRoutingReq{}
+}
+
+func (p *UpdateAdminModelRoutingReq) InitDefault() {
+}
+
+func (p *UpdateAdminModelRoutingReq) GetDefaultModelId() (v string) {
+	return p.DefaultModelId
+}
+
+func (p *UpdateAdminModelRoutingReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("UpdateAdminModelRoutingReq(%+v)", *p)
+}
+
+type UpdateAdminWebSearchConfigReq struct {
+	Enabled     *bool   `thrift:"enabled,1,optional" json:"enabled,omitempty"`
+	ApiKey      *string `thrift:"apiKey,2,optional" json:"apiKey,omitempty"`
+	ClearApiKey *bool   `thrift:"clearApiKey,3,optional" json:"clearApiKey,omitempty"`
+}
+
+func NewUpdateAdminWebSearchConfigReq() *UpdateAdminWebSearchConfigReq {
+	return &UpdateAdminWebSearchConfigReq{}
+}
+
+func (p *UpdateAdminWebSearchConfigReq) InitDefault() {
+}
+
+var UpdateAdminWebSearchConfigReq_Enabled_DEFAULT bool
+
+func (p *UpdateAdminWebSearchConfigReq) GetEnabled() (v bool) {
+	if !p.IsSetEnabled() {
+		return UpdateAdminWebSearchConfigReq_Enabled_DEFAULT
+	}
+	return *p.Enabled
+}
+
+var UpdateAdminWebSearchConfigReq_ApiKey_DEFAULT string
+
+func (p *UpdateAdminWebSearchConfigReq) GetApiKey() (v string) {
+	if !p.IsSetApiKey() {
+		return UpdateAdminWebSearchConfigReq_ApiKey_DEFAULT
+	}
+	return *p.ApiKey
+}
+
+var UpdateAdminWebSearchConfigReq_ClearApiKey_DEFAULT bool
+
+func (p *UpdateAdminWebSearchConfigReq) GetClearApiKey() (v bool) {
+	if !p.IsSetClearApiKey() {
+		return UpdateAdminWebSearchConfigReq_ClearApiKey_DEFAULT
+	}
+	return *p.ClearApiKey
+}
+
+func (p *UpdateAdminWebSearchConfigReq) IsSetEnabled() bool {
+	return p.Enabled != nil
+}
+
+func (p *UpdateAdminWebSearchConfigReq) IsSetApiKey() bool {
+	return p.ApiKey != nil
+}
+
+func (p *UpdateAdminWebSearchConfigReq) IsSetClearApiKey() bool {
+	return p.ClearApiKey != nil
+}
+
+func (p *UpdateAdminWebSearchConfigReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("UpdateAdminWebSearchConfigReq(%+v)", *p)
 }
 
 type ModelConfigDTO struct {
@@ -299,6 +421,8 @@ type AdminModelConfigResp struct {
 	Status         string                  `thrift:"status,2,required" json:"status"`
 	Models         []*AdminModelProfileDTO `thrift:"models,3,optional,list<AdminModelProfileDTO>" json:"models,omitempty"`
 	DefaultModelId *string                 `thrift:"defaultModelId,4,optional" json:"defaultModelId,omitempty"`
+	Routing        *ModelRoutingConfigDTO  `thrift:"routing,5,required" json:"routing"`
+	WebSearch      *WebSearchConfigDTO     `thrift:"webSearch,6,required" json:"webSearch"`
 }
 
 func NewAdminModelConfigResp() *AdminModelConfigResp {
@@ -339,6 +463,24 @@ func (p *AdminModelConfigResp) GetDefaultModelId() (v string) {
 	return *p.DefaultModelId
 }
 
+var AdminModelConfigResp_Routing_DEFAULT *ModelRoutingConfigDTO
+
+func (p *AdminModelConfigResp) GetRouting() (v *ModelRoutingConfigDTO) {
+	if !p.IsSetRouting() {
+		return AdminModelConfigResp_Routing_DEFAULT
+	}
+	return p.Routing
+}
+
+var AdminModelConfigResp_WebSearch_DEFAULT *WebSearchConfigDTO
+
+func (p *AdminModelConfigResp) GetWebSearch() (v *WebSearchConfigDTO) {
+	if !p.IsSetWebSearch() {
+		return AdminModelConfigResp_WebSearch_DEFAULT
+	}
+	return p.WebSearch
+}
+
 func (p *AdminModelConfigResp) IsSetConfig() bool {
 	return p.Config != nil
 }
@@ -349,6 +491,14 @@ func (p *AdminModelConfigResp) IsSetModels() bool {
 
 func (p *AdminModelConfigResp) IsSetDefaultModelId() bool {
 	return p.DefaultModelId != nil
+}
+
+func (p *AdminModelConfigResp) IsSetRouting() bool {
+	return p.Routing != nil
+}
+
+func (p *AdminModelConfigResp) IsSetWebSearch() bool {
+	return p.WebSearch != nil
 }
 
 func (p *AdminModelConfigResp) String() string {
@@ -483,7 +633,6 @@ type CreateAdminModelProfileReq struct {
 	ApiKey              *string `thrift:"apiKey,6,optional" json:"apiKey,omitempty"`
 	Enabled             bool    `thrift:"enabled,7,required" json:"enabled"`
 	ContextWindowTokens *int64  `thrift:"contextWindowTokens,8,optional" json:"contextWindowTokens,omitempty"`
-	IsDefault           *bool   `thrift:"isDefault,9,optional" json:"isDefault,omitempty"`
 }
 
 func NewCreateAdminModelProfileReq() *CreateAdminModelProfileReq {
@@ -550,15 +699,6 @@ func (p *CreateAdminModelProfileReq) GetContextWindowTokens() (v int64) {
 	return *p.ContextWindowTokens
 }
 
-var CreateAdminModelProfileReq_IsDefault_DEFAULT bool
-
-func (p *CreateAdminModelProfileReq) GetIsDefault() (v bool) {
-	if !p.IsSetIsDefault() {
-		return CreateAdminModelProfileReq_IsDefault_DEFAULT
-	}
-	return *p.IsDefault
-}
-
 func (p *CreateAdminModelProfileReq) IsSetID() bool {
 	return p.ID != nil
 }
@@ -579,10 +719,6 @@ func (p *CreateAdminModelProfileReq) IsSetContextWindowTokens() bool {
 	return p.ContextWindowTokens != nil
 }
 
-func (p *CreateAdminModelProfileReq) IsSetIsDefault() bool {
-	return p.IsDefault != nil
-}
-
 func (p *CreateAdminModelProfileReq) String() string {
 	if p == nil {
 		return "<nil>"
@@ -600,7 +736,6 @@ type UpdateAdminModelProfileReq struct {
 	ClearApiKey         *bool   `thrift:"clearApiKey,7,optional" json:"clearApiKey,omitempty"`
 	Enabled             *bool   `thrift:"enabled,8,optional" json:"enabled,omitempty"`
 	ContextWindowTokens *int64  `thrift:"contextWindowTokens,9,optional" json:"contextWindowTokens,omitempty"`
-	IsDefault           *bool   `thrift:"isDefault,10,optional" json:"isDefault,omitempty"`
 }
 
 func NewUpdateAdminModelProfileReq() *UpdateAdminModelProfileReq {
@@ -686,15 +821,6 @@ func (p *UpdateAdminModelProfileReq) GetContextWindowTokens() (v int64) {
 	return *p.ContextWindowTokens
 }
 
-var UpdateAdminModelProfileReq_IsDefault_DEFAULT bool
-
-func (p *UpdateAdminModelProfileReq) GetIsDefault() (v bool) {
-	if !p.IsSetIsDefault() {
-		return UpdateAdminModelProfileReq_IsDefault_DEFAULT
-	}
-	return *p.IsDefault
-}
-
 func (p *UpdateAdminModelProfileReq) IsSetDisplayName() bool {
 	return p.DisplayName != nil
 }
@@ -725,10 +851,6 @@ func (p *UpdateAdminModelProfileReq) IsSetEnabled() bool {
 
 func (p *UpdateAdminModelProfileReq) IsSetContextWindowTokens() bool {
 	return p.ContextWindowTokens != nil
-}
-
-func (p *UpdateAdminModelProfileReq) IsSetIsDefault() bool {
-	return p.IsDefault != nil
 }
 
 func (p *UpdateAdminModelProfileReq) String() string {
@@ -1536,6 +1658,10 @@ type ModelGatewayHTTPService interface {
 	GetModelCatalog(ctx context.Context, req *GetModelCatalogReq) (r *ModelCatalogResp, err error)
 
 	GetAdminModelConfig(ctx context.Context, req *GetAdminModelConfigReq) (r *AdminModelConfigResp, err error)
+
+	UpdateAdminWebSearchConfig(ctx context.Context, req *UpdateAdminWebSearchConfigReq) (r *AdminModelConfigResp, err error)
+
+	UpdateAdminModelRouting(ctx context.Context, req *UpdateAdminModelRoutingReq) (r *AdminModelConfigResp, err error)
 
 	UpdateAdminModelConfig(ctx context.Context, req *UpdateAdminModelConfigReq) (r *AdminModelConfigResp, err error)
 

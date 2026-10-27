@@ -18,41 +18,75 @@ afterEach(() => {
 });
 describe("account-bound transport", () => {
   it("cancels ordinary single-message reads with the caller's account binding", async () => {
-    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: {} })));
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ message: {} })));
     vi.stubGlobal("fetch", fetch);
-    const client = new TeamieClient(); client.csrfToken = "current-account";
+    const client = new TeamieClient();
+    client.csrfToken = "current-account";
     const controller = new AbortController();
     await client.message("conversation/id", "message/id", controller.signal);
     const [url, options] = fetch.mock.calls[0];
-    expect(url).toBe("/api/v1/conversations/conversation%2Fid/messages/message%2Fid");
+    expect(url).toBe(
+      "/api/v1/conversations/conversation%2Fid/messages/message%2Fid",
+    );
     expect(options.headers.get("X-CSRF-Token")).toBe("current-account");
     expect(options.signal).toBe(controller.signal);
     expect(options.cache).toBe("no-store");
   });
   it("binds attention pages to the current account and encodes only paging/filter options", async () => {
-    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: [], unreadCount: 0 })));
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ items: [], unreadCount: 0 })),
+      );
     vi.stubGlobal("fetch", fetch);
-    const client = new TeamieClient(); client.csrfToken = "current-account";
+    const client = new TeamieClient();
+    client.csrfToken = "current-account";
     const controller = new AbortController();
-    await client.attention({ cursor: "opaque+cursor", limit: 20, unreadOnly: true }, controller.signal);
+    await client.attention(
+      { cursor: "opaque+cursor", limit: 20, unreadOnly: true },
+      controller.signal,
+    );
     const [url, options] = fetch.mock.calls[0];
-    expect(new URL(url, "https://example.test").pathname).toBe("/api/v1/attention");
-    expect(Object.fromEntries(new URL(url, "https://example.test").searchParams)).toEqual({ cursor: "opaque+cursor", limit: "20", unreadOnly: "true" });
+    expect(new URL(url, "https://example.test").pathname).toBe(
+      "/api/v1/attention",
+    );
+    expect(
+      Object.fromEntries(new URL(url, "https://example.test").searchParams),
+    ).toEqual({ cursor: "opaque+cursor", limit: "20", unreadOnly: "true" });
     expect(options.headers.get("X-CSRF-Token")).toBe("current-account");
-    expect(options.signal).toBe(controller.signal); expect(options.cache).toBe("no-store");
+    expect(options.signal).toBe(controller.signal);
+    expect(options.cache).toBe("no-store");
   });
   it("encodes literal history searches and file filters with current read authentication and cancellation", async () => {
-    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ messages: [], hasMore: false })));
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ messages: [], hasMore: false })),
+      );
     vi.stubGlobal("fetch", fetch);
-    const client = new TeamieClient(); client.csrfToken = "current-account";
+    const client = new TeamieClient();
+    client.csrfToken = "current-account";
     const controller = new AbortController();
-    await client.searchMessages("conversation/id", { q: "10%_ & 报告", content: "files", beforeSeq: 65 }, controller.signal);
+    await client.searchMessages(
+      "conversation/id",
+      { q: "10%_ & 报告", content: "files", beforeSeq: 65 },
+      controller.signal,
+    );
     const [url, options] = fetch.mock.calls[0];
     const params = new URL(url, "https://example.test").searchParams;
     expect(url).toContain("/conversations/conversation%2Fid/messages?");
-    expect(Object.fromEntries(params)).toEqual({ limit: "50", q: "10%_ & 报告", content: "files", beforeSeq: "65" });
+    expect(Object.fromEntries(params)).toEqual({
+      limit: "50",
+      q: "10%_ & 报告",
+      content: "files",
+      beforeSeq: "65",
+    });
     expect(options.headers.get("X-CSRF-Token")).toBe("current-account");
-    expect(options.credentials).toBe("same-origin"); expect(options.cache).toBe("no-store"); expect(options.signal).toBe(controller.signal);
+    expect(options.credentials).toBe("same-origin");
+    expect(options.cache).toBe("no-store");
+    expect(options.signal).toBe(controller.signal);
   });
   it("sends Idempotency-Key on attachment uploads and queries attachment-uploads recovery with CSRF", async () => {
     const attachment = {
@@ -111,22 +145,38 @@ describe("account-bound transport", () => {
     await client.bootstrap();
     fetch.mockResolvedValue(new Response("{}"));
     await client.session();
-    expect(fetch.mock.calls[0][1].headers.get("X-CSRF-Token")).toBe("browser-account");
+    expect(fetch.mock.calls[0][1].headers.get("X-CSRF-Token")).toBe(
+      "browser-account",
+    );
     expect(fetch.mock.calls[1][1].headers.has("X-CSRF-Token")).toBe(false);
   });
-  it.each([[401, "session_changed"], [403, "csrf_failed"], [403, "invalid_csrf"]])(
+  it.each([
+    [401, "session_changed"],
+    [403, "csrf_failed"],
+    [403, "invalid_csrf"],
+  ])(
     "reconciles a cookie/session mismatch without clearing it as an ordinary denial: %s %s",
     async (status, code) => {
-      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
-        JSON.stringify({ error: { code, message: "session changed" } }),
-        { status: status as number },
-      )));
+      vi.stubGlobal(
+        "fetch",
+        vi
+          .fn()
+          .mockResolvedValue(
+            new Response(
+              JSON.stringify({ error: { code, message: "session changed" } }),
+              { status: status as number },
+            ),
+          ),
+      );
       const client = new TeamieClient();
       client.csrfToken = "browser-account";
       client.onSessionChanged = vi.fn();
       client.onUnauthorized = vi.fn();
       client.onForbidden = vi.fn();
-      await expect(client.messages("c1")).rejects.toMatchObject({ status, code });
+      await expect(client.messages("c1")).rejects.toMatchObject({
+        status,
+        code,
+      });
       expect(client.onSessionChanged).toHaveBeenCalledOnce();
       expect(client.onUnauthorized).not.toHaveBeenCalled();
       expect(client.onForbidden).not.toHaveBeenCalled();
@@ -134,22 +184,40 @@ describe("account-bound transport", () => {
   );
   it("discards an old protected success even when the session changes during body decoding", async () => {
     let finish!: (value: unknown) => void;
-    const json = vi.fn(() => new Promise((resolve) => { finish = resolve; }));
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, json }));
+    const json = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, status: 200, json }),
+    );
     const client = new TeamieClient();
     client.csrfToken = "previous-account";
     const pending = client.bootstrap();
     await vi.waitFor(() => expect(json).toHaveBeenCalledOnce());
     client.csrfToken = "current-account";
     finish({ conversations: [{ id: "previous-private-conversation" }] });
-    await expect(pending).rejects.toMatchObject({ status: 409, code: "stale_session" });
+    await expect(pending).rejects.toMatchObject({
+      status: 409,
+      code: "stale_session",
+    });
   });
   it("changes the password using the authenticated CSRF-protected endpoint and handles an empty 204", async () => {
-    const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetch);
     const client = new TeamieClient();
     client.csrfToken = "current-session";
-    expect(await client.changePassword("example-old-password", "example-new-password")).toBeUndefined();
+    expect(
+      await client.changePassword(
+        "example-old-password",
+        "example-new-password",
+      ),
+    ).toBeUndefined();
     expect(fetch.mock.calls[0][0]).toBe("/api/v1/auth/password");
     const options = fetch.mock.calls[0][1];
     expect(options.method).toBe("POST");
@@ -167,18 +235,30 @@ describe("account-bound transport", () => {
     [400, "invalid_password", false],
     [429, "rate_limited", false],
     [401, "unauthorized", true],
-  ])("only invalidates a password-change session for an actual 401: %s %s", async (status, code, unauthorized) => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
-      JSON.stringify({ error: { code, message: "example error" } }),
-      { status: status as number },
-    )));
-    const client = new TeamieClient();
-    client.csrfToken = "current-session";
-    client.onUnauthorized = vi.fn();
-    await expect(client.changePassword("example-old-password", "example-new-password")).rejects.toMatchObject({ status, code });
-    expect(client.onUnauthorized).toHaveBeenCalledTimes(unauthorized ? 1 : 0);
-    expect(client.csrfToken).toBe("current-session");
-  });
+  ])(
+    "only invalidates a password-change session for an actual 401: %s %s",
+    async (status, code, unauthorized) => {
+      vi.stubGlobal(
+        "fetch",
+        vi
+          .fn()
+          .mockResolvedValue(
+            new Response(
+              JSON.stringify({ error: { code, message: "example error" } }),
+              { status: status as number },
+            ),
+          ),
+      );
+      const client = new TeamieClient();
+      client.csrfToken = "current-session";
+      client.onUnauthorized = vi.fn();
+      await expect(
+        client.changePassword("example-old-password", "example-new-password"),
+      ).rejects.toMatchObject({ status, code });
+      expect(client.onUnauthorized).toHaveBeenCalledTimes(unauthorized ? 1 : 0);
+      expect(client.csrfToken).toBe("current-session");
+    },
+  );
   it("sends relative same-origin writes with the current CSRF token", async () => {
     const fetch = vi
       .fn()
@@ -226,18 +306,34 @@ describe("account-bound transport", () => {
     "does not invalidate a new session for an old %s response with 401",
     async (endpoint) => {
       let finish!: (response: Response) => void;
-      vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => { finish = resolve; })));
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(
+          () =>
+            new Promise<Response>((resolve) => {
+              finish = resolve;
+            }),
+        ),
+      );
       const client = new TeamieClient();
       client.csrfToken = "old-session";
       client.onUnauthorized = vi.fn();
-      const request = endpoint === "profile"
-        ? client.profile("旧会话的资料")
-        : client.changePassword("example-old-password", "example-new-password");
+      const request =
+        endpoint === "profile"
+          ? client.profile("旧会话的资料")
+          : client.changePassword(
+              "example-old-password",
+              "example-new-password",
+            );
       client.csrfToken = "new-session";
-      finish(new Response(
-        JSON.stringify({ error: { code: "unauthorized", message: "expired" } }),
-        { status: 401 },
-      ));
+      finish(
+        new Response(
+          JSON.stringify({
+            error: { code: "unauthorized", message: "expired" },
+          }),
+          { status: 401 },
+        ),
+      );
       await expect(request).rejects.toMatchObject({ status: 401 });
       expect(client.onUnauthorized).not.toHaveBeenCalled();
       expect(client.csrfToken).toBe("new-session");
@@ -245,8 +341,16 @@ describe("account-bound transport", () => {
   );
   it("rechecks the session after parsing an old unauthorized response", async () => {
     let finishBody!: (value: unknown) => void;
-    const json = vi.fn(() => new Promise((resolve) => { finishBody = resolve; }));
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401, json }));
+    const json = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          finishBody = resolve;
+        }),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status: 401, json }),
+    );
     const client = new TeamieClient();
     client.csrfToken = "old-session";
     client.onUnauthorized = vi.fn();
@@ -509,6 +613,14 @@ describe("Agent and model gateway boundaries", () => {
   });
   it("strips any accidentally returned credential fields from gateway read and save results", async () => {
     const response = {
+      routing: { defaultModelId: "default", effectiveModelId: "default" },
+      webSearch: {
+        provider: "tavily",
+        hasApiKey: true,
+        enabled: true,
+        configured: true,
+        apiKey: "example-never-returned-tavily-key",
+      },
       config: {
         baseUrl: "https://model.example.test/v1",
         model: "model-id",
@@ -538,17 +650,21 @@ describe("Agent and model gateway boundaries", () => {
     const client = new TeamieClient();
     client.csrfToken = "admin-session";
     const read = await client.modelGateway();
-    const saved = await client.saveModelGateway({
-      baseUrl: response.config.baseUrl,
-      model: response.config.model,
-      apiKey: "example-request-key",
+    const saved = await client.saveWebSearch({
       enabled: true,
-      webSearchEnabled: true,
-      webSearchApiKey: "example-tavily-request-key",
+      apiKey: "example-tavily-request-key",
+    });
+    const searchCall = fetch.mock.calls.at(-1)!;
+    expect(searchCall[0]).toBe("/api/v1/admin/model-gateway/web-search");
+    expect(JSON.parse((searchCall[1] as RequestInit).body as string)).toEqual({
+      enabled: true,
+      apiKey: "example-tavily-request-key",
     });
     for (const value of [read, saved]) {
       expect(JSON.stringify(value)).not.toContain("example-never-returned-key");
-      expect(JSON.stringify(value)).not.toContain("example-never-returned-tavily-key");
+      expect(JSON.stringify(value)).not.toContain(
+        "example-never-returned-tavily-key",
+      );
       expect(JSON.stringify(value)).not.toContain("example-ciphertext");
       expect(JSON.stringify(value)).not.toContain("example-top-level-secret");
       expect(value.config).not.toHaveProperty("apiKey");
@@ -559,9 +675,11 @@ describe("Agent and model gateway boundaries", () => {
         configured: true,
       });
     }
-    expect(fetch.mock.calls[1][0]).toBe("/api/v1/admin/model-gateway");
+    expect(fetch.mock.calls[1][0]).toBe(
+      "/api/v1/admin/model-gateway/web-search",
+    );
     expect(fetch.mock.calls[1][0]).not.toContain("example-request-key");
-    expect(fetch.mock.calls[1][1].method).toBe("PUT");
+    expect(fetch.mock.calls[1][1].method).toBe("PATCH");
     expect(fetch.mock.calls[1][1].headers.get("X-CSRF-Token")).toBe(
       "admin-session",
     );
@@ -644,6 +762,16 @@ describe("Agent and model gateway boundaries", () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
+            routing: {
+              defaultModelId: "deepseek-r1",
+              effectiveModelId: "deepseek-r1",
+            },
+            webSearch: {
+              provider: "tavily",
+              hasApiKey: false,
+              enabled: false,
+              configured: false,
+            },
             config: {
               baseUrl: "https://model.example.test/v1",
               model: "deepseek-reasoner",
@@ -699,7 +827,6 @@ describe("Agent and model gateway boundaries", () => {
       apiKey: "sk-write-only",
       enabled: true,
       contextWindowTokens: 65536,
-      isDefault: true,
     });
     expect(JSON.stringify(created)).not.toContain("sk-never-returned-secret");
     expect(created.models?.[0]?.id).toBe("deepseek-r1");
@@ -774,9 +901,17 @@ describe("IDL_ROUTES and generated Thrift DTO contracts", () => {
 
   it("verifies generated.ts is in sync with contracts/*.thrift and excludes internal runtime DTOs", () => {
     const repoRoot = path.resolve(process.cwd(), "../..");
-    const codegenScript = path.join(repoRoot, "tools/thrift-ts-codegen/index.mjs");
-    const generatedFile = path.join(repoRoot, "packages/api-client/src/generated.ts");
-    execFileSync(process.execPath, [codegenScript, "--check"], { stdio: "pipe" });
+    const codegenScript = path.join(
+      repoRoot,
+      "tools/thrift-ts-codegen/index.mjs",
+    );
+    const generatedFile = path.join(
+      repoRoot,
+      "packages/api-client/src/generated.ts",
+    );
+    execFileSync(process.execPath, [codegenScript, "--check"], {
+      stdio: "pipe",
+    });
     const source = fs.readFileSync(generatedFile, "utf8");
     expect(source).not.toContain("ChatCallReq");
     expect(source).not.toContain("StreamEventFrameDTO");
@@ -847,10 +982,18 @@ describe("IDL_ROUTES and generated Thrift DTO contracts", () => {
 
     const fetch = vi
       .fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify(sessionDto), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(bootstrapDto), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ message: messageDto }), { status: 201 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ agents: [agentDto] }), { status: 200 }));
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(sessionDto), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(bootstrapDto), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: messageDto }), { status: 201 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ agents: [agentDto] }), { status: 200 }),
+      );
     vi.stubGlobal("fetch", fetch);
 
     const client = new TeamieClient();
@@ -873,8 +1016,17 @@ describe("IDL_ROUTES and generated Thrift DTO contracts", () => {
 it("passes attachment cancellation and preserves Retry-After for transfer saturation", async () => {
   const client = new TeamieClient();
   const controller = new AbortController();
-  const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { code: "attachment_busy" } }), { status: 429, headers: { "Retry-After": "2" } }));
+  const fetch = vi
+    .fn()
+    .mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: "attachment_busy" } }), {
+        status: 429,
+        headers: { "Retry-After": "2" },
+      }),
+    );
   vi.stubGlobal("fetch", fetch);
-  await expect(client.attachmentContent("c", "f", controller.signal)).rejects.toMatchObject({ status: 429, retryAfterMs: 2000 });
+  await expect(
+    client.attachmentContent("c", "f", controller.signal),
+  ).rejects.toMatchObject({ status: 429, retryAfterMs: 2000 });
   expect(fetch.mock.calls[0][1].signal).toBe(controller.signal);
 });

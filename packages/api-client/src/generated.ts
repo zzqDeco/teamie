@@ -565,6 +565,22 @@ export interface WebSearchConfigDTO {
   enabled: boolean;
   hasApiKey: boolean;
   configured: boolean;
+  updatedAt?: string;
+}
+
+export interface ModelRoutingConfigDTO {
+  defaultModelId: string;
+  effectiveModelId: string;
+}
+
+export interface UpdateAdminModelRoutingReq {
+  defaultModelId: string;
+}
+
+export interface UpdateAdminWebSearchConfigReq {
+  enabled?: boolean;
+  apiKey?: string;
+  clearApiKey?: boolean;
 }
 
 export interface ModelConfigDTO {
@@ -614,6 +630,8 @@ export interface AdminModelConfigResp {
   status: string;
   models?: AdminModelProfileDTO[];
   defaultModelId?: string;
+  routing: ModelRoutingConfigDTO;
+  webSearch: WebSearchConfigDTO;
 }
 
 export interface UpdateAdminModelConfigReq {
@@ -637,7 +655,6 @@ export interface CreateAdminModelProfileReq {
   apiKey?: string;
   enabled: boolean;
   contextWindowTokens?: number;
-  isDefault?: boolean;
 }
 
 export interface UpdateAdminModelProfileReq {
@@ -650,7 +667,6 @@ export interface UpdateAdminModelProfileReq {
   clearApiKey?: boolean;
   enabled?: boolean;
   contextWindowTokens?: number;
-  isDefault?: boolean;
 }
 
 export interface DeleteAdminModelProfileReq {
@@ -1104,6 +1120,24 @@ export const IDL_ROUTES = {
     path: "/api/v1/admin/model-gateway",
     clientPath: "/admin/model-gateway",
     requestType: "GetAdminModelConfigReq",
+    responseType: "AdminModelConfigResp",
+  },
+  UpdateAdminWebSearchConfig: {
+    service: "ModelGatewayHTTPService",
+    namespace: "agent.gateway",
+    method: "PATCH",
+    path: "/api/v1/admin/model-gateway/web-search",
+    clientPath: "/admin/model-gateway/web-search",
+    requestType: "UpdateAdminWebSearchConfigReq",
+    responseType: "AdminModelConfigResp",
+  },
+  UpdateAdminModelRouting: {
+    service: "ModelGatewayHTTPService",
+    namespace: "agent.gateway",
+    method: "PUT",
+    path: "/api/v1/admin/model-gateway/routing",
+    clientPath: "/admin/model-gateway/routing",
+    requestType: "UpdateAdminModelRoutingReq",
     responseType: "AdminModelConfigResp",
   },
   UpdateAdminModelConfig: {

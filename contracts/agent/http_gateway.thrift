@@ -8,6 +8,22 @@ struct WebSearchConfigDTO {
   2: required bool enabled (api.body="enabled")
   3: required bool hasApiKey (api.body="hasApiKey")
   4: required bool configured (api.body="configured")
+  5: optional string updatedAt (api.body="updatedAt")
+}
+
+struct ModelRoutingConfigDTO {
+  1: required string defaultModelId (api.body="defaultModelId")
+  2: required string effectiveModelId (api.body="effectiveModelId")
+}
+
+struct UpdateAdminModelRoutingReq {
+  1: required string defaultModelId (api.body="defaultModelId")
+}
+
+struct UpdateAdminWebSearchConfigReq {
+  1: optional bool enabled (api.body="enabled")
+  2: optional string apiKey (api.body="apiKey")
+  3: optional bool clearApiKey (api.body="clearApiKey")
 }
 
 struct ModelConfigDTO {
@@ -57,6 +73,8 @@ struct AdminModelConfigResp {
   2: required string status (api.body="status")
   3: optional list<AdminModelProfileDTO> models (api.body="models")
   4: optional string defaultModelId (api.body="defaultModelId")
+  5: required ModelRoutingConfigDTO routing (api.body="routing")
+  6: required WebSearchConfigDTO webSearch (api.body="webSearch")
 }
 
 struct UpdateAdminModelConfigReq {
@@ -80,7 +98,7 @@ struct CreateAdminModelProfileReq {
   6: optional string apiKey (api.body="apiKey")
   7: required bool enabled (api.body="enabled")
   8: optional i64 contextWindowTokens (api.body="contextWindowTokens")
-  9: optional bool isDefault (api.body="isDefault")
+  // Field 9 retired: default selection is updated through the routing API.
 }
 
 struct UpdateAdminModelProfileReq {
@@ -93,7 +111,7 @@ struct UpdateAdminModelProfileReq {
   7: optional bool clearApiKey (api.body="clearApiKey")
   8: optional bool enabled (api.body="enabled")
   9: optional i64 contextWindowTokens (api.body="contextWindowTokens")
-  10: optional bool isDefault (api.body="isDefault")
+  // Field 10 retired: default selection is updated through the routing API.
 }
 
 struct DeleteAdminModelProfileReq {
@@ -199,6 +217,9 @@ struct WebExtractResp {
 service ModelGatewayHTTPService {
   ModelCatalogResp GetModelCatalog(1: GetModelCatalogReq req) (api.get="/api/v1/model-gateway/catalog")
   AdminModelConfigResp GetAdminModelConfig(1: GetAdminModelConfigReq req) (api.get="/api/v1/admin/model-gateway")
+  AdminModelConfigResp UpdateAdminWebSearchConfig(1: UpdateAdminWebSearchConfigReq req) (api.patch="/api/v1/admin/model-gateway/web-search")
+  AdminModelConfigResp UpdateAdminModelRouting(1: UpdateAdminModelRoutingReq req) (api.put="/api/v1/admin/model-gateway/routing")
+  // Retired combined write: returns 409 config_api_changed without side effects.
   AdminModelConfigResp UpdateAdminModelConfig(1: UpdateAdminModelConfigReq req) (api.put="/api/v1/admin/model-gateway")
   TestAdminModelConfigResp TestAdminModelConfig(1: TestAdminModelConfigReq req) (api.post="/api/v1/admin/model-gateway/test")
   AdminModelConfigResp CreateAdminModelProfile(1: CreateAdminModelProfileReq req) (api.post="/api/v1/admin/model-gateway/models", api.status="201")
