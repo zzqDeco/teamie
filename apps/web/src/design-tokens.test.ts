@@ -1,5 +1,5 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ICON } from "./icons";
@@ -9,16 +9,27 @@ const modularStyleFiles = [
   "styles/base.css",
   "styles/primitives.css",
   "styles/public.css",
+  "styles/auth.css",
   "styles/shell.css",
+  "styles/settings.css",
   "styles/chat.css",
+  "styles/markdown.css",
   "styles/members.css",
+  "styles/admin.css",
   "styles/agents.css",
+  "styles/gateway.css",
   "styles/utilities.css",
+];
+const modularLayoutFiles = [
+  "styles/layout-base.css",
+  "styles/layout-tablet.css",
+  "styles/layout-mobile.css",
+  "styles/layout-mobile-compact.css",
 ];
 const cssFiles = [
   "tokens.css",
   ...modularStyleFiles,
-  "layout.css",
+  ...modularLayoutFiles,
   "attention.css",
   "attachments.css",
   "connection-banner.css",
@@ -28,6 +39,19 @@ const cssFiles = [
   "feedback.css",
   "conveniences.css",
 ];
+
+function listRelativeFiles(dir: string, root = dir): string[] {
+  const results: string[] = [];
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) {
+      results.push(...listRelativeFiles(full, root));
+    } else {
+      results.push(relative(root, full).replace(/\\/g, "/"));
+    }
+  }
+  return results;
+}
 
 function parseHex(hex: string) {
   const clean = hex.replace("#", "").trim().toLowerCase();
@@ -251,7 +275,7 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
 
 describe("PR-5 CSS cleanup, unified focus, icon scale & self-hosted DM Sans", () => {
   it("contains zero unreferenced CSS classes across all modular and feature stylesheets", () => {
-    const allFiles = readdirSync(srcDir);
+    const allFiles = listRelativeFiles(srcDir);
     const tsFiles = allFiles.filter(
       (f) => f.endsWith(".ts") || f.endsWith(".tsx"),
     );
@@ -272,10 +296,14 @@ describe("PR-5 CSS cleanup, unified focus, icon scale & self-hosted DM Sans", ()
     }
   });
 
-  it("enforces bidirectional CSS/TSX className contract, modular stylesheet size bounds, and bans fragile unclassed container selectors", () => {
+  it("enforces bidirectional CSS/TSX className contract, strict <=700-line modular size bounds across CSS/TS/TSX, and bans fragile unclassed container selectors", () => {
     const barrelCss = readFileSync(join(srcDir, "styles.css"), "utf8");
     for (const modFile of modularStyleFiles) {
       expect(barrelCss).toContain(`@import "./${modFile}";`);
+    }
+    const barrelLayoutCss = readFileSync(join(srcDir, "layout.css"), "utf8");
+    for (const modLayout of modularLayoutFiles) {
+      expect(barrelLayoutCss).toContain(`@import "./${modLayout}";`);
     }
 
     const definedClasses = new Set<string>();
@@ -284,8 +312,8 @@ describe("PR-5 CSS cleanup, unified focus, icon scale & self-hosted DM Sans", ()
       const lineCount = content.split("\n").length;
       expect(
         lineCount,
-        `${cssFile} (${lineCount} lines) exceeds modular 1,800-line ceiling`,
-      ).toBeLessThanOrEqual(1800);
+        `${cssFile} (${lineCount} lines) exceeds modular 700-line ceiling`,
+      ).toBeLessThanOrEqual(700);
       expect(
         content,
         `${cssFile} must not use fragile unclassed > div structural selectors on member/agent rows`,
@@ -295,9 +323,24 @@ describe("PR-5 CSS cleanup, unified focus, icon scale & self-hosted DM Sans", ()
       }
     }
 
-    const nonTestTsx = readdirSync(srcDir).filter(
-      (f) => f.endsWith(".tsx") && !f.endsWith(".test.tsx"),
+    const allFiles = listRelativeFiles(srcDir);
+    const nonTestSourceFiles = allFiles.filter(
+      (f) =>
+        (f.endsWith(".ts") || f.endsWith(".tsx")) &&
+        !f.endsWith(".test.ts") &&
+        !f.endsWith(".test.tsx"),
     );
+    for (const file of nonTestSourceFiles) {
+      const lineCount = readFileSync(join(srcDir, file), "utf8").split(
+        "\n",
+      ).length;
+      expect(
+        lineCount,
+        `${file} (${lineCount} lines) exceeds modular 700-line ceiling`,
+      ).toBeLessThanOrEqual(700);
+    }
+
+    const nonTestTsx = nonTestSourceFiles.filter((f) => f.endsWith(".tsx"));
     const undefinedTokens: string[] = [];
     for (const file of nonTestTsx) {
       const content = readFileSync(join(srcDir, file), "utf8");
@@ -373,7 +416,7 @@ describe("PR-5 CSS cleanup, unified focus, icon scale & self-hosted DM Sans", ()
       lg: 20,
       xl: 24,
     });
-    const tsxFiles = readdirSync(srcDir).filter(
+    const tsxFiles = listRelativeFiles(srcDir).filter(
       (f) => f.endsWith(".tsx") && !f.endsWith(".test.tsx"),
     );
     for (const file of tsxFiles) {

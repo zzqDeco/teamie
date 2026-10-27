@@ -2,8 +2,13 @@
 @import "./styles/base.css";
 @import "./styles/primitives.css";
 @import "./styles/public.css";
+@import "./styles/auth.css";
 @import "./styles/shell.css";
+@import "./styles/settings.css";
 @import "./styles/chat.css";
+@import "./styles/markdown.css";
 @import "./styles/members.css";
+@import "./styles/admin.css";
 @import "./styles/agents.css";
+@import "./styles/gateway.css";
 @import "./styles/utilities.css";

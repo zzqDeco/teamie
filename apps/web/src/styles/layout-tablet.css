@@ -1,0 +1,371 @@
+/* Layout layer: wide-screen, coarse-pointer, and tablet responsive breakpoints. */
+
+@layer layout {
+  @media (min-width: 1700px) {
+    .hero {
+      min-height: 690px;
+    }
+    .auth-story {
+      padding-left: 90px;
+      padding-right: 90px;
+    }
+    .hero h1 {
+      font-size: var(--font-display);
+    }
+    .message {
+      padding-left: 40px;
+      padding-right: 40px;
+    }
+    .conversation-start {
+      padding-left: 40px;
+    }
+    .composer-area {
+      padding-left: 36px;
+      padding-right: 36px;
+    }
+    .conversation-header {
+      padding-left: 36px;
+    }
+  }
+  @media (max-height: 700px) {
+    .scroll-story-track {
+      height: auto;
+    }
+    .scroll-story-sticky {
+      position: static;
+      height: auto;
+      min-height: 0;
+      padding: 56px 0;
+    }
+  }
+  @media (hover: none), (pointer: coarse) {
+    .member-dm,
+    .remove-member {
+      opacity: 1;
+      width: 44px;
+      height: 44px;
+    }
+  }
+  @media (max-width: 1250px) {
+    .hero {
+      padding: 50px 35px 65px;
+      gap: 10px;
+      min-height: 580px;
+    }
+    .hero h1 {
+      font-size: var(--font-5xl);
+    }
+    .hero-copy > p {
+      font-size: var(--font-sm);
+    }
+    .hero-actions {
+      gap: 12px;
+    }
+    .hero-actions > span {
+      display: none;
+    }
+    .hero-visual {
+      padding-left: 10px;
+    }
+    .demo-sidebar {
+      width: 130px;
+      padding-left: 8px;
+      padding-right: 8px;
+    }
+    .demo-chat {
+      padding: 0 12px;
+    }
+    .values,
+    .landing-cta,
+    .public-footer {
+      margin-left: 36px;
+      margin-right: 36px;
+    }
+    .auth-story {
+      padding-left: 40px;
+      padding-right: 40px;
+    }
+    .auth-story h1 {
+      font-size: var(--font-5xl);
+    }
+    .auth-content {
+      padding-left: 40px;
+      padding-right: 40px;
+    }
+    .members-pane {
+      box-shadow: var(--shadow-lg);
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: auto;
+      height: var(--app-height, 100dvh);
+      z-index: var(--z-members-pane);
+      width: min(340px, 88vw);
+    }
+    .navigation-sidebar {
+      width: 232px;
+    }
+    .workspace-header {
+      padding-left: 17px;
+      padding-right: 17px;
+    }
+    .workspace-title > b {
+      font-size: var(--font-md);
+    }
+    .welcome-content > h1 {
+      font-size: var(--font-4xl);
+    }
+    .hero-asterisk {
+      font-size: var(--font-5xl);
+      left: -4px;
+      top: 12px;
+    }
+  }
+  @media (max-width: 1200px) {
+    .agents-view {
+      padding-left: 29px;
+      padding-right: 29px;
+    }
+    .agent-detail-heading {
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .agent-detail-summary {
+      flex-basis: calc(100% - 92px);
+    }
+    .agent-detail-actions {
+      margin-left: 89px;
+      padding-top: 0;
+      align-self: auto;
+    }
+    .agent-detail-heading h1 {
+      font-size: var(--font-3xl);
+    }
+    .agent-card {
+      padding: 19px;
+    }
+    .gateway-test-panel {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 16px;
+    }
+  }
+  @media (max-width: 1050px) {
+    .member-directory-row {
+      flex-wrap: wrap;
+      gap: 13px;
+    }
+    .member-directory-identity {
+      flex-basis: 100%;
+    }
+    .member-directory-actions {
+      padding-left: 48px;
+    }
+  }
+  @media (max-width: 1000px) {
+    .hero {
+      grid-template-columns: 1fr 1fr;
+      padding-top: 38px;
+      padding-bottom: 65px;
+      min-height: 560px;
+    }
+    .hero h1 {
+      font-size: var(--font-5xl);
+      letter-spacing: -1.4px;
+    }
+    .hero-visual {
+      margin-right: -25px;
+    }
+    .demo-sidebar {
+      width: 110px;
+    }
+    .demo-title {
+      padding: 0 12px;
+    }
+    .demo-window {
+      min-height: 320px;
+    }
+    .demo-body {
+      min-height: 280px;
+    }
+    .demo-message {
+      gap: 6px;
+    }
+    .demo-message > .avatar {
+      width: 21px;
+      height: 21px;
+      font-size: var(--font-xs);
+      border-radius: var(--r-sm);
+    }
+    .demo-message p,
+    .demo-message b,
+    .demo-message b small {
+      font-size: var(--font-xs);
+    }
+    .demo-chat {
+      padding: 0 10px;
+    }
+    .demo-chat-heading {
+      font-size: var(--font-xs);
+    }
+    .demo-channel {
+      padding-left: 7px;
+      gap: 5px;
+      font-size: var(--font-xs);
+    }
+    .demo-workspace,
+    .demo-sidebar > small {
+      font-size: var(--font-xs);
+    }
+    .demo-input {
+      font-size: var(--font-xs);
+      padding: 10px 7px;
+    }
+    .floating-note {
+      bottom: 14px;
+      right: 16px;
+      padding: 12px 14px;
+      gap: 8px;
+    }
+    .floating-icon {
+      width: 29px;
+      height: 29px;
+      border-radius: var(--r-md);
+    }
+    .floating-note > span:nth-child(2),
+    .floating-note small {
+      font-size: var(--font-xs);
+    }
+    .hero-footnote {
+      font-size: var(--font-xs);
+      gap: 9px;
+    }
+    .auth-page {
+      grid-template-columns: minmax(330px, 44%) 1fr;
+    }
+    .auth-story {
+      padding-left: 30px;
+      padding-right: 30px;
+    }
+    .auth-story h1 {
+      font-size: var(--font-5xl);
+    }
+    .auth-story .eyebrow,
+    .story-bottom,
+    .story-bottom > span {
+      font-size: var(--font-xs);
+    }
+    .auth-content {
+      padding-left: 35px;
+      padding-right: 35px;
+    }
+    .auth-form h2 {
+      font-size: var(--font-3xl);
+    }
+    .navigation-sidebar {
+      width: 221px;
+    }
+    .workspace-rail {
+      width: 65px;
+      padding-left: 6px;
+      padding-right: 6px;
+    }
+    .conversation-header {
+      padding-left: 23px;
+      padding-right: 23px;
+    }
+    .conversation-start {
+      padding-left: 26px;
+      padding-right: 26px;
+    }
+    .conversation-start h2 {
+      font-size: var(--font-2xl);
+    }
+    .message {
+      padding-left: 24px;
+      padding-right: 24px;
+    }
+    .composer-area {
+      padding-left: 20px;
+      padding-right: 20px;
+    }
+    .composer-footer > span:last-child {
+      font-size: var(--font-xs);
+    }
+    .settings-view {
+      padding-left: 32px;
+      padding-right: 32px;
+    }
+    .admin-view {
+      padding-left: 30px;
+      padding-right: 30px;
+    }
+    .admin-generate {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 15px;
+    }
+    .admin-invites-table th,
+    .admin-invites-table td {
+      padding-left: 15px;
+      padding-right: 15px;
+    }
+    .admin-heading h1 {
+      font-size: var(--font-3xl);
+      gap: 8px;
+    }
+    .admin-heading-icon {
+      width: 57px;
+      height: 57px;
+      border-radius: var(--r-xl);
+    }
+  }
+  @media (max-width: 1000px) and (min-width: 781px) {
+    .agent-card-grid {
+      grid-template-columns: 1fr;
+    }
+    .agents-heading {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .agents-heading h1 {
+      font-size: var(--font-3xl);
+    }
+    .agent-detail-heading > .avatar {
+      width: 61px;
+      height: 61px;
+      border-radius: var(--r-xl);
+    }
+    .agent-detail-actions {
+      margin-left: 77px;
+    }
+    .agent-delete-section {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 13px;
+    }
+    .navigation-sidebar {
+      width: 220px;
+    }
+    .hero {
+      padding-left: 32px;
+      padding-right: 32px;
+      gap: 24px;
+    }
+    .hero h1 {
+      font-size: var(--font-5xl);
+    }
+    .demo-sidebar {
+      width: 108px;
+    }
+    .demo-chat {
+      padding-left: 12px;
+      padding-right: 12px;
+    }
+    .scroll-story-inner {
+      gap: 32px;
+      padding: 0 32px;
+    }
+  }
+}
