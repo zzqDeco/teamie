@@ -66,4 +66,6 @@ Frozen output admission belongs to the logical Runtime Run. The gateway honors t
 
 The retired combined PUT returns `config_api_changed` without writes. Read-only legacy metadata remains available for existing acceptance tooling. The web administrator has separate model dialogs, default selection actions and a search form, each with its own submission state. Secret inputs start empty; successful search saves clear only the search input.
 
+In-flight calls track their resolved profile ID. Disabling/deleting that profile or clearing its credential cancels only its calls, even if another model remains available; search calls and healthy model calls continue. Catalog mutations exclude the short configuration-lookup-to-cancellation-registration phase so revocation cannot miss an admitting call. The admission lock is released before provider execution and does not serialize inference.
+
 Schema 5 creates independent routing and search singletons, migrating schema-3/4 settings once. The old `gateway_config` is retained as migration data and is not written by live code. Model catalog backfill is also version-gated, so deleted profiles are never reconstructed on startup. Release manifests declare Gateway 5; cross-schema rollback follows the existing backup/restore policy.

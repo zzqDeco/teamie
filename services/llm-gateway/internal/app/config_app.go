@@ -135,6 +135,8 @@ func (s *Service) CreateModelProfile(ctx context.Context, in CreateModelProfileI
 	if err := domain.ValidateEndpoint(validateCtx, in.BaseURL); err != nil {
 		return domain.Config{}, err
 	}
+	s.modelConfigMu.Lock()
+	defer s.modelConfigMu.Unlock()
 	saved, err := s.Store.UpdateModels(validateCtx, func(models []domain.ModelProfile) ([]domain.ModelProfile, error) {
 		id := in.ID
 		if id == "" {
@@ -223,6 +225,8 @@ func (s *Service) UpdateModelProfile(ctx context.Context, in UpdateModelProfileI
 		}
 		in.BaseURL = &trimmed
 	}
+	s.modelConfigMu.Lock()
+	defer s.modelConfigMu.Unlock()
 	saved, err := s.Store.UpdateModels(validateCtx, func(models []domain.ModelProfile) ([]domain.ModelProfile, error) {
 		idx := -1
 		for i, m := range models {
@@ -284,6 +288,8 @@ func (s *Service) DeleteModelProfile(ctx context.Context, id string) (domain.Con
 	if !domain.ValidModelID(id) {
 		return domain.Config{}, domain.Err(400, "invalid_request", "Invalid model ID")
 	}
+	s.modelConfigMu.Lock()
+	defer s.modelConfigMu.Unlock()
 	saved, err := s.Store.UpdateModels(ctx, func(models []domain.ModelProfile) ([]domain.ModelProfile, error) {
 		filtered := make([]domain.ModelProfile, 0, len(models))
 		found := false
@@ -376,18 +382,25 @@ func (s *Service) UpdateWebSearch(ctx context.Context, in UpdateWebSearchInput) 
 }
 
 func (s *Service) cancelUnavailableModels(c domain.Config) {
-	m := c.ResolveModel("")
-	if !m.Enabled || !m.Configured() {
-		s.cancelActiveCalls(false)
+	available := make(map[string]bool, len(c.Models))
+	for _, m := range c.Models {
+		available[m.ID] = m.Enabled && m.Configured()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, call := range s.active {
+		if !call.web && !available[call.modelID] {
+			call.cancel()
+		}
 	}
 }
 func (s *Service) cancelActiveCalls(web bool) {
 	s.ensureInit()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for key, cancel := range s.active {
-		if strings.Contains(key, "/web/") == web {
-			cancel()
+	for _, call := range s.active {
+		if call.web == web {
+			call.cancel()
 		}
 	}
 }

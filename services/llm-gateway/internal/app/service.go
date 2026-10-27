@@ -17,20 +17,27 @@ import (
 
 // Service coordinates Model Gateway use cases, slot admission, and run cancellation.
 type Service struct {
-	Store        domain.ConfigStore
-	Cipher       domain.Cipher
-	Model        domain.UpstreamModel
-	WebSearch    domain.WebSearchProvider
-	Token        string
-	WebSearchURL string
-	slots        chan struct{}
-	inFlight     atomic.Int64
-	webSlots     chan struct{}
-	mu           sync.Mutex
-	modelSeq     uint64
-	webSeq       uint64
-	active       map[string]context.CancelFunc
-	canceled     map[string]time.Time
+	Store         domain.ConfigStore
+	Cipher        domain.Cipher
+	Model         domain.UpstreamModel
+	WebSearch     domain.WebSearchProvider
+	Token         string
+	WebSearchURL  string
+	slots         chan struct{}
+	inFlight      atomic.Int64
+	webSlots      chan struct{}
+	modelConfigMu sync.RWMutex // catalog writes exclude lookup-to-registration, never provider execution
+	mu            sync.Mutex
+	modelSeq      uint64
+	webSeq        uint64
+	active        map[string]activeCall
+	canceled      map[string]time.Time
+}
+
+type activeCall struct {
+	modelID string
+	web     bool
+	cancel  context.CancelFunc
 }
 
 // New constructs a new gateway application Service.
@@ -43,7 +50,7 @@ func New(store domain.ConfigStore, cipher domain.Cipher, model domain.UpstreamMo
 		Token:        token,
 		WebSearchURL: domain.DefaultTavilyBaseURL,
 		webSlots:     make(chan struct{}, 4),
-		active:       make(map[string]context.CancelFunc),
+		active:       make(map[string]activeCall),
 		canceled:     make(map[string]time.Time),
 	}
 }
@@ -55,7 +62,7 @@ func (s *Service) ensureInit() {
 		s.webSlots = make(chan struct{}, 4)
 	}
 	if s.active == nil {
-		s.active = make(map[string]context.CancelFunc)
+		s.active = make(map[string]activeCall)
 	}
 	if s.canceled == nil {
 		s.canceled = make(map[string]time.Time)
@@ -129,15 +136,22 @@ func (s *Service) AcquireWebSlot() (func(), bool) {
 	}
 }
 
-// RegisterRunCancel registers a cancelable context for an agent run.
-func (s *Service) RegisterRunCancel(ctx context.Context, agentID, runID string) (context.Context, func()) {
+// lockModelAdmission closes the gap between resolving a model and registering its
+// call against a concurrent catalog change. Release it before invoking a provider.
+func (s *Service) lockModelAdmission() func() {
+	s.modelConfigMu.RLock()
+	return sync.OnceFunc(s.modelConfigMu.RUnlock)
+}
+
+// RegisterRunCancel tracks the resolved profile, which can differ from the Agent's selection.
+func (s *Service) RegisterRunCancel(ctx context.Context, agentID, runID, modelID string) (context.Context, func()) {
 	s.ensureInit()
 	ctx, cancel := context.WithCancel(ctx)
 	index := agentID + "/" + runID
 	s.mu.Lock()
 	s.modelSeq++
 	modelKey := index + "/model/" + strconv.FormatUint(s.modelSeq, 10)
-	s.active[modelKey] = cancel
+	s.active[modelKey] = activeCall{modelID: modelID, cancel: cancel}
 	if at, ok := s.canceled[index]; ok && time.Since(at) < 2*time.Minute {
 		cancel()
 	}
@@ -158,7 +172,7 @@ func (s *Service) RegisterWebCancel(ctx context.Context, agentID, runID string) 
 	s.mu.Lock()
 	s.webSeq++
 	webKey := index + "/web/" + strconv.FormatUint(s.webSeq, 10)
-	s.active[webKey] = cancel
+	s.active[webKey] = activeCall{web: true, cancel: cancel}
 	if at, ok := s.canceled[index]; ok && time.Since(at) < 2*time.Minute {
 		cancel()
 	}
@@ -195,14 +209,11 @@ func (s *Service) CancelRun(agentID, runID string) {
 	}
 	s.canceled[index] = now
 	var cancels []context.CancelFunc
-	if cancel := s.active[index]; cancel != nil {
-		cancels = append(cancels, cancel)
-	}
 	modelPrefix := index + "/model/"
 	webPrefix := index + "/web/"
-	for key, cancel := range s.active {
-		if (strings.HasPrefix(key, modelPrefix) || strings.HasPrefix(key, webPrefix)) && cancel != nil {
-			cancels = append(cancels, cancel)
+	for key, call := range s.active {
+		if (strings.HasPrefix(key, modelPrefix) || strings.HasPrefix(key, webPrefix)) && call.cancel != nil {
+			cancels = append(cancels, call.cancel)
 		}
 	}
 	s.mu.Unlock()

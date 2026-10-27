@@ -48,6 +48,8 @@ func (s *Service) CallChat(ctx context.Context, owner, agentID, sessionID, runID
 		outcome.Result = failedChatResult(err, cfgID)
 		return outcome
 	}
+	unlockAdmission := s.lockModelAdmission()
+	defer unlockAdmission()
 	settings, err := s.Store.Load(ctx)
 	if err != nil {
 		return fail(err, "")
@@ -72,8 +74,9 @@ func (s *Service) CallChat(ctx context.Context, owner, agentID, sessionID, runID
 	if err != nil {
 		return fail(domain.ErrWithCause(503, "credential_unavailable", "Saved model credential could not be decrypted", err), configID)
 	}
-	callCtx, cleanup := s.RegisterRunCancel(ctx, agentID, runID)
+	callCtx, cleanup := s.RegisterRunCancel(ctx, agentID, runID, c.ID)
 	defer cleanup()
+	unlockAdmission()
 
 	start := time.Now()
 	outcome.Phase = "provider-generate"
@@ -116,6 +119,8 @@ func (s *Service) CallChat(ctx context.Context, owner, agentID, sessionID, runID
 // StreamChat executes an NDJSON streaming model inference call with slot admission, cancellation tracking, and usage auditing.
 func (s *Service) StreamChat(ctx context.Context, owner, agentID, sessionID, runID, expectedConfigID, raw string, onConfigID func(string), emit func(domain.StreamEvent) error, messageLimits ...int) StreamOutcome {
 	s.ensureInit()
+	unlockAdmission := s.lockModelAdmission()
+	defer unlockAdmission()
 	outcome := StreamOutcome{Phase: "admission"}
 	var configID string
 	writeEvent := func(ev domain.StreamEvent) error {
@@ -126,6 +131,7 @@ func (s *Service) StreamChat(ctx context.Context, owner, agentID, sessionID, run
 		return emit(ev)
 	}
 	terminal := func(err error) StreamOutcome {
+		unlockAdmission() // Response writes must not block catalog changes, including admission errors.
 		outcome.Failure = err
 		if err == nil {
 			if wErr := writeEvent(domain.StreamEvent{Type: "done", ModelConfigID: configID}); wErr != nil {
@@ -170,8 +176,9 @@ func (s *Service) StreamChat(ctx context.Context, owner, agentID, sessionID, run
 	if err != nil {
 		return terminal(domain.ErrWithCause(503, "credential_unavailable", "Saved model credential could not be decrypted", err))
 	}
-	callCtx, cleanup := s.RegisterRunCancel(ctx, agentID, runID)
+	callCtx, cleanup := s.RegisterRunCancel(ctx, agentID, runID, c.ID)
 	defer cleanup()
+	unlockAdmission()
 
 	start := time.Now()
 	outcome.Phase = "provider-stream"
