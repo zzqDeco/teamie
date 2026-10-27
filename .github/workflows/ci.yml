@@ -191,6 +191,7 @@ jobs:
       - name: Enforce contract sync, IM independence and Clean DDD dependency boundaries
         run: |
           make gen && git diff --exit-code -- contracts/ packages/api-client/src/generated.ts
+          go run tools/unicode-emoji/generate.go -check
           bash ops/check-architecture.sh
       - run: python3 -m unittest discover -s ops -p 'test_*.py' -v
       - name: Validate shell and workflow syntax
