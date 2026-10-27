@@ -2,6 +2,7 @@ package gateway_test
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"os"
 	"reflect"
@@ -14,6 +15,73 @@ import (
 	"teamie/services/llm-gateway/internal/app"
 	"teamie/services/llm-gateway/internal/infra/pg"
 )
+
+func TestPostgresPreservesLegacyModelWithoutKey(t *testing.T) {
+	dsn := os.Getenv("DATABASE_URL_TEST")
+	if dsn == "" {
+		t.Skip("DATABASE_URL_TEST is unset")
+	}
+	for _, tc := range []struct {
+		name, model string
+		enabled     bool
+	}{
+		{name: "enabled_without_key", model: "saved-model", enabled: true},
+		{name: "disabled_without_key", model: "saved-model", enabled: false},
+		{name: "partial_settings", model: "", enabled: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			admin, err := pgx.Connect(ctx, dsn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer admin.Close(ctx)
+			schema := fmt.Sprintf("gateway_legacy_%d", time.Now().UnixNano())
+			if _, err = admin.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
+				t.Fatal(err)
+			}
+			defer admin.Exec(ctx, "DROP SCHEMA "+schema+" CASCADE")
+			u, err := url.Parse(dsn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			q := u.Query()
+			q.Set("search_path", schema)
+			u.RawQuery = q.Encode()
+			legacy, err := pgx.Connect(ctx, u.String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer legacy.Close(ctx)
+			if _, err = legacy.Exec(ctx, strings.Split(pg.SchemaSQL, "CREATE TABLE IF NOT EXISTS gateway_models")[0]); err != nil {
+				t.Fatal(err)
+			}
+			var savedAt time.Time
+			if err = legacy.QueryRow(ctx, `UPDATE gateway_config SET base_url='https://1.1.1.1/v1',model=$1,encrypted_key=NULL,enabled=$2,context_window_tokens=131072 WHERE id RETURNING updated_at`, tc.model, tc.enabled).Scan(&savedAt); err != nil {
+				t.Fatal(err)
+			}
+			store, err := Open(ctx, u.String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.DB.Close()
+			c, err := store.Load(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(c.Models) != 1 {
+				t.Fatal("legacy model settings disappeared because the key was absent")
+			}
+			m := c.Models[0]
+			if m.ID != "default" || m.BaseURL != "https://1.1.1.1/v1" || m.Model != tc.model || m.Enabled != tc.enabled || m.ContextWindowTokens != 131072 || !m.UpdatedAt.Equal(savedAt) {
+				t.Fatal("migration changed saved model settings")
+			}
+			if m.Configured() || len(m.CipherKey) != 0 || c.ResolveModel("").Status() != "unconfigured" {
+				t.Fatal("migration invented a credential or made an unconfigured model available")
+			}
+		})
+	}
+}
 
 func TestPostgresConfigBoundariesAndRestart(t *testing.T) {
 	dsn := os.Getenv("DATABASE_URL_TEST")
