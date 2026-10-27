@@ -715,18 +715,24 @@ export class TeamieClient {
     });
   putReaction = (conversationId: string, messageId: string, emoji: string) =>
     this.#request<ReactionsResp>(
-      routePath(IDL_ROUTES.PutReaction, { id: conversationId, messageId }),
+      routePath(IDL_ROUTES.PutReaction, {
+        id: conversationId,
+        messageId,
+        emoji,
+      }),
       {
         method: IDL_ROUTES.PutReaction.method,
-        body: JSON.stringify({ emoji }),
       },
     );
   deleteReaction = (conversationId: string, messageId: string, emoji: string) =>
     this.#request<ReactionsResp>(
-      routePath(IDL_ROUTES.DeleteReaction, { id: conversationId, messageId }),
+      routePath(IDL_ROUTES.DeleteReaction, {
+        id: conversationId,
+        messageId,
+        emoji,
+      }),
       {
         method: IDL_ROUTES.DeleteReaction.method,
-        body: JSON.stringify({ emoji }),
       },
     );
   readReceipts = (conversationId: string, signal?: AbortSignal) =>

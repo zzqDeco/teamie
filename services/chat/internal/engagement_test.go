@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -112,27 +113,29 @@ func TestReactionsReadReceiptsAndNotificationLevels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reactPath := "/api/v1/conversations/" + channelConv.ID + "/messages/" + msg.ID + "/reactions"
+	reactPath := func(emoji string) string {
+		return "/api/v1/conversations/" + channelConv.ID + "/messages/" + msg.ID + "/reactions/" + url.PathEscape(emoji)
+	}
 
 	// Invalid ASCII / plain text emoji rejected with 400
-	if status, _ := doJSON(http.MethodPut, reactPath, ownerTok, map[string]any{"emoji": "thumbsup"}); status != 400 {
+	if status, _ := doJSON(http.MethodPut, reactPath("thumbsup"), ownerTok, nil); status != 400 {
 		t.Fatalf("plain text reaction status = %d, want 400", status)
 	}
 	// Outsider rejected with 404
-	if status, _ := doJSON(http.MethodPut, reactPath, outsiderTok, map[string]any{"emoji": "👍"}); status != 404 {
+	if status, _ := doJSON(http.MethodPut, reactPath("👍"), outsiderTok, nil); status != 404 {
 		t.Fatalf("outsider reaction status = %d, want 404", status)
 	}
 	// Owner and member add 👍
-	status, resp := doJSON(http.MethodPut, reactPath, ownerTok, map[string]any{"emoji": "👍"})
+	status, resp := doJSON(http.MethodPut, reactPath("👍"), ownerTok, nil)
 	if status != 200 {
 		t.Fatalf("owner put reaction status = %d, resp = %#v", status, resp)
 	}
 	// Idempotent repeat PUT
-	status, _ = doJSON(http.MethodPut, reactPath, ownerTok, map[string]any{"emoji": "👍"})
+	status, _ = doJSON(http.MethodPut, reactPath("👍"), ownerTok, nil)
 	if status != 200 {
 		t.Fatalf("idempotent put reaction status = %d", status)
 	}
-	status, resp = doJSON(http.MethodPut, reactPath, memberTok, map[string]any{"emoji": "👍"})
+	status, resp = doJSON(http.MethodPut, reactPath("👍"), memberTok, nil)
 	if status != 200 {
 		t.Fatalf("member put reaction status = %d", status)
 	}
@@ -146,22 +149,24 @@ func TestReactionsReadReceiptsAndNotificationLevels(t *testing.T) {
 	}
 
 	// Member removes 👍
-	status, resp = doJSON(http.MethodDelete, reactPath, memberTok, map[string]any{"emoji": "👍"})
+	status, resp = doJSON(http.MethodDelete, reactPath("👍"), memberTok, nil)
 	if status != 200 || len(resp["reactions"].([]any)) != 1 || len(resp["reactions"].([]any)[0].(map[string]any)["userIds"].([]any)) != 1 {
 		t.Fatalf("after member delete: %d %#v", status, resp)
 	}
 	// Owner removes 👍 -> empty reactions array []
-	status, resp = doJSON(http.MethodDelete, reactPath, ownerTok, map[string]any{"emoji": "👍"})
+	status, resp = doJSON(http.MethodDelete, reactPath("👍"), ownerTok, nil)
 	if status != 200 || len(resp["reactions"].([]any)) != 0 {
 		t.Fatalf("after owner delete: %d %#v", status, resp)
 	}
 
 	// Add 🎉 then retract message -> reactions cleared and further reactions rejected with 409 message_retracted
-	_, _ = doJSON(http.MethodPut, reactPath, memberTok, map[string]any{"emoji": "🎉"})
+	_, _ = doJSON(http.MethodPut, reactPath("🎉"), memberTok, nil)
 	if _, err := s.ChangeMessage(ctx, owner.ID, channelConv.ID, msg.ID, "", true); err != nil {
 		t.Fatal(err)
 	}
-	if status, body := doJSON(http.MethodPut, reactPath, memberTok, map[string]any{"emoji": "🔥"}); status != 409 || body["error"] != "message_retracted" {
+	status, body := doJSON(http.MethodPut, reactPath("🔥"), memberTok, nil)
+	errObj, _ := body["error"].(map[string]any)
+	if status != 409 || errObj["code"] != "message_retracted" {
 		t.Fatalf("reaction on retracted message = %d %#v, want 409 message_retracted", status, body)
 	}
 	fetched, err := s.Message(ctx, owner.ID, channelConv.ID, msg.ID)
@@ -197,13 +202,13 @@ func TestReactionsReadReceiptsAndNotificationLevels(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Direct & group include members array; channel omits members array
+	// Direct & group include members array of eligible non-caller readers; channel omits members array
 	status, dmReceipts := doJSON(http.MethodGet, "/api/v1/conversations/"+dmConv.ID+"/read-receipts", ownerTok, nil)
-	if status != 200 || dmReceipts["members"] == nil || len(dmReceipts["members"].([]any)) != 2 {
+	if status != 200 || dmReceipts["members"] == nil || len(dmReceipts["members"].([]any)) != 1 {
 		t.Fatalf("dm read receipts = %d %#v", status, dmReceipts)
 	}
 	status, grpReceipts := doJSON(http.MethodGet, "/api/v1/conversations/"+groupConv.ID+"/read-receipts", ownerTok, nil)
-	if status != 200 || grpReceipts["members"] == nil || len(grpReceipts["members"].([]any)) != 2 {
+	if status != 200 || grpReceipts["members"] == nil || len(grpReceipts["members"].([]any)) != 1 {
 		t.Fatalf("group read receipts = %d %#v", status, grpReceipts)
 	}
 	status, chReceipts := doJSON(http.MethodGet, "/api/v1/conversations/"+channelConv.ID+"/read-receipts", ownerTok, nil)
