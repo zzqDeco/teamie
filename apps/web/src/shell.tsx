@@ -13,6 +13,7 @@ import { enrichParticipants } from "./participants";
 import type { Participant } from "./participants";
 import { KeyboardShortcutsModal, QuickSwitcher } from "./quick-switcher";
 import { chatStore, compareTimestampsDesc } from "./store";
+import { presenceStore } from "./engagement-store";
 import { setActiveNotificationContext } from "./notifications";
 import type { DialogKind } from "./dialogs";
 import { ConversationView } from "./messages";
@@ -408,6 +409,29 @@ export function Shell() {
     refetchInterval: 30_000,
   });
   const workspaceAgents = discoveryAllowed ? workspaceAgentsQuery.data?.agents || [] : [];
+  const presenceAllowed = !!chat.data?.capabilities["im.presence.publish"];
+  const workspacePresenceQuery = useQuery({
+    queryKey: ["workspacePresence", user!.id, workspace?.id],
+    queryFn: () => api.workspacePresence(workspace!.id),
+    enabled: !!workspace && presenceAllowed,
+    refetchInterval: 60_000,
+  });
+  useEffect(() => {
+    if (workspace && presenceAllowed && workspacePresenceQuery.data) {
+      const humanIds = (membersQuery.data?.members || [])
+        .filter((m) => m.kind === "human")
+        .map((m) => m.userId);
+      presenceStore.applyWorkspaceSnapshot(
+        humanIds,
+        workspacePresenceQuery.data.items || [],
+      );
+    }
+  }, [
+    workspace,
+    presenceAllowed,
+    workspacePresenceQuery.data,
+    membersQuery.data,
+  ]);
   const members: Participant[] = enrichParticipants(
     membersQuery.data?.members || [],
     workspaceAgents,
@@ -623,6 +647,8 @@ export function Shell() {
         connection={chat.connection} connectionLabel={connectionLabel}
         isAttentionPage={isAttentionPage} isAgentsPage={isAgentsPage}
         attentionUnreadCount={attentionCount.data?.unreadCount}
+        attentionProjection={attentionCount.data?.attentionUnreadByConversation}
+        snapshot={snapshot}
         workspaces={chat.data?.workspaces || []} workspace={workspace}
         owner={owner} caps={caps}
         allAuthorizedConversations={allAuthorizedConversations}

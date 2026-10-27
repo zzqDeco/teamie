@@ -19,6 +19,7 @@ import {
 } from "./notifications";
 import { chatStore } from "./store";
 import { typingStore } from "./typing-store";
+import { presenceStore, receiptStore } from "./engagement-store";
 export type Connection =
   "connecting" | "connected" | "reconnecting" | "offline";
 type Chat = {
@@ -74,12 +75,18 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (appliedBootstrap.current === query.data) return;
+      const previous = chatStore.getSnapshot().conversations;
+      const changedReaders = appliedBootstrap.current !== null && (
+        Object.keys(previous).length !== query.data.conversations.length ||
+        query.data.conversations.some((c) => !previous[c.id] || previous[c.id].memberIds.join("\0") !== c.memberIds.join("\0"))
+      );
       if (!chatStore.replaceConversations(query.data.conversations, query.data[bootstrapObservation])) {
         void client.invalidateQueries({ queryKey: ["bootstrap", userId] });
         return;
       }
       appliedBootstrap.current = query.data;
       capabilities.current = query.data.capabilities;
+      if (changedReaders) receiptStore.invalidateAll(true);
     }
   }, [client, query.data, reconcileSession, userId]);
   useEffect(() => {
@@ -94,7 +101,47 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       initialSyncCompleted = completedInitialSyncUser.current === userId,
       attempt = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
     let ws: WebSocket | null = null;
+    let lastPresenceSent: { state: "active" | "idle" | ""; at: number } = {
+      state: "",
+      at: 0,
+    };
+    const sendPresence = (state: "active" | "idle", force = false) => {
+      if (
+        stopped ||
+        !capabilities.current["im.presence.publish"] ||
+        !ws ||
+        ws.readyState !== WebSocket.OPEN
+      ) {
+        return;
+      }
+      const now = Date.now();
+      if (
+        !force &&
+        lastPresenceSent.state === state &&
+        (state === "idle" || now - lastPresenceSent.at < 30_000)
+      ) {
+        return;
+      }
+      lastPresenceSent = { state, at: now };
+      try {
+        ws.send(JSON.stringify({ type: "presence", state }));
+      } catch {
+        /* Ignore transient WebSocket send errors. */
+      }
+    };
+    const scheduleIdlePresence = () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        sendPresence("idle");
+      }, 5 * 60_000);
+    };
+    const recordUserActivity = () => {
+      if (document.visibilityState === "hidden") return;
+      scheduleIdlePresence();
+      sendPresence("active");
+    };
     // Applied pages advance the durable cursor. Keep their notification
     // candidates until pagination completes, including across transient retries.
     const notifyCandidates: Array<{
@@ -146,6 +193,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               }
               appliedBootstrap.current = fresh;
               capabilities.current = fresh.capabilities;
+              receiptStore.invalidateAll(true);
+              resetNotificationSession(userId);
               const allowed = new Set(fresh.conversations.map((c) => c.id));
               page.events = page.events.filter((event) => {
                 const id =
@@ -224,15 +273,31 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       socket.current = ws;
       ws.onopen = () => {
         attempt = 0;
+        lastPresenceSent = { state: "", at: 0 };
         setConnection("connected");
         void sync();
         void retryTransientFailures(chatStore.generation);
+        if (capabilities.current["im.read_receipts.view"]) {
+          receiptStore.invalidateAll();
+        }
+        if (document.visibilityState === "hidden") {
+          sendPresence("idle", true);
+        } else {
+          scheduleIdlePresence();
+          sendPresence("active", true);
+        }
       };
       ws.onmessage = (event) => {
         try {
           const hint = JSON.parse(event.data);
           if (hint.type === "sync.required" || hint.type === "ready")
             void sync();
+          if (
+            hint.type === "ready" &&
+            capabilities.current["im.read_receipts.view"]
+          ) {
+            receiptStore.invalidateAll();
+          }
           if (
             hint.type === "typing" &&
             hint.userId !== userId &&
@@ -244,6 +309,23 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               hint.displayName,
               !!hint.isTyping,
             );
+          }
+          if (
+            hint.type === "receipts.changed" &&
+            typeof hint.conversationId === "string" &&
+            capabilities.current["im.read_receipts.view"]
+          ) {
+            receiptStore.invalidate(hint.conversationId);
+          }
+          if (
+            hint.type === "presence" &&
+            typeof hint.userId === "string" &&
+            (hint.state === "online" ||
+              hint.state === "away" ||
+              hint.state === "offline") &&
+            capabilities.current["im.presence.publish"]
+          ) {
+            presenceStore.hint(hint.userId, hint.state);
           }
         } catch {
           /* Unknown ephemeral frames cannot alter durable state. */
@@ -276,14 +358,24 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     reconnectRef.current = () => {
       if (stopped) return;
       if (!ws || ws.readyState !== WebSocket.OPEN) online();
-      else void sync();
+      else {
+        receiptStore.invalidateAll();
+        void sync();
+      }
     };
     const offline = () => {
       setConnection("offline");
       ws?.close();
     };
     const focus = () => {
-      if (document.visibilityState === "visible") void sync();
+      if (document.visibilityState === "visible") {
+        void sync();
+        scheduleIdlePresence();
+        sendPresence("active");
+      } else {
+        if (idleTimer) clearTimeout(idleTimer);
+        sendPresence("idle");
+      }
     };
     const interval = setInterval(() => {
       if (navigator.onLine) void sync();
@@ -292,13 +384,18 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     connect();
     window.addEventListener("online", online);
     window.addEventListener("offline", offline);
+    window.addEventListener("pointerdown", recordUserActivity, { passive: true });
+    window.addEventListener("keydown", recordUserActivity, { passive: true });
     document.addEventListener("visibilitychange", focus);
     return () => {
       stopped = true;
       if (timer) clearTimeout(timer);
+      if (idleTimer) clearTimeout(idleTimer);
       clearInterval(interval);
       clearInterval(typingTimer);
       typingStore.reset();
+      presenceStore.reset();
+      receiptStore.reset();
       if (ws) {
         ws.onclose = null;
         ws.close();
@@ -307,6 +404,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       if (api.onForbidden === refreshPermissions) api.onForbidden = undefined;
       window.removeEventListener("online", online);
       window.removeEventListener("offline", offline);
+      window.removeEventListener("pointerdown", recordUserActivity);
+      window.removeEventListener("keydown", recordUserActivity);
       document.removeEventListener("visibilitychange", focus);
       resetNotificationSession(null);
     };
@@ -398,7 +497,8 @@ export function errorText(error: unknown) {
     invalid_mentions: "提及的成员不在当前对话中或格式无效，请修改后重新发送。",
     invalid_reply: "引用回复的目标消息不在当前对话中，请移除引用后重新发送。",
     invalid_client_message_id: "消息标识无效，请删除后重新发送。",
-    message_retracted: "已撤回的消息无法继续编辑。",
+    message_retracted: "已撤回的消息无法继续操作。",
+    reaction_limit: "单条消息最多可添加 20 种不同表情回应。",
     email_exists: "此邮箱已注册，请直接登录。",
     email_in_use: "此邮箱已注册，请直接登录。",
     invalid_email: "邮箱格式不正确，请检查后重试。",

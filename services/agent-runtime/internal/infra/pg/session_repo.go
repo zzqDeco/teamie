@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"teamie/pkg/postgres"
@@ -41,7 +42,10 @@ func (r *Repository) ReleaseLease(ctx context.Context, l *domain.Lease) {
 // CheckLease verifies that the lease is currently active without locking the row.
 func (r *Repository) CheckLease(ctx context.Context, l *domain.Lease) error {
 	var ok bool
-	err := r.db.Conn(ctx).QueryRow(ctx, `SELECT lease_owner=$2 AND fence=$3 AND lease_until>now() FROM runtime_agents WHERE agent_id=$1`, l.AgentID, l.Owner, l.Fence).Scan(&ok)
+	err := r.db.Conn(ctx).QueryRow(ctx, `SELECT COALESCE(lease_owner=$2 AND fence=$3 AND lease_until>now(),false) FROM runtime_agents WHERE agent_id=$1`, l.AgentID, l.Owner, l.Fence).Scan(&ok)
+	if postgres.IsNoRows(err) {
+		return domain.ErrLeaseLost
+	}
 	if err != nil {
 		return err
 	}
@@ -54,7 +58,10 @@ func (r *Repository) CheckLease(ctx context.Context, l *domain.Lease) error {
 // CheckLeaseForUpdate locks the agent row FOR UPDATE and verifies the active lease fence.
 func (r *Repository) CheckLeaseForUpdate(ctx context.Context, l *domain.Lease) error {
 	var ok bool
-	err := r.db.Conn(ctx).QueryRow(ctx, `SELECT lease_owner=$2 AND fence=$3 AND lease_until>now() FROM runtime_agents WHERE agent_id=$1 FOR UPDATE`, l.AgentID, l.Owner, l.Fence).Scan(&ok)
+	err := r.db.Conn(ctx).QueryRow(ctx, `SELECT COALESCE(lease_owner=$2 AND fence=$3 AND lease_until>now(),false) FROM runtime_agents WHERE agent_id=$1 FOR UPDATE`, l.AgentID, l.Owner, l.Fence).Scan(&ok)
+	if postgres.IsNoRows(err) {
+		return domain.ErrLeaseLost
+	}
 	if err != nil {
 		return err
 	}
@@ -69,6 +76,65 @@ func (r *Repository) GetCursor(ctx context.Context, l *domain.Lease) (string, er
 	var c string
 	err := r.db.Conn(ctx).QueryRow(ctx, `SELECT cursor::text FROM runtime_agents WHERE agent_id=$1`, l.AgentID).Scan(&c)
 	return c, err
+}
+
+// ListReadReceiptInputs reads only source positions, using the existing
+// (agent_id,event_id) primary key. No write lock is held while recovering history.
+func (r *Repository) ListReadReceiptInputs(ctx context.Context, l *domain.Lease, after, through string, limit int) (domain.ReadReceiptInputPage, error) {
+	out := domain.ReadReceiptInputPage{NextEventID: after}
+	if l == nil || !l.Valid() {
+		return out, domain.ErrLeaseLost
+	}
+	validCursor := func(value string) bool {
+		if value == "" || len(value) > 30 {
+			return false
+		}
+		for _, digit := range value {
+			if digit < '0' || digit > '9' {
+				return false
+			}
+		}
+		return true
+	}
+	if !validCursor(after) || !validCursor(through) || limit < 1 || limit > 512 {
+		return out, errors.New("invalid read receipt recovery page")
+	}
+	if err := r.CheckLease(ctx, l); err != nil {
+		return out, err
+	}
+	rows, err := r.db.Conn(ctx).Query(ctx, `SELECT event_id::text,COALESCE(payload->>'conversationId',''),COALESCE(payload->>'seq','')
+ FROM runtime_inputs
+ WHERE agent_id=$1 AND event_id>$2::numeric AND event_id<=$3::numeric
+   AND COALESCE(payload->>'kind','')=''
+ ORDER BY runtime_inputs.event_id LIMIT $4`, l.AgentID, after, through, limit+1)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for scanned := 0; rows.Next(); scanned++ {
+		if scanned == limit {
+			out.HasMore = true
+			break
+		}
+		var eventID, conversationID, rawSeq string
+		if err := rows.Scan(&eventID, &conversationID, &rawSeq); err != nil {
+			return out, err
+		}
+		// Progress follows scanned rows even when a legacy payload is invalid.
+		out.NextEventID = eventID
+		seq, parseErr := strconv.ParseInt(rawSeq, 10, 64)
+		if parseErr == nil && seq > 0 && domain.ValidUUID(conversationID) {
+			out.Items = append(out.Items, domain.ReceivedReadPosition{EventID: eventID, ConversationID: conversationID, Seq: seq})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	rows.Close()
+	if err := r.CheckLease(ctx, l); err != nil {
+		return domain.ReadReceiptInputPage{}, err
+	}
+	return out, nil
 }
 
 // IngestInputs atomically persists inbox inputs before advancing the Agent's IM sync cursor.

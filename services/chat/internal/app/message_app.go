@@ -232,6 +232,12 @@ func (s *Service) ChangeAnnotatedMessage(ctx context.Context, userID, conversati
 			if err = s.Messages.RetractMessageAndDeleteAttachments(txCtx, messageID, now); err != nil {
 				return err
 			}
+			// The response and durable event must use the cleared list and the
+			// revision committed by the same retraction transaction.
+			m, err = s.Messages.GetMessage(txCtx, conversationID, messageID)
+			if err != nil {
+				return err
+			}
 		} else {
 			if m.RetractedAt != nil {
 				return domain.ErrMessageRetracted()
@@ -285,10 +291,51 @@ func (s *Service) Read(ctx context.Context, userID, conversationID string, seq i
 		}); err != nil {
 			return err
 		}
+		if s.Flags != nil && s.Flags.Enabled("im.read_receipts.view") {
+			other := make([]string, 0, len(c.MemberIDs))
+			for _, id := range c.MemberIDs {
+				if id != userID {
+					other = append(other, id)
+				}
+			}
+			if len(other) > 0 {
+				if err = s.Conversations.EnqueueOutboxHint(txCtx, map[string]any{
+					"type":           "receipts.changed",
+					"conversationId": conversationID,
+					"userIds":        other,
+				}); err != nil {
+					return err
+				}
+			}
+		}
 		result = seq
 		return nil
 	})
 	return result, err
+}
+
+// ReadReceipts returns conversation read receipts for an authorized member.
+func (s *Service) ReadReceipts(ctx context.Context, userID, conversationID string) (domain.ReadReceipts, error) {
+	if err := s.requireFlag("im.read_receipts.view"); err != nil {
+		return domain.ReadReceipts{}, err
+	}
+	var out domain.ReadReceipts
+	err := s.Tx.WithinTx(ctx, func(txCtx context.Context) error {
+		ws, err := s.Conversations.GetConversationWorkspaceID(txCtx, conversationID)
+		if err != nil {
+			return err
+		}
+		if err = s.Workspaces.WorkspaceLock(txCtx, ws, userID, false, false); err != nil {
+			return err
+		}
+		c, err := s.Conversations.ConversationAccess(txCtx, conversationID, userID)
+		if err != nil {
+			return err
+		}
+		out, err = s.Conversations.QueryReadReceipts(txCtx, c, userID)
+		return err
+	})
+	return out, err
 }
 
 // SearchWorkspaceMessages searches unretracted messages across authorized conversations in a workspace.
@@ -365,7 +412,7 @@ func (s *Service) SearchWorkspaceMessages(ctx context.Context, userID, workspace
 
 // Attention computes the caller's mention/reply attention inbox projection.
 func (s *Service) Attention(ctx context.Context, userID, rawCursor string, limit int, unreadOnly bool) (domain.AttentionPage, error) {
-	out := domain.AttentionPage{Items: []domain.AttentionItem{}}
+	out := domain.AttentionPage{Items: []domain.AttentionItem{}, AttentionUnreadByConversation: []domain.AttentionUnread{}}
 	if limit < 1 || limit > 100 {
 		return out, domain.ErrInvalidAttentionPageSize()
 	}
@@ -389,13 +436,14 @@ func (s *Service) Attention(ctx context.Context, userID, rawCursor string, limit
 		if rawCursor != "" {
 			before = cursor.At
 		}
-		unread, channelUnread, items, err := s.Messages.QueryAttentionProjection(txCtx, userID, before, cursor.ID, unreadOnly, limit+1, conversations)
+		unread, channelUnread, items, unreadByConversation, err := s.Messages.QueryAttentionProjection(txCtx, userID, before, cursor.ID, unreadOnly, limit+1, conversations)
 		if err != nil {
 			return err
 		}
 		out.UnreadCount = unread
 		out.ChannelUnreadCount = channelUnread
 		out.Items = items
+		out.AttentionUnreadByConversation = unreadByConversation
 		if len(out.Items) > limit {
 			out.Items = out.Items[:limit]
 			last := out.Items[len(out.Items)-1].Message

@@ -13,21 +13,47 @@ type Mention struct {
 	End    int    `json:"end"`
 }
 
+type Reaction struct {
+	Emoji   string   `json:"emoji"`
+	Count   int64    `json:"count"`
+	UserIDs []string `json:"userIds"`
+}
+
+// ReactionState is a complete list at one message-owned, durable revision.
+type ReactionState struct {
+	Reactions        []Reaction
+	ReactionsVersion int64
+}
+
 type Message struct {
-	ID              string       `json:"id"`
-	ConversationID  string       `json:"conversationId"`
-	SenderID        string       `json:"senderId"`
-	SenderName      string       `json:"senderName"`
-	SenderKind      string       `json:"senderKind"`
-	ClientMessageID string       `json:"clientMessageId"`
-	Seq             int64        `json:"seq"`
-	Body            string       `json:"body"`
-	ReplyToID       *string      `json:"replyToId,omitempty"`
-	CreatedAt       time.Time    `json:"createdAt"`
-	EditedAt        *time.Time   `json:"editedAt,omitempty"`
-	RetractedAt     *time.Time   `json:"retractedAt,omitempty"`
-	Attachments     []Attachment `json:"attachments,omitempty"`
-	Mentions        []Mention    `json:"mentions,omitempty"`
+	ID               string       `json:"id"`
+	ConversationID   string       `json:"conversationId"`
+	SenderID         string       `json:"senderId"`
+	SenderName       string       `json:"senderName"`
+	SenderKind       string       `json:"senderKind"`
+	ClientMessageID  string       `json:"clientMessageId"`
+	Seq              int64        `json:"seq"`
+	Body             string       `json:"body"`
+	ReplyToID        *string      `json:"replyToId,omitempty"`
+	CreatedAt        time.Time    `json:"createdAt"`
+	EditedAt         *time.Time   `json:"editedAt,omitempty"`
+	RetractedAt      *time.Time   `json:"retractedAt,omitempty"`
+	Attachments      []Attachment `json:"attachments,omitempty"`
+	Mentions         []Mention    `json:"mentions,omitempty"`
+	Reactions        []Reaction   `json:"reactions,omitempty"`
+	ReactionsVersion int64        `json:"reactionsVersion,string"`
+}
+
+// ValidateReactionEmoji accepts exactly one fully-qualified Unicode Emoji 17.0
+// sequence. Generation, validation and tests use only the pinned offline data.
+func ValidateReactionEmoji(emoji string) error {
+	if emoji == "" || len(emoji) > 64 || !utf8.ValidString(emoji) {
+		return ErrInvalidReaction()
+	}
+	if _, ok := slices.BinarySearch(reactionEmojiSequences, emoji); !ok {
+		return ErrInvalidReaction()
+	}
+	return nil
 }
 
 func ValidateBody(body string) error {

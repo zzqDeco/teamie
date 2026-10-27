@@ -168,4 +168,317 @@
     color: var(--text-subtle);
   }
 }
+
+.avatar-with-presence {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.presence-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-pill);
+  flex-shrink: 0;
+  background: var(--status-offline);
+}
+
+.avatar-with-presence > .presence-dot {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--surface);
+}
+
+.presence-dot.presence-online {
+  background: var(--status-online);
+}
+
+.presence-dot.presence-away {
+  background: var(--status-connecting);
+}
+
+.presence-dot.presence-offline {
+  background: var(--status-offline);
+}
+
+.header-presence {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text-muted);
+}
+
+.member-presence-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border-radius: var(--r-pill);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  font-size: var(--font-xs);
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.conversation-link.is-muted {
+  color: var(--text-subtle);
+}
+
+.conversation-muted-icon,
+.conversation-mentions-icon {
+  margin-left: auto;
+  color: var(--text-subtle);
+  flex-shrink: 0;
+}
+
+.unread-badge.mention-badge {
+  background: var(--brand);
+  color: var(--on-brand);
+}
+
+.notification-level-control {
+  position: relative;
+  display: inline-flex;
+}
+
+.notification-level-readonly {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  color: var(--text-subtle);
+}
+
+.notification-level-menu {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  right: 0;
+  width: 240px;
+  padding: var(--space-1);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-pop);
+  z-index: var(--z-popover);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.notification-level-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-strong);
+  text-align: left;
+  cursor: pointer;
+}
+
+.notification-level-option:hover,
+.notification-level-option.active {
+  background: var(--surface-sunken);
+}
+
+.notification-level-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.notification-level-option-text > b {
+  font-size: var(--font-sm);
+  font-weight: 600;
+}
+
+.notification-level-option-text > span {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+}
+
+.message-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+
+.reaction-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border);
+  background: var(--surface-sunken);
+  color: var(--text);
+  font-size: var(--font-xs);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.reaction-chip:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
+.reaction-chip.active {
+  background: var(--lavender);
+  border-color: var(--brand);
+  color: var(--brand-strong);
+}
+
+.reaction-chip:disabled {
+  cursor: default;
+}
+
+.reaction-picker-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.reaction-picker-popover {
+  position: absolute;
+  bottom: calc(100% + var(--space-1));
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: var(--space-1);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-pop);
+  z-index: var(--z-popover);
+}
+
+.reaction-picker-emoji {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  font-size: var(--font-md);
+  cursor: pointer;
+}
+
+.reaction-picker-emoji:hover,
+.reaction-picker-emoji.active {
+  background: var(--lavender);
+}
+
+.message-read-receipt-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-top: var(--space-1);
+}
+
+.message-read-receipt {
+  display: inline-flex;
+  align-items: center;
+  margin-top: var(--space-1);
+  font-size: var(--font-xs);
+  font-weight: 500;
+  color: var(--text-subtle);
+}
+
+.message-read-receipt-wrap > .message-read-receipt {
+  margin-top: 0;
+}
+
+.message-read-receipt.is-read {
+  color: var(--brand-text);
+}
+
+.message-read-receipt.is-interactive {
+  padding: 2px var(--space-2);
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border);
+  background: var(--surface-sunken);
+  cursor: pointer;
+}
+
+.message-read-receipt.is-interactive:hover {
+  border-color: var(--brand);
+}
+
+.message-read-receipt.on-hover,
+.message-read-receipt-wrap.on-hover {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.message:hover .message-read-receipt.on-hover,
+.message:focus-within .message-read-receipt.on-hover,
+.message:hover .message-read-receipt-wrap.on-hover,
+.message:focus-within .message-read-receipt-wrap.on-hover {
+  opacity: 1;
+}
+
+.read-receipt-popover {
+  position: absolute;
+  bottom: calc(100% + var(--space-1));
+  left: 0;
+  min-width: 200px;
+  max-width: 280px;
+  padding: var(--space-3);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-pop);
+  z-index: var(--z-popover);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.read-receipt-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.read-receipt-section > b {
+  font-size: var(--font-xs);
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.read-receipt-section > span {
+  font-size: var(--font-xs);
+  color: var(--text-subtle);
+}
+
+.read-receipt-section > ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.read-receipt-section > ul > li {
+  padding: 2px var(--space-2);
+  border-radius: var(--r-pill);
+  background: var(--surface-sunken);
+  font-size: var(--font-xs);
+  color: var(--text);
+}
 }

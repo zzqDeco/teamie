@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
-import { chatStore } from "./store";
+import { api } from "@teamie/api-client";
+import type { Message } from "@teamie/api-client";
+import { isRelevantMessage } from "./notification-model";
+import { chatStore, effectiveNotificationLevel, reconcileMessages } from "./store";
 import type { ChatSnapshot } from "./store";
 
 export const NOTIFICATION_STORAGE_KEY = "teamie.notifications";
@@ -23,6 +26,8 @@ const listeners = new Set<(prefs: NotificationPreferences) => void>();
 const activeNotifications = new Set<{ close?: () => void }>();
 let notifiedUserId: string | null = null;
 const notifiedMessageIds = new Set<string>();
+const pendingMessages = new Map<string, AbortController>();
+let notificationEpoch = 0;
 let registeredConversationId: string | null | undefined = undefined;
 let registeredNavigate: ((to: string) => void) | null = null;
 
@@ -83,6 +88,9 @@ export function closeActiveNotifications(): void {
 }
 
 export function resetNotificationSession(userId: string | null = null): void {
+  notificationEpoch += 1;
+  for (const controller of pendingMessages.values()) controller.abort();
+  pendingMessages.clear();
   closeActiveNotifications();
   if (!userId) {
     fallbackPreferencesByUser.clear();
@@ -192,6 +200,7 @@ export function notifySyncedMessages(
   candidates: ReadonlyArray<{ conversationId: string; messageId: string }>,
   snapshot: ChatSnapshot,
   currentUserId: string,
+  verifiedParents?: ReadonlyMap<string, Message>,
 ): void {
   if (!candidates.length || snapshot.userId !== currentUserId) return;
   if (notifiedUserId !== currentUserId) {
@@ -218,18 +227,36 @@ export function notifySyncedMessages(
       continue;
     }
 
+    const level = effectiveNotificationLevel(conversation);
+    if (level === "none") continue;
+
     const isMention = Boolean(
       message.mentions?.some((mention) => mention.userId === currentUserId),
     );
-    const isDirect = conversation.type === "direct";
-    let isReplyToMe = false;
-    if (message.replyToId) {
-      const parent = cached.find((m) => m.id === message.replyToId);
-      if (parent && !parent.retractedAt && parent.senderId === currentUserId) {
-        isReplyToMe = true;
-      }
+    let parent = message.replyToId ? cached.find((m) => m.id === message.replyToId) : undefined;
+    if (message.replyToId && verifiedParents?.has(message.replyToId)) {
+      const verified = verifiedParents.get(message.replyToId)!;
+      parent = parent ? reconcileMessages([verified], [parent])[0] : verified;
     }
-    if (!isMention && !isDirect && !isReplyToMe) continue;
+    if (conversation.type === "channel" && !isMention && message.replyToId && !parent) {
+      const key = `${currentUserId}:${conversationId}:${messageId}`;
+      if (!pendingMessages.has(key)) {
+        const controller = new AbortController();
+        const epoch = notificationEpoch, generation = chatStore.generation;
+        pendingMessages.set(key, controller);
+        void api.message(conversationId, message.replyToId, controller.signal).then(({ message: original }) => {
+          if (controller.signal.aborted || epoch !== notificationEpoch || generation !== chatStore.generation) return;
+          const latest = chatStore.getSnapshot();
+          if (latest.userId !== currentUserId) return;
+          notifySyncedMessages([{ conversationId, messageId }], latest, currentUserId, new Map([[original.id, original]]));
+        }).catch(() => { /* Unknown reply context never grants a notification. */ }).finally(() => {
+          if (pendingMessages.get(key) === controller) pendingMessages.delete(key);
+        });
+      }
+      continue;
+    }
+    if (!isRelevantMessage(conversation, message, currentUserId, parent)) continue;
+    const isReplyToMe = Boolean(parent && !parent.retractedAt && parent.senderId === currentUserId);
 
     if (!isTabInBackground() && getCurrentConversationId() === conversation.id) {
       continue;
@@ -248,7 +275,7 @@ export function notifySyncedMessages(
           ? "在消息中提及了你"
           : isReplyToMe
             ? "回复了你的消息"
-            : "发来一条新私信";
+            : conversation.type === "group" ? "发来一条新群聊消息" : "发来一条新私信";
     const previewText = message.body
       ? message.body.length > 120
         ? `${message.body.slice(0, 120)}…`

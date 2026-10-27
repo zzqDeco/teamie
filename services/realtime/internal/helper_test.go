@@ -82,6 +82,7 @@ type Hub struct {
 	mu                   sync.Mutex
 	peers                map[*peer]struct{}
 	policy               domain.TypingPolicy
+	presence             domain.PresenceTracker
 }
 
 func NewHub(identity httpx.Identity, chatAccess Access, rdb *redis.Client, cfgFlags httpx.Flags, origin string) *Hub {
@@ -104,15 +105,20 @@ func (h *Hub) App() *app.HubService {
 		chatAuth = rpcclient.ChatAuthority{Chat: h.Chat}
 	}
 	var bus domain.HintBus
+	var presenceStore domain.PresenceStore
 	if h.Redis != nil {
 		bus = redisinfra.RedisBus{Client: h.Redis}
+		presenceStore = redisinfra.RedisPresenceStore{Client: h.Redis}
 	}
 	return &app.HubService{
-		Identity: idVal,
-		Chat:     chatAuth,
-		Flags:    redisinfra.FlagsProvider{Flags: &h.Flags},
-		Bus:      bus,
-		Policy:   &h.policy,
+		Identity:      idVal,
+		Chat:          chatAuth,
+		Flags:         redisinfra.FlagsProvider{Flags: &h.Flags},
+		Bus:           bus,
+		Policy:        &h.policy,
+		Presence:      &h.presence,
+		PresenceStore: presenceStore,
+		Clients:       h.clients,
 	}
 }
 

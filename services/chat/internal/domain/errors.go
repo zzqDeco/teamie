@@ -225,3 +225,15 @@ func ErrAttachmentCapacity() error {
 func ErrAttachmentBusy() error {
 	return Err(429, "attachment_busy", "File transfers are busy; please retry")
 }
+
+func ErrInvalidReaction() error {
+	return Err(400, "invalid_reaction", "Choose one supported Unicode emoji")
+}
+
+func ErrReactionLimit() error {
+	return Err(409, "reaction_limit", "A message supports at most 20 distinct emoji reactions")
+}
+
+func ErrInvalidNotificationLevel() error {
+	return Err(400, "invalid_notification_level", "Notification level must be all, mentions or none")
+}

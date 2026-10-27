@@ -49,6 +49,7 @@ type WorkspaceRepository interface {
 	FindMemberAndDelegatedIDs(ctx context.Context, workspaceID, targetUserID string) ([]string, error)
 	DeleteConversationMembersInWorkspace(ctx context.Context, workspaceID string, userIDs []string) error
 	DeleteWorkspaceMembers(ctx context.Context, workspaceID string, userIDs []string) error
+	SharedWorkspaceMemberIDs(ctx context.Context, userID string) ([]string, error)
 }
 
 // ConversationRepository defines persistence operations for conversations and sync streams.
@@ -66,6 +67,9 @@ type ConversationRepository interface {
 	CountConversationMembersAndCheckTarget(ctx context.Context, conversationID, targetUserID string) (count int, present bool, err error)
 	IncrementConversationSeq(ctx context.Context, conversationID string) (int64, error)
 	UpsertReadCursor(ctx context.Context, conversationID, userID string, seq int64) error
+	SetNotificationLevel(ctx context.Context, conversationID, userID, level string) (bool, error)
+	QueryReadReceipts(ctx context.Context, c Conversation, callerUserID string) (ReadReceipts, error)
+	EnqueueOutboxHint(ctx context.Context, payload any) error
 	SyncHead(ctx context.Context, userID string) (int64, error)
 	EnsureAndLockSyncHeads(ctx context.Context, userIDs []string) error
 	Fanout(ctx context.Context, userIDs []string, event Event) error
@@ -89,13 +93,15 @@ type MessageRepository interface {
 	SetMessageInitialAttachments(ctx context.Context, messageID string, attachments []Attachment, originalIDs []string) error
 	RetractMessageAndDeleteAttachments(ctx context.Context, messageID string, retractedAt time.Time) error
 	UpdateMessageBodyAndMentions(ctx context.Context, messageID, body string, editedAt time.Time, mentions []Mention) error
+	AddReaction(ctx context.Context, conversationID, messageID, userID, emoji string) (ReactionState, bool, error)
+	RemoveReaction(ctx context.Context, conversationID, messageID, userID, emoji string) (ReactionState, bool, error)
 	QueryMessageHistory(ctx context.Context, conversationID string, before, around int64, query string, limit int, filesOnly bool) ([]Message, bool, error)
 	SearchWorkspaceCandidateIDs(ctx context.Context, userID, workspaceID, query string, before any, cursorID string, limit int) ([]string, error)
 	LockSearchConversationsForShare(ctx context.Context, userID, workspaceID string, candidateMessageIDs []string) ([]string, error)
 	QueryVerifiedWorkspaceSearchItems(ctx context.Context, userID, query string, before any, cursorID string, limit int, candidateMessageIDs, conversationIDs []string) ([]WorkspaceSearchItem, error)
 	LockUserWorkspacesForShare(ctx context.Context, userID string) ([]string, error)
 	LockUserConversationsForShare(ctx context.Context, userID string, workspaceIDs []string) ([]string, error)
-	QueryAttentionProjection(ctx context.Context, userID string, before any, cursorID string, unreadOnly bool, limit int, conversationIDs []string) (unreadCount, channelUnreadCount int64, items []AttentionItem, err error)
+	QueryAttentionProjection(ctx context.Context, userID string, before any, cursorID string, unreadOnly bool, limit int, conversationIDs []string) (unreadCount, channelUnreadCount int64, items []AttentionItem, unreadByConversation []AttentionUnread, err error)
 }
 
 // AttachmentRepository defines persistence operations for file attachments and upload receipts.

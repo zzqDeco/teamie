@@ -6,8 +6,12 @@ import { api, ApiError } from "@teamie/api-client";
 import type { AttentionItem } from "@teamie/api-client";
 import { useAuth } from "./auth";
 import { errorText, useChatState } from "./chat";
-import { chatStore, reconcileMessages } from "./store";
+import {
+  chatStore,
+  reconcileMessages,
+} from "./store";
 import type { ChatSnapshot } from "./store";
+import { fetchAttentionCount } from "./notification-projection";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
 import { MentionText } from "./mentions";
 import { Avatar, Button, date, IconButton, Notice, time } from "./ui";
@@ -27,12 +31,14 @@ function useAttentionScope() {
     reads: conversations
       .map((conversation) => `${conversation.id}:${conversation.readSeq}`)
       .join("|"),
+    epoch: chatStore.notificationEpoch,
     enabled: snapshot.userId === user!.id,
   };
 }
 
 const retry = (count: number, error: Error) =>
   count < 1 &&
+  error.name !== "AbortError" &&
   !(
     error instanceof ApiError &&
     [400, 401, 403, 404, 409].includes(error.status)
@@ -48,8 +54,9 @@ export function useAttentionCount() {
       scope.access,
       "count",
       scope.reads,
+      scope.epoch,
     ],
-    queryFn: ({ signal }) => api.attention({ limit: 1 }, signal),
+    queryFn: ({ signal }) => fetchAttentionCount(signal),
     enabled: scope.enabled,
     staleTime: 5_000,
     refetchInterval: 30_000,

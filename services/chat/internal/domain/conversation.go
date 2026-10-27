@@ -9,16 +9,41 @@ import (
 )
 
 type Conversation struct {
-	ID               string    `json:"id"`
-	WorkspaceID      string    `json:"workspaceId"`
-	Type             string    `json:"type"`
-	Name             string    `json:"name"`
-	MemberIDs        []string  `json:"memberIds"`
-	LastSeq          int64     `json:"lastSeq"`
-	ReadSeq          int64     `json:"readSeq"`
-	UpdatedAt        time.Time `json:"updatedAt"`
-	CreatedBy        string    `json:"createdBy,omitempty"`
-	CanManageMembers bool      `json:"canManageMembers"`
+	ID                string    `json:"id"`
+	WorkspaceID       string    `json:"workspaceId"`
+	Type              string    `json:"type"`
+	Name              string    `json:"name"`
+	MemberIDs         []string  `json:"memberIds"`
+	LastSeq           int64     `json:"lastSeq"`
+	ReadSeq           int64     `json:"readSeq"`
+	UpdatedAt         time.Time `json:"updatedAt"`
+	CreatedBy         string    `json:"createdBy,omitempty"`
+	CanManageMembers  bool      `json:"canManageMembers"`
+	NotificationLevel string    `json:"notificationLevel,omitempty"`
+}
+
+type ReadSeqCount struct {
+	ReadSeq int64 `json:"readSeq"`
+	Count   int64 `json:"count"`
+}
+
+type MemberReadReceipt struct {
+	UserID  string `json:"userId"`
+	ReadSeq int64  `json:"readSeq"`
+}
+
+type ReadReceipts struct {
+	ConversationID string              `json:"conversationId"`
+	EligibleCount  int64               `json:"eligibleCount"`
+	ReadSeqCounts  []ReadSeqCount      `json:"readSeqCounts"`
+	Members        []MemberReadReceipt `json:"members,omitempty"`
+}
+
+func ValidateNotificationLevel(level string) error {
+	if level != "all" && level != "mentions" && level != "none" {
+		return ErrInvalidNotificationLevel()
+	}
+	return nil
 }
 
 type AttentionConversation struct {
@@ -37,10 +62,16 @@ type AttentionItem struct {
 }
 
 type AttentionPage struct {
-	Items              []AttentionItem `json:"items"`
-	Cursor             string          `json:"cursor,omitempty"`
-	UnreadCount        int64           `json:"unreadCount"`
-	ChannelUnreadCount int64           `json:"channelUnreadCount"`
+	Items                         []AttentionItem   `json:"items"`
+	Cursor                        string            `json:"cursor,omitempty"`
+	UnreadCount                   int64             `json:"unreadCount"`
+	ChannelUnreadCount            int64             `json:"channelUnreadCount"`
+	AttentionUnreadByConversation []AttentionUnread `json:"attentionUnreadByConversation"`
+}
+
+type AttentionUnread struct {
+	ConversationID string `json:"conversationId"`
+	UnreadCount    int64  `json:"unreadCount"`
 }
 
 type WorkspaceSearchItem struct {

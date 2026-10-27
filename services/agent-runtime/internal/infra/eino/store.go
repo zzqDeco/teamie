@@ -309,6 +309,9 @@ func (s *Store) Ingest(ctx context.Context, l *Lease, cursor string, inputs []In
 	}
 	return s.Repo().IngestInputs(ctx, l, cursor, toDomainInputs(inputs))
 }
+func (s *Store) ReadReceiptInputs(ctx context.Context, l *Lease, after, through string, limit int) (domain.ReadReceiptInputPage, error) {
+	return s.Repo().ListReadReceiptInputs(ctx, l, after, through, limit)
+}
 func (s *Store) Pending(ctx context.Context, l *Lease) ([]Input, error) {
 	raws, err := s.DB.ListPendingInputs(ctx, l.AgentID)
 	if err != nil {

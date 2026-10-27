@@ -23,6 +23,62 @@ func (f FlagsProvider) TypingPublishEnabled() bool {
 	return f.Flags.Load().Flags["im.typing.publish"]
 }
 
+func (f FlagsProvider) PresencePublishEnabled() bool {
+	if f.Flags == nil {
+		return true
+	}
+	return f.Flags.Load().Flags["im.presence.publish"]
+}
+
+func (f FlagsProvider) ReadReceiptsViewEnabled() bool {
+	if f.Flags == nil {
+		return true
+	}
+	return f.Flags.Load().Flags["im.read_receipts.view"]
+}
+
+const PresenceKeyPrefix = "teamie:im:presence:v1:"
+
+// RedisPresenceStore persists disposable human presence state in Redis.
+type RedisPresenceStore struct {
+	Client *redis.Client
+}
+
+func (s RedisPresenceStore) SaveUserPresence(ctx context.Context, userID, state string, ttl time.Duration) error {
+	if s.Client == nil || userID == "" {
+		return nil
+	}
+	key := PresenceKeyPrefix + userID
+	if state == "" || state == "offline" {
+		return s.Client.Del(ctx, key).Err()
+	}
+	if ttl <= 0 {
+		ttl = 10 * time.Minute
+	}
+	return s.Client.Set(ctx, key, state, ttl).Err()
+}
+
+func (s RedisPresenceStore) GetUsersPresence(ctx context.Context, userIDs []string) (map[string]string, error) {
+	out := make(map[string]string, len(userIDs))
+	if s.Client == nil || len(userIDs) == 0 {
+		return out, nil
+	}
+	keys := make([]string, len(userIDs))
+	for i, id := range userIDs {
+		keys[i] = PresenceKeyPrefix + id
+	}
+	vals, err := s.Client.MGet(ctx, keys...).Result()
+	if err != nil {
+		return out, err
+	}
+	for i, v := range vals {
+		if str, ok := v.(string); ok && (str == "online" || str == "away") {
+			out[userIDs[i]] = str
+		}
+	}
+	return out, nil
+}
+
 // RedisBus adapts *redis.Client to domain.HintBus.
 type RedisBus struct {
 	Client *redis.Client
@@ -57,7 +113,12 @@ func RunSubscriber(ctx context.Context, rdb *redis.Client, deliverer HintDeliver
 				return
 			}
 			var hint domain.Hint
-			if json.Unmarshal([]byte(msg.Payload), &hint) != nil || (hint.Type != "sync.required" && hint.Type != "typing") {
+			if json.Unmarshal([]byte(msg.Payload), &hint) != nil {
+				continue
+			}
+			switch hint.Type {
+			case "sync.required", "typing", "receipts.changed", "presence":
+			default:
 				continue
 			}
 			ctxCall, cancel := context.WithTimeout(ctx, 3*time.Second)

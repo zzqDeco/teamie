@@ -10,6 +10,7 @@ import { useAuth } from "./auth";
 import { errorText, useChat, useChatState } from "./chat";
 import { chatStore, reconcileMessages } from "./store";
 import type { LocalMessage } from "./store";
+import { projectReactionList } from "./reactions";
 import { MessageBody } from "./markdown";
 export { MessageBody };
 import { Notice } from "./ui";
@@ -26,6 +27,7 @@ import {
   MessageItem, messageGrouping, RetractMessageModal, useMessageActions,
 } from "./message-item";
 import { MessageComposer } from "./message-composer";
+import { useConversationReceiptsSync } from "./engagement-store";
 
 const noMessages: LocalMessage[] = [];
 const noMembers: Member[] = [];
@@ -71,10 +73,12 @@ export function ConversationView({
   const [located, setLocated] = useState<LocalMessage[] | null>(null);
   const [resolvedTargets, setResolvedTargets] = useState<Record<string, Message>>({});
   const messages = useMemo(() => {
-    if (!located) return allMessages;
-    const ids = new Set(located.map((l) => l.id));
-    return reconcileMessages(located, allMessages.filter((m) => ids.has(m.id)));
-  }, [located, allMessages]);
+    const ids = located ? new Set(located.map((l) => l.id)) : null;
+    const base = !located
+      ? allMessages
+      : reconcileMessages(located, allMessages.filter((m) => ids!.has(m.id)));
+    return projectReactionList(base, snapshot.reactionStates);
+  }, [located, allMessages, snapshot.reactionStates]);
   const [highlightId, setHighlightId] = useState("");
   const [focusedMessageId, setFocusedMessageId] = useState("");
   const [locating, setLocating] = useState(false);
@@ -139,6 +143,7 @@ export function ConversationView({
   }, [conversation.id, uploadsEnabled]);
   const fetchLatest = useCallback(async () => {
     const token = chatStore.generation;
+    const reactionScope = chatStore.reactionScope(conversation.id);
     const operation = ++navigation.current;
     const hasConfirmed = (chatStore.getSnapshot().messages[conversation.id] || []).some(
       (m) => !m.status,
@@ -166,7 +171,7 @@ export function ConversationView({
     setError("");
     try {
       const page = await api.messages(conversation.id);
-      if (token !== chatStore.generation || operation !== navigation.current) return;
+      if (token !== chatStore.generation || operation !== navigation.current || (reactionScope && !chatStore.reactionScopeCurrent(reactionScope))) return;
       historyBefore.current = page.messages[0]
         ? { seq: page.messages[0].seq, generation: token }
         : null;
@@ -199,9 +204,10 @@ export function ConversationView({
   const loadContext = useCallback(
     async (id: string, readOnDisplay = false) => {
       const token = chatStore.generation;
+      const reactionScope = chatStore.reactionScope(conversation.id);
       const operation = ++navigation.current;
       const current = () =>
-        token === chatStore.generation && operation === navigation.current;
+        token === chatStore.generation && operation === navigation.current && (!reactionScope || chatStore.reactionScopeCurrent(reactionScope));
       setAtBottom(false);
       setLoading(false);
       setLoadingOlder(false);
@@ -215,6 +221,7 @@ export function ConversationView({
       try {
         const target = await api.message(conversation.id, id);
         if (!current()) return;
+        chatStore.ingestMessageReactions([target.message], reactionScope);
         setResolvedTargets((old) => ({
           ...old,
           [target.message.id]: old[target.message.id]
@@ -223,6 +230,7 @@ export function ConversationView({
         }));
         const page = await api.messagesAround(conversation.id, target.message.seq);
         if (!current()) return;
+        chatStore.ingestMessageReactions(page.messages, reactionScope);
         const currentTarget = chatStore
           .getSnapshot()
           .messages[conversation.id]?.find((message) => message.id === id);
@@ -261,9 +269,10 @@ export function ConversationView({
   const loadUnreadContext = useCallback(async () => {
     const seq = readSeq + 1;
     const token = chatStore.generation;
+    const reactionScope = chatStore.reactionScope(conversation.id);
     const operation = ++navigation.current;
     const current = () =>
-      token === chatStore.generation && operation === navigation.current;
+      token === chatStore.generation && operation === navigation.current && (!reactionScope || chatStore.reactionScopeCurrent(reactionScope));
     setAnchorPending(false);
     setAtBottom(false);
     setLoading(false);
@@ -278,6 +287,7 @@ export function ConversationView({
     try {
       const page = await api.messagesAround(conversation.id, seq);
       if (!current()) return;
+      chatStore.ingestMessageReactions(page.messages, reactionScope);
       const context = reconcileMessages(
         page.messages,
         (chatStore.getSnapshot().messages[conversation.id] || []).filter((message) =>
@@ -577,16 +587,18 @@ export function ConversationView({
     if (!boundary || boundary.generation !== chatStore.generation || loadingOlder) return;
     const first = extendHistoryBoundary(boundary.seq, messages);
     const token = chatStore.generation;
+    const reactionScope = chatStore.reactionScope(conversation.id);
     const operation = navigation.current;
     const height = scrollRef.current?.scrollHeight || 0;
     setLoadingOlder(true);
     setError("");
     try {
       const page = await api.messages(conversation.id, first);
-      if (token !== chatStore.generation || operation !== navigation.current) return;
+      if (token !== chatStore.generation || operation !== navigation.current || (reactionScope && !chatStore.reactionScopeCurrent(reactionScope))) return;
       historyBefore.current = page.messages[0]
         ? { seq: page.messages[0].seq, generation: token }
         : null;
+      chatStore.ingestMessageReactions(page.messages, reactionScope);
       if (located) setLocated((old) => (old ? reconcileMessages(old, page.messages) : old));
       else chatStore.merge(page.messages);
       setHasMore(page.hasMore);
@@ -603,11 +615,12 @@ export function ConversationView({
   async function newer() {
     if (!located || !unreadContext || loadingNewer || loadingOlder || locating) return;
     const token = chatStore.generation;
+    const reactionScope = chatStore.reactionScope(conversation.id);
     const operation = navigation.current;
     const current = () =>
       token === chatStore.generation &&
       operation === navigation.current &&
-      !!chatStore.getSnapshot().conversations[conversation.id];
+      chatStore.reactionScopeCurrent(reactionScope);
     setLoadingNewer(true);
     setError("");
     try {
@@ -617,6 +630,7 @@ export function ConversationView({
         setError("后续消息暂未加载，请重试");
         return;
       }
+      chatStore.ingestMessageReactions(page.messages, reactionScope);
       setLocated((old) => (old ? reconcileMessages(old, page.messages) : old));
     } catch (e) {
       if (current()) setError(errorText(e));
@@ -626,6 +640,20 @@ export function ConversationView({
   }
   const canEdit = !!data?.capabilities["im.message.edit"];
   const canRetract = !!data?.capabilities["im.message.retract"];
+  const canReact = !!data?.capabilities["im.reactions.create"];
+  const canViewReceipts = !!data?.capabilities["im.read_receipts.view"];
+  const canConfigureNotifications = !!data?.capabilities["im.notifications.configure"];
+  const presenceEnabled = !!data?.capabilities["im.presence.publish"];
+  const latestOwnMessageId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (!m.status && !m.retractedAt && m.senderId === userId) {
+        return m.id;
+      }
+    }
+    return "";
+  }, [messages, userId]);
+  useConversationReceiptsSync(conversation.id, canViewReceipts, !!latestOwnMessageId);
   // Stable handlers keep memoized rows from re-rendering when unrelated view
   // state changes; the refs always hold the latest closures.
   const locateRef = useRef(locate);
@@ -763,6 +791,9 @@ export function ConversationView({
       <ConversationHeader
         conversation={conversation} name={name} membersOpen={membersOpen}
         onMenu={onMenu} onSearchOpen={() => setSearchOpen(true)} onMembers={onMembers}
+        members={mentionMembers} userId={userId}
+        canConfigureNotifications={canConfigureNotifications}
+        presenceEnabled={presenceEnabled}
       />
       {searchOpen && (
         <ConversationSearch
@@ -834,13 +865,20 @@ export function ConversationView({
                 showDate={row.showDate} compact={row.compact}
                 previousId={row.previousId} nextId={row.nextId} replyTarget={row.replyTarget}
                 workspaceId={conversation.workspaceId}
-                conversationId={conversation.id} userId={userId}
+                conversationId={conversation.id}
+                conversationType={conversation.type}
+                userId={userId}
                 agentOwnerName={
                   message.senderKind === "agent" ? agentOwners.get(message.senderId) : undefined
                 }
                 mentionMembers={isEditing ? mentionMembers : noMembers}
+                allMembers={mentionMembers}
                 mentionsEnabled={mentionsEnabled}
                 canEdit={canEdit} canRetract={canRetract}
+                canReact={canReact}
+                canViewReceipts={canViewReceipts}
+                isLatestOwn={message.id === latestOwnMessageId}
+                senderReadSeq={message.senderId === userId ? readSeq : 0}
                 showUnreadDivider={message.id === firstUnread && (entry?.readSeq ?? 0) > 0}
                 isRovingTarget={message.id === rovingMessageId}
                 highlighted={highlightId === message.id}

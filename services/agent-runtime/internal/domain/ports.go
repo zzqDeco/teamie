@@ -126,6 +126,7 @@ type SessionRepository interface {
 	CheckLease(ctx context.Context, lease *Lease) error
 	CheckLeaseForUpdate(ctx context.Context, lease *Lease) error
 	GetCursor(ctx context.Context, lease *Lease) (string, error)
+	ListReadReceiptInputs(ctx context.Context, lease *Lease, afterEventID, throughEventID string, limit int) (ReadReceiptInputPage, error)
 	IngestInputs(ctx context.Context, lease *Lease, cursor string, inputs []Input) error
 	SkipInput(ctx context.Context, lease *Lease, eventID string) error
 }

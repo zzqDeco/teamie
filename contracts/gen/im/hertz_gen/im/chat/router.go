@@ -4,6 +4,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 
 	"github.com/cloudwego/hertz/pkg/app"
@@ -62,7 +63,11 @@ const (
 	PatternSendMessage = "POST /api/v1/conversations/{id}/messages"
 	PatternEditMessage = "PATCH /api/v1/conversations/{id}/messages/{messageId}"
 	PatternRetractMessage = "DELETE /api/v1/conversations/{id}/messages/{messageId}"
+	PatternPutReaction = "PUT /api/v1/conversations/{id}/messages/{messageId}/reactions/{emoji}"
+	PatternDeleteReaction = "DELETE /api/v1/conversations/{id}/messages/{messageId}/reactions/{emoji}"
 	PatternMarkRead = "POST /api/v1/conversations/{id}/read"
+	PatternGetReadReceipts = "GET /api/v1/conversations/{id}/read-receipts"
+	PatternSetNotificationLevel = "PUT /api/v1/conversations/{id}/notification-level"
 	PatternSearchWorkspaceMessages = "GET /api/v1/workspaces/{id}/messages/search"
 	PatternGetAttention = "GET /api/v1/attention"
 	PatternSync = "GET /api/v1/sync"
@@ -72,7 +77,7 @@ const (
 	PatternDownloadAttachment = "GET /api/v1/conversations/{id}/attachments/{attachmentId}/content"
 )
 
-// ChatHTTPServiceRoutes lists all 24 route specifications declared on ChatHTTPService.
+// ChatHTTPServiceRoutes lists all 28 route specifications declared on ChatHTTPService.
 var ChatHTTPServiceRoutes = []RouteSpec{
 	{Name: "GetBootstrap", Method: "GET", Path: "/api/v1/bootstrap", MuxPattern: PatternGetBootstrap, RequestType: "GetBootstrapReq", ResponseType: "BootstrapResp"},
 	{Name: "CreateWorkspace", Method: "POST", Path: "/api/v1/workspaces", MuxPattern: PatternCreateWorkspace, RequestType: "CreateWorkspaceReq", ResponseType: "CreateWorkspaceResp"},
@@ -90,7 +95,11 @@ var ChatHTTPServiceRoutes = []RouteSpec{
 	{Name: "SendMessage", Method: "POST", Path: "/api/v1/conversations/:id/messages", MuxPattern: PatternSendMessage, RequestType: "SendMessageReq", ResponseType: "MessageResp"},
 	{Name: "EditMessage", Method: "PATCH", Path: "/api/v1/conversations/:id/messages/:messageId", MuxPattern: PatternEditMessage, RequestType: "EditMessageReq", ResponseType: "MessageResp"},
 	{Name: "RetractMessage", Method: "DELETE", Path: "/api/v1/conversations/:id/messages/:messageId", MuxPattern: PatternRetractMessage, RequestType: "RetractMessageReq", ResponseType: "MessageResp"},
+	{Name: "PutReaction", Method: "PUT", Path: "/api/v1/conversations/:id/messages/:messageId/reactions/:emoji", MuxPattern: PatternPutReaction, RequestType: "PutReactionReq", ResponseType: "ReactionsResp"},
+	{Name: "DeleteReaction", Method: "DELETE", Path: "/api/v1/conversations/:id/messages/:messageId/reactions/:emoji", MuxPattern: PatternDeleteReaction, RequestType: "DeleteReactionReq", ResponseType: "ReactionsResp"},
 	{Name: "MarkRead", Method: "POST", Path: "/api/v1/conversations/:id/read", MuxPattern: PatternMarkRead, RequestType: "MarkReadReq", ResponseType: "MarkReadResp"},
+	{Name: "GetReadReceipts", Method: "GET", Path: "/api/v1/conversations/:id/read-receipts", MuxPattern: PatternGetReadReceipts, RequestType: "GetReadReceiptsReq", ResponseType: "ReadReceiptsResp"},
+	{Name: "SetNotificationLevel", Method: "PUT", Path: "/api/v1/conversations/:id/notification-level", MuxPattern: PatternSetNotificationLevel, RequestType: "SetNotificationLevelReq", ResponseType: "NotificationLevelResp"},
 	{Name: "SearchWorkspaceMessages", Method: "GET", Path: "/api/v1/workspaces/:id/messages/search", MuxPattern: PatternSearchWorkspaceMessages, RequestType: "SearchWorkspaceMessagesReq", ResponseType: "WorkspaceSearchPageResp"},
 	{Name: "GetAttention", Method: "GET", Path: "/api/v1/attention", MuxPattern: PatternGetAttention, RequestType: "GetAttentionReq", ResponseType: "AttentionPageResp"},
 	{Name: "Sync", Method: "GET", Path: "/api/v1/sync", MuxPattern: PatternSync, RequestType: "SyncReq", ResponseType: "SyncResp"},
@@ -118,7 +127,11 @@ type ChatHTTPServiceRouteHandlers struct {
 	SendMessage http.HandlerFunc
 	EditMessage http.HandlerFunc
 	RetractMessage http.HandlerFunc
+	PutReaction http.HandlerFunc
+	DeleteReaction http.HandlerFunc
 	MarkRead http.HandlerFunc
+	GetReadReceipts http.HandlerFunc
+	SetNotificationLevel http.HandlerFunc
 	SearchWorkspaceMessages http.HandlerFunc
 	GetAttention http.HandlerFunc
 	Sync http.HandlerFunc
@@ -194,10 +207,26 @@ func RegisterChatHTTPServiceRoutes(mux *http.ServeMux, h ChatHTTPServiceRouteHan
 		panic("ChatHTTPServiceRouteHandlers.RetractMessage (" + PatternRetractMessage + ") is nil")
 	}
 	mux.HandleFunc(PatternRetractMessage, h.RetractMessage)
+	if h.PutReaction == nil {
+		panic("ChatHTTPServiceRouteHandlers.PutReaction (" + PatternPutReaction + ") is nil")
+	}
+	mux.HandleFunc(PatternPutReaction, h.PutReaction)
+	if h.DeleteReaction == nil {
+		panic("ChatHTTPServiceRouteHandlers.DeleteReaction (" + PatternDeleteReaction + ") is nil")
+	}
+	mux.HandleFunc(PatternDeleteReaction, h.DeleteReaction)
 	if h.MarkRead == nil {
 		panic("ChatHTTPServiceRouteHandlers.MarkRead (" + PatternMarkRead + ") is nil")
 	}
 	mux.HandleFunc(PatternMarkRead, h.MarkRead)
+	if h.GetReadReceipts == nil {
+		panic("ChatHTTPServiceRouteHandlers.GetReadReceipts (" + PatternGetReadReceipts + ") is nil")
+	}
+	mux.HandleFunc(PatternGetReadReceipts, h.GetReadReceipts)
+	if h.SetNotificationLevel == nil {
+		panic("ChatHTTPServiceRouteHandlers.SetNotificationLevel (" + PatternSetNotificationLevel + ") is nil")
+	}
+	mux.HandleFunc(PatternSetNotificationLevel, h.SetNotificationLevel)
 	if h.SearchWorkspaceMessages == nil {
 		panic("ChatHTTPServiceRouteHandlers.SearchWorkspaceMessages (" + PatternSearchWorkspaceMessages + ") is nil")
 	}
@@ -916,6 +945,108 @@ func RegisterChatHTTPServiceHertzServer(r *route.RouterGroup, srv ChatHTTPServer
 		})
 	}
 	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "PutReaction", Method: "PUT", Path: "/api/v1/conversations/:id/messages/:messageId/reactions/:emoji", MuxPattern: PatternPutReaction, RequestType: "PutReactionReq", ResponseType: "ReactionsResp"}); hfn != nil {
+			r.PUT("/api/v1/conversations/:id/messages/:messageId/reactions/:emoji", hfn)
+		} else {
+			r.PUT("/api/v1/conversations/:id/messages/:messageId/reactions/:emoji", func(ctx context.Context, c *app.RequestContext) {
+				var req PutReactionReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				if req.MessageId == "" {
+					req.MessageId = c.Param("messageId")
+				}
+				if req.Emoji == "" {
+					req.Emoji = c.Param("emoji")
+				}
+				resp, err := srv.PutReaction(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.PUT("/api/v1/conversations/:id/messages/:messageId/reactions/:emoji", func(ctx context.Context, c *app.RequestContext) {
+			var req PutReactionReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			if req.MessageId == "" {
+				req.MessageId = c.Param("messageId")
+			}
+			if req.Emoji == "" {
+				req.Emoji = c.Param("emoji")
+			}
+			resp, err := srv.PutReaction(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "DeleteReaction", Method: "DELETE", Path: "/api/v1/conversations/:id/messages/:messageId/reactions/:emoji", MuxPattern: PatternDeleteReaction, RequestType: "DeleteReactionReq", ResponseType: "ReactionsResp"}); hfn != nil {
+			r.DELETE("/api/v1/conversations/:id/messages/:messageId/reactions/:emoji", hfn)
+		} else {
+			r.DELETE("/api/v1/conversations/:id/messages/:messageId/reactions/:emoji", func(ctx context.Context, c *app.RequestContext) {
+				var req DeleteReactionReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				if req.MessageId == "" {
+					req.MessageId = c.Param("messageId")
+				}
+				if req.Emoji == "" {
+					req.Emoji = c.Param("emoji")
+				}
+				resp, err := srv.DeleteReaction(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.DELETE("/api/v1/conversations/:id/messages/:messageId/reactions/:emoji", func(ctx context.Context, c *app.RequestContext) {
+			var req DeleteReactionReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			if req.MessageId == "" {
+				req.MessageId = c.Param("messageId")
+			}
+			if req.Emoji == "" {
+				req.Emoji = c.Param("emoji")
+			}
+			resp, err := srv.DeleteReaction(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
 		if hfn := hmw.HertzHandler(RouteSpec{Name: "MarkRead", Method: "POST", Path: "/api/v1/conversations/:id/read", MuxPattern: PatternMarkRead, RequestType: "MarkReadReq", ResponseType: "MarkReadResp"}); hfn != nil {
 			r.POST("/api/v1/conversations/:id/read", hfn)
 		} else {
@@ -947,6 +1078,84 @@ func RegisterChatHTTPServiceHertzServer(r *route.RouterGroup, srv ChatHTTPServer
 				req.ID = c.Param("id")
 			}
 			resp, err := srv.MarkRead(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "GetReadReceipts", Method: "GET", Path: "/api/v1/conversations/:id/read-receipts", MuxPattern: PatternGetReadReceipts, RequestType: "GetReadReceiptsReq", ResponseType: "ReadReceiptsResp"}); hfn != nil {
+			r.GET("/api/v1/conversations/:id/read-receipts", hfn)
+		} else {
+			r.GET("/api/v1/conversations/:id/read-receipts", func(ctx context.Context, c *app.RequestContext) {
+				var req GetReadReceiptsReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				resp, err := srv.GetReadReceipts(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.GET("/api/v1/conversations/:id/read-receipts", func(ctx context.Context, c *app.RequestContext) {
+			var req GetReadReceiptsReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			resp, err := srv.GetReadReceipts(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "SetNotificationLevel", Method: "PUT", Path: "/api/v1/conversations/:id/notification-level", MuxPattern: PatternSetNotificationLevel, RequestType: "SetNotificationLevelReq", ResponseType: "NotificationLevelResp"}); hfn != nil {
+			r.PUT("/api/v1/conversations/:id/notification-level", hfn)
+		} else {
+			r.PUT("/api/v1/conversations/:id/notification-level", func(ctx context.Context, c *app.RequestContext) {
+				var req SetNotificationLevelReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				resp, err := srv.SetNotificationLevel(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.PUT("/api/v1/conversations/:id/notification-level", func(ctx context.Context, c *app.RequestContext) {
+			var req SetNotificationLevelReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			resp, err := srv.SetNotificationLevel(ctx, &req)
 			if err != nil {
 				m.WriteDomainError(ctx, c, err)
 				return
@@ -1597,6 +1806,42 @@ func RegisterChatHTTPServer(mux *http.ServeMux, srv ChatHTTPServer, m HTTPRespon
 		}
 		h.RetractMessage = fn
 	}
+	if h.PutReaction == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req PutReactionReq
+			req.ID = r.PathValue("id")
+			req.MessageId = r.PathValue("messageId")
+			req.Emoji = r.PathValue("emoji")
+			resp, err := srv.PutReaction(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "PutReaction", Method: "PUT", Path: "/api/v1/conversations/:id/messages/:messageId/reactions/:emoji", MuxPattern: PatternPutReaction, RequestType: "PutReactionReq", ResponseType: "ReactionsResp"}, fn)
+		}
+		h.PutReaction = fn
+	}
+	if h.DeleteReaction == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req DeleteReactionReq
+			req.ID = r.PathValue("id")
+			req.MessageId = r.PathValue("messageId")
+			req.Emoji = r.PathValue("emoji")
+			resp, err := srv.DeleteReaction(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "DeleteReaction", Method: "DELETE", Path: "/api/v1/conversations/:id/messages/:messageId/reactions/:emoji", MuxPattern: PatternDeleteReaction, RequestType: "DeleteReactionReq", ResponseType: "ReactionsResp"}, fn)
+		}
+		h.DeleteReaction = fn
+	}
 	if h.MarkRead == nil {
 		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req MarkReadReq
@@ -1616,6 +1861,42 @@ func RegisterChatHTTPServer(mux *http.ServeMux, srv ChatHTTPServer, m HTTPRespon
 			fn = mw.WrapRoute(RouteSpec{Name: "MarkRead", Method: "POST", Path: "/api/v1/conversations/:id/read", MuxPattern: PatternMarkRead, RequestType: "MarkReadReq", ResponseType: "MarkReadResp"}, fn)
 		}
 		h.MarkRead = fn
+	}
+	if h.GetReadReceipts == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req GetReadReceiptsReq
+			req.ID = r.PathValue("id")
+			resp, err := srv.GetReadReceipts(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "GetReadReceipts", Method: "GET", Path: "/api/v1/conversations/:id/read-receipts", MuxPattern: PatternGetReadReceipts, RequestType: "GetReadReceiptsReq", ResponseType: "ReadReceiptsResp"}, fn)
+		}
+		h.GetReadReceipts = fn
+	}
+	if h.SetNotificationLevel == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req SetNotificationLevelReq
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
+			}
+			req.ID = r.PathValue("id")
+			resp, err := srv.SetNotificationLevel(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "SetNotificationLevel", Method: "PUT", Path: "/api/v1/conversations/:id/notification-level", MuxPattern: PatternSetNotificationLevel, RequestType: "SetNotificationLevelReq", ResponseType: "NotificationLevelResp"}, fn)
+		}
+		h.SetNotificationLevel = fn
 	}
 	if h.SearchWorkspaceMessages == nil {
 		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1761,4 +2042,26 @@ func RegisterChatHTTPServer(mux *http.ServeMux, srv ChatHTTPServer, m HTTPRespon
 		h.DownloadAttachment = fn
 	}
 	RegisterChatHTTPServiceRoutes(mux, h)
+}
+
+func (p EventDTO) MarshalJSON() ([]byte, error) {
+	type plainEventDTO EventDTO
+	if p.Reactions != nil && len(p.Reactions) == 0 {
+		return json.Marshal(struct {
+			plainEventDTO
+			Reactions []*ReactionDTO `json:"reactions"`
+		}{plainEventDTO: plainEventDTO(p), Reactions: []*ReactionDTO{}})
+	}
+	return json.Marshal(plainEventDTO(p))
+}
+
+func (p ReadReceiptsResp) MarshalJSON() ([]byte, error) {
+	type plainReadReceiptsResp ReadReceiptsResp
+	if p.Members != nil && len(p.Members) == 0 {
+		return json.Marshal(struct {
+			plainReadReceiptsResp
+			Members []*MemberReadReceiptDTO `json:"members"`
+		}{plainReadReceiptsResp: plainReadReceiptsResp(p), Members: []*MemberReadReceiptDTO{}})
+	}
+	return json.Marshal(plainReadReceiptsResp(p))
 }

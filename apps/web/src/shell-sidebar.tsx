@@ -3,7 +3,9 @@ import type { RefObject } from "react";
 import { Link } from "react-router-dom";
 import {
   ArrowLeft,
+  AtSign,
   Bell,
+  BellOff,
   Bot,
   ChevronDown,
   Hash,
@@ -17,7 +19,7 @@ import {
 } from "lucide-react";
 import type {
   Agent,
-  AttentionItem,
+  AttentionUnreadDTO,
   Conversation,
   Member,
   User,
@@ -37,8 +39,13 @@ import { AgentDetail, MyAgents } from "./agents";
 import { WorkspaceMembers } from "./members";
 import type { Participant } from "./participants";
 import { conversationName } from "./messages";
-import { currentAttention } from "./attention";
+import {
+  chatStore,
+  effectiveNotificationLevel,
+  summarizeConversationUnread,
+} from "./store";
 import type { ChatSnapshot } from "./store";
+import { formatPresenceLabel, useUserPresence } from "./engagement-store";
 import { Avatar, IconButton, Logo, useOverlayFocus } from "./ui";
 import { ICON } from "./icons";
 
@@ -188,39 +195,17 @@ export function computeShellAttention({
   attentionData?: {
     unreadCount?: number;
     channelUnreadCount?: number;
-    items?: AttentionItem[];
+    items?: unknown[];
+    attentionUnreadByConversation?: AttentionUnreadDTO[];
   };
 }) {
   const activeWorkspaceIds = new Set(workspaces.map((w) => w.id));
   const allAuthorizedConversations = Object.values(
     snapshot.conversations,
   ).filter((c) => activeWorkspaceIds.has(c.workspaceId));
-  const directUnreadCount = allAuthorizedConversations.reduce(
-    (sum, c) =>
-      c.type !== "channel" ? sum + Math.max(0, c.lastSeq - c.readSeq) : sum,
-    0,
-  );
-  const rawChannelAttention = attentionData?.channelUnreadCount || 0;
-  let locallyResolvedChannel = 0;
-  for (const item of attentionData?.items || []) {
-    if (item.isRead || item.conversation.type !== "channel") continue;
-    const current = currentAttention(item, snapshot, userId);
-    if (
-      !current ||
-      current.isRead ||
-      current.conversation.type !== "channel"
-    ) {
-      locallyResolvedChannel += 1;
-    }
-  }
-  const channelAttentionCount = Math.max(
-    0,
-    rawChannelAttention - locallyResolvedChannel,
-  );
-  const urgentCount = directUnreadCount + channelAttentionCount;
-  const hasChannelUnread = allAuthorizedConversations.some(
-    (c) => c.type === "channel" && c.lastSeq > c.readSeq,
-  );
+  const summaries = allAuthorizedConversations.map((c) => summarizeConversationUnread(c, snapshot, userId, attentionData?.attentionUnreadByConversation));
+  const urgentCount = summaries.reduce((sum, summary) => sum + summary.contributesToUrgentCount, 0);
+  const hasChannelUnread = summaries.some((summary) => summary.contributesToChannelUnreadDot);
   return {
     allAuthorizedConversations,
     urgentCount,
@@ -406,7 +391,9 @@ export function pickAdjacentConversation(
     if (
       candidate &&
       (!unreadOnly ||
-        (candidate.lastSeq > candidate.readSeq && candidate.id !== currentId))
+        (effectiveNotificationLevel(candidate) !== "none" &&
+          candidate.lastSeq > candidate.readSeq &&
+          candidate.id !== currentId))
     ) {
       return candidate;
     }
@@ -418,25 +405,42 @@ function ConversationItem({
   conversation,
   selected,
   members,
+  snapshot,
+  attentionProjection,
+  presenceEnabled,
   onClick,
 }: {
   conversation: Conversation;
   selected: boolean;
   members: Member[];
+  snapshot?: ChatSnapshot;
+  attentionProjection?: ReadonlyArray<AttentionUnreadDTO>;
+  presenceEnabled?: boolean;
   onClick: () => void;
 }) {
   const { user } = useAuth();
-  const unread = Math.max(0, conversation.lastSeq - conversation.readSeq);
+  const activeSnapshot = snapshot || chatStore.getSnapshot();
+  const summary = summarizeConversationUnread(
+    conversation,
+    activeSnapshot,
+    user!.id,
+    attentionProjection,
+  );
   const otherMember = members.find(
     (member) =>
       member.userId !== user!.id &&
       conversation.memberIds.includes(member.userId),
   );
+  const otherHumanId =
+    conversation.type === "direct" && otherMember?.kind === "human"
+      ? otherMember.userId
+      : undefined;
+  const presenceState = useUserPresence(otherHumanId, !!presenceEnabled);
   return (
     <Link
       to={route(conversation)}
       onClick={onClick}
-      className={`conversation-link ${selected ? "active" : ""} ${unread ? "has-unread" : ""}`}
+      className={`conversation-link ${selected ? "active" : ""} ${summary.hasUnread ? "has-unread" : ""} ${summary.muted ? "is-muted" : ""}`}
       aria-current={selected ? "page" : undefined}
     >
       {conversation.type === "channel" ? (
@@ -447,6 +451,19 @@ function ConversationItem({
         </span>
       ) : otherMember?.kind === "agent" ? (
         <AgentAvatar size="small" />
+      ) : presenceEnabled && otherHumanId ? (
+        <div className="avatar-with-presence">
+          <Avatar
+            size="small"
+            name={conversationName(conversation, user!.id, members)}
+            seed={conversation.memberIds.find((id) => id !== user!.id)}
+          />
+          <i
+            className={`presence-dot presence-${presenceState}`}
+            title={formatPresenceLabel(presenceState)}
+            aria-label={formatPresenceLabel(presenceState)}
+          />
+        </div>
       ) : (
         <Avatar
           size="small"
@@ -458,11 +475,28 @@ function ConversationItem({
       {conversation.type === "direct" && otherMember?.kind === "agent" && (
         <AgentBadge compact ownerName={otherMember.ownerName} />
       )}
-      {unread > 0 && (
-        <span className="unread-badge" aria-label={`${unread} 条未读`}>
-          {unread > 99 ? "99+" : unread}
+      {summary.muted ? (
+        <BellOff
+          size={ICON.xs}
+          className="conversation-muted-icon"
+          aria-label="已静音"
+        />
+      ) : summary.badgeCount > 0 ? (
+        <span
+          className={`unread-badge ${summary.badgePrefix ? "mention-badge" : ""}`}
+          aria-label={`${summary.badgeCount} 条未读`}
+          title={conversation.type === "channel" && summary.projectionStale ? "截至最近同步的未读提醒" : undefined}
+        >
+          {summary.badgePrefix}
+          {summary.badgeCount > 99 ? "99+" : summary.badgeCount}
         </span>
-      )}
+      ) : summary.level === "mentions" ? (
+        <AtSign
+          size={ICON.xs}
+          className="conversation-mentions-icon"
+          aria-label="仅提及通知"
+        />
+      ) : null}
     </Link>
   );
 }
@@ -479,6 +513,8 @@ export function ShellSidebar({
   isAttentionPage,
   isAgentsPage,
   attentionUnreadCount,
+  attentionProjection,
+  snapshot,
   workspaces,
   workspace,
   owner,
@@ -505,6 +541,8 @@ export function ShellSidebar({
   isAttentionPage: boolean;
   isAgentsPage: boolean;
   attentionUnreadCount?: number;
+  attentionProjection?: ReadonlyArray<AttentionUnreadDTO>;
+  snapshot?: ChatSnapshot;
   workspaces: Workspace[];
   workspace?: Workspace;
   owner: boolean;
@@ -520,6 +558,8 @@ export function ShellSidebar({
   onSignOut: () => void;
   onShortcuts: () => void;
 }) {
+  const activeSnapshot = snapshot || chatStore.getSnapshot();
+  const presenceEnabled = !!caps["im.presence.publish"];
   return (
     <div
       className="app-navigation"
@@ -562,7 +602,14 @@ export function ShellSidebar({
         <div className="workspace-buttons">
           {workspaces.map((space) => {
             const hasUnread = allAuthorizedConversations.some(
-              (c) => c.workspaceId === space.id && c.lastSeq > c.readSeq,
+              (c) =>
+                c.workspaceId === space.id &&
+                summarizeConversationUnread(
+                  c,
+                  activeSnapshot,
+                  user.id,
+                  attentionProjection,
+                ).contributesToWorkspaceDot,
             );
             return (
               <button
@@ -657,6 +704,9 @@ export function ShellSidebar({
                 conversation={c}
                 selected={c.id === conversationId}
                 members={members}
+                snapshot={activeSnapshot}
+                attentionProjection={attentionProjection}
+                presenceEnabled={presenceEnabled}
                 onClick={onCloseSidebar}
               />
             ))}
@@ -678,6 +728,9 @@ export function ShellSidebar({
                 conversation={c}
                 selected={c.id === conversationId}
                 members={members}
+                snapshot={activeSnapshot}
+                attentionProjection={attentionProjection}
+                presenceEnabled={presenceEnabled}
                 onClick={onCloseSidebar}
               />
             ))}

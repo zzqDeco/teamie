@@ -64,6 +64,22 @@ type Lease struct {
 	Fence          int64
 }
 
+// ReceivedReadPosition is an IM message already committed to the Runtime inbox.
+// It deliberately carries no message body or execution state.
+type ReceivedReadPosition struct {
+	EventID        string
+	ConversationID string
+	Seq            int64
+}
+
+// ReadReceiptInputPage advances through a fixed committed IM cursor, including
+// inbox rows that have since been processed, failed, or skipped.
+type ReadReceiptInputPage struct {
+	Items       []ReceivedReadPosition
+	NextEventID string
+	HasMore     bool
+}
+
 // Valid reports whether the lease has a valid Agent UUID, non-empty owner, and positive fence token.
 func (l Lease) Valid() bool {
 	return ValidUUID(l.AgentID) && strings.TrimSpace(l.Owner) != "" && l.Fence > 0

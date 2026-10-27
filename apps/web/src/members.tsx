@@ -20,6 +20,7 @@ import {
 } from "./group-members";
 import type { Participant } from "./participants";
 import { chatStore } from "./store";
+import { formatPresenceLabel, usePresenceMap } from "./engagement-store";
 import { Button, Notice } from "./ui";
 import { ICON } from "./icons";
 
@@ -40,6 +41,8 @@ export function WorkspaceMembers({
 }) {
   const { user } = useAuth();
   const { data, refresh } = useChat();
+  const presenceEnabled = !!data?.capabilities["im.presence.publish"];
+  const presenceMap = usePresenceMap(presenceEnabled);
   const navigate = useNavigate();
   const owner = workspace.createdBy === user!.id;
   const [search, setSearch] = useState("");
@@ -141,11 +144,24 @@ export function WorkspaceMembers({
               (item) => item.principalId === member.userId,
             );
             const self = member.userId === user!.id;
+            const humanPresence =
+              presenceEnabled && member.kind === "human"
+                ? presenceMap[member.userId] || "offline"
+                : null;
             return (
               <li key={member.userId} className="member-directory-row">
                 <div className="member-directory-identity">
                   <ParticipantIdentity member={member} />
                   {self && <span className="member-self-label">你</span>}
+                  {humanPresence && (
+                    <span
+                      className={`member-presence-badge presence-${humanPresence}`}
+                      aria-label={`在线状态：${formatPresenceLabel(humanPresence)}`}
+                    >
+                      <i className={`presence-dot presence-${humanPresence}`} aria-hidden="true" />
+                      {formatPresenceLabel(humanPresence)}
+                    </span>
+                  )}
                   {member.kind === "agent" && member.selectable === false && (
                     <span className="member-unavailable">
                       {agent && !agent.enabled ? "已停用" : "暂不可添加"}

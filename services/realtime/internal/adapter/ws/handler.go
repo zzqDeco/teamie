@@ -4,6 +4,7 @@ package ws
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"sync"
 	"time"
@@ -65,7 +66,8 @@ func (p *peer) enqueue(h domain.Hint) {
 
 // ToServerFrame converts a domain.Event into a generated RealtimeServerFrame DTO.
 func ToServerFrame(ev domain.Event) *realtimegen.RealtimeServerFrame {
-	if ev.Type == "typing" {
+	switch ev.Type {
+	case "typing":
 		convID := ev.ConversationID
 		userID := ev.UserID
 		displayName := ev.DisplayName
@@ -77,9 +79,24 @@ func ToServerFrame(ev domain.Event) *realtimegen.RealtimeServerFrame {
 			DisplayName:    &displayName,
 			IsTyping:       &isTyping,
 		}
-	}
-	return &realtimegen.RealtimeServerFrame{
-		Type: ev.Type,
+	case "receipts.changed":
+		convID := ev.ConversationID
+		return &realtimegen.RealtimeServerFrame{
+			Type:           ev.Type,
+			ConversationId: &convID,
+		}
+	case "presence":
+		userID := ev.UserID
+		state := ev.State
+		return &realtimegen.RealtimeServerFrame{
+			Type:   ev.Type,
+			UserId: &userID,
+			State:  &state,
+		}
+	default:
+		return &realtimegen.RealtimeServerFrame{
+			Type: ev.Type,
+		}
 	}
 }
 
@@ -189,6 +206,26 @@ func (a *Adapter) PublishTyping(ctx context.Context, req *realtimegen.PublishTyp
 	return &realtimegen.EmptyResp{}, nil
 }
 
+func (a *Adapter) GetWorkspacePresence(ctx context.Context, req *realtimegen.GetWorkspacePresenceReq) (*realtimegen.WorkspacePresenceResp, error) {
+	user, ok := actorFromContext(ctx)
+	if !ok {
+		return nil, domain.Err(401, "unauthenticated", "Sign in to continue")
+	}
+	svc := a.hubService()
+	items, err := svc.WorkspacePresence(ctx, a.ActiveClients, user, req.ID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*realtimegen.PresenceItemDTO, 0, len(items))
+	for _, it := range items {
+		out = append(out, &realtimegen.PresenceItemDTO{
+			UserId: it.UserID,
+			State:  it.State,
+		})
+	}
+	return &realtimegen.WorkspacePresenceResp{Items: out}, nil
+}
+
 // Routes mounts the Realtime WebSocket and HTTP endpoints onto an http.ServeMux
 // using the generated realtimegen.RegisterRealtimeWSServiceRoutes router bindings.
 func (a *Adapter) Routes() http.Handler {
@@ -197,10 +234,31 @@ func (a *Adapter) Routes() http.Handler {
 		return a.hubService().CheckDependencies(r.Context())
 	})
 	realtimegen.RegisterRealtimeWSServiceRoutes(m, realtimegen.RealtimeWSServiceRouteHandlers{
-		ConnectWS:     a.handleWS,
-		PublishTyping: httpx.Auth(a.Auth, a.Origin, a.handleTyping),
+		ConnectWS:            a.handleWS,
+		PublishTyping:        httpx.Auth(a.Auth, a.Origin, a.handleTyping),
+		GetWorkspacePresence: httpx.Auth(a.Auth, a.Origin, a.handleWorkspacePresence),
 	})
 	return m
+}
+
+func (a *Adapter) handleWorkspacePresence(w http.ResponseWriter, r *http.Request, s httpx.Session) error {
+	w.Header().Set("Cache-Control", "no-store")
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+	ctx = WithActor(ctx, domain.User{
+		ID:           s.User.ID,
+		Email:        s.User.Email,
+		DisplayName:  s.User.DisplayName,
+		Kind:         s.User.Kind,
+		PlatformRole: s.User.PlatformRole,
+		CreatedAt:    s.User.CreatedAt,
+	})
+	resp, err := a.GetWorkspacePresence(ctx, &realtimegen.GetWorkspacePresenceReq{ID: r.PathValue("id")})
+	if err != nil {
+		return err
+	}
+	httpx.WriteJSON(w, http.StatusOK, resp)
+	return nil
 }
 
 func (a *Adapter) handleTyping(w http.ResponseWriter, r *http.Request, s httpx.Session) error {
@@ -254,28 +312,66 @@ func (a *Adapter) handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	client, queue, done := a.registerPeer(ss.User.ID, httpx.Token(r), conn)
-	defer a.unregisterPeer(client)
+	svc.ConnectPresence(r.Context(), a.ActiveClients, client, ss.User)
+	defer func() {
+		a.unregisterPeer(client)
+		a.hubService().DisconnectPresence(a.ActiveClients, client)
+	}()
 	go a.writeLoop(client, conn, queue, done)
 	conn.SetReadLimit(4096)
 	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 	conn.SetPongHandler(func(string) error { return conn.SetReadDeadline(time.Now().Add(60 * time.Second)) })
 	for {
+		_, rawMsg, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
 		var frame realtimegen.RealtimeClientFrame
-		if err = conn.ReadJSON(&frame); err != nil {
+		if err = json.Unmarshal(rawMsg, &frame); err != nil {
 			return
 		}
 		curSvc := a.hubService()
-		if frame.GetType() != "typing" || frame.GetConversationId() == "" || (curSvc.Flags != nil && !curSvc.Flags.TypingPublishEnabled()) {
-			continue
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		current, err := curSvc.Identity.Validate(ctx, client.Token())
-		if err != nil {
+		switch frame.GetType() {
+		case "typing":
+			if frame.GetConversationId() == "" || (curSvc.Flags != nil && !curSvc.Flags.TypingPublishEnabled()) {
+				continue
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			current, err := curSvc.Identity.Validate(ctx, client.Token())
+			if err != nil {
+				cancel()
+				return
+			}
+			_ = curSvc.PublishTyping(ctx, a.ActiveClients, current.User, frame.GetConversationId(), frame.GetIsTyping())
 			cancel()
-			return
+		case "presence":
+			var rawFields map[string]json.RawMessage
+			if json.Unmarshal(rawMsg, &rawFields) != nil {
+				continue
+			}
+			validFields := true
+			for k := range rawFields {
+				if k != "type" && k != "state" {
+					validFields = false
+					break
+				}
+			}
+			if !validFields || !frame.IsSetState() {
+				continue
+			}
+			state := frame.GetState()
+			if state != "active" && state != "idle" {
+				continue
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			current, err := curSvc.Identity.Validate(ctx, client.Token())
+			if err != nil {
+				cancel()
+				return
+			}
+			_ = curSvc.ReportPresence(ctx, a.ActiveClients, client, current.User, state)
+			cancel()
 		}
-		_ = curSvc.PublishTyping(ctx, a.ActiveClients, current.User, frame.GetConversationId(), frame.GetIsTyping())
-		cancel()
 	}
 }
 
@@ -309,6 +405,7 @@ func (a *Adapter) writeLoop(client domain.Client, conn *websocket.Conn, queue <-
 				return
 			}
 		case <-fallback.C:
+			a.hubService().SweepPresence(context.Background(), a.ActiveClients)
 			if write(ToServerFrame(domain.Event{Type: "sync.required"})) != nil {
 				return
 			}

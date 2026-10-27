@@ -11,7 +11,16 @@ import (
 
 func (r *Repository) GetMessage(ctx context.Context, conversationID, messageID string) (domain.Message, error) {
 	m, err := scanMessage(r.DB.Conn(ctx).QueryRow(ctx, "SELECT "+messageColumns+" FROM messages WHERE id=$1 AND conversation_id=$2", messageID, conversationID))
-	return m, notFound(err)
+	if err != nil {
+		return m, notFound(err)
+	}
+	byID, err := r.loadReactionStatesByMessageIDs(ctx, []string{m.ID})
+	if err != nil {
+		return m, err
+	}
+	m.Reactions = byID[m.ID].Reactions
+	m.ReactionsVersion = byID[m.ID].ReactionsVersion
+	return m, nil
 }
 
 func (r *Repository) FindMessageBySenderClientID(ctx context.Context, senderID, clientMessageID string) (domain.Message, string, []string, []domain.Mention, bool, error) {
@@ -23,6 +32,12 @@ func (r *Repository) FindMessageBySenderClientID(ctx context.Context, senderID, 
 	if err != nil {
 		return domain.Message{}, "", nil, nil, false, err
 	}
+	byID, err := r.loadReactionStatesByMessageIDs(ctx, []string{m.ID})
+	if err != nil {
+		return domain.Message{}, "", nil, nil, false, err
+	}
+	m.Reactions = byID[m.ID].Reactions
+	m.ReactionsVersion = byID[m.ID].ReactionsVersion
 	var hash string
 	var originalIDs []string
 	var originalMentions []domain.Mention
@@ -59,7 +74,16 @@ func (r *Repository) RetractMessageAndDeleteAttachments(ctx context.Context, mes
 	if _, err := conn.Exec(ctx, "UPDATE messages SET body='',attachments='[]',mentions='[]',retracted_at=$2 WHERE id=$1", messageID, retractedAt); err != nil {
 		return err
 	}
-	_, err := conn.Exec(ctx, "DELETE FROM attachments WHERE message_id=$1", messageID)
+	tag, err := conn.Exec(ctx, "DELETE FROM message_reactions WHERE message_id=$1", messageID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() > 0 {
+		if err = r.bumpReactionVersion(ctx, messageID); err != nil {
+			return err
+		}
+	}
+	_, err = conn.Exec(ctx, "DELETE FROM attachments WHERE message_id=$1", messageID)
 	return err
 }
 
@@ -95,6 +119,9 @@ func (r *Repository) QueryMessageHistory(ctx context.Context, conversationID str
 	}
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
 		out[i], out[j] = out[j], out[i]
+	}
+	if err = r.populateMessageReactions(ctx, out); err != nil {
+		return nil, false, err
 	}
 	return out, more, nil
 }
@@ -174,6 +201,18 @@ FROM page p JOIN messages m ON m.id=p.id JOIN conversations c ON c.id=m.conversa
 	if err = json.Unmarshal(rawItems, &items); err != nil {
 		return nil, err
 	}
+	ids := make([]string, 0, len(items))
+	for _, it := range items {
+		ids = append(ids, it.Message.ID)
+	}
+	byID, err := r.loadReactionStatesByMessageIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		items[i].Message.Reactions = byID[items[i].Message.ID].Reactions
+		items[i].Message.ReactionsVersion = byID[items[i].Message.ID].ReactionsVersion
+	}
 	return items, nil
 }
 
@@ -185,12 +224,12 @@ func (r *Repository) LockUserConversationsForShare(ctx context.Context, userID s
 	return r.lockIDs(ctx, `SELECT c.id FROM conversations c JOIN workspace_members wm ON wm.workspace_id=c.workspace_id AND wm.user_id=$1 WHERE c.workspace_id=ANY($2::text[]) AND (c.type='channel' OR EXISTS(SELECT 1 FROM conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id=$1)) ORDER BY c.id FOR SHARE OF c`, userID, workspaceIDs)
 }
 
-func (r *Repository) QueryAttentionProjection(ctx context.Context, userID string, before any, cursorID string, unreadOnly bool, limit int, conversationIDs []string) (int64, int64, []domain.AttentionItem, error) {
+func (r *Repository) QueryAttentionProjection(ctx context.Context, userID string, before any, cursorID string, unreadOnly bool, limit int, conversationIDs []string) (int64, int64, []domain.AttentionItem, []domain.AttentionUnread, error) {
 	var unreadCount, channelUnreadCount int64
-	var rawItems []byte
+	var rawItems, rawUnreadByConversation []byte
 	err := r.DB.Conn(ctx).QueryRow(ctx, `
 WITH candidates AS MATERIALIZED (
- SELECT m.id,m.created_at,c.type AS conversation_type,m.seq>COALESCE(r.seq,0) AS unread,
+ SELECT m.id,m.conversation_id,m.created_at,c.type AS conversation_type,m.seq>COALESCE(r.seq,0) AS unread,
         m.mentions @> jsonb_build_array(jsonb_build_object('userId',$1::text)) AS mentioned,
         (original.id IS NOT NULL AND original.sender_id=$1 AND original.retracted_at IS NULL) AS replied
  FROM messages m
@@ -201,6 +240,8 @@ WITH candidates AS MATERIALIZED (
  WHERE c.id=ANY($6::text[]) AND m.retracted_at IS NULL AND m.sender_id<>$1
    AND (c.type='channel' OR EXISTS(SELECT 1 FROM conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id=$1))
    AND (m.mentions @> jsonb_build_array(jsonb_build_object('userId',$1::text)) OR (original.sender_id=$1 AND original.retracted_at IS NULL))
+), unread_counts AS (
+ SELECT conversation_id,count(*) AS unread_count FROM candidates WHERE unread GROUP BY conversation_id
 ), page AS (
  SELECT * FROM candidates
  WHERE ($2::timestamptz IS NULL OR (created_at,id)<($2,$3::text)) AND (NOT $4::boolean OR unread)
@@ -214,14 +255,34 @@ SELECT (SELECT count(*) FROM candidates WHERE unread),
    'workspaceName',w.name,'isRead',NOT p.unread,
    'reasons',to_jsonb(array_remove(ARRAY[CASE WHEN p.mentioned THEN 'mention' END,CASE WHEN p.replied THEN 'reply' END],NULL))
  ) ORDER BY p.created_at DESC,p.id DESC)
- FROM page p JOIN messages m ON m.id=p.id JOIN conversations c ON c.id=m.conversation_id JOIN workspaces w ON w.id=c.workspace_id),'[]'::jsonb)
-`, userID, before, cursorID, unreadOnly, limit, conversationIDs).Scan(&unreadCount, &channelUnreadCount, &rawItems)
+ FROM page p JOIN messages m ON m.id=p.id JOIN conversations c ON c.id=m.conversation_id JOIN workspaces w ON w.id=c.workspace_id),'[]'::jsonb),
+ COALESCE((SELECT jsonb_agg(jsonb_build_object('conversationId',c.id,'unreadCount',COALESCE(unread.unread_count,0)) ORDER BY c.id)
+ FROM conversations c JOIN workspace_members wm ON wm.workspace_id=c.workspace_id AND wm.user_id=$1
+ LEFT JOIN unread_counts unread ON unread.conversation_id=c.id
+ WHERE c.id=ANY($6::text[]) AND (c.type='channel' OR EXISTS(SELECT 1 FROM conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id=$1))),'[]'::jsonb)
+`, userID, before, cursorID, unreadOnly, limit, conversationIDs).Scan(&unreadCount, &channelUnreadCount, &rawItems, &rawUnreadByConversation)
 	if err != nil {
-		return 0, 0, nil, err
+		return 0, 0, nil, nil, err
 	}
 	items := []domain.AttentionItem{}
 	if err = json.Unmarshal(rawItems, &items); err != nil {
-		return 0, 0, nil, err
+		return 0, 0, nil, nil, err
 	}
-	return unreadCount, channelUnreadCount, items, nil
+	unreadByConversation := []domain.AttentionUnread{}
+	if err = json.Unmarshal(rawUnreadByConversation, &unreadByConversation); err != nil {
+		return 0, 0, nil, nil, err
+	}
+	ids := make([]string, 0, len(items))
+	for _, it := range items {
+		ids = append(ids, it.Message.ID)
+	}
+	byID, err := r.loadReactionStatesByMessageIDs(ctx, ids)
+	if err != nil {
+		return 0, 0, nil, nil, err
+	}
+	for i := range items {
+		items[i].Message.Reactions = byID[items[i].Message.ID].Reactions
+		items[i].Message.ReactionsVersion = byID[items[i].Message.ID].ReactionsVersion
+	}
+	return unreadCount, channelUnreadCount, items, unreadByConversation, nil
 }

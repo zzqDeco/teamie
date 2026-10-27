@@ -48,10 +48,11 @@ SQL
     cat services/chat/internal/infra/pg/migrations/001_chat.sql services/chat/internal/infra/pg/migrations/002_membership_management.sql \
       services/chat/internal/infra/pg/migrations/003_attachments.sql services/chat/internal/infra/pg/migrations/004_attachment_uploads.sql \
       services/chat/internal/infra/pg/migrations/005_mentions.sql \
-      services/chat/internal/infra/pg/migrations/006_conversation_mutations.sql | "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 >/dev/null
+      services/chat/internal/infra/pg/migrations/006_conversation_mutations.sql \
+      services/chat/internal/infra/pg/migrations/007_reactions_and_notification_levels.sql | "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 >/dev/null
     "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 <<'SQL'
 INSERT INTO workspaces(id,name,created_by) VALUES('restore-workspace','Restore','owner');
-INSERT INTO chat_schema_migrations(version) VALUES(2),(3),(4),(5),(6) ON CONFLICT DO NOTHING;
+INSERT INTO chat_schema_migrations(version) VALUES(2),(3),(4),(5),(6),(7) ON CONFLICT DO NOTHING;
 INSERT INTO conversations(id,workspace_id,type,name) VALUES('restore-conversation','restore-workspace','channel','general');
 INSERT INTO conversation_mutations(actor_id,request_key,request_hash,conversation_id) VALUES('owner','restore-group','fixture-hash','restore-conversation');
 INSERT INTO messages(id,conversation_id,sender_id,sender_name,sender_kind,client_message_id,seq,body,original_body_hash,attachments,original_attachment_ids)
@@ -63,6 +64,14 @@ INSERT INTO attachment_uploads(uploader_id,upload_key,conversation_id,fingerprin
 VALUES('owner','restore-upload','restore-conversation','fixture-fingerprint','restore-attachment'),
       ('owner','restore-removed','restore-conversation','removed-fingerprint',NULL);
 UPDATE messages SET body='@Owner',mentions='[{"userId":"owner","start":0,"end":6}]',original_mentions='[{"userId":"owner","start":0,"end":6}]' WHERE id='restore-message';
+UPDATE messages SET reactions_version=3 WHERE id='restore-message';
+INSERT INTO message_reactions(conversation_id,message_id,emoji,user_id)
+VALUES('restore-conversation','restore-message','🟢','owner'),
+      ('restore-conversation','restore-message','🟢','reader');
+INSERT INTO messages(id,conversation_id,sender_id,sender_name,sender_kind,client_message_id,seq,body,original_body_hash,reactions_version)
+VALUES('restore-empty-reactions','restore-conversation','owner','Owner','human','restore-empty-send',2,'Persist the empty reaction watermark','fixture',4);
+INSERT INTO conversation_notification_levels(conversation_id,user_id,level)
+VALUES('restore-conversation','owner','mentions'),('restore-conversation','reader','none');
 SQL
   fi
   if [[ $suffix == agent_runtime ]]; then
@@ -150,10 +159,19 @@ SQL
     [[ $actual == '00fffe80890a0d:binary.restore.bin:restore-attachment:restore-attachment' ]] || { echo 'Chat attachment binary restore verification failed.' >&2; exit 1; }
     actual=$("${pg[@]}" psql -U postgres -d restore_chat -At -v ON_ERROR_STOP=1 -c \
       "SELECT (SELECT string_agg(version::text,',' ORDER BY version) FROM chat_schema_migrations)||':'||(SELECT attachment_id FROM attachment_uploads WHERE uploader_id='owner' AND upload_key='restore-upload')||':'||(SELECT count(*) FROM attachment_uploads WHERE upload_key='restore-removed' AND attachment_id IS NULL);")
-    [[ $actual == '1,2,3,4,5,6:restore-attachment:1' ]] || { echo 'Chat upload receipts and tombstones restore verification failed.' >&2; exit 1; }
+    [[ $actual == '1,2,3,4,5,6,7:restore-attachment:1' ]] || { echo 'Chat upload receipts and tombstones restore verification failed.' >&2; exit 1; }
     actual=$("${pg[@]}" psql -U postgres -d restore_chat -At -v ON_ERROR_STOP=1 -c \
       "SELECT request_hash||':'||conversation_id FROM conversation_mutations WHERE actor_id='owner' AND request_key='restore-group';")
     [[ $actual == 'fixture-hash:restore-conversation' ]] || { echo 'Chat conversation mutation receipt restore failed.' >&2; exit 1; }
+    actual=$("${pg[@]}" psql -U postgres -d restore_chat -At -v ON_ERROR_STOP=1 -c \
+      "SELECT m.reactions_version||':'||(SELECT string_agg(r.user_id,',' ORDER BY r.seq) FROM message_reactions r WHERE r.message_id=m.id AND r.emoji='🟢') FROM messages m WHERE m.id='restore-message';")
+    [[ $actual == '3:owner,reader' ]] || { echo 'Chat reaction attribution and version restore failed.' >&2; exit 1; }
+    actual=$("${pg[@]}" psql -U postgres -d restore_chat -At -v ON_ERROR_STOP=1 -c \
+      "SELECT m.reactions_version||':'||(SELECT count(*) FROM message_reactions r WHERE r.message_id=m.id) FROM messages m WHERE m.id='restore-empty-reactions';")
+    [[ $actual == '4:0' ]] || { echo 'Chat empty reaction watermark restore failed.' >&2; exit 1; }
+    actual=$("${pg[@]}" psql -U postgres -d restore_chat -At -v ON_ERROR_STOP=1 -c \
+      "SELECT string_agg(user_id||'='||level,',' ORDER BY user_id) FROM conversation_notification_levels WHERE conversation_id='restore-conversation';")
+    [[ $actual == 'owner=mentions,reader=none' ]] || { echo 'Chat notification preference restore failed.' >&2; exit 1; }
   fi
   if [[ $suffix == agent_runtime ]]; then
     actual=$("${pg[@]}" psql -U postgres -d restore_agent_runtime -At -v ON_ERROR_STOP=1 -v frozen_budget="$runtime_context_budget" <<'SQL'

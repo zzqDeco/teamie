@@ -45,6 +45,34 @@ func (s *Server) CheckAccess(ctx context.Context, r *im.AccessRequest) (*im.Acce
 	return &im.AccessResponse{Allowed: true, MemberIds: c.MemberIDs, TypingEnabled: typingEnabled}, nil
 }
 
+func (s *Server) CheckWorkspaceAccess(ctx context.Context, r *im.WorkspaceAccessRequest) (*im.WorkspaceAccessResponse, error) {
+	ids, err := s.App.WorkspaceParticipants(ctx, r.WorkspaceId, r.UserId)
+	if err != nil {
+		var de *domain.Error
+		if errors.As(err, &de) && de.Status == 404 {
+			return &im.WorkspaceAccessResponse{Allowed: false, MemberIds: []string{}, PresenceEnabled: false}, nil
+		}
+		return nil, err
+	}
+	presenceEnabled := false
+	if s.App.Flags != nil {
+		presenceEnabled = s.App.Flags.Enabled("im.presence.publish")
+	}
+	return &im.WorkspaceAccessResponse{Allowed: true, MemberIds: ids, PresenceEnabled: presenceEnabled}, nil
+}
+
+func (s *Server) GetSharedWorkspaceMembers(ctx context.Context, r *im.SharedWorkspaceMembersRequest) (*im.SharedWorkspaceMembersResponse, error) {
+	ids, err := s.App.SharedWorkspaceMembers(ctx, r.UserId)
+	if err != nil {
+		return nil, err
+	}
+	presenceEnabled := false
+	if s.App.Flags != nil {
+		presenceEnabled = s.App.Flags.Enabled("im.presence.publish")
+	}
+	return &im.SharedWorkspaceMembersResponse{MemberIds: ids, PresenceEnabled: presenceEnabled}, nil
+}
+
 func (s *Server) Ping(ctx context.Context, _ *im.PingRequest) (*im.PingResponse, error) {
 	return &im.PingResponse{Ready: s.App.Ping(ctx) == nil}, nil
 }

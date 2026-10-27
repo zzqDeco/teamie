@@ -9,6 +9,22 @@ struct AccessResponse {
   2: required list<string> memberIds
   3: required bool typingEnabled
 }
+struct WorkspaceAccessRequest {
+  1: required string userId
+  2: required string workspaceId
+}
+struct WorkspaceAccessResponse {
+  1: required bool allowed
+  2: required list<string> memberIds
+  3: required bool presenceEnabled
+}
+struct SharedWorkspaceMembersRequest {
+  1: required string userId
+}
+struct SharedWorkspaceMembersResponse {
+  1: required list<string> memberIds
+  2: required bool presenceEnabled
+}
 struct ParticipantWorkspacesRequest { 1: required string serviceToken, 2: required string userId }
 struct ParticipantWorkspacesResponse { 1: required bool ok, 2: required string errorCode, 3: required list<string> workspaceIds }
 struct WorkspaceParticipantsRequest { 1: required string serviceToken, 2: required string workspaceId, 3: required string requesterId }
@@ -19,6 +35,8 @@ struct PrincipalWorkspacesRequest {
 }
 service ChatService {
   AccessResponse CheckAccess(1: AccessRequest request)
+  WorkspaceAccessResponse CheckWorkspaceAccess(1: WorkspaceAccessRequest request)
+  SharedWorkspaceMembersResponse GetSharedWorkspaceMembers(1: SharedWorkspaceMembersRequest request)
   PingResponse Ping(1: PingRequest request)
   ParticipantWorkspacesResponse GetParticipantWorkspaces(1: ParticipantWorkspacesRequest request)
   WorkspaceParticipantsResponse GetWorkspaceParticipants(1: WorkspaceParticipantsRequest request)

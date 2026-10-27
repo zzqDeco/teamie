@@ -26,7 +26,7 @@
 	handle @agents {
 		reverse_proxy agent-control:8084
 	}
-	@realtime path /api/v1/ws /api/v1/conversations/*/typing
+	@realtime path /api/v1/ws /api/v1/conversations/*/typing /api/v1/workspaces/*/presence
 	handle @realtime {
 		reverse_proxy realtime:8083
 	}

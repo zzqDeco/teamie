@@ -637,6 +637,158 @@ var fieldIDToName_AccessResponse = map[int16]string{
 	3: "typingEnabled",
 }
 
+type WorkspaceAccessRequest struct {
+	UserId      string `thrift:"userId,1,required" frugal:"1,required,string" json:"userId"`
+	WorkspaceId string `thrift:"workspaceId,2,required" frugal:"2,required,string" json:"workspaceId"`
+}
+
+func NewWorkspaceAccessRequest() *WorkspaceAccessRequest {
+	return &WorkspaceAccessRequest{}
+}
+
+func (p *WorkspaceAccessRequest) InitDefault() {
+}
+
+func (p *WorkspaceAccessRequest) GetUserId() (v string) {
+	return p.UserId
+}
+
+func (p *WorkspaceAccessRequest) GetWorkspaceId() (v string) {
+	return p.WorkspaceId
+}
+func (p *WorkspaceAccessRequest) SetUserId(val string) {
+	p.UserId = val
+}
+func (p *WorkspaceAccessRequest) SetWorkspaceId(val string) {
+	p.WorkspaceId = val
+}
+
+func (p *WorkspaceAccessRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("WorkspaceAccessRequest(%+v)", *p)
+}
+
+var fieldIDToName_WorkspaceAccessRequest = map[int16]string{
+	1: "userId",
+	2: "workspaceId",
+}
+
+type WorkspaceAccessResponse struct {
+	Allowed         bool     `thrift:"allowed,1,required" frugal:"1,required,bool" json:"allowed"`
+	MemberIds       []string `thrift:"memberIds,2,required" frugal:"2,required,list<string>" json:"memberIds"`
+	PresenceEnabled bool     `thrift:"presenceEnabled,3,required" frugal:"3,required,bool" json:"presenceEnabled"`
+}
+
+func NewWorkspaceAccessResponse() *WorkspaceAccessResponse {
+	return &WorkspaceAccessResponse{}
+}
+
+func (p *WorkspaceAccessResponse) InitDefault() {
+}
+
+func (p *WorkspaceAccessResponse) GetAllowed() (v bool) {
+	return p.Allowed
+}
+
+func (p *WorkspaceAccessResponse) GetMemberIds() (v []string) {
+	return p.MemberIds
+}
+
+func (p *WorkspaceAccessResponse) GetPresenceEnabled() (v bool) {
+	return p.PresenceEnabled
+}
+func (p *WorkspaceAccessResponse) SetAllowed(val bool) {
+	p.Allowed = val
+}
+func (p *WorkspaceAccessResponse) SetMemberIds(val []string) {
+	p.MemberIds = val
+}
+func (p *WorkspaceAccessResponse) SetPresenceEnabled(val bool) {
+	p.PresenceEnabled = val
+}
+
+func (p *WorkspaceAccessResponse) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("WorkspaceAccessResponse(%+v)", *p)
+}
+
+var fieldIDToName_WorkspaceAccessResponse = map[int16]string{
+	1: "allowed",
+	2: "memberIds",
+	3: "presenceEnabled",
+}
+
+type SharedWorkspaceMembersRequest struct {
+	UserId string `thrift:"userId,1,required" frugal:"1,required,string" json:"userId"`
+}
+
+func NewSharedWorkspaceMembersRequest() *SharedWorkspaceMembersRequest {
+	return &SharedWorkspaceMembersRequest{}
+}
+
+func (p *SharedWorkspaceMembersRequest) InitDefault() {
+}
+
+func (p *SharedWorkspaceMembersRequest) GetUserId() (v string) {
+	return p.UserId
+}
+func (p *SharedWorkspaceMembersRequest) SetUserId(val string) {
+	p.UserId = val
+}
+
+func (p *SharedWorkspaceMembersRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SharedWorkspaceMembersRequest(%+v)", *p)
+}
+
+var fieldIDToName_SharedWorkspaceMembersRequest = map[int16]string{
+	1: "userId",
+}
+
+type SharedWorkspaceMembersResponse struct {
+	MemberIds       []string `thrift:"memberIds,1,required" frugal:"1,required,list<string>" json:"memberIds"`
+	PresenceEnabled bool     `thrift:"presenceEnabled,2,required" frugal:"2,required,bool" json:"presenceEnabled"`
+}
+
+func NewSharedWorkspaceMembersResponse() *SharedWorkspaceMembersResponse {
+	return &SharedWorkspaceMembersResponse{}
+}
+
+func (p *SharedWorkspaceMembersResponse) InitDefault() {
+}
+
+func (p *SharedWorkspaceMembersResponse) GetMemberIds() (v []string) {
+	return p.MemberIds
+}
+
+func (p *SharedWorkspaceMembersResponse) GetPresenceEnabled() (v bool) {
+	return p.PresenceEnabled
+}
+func (p *SharedWorkspaceMembersResponse) SetMemberIds(val []string) {
+	p.MemberIds = val
+}
+func (p *SharedWorkspaceMembersResponse) SetPresenceEnabled(val bool) {
+	p.PresenceEnabled = val
+}
+
+func (p *SharedWorkspaceMembersResponse) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SharedWorkspaceMembersResponse(%+v)", *p)
+}
+
+var fieldIDToName_SharedWorkspaceMembersResponse = map[int16]string{
+	1: "memberIds",
+	2: "presenceEnabled",
+}
+
 type ParticipantWorkspacesRequest struct {
 	ServiceToken string `thrift:"serviceToken,1,required" frugal:"1,required,string" json:"serviceToken"`
 	UserId       string `thrift:"userId,2,required" frugal:"2,required,string" json:"userId"`
@@ -1354,6 +1506,10 @@ var fieldIDToName_IdentityServiceValidatePrincipalTokenResult = map[int16]string
 type ChatService interface {
 	CheckAccess(ctx context.Context, request *AccessRequest) (r *AccessResponse, err error)
 
+	CheckWorkspaceAccess(ctx context.Context, request *WorkspaceAccessRequest) (r *WorkspaceAccessResponse, err error)
+
+	GetSharedWorkspaceMembers(ctx context.Context, request *SharedWorkspaceMembersRequest) (r *SharedWorkspaceMembersResponse, err error)
+
 	Ping(ctx context.Context, request *PingRequest) (r *PingResponse, err error)
 
 	GetParticipantWorkspaces(ctx context.Context, request *ParticipantWorkspacesRequest) (r *ParticipantWorkspacesResponse, err error)
@@ -1436,6 +1592,158 @@ func (p *ChatServiceCheckAccessResult) String() string {
 }
 
 var fieldIDToName_ChatServiceCheckAccessResult = map[int16]string{
+	0: "success",
+}
+
+type ChatServiceCheckWorkspaceAccessArgs struct {
+	Request *WorkspaceAccessRequest `thrift:"request,1" frugal:"1,default,WorkspaceAccessRequest" json:"request"`
+}
+
+func NewChatServiceCheckWorkspaceAccessArgs() *ChatServiceCheckWorkspaceAccessArgs {
+	return &ChatServiceCheckWorkspaceAccessArgs{}
+}
+
+func (p *ChatServiceCheckWorkspaceAccessArgs) InitDefault() {
+}
+
+var ChatServiceCheckWorkspaceAccessArgs_Request_DEFAULT *WorkspaceAccessRequest
+
+func (p *ChatServiceCheckWorkspaceAccessArgs) GetRequest() (v *WorkspaceAccessRequest) {
+	if !p.IsSetRequest() {
+		return ChatServiceCheckWorkspaceAccessArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *ChatServiceCheckWorkspaceAccessArgs) SetRequest(val *WorkspaceAccessRequest) {
+	p.Request = val
+}
+
+func (p *ChatServiceCheckWorkspaceAccessArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *ChatServiceCheckWorkspaceAccessArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ChatServiceCheckWorkspaceAccessArgs(%+v)", *p)
+}
+
+var fieldIDToName_ChatServiceCheckWorkspaceAccessArgs = map[int16]string{
+	1: "request",
+}
+
+type ChatServiceCheckWorkspaceAccessResult struct {
+	Success *WorkspaceAccessResponse `thrift:"success,0,optional" frugal:"0,optional,WorkspaceAccessResponse" json:"success,omitempty"`
+}
+
+func NewChatServiceCheckWorkspaceAccessResult() *ChatServiceCheckWorkspaceAccessResult {
+	return &ChatServiceCheckWorkspaceAccessResult{}
+}
+
+func (p *ChatServiceCheckWorkspaceAccessResult) InitDefault() {
+}
+
+var ChatServiceCheckWorkspaceAccessResult_Success_DEFAULT *WorkspaceAccessResponse
+
+func (p *ChatServiceCheckWorkspaceAccessResult) GetSuccess() (v *WorkspaceAccessResponse) {
+	if !p.IsSetSuccess() {
+		return ChatServiceCheckWorkspaceAccessResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *ChatServiceCheckWorkspaceAccessResult) SetSuccess(x interface{}) {
+	p.Success = x.(*WorkspaceAccessResponse)
+}
+
+func (p *ChatServiceCheckWorkspaceAccessResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *ChatServiceCheckWorkspaceAccessResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ChatServiceCheckWorkspaceAccessResult(%+v)", *p)
+}
+
+var fieldIDToName_ChatServiceCheckWorkspaceAccessResult = map[int16]string{
+	0: "success",
+}
+
+type ChatServiceGetSharedWorkspaceMembersArgs struct {
+	Request *SharedWorkspaceMembersRequest `thrift:"request,1" frugal:"1,default,SharedWorkspaceMembersRequest" json:"request"`
+}
+
+func NewChatServiceGetSharedWorkspaceMembersArgs() *ChatServiceGetSharedWorkspaceMembersArgs {
+	return &ChatServiceGetSharedWorkspaceMembersArgs{}
+}
+
+func (p *ChatServiceGetSharedWorkspaceMembersArgs) InitDefault() {
+}
+
+var ChatServiceGetSharedWorkspaceMembersArgs_Request_DEFAULT *SharedWorkspaceMembersRequest
+
+func (p *ChatServiceGetSharedWorkspaceMembersArgs) GetRequest() (v *SharedWorkspaceMembersRequest) {
+	if !p.IsSetRequest() {
+		return ChatServiceGetSharedWorkspaceMembersArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *ChatServiceGetSharedWorkspaceMembersArgs) SetRequest(val *SharedWorkspaceMembersRequest) {
+	p.Request = val
+}
+
+func (p *ChatServiceGetSharedWorkspaceMembersArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *ChatServiceGetSharedWorkspaceMembersArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ChatServiceGetSharedWorkspaceMembersArgs(%+v)", *p)
+}
+
+var fieldIDToName_ChatServiceGetSharedWorkspaceMembersArgs = map[int16]string{
+	1: "request",
+}
+
+type ChatServiceGetSharedWorkspaceMembersResult struct {
+	Success *SharedWorkspaceMembersResponse `thrift:"success,0,optional" frugal:"0,optional,SharedWorkspaceMembersResponse" json:"success,omitempty"`
+}
+
+func NewChatServiceGetSharedWorkspaceMembersResult() *ChatServiceGetSharedWorkspaceMembersResult {
+	return &ChatServiceGetSharedWorkspaceMembersResult{}
+}
+
+func (p *ChatServiceGetSharedWorkspaceMembersResult) InitDefault() {
+}
+
+var ChatServiceGetSharedWorkspaceMembersResult_Success_DEFAULT *SharedWorkspaceMembersResponse
+
+func (p *ChatServiceGetSharedWorkspaceMembersResult) GetSuccess() (v *SharedWorkspaceMembersResponse) {
+	if !p.IsSetSuccess() {
+		return ChatServiceGetSharedWorkspaceMembersResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *ChatServiceGetSharedWorkspaceMembersResult) SetSuccess(x interface{}) {
+	p.Success = x.(*SharedWorkspaceMembersResponse)
+}
+
+func (p *ChatServiceGetSharedWorkspaceMembersResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *ChatServiceGetSharedWorkspaceMembersResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ChatServiceGetSharedWorkspaceMembersResult(%+v)", *p)
+}
+
+var fieldIDToName_ChatServiceGetSharedWorkspaceMembersResult = map[int16]string{
 	0: "success",
 }
 

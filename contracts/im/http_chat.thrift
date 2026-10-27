@@ -42,6 +42,7 @@ struct ConversationDTO {
   8: required string updatedAt (api.body="updatedAt")
   9: optional string createdBy (api.body="createdBy")
   10: required bool canManageMembers (api.body="canManageMembers")
+  11: optional string notificationLevel (api.body="notificationLevel")
 }
 
 struct AttachmentDTO {
@@ -63,6 +64,12 @@ struct MentionDTO {
   3: required i64 end (api.body="end")
 }
 
+struct ReactionDTO {
+  1: required string emoji (api.body="emoji")
+  2: required i64 count (api.body="count")
+  3: required list<string> userIds (api.body="userIds")
+}
+
 struct MessageDTO {
   1: required string id (api.body="id")
   2: required string conversationId (api.body="conversationId")
@@ -78,6 +85,8 @@ struct MessageDTO {
   12: optional string retractedAt (api.body="retractedAt")
   13: optional list<AttachmentDTO> attachments (api.body="attachments")
   14: optional list<MentionDTO> mentions (api.body="mentions")
+  15: optional list<ReactionDTO> reactions (api.body="reactions")
+  16: optional string reactionsVersion (api.body="reactionsVersion")
 }
 
 struct EventDTO {
@@ -89,6 +98,10 @@ struct EventDTO {
   6: optional ConversationDTO conversation (api.body="conversation")
   7: optional i64 readSeq (api.body="readSeq")
   8: required string createdAt (api.body="createdAt")
+  9: optional string messageId (api.body="messageId")
+  10: optional list<ReactionDTO> reactions (api.body="reactions")
+  11: optional string notificationLevel (api.body="notificationLevel")
+  12: optional string reactionsVersion (api.body="reactionsVersion")
 }
 
 struct AttentionConversationDTO {
@@ -259,6 +272,54 @@ struct MarkReadResp {
   1: required i64 readSeq (api.body="readSeq")
 }
 
+struct PutReactionReq {
+  1: required string id (api.path="id")
+  2: required string messageId (api.path="messageId")
+  3: required string emoji (api.path="emoji")
+}
+
+struct DeleteReactionReq {
+  1: required string id (api.path="id")
+  2: required string messageId (api.path="messageId")
+  3: required string emoji (api.path="emoji")
+}
+
+struct ReactionsResp {
+  1: required list<ReactionDTO> reactions (api.body="reactions")
+  2: required string reactionsVersion (api.body="reactionsVersion")
+}
+
+struct ReadSeqCountDTO {
+  1: required i64 readSeq (api.body="readSeq")
+  2: required i64 count (api.body="count")
+}
+
+struct MemberReadReceiptDTO {
+  1: required string userId (api.body="userId")
+  2: required i64 readSeq (api.body="readSeq")
+}
+
+struct GetReadReceiptsReq {
+  1: required string id (api.path="id")
+}
+
+struct ReadReceiptsResp {
+  1: required string conversationId (api.body="conversationId")
+  2: required i64 eligibleCount (api.body="eligibleCount")
+  3: required list<ReadSeqCountDTO> readSeqCounts (api.body="readSeqCounts")
+  4: optional list<MemberReadReceiptDTO> members (api.body="members")
+}
+
+struct SetNotificationLevelReq {
+  1: required string id (api.path="id", go.tag="json:\"-\"")
+  2: required string level (api.body="level")
+}
+
+struct NotificationLevelResp {
+  1: required string conversationId (api.body="conversationId")
+  2: required string notificationLevel (api.body="notificationLevel")
+}
+
 struct SearchWorkspaceMessagesReq {
   1: required string id (api.path="id")
   2: optional string q (api.query="q")
@@ -277,11 +338,17 @@ struct GetAttentionReq {
   3: optional string unreadOnly (api.query="unreadOnly")
 }
 
+struct AttentionUnreadDTO {
+  1: required string conversationId (api.body="conversationId")
+  2: required i64 unreadCount (api.body="unreadCount")
+}
+
 struct AttentionPageResp {
   1: required list<AttentionItemDTO> items (api.body="items")
   2: optional string cursor (api.body="cursor")
   3: required i64 unreadCount (api.body="unreadCount")
   4: required i64 channelUnreadCount (api.body="channelUnreadCount")
+  5: optional list<AttentionUnreadDTO> attentionUnreadByConversation (api.body="attentionUnreadByConversation", go.tag="json:\"attentionUnreadByConversation\"")
 }
 
 struct SyncReq {
@@ -343,7 +410,11 @@ service ChatHTTPService {
   MessageResp SendMessage(1: SendMessageReq req) (api.post="/api/v1/conversations/:id/messages", api.status="201")
   MessageResp EditMessage(1: EditMessageReq req) (api.patch="/api/v1/conversations/:id/messages/:messageId")
   MessageResp RetractMessage(1: RetractMessageReq req) (api.delete="/api/v1/conversations/:id/messages/:messageId")
+  ReactionsResp PutReaction(1: PutReactionReq req) (api.put="/api/v1/conversations/:id/messages/:messageId/reactions/:emoji")
+  ReactionsResp DeleteReaction(1: DeleteReactionReq req) (api.delete="/api/v1/conversations/:id/messages/:messageId/reactions/:emoji")
   MarkReadResp MarkRead(1: MarkReadReq req) (api.post="/api/v1/conversations/:id/read")
+  ReadReceiptsResp GetReadReceipts(1: GetReadReceiptsReq req) (api.get="/api/v1/conversations/:id/read-receipts")
+  NotificationLevelResp SetNotificationLevel(1: SetNotificationLevelReq req) (api.put="/api/v1/conversations/:id/notification-level")
   WorkspaceSearchPageResp SearchWorkspaceMessages(1: SearchWorkspaceMessagesReq req) (api.get="/api/v1/workspaces/:id/messages/search")
   AttentionPageResp GetAttention(1: GetAttentionReq req) (api.get="/api/v1/attention")
   SyncResp Sync(1: SyncReq req) (api.get="/api/v1/sync")

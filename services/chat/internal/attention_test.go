@@ -243,6 +243,11 @@ func TestAttentionRechecksMembershipAfterWaitingForRevocation(t *testing.T) {
 			}
 			select {
 			case result := <-done:
+				for _, entry := range result.page.AttentionUnreadByConversation {
+					if entry.ConversationID == conversation.ID {
+						t.Fatal("revoked count escaped after lock wait", result)
+					}
+				}
 				if result.err != nil || len(result.page.Items) != 0 || result.page.UnreadCount != 0 {
 					t.Fatal("revoked payload escaped after lock wait", result)
 				}

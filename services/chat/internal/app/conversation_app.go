@@ -160,13 +160,14 @@ func (s *Service) CreateConversation(ctx context.Context, userID, workspaceID, k
 			}
 		}
 		c = domain.Conversation{
-			ID:               domain.NewID(),
-			WorkspaceID:      workspaceID,
-			Type:             kind,
-			Name:             name,
-			MemberIDs:        ids,
-			CreatedBy:        userID,
-			CanManageMembers: kind == "group",
+			ID:                domain.NewID(),
+			WorkspaceID:       workspaceID,
+			Type:              kind,
+			Name:              name,
+			MemberIDs:         ids,
+			CreatedBy:         userID,
+			CanManageMembers:  kind == "group",
+			NotificationLevel: "all",
 		}
 		updatedAt, err := s.Conversations.InsertConversation(txCtx, c, pair)
 		if err != nil {
@@ -275,4 +276,34 @@ func (s *Service) groupMember(ctx context.Context, actorID, conversationID, targ
 		})
 	})
 	return c, err
+}
+
+// SetNotificationLevel updates the caller's notification preference for a conversation.
+func (s *Service) SetNotificationLevel(ctx context.Context, userID, conversationID, level string) (string, error) {
+	if err := s.requireFlag("im.notifications.configure"); err != nil {
+		return "", err
+	}
+	if err := domain.ValidateNotificationLevel(level); err != nil {
+		return "", err
+	}
+	err := s.Tx.WithinTx(ctx, func(txCtx context.Context) error {
+		c, err := s.Conversations.LockConversation(txCtx, conversationID, userID)
+		if err != nil {
+			return err
+		}
+		changed, err := s.Conversations.SetNotificationLevel(txCtx, conversationID, userID, level)
+		if err != nil || !changed {
+			return err
+		}
+		return s.Conversations.Fanout(txCtx, []string{userID}, domain.Event{
+			Type:              "preference.updated",
+			WorkspaceID:       c.WorkspaceID,
+			ConversationID:    conversationID,
+			NotificationLevel: &level,
+		})
+	})
+	if err != nil {
+		return "", err
+	}
+	return level, nil
 }

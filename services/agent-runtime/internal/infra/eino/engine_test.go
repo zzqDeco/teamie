@@ -201,6 +201,8 @@ type fixtureIM struct {
 	events                         []map[string]any
 	messages                       map[string]*Message
 	sent                           map[string]Message
+	readReceipts                   map[string]int64
+	readCalls                      int
 	failAfterSend                  bool
 	posts                          int
 	reads                          int
@@ -209,7 +211,7 @@ type fixtureIM struct {
 
 func newFixtureIM(t *testing.T) (*fixtureIM, *httptest.Server) {
 	t.Helper()
-	f := &fixtureIM{agent: uuid.NewString(), workspace: uuid.NewString(), conversation: uuid.NewString(), messages: map[string]*Message{}, sent: map[string]Message{}}
+	f := &fixtureIM{agent: uuid.NewString(), workspace: uuid.NewString(), conversation: uuid.NewString(), messages: map[string]*Message{}, sent: map[string]Message{}, readReceipts: map[string]int64{}}
 	server := httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(server.Close)
 	return f, server
@@ -261,6 +263,24 @@ func (f *fixtureIM) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		write(map[string]any{"message": m})
+		return
+	}
+	if len(parts) == 6 && parts[5] == "read" && r.Method == "POST" {
+		var body struct {
+			Seq int64 `json:"seq"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body.Seq < 0 {
+			w.WriteHeader(400)
+			return
+		}
+		f.readCalls++
+		if f.readReceipts == nil {
+			f.readReceipts = map[string]int64{}
+		}
+		if body.Seq > f.readReceipts[parts[4]] {
+			f.readReceipts[parts[4]] = body.Seq
+		}
+		write(map[string]any{"readSeq": f.readReceipts[parts[4]]})
 		return
 	}
 	if len(parts) == 6 && r.Method == "POST" {

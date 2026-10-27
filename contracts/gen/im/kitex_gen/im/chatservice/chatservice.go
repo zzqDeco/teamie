@@ -20,6 +20,20 @@ var serviceMethods = map[string]kitex.MethodInfo{
 		false,
 		kitex.WithStreamingMode(kitex.StreamingNone),
 	),
+	"CheckWorkspaceAccess": kitex.NewMethodInfo(
+		checkWorkspaceAccessHandler,
+		newChatServiceCheckWorkspaceAccessArgs,
+		newChatServiceCheckWorkspaceAccessResult,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
+	"GetSharedWorkspaceMembers": kitex.NewMethodInfo(
+		getSharedWorkspaceMembersHandler,
+		newChatServiceGetSharedWorkspaceMembersArgs,
+		newChatServiceGetSharedWorkspaceMembersResult,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
 	"Ping": kitex.NewMethodInfo(
 		pingHandler,
 		newChatServicePingArgs,
@@ -132,6 +146,42 @@ func newChatServiceCheckAccessResult() interface{} {
 	return im.NewChatServiceCheckAccessResult()
 }
 
+func checkWorkspaceAccessHandler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*im.ChatServiceCheckWorkspaceAccessArgs)
+	realResult := result.(*im.ChatServiceCheckWorkspaceAccessResult)
+	success, err := handler.(im.ChatService).CheckWorkspaceAccess(ctx, realArg.Request)
+	if err != nil {
+		return err
+	}
+	realResult.Success = success
+	return nil
+}
+func newChatServiceCheckWorkspaceAccessArgs() interface{} {
+	return im.NewChatServiceCheckWorkspaceAccessArgs()
+}
+
+func newChatServiceCheckWorkspaceAccessResult() interface{} {
+	return im.NewChatServiceCheckWorkspaceAccessResult()
+}
+
+func getSharedWorkspaceMembersHandler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*im.ChatServiceGetSharedWorkspaceMembersArgs)
+	realResult := result.(*im.ChatServiceGetSharedWorkspaceMembersResult)
+	success, err := handler.(im.ChatService).GetSharedWorkspaceMembers(ctx, realArg.Request)
+	if err != nil {
+		return err
+	}
+	realResult.Success = success
+	return nil
+}
+func newChatServiceGetSharedWorkspaceMembersArgs() interface{} {
+	return im.NewChatServiceGetSharedWorkspaceMembersArgs()
+}
+
+func newChatServiceGetSharedWorkspaceMembersResult() interface{} {
+	return im.NewChatServiceGetSharedWorkspaceMembersResult()
+}
+
 func pingHandler(ctx context.Context, handler interface{}, arg, result interface{}) error {
 	realArg := arg.(*im.ChatServicePingArgs)
 	realResult := result.(*im.ChatServicePingResult)
@@ -219,6 +269,26 @@ func (p *kClient) CheckAccess(ctx context.Context, request *im.AccessRequest) (r
 	_args.Request = request
 	var _result im.ChatServiceCheckAccessResult
 	if err = p.c.Call(ctx, "CheckAccess", &_args, &_result); err != nil {
+		return
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) CheckWorkspaceAccess(ctx context.Context, request *im.WorkspaceAccessRequest) (r *im.WorkspaceAccessResponse, err error) {
+	var _args im.ChatServiceCheckWorkspaceAccessArgs
+	_args.Request = request
+	var _result im.ChatServiceCheckWorkspaceAccessResult
+	if err = p.c.Call(ctx, "CheckWorkspaceAccess", &_args, &_result); err != nil {
+		return
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) GetSharedWorkspaceMembers(ctx context.Context, request *im.SharedWorkspaceMembersRequest) (r *im.SharedWorkspaceMembersResponse, err error) {
+	var _args im.ChatServiceGetSharedWorkspaceMembersArgs
+	_args.Request = request
+	var _result im.ChatServiceGetSharedWorkspaceMembersResult
+	if err = p.c.Call(ctx, "GetSharedWorkspaceMembers", &_args, &_result); err != nil {
 		return
 	}
 	return _result.GetSuccess(), nil

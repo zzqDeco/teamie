@@ -38,12 +38,15 @@ func main() {
 	defer rdb.Close()
 
 	var policy domain.TypingTracker
+	var presence domain.PresenceTracker
 	streamApp := &app.StreamApp{
-		Identity: rpcclient.IdentityValidator{Identity: identityClient},
-		Chat:     rpcclient.ChatAuthority{Chat: chatClient},
-		Flags:    redisinfra.FlagsProvider{Flags: &cfgFlags},
-		Bus:      redisinfra.RedisBus{Client: rdb},
-		Policy:   &policy,
+		Identity:      rpcclient.IdentityValidator{Identity: identityClient},
+		Chat:          rpcclient.ChatAuthority{Chat: chatClient},
+		Flags:         redisinfra.FlagsProvider{Flags: &cfgFlags},
+		Bus:           redisinfra.RedisBus{Client: rdb},
+		Policy:        &policy,
+		Presence:      &presence,
+		PresenceStore: redisinfra.RedisPresenceStore{Client: rdb},
 	}
 
 	adapter := &wsadapter.Adapter{
@@ -51,10 +54,19 @@ func main() {
 		Auth:   identityClient,
 		Origin: origin,
 	}
+	streamApp.Clients = adapter.ActiveClients
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go redisinfra.RunSubscriber(ctx, rdb, streamApp, adapter.ActiveClients, adapter.CloseAll)
+	subscriberDone := make(chan struct{})
+	defer func() {
+		cancel()
+		policy.CloseReceiptHints()
+		<-subscriberDone
+	}()
+	go func() {
+		defer close(subscriberDone)
+		redisinfra.RunSubscriber(ctx, rdb, streamApp, adapter.ActiveClients, adapter.CloseAll)
+	}()
 
 	httpx.Serve(httpx.Env("HTTP_ADDR", ":8083"), adapter.Routes())
 }

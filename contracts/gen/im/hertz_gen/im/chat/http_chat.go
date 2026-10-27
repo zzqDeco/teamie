@@ -156,16 +156,17 @@ func (p *MemberDTO) String() string {
 }
 
 type ConversationDTO struct {
-	ID               string   `thrift:"id,1,required" json:"id"`
-	WorkspaceId      string   `thrift:"workspaceId,2,required" json:"workspaceId"`
-	Type             string   `thrift:"type,3,required" json:"type"`
-	Name             string   `thrift:"name,4,required" json:"name"`
-	MemberIds        []string `thrift:"memberIds,5,required,list<string>" json:"memberIds"`
-	LastSeq          int64    `thrift:"lastSeq,6,required" json:"lastSeq"`
-	ReadSeq          int64    `thrift:"readSeq,7,required" json:"readSeq"`
-	UpdatedAt        string   `thrift:"updatedAt,8,required" json:"updatedAt"`
-	CreatedBy        *string  `thrift:"createdBy,9,optional" json:"createdBy,omitempty"`
-	CanManageMembers bool     `thrift:"canManageMembers,10,required" json:"canManageMembers"`
+	ID                string   `thrift:"id,1,required" json:"id"`
+	WorkspaceId       string   `thrift:"workspaceId,2,required" json:"workspaceId"`
+	Type              string   `thrift:"type,3,required" json:"type"`
+	Name              string   `thrift:"name,4,required" json:"name"`
+	MemberIds         []string `thrift:"memberIds,5,required,list<string>" json:"memberIds"`
+	LastSeq           int64    `thrift:"lastSeq,6,required" json:"lastSeq"`
+	ReadSeq           int64    `thrift:"readSeq,7,required" json:"readSeq"`
+	UpdatedAt         string   `thrift:"updatedAt,8,required" json:"updatedAt"`
+	CreatedBy         *string  `thrift:"createdBy,9,optional" json:"createdBy,omitempty"`
+	CanManageMembers  bool     `thrift:"canManageMembers,10,required" json:"canManageMembers"`
+	NotificationLevel *string  `thrift:"notificationLevel,11,optional" json:"notificationLevel,omitempty"`
 }
 
 func NewConversationDTO() *ConversationDTO {
@@ -220,8 +221,21 @@ func (p *ConversationDTO) GetCanManageMembers() (v bool) {
 	return p.CanManageMembers
 }
 
+var ConversationDTO_NotificationLevel_DEFAULT string
+
+func (p *ConversationDTO) GetNotificationLevel() (v string) {
+	if !p.IsSetNotificationLevel() {
+		return ConversationDTO_NotificationLevel_DEFAULT
+	}
+	return *p.NotificationLevel
+}
+
 func (p *ConversationDTO) IsSetCreatedBy() bool {
 	return p.CreatedBy != nil
+}
+
+func (p *ConversationDTO) IsSetNotificationLevel() bool {
+	return p.NotificationLevel != nil
 }
 
 func (p *ConversationDTO) String() string {
@@ -332,21 +346,55 @@ func (p *MentionDTO) String() string {
 	return fmt.Sprintf("MentionDTO(%+v)", *p)
 }
 
+type ReactionDTO struct {
+	Emoji   string   `thrift:"emoji,1,required" json:"emoji"`
+	Count   int64    `thrift:"count,2,required" json:"count"`
+	UserIds []string `thrift:"userIds,3,required,list<string>" json:"userIds"`
+}
+
+func NewReactionDTO() *ReactionDTO {
+	return &ReactionDTO{}
+}
+
+func (p *ReactionDTO) InitDefault() {
+}
+
+func (p *ReactionDTO) GetEmoji() (v string) {
+	return p.Emoji
+}
+
+func (p *ReactionDTO) GetCount() (v int64) {
+	return p.Count
+}
+
+func (p *ReactionDTO) GetUserIds() (v []string) {
+	return p.UserIds
+}
+
+func (p *ReactionDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ReactionDTO(%+v)", *p)
+}
+
 type MessageDTO struct {
-	ID              string           `thrift:"id,1,required" json:"id"`
-	ConversationId  string           `thrift:"conversationId,2,required" json:"conversationId"`
-	SenderId        string           `thrift:"senderId,3,required" json:"senderId"`
-	SenderName      string           `thrift:"senderName,4,required" json:"senderName"`
-	SenderKind      string           `thrift:"senderKind,5,required" json:"senderKind"`
-	ClientMessageId string           `thrift:"clientMessageId,6,required" json:"clientMessageId"`
-	Seq             int64            `thrift:"seq,7,required" json:"seq"`
-	Body            string           `thrift:"body,8,required" json:"body"`
-	ReplyToId       *string          `thrift:"replyToId,9,optional" json:"replyToId,omitempty"`
-	CreatedAt       string           `thrift:"createdAt,10,required" json:"createdAt"`
-	EditedAt        *string          `thrift:"editedAt,11,optional" json:"editedAt,omitempty"`
-	RetractedAt     *string          `thrift:"retractedAt,12,optional" json:"retractedAt,omitempty"`
-	Attachments     []*AttachmentDTO `thrift:"attachments,13,optional,list<AttachmentDTO>" json:"attachments,omitempty"`
-	Mentions        []*MentionDTO    `thrift:"mentions,14,optional,list<MentionDTO>" json:"mentions,omitempty"`
+	ID               string           `thrift:"id,1,required" json:"id"`
+	ConversationId   string           `thrift:"conversationId,2,required" json:"conversationId"`
+	SenderId         string           `thrift:"senderId,3,required" json:"senderId"`
+	SenderName       string           `thrift:"senderName,4,required" json:"senderName"`
+	SenderKind       string           `thrift:"senderKind,5,required" json:"senderKind"`
+	ClientMessageId  string           `thrift:"clientMessageId,6,required" json:"clientMessageId"`
+	Seq              int64            `thrift:"seq,7,required" json:"seq"`
+	Body             string           `thrift:"body,8,required" json:"body"`
+	ReplyToId        *string          `thrift:"replyToId,9,optional" json:"replyToId,omitempty"`
+	CreatedAt        string           `thrift:"createdAt,10,required" json:"createdAt"`
+	EditedAt         *string          `thrift:"editedAt,11,optional" json:"editedAt,omitempty"`
+	RetractedAt      *string          `thrift:"retractedAt,12,optional" json:"retractedAt,omitempty"`
+	Attachments      []*AttachmentDTO `thrift:"attachments,13,optional,list<AttachmentDTO>" json:"attachments,omitempty"`
+	Mentions         []*MentionDTO    `thrift:"mentions,14,optional,list<MentionDTO>" json:"mentions,omitempty"`
+	Reactions        []*ReactionDTO   `thrift:"reactions,15,optional,list<ReactionDTO>" json:"reactions,omitempty"`
+	ReactionsVersion *string          `thrift:"reactionsVersion,16,optional" json:"reactionsVersion,omitempty"`
 }
 
 func NewMessageDTO() *MessageDTO {
@@ -437,6 +485,24 @@ func (p *MessageDTO) GetMentions() (v []*MentionDTO) {
 	return p.Mentions
 }
 
+var MessageDTO_Reactions_DEFAULT []*ReactionDTO
+
+func (p *MessageDTO) GetReactions() (v []*ReactionDTO) {
+	if !p.IsSetReactions() {
+		return MessageDTO_Reactions_DEFAULT
+	}
+	return p.Reactions
+}
+
+var MessageDTO_ReactionsVersion_DEFAULT string
+
+func (p *MessageDTO) GetReactionsVersion() (v string) {
+	if !p.IsSetReactionsVersion() {
+		return MessageDTO_ReactionsVersion_DEFAULT
+	}
+	return *p.ReactionsVersion
+}
+
 func (p *MessageDTO) IsSetReplyToId() bool {
 	return p.ReplyToId != nil
 }
@@ -457,6 +523,14 @@ func (p *MessageDTO) IsSetMentions() bool {
 	return p.Mentions != nil
 }
 
+func (p *MessageDTO) IsSetReactions() bool {
+	return p.Reactions != nil
+}
+
+func (p *MessageDTO) IsSetReactionsVersion() bool {
+	return p.ReactionsVersion != nil
+}
+
 func (p *MessageDTO) String() string {
 	if p == nil {
 		return "<nil>"
@@ -465,14 +539,18 @@ func (p *MessageDTO) String() string {
 }
 
 type EventDTO struct {
-	ID             string           `thrift:"id,1,required" json:"id"`
-	Type           string           `thrift:"type,2,required" json:"type"`
-	ConversationId *string          `thrift:"conversationId,3,optional" json:"conversationId,omitempty"`
-	WorkspaceId    *string          `thrift:"workspaceId,4,optional" json:"workspaceId,omitempty"`
-	Message        *MessageDTO      `thrift:"message,5,optional" json:"message,omitempty"`
-	Conversation   *ConversationDTO `thrift:"conversation,6,optional" json:"conversation,omitempty"`
-	ReadSeq        *int64           `thrift:"readSeq,7,optional" json:"readSeq,omitempty"`
-	CreatedAt      string           `thrift:"createdAt,8,required" json:"createdAt"`
+	ID                string           `thrift:"id,1,required" json:"id"`
+	Type              string           `thrift:"type,2,required" json:"type"`
+	ConversationId    *string          `thrift:"conversationId,3,optional" json:"conversationId,omitempty"`
+	WorkspaceId       *string          `thrift:"workspaceId,4,optional" json:"workspaceId,omitempty"`
+	Message           *MessageDTO      `thrift:"message,5,optional" json:"message,omitempty"`
+	Conversation      *ConversationDTO `thrift:"conversation,6,optional" json:"conversation,omitempty"`
+	ReadSeq           *int64           `thrift:"readSeq,7,optional" json:"readSeq,omitempty"`
+	CreatedAt         string           `thrift:"createdAt,8,required" json:"createdAt"`
+	MessageId         *string          `thrift:"messageId,9,optional" json:"messageId,omitempty"`
+	Reactions         []*ReactionDTO   `thrift:"reactions,10,optional,list<ReactionDTO>" json:"reactions,omitempty"`
+	NotificationLevel *string          `thrift:"notificationLevel,11,optional" json:"notificationLevel,omitempty"`
+	ReactionsVersion  *string          `thrift:"reactionsVersion,12,optional" json:"reactionsVersion,omitempty"`
 }
 
 func NewEventDTO() *EventDTO {
@@ -539,6 +617,42 @@ func (p *EventDTO) GetCreatedAt() (v string) {
 	return p.CreatedAt
 }
 
+var EventDTO_MessageId_DEFAULT string
+
+func (p *EventDTO) GetMessageId() (v string) {
+	if !p.IsSetMessageId() {
+		return EventDTO_MessageId_DEFAULT
+	}
+	return *p.MessageId
+}
+
+var EventDTO_Reactions_DEFAULT []*ReactionDTO
+
+func (p *EventDTO) GetReactions() (v []*ReactionDTO) {
+	if !p.IsSetReactions() {
+		return EventDTO_Reactions_DEFAULT
+	}
+	return p.Reactions
+}
+
+var EventDTO_NotificationLevel_DEFAULT string
+
+func (p *EventDTO) GetNotificationLevel() (v string) {
+	if !p.IsSetNotificationLevel() {
+		return EventDTO_NotificationLevel_DEFAULT
+	}
+	return *p.NotificationLevel
+}
+
+var EventDTO_ReactionsVersion_DEFAULT string
+
+func (p *EventDTO) GetReactionsVersion() (v string) {
+	if !p.IsSetReactionsVersion() {
+		return EventDTO_ReactionsVersion_DEFAULT
+	}
+	return *p.ReactionsVersion
+}
+
 func (p *EventDTO) IsSetConversationId() bool {
 	return p.ConversationId != nil
 }
@@ -557,6 +671,22 @@ func (p *EventDTO) IsSetConversation() bool {
 
 func (p *EventDTO) IsSetReadSeq() bool {
 	return p.ReadSeq != nil
+}
+
+func (p *EventDTO) IsSetMessageId() bool {
+	return p.MessageId != nil
+}
+
+func (p *EventDTO) IsSetReactions() bool {
+	return p.Reactions != nil
+}
+
+func (p *EventDTO) IsSetNotificationLevel() bool {
+	return p.NotificationLevel != nil
+}
+
+func (p *EventDTO) IsSetReactionsVersion() bool {
+	return p.ReactionsVersion != nil
 }
 
 func (p *EventDTO) String() string {
@@ -1705,6 +1835,273 @@ func (p *MarkReadResp) String() string {
 	return fmt.Sprintf("MarkReadResp(%+v)", *p)
 }
 
+type PutReactionReq struct {
+	ID        string `thrift:"id,1,required" json:"id"`
+	MessageId string `thrift:"messageId,2,required" json:"messageId"`
+	Emoji     string `thrift:"emoji,3,required" json:"emoji"`
+}
+
+func NewPutReactionReq() *PutReactionReq {
+	return &PutReactionReq{}
+}
+
+func (p *PutReactionReq) InitDefault() {
+}
+
+func (p *PutReactionReq) GetID() (v string) {
+	return p.ID
+}
+
+func (p *PutReactionReq) GetMessageId() (v string) {
+	return p.MessageId
+}
+
+func (p *PutReactionReq) GetEmoji() (v string) {
+	return p.Emoji
+}
+
+func (p *PutReactionReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PutReactionReq(%+v)", *p)
+}
+
+type DeleteReactionReq struct {
+	ID        string `thrift:"id,1,required" json:"id"`
+	MessageId string `thrift:"messageId,2,required" json:"messageId"`
+	Emoji     string `thrift:"emoji,3,required" json:"emoji"`
+}
+
+func NewDeleteReactionReq() *DeleteReactionReq {
+	return &DeleteReactionReq{}
+}
+
+func (p *DeleteReactionReq) InitDefault() {
+}
+
+func (p *DeleteReactionReq) GetID() (v string) {
+	return p.ID
+}
+
+func (p *DeleteReactionReq) GetMessageId() (v string) {
+	return p.MessageId
+}
+
+func (p *DeleteReactionReq) GetEmoji() (v string) {
+	return p.Emoji
+}
+
+func (p *DeleteReactionReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("DeleteReactionReq(%+v)", *p)
+}
+
+type ReactionsResp struct {
+	Reactions        []*ReactionDTO `thrift:"reactions,1,required,list<ReactionDTO>" json:"reactions"`
+	ReactionsVersion string         `thrift:"reactionsVersion,2,required" json:"reactionsVersion"`
+}
+
+func NewReactionsResp() *ReactionsResp {
+	return &ReactionsResp{}
+}
+
+func (p *ReactionsResp) InitDefault() {
+}
+
+func (p *ReactionsResp) GetReactions() (v []*ReactionDTO) {
+	return p.Reactions
+}
+
+func (p *ReactionsResp) GetReactionsVersion() (v string) {
+	return p.ReactionsVersion
+}
+
+func (p *ReactionsResp) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ReactionsResp(%+v)", *p)
+}
+
+type ReadSeqCountDTO struct {
+	ReadSeq int64 `thrift:"readSeq,1,required" json:"readSeq"`
+	Count   int64 `thrift:"count,2,required" json:"count"`
+}
+
+func NewReadSeqCountDTO() *ReadSeqCountDTO {
+	return &ReadSeqCountDTO{}
+}
+
+func (p *ReadSeqCountDTO) InitDefault() {
+}
+
+func (p *ReadSeqCountDTO) GetReadSeq() (v int64) {
+	return p.ReadSeq
+}
+
+func (p *ReadSeqCountDTO) GetCount() (v int64) {
+	return p.Count
+}
+
+func (p *ReadSeqCountDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ReadSeqCountDTO(%+v)", *p)
+}
+
+type MemberReadReceiptDTO struct {
+	UserId  string `thrift:"userId,1,required" json:"userId"`
+	ReadSeq int64  `thrift:"readSeq,2,required" json:"readSeq"`
+}
+
+func NewMemberReadReceiptDTO() *MemberReadReceiptDTO {
+	return &MemberReadReceiptDTO{}
+}
+
+func (p *MemberReadReceiptDTO) InitDefault() {
+}
+
+func (p *MemberReadReceiptDTO) GetUserId() (v string) {
+	return p.UserId
+}
+
+func (p *MemberReadReceiptDTO) GetReadSeq() (v int64) {
+	return p.ReadSeq
+}
+
+func (p *MemberReadReceiptDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("MemberReadReceiptDTO(%+v)", *p)
+}
+
+type GetReadReceiptsReq struct {
+	ID string `thrift:"id,1,required" json:"id"`
+}
+
+func NewGetReadReceiptsReq() *GetReadReceiptsReq {
+	return &GetReadReceiptsReq{}
+}
+
+func (p *GetReadReceiptsReq) InitDefault() {
+}
+
+func (p *GetReadReceiptsReq) GetID() (v string) {
+	return p.ID
+}
+
+func (p *GetReadReceiptsReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("GetReadReceiptsReq(%+v)", *p)
+}
+
+type ReadReceiptsResp struct {
+	ConversationId string                  `thrift:"conversationId,1,required" json:"conversationId"`
+	EligibleCount  int64                   `thrift:"eligibleCount,2,required" json:"eligibleCount"`
+	ReadSeqCounts  []*ReadSeqCountDTO      `thrift:"readSeqCounts,3,required,list<ReadSeqCountDTO>" json:"readSeqCounts"`
+	Members        []*MemberReadReceiptDTO `thrift:"members,4,optional,list<MemberReadReceiptDTO>" json:"members,omitempty"`
+}
+
+func NewReadReceiptsResp() *ReadReceiptsResp {
+	return &ReadReceiptsResp{}
+}
+
+func (p *ReadReceiptsResp) InitDefault() {
+}
+
+func (p *ReadReceiptsResp) GetConversationId() (v string) {
+	return p.ConversationId
+}
+
+func (p *ReadReceiptsResp) GetEligibleCount() (v int64) {
+	return p.EligibleCount
+}
+
+func (p *ReadReceiptsResp) GetReadSeqCounts() (v []*ReadSeqCountDTO) {
+	return p.ReadSeqCounts
+}
+
+var ReadReceiptsResp_Members_DEFAULT []*MemberReadReceiptDTO
+
+func (p *ReadReceiptsResp) GetMembers() (v []*MemberReadReceiptDTO) {
+	if !p.IsSetMembers() {
+		return ReadReceiptsResp_Members_DEFAULT
+	}
+	return p.Members
+}
+
+func (p *ReadReceiptsResp) IsSetMembers() bool {
+	return p.Members != nil
+}
+
+func (p *ReadReceiptsResp) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ReadReceiptsResp(%+v)", *p)
+}
+
+type SetNotificationLevelReq struct {
+	ID    string `thrift:"id,1,required" json:"-"`
+	Level string `thrift:"level,2,required" json:"level"`
+}
+
+func NewSetNotificationLevelReq() *SetNotificationLevelReq {
+	return &SetNotificationLevelReq{}
+}
+
+func (p *SetNotificationLevelReq) InitDefault() {
+}
+
+func (p *SetNotificationLevelReq) GetID() (v string) {
+	return p.ID
+}
+
+func (p *SetNotificationLevelReq) GetLevel() (v string) {
+	return p.Level
+}
+
+func (p *SetNotificationLevelReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SetNotificationLevelReq(%+v)", *p)
+}
+
+type NotificationLevelResp struct {
+	ConversationId    string `thrift:"conversationId,1,required" json:"conversationId"`
+	NotificationLevel string `thrift:"notificationLevel,2,required" json:"notificationLevel"`
+}
+
+func NewNotificationLevelResp() *NotificationLevelResp {
+	return &NotificationLevelResp{}
+}
+
+func (p *NotificationLevelResp) InitDefault() {
+}
+
+func (p *NotificationLevelResp) GetConversationId() (v string) {
+	return p.ConversationId
+}
+
+func (p *NotificationLevelResp) GetNotificationLevel() (v string) {
+	return p.NotificationLevel
+}
+
+func (p *NotificationLevelResp) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("NotificationLevelResp(%+v)", *p)
+}
+
 type SearchWorkspaceMessagesReq struct {
 	ID     string  `thrift:"id,1,required" json:"id"`
 	Q      *string `thrift:"q,2,optional" json:"q,omitempty"`
@@ -1864,11 +2261,39 @@ func (p *GetAttentionReq) String() string {
 	return fmt.Sprintf("GetAttentionReq(%+v)", *p)
 }
 
+type AttentionUnreadDTO struct {
+	ConversationId string `thrift:"conversationId,1,required" json:"conversationId"`
+	UnreadCount    int64  `thrift:"unreadCount,2,required" json:"unreadCount"`
+}
+
+func NewAttentionUnreadDTO() *AttentionUnreadDTO {
+	return &AttentionUnreadDTO{}
+}
+
+func (p *AttentionUnreadDTO) InitDefault() {
+}
+
+func (p *AttentionUnreadDTO) GetConversationId() (v string) {
+	return p.ConversationId
+}
+
+func (p *AttentionUnreadDTO) GetUnreadCount() (v int64) {
+	return p.UnreadCount
+}
+
+func (p *AttentionUnreadDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AttentionUnreadDTO(%+v)", *p)
+}
+
 type AttentionPageResp struct {
-	Items              []*AttentionItemDTO `thrift:"items,1,required,list<AttentionItemDTO>" json:"items"`
-	Cursor             *string             `thrift:"cursor,2,optional" json:"cursor,omitempty"`
-	UnreadCount        int64               `thrift:"unreadCount,3,required" json:"unreadCount"`
-	ChannelUnreadCount int64               `thrift:"channelUnreadCount,4,required" json:"channelUnreadCount"`
+	Items                         []*AttentionItemDTO   `thrift:"items,1,required,list<AttentionItemDTO>" json:"items"`
+	Cursor                        *string               `thrift:"cursor,2,optional" json:"cursor,omitempty"`
+	UnreadCount                   int64                 `thrift:"unreadCount,3,required" json:"unreadCount"`
+	ChannelUnreadCount            int64                 `thrift:"channelUnreadCount,4,required" json:"channelUnreadCount"`
+	AttentionUnreadByConversation []*AttentionUnreadDTO `thrift:"attentionUnreadByConversation,5,optional,list<AttentionUnreadDTO>" json:"attentionUnreadByConversation"`
 }
 
 func NewAttentionPageResp() *AttentionPageResp {
@@ -1899,8 +2324,21 @@ func (p *AttentionPageResp) GetChannelUnreadCount() (v int64) {
 	return p.ChannelUnreadCount
 }
 
+var AttentionPageResp_AttentionUnreadByConversation_DEFAULT []*AttentionUnreadDTO
+
+func (p *AttentionPageResp) GetAttentionUnreadByConversation() (v []*AttentionUnreadDTO) {
+	if !p.IsSetAttentionUnreadByConversation() {
+		return AttentionPageResp_AttentionUnreadByConversation_DEFAULT
+	}
+	return p.AttentionUnreadByConversation
+}
+
 func (p *AttentionPageResp) IsSetCursor() bool {
 	return p.Cursor != nil
+}
+
+func (p *AttentionPageResp) IsSetAttentionUnreadByConversation() bool {
+	return p.AttentionUnreadByConversation != nil
 }
 
 func (p *AttentionPageResp) String() string {
@@ -2214,7 +2652,15 @@ type ChatHTTPService interface {
 
 	RetractMessage(ctx context.Context, req *RetractMessageReq) (r *MessageResp, err error)
 
+	PutReaction(ctx context.Context, req *PutReactionReq) (r *ReactionsResp, err error)
+
+	DeleteReaction(ctx context.Context, req *DeleteReactionReq) (r *ReactionsResp, err error)
+
 	MarkRead(ctx context.Context, req *MarkReadReq) (r *MarkReadResp, err error)
+
+	GetReadReceipts(ctx context.Context, req *GetReadReceiptsReq) (r *ReadReceiptsResp, err error)
+
+	SetNotificationLevel(ctx context.Context, req *SetNotificationLevelReq) (r *NotificationLevelResp, err error)
 
 	SearchWorkspaceMessages(ctx context.Context, req *SearchWorkspaceMessagesReq) (r *WorkspaceSearchPageResp, err error)
 

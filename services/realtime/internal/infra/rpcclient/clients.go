@@ -115,6 +115,14 @@ func (c *Chat) CheckAccess(ctx context.Context, user, conversation string) (*im.
 	return c.Client.CheckAccess(ctx, &im.AccessRequest{UserId: user, ConversationId: conversation})
 }
 
+func (c *Chat) CheckWorkspaceAccess(ctx context.Context, user, workspace string) (*im.WorkspaceAccessResponse, error) {
+	return c.Client.CheckWorkspaceAccess(ctx, &im.WorkspaceAccessRequest{UserId: user, WorkspaceId: workspace})
+}
+
+func (c *Chat) GetSharedWorkspaceMembers(ctx context.Context, user string) (*im.SharedWorkspaceMembersResponse, error) {
+	return c.Client.GetSharedWorkspaceMembers(ctx, &im.SharedWorkspaceMembersRequest{UserId: user})
+}
+
 func (c *Chat) Ping(ctx context.Context) error {
 	r, err := c.Client.Ping(ctx, &im.PingRequest{})
 	if err != nil {
@@ -130,6 +138,12 @@ func (c *Chat) Ping(ctx context.Context) error {
 type ChatAccess interface {
 	CheckAccess(context.Context, string, string) (*im.AccessResponse, error)
 	Ping(context.Context) error
+}
+
+// ChatWorkspaceAccess is an optional extension interface for workspace-level access and presence fanout.
+type ChatWorkspaceAccess interface {
+	CheckWorkspaceAccess(context.Context, string, string) (*im.WorkspaceAccessResponse, error)
+	GetSharedWorkspaceMembers(context.Context, string) (*im.SharedWorkspaceMembersResponse, error)
 }
 
 // IdentityValidator adapts httpx.Identity to domain.SessionValidator.
@@ -175,6 +189,32 @@ func (a ChatAuthority) CheckAccess(ctx context.Context, userID, conversationID s
 		MemberIDs:     res.MemberIds,
 		TypingEnabled: res.TypingEnabled,
 	}, nil
+}
+
+func (a ChatAuthority) CheckWorkspaceAccess(ctx context.Context, userID, workspaceID string) (domain.WorkspaceAccessResult, error) {
+	if wa, ok := a.Chat.(ChatWorkspaceAccess); ok {
+		res, err := wa.CheckWorkspaceAccess(ctx, userID, workspaceID)
+		if err != nil || res == nil {
+			return domain.WorkspaceAccessResult{}, err
+		}
+		return domain.WorkspaceAccessResult{
+			Allowed:         res.Allowed,
+			MemberIDs:       res.MemberIds,
+			PresenceEnabled: res.PresenceEnabled,
+		}, nil
+	}
+	return domain.WorkspaceAccessResult{}, nil
+}
+
+func (a ChatAuthority) SharedWorkspaceMembers(ctx context.Context, userID string) ([]string, bool, error) {
+	if wa, ok := a.Chat.(ChatWorkspaceAccess); ok {
+		res, err := wa.GetSharedWorkspaceMembers(ctx, userID)
+		if err != nil || res == nil {
+			return nil, false, err
+		}
+		return res.MemberIds, res.PresenceEnabled, nil
+	}
+	return nil, true, nil
 }
 
 func (a ChatAuthority) Ping(ctx context.Context) error {

@@ -1,4 +1,21 @@
-import type { Conversation, Message, SyncPage } from "@teamie/api-client";
+import type {
+  AttentionUnreadDTO,
+  Conversation,
+  Message,
+  NotificationLevel,
+  Reaction,
+  SyncPage,
+} from "@teamie/api-client";
+import {
+  materializeReactionState, messageReactionState, projectReactionList,
+  reconcileReactionState, updateReactionStates, validReactionVersion,
+} from "./reactions";
+import type { ReactionStates } from "./reactions";
+
+
+export { effectiveNotificationLevel, summarizeConversationUnread } from "./notification-model";
+import { notificationInputsChanged } from "./notification-model";
+import type { NotificationProjection } from "./notification-model";
 
 export type LocalMessage = Message & {
   status?: "sending" | "failed";
@@ -12,6 +29,8 @@ export type ChatSnapshot = {
   cursor: string;
   messages: Record<string, LocalMessage[]>;
   conversations: Record<string, Conversation>;
+  notificationProjection?: NotificationProjection;
+  reactionStates?: ReactionStates;
   revision: number;
 };
 export type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
@@ -85,6 +104,7 @@ export function reconcileMessages(
           body: "",
           attachments: undefined,
           mentions: undefined,
+          reactions: undefined,
         }
       : incomingMessage;
     const key = clientKey(message);
@@ -103,9 +123,12 @@ export function reconcileMessages(
       const old = output[index];
       if (old.retractedAt && !message.retractedAt) continue;
       if (!old.status && message.status) continue;
-      if (!old.status && !message.status && version(old) > version(message))
+      const reactions = reconcileReactionState(messageReactionState(old), messageReactionState(message));
+      if (!old.status && !message.status && version(old) > version(message)) {
+        output[index] = materializeReactionState(old, reactions);
         continue;
-      output[index] = message.retractedAt ? { ...message, body: "" } : message;
+      }
+      output[index] = materializeReactionState(message, reactions);
       if (old.id !== message.id) byId.delete(old.id);
       const oldKey = clientKey(old);
       if (oldKey !== key) byClientKey.delete(oldKey);
@@ -204,12 +227,23 @@ function outboundChanged(previous: ChatSnapshot, next: ChatSnapshot) {
   return false;
 }
 export function serializeSnapshot(snapshot: ChatSnapshot): string {
+  const states: ReactionStates = {};
+  for (const [conversationId, messages] of Object.entries(snapshot.messages)) {
+    const kept = new Set(trimPersistedMessages(messages).map((message) => message.id));
+    const reactions = Object.fromEntries(
+      Object.entries(snapshot.reactionStates?.[conversationId] || {}).filter(([id]) => kept.has(id)),
+    );
+    if (Object.keys(reactions).length) states[conversationId] = reactions;
+  }
+  const reactionsJson = Object.keys(states).length ? `,"reactionStates":${JSON.stringify(states)}` : "";
   return (
     `{"userId":${JSON.stringify(snapshot.userId)}` +
     `,"cursor":${JSON.stringify(snapshot.cursor)}` +
     `,"messages":${recordJson(snapshot.messages, messagesJson)}` +
     `,"conversations":${recordJson(snapshot.conversations, conversationJson)}` +
-    `,"revision":${JSON.stringify(snapshot.revision)}}`
+    `,"revision":${JSON.stringify(snapshot.revision)}` +
+    (snapshot.notificationProjection ? `,"notificationProjection":${JSON.stringify(snapshot.notificationProjection)}` : "") +
+    reactionsJson + "}"
   );
 }
 export class ChatStore {
@@ -218,7 +252,9 @@ export class ChatStore {
   private storage?: StorageLike;
   private schedule?: PersistScheduler;
   private cancelPersist?: () => void;
+  private reactionAccessEpochs = new Map<string, number>();
   generation = 0;
+  notificationEpoch = 0;
   conversationVersion = 0;
   hasAuthoritativeConversations = false;
   constructor(storage?: StorageLike, schedule?: PersistScheduler) {
@@ -256,6 +292,18 @@ export class ChatStore {
   };
   private commit(next: ChatSnapshot) {
     const previous = this.snapshot;
+    if (notificationInputsChanged(previous, next)) {
+      this.notificationEpoch += 1;
+      if (next.notificationProjection) {
+        next = {
+          ...next,
+          notificationProjection: {
+            stale: true,
+            byConversation: Object.fromEntries(Object.entries(next.notificationProjection.byConversation).filter(([id]) => next.conversations[id])),
+          },
+        };
+      }
+    }
     this.snapshot = { ...next, revision: this.snapshot.revision + 1 };
     if (next.userId && this.storage) {
       // The persisted snapshot always pairs entities with their cursor, so a
@@ -315,13 +363,30 @@ export class ChatStore {
     } catch {
       /* A corrupt snapshot restarts durable sync from zero. */
     }
+    const cachedProjection = restored.notificationProjection;
+    if (cachedProjection && cachedProjection.byConversation && typeof cachedProjection.byConversation === "object" &&
+      Object.keys(cachedProjection.byConversation).length === Object.keys(restored.conversations).length &&
+      Object.entries(cachedProjection.byConversation).every(([id, count]) => restored.conversations[id] && Number.isSafeInteger(count) && count >= 0)) {
+      restored.notificationProjection = { ...cachedProjection, stale: true };
+    } else {
+      delete restored.notificationProjection;
+    }
+    for (const messages of Object.values(restored.messages)) {
+      for (const message of messages)
+        restored.reactionStates = updateReactionStates(restored.reactionStates, message.conversationId, message.id, messageReactionState(message));
+    }
+    restored.messages = Object.fromEntries(Object.entries(restored.messages).map(([id, messages]) =>
+      [id, projectReactionList(messages, restored.reactionStates)],
+    ));
     this.hasAuthoritativeConversations = false;
     this.conversationVersion =
       Object.keys(restored.conversations).length > 0 ? 1 : 0;
     this.commit(restored);
   }
   clear() {
+    this.reactionAccessEpochs.clear();
     this.generation += 1;
+    this.notificationEpoch += 1;
     this.conversationVersion += 1;
     this.hasAuthoritativeConversations = false;
     // Account isolation: a deferred write of this account must never land
@@ -338,6 +403,7 @@ export class ChatStore {
     this.listeners.forEach((fn) => fn());
   }
   revoke() {
+    this.reactionAccessEpochs.clear();
     this.generation += 1;
     this.conversationVersion += 1;
     this.hasAuthoritativeConversations = false;
@@ -374,11 +440,13 @@ export class ChatStore {
           updatedAt: newerTimestamp(conversation.updatedAt, m.createdAt),
         };
     }
+    this.ingestReactionsInto(next, messages);
     for (const [conversationId, batch] of grouped) {
       next.messages[conversationId] = reconcileMessages(
         next.messages[conversationId] || [],
         batch,
       );
+      next.messages[conversationId] = projectReactionList(next.messages[conversationId], next.reactionStates);
     }
     this.commit(next);
   }
@@ -391,8 +459,14 @@ export class ChatStore {
     this.hasAuthoritativeConversations = true;
     this.conversationVersion += 1;
     const allowed = new Set(conversations.map((c) => c.id));
+    for (const id of Object.keys(this.snapshot.conversations)) {
+      if (!allowed.has(id)) this.reactionAccessEpochs.set(id, (this.reactionAccessEpochs.get(id) || 0) + 1);
+    }
     this.commit({
       ...this.snapshot,
+      reactionStates: this.snapshot.reactionStates
+        ? Object.fromEntries(Object.entries(this.snapshot.reactionStates).filter(([id]) => allowed.has(id)))
+        : undefined,
       messages: Object.fromEntries(
         Object.entries(this.snapshot.messages).filter(([id]) =>
           allowed.has(id),
@@ -408,6 +482,8 @@ export class ChatStore {
               lastSeq: Math.max(c.lastSeq, old?.lastSeq ?? 0),
               readSeq: Math.max(c.readSeq, old?.readSeq ?? 0),
               updatedAt: newerTimestamp(old?.updatedAt, c.updatedAt),
+              notificationLevel:
+                c.notificationLevel ?? old?.notificationLevel ?? "all",
             },
           ];
         }),
@@ -430,6 +506,59 @@ export class ChatStore {
     if (conversation && seq > conversation.readSeq)
       this.addConversation({ ...conversation, readSeq: seq });
   }
+  reactionScope(conversationId: string) {
+    if (!this.snapshot.userId || !this.snapshot.conversations[conversationId]) return undefined;
+    return { conversationId, userId: this.snapshot.userId, generation: this.generation, epoch: this.reactionAccessEpochs.get(conversationId) || 0 };
+  }
+  reactionScopeCurrent(scope: ReturnType<ChatStore["reactionScope"]>) {
+    return !!scope && scope.userId === this.snapshot.userId && scope.generation === this.generation &&
+      !!this.snapshot.conversations[scope.conversationId] && scope.epoch === (this.reactionAccessEpochs.get(scope.conversationId) || 0);
+  }
+  private ingestReactionsInto(next: ChatSnapshot, messages: Message[]) {
+    for (const message of messages) {
+      if (!next.conversations[message.conversationId]) continue;
+      next.reactionStates = updateReactionStates(next.reactionStates, message.conversationId, message.id, messageReactionState(message));
+    }
+  }
+  ingestMessageReactions(messages: Message[], scope?: ReturnType<ChatStore["reactionScope"]>) {
+    if (!this.snapshot.userId || (scope && !this.reactionScopeCurrent(scope))) return;
+    const next = { ...this.snapshot, messages: { ...this.snapshot.messages } };
+    this.ingestReactionsInto(next, messages);
+    if (next.reactionStates === this.snapshot.reactionStates) return;
+    for (const id of new Set(messages.map((message) => message.conversationId))) {
+      if (next.messages[id]) next.messages[id] = projectReactionList(next.messages[id], next.reactionStates);
+    }
+    this.commit(next);
+  }
+  setReactions(conversationId: string, messageId: string, reactions: Reaction[], reactionsVersion: string, scope?: ReturnType<ChatStore["reactionScope"]>) {
+    if (!this.snapshot.userId || !this.snapshot.conversations[conversationId] || !validReactionVersion(reactionsVersion) ||
+      (scope && !this.reactionScopeCurrent(scope))) return;
+    const reactionStates = updateReactionStates(this.snapshot.reactionStates, conversationId, messageId, { reactions, reactionsVersion });
+    if (reactionStates === this.snapshot.reactionStates) return;
+    const list = this.snapshot.messages[conversationId];
+    this.commit({
+      ...this.snapshot,
+      reactionStates,
+      messages: list ? { ...this.snapshot.messages, [conversationId]: projectReactionList(list, reactionStates) } : this.snapshot.messages,
+    });
+  }
+  setAttentionProjection(items: AttentionUnreadDTO[], observed: { userId: string; generation: number; epoch: number }) {
+    if (observed.userId !== this.snapshot.userId || observed.generation !== this.generation || observed.epoch !== this.notificationEpoch) return false;
+    const byConversation: Record<string, number> = {};
+    for (const item of items) {
+      if (!this.snapshot.conversations[item.conversationId] || !Number.isSafeInteger(item.unreadCount) || item.unreadCount < 0 || item.conversationId in byConversation) return false;
+      byConversation[item.conversationId] = item.unreadCount;
+    }
+    if (Object.keys(byConversation).length !== Object.keys(this.snapshot.conversations).length) return false;
+    this.commit({ ...this.snapshot, notificationProjection: { byConversation, stale: false } });
+    return true;
+  }
+  setNotificationLevel(conversationId: string, notificationLevel: NotificationLevel) {
+    const conversation = this.snapshot.conversations[conversationId];
+    if (!conversation || conversation.notificationLevel === notificationLevel)
+      return;
+    this.addConversation({ ...conversation, notificationLevel });
+  }
   apply(page: SyncPage) {
     if (
       page.cursor === this.snapshot.cursor &&
@@ -443,6 +572,7 @@ export class ChatStore {
       ...this.snapshot,
       messages: { ...this.snapshot.messages },
       conversations: { ...this.snapshot.conversations },
+      reactionStates: this.snapshot.reactionStates,
     };
     for (const event of page.events) {
       if (olderOrEqual(event.id, this.snapshot.cursor)) continue;
@@ -452,6 +582,8 @@ export class ChatStore {
           next.messages[m.conversationId] || [],
           [m],
         );
+        this.ingestReactionsInto(next, [m]);
+        next.messages[m.conversationId] = projectReactionList(next.messages[m.conversationId], next.reactionStates);
         const conversation = next.conversations[m.conversationId];
         if (conversation)
           next.conversations[m.conversationId] = {
@@ -481,6 +613,31 @@ export class ChatStore {
         next.conversations[event.conversationId] = {
           ...c,
           readSeq: Math.max(c.readSeq, event.readSeq || 0),
+        };
+      }
+      if (
+        event.type === "reaction.updated" &&
+        event.conversationId &&
+        event.messageId
+      ) {
+        if (next.conversations[event.conversationId] && validReactionVersion(event.reactionsVersion)) {
+          next.reactionStates = updateReactionStates(next.reactionStates, event.conversationId, event.messageId, {
+            reactions: event.reactions || [], reactionsVersion: event.reactionsVersion,
+          });
+          if (next.messages[event.conversationId])
+            next.messages[event.conversationId] = projectReactionList(next.messages[event.conversationId], next.reactionStates);
+        }
+      }
+      if (
+        event.type === "preference.updated" &&
+        event.conversationId &&
+        event.notificationLevel &&
+        next.conversations[event.conversationId]
+      ) {
+        const c = next.conversations[event.conversationId];
+        next.conversations[event.conversationId] = {
+          ...c,
+          notificationLevel: event.notificationLevel,
         };
       }
     }

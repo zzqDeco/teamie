@@ -14,6 +14,7 @@ import type { Conversation, Member, Workspace } from "@teamie/api-client";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
 import type { Participant } from "./participants";
 import { conversationName } from "./messages";
+import { formatPresenceLabel, usePresenceMap } from "./engagement-store";
 import { Avatar, Button, IconButton, Modal, Notice } from "./ui";
 import { ICON } from "./icons";
 
@@ -64,6 +65,8 @@ export function ShellMembersPane({
   onManageGroup: () => void;
   onInvite: () => void;
 }) {
+  const presenceEnabled = !!caps["im.presence.publish"];
+  const presenceMap = usePresenceMap(presenceEnabled);
   return (
     <>
       {overlayMembers && !sidebar && (
@@ -114,10 +117,24 @@ export function ShellMembersPane({
           )}
           {hasError && <Notice>成员暂时无法加载。</Notice>}
           <Notice>{directError}</Notice>
-          {visibleMembers.map((member) => (
+          {visibleMembers.map((member) => {
+            const humanPresence =
+              presenceEnabled && member.kind === "human"
+                ? presenceMap[member.userId] || "offline"
+                : null;
+            return (
             <div className="member-row" key={member.userId}>
               {member.kind === "agent" ? (
                 <AgentAvatar />
+              ) : humanPresence ? (
+                <div className="avatar-with-presence">
+                  <Avatar name={member.displayName} seed={member.userId} />
+                  <i
+                    className={`presence-dot presence-${humanPresence}`}
+                    title={formatPresenceLabel(humanPresence)}
+                    aria-label={formatPresenceLabel(humanPresence)}
+                  />
+                </div>
               ) : (
                 <Avatar name={member.displayName} seed={member.userId} />
               )}
@@ -134,9 +151,7 @@ export function ShellMembersPane({
                     ? member.ownerName
                       ? `由 ${member.ownerName} 创建`
                       : "Agent"
-                    : member.role === "owner"
-                      ? "空间所有者"
-                      : "团队成员"}
+                    : `${member.role === "owner" ? "空间所有者" : "团队成员"}${humanPresence ? ` · ${formatPresenceLabel(humanPresence)}` : ""}`}
                 </span>
               </div>
               {member.role === "owner" && (
@@ -176,7 +191,8 @@ export function ShellMembersPane({
                   </IconButton>
                 )}
             </div>
-          ))}
+            );
+          })}
         </div>
         <Link
           className="members-directory-link"
