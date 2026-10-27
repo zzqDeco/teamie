@@ -20,6 +20,7 @@ type StreamApp struct {
 	Policy        *domain.TypingTracker
 	Presence      *domain.PresenceTracker
 	PresenceStore domain.PresenceStore
+	Clients       func() []domain.Client
 }
 
 // HubService is an alias for StreamApp.
@@ -54,6 +55,34 @@ func (s *StreamApp) CheckConnectionCapacity(clients []domain.Client, userID stri
 	return nil
 }
 
+func (s *StreamApp) deliverReceiptToUser(ctx context.Context, clients []domain.Client, conversationID, userID string) {
+	if conversationID == "" || userID == "" || (s.Flags != nil && !s.Flags.ReadReceiptsViewEnabled()) {
+		return
+	}
+	var targets []domain.Client
+	for _, c := range clients {
+		if c.UserID() == userID {
+			targets = append(targets, c)
+		}
+	}
+	if len(targets) == 0 {
+		return
+	}
+	if s.Chat != nil {
+		access, err := s.Chat.CheckAccess(ctx, userID, conversationID)
+		if err != nil || !access.Allowed {
+			return
+		}
+	}
+	ev := domain.Event{
+		Type:           "receipts.changed",
+		ConversationID: conversationID,
+	}
+	for _, c := range targets {
+		c.Send(ev)
+	}
+}
+
 // Deliver verifies sender/recipient membership and broadcasts a realtime hint to matching clients.
 func (s *StreamApp) Deliver(ctx context.Context, clients []domain.Client, hint domain.Event) {
 	switch hint.Type {
@@ -69,15 +98,50 @@ func (s *StreamApp) Deliver(ctx context.Context, clients []domain.Client, hint d
 		if hint.ConversationID == "" || (s.Flags != nil && !s.Flags.ReadReceiptsViewEnabled()) {
 			return
 		}
-		if s.Policy != nil && !s.Policy.AdmitReceiptHint(hint.ConversationID) {
-			return
+		convID := hint.ConversationID
+		admitted := hint.UserIDs
+		if s.Policy != nil {
+			admitted = s.Policy.ScheduleReceiptHints(convID, hint.UserIDs, func(uid string) {
+				tCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				cur := clients
+				if s.Clients != nil {
+					cur = s.Clients()
+				}
+				s.deliverReceiptToUser(tCtx, cur, convID, uid)
+			})
 		}
+		for _, uid := range admitted {
+			s.deliverReceiptToUser(ctx, clients, convID, uid)
+		}
+		return
 	case "presence":
 		if hint.UserID == "" || (s.Flags != nil && !s.Flags.PresencePublishEnabled()) {
 			return
 		}
 		if hint.State != "online" && hint.State != "away" && hint.State != "offline" {
 			return
+		}
+		if s.Chat != nil {
+			memberIDs, enabled, err := s.Chat.SharedWorkspaceMembers(ctx, hint.UserID)
+			if err != nil || !enabled || len(memberIDs) == 0 {
+				return
+			}
+			allowed := make(map[string]bool, len(memberIDs))
+			for _, id := range memberIDs {
+				allowed[id] = true
+			}
+			if len(hint.UserIDs) == 0 {
+				hint.UserIDs = memberIDs
+			} else {
+				filtered := make([]string, 0, len(hint.UserIDs))
+				for _, id := range hint.UserIDs {
+					if allowed[id] {
+						filtered = append(filtered, id)
+					}
+				}
+				hint.UserIDs = filtered
+			}
 		}
 	}
 	set := make(map[string]bool, len(hint.UserIDs))
@@ -107,17 +171,6 @@ func (s *StreamApp) Deliver(ctx context.Context, clients []domain.Client, hint d
 				}
 			}
 			c.Send(hint)
-		case "receipts.changed":
-			if s.Chat != nil {
-				access, err := s.Chat.CheckAccess(ctx, c.UserID(), hint.ConversationID)
-				if err != nil || !access.Allowed {
-					continue
-				}
-			}
-			c.Send(domain.Event{
-				Type:           "receipts.changed",
-				ConversationID: hint.ConversationID,
-			})
 		case "presence":
 			c.Send(domain.Event{
 				Type:   "presence",

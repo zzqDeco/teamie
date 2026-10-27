@@ -118,6 +118,7 @@ func (h *Hub) App() *app.HubService {
 		Policy:        &h.policy,
 		Presence:      &h.presence,
 		PresenceStore: presenceStore,
+		Clients:       h.clients,
 	}
 }
 

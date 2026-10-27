@@ -932,6 +932,11 @@ func (e *Engine) ingest(ctx context.Context, imc *IM, l *Lease) (failure error) 
 	for _, input := range inputs {
 		observability.L(ctx).Info("Agent input persisted", zap.String("event.action", "agent-input-persisted"), zap.String("custom.agent.id", l.AgentID), zap.String("custom.input.event_id", input.EventID), zap.String("custom.im.message_id", input.MessageID), zap.String("custom.im.conversation_id", input.ConversationID))
 	}
+	if e.readFlusher.needsSeed(l.AgentID) {
+		if seeded, seedErr := e.Store.IngestedConversationSeqs(ctx, l.AgentID); seedErr == nil {
+			e.readFlusher.markSeeded(l.AgentID, seeded)
+		}
+	}
 	e.readFlusher.recordInputs(l.AgentID, inputs)
 	e.readFlusher.flush(ctx, l.AgentID, imc.MarkRead)
 	return nil

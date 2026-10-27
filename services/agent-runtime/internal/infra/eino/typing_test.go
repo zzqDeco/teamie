@@ -544,4 +544,18 @@ func TestReadReceiptFlusherCoalescesToTwoSecondsAndRetriesAfterTransientFailure(
 	if len(calls) != 3 {
 		t.Fatalf("duplicate flush after ack: %#v", calls)
 	}
+
+	// Simulate runtime restart: a fresh flusher seeds durable high-water seqs from runtime_inputs and flushes on first tick.
+	restarted := &readReceiptFlusher{now: func() time.Time { return now }}
+	if !restarted.needsSeed(agentID) {
+		t.Fatal("fresh flusher should require seeding for agent")
+	}
+	restarted.markSeeded(agentID, []Input{{ConversationID: convID, Seq: 9}})
+	if restarted.needsSeed(agentID) {
+		t.Fatal("seeded flusher should not require seeding again")
+	}
+	restarted.flush(context.Background(), agentID, markRead)
+	if len(calls) != 4 || calls[3] != (call{convID, 9}) {
+		t.Fatalf("post-restart seeded flush calls = %#v, want seq 9", calls)
+	}
 }

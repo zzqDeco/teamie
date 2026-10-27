@@ -105,11 +105,13 @@ export function usePresenceMap(enabled: boolean): PresenceMap {
 type ReceiptStoreState = {
   byConversation: Record<string, ReadReceipts>;
   invalidations: Record<string, number>;
+  globalInvalidation: number;
 };
 
 let receiptState: ReceiptStoreState = {
   byConversation: {},
   invalidations: {},
+  globalInvalidation: 0,
 };
 const receiptListeners = new Set<() => void>();
 
@@ -146,12 +148,23 @@ export const receiptStore = {
       },
     });
   },
+  invalidateAll() {
+    setReceipts({
+      ...receiptState,
+      globalInvalidation: receiptState.globalInvalidation + 1,
+    });
+  },
   reset() {
     if (
       Object.keys(receiptState.byConversation).length > 0 ||
-      Object.keys(receiptState.invalidations).length > 0
+      Object.keys(receiptState.invalidations).length > 0 ||
+      receiptState.globalInvalidation > 0
     ) {
-      setReceipts({ byConversation: {}, invalidations: {} });
+      setReceipts({
+        byConversation: {},
+        invalidations: {},
+        globalInvalidation: 0,
+      });
     }
   },
 };
@@ -163,11 +176,29 @@ export function useConversationReceiptsSync(
 ) {
   const invalidation = useSyncExternalStore(
     receiptStore.subscribe,
-    useCallback(
-      () => receiptStore.getSnapshot().invalidations[conversationId] || 0,
-      [conversationId],
-    ),
+    useCallback(() => {
+      const snap = receiptStore.getSnapshot();
+      return (snap.invalidations[conversationId] || 0) + snap.globalInvalidation;
+    }, [conversationId]),
   );
+
+  useEffect(() => {
+    if (!enabled || !conversationId || !hasOwnMessages) return;
+    const onFocus = () => {
+      receiptStore.invalidate(conversationId);
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        receiptStore.invalidate(conversationId);
+      }
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [conversationId, enabled, hasOwnMessages]);
 
   useEffect(() => {
     if (!enabled || !conversationId || !hasOwnMessages) return;
@@ -215,14 +246,13 @@ export function computeMessageReadSummary({
   receipts,
   seq,
   senderId,
-  senderReadSeq,
   conversationType,
   members,
 }: {
   receipts?: ReadReceipts;
   seq: number;
   senderId: string;
-  senderReadSeq: number;
+  senderReadSeq?: number;
   conversationType: Conversation["type"];
   members: Member[];
 }): MessageReadSummary | null {
@@ -273,16 +303,15 @@ export function computeMessageReadSummary({
     };
   }
 
-  // channel: members array is omitted by contract; compute from readSeqCounts
+  // channel: members array is omitted by contract and caller is already excluded by backend
   let totalAtOrAbove = 0;
   for (const bucket of receipts.readSeqCounts || []) {
     if (bucket.readSeq >= seq) {
       totalAtOrAbove += bucket.count;
     }
   }
-  const selfCount = senderReadSeq >= seq ? 1 : 0;
-  const readCount = Math.max(0, totalAtOrAbove - selfCount);
-  const eligibleOthers = Math.max(0, (receipts.eligibleCount || 1) - 1);
+  const readCount = Math.max(0, totalAtOrAbove);
+  const eligibleOthers = Math.max(0, receipts.eligibleCount ?? readCount);
   return {
     isRead: readCount > 0,
     readCount,

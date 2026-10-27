@@ -269,6 +269,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         setConnection("connected");
         void sync();
         void retryTransientFailures(chatStore.generation);
+        if (capabilities.current["im.read_receipts.view"]) {
+          receiptStore.invalidateAll();
+        }
         if (document.visibilityState === "hidden") {
           sendPresence("idle", true);
         } else {
@@ -281,6 +284,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           const hint = JSON.parse(event.data);
           if (hint.type === "sync.required" || hint.type === "ready")
             void sync();
+          if (
+            hint.type === "ready" &&
+            capabilities.current["im.read_receipts.view"]
+          ) {
+            receiptStore.invalidateAll();
+          }
           if (
             hint.type === "typing" &&
             hint.userId !== userId &&

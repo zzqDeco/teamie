@@ -54,6 +54,7 @@ func main() {
 		Auth:   identityClient,
 		Origin: origin,
 	}
+	streamApp.Clients = adapter.ActiveClients
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -72,10 +72,20 @@ export function ConversationView({
   const [located, setLocated] = useState<LocalMessage[] | null>(null);
   const [resolvedTargets, setResolvedTargets] = useState<Record<string, Message>>({});
   const messages = useMemo(() => {
-    if (!located) return allMessages;
-    const ids = new Set(located.map((l) => l.id));
-    return reconcileMessages(located, allMessages.filter((m) => ids.has(m.id)));
-  }, [located, allMessages]);
+    const ids = located ? new Set(located.map((l) => l.id)) : null;
+    const base = !located
+      ? allMessages
+      : reconcileMessages(located, allMessages.filter((m) => ids!.has(m.id)));
+    const reactionMap = snapshot.reactions;
+    if (!reactionMap) return base;
+    return base.map((m) => {
+      if (m.retractedAt) return m;
+      const latest = reactionMap[`${conversation.id}:${m.id}`];
+      return latest !== undefined && latest !== m.reactions
+        ? { ...m, reactions: latest }
+        : m;
+    });
+  }, [located, allMessages, snapshot.reactions, conversation.id]);
   const [highlightId, setHighlightId] = useState("");
   const [focusedMessageId, setFocusedMessageId] = useState("");
   const [locating, setLocating] = useState(false);

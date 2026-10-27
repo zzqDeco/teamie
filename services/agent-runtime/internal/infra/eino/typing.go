@@ -38,7 +38,30 @@ type readReceiptEntry struct {
 type readReceiptFlusher struct {
 	mu      sync.Mutex
 	entries map[string]*readReceiptEntry
+	seeded  map[string]bool
 	now     func() time.Time
+}
+
+func (f *readReceiptFlusher) needsSeed(agentID string) bool {
+	if f == nil || agentID == "" {
+		return false
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return !f.seeded[agentID]
+}
+
+func (f *readReceiptFlusher) markSeeded(agentID string, inputs []Input) {
+	if f == nil || agentID == "" {
+		return
+	}
+	f.recordInputs(agentID, inputs)
+	f.mu.Lock()
+	if f.seeded == nil {
+		f.seeded = make(map[string]bool)
+	}
+	f.seeded[agentID] = true
+	f.mu.Unlock()
 }
 
 func (f *readReceiptFlusher) recordInputs(agentID string, inputs []Input) {

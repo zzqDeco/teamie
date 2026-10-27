@@ -231,10 +231,26 @@ export function computeShellAttention({
       locallyResolvedChannel += 1;
     }
   }
-  const channelAttentionCount = Math.max(
+  const hasMutedChannel = allAuthorizedConversations.some(
+    (c) => c.type === "channel" && effectiveNotificationLevel(c) === "none",
+  );
+  let channelAttentionCount = Math.max(
     0,
     rawChannelAttention - locallyResolvedChannel,
   );
+  if (hasMutedChannel) {
+    const unmutedChannelRawUnread = allAuthorizedConversations.reduce(
+      (sum, c) =>
+        c.type === "channel" && effectiveNotificationLevel(c) !== "none"
+          ? sum + Math.max(0, c.lastSeq - c.readSeq)
+          : sum,
+      0,
+    );
+    channelAttentionCount = Math.min(
+      channelAttentionCount,
+      unmutedChannelRawUnread,
+    );
+  }
   const urgentCount = directUnreadCount + channelAttentionCount;
   const hasChannelUnread = allAuthorizedConversations.some(
     (c) =>

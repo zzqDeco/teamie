@@ -343,7 +343,7 @@ describe("IM engagement suite: reactions, read receipts, presence, and notificat
     await flush();
     expect(deleteSpy).toHaveBeenCalledWith(conv.id, m1.id, "👍");
 
-    // When im.reactions.create is disabled, persisted reactions still render as disabled chips
+    // When im.reactions.create is disabled, own active reactions can still be removed (DELETE) while others' chips are disabled
     bootstrap = {
       ...bootstrap,
       capabilities: {
@@ -354,6 +354,7 @@ describe("IM engagement suite: reactions, read receipts, presence, and notificat
     await act(async () => {
       chatStore.setReactions(conv.id, m1.id, [
         { emoji: "🔥", count: 2, userIds: [peerAlice.userId, peerBob.userId] },
+        { emoji: "👀", count: 1, userIds: [selfUser.id] },
       ]);
       root.render(
         <MemoryRouter>
@@ -371,10 +372,17 @@ describe("IM engagement suite: reactions, read receipts, presence, and notificat
     expect(
       host.querySelector('button[aria-label="添加表情回应"]'),
     ).toBeNull();
-    const readonlyChip = host.querySelector<HTMLButtonElement>(".reaction-chip")!;
-    expect(readonlyChip).toBeTruthy();
-    expect(readonlyChip.disabled).toBe(true);
-    expect(readonlyChip.textContent).toContain("🔥2");
+    const disabledChips = host.querySelectorAll<HTMLButtonElement>(".reaction-chip");
+    expect(disabledChips).toHaveLength(2);
+    expect(disabledChips[0].disabled).toBe(true);
+    expect(disabledChips[0].textContent).toContain("🔥2");
+    expect(disabledChips[1].disabled).toBe(false);
+    expect(disabledChips[1].textContent).toContain("👀1");
+    await act(async () => {
+      disabledChips[1].click();
+    });
+    await flush();
+    expect(deleteSpy).toHaveBeenCalledWith(conv.id, m1.id, "👀");
   });
 
   it("renders read receipts for direct ('已读'/'未读'), group ('N 人已读' with read/unread member popover), and channel ('N 人已读' without member names)", async () => {
@@ -428,7 +436,7 @@ describe("IM engagement suite: reactions, read receipts, presence, and notificat
       readSeqCounts: [{ readSeq: 2, count: 2 }],
     });
     await act(async () => {
-      receiptStore.invalidate(dmConv.id);
+      window.dispatchEvent(new Event("focus"));
     });
     await flush();
     expect(
@@ -518,10 +526,10 @@ describe("IM engagement suite: reactions, read receipts, presence, and notificat
     });
     await flush();
 
-    // 3 total at seq 2 minus self = 2 人已读, rendered as non-expandable span
+    // Backend readSeqCounts already excludes caller: 3 at seq 2 = 3 人已读, rendered as non-expandable span
     const chanReceipt = host.querySelector(".message-read-receipt")!;
     expect(chanReceipt.tagName).toBe("SPAN");
-    expect(chanReceipt.textContent).toBe("2 人已读");
+    expect(chanReceipt.textContent).toBe("3 人已读");
   });
 
   it("displays human online/away/offline presence indicators in direct headers and member directory while keeping Agents on Agent badges", async () => {

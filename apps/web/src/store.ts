@@ -136,6 +136,7 @@ export type ChatSnapshot = {
   cursor: string;
   messages: Record<string, LocalMessage[]>;
   conversations: Record<string, Conversation>;
+  reactions?: Record<string, Reaction[]>;
   revision: number;
 };
 export type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
@@ -566,19 +567,28 @@ export class ChatStore {
   }
   setReactions(conversationId: string, messageId: string, reactions: Reaction[]) {
     const list = this.snapshot.messages[conversationId];
-    if (!list) return;
     let changed = false;
-    const nextList = list.map((m) => {
-      if (m.id !== messageId || m.retractedAt) return m;
-      changed = true;
-      return { ...m, reactions };
-    });
-    if (!changed) return;
+    const nextList = list
+      ? list.map((m) => {
+          if (m.id !== messageId || m.retractedAt) return m;
+          changed = true;
+          return { ...m, reactions };
+        })
+      : undefined;
+    const reactionKey = `${conversationId}:${messageId}`;
     this.commit({
       ...this.snapshot,
-      messages: {
-        ...this.snapshot.messages,
-        [conversationId]: nextList,
+      ...(changed && nextList
+        ? {
+            messages: {
+              ...this.snapshot.messages,
+              [conversationId]: nextList,
+            },
+          }
+        : {}),
+      reactions: {
+        ...this.snapshot.reactions,
+        [reactionKey]: reactions,
       },
     });
   }
@@ -601,6 +611,7 @@ export class ChatStore {
       ...this.snapshot,
       messages: { ...this.snapshot.messages },
       conversations: { ...this.snapshot.conversations },
+      reactions: { ...this.snapshot.reactions },
     };
     for (const event of page.events) {
       if (olderOrEqual(event.id, this.snapshot.cursor)) continue;
@@ -610,6 +621,11 @@ export class ChatStore {
           next.messages[m.conversationId] || [],
           [m],
         );
+        if (m.retractedAt) {
+          delete next.reactions[`${m.conversationId}:${m.id}`];
+        } else if (m.reactions !== undefined) {
+          next.reactions[`${m.conversationId}:${m.id}`] = m.reactions;
+        }
         const conversation = next.conversations[m.conversationId];
         if (conversation)
           next.conversations[m.conversationId] = {
@@ -644,15 +660,18 @@ export class ChatStore {
       if (
         event.type === "reaction.updated" &&
         event.conversationId &&
-        event.messageId &&
-        next.messages[event.conversationId]
+        event.messageId
       ) {
-        const list = next.messages[event.conversationId];
-        next.messages[event.conversationId] = list.map((m) =>
-          m.id === event.messageId && !m.retractedAt
-            ? { ...m, reactions: event.reactions || [] }
-            : m,
-        );
+        next.reactions[`${event.conversationId}:${event.messageId}`] =
+          event.reactions || [];
+        if (next.messages[event.conversationId]) {
+          const list = next.messages[event.conversationId];
+          next.messages[event.conversationId] = list.map((m) =>
+            m.id === event.messageId && !m.retractedAt
+              ? { ...m, reactions: event.reactions || [] }
+              : m,
+          );
+        }
       }
       if (
         event.type === "preference.updated" &&

@@ -214,15 +214,19 @@ func TestPresenceLifecycleMultiTabAndWorkspaceQuery(t *testing.T) {
 
 func TestReceiptsChangedCoalescingAndAccessCheck(t *testing.T) {
 	access := &workspacePresenceAccess{
-		convAllowed: map[string]bool{"alice": true, "bob": false},
+		convAllowed:     map[string]bool{"alice": true, "carol": true, "bob": false},
+		wsAllowed:       map[string]bool{"alice": true},
+		sharedMembers:   []string{"alice", "carol"},
+		presenceEnabled: true,
 	}
 	pAlice := &peer{user: "alice", token: "tok-a", queue: make(chan Hint, 8), done: make(chan struct{})}
+	pCarol := &peer{user: "carol", token: "tok-c", queue: make(chan Hint, 8), done: make(chan struct{})}
 	pBob := &peer{user: "bob", token: "tok-b", queue: make(chan Hint, 8), done: make(chan struct{})}
 	h := &Hub{
 		Chat:  access,
-		peers: map[*peer]struct{}{pAlice: {}, pBob: {}},
+		peers: map[*peer]struct{}{pAlice: {}, pCarol: {}, pBob: {}},
 	}
-	h.policy.ReceiptInterval = 80 * time.Millisecond
+	h.policy.ReceiptInterval = 60 * time.Millisecond
 
 	hint := Hint{
 		Type:           "receipts.changed",
@@ -230,7 +234,7 @@ func TestReceiptsChangedCoalescingAndAccessCheck(t *testing.T) {
 		ConversationID: "conv-1",
 	}
 
-	// First hint is delivered to authorized member Alice, not unauthorized Bob.
+	// First hint is delivered immediately to authorized member Alice, not unauthorized Bob.
 	h.deliver(context.Background(), hint)
 	select {
 	case ev := <-pAlice.queue:
@@ -246,23 +250,55 @@ func TestReceiptsChangedCoalescingAndAccessCheck(t *testing.T) {
 	default:
 	}
 
-	// Second hint within coalescing interval is suppressed.
-	h.deliver(context.Background(), hint)
+	// Another recipient (Carol) reading in the same conversation within the window is NOT blocked by Alice's throttle.
+	h.deliver(context.Background(), Hint{
+		Type:           "receipts.changed",
+		UserIDs:        []string{"carol"},
+		ConversationID: "conv-1",
+	})
 	select {
-	case ev := <-pAlice.queue:
-		t.Fatalf("coalesced receipts.changed was not suppressed: %#v", ev)
-	default:
-	}
-
-	// After coalescing interval expires, hint is delivered again.
-	time.Sleep(100 * time.Millisecond)
-	h.deliver(context.Background(), hint)
-	select {
-	case ev := <-pAlice.queue:
-		if ev.Type != "receipts.changed" {
-			t.Fatalf("alice received %#v", ev)
+	case ev := <-pCarol.queue:
+		if ev.Type != "receipts.changed" || ev.ConversationID != "conv-1" {
+			t.Fatalf("carol received %#v", ev)
 		}
 	default:
-		t.Fatal("alice did not receive receipts.changed after interval")
+		t.Fatal("carol's receipt hint was blocked by alice's throttle")
+	}
+
+	// Second hint to Alice within coalescing interval is suppressed immediately, then delivered as a trailing invalidation.
+	h.deliver(context.Background(), hint)
+	select {
+	case ev := <-pAlice.queue:
+		t.Fatalf("coalesced receipts.changed was not suppressed immediately: %#v", ev)
+	default:
+	}
+	select {
+	case ev := <-pAlice.queue:
+		if ev.Type != "receipts.changed" || ev.ConversationID != "conv-1" {
+			t.Fatalf("alice received trailing %#v", ev)
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("alice did not receive trailing receipts.changed after throttle window")
+	}
+
+	// Presence delivery rechecks SharedWorkspaceMembers and filters out Bob even if UserIDs includes Bob.
+	h.deliver(context.Background(), Hint{
+		Type:    "presence",
+		UserID:  "alice",
+		State:   "online",
+		UserIDs: []string{"carol", "bob"},
+	})
+	select {
+	case ev := <-pCarol.queue:
+		if ev.Type != "presence" || ev.UserID != "alice" || ev.State != "online" {
+			t.Fatalf("carol received %#v", ev)
+		}
+	default:
+		t.Fatal("shared workspace member carol did not receive presence")
+	}
+	select {
+	case ev := <-pBob.queue:
+		t.Fatalf("non-shared-workspace bob received presence: %#v", ev)
+	default:
 	}
 }

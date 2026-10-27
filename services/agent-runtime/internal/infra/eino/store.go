@@ -309,6 +309,38 @@ func (s *Store) Ingest(ctx context.Context, l *Lease, cursor string, inputs []In
 	}
 	return s.Repo().IngestInputs(ctx, l, cursor, toDomainInputs(inputs))
 }
+func (s *Store) IngestedConversationSeqs(ctx context.Context, agentID string) ([]Input, error) {
+	if s == nil || s.DB == nil || agentID == "" {
+		return nil, nil
+	}
+	rows, err := s.DB.Query(
+		ctx,
+		`SELECT payload->>'conversationId', MAX((payload->>'seq')::bigint)
+		 FROM runtime_inputs
+		 WHERE agent_id = $1
+		   AND COALESCE(payload->>'kind', '') = ''
+		   AND COALESCE(payload->>'conversationId', '') <> ''
+		   AND (payload->>'seq') ~ '^[0-9]+$'
+		 GROUP BY payload->>'conversationId'`,
+		agentID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Input
+	for rows.Next() {
+		var convID string
+		var seq int64
+		if err := rows.Scan(&convID, &seq); err != nil {
+			return nil, err
+		}
+		if validUUID(convID) && seq > 0 {
+			out = append(out, Input{ConversationID: convID, Seq: seq})
+		}
+	}
+	return out, rows.Err()
+}
 func (s *Store) Pending(ctx context.Context, l *Lease) ([]Input, error) {
 	raws, err := s.DB.ListPendingInputs(ctx, l.AgentID)
 	if err != nil {

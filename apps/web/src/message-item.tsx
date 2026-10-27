@@ -809,12 +809,15 @@ export const MessageItem = memo(function MessageItem({
   }, [pickerOpen]);
 
   async function toggleReaction(emoji: string) {
-    if (!canReact || reactionBusy || message.retractedAt || message.status) {
+    if (reactionBusy || message.retractedAt || message.status) {
+      return;
+    }
+    const existing = message.reactions?.find((item) => item.emoji === emoji);
+    const reactedByMe = !!existing?.userIds.includes(userId);
+    if (!reactedByMe && !canReact) {
       return;
     }
     setPickerOpen(false);
-    const existing = message.reactions?.find((item) => item.emoji === emoji);
-    const reactedByMe = !!existing?.userIds.includes(userId);
     const token = chatStore.generation;
     setReactionBusy(true);
     try {
@@ -1040,7 +1043,7 @@ export const MessageItem = memo(function MessageItem({
                       key={reaction.emoji}
                       type="button"
                       className={`reaction-chip ${active ? "active" : ""}`}
-                      disabled={!canReact || reactionBusy}
+                      disabled={(!canReact && !active) || reactionBusy}
                       aria-pressed={active}
                       title={tooltip}
                       aria-label={`${reaction.emoji} ${reaction.count} 人回应：${reactorNames.join("、")}`}
