@@ -348,7 +348,7 @@ struct AttentionPageResp {
   2: optional string cursor (api.body="cursor")
   3: required i64 unreadCount (api.body="unreadCount")
   4: required i64 channelUnreadCount (api.body="channelUnreadCount")
-  5: optional list<AttentionUnreadDTO> attentionUnreadByConversation (api.body="attentionUnreadByConversation")
+  5: optional list<AttentionUnreadDTO> attentionUnreadByConversation (api.body="attentionUnreadByConversation", go.tag="json:\"attentionUnreadByConversation\"")
 }
 
 struct SyncReq {

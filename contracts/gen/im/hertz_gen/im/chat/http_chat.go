@@ -2293,7 +2293,7 @@ type AttentionPageResp struct {
 	Cursor                        *string               `thrift:"cursor,2,optional" json:"cursor,omitempty"`
 	UnreadCount                   int64                 `thrift:"unreadCount,3,required" json:"unreadCount"`
 	ChannelUnreadCount            int64                 `thrift:"channelUnreadCount,4,required" json:"channelUnreadCount"`
-	AttentionUnreadByConversation []*AttentionUnreadDTO `thrift:"attentionUnreadByConversation,5,optional,list<AttentionUnreadDTO>" json:"attentionUnreadByConversation,omitempty"`
+	AttentionUnreadByConversation []*AttentionUnreadDTO `thrift:"attentionUnreadByConversation,5,optional,list<AttentionUnreadDTO>" json:"attentionUnreadByConversation"`
 }
 
 func NewAttentionPageResp() *AttentionPageResp {
