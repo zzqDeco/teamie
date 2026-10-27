@@ -101,7 +101,7 @@ type MessageRepository interface {
 	QueryVerifiedWorkspaceSearchItems(ctx context.Context, userID, query string, before any, cursorID string, limit int, candidateMessageIDs, conversationIDs []string) ([]WorkspaceSearchItem, error)
 	LockUserWorkspacesForShare(ctx context.Context, userID string) ([]string, error)
 	LockUserConversationsForShare(ctx context.Context, userID string, workspaceIDs []string) ([]string, error)
-	QueryAttentionProjection(ctx context.Context, userID string, before any, cursorID string, unreadOnly bool, limit int, conversationIDs []string) (unreadCount, channelUnreadCount int64, items []AttentionItem, err error)
+	QueryAttentionProjection(ctx context.Context, userID string, before any, cursorID string, unreadOnly bool, limit int, conversationIDs []string) (unreadCount, channelUnreadCount int64, items []AttentionItem, unreadByConversation []AttentionUnread, err error)
 }
 
 // AttachmentRepository defines persistence operations for file attachments and upload receipts.

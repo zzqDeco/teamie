@@ -62,10 +62,16 @@ type AttentionItem struct {
 }
 
 type AttentionPage struct {
-	Items              []AttentionItem `json:"items"`
-	Cursor             string          `json:"cursor,omitempty"`
-	UnreadCount        int64           `json:"unreadCount"`
-	ChannelUnreadCount int64           `json:"channelUnreadCount"`
+	Items                         []AttentionItem   `json:"items"`
+	Cursor                        string            `json:"cursor,omitempty"`
+	UnreadCount                   int64             `json:"unreadCount"`
+	ChannelUnreadCount            int64             `json:"channelUnreadCount"`
+	AttentionUnreadByConversation []AttentionUnread `json:"attentionUnreadByConversation"`
+}
+
+type AttentionUnread struct {
+	ConversationID string `json:"conversationId"`
+	UnreadCount    int64  `json:"unreadCount"`
 }
 
 type WorkspaceSearchItem struct {

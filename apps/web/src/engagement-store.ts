@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useSyncExternalStore } from "react";
-import { api } from "@teamie/api-client";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
+import { api, ApiError } from "@teamie/api-client";
 import type {
   Conversation,
   Member,
@@ -7,6 +7,7 @@ import type {
   PresenceState,
   ReadReceipts,
 } from "@teamie/api-client";
+import { chatStore } from "./store";
 
 export const COMMON_REACTION_EMOJIS = [
   "👍",
@@ -106,12 +107,14 @@ type ReceiptStoreState = {
   byConversation: Record<string, ReadReceipts>;
   invalidations: Record<string, number>;
   globalInvalidation: number;
+  sessionEpoch: number;
 };
 
 let receiptState: ReceiptStoreState = {
   byConversation: {},
   invalidations: {},
   globalInvalidation: 0,
+  sessionEpoch: 0,
 };
 const receiptListeners = new Set<() => void>();
 
@@ -148,73 +151,89 @@ export const receiptStore = {
       },
     });
   },
-  invalidateAll() {
+  invalidateAll(clear = false) {
     setReceipts({
       ...receiptState,
+      ...(clear ? { byConversation: {}, sessionEpoch: receiptState.sessionEpoch + 1 } : {}),
       globalInvalidation: receiptState.globalInvalidation + 1,
     });
   },
+  remove(conversationId: string) {
+    const next = { ...receiptState.byConversation };
+    delete next[conversationId];
+    setReceipts({ ...receiptState, byConversation: next });
+  },
   reset() {
-    if (
-      Object.keys(receiptState.byConversation).length > 0 ||
-      Object.keys(receiptState.invalidations).length > 0 ||
-      receiptState.globalInvalidation > 0
-    ) {
-      setReceipts({
-        byConversation: {},
-        invalidations: {},
-        globalInvalidation: 0,
-      });
-    }
+    setReceipts({ byConversation: {}, invalidations: {}, globalInvalidation: receiptState.globalInvalidation + 1, sessionEpoch: receiptState.sessionEpoch + 1 });
   },
 };
 
-export function useConversationReceiptsSync(
-  conversationId: string,
-  enabled: boolean,
-  hasOwnMessages: boolean,
-) {
-  const invalidation = useSyncExternalStore(
-    receiptStore.subscribe,
-    useCallback(() => {
-      const snap = receiptStore.getSnapshot();
-      return (snap.invalidations[conversationId] || 0) + snap.globalInvalidation;
-    }, [conversationId]),
-  );
+export function useConversationReceiptsSync(conversationId: string, enabled: boolean, hasOwnMessages: boolean) {
+  const invalidation = useSyncExternalStore(receiptStore.subscribe, useCallback(() => {
+    const snap = receiptStore.getSnapshot();
+    return `${snap.sessionEpoch}:${snap.globalInvalidation}:${snap.invalidations[conversationId] || 0}`;
+  }, [conversationId]));
+  const sessionEpoch = receiptStore.getSnapshot().sessionEpoch;
+  const identity = useSyncExternalStore(chatStore.subscribe, () => `${chatStore.getSnapshot().userId}:${chatStore.generation}`);
+  const runner = useRef<{ refresh: () => void } | undefined>(undefined);
 
   useEffect(() => {
     if (!enabled || !conversationId || !hasOwnMessages) return;
-    const onFocus = () => {
-      receiptStore.invalidate(conversationId);
+    let stopped = false, inFlight = false, dirty = false, failures = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let controller: AbortController | undefined;
+    const generation = chatStore.generation;
+    const refresh = () => {
+      dirty = true;
+      if (stopped || inFlight) return;
+      if (timer) clearTimeout(timer);
+      if (!navigator.onLine || document.visibilityState === "hidden") return;
+      dirty = false;
+      inFlight = true;
+      controller = new AbortController();
+      void api.readReceipts(conversationId, controller.signal).then((result) => {
+        if (!stopped && generation === chatStore.generation && sessionEpoch === receiptStore.getSnapshot().sessionEpoch) {
+          failures = 0;
+          receiptStore.set(conversationId, result);
+        }
+      }).catch((error: unknown) => {
+        if (stopped || controller?.signal.aborted) return;
+        if (error instanceof ApiError && error.status >= 400 && error.status < 500 && error.status !== 429) {
+          receiptStore.remove(conversationId);
+          dirty = false;
+          return;
+        }
+        timer = setTimeout(refresh, Math.min(30_000, 1000 * 2 ** Math.min(failures++, 5)));
+      }).finally(() => {
+        inFlight = false;
+        if (dirty && !stopped) refresh();
+      });
     };
-    const onVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        receiptStore.invalidate(conversationId);
-      }
-    };
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVisibilityChange);
+    runner.current = { refresh };
     return () => {
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
+      stopped = true;
+      controller?.abort();
+      if (timer) clearTimeout(timer);
+      runner.current = undefined;
+    };
+  }, [conversationId, enabled, hasOwnMessages, identity, sessionEpoch]);
+
+  useEffect(() => {
+    if (enabled && hasOwnMessages) runner.current?.refresh();
+  }, [conversationId, enabled, hasOwnMessages, identity, invalidation]);
+
+  useEffect(() => {
+    if (!enabled || !conversationId || !hasOwnMessages) return;
+    const refresh = () => { if (document.visibilityState !== "hidden") receiptStore.invalidate(conversationId); };
+    window.addEventListener("focus", refresh);
+    window.addEventListener("online", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("online", refresh);
+      document.removeEventListener("visibilitychange", refresh);
     };
   }, [conversationId, enabled, hasOwnMessages]);
-
-  useEffect(() => {
-    if (!enabled || !conversationId || !hasOwnMessages) return;
-    const controller = new AbortController();
-    void api
-      .readReceipts(conversationId, controller.signal)
-      .then((res) => {
-        if (!controller.signal.aborted) {
-          receiptStore.set(conversationId, res);
-        }
-      })
-      .catch(() => {
-        /* Read receipts are supplementary; ignore transient errors. */
-      });
-    return () => controller.abort();
-  }, [conversationId, enabled, hasOwnMessages, invalidation]);
 }
 
 export function useConversationReceipts(

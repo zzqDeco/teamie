@@ -94,10 +94,11 @@ type AttentionItem struct {
 }
 
 type AttentionPage struct {
-	Items              []AttentionItem `json:"items"`
-	Cursor             string          `json:"cursor,omitempty"`
-	UnreadCount        int64           `json:"unreadCount"`
-	ChannelUnreadCount int64           `json:"channelUnreadCount"`
+	Items                         []AttentionItem          `json:"items"`
+	Cursor                        string                   `json:"cursor,omitempty"`
+	UnreadCount                   int64                    `json:"unreadCount"`
+	ChannelUnreadCount            int64                    `json:"channelUnreadCount"`
+	AttentionUnreadByConversation []domain.AttentionUnread `json:"attentionUnreadByConversation"`
 }
 
 func compatErr(err error) error {
@@ -411,10 +412,11 @@ func (s *Store) Attention(ctx context.Context, user, rawCursor string, limit int
 		}
 	}
 	return AttentionPage{
-		Items:              items,
-		Cursor:             page.Cursor,
-		UnreadCount:        page.UnreadCount,
-		ChannelUnreadCount: page.ChannelUnreadCount,
+		Items:                         items,
+		Cursor:                        page.Cursor,
+		UnreadCount:                   page.UnreadCount,
+		ChannelUnreadCount:            page.ChannelUnreadCount,
+		AttentionUnreadByConversation: page.AttentionUnreadByConversation,
 	}, nil
 }
 

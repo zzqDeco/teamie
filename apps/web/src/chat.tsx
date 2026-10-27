@@ -75,12 +75,18 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (appliedBootstrap.current === query.data) return;
+      const previous = chatStore.getSnapshot().conversations;
+      const changedReaders = appliedBootstrap.current !== null && (
+        Object.keys(previous).length !== query.data.conversations.length ||
+        query.data.conversations.some((c) => !previous[c.id] || previous[c.id].memberIds.join("\0") !== c.memberIds.join("\0"))
+      );
       if (!chatStore.replaceConversations(query.data.conversations, query.data[bootstrapObservation])) {
         void client.invalidateQueries({ queryKey: ["bootstrap", userId] });
         return;
       }
       appliedBootstrap.current = query.data;
       capabilities.current = query.data.capabilities;
+      if (changedReaders) receiptStore.invalidateAll(true);
     }
   }, [client, query.data, reconcileSession, userId]);
   useEffect(() => {
@@ -187,6 +193,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               }
               appliedBootstrap.current = fresh;
               capabilities.current = fresh.capabilities;
+              receiptStore.invalidateAll(true);
+              resetNotificationSession(userId);
               const allowed = new Set(fresh.conversations.map((c) => c.id));
               page.events = page.events.filter((event) => {
                 const id =
@@ -350,7 +358,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     reconnectRef.current = () => {
       if (stopped) return;
       if (!ws || ws.readyState !== WebSocket.OPEN) online();
-      else void sync();
+      else {
+        receiptStore.invalidateAll();
+        void sync();
+      }
     };
     const offline = () => {
       setConnection("offline");

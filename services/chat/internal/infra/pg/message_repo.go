@@ -335,12 +335,12 @@ func (r *Repository) LockUserConversationsForShare(ctx context.Context, userID s
 	return r.lockIDs(ctx, `SELECT c.id FROM conversations c JOIN workspace_members wm ON wm.workspace_id=c.workspace_id AND wm.user_id=$1 WHERE c.workspace_id=ANY($2::text[]) AND (c.type='channel' OR EXISTS(SELECT 1 FROM conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id=$1)) ORDER BY c.id FOR SHARE OF c`, userID, workspaceIDs)
 }
 
-func (r *Repository) QueryAttentionProjection(ctx context.Context, userID string, before any, cursorID string, unreadOnly bool, limit int, conversationIDs []string) (int64, int64, []domain.AttentionItem, error) {
+func (r *Repository) QueryAttentionProjection(ctx context.Context, userID string, before any, cursorID string, unreadOnly bool, limit int, conversationIDs []string) (int64, int64, []domain.AttentionItem, []domain.AttentionUnread, error) {
 	var unreadCount, channelUnreadCount int64
-	var rawItems []byte
+	var rawItems, rawUnreadByConversation []byte
 	err := r.DB.Conn(ctx).QueryRow(ctx, `
 WITH candidates AS MATERIALIZED (
- SELECT m.id,m.created_at,c.type AS conversation_type,m.seq>COALESCE(r.seq,0) AS unread,
+ SELECT m.id,m.conversation_id,m.created_at,c.type AS conversation_type,m.seq>COALESCE(r.seq,0) AS unread,
         m.mentions @> jsonb_build_array(jsonb_build_object('userId',$1::text)) AS mentioned,
         (original.id IS NOT NULL AND original.sender_id=$1 AND original.retracted_at IS NULL) AS replied
  FROM messages m
@@ -351,6 +351,8 @@ WITH candidates AS MATERIALIZED (
  WHERE c.id=ANY($6::text[]) AND m.retracted_at IS NULL AND m.sender_id<>$1
    AND (c.type='channel' OR EXISTS(SELECT 1 FROM conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id=$1))
    AND (m.mentions @> jsonb_build_array(jsonb_build_object('userId',$1::text)) OR (original.sender_id=$1 AND original.retracted_at IS NULL))
+), unread_counts AS (
+ SELECT conversation_id,count(*) AS unread_count FROM candidates WHERE unread GROUP BY conversation_id
 ), page AS (
  SELECT * FROM candidates
  WHERE ($2::timestamptz IS NULL OR (created_at,id)<($2,$3::text)) AND (NOT $4::boolean OR unread)
@@ -364,14 +366,22 @@ SELECT (SELECT count(*) FROM candidates WHERE unread),
    'workspaceName',w.name,'isRead',NOT p.unread,
    'reasons',to_jsonb(array_remove(ARRAY[CASE WHEN p.mentioned THEN 'mention' END,CASE WHEN p.replied THEN 'reply' END],NULL))
  ) ORDER BY p.created_at DESC,p.id DESC)
- FROM page p JOIN messages m ON m.id=p.id JOIN conversations c ON c.id=m.conversation_id JOIN workspaces w ON w.id=c.workspace_id),'[]'::jsonb)
-`, userID, before, cursorID, unreadOnly, limit, conversationIDs).Scan(&unreadCount, &channelUnreadCount, &rawItems)
+ FROM page p JOIN messages m ON m.id=p.id JOIN conversations c ON c.id=m.conversation_id JOIN workspaces w ON w.id=c.workspace_id),'[]'::jsonb),
+ COALESCE((SELECT jsonb_agg(jsonb_build_object('conversationId',c.id,'unreadCount',COALESCE(unread.unread_count,0)) ORDER BY c.id)
+ FROM conversations c JOIN workspace_members wm ON wm.workspace_id=c.workspace_id AND wm.user_id=$1
+ LEFT JOIN unread_counts unread ON unread.conversation_id=c.id
+ WHERE c.id=ANY($6::text[]) AND (c.type='channel' OR EXISTS(SELECT 1 FROM conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id=$1))),'[]'::jsonb)
+`, userID, before, cursorID, unreadOnly, limit, conversationIDs).Scan(&unreadCount, &channelUnreadCount, &rawItems, &rawUnreadByConversation)
 	if err != nil {
-		return 0, 0, nil, err
+		return 0, 0, nil, nil, err
 	}
 	items := []domain.AttentionItem{}
 	if err = json.Unmarshal(rawItems, &items); err != nil {
-		return 0, 0, nil, err
+		return 0, 0, nil, nil, err
+	}
+	unreadByConversation := []domain.AttentionUnread{}
+	if err = json.Unmarshal(rawUnreadByConversation, &unreadByConversation); err != nil {
+		return 0, 0, nil, nil, err
 	}
 	ids := make([]string, 0, len(items))
 	for _, it := range items {
@@ -379,10 +389,10 @@ SELECT (SELECT count(*) FROM candidates WHERE unread),
 	}
 	byID, err := r.loadReactionsByMessageIDs(ctx, ids)
 	if err != nil {
-		return 0, 0, nil, err
+		return 0, 0, nil, nil, err
 	}
 	for i := range items {
 		items[i].Message.Reactions = byID[items[i].Message.ID]
 	}
-	return unreadCount, channelUnreadCount, items, nil
+	return unreadCount, channelUnreadCount, items, unreadByConversation, nil
 }

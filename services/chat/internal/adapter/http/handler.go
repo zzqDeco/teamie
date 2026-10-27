@@ -735,11 +735,20 @@ func (a *Adapter) GetAttention(ctx context.Context, req *chatgen.GetAttentionReq
 		})
 	}
 	return &chatgen.AttentionPageResp{
-		Items:              items,
-		Cursor:             optString(page.Cursor),
-		UnreadCount:        page.UnreadCount,
-		ChannelUnreadCount: page.ChannelUnreadCount,
+		Items:                         items,
+		Cursor:                        optString(page.Cursor),
+		UnreadCount:                   page.UnreadCount,
+		ChannelUnreadCount:            page.ChannelUnreadCount,
+		AttentionUnreadByConversation: attentionUnreadDTOs(page.AttentionUnreadByConversation),
 	}, nil
+}
+
+func attentionUnreadDTOs(items []domain.AttentionUnread) []*chatgen.AttentionUnreadDTO {
+	out := make([]*chatgen.AttentionUnreadDTO, 0, len(items))
+	for _, item := range items {
+		out = append(out, &chatgen.AttentionUnreadDTO{ConversationId: item.ConversationID, UnreadCount: item.UnreadCount})
+	}
+	return out
 }
 
 func (a *Adapter) Sync(ctx context.Context, req *chatgen.SyncReq) (*chatgen.SyncResp, error) {

@@ -647,7 +647,7 @@ export function Shell() {
         connection={chat.connection} connectionLabel={connectionLabel}
         isAttentionPage={isAttentionPage} isAgentsPage={isAgentsPage}
         attentionUnreadCount={attentionCount.data?.unreadCount}
-        attentionItems={attentionCount.data?.items}
+        attentionProjection={attentionCount.data?.attentionUnreadByConversation}
         snapshot={snapshot}
         workspaces={chat.data?.workspaces || []} workspace={workspace}
         owner={owner} caps={caps}

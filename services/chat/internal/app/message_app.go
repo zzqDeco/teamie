@@ -463,7 +463,7 @@ func (s *Service) SearchWorkspaceMessages(ctx context.Context, userID, workspace
 
 // Attention computes the caller's mention/reply attention inbox projection.
 func (s *Service) Attention(ctx context.Context, userID, rawCursor string, limit int, unreadOnly bool) (domain.AttentionPage, error) {
-	out := domain.AttentionPage{Items: []domain.AttentionItem{}}
+	out := domain.AttentionPage{Items: []domain.AttentionItem{}, AttentionUnreadByConversation: []domain.AttentionUnread{}}
 	if limit < 1 || limit > 100 {
 		return out, domain.ErrInvalidAttentionPageSize()
 	}
@@ -487,13 +487,14 @@ func (s *Service) Attention(ctx context.Context, userID, rawCursor string, limit
 		if rawCursor != "" {
 			before = cursor.At
 		}
-		unread, channelUnread, items, err := s.Messages.QueryAttentionProjection(txCtx, userID, before, cursor.ID, unreadOnly, limit+1, conversations)
+		unread, channelUnread, items, unreadByConversation, err := s.Messages.QueryAttentionProjection(txCtx, userID, before, cursor.ID, unreadOnly, limit+1, conversations)
 		if err != nil {
 			return err
 		}
 		out.UnreadCount = unread
 		out.ChannelUnreadCount = channelUnread
 		out.Items = items
+		out.AttentionUnreadByConversation = unreadByConversation
 		if len(out.Items) > limit {
 			out.Items = out.Items[:limit]
 			last := out.Items[len(out.Items)-1].Message

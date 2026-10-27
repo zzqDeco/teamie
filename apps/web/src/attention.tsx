@@ -8,10 +8,10 @@ import { useAuth } from "./auth";
 import { errorText, useChatState } from "./chat";
 import {
   chatStore,
-  effectiveNotificationLevel,
   reconcileMessages,
 } from "./store";
 import type { ChatSnapshot } from "./store";
+import { fetchAttentionCount } from "./notification-projection";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
 import { MentionText } from "./mentions";
 import { Avatar, Button, date, IconButton, Notice, time } from "./ui";
@@ -24,9 +24,6 @@ function useAttentionScope() {
   const conversations = Object.values(snapshot.conversations).sort((a, b) =>
     a.id.localeCompare(b.id),
   );
-  const hasCustomLevels = conversations.some(
-    (conversation) => effectiveNotificationLevel(conversation) !== "all",
-  );
   return {
     userId: user!.id,
     generation: chatStore.generation,
@@ -34,21 +31,14 @@ function useAttentionScope() {
     reads: conversations
       .map((conversation) => `${conversation.id}:${conversation.readSeq}`)
       .join("|"),
-    levels: hasCustomLevels
-      ? conversations
-          .map(
-            (conversation) =>
-              `${conversation.id}:${effectiveNotificationLevel(conversation)}`,
-          )
-          .join("|")
-      : "",
-    hasCustomLevels,
+    epoch: chatStore.notificationEpoch,
     enabled: snapshot.userId === user!.id,
   };
 }
 
 const retry = (count: number, error: Error) =>
   count < 1 &&
+  error.name !== "AbortError" &&
   !(
     error instanceof ApiError &&
     [400, 401, 403, 404, 409].includes(error.status)
@@ -64,37 +54,9 @@ export function useAttentionCount() {
       scope.access,
       "count",
       scope.reads,
-      ...(scope.levels ? [scope.levels] : []),
+      scope.epoch,
     ],
-    queryFn: async ({ signal }) => {
-      if (!scope.hasCustomLevels) {
-        return api.attention({ limit: 1 }, signal);
-      }
-      const items: AttentionItem[] = [];
-      let cursor: string | undefined = undefined;
-      let unreadCount = 0;
-      let channelUnreadCount: number | undefined = undefined;
-      const seenCursors = new Set<string>();
-      for (;;) {
-        const page = await api.attention(
-          { cursor, unreadOnly: true, limit: 100 },
-          signal,
-        );
-        if (cursor === undefined) {
-          unreadCount = page.unreadCount;
-          channelUnreadCount = page.channelUnreadCount;
-        }
-        items.push(...page.items);
-        if (!page.cursor || seenCursors.has(page.cursor)) break;
-        seenCursors.add(page.cursor);
-        cursor = page.cursor;
-      }
-      return {
-        items,
-        unreadCount,
-        ...(channelUnreadCount !== undefined ? { channelUnreadCount } : {}),
-      };
-    },
+    queryFn: ({ signal }) => fetchAttentionCount(signal),
     enabled: scope.enabled,
     staleTime: 5_000,
     refetchInterval: 30_000,

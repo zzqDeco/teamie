@@ -267,9 +267,11 @@ describe("IM engagement suite: reactions, read receipts, presence, and notificat
     });
     const putSpy = vi.spyOn(api, "putReaction").mockResolvedValue({
       reactions: [{ emoji: "👍", count: 1, userIds: [selfUser.id] }],
+      reactionsVersion: "1",
     });
     const deleteSpy = vi.spyOn(api, "deleteReaction").mockResolvedValue({
       reactions: [],
+      reactionsVersion: "2",
     });
 
     await act(async () => {
@@ -625,7 +627,7 @@ describe("IM engagement suite: reactions, read receipts, presence, and notificat
     const snap = chatStore.getSnapshot();
     const sumAll = summarizeConversationUnread(chanAll, snap, selfUser.id);
     expect(sumAll.hasUnread).toBe(true);
-    expect(sumAll.badgeCount).toBe(3);
+    expect(sumAll.badgeCount).toBe(0);
     expect(sumAll.contributesToWorkspaceDot).toBe(true);
 
     // "mentions" with 0 unread mentions suppresses both badge and bold unread state

@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import type {
   Agent,
-  AttentionItem,
+  AttentionUnreadDTO,
   Conversation,
   Member,
   User,
@@ -39,7 +39,6 @@ import { AgentDetail, MyAgents } from "./agents";
 import { WorkspaceMembers } from "./members";
 import type { Participant } from "./participants";
 import { conversationName } from "./messages";
-import { currentAttention } from "./attention";
 import {
   chatStore,
   effectiveNotificationLevel,
@@ -196,68 +195,17 @@ export function computeShellAttention({
   attentionData?: {
     unreadCount?: number;
     channelUnreadCount?: number;
-    items?: AttentionItem[];
+    items?: unknown[];
+    attentionUnreadByConversation?: AttentionUnreadDTO[];
   };
 }) {
   const activeWorkspaceIds = new Set(workspaces.map((w) => w.id));
   const allAuthorizedConversations = Object.values(
     snapshot.conversations,
   ).filter((c) => activeWorkspaceIds.has(c.workspaceId));
-  const directUnreadCount = allAuthorizedConversations.reduce((sum, c) => {
-    if (c.type === "channel") return sum;
-    const summary = summarizeConversationUnread(
-      c,
-      snapshot,
-      userId,
-      attentionData?.items,
-    );
-    return sum + summary.contributesToUrgentCount;
-  }, 0);
-  const rawChannelAttention = attentionData?.channelUnreadCount || 0;
-  let locallyResolvedChannel = 0;
-  for (const item of attentionData?.items || []) {
-    if (item.isRead || item.conversation.type !== "channel") continue;
-    const conv = snapshot.conversations[item.conversation.id];
-    if (conv && effectiveNotificationLevel(conv) === "none") {
-      locallyResolvedChannel += 1;
-      continue;
-    }
-    const current = currentAttention(item, snapshot, userId);
-    if (
-      !current ||
-      current.isRead ||
-      current.conversation.type !== "channel"
-    ) {
-      locallyResolvedChannel += 1;
-    }
-  }
-  const hasMutedChannel = allAuthorizedConversations.some(
-    (c) => c.type === "channel" && effectiveNotificationLevel(c) === "none",
-  );
-  let channelAttentionCount = Math.max(
-    0,
-    rawChannelAttention - locallyResolvedChannel,
-  );
-  if (hasMutedChannel) {
-    const unmutedChannelRawUnread = allAuthorizedConversations.reduce(
-      (sum, c) =>
-        c.type === "channel" && effectiveNotificationLevel(c) !== "none"
-          ? sum + Math.max(0, c.lastSeq - c.readSeq)
-          : sum,
-      0,
-    );
-    channelAttentionCount = Math.min(
-      channelAttentionCount,
-      unmutedChannelRawUnread,
-    );
-  }
-  const urgentCount = directUnreadCount + channelAttentionCount;
-  const hasChannelUnread = allAuthorizedConversations.some(
-    (c) =>
-      c.type === "channel" &&
-      effectiveNotificationLevel(c) === "all" &&
-      c.lastSeq > c.readSeq,
-  );
+  const summaries = allAuthorizedConversations.map((c) => summarizeConversationUnread(c, snapshot, userId, attentionData?.attentionUnreadByConversation));
+  const urgentCount = summaries.reduce((sum, summary) => sum + summary.contributesToUrgentCount, 0);
+  const hasChannelUnread = summaries.some((summary) => summary.contributesToChannelUnreadDot);
   return {
     allAuthorizedConversations,
     urgentCount,
@@ -458,7 +406,7 @@ function ConversationItem({
   selected,
   members,
   snapshot,
-  attentionItems,
+  attentionProjection,
   presenceEnabled,
   onClick,
 }: {
@@ -466,7 +414,7 @@ function ConversationItem({
   selected: boolean;
   members: Member[];
   snapshot?: ChatSnapshot;
-  attentionItems?: ReadonlyArray<AttentionItem>;
+  attentionProjection?: ReadonlyArray<AttentionUnreadDTO>;
   presenceEnabled?: boolean;
   onClick: () => void;
 }) {
@@ -476,7 +424,7 @@ function ConversationItem({
     conversation,
     activeSnapshot,
     user!.id,
-    attentionItems,
+    attentionProjection,
   );
   const otherMember = members.find(
     (member) =>
@@ -537,6 +485,7 @@ function ConversationItem({
         <span
           className={`unread-badge ${summary.badgePrefix ? "mention-badge" : ""}`}
           aria-label={`${summary.badgeCount} 条未读`}
+          title={conversation.type === "channel" && summary.projectionStale ? "截至最近同步的未读提醒" : undefined}
         >
           {summary.badgePrefix}
           {summary.badgeCount > 99 ? "99+" : summary.badgeCount}
@@ -564,7 +513,7 @@ export function ShellSidebar({
   isAttentionPage,
   isAgentsPage,
   attentionUnreadCount,
-  attentionItems,
+  attentionProjection,
   snapshot,
   workspaces,
   workspace,
@@ -592,7 +541,7 @@ export function ShellSidebar({
   isAttentionPage: boolean;
   isAgentsPage: boolean;
   attentionUnreadCount?: number;
-  attentionItems?: ReadonlyArray<AttentionItem>;
+  attentionProjection?: ReadonlyArray<AttentionUnreadDTO>;
   snapshot?: ChatSnapshot;
   workspaces: Workspace[];
   workspace?: Workspace;
@@ -659,7 +608,7 @@ export function ShellSidebar({
                   c,
                   activeSnapshot,
                   user.id,
-                  attentionItems,
+                  attentionProjection,
                 ).contributesToWorkspaceDot,
             );
             return (
@@ -756,7 +705,7 @@ export function ShellSidebar({
                 selected={c.id === conversationId}
                 members={members}
                 snapshot={activeSnapshot}
-                attentionItems={attentionItems}
+                attentionProjection={attentionProjection}
                 presenceEnabled={presenceEnabled}
                 onClick={onCloseSidebar}
               />
@@ -780,7 +729,7 @@ export function ShellSidebar({
                 selected={c.id === conversationId}
                 members={members}
                 snapshot={activeSnapshot}
-                attentionItems={attentionItems}
+                attentionProjection={attentionProjection}
                 presenceEnabled={presenceEnabled}
                 onClick={onCloseSidebar}
               />

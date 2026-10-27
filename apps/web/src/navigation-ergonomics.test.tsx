@@ -327,6 +327,7 @@ describe("PR-3 navigation & notification ergonomics", () => {
       ],
       unreadCount: 2,
       channelUnreadCount: 1,
+      attentionUnreadByConversation: [{ conversationId: channel.id, unreadCount: 1 }, { conversationId: dmOne.id, unreadCount: 1 }],
     });
     act(() => {
       chatStore.replaceConversations([
@@ -769,7 +770,7 @@ describe("PR-3 navigation & notification ergonomics", () => {
       updatedAt: "2026-10-16T00:30:00Z",
     };
     chatStore.replaceConversations([
-      channel,
+      { ...channel, lastSeq: 2 },
       dmWholeSecond,
       dmSubSecond,
       agentDm,
@@ -802,8 +803,9 @@ describe("PR-3 navigation & notification ergonomics", () => {
           isRead: false,
         },
       ],
-      unreadCount: 60,
+      unreadCount: 2,
       channelUnreadCount: 2,
+      attentionUnreadByConversation: [channel, dmWholeSecond, dmSubSecond, agentDm, secondChannel].map((c) => ({ conversationId: c.id, unreadCount: c.id === channel.id ? 2 : 0 })),
     });
     const membersSpy = vi
       .spyOn(api, "members")

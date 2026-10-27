@@ -1,5 +1,5 @@
 import type {
-  AttentionItem,
+  AttentionUnreadDTO,
   Conversation,
   Message,
   NotificationLevel,
@@ -7,122 +7,9 @@ import type {
   SyncPage,
 } from "@teamie/api-client";
 
-export function effectiveNotificationLevel(
-  conversation?: Pick<Conversation, "notificationLevel"> | null,
-): NotificationLevel {
-  const level = conversation?.notificationLevel;
-  return level === "mentions" || level === "none" ? level : "all";
-}
-
-export type ConversationUnreadSummary = {
-  level: NotificationLevel;
-  muted: boolean;
-  rawUnread: number;
-  mentionUnread: number;
-  hasUnread: boolean;
-  badgeCount: number;
-  badgePrefix: string;
-  contributesToWorkspaceDot: boolean;
-  contributesToUrgentCount: number;
-  contributesToChannelUnreadDot: boolean;
-};
-
-export function summarizeConversationUnread(
-  conversation: Conversation,
-  snapshot: ChatSnapshot,
-  userId: string,
-  attentionItems?: ReadonlyArray<AttentionItem>,
-): ConversationUnreadSummary {
-  const level = effectiveNotificationLevel(conversation);
-  const rawUnread = Math.max(0, conversation.lastSeq - conversation.readSeq);
-  if (level === "none") {
-    return {
-      level,
-      muted: true,
-      rawUnread,
-      mentionUnread: 0,
-      hasUnread: false,
-      badgeCount: 0,
-      badgePrefix: "",
-      contributesToWorkspaceDot: false,
-      contributesToUrgentCount: 0,
-      contributesToChannelUnreadDot: false,
-    };
-  }
-  const mentionMessageIds = new Set<string>();
-  if (attentionItems) {
-    for (const item of attentionItems) {
-      if (
-        item.conversation.id === conversation.id &&
-        !item.isRead &&
-        !item.message.retractedAt &&
-        item.message.seq > conversation.readSeq &&
-        item.message.senderId !== userId
-      ) {
-        mentionMessageIds.add(item.message.id);
-      }
-    }
-  }
-  const cached = snapshot.messages[conversation.id] || [];
-  if (rawUnread > 0 && cached.length > 0) {
-    const byId = new Map<string, LocalMessage>();
-    for (const m of cached) {
-      if (!byId.has(m.id)) byId.set(m.id, m);
-    }
-    for (const m of cached) {
-      if (
-        m.status ||
-        m.retractedAt ||
-        m.seq <= conversation.readSeq ||
-        m.senderId === userId
-      ) {
-        continue;
-      }
-      const isMention = Boolean(
-        m.mentions?.some((mention) => mention.userId === userId),
-      );
-      let isReplyToMe = false;
-      if (m.replyToId) {
-        const parent = byId.get(m.replyToId);
-        if (parent && !parent.retractedAt && parent.senderId === userId) {
-          isReplyToMe = true;
-        }
-      }
-      if (isMention || isReplyToMe) {
-        mentionMessageIds.add(m.id);
-      }
-    }
-  }
-  const mentionUnread = mentionMessageIds.size;
-  if (level === "mentions") {
-    return {
-      level,
-      muted: false,
-      rawUnread,
-      mentionUnread,
-      hasUnread: mentionUnread > 0,
-      badgeCount: mentionUnread,
-      badgePrefix: mentionUnread > 0 ? "@ " : "",
-      contributesToWorkspaceDot: mentionUnread > 0,
-      contributesToUrgentCount: mentionUnread,
-      contributesToChannelUnreadDot: false,
-    };
-  }
-  // level === "all"
-  const isChannel = conversation.type === "channel";
-  return {
-    level,
-    muted: false,
-    rawUnread,
-    mentionUnread,
-    hasUnread: rawUnread > 0,
-    badgeCount: rawUnread,
-    badgePrefix: mentionUnread > 0 ? "@ " : "",
-    contributesToWorkspaceDot: rawUnread > 0,
-    contributesToUrgentCount: isChannel ? mentionUnread : rawUnread,
-    contributesToChannelUnreadDot: isChannel && rawUnread > 0,
-  };
-}
+export { effectiveNotificationLevel, summarizeConversationUnread } from "./notification-model";
+import { notificationInputsChanged } from "./notification-model";
+import type { NotificationProjection } from "./notification-model";
 
 export type LocalMessage = Message & {
   status?: "sending" | "failed";
@@ -137,6 +24,7 @@ export type ChatSnapshot = {
   messages: Record<string, LocalMessage[]>;
   conversations: Record<string, Conversation>;
   reactions?: Record<string, Reaction[]>;
+  notificationProjection?: NotificationProjection;
   revision: number;
 };
 export type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
@@ -342,7 +230,9 @@ export function serializeSnapshot(snapshot: ChatSnapshot): string {
     `,"cursor":${JSON.stringify(snapshot.cursor)}` +
     `,"messages":${recordJson(snapshot.messages, messagesJson)}` +
     `,"conversations":${recordJson(snapshot.conversations, conversationJson)}` +
-    `,"revision":${JSON.stringify(snapshot.revision)}}`
+    `,"revision":${JSON.stringify(snapshot.revision)}` +
+    (snapshot.notificationProjection ? `,"notificationProjection":${JSON.stringify(snapshot.notificationProjection)}` : "") +
+    "}"
   );
 }
 export class ChatStore {
@@ -352,6 +242,7 @@ export class ChatStore {
   private schedule?: PersistScheduler;
   private cancelPersist?: () => void;
   generation = 0;
+  notificationEpoch = 0;
   conversationVersion = 0;
   hasAuthoritativeConversations = false;
   constructor(storage?: StorageLike, schedule?: PersistScheduler) {
@@ -389,6 +280,18 @@ export class ChatStore {
   };
   private commit(next: ChatSnapshot) {
     const previous = this.snapshot;
+    if (notificationInputsChanged(previous, next)) {
+      this.notificationEpoch += 1;
+      if (next.notificationProjection) {
+        next = {
+          ...next,
+          notificationProjection: {
+            stale: true,
+            byConversation: Object.fromEntries(Object.entries(next.notificationProjection.byConversation).filter(([id]) => next.conversations[id])),
+          },
+        };
+      }
+    }
     this.snapshot = { ...next, revision: this.snapshot.revision + 1 };
     if (next.userId && this.storage) {
       // The persisted snapshot always pairs entities with their cursor, so a
@@ -448,6 +351,14 @@ export class ChatStore {
     } catch {
       /* A corrupt snapshot restarts durable sync from zero. */
     }
+    const cachedProjection = restored.notificationProjection;
+    if (cachedProjection && cachedProjection.byConversation && typeof cachedProjection.byConversation === "object" &&
+      Object.keys(cachedProjection.byConversation).length === Object.keys(restored.conversations).length &&
+      Object.entries(cachedProjection.byConversation).every(([id, count]) => restored.conversations[id] && Number.isSafeInteger(count) && count >= 0)) {
+      restored.notificationProjection = { ...cachedProjection, stale: true };
+    } else {
+      delete restored.notificationProjection;
+    }
     this.hasAuthoritativeConversations = false;
     this.conversationVersion =
       Object.keys(restored.conversations).length > 0 ? 1 : 0;
@@ -455,6 +366,7 @@ export class ChatStore {
   }
   clear() {
     this.generation += 1;
+    this.notificationEpoch += 1;
     this.conversationVersion += 1;
     this.hasAuthoritativeConversations = false;
     // Account isolation: a deferred write of this account must never land
@@ -591,6 +503,17 @@ export class ChatStore {
         [reactionKey]: reactions,
       },
     });
+  }
+  setAttentionProjection(items: AttentionUnreadDTO[], observed: { userId: string; generation: number; epoch: number }) {
+    if (observed.userId !== this.snapshot.userId || observed.generation !== this.generation || observed.epoch !== this.notificationEpoch) return false;
+    const byConversation: Record<string, number> = {};
+    for (const item of items) {
+      if (!this.snapshot.conversations[item.conversationId] || !Number.isSafeInteger(item.unreadCount) || item.unreadCount < 0 || item.conversationId in byConversation) return false;
+      byConversation[item.conversationId] = item.unreadCount;
+    }
+    if (Object.keys(byConversation).length !== Object.keys(this.snapshot.conversations).length) return false;
+    this.commit({ ...this.snapshot, notificationProjection: { byConversation, stale: false } });
+    return true;
   }
   setNotificationLevel(conversationId: string, notificationLevel: NotificationLevel) {
     const conversation = this.snapshot.conversations[conversationId];
