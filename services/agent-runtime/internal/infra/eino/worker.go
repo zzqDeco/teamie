@@ -31,15 +31,14 @@ import (
 
 type Config struct{ ControlAddr, GatewayAddr, SandboxAddr, IdentityAddr, IMURL, IMRealtimeURL, ControlToken, GatewayToken, SandboxToken, IMToken, FlagsFile, GatewayStreamURL string }
 type Engine struct {
-	Store       *Store
-	Config      Config
-	Control     agentcontrolservice.Client
-	Gateway     modelgatewayservice.Client
-	Sandbox     sandboxservice.Client
-	Identity    identityservice.Client
-	slots       chan struct{}
-	owner       string
-	readFlusher readReceiptFlusher
+	Store    *Store
+	Config   Config
+	Control  agentcontrolservice.Client
+	Gateway  modelgatewayservice.Client
+	Sandbox  sandboxservice.Client
+	Identity identityservice.Client
+	slots    chan struct{}
+	owner    string
 }
 
 func New(store *Store, c Config) (*Engine, error) {
@@ -238,6 +237,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 	// Typing and normal IM calls share credentials: issuance rotates the
 	// principal's single token and must never create competing token caches.
 	imc := &IM{BaseURL: e.Config.IMURL, RealtimeURL: e.Config.IMRealtimeURL, ServiceKey: e.Config.IMToken, AgentID: def.Id, Identity: e.Identity}
+	reads := newReadReceiptSender()
 	gatewayModel := &GatewayModel{Client: e.Gateway, Token: e.Config.GatewayToken, OwnerID: def.OwnerId, AgentID: def.Id, ModelID: def.GetModelId(), Store: e.Store, Lease: lease, Authorize: authorize, StreamURL: e.Config.GatewayStreamURL, ContextWindow: func() int { return int(contextWindow.Load()) }}
 	tools, err := (&Tools{Store: e.Store, Lease: lease, IM: imc, Sandbox: e.Sandbox, SandboxToken: e.Config.SandboxToken, Authorize: authorize}).BuildIM()
 	if err != nil {
@@ -746,19 +746,28 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 			done <- active.Wait()
 		}(loop, loopDone)
 	}
+	stopReads := reads.start(ctx, e.Store, lease, func(rc context.Context) error {
+		if !runtimeFlag(e.Config.FlagsFile, "agents.runtime.v3") {
+			return &ModelError{Code: "runtime_disabled"}
+		}
+		return authorize(rc)
+	}, imc.MarkRead)
+	defer stopReads()
 	poll := time.NewTicker(time.Second)
 	defer poll.Stop()
 	lastState := ""
 	lastReport := time.Time{}
 	heartbeatEnsured := false
 	tick := func() bool {
-		if err := e.ingest(ctx, imc, lease); err != nil {
+		inputs, err := e.ingest(ctx, imc, lease)
+		if err != nil {
 			if errors.Is(err, ErrLeaseLost) {
 				return false
 			}
 			e.report(ctx, def.Id, "error", "im_unavailable", false)
 			return true
 		}
+		reads.recordInputs(inputs)
 		if err := tasks.notifications(ctx, lease); errors.Is(err, ErrLeaseLost) {
 			return false
 		}
@@ -889,12 +898,12 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		}
 	}
 }
-func (e *Engine) ingest(ctx context.Context, imc *IM, l *Lease) (failure error) {
+func (e *Engine) ingest(ctx context.Context, imc *IM, l *Lease) (committed []Input, failure error) {
 	ctx, operation := observability.Begin(ctx, "agent-input-ingest", zap.String("custom.agent.id", l.AgentID))
 	defer func() { operation.EndQuiet(failure) }()
 	cursor, err := e.Store.Cursor(ctx, l)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var page struct {
 		Events []struct {
@@ -908,7 +917,7 @@ func (e *Engine) ingest(ctx context.Context, imc *IM, l *Lease) (failure error) 
 		HasMore bool   `json:"hasMore"`
 	}
 	if err = imc.Call(ctx, http.MethodGet, "/api/v1/sync?limit=32&cursor="+cursor, nil, &page); err != nil {
-		return err
+		return nil, err
 	}
 	inputs := []Input{}
 	var bootstrap *Bootstrap
@@ -922,7 +931,7 @@ func (e *Engine) ingest(ctx context.Context, imc *IM, l *Lease) (failure error) 
 			if bootstrap == nil {
 				bootstrap, err = imc.Bootstrap(ctx)
 				if err != nil {
-					return err
+					return nil, err
 				}
 			}
 			for _, c := range bootstrap.Conversations {
@@ -935,19 +944,12 @@ func (e *Engine) ingest(ctx context.Context, imc *IM, l *Lease) (failure error) 
 		inputs = append(inputs, Input{EventID: event.ID, WorkspaceID: ws, ConversationID: event.ConversationID, MessageID: m.ID, SenderID: m.SenderID, SenderName: m.SenderName, SenderKind: m.SenderKind, Body: m.Body, Attachments: m.Attachments, Mentions: m.Mentions, ReplyToID: m.ReplyToID, Seq: m.Seq, CreatedAt: m.CreatedAt})
 	}
 	if err = e.Store.Ingest(ctx, l, page.Cursor, inputs); err != nil {
-		return err
+		return nil, err
 	}
 	for _, input := range inputs {
 		observability.L(ctx).Info("Agent input persisted", zap.String("event.action", "agent-input-persisted"), zap.String("custom.agent.id", l.AgentID), zap.String("custom.input.event_id", input.EventID), zap.String("custom.im.message_id", input.MessageID), zap.String("custom.im.conversation_id", input.ConversationID))
 	}
-	if e.readFlusher.needsSeed(l.AgentID) {
-		if seeded, seedErr := e.Store.IngestedConversationSeqs(ctx, l.AgentID); seedErr == nil {
-			e.readFlusher.markSeeded(l.AgentID, seeded)
-		}
-	}
-	e.readFlusher.recordInputs(l.AgentID, inputs)
-	e.readFlusher.flush(ctx, l.AgentID, imc.MarkRead)
-	return nil
+	return inputs, nil
 }
 func finalizeSummary(ctx context.Context, original []*schema.AgenticMessage, summary *schema.AgenticMessage) ([]*schema.AgenticMessage, error) {
 	return finalizeSummaryWithSourceFormat(ctx, original, summary, false)

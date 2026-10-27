@@ -2,9 +2,7 @@ package eino
 
 import (
 	"context"
-	"errors"
 	"net/http"
-	"sync"
 	"time"
 )
 
@@ -12,134 +10,12 @@ import (
 // to cover normal scheduling/network jitter without creating durable activity.
 const typingRefreshInterval = 1500 * time.Millisecond
 const typingRequestTimeout = time.Second
-const readReceiptCoalesceInterval = 2 * time.Second
 
 func (imc *IM) Typing(ctx context.Context, conversationID string, active bool) error {
 	if !validUUID(conversationID) {
 		return &APIError{Status: 400, Code: "invalid_id"}
 	}
 	return imc.callAt(ctx, imc.RealtimeURL, http.MethodPost, "/api/v1/conversations/"+conversationID+"/typing", map[string]bool{"isTyping": active}, nil)
-}
-
-func (imc *IM) MarkRead(ctx context.Context, conversationID string, seq int64) error {
-	if !validUUID(conversationID) || seq <= 0 {
-		return nil
-	}
-	return imc.Call(ctx, http.MethodPost, "/api/v1/conversations/"+conversationID+"/read", map[string]int64{"seq": seq}, nil)
-}
-
-type readReceiptEntry struct {
-	conversationID string
-	pendingSeq     int64
-	ackedSeq       int64
-	lastSentAt     time.Time
-}
-
-type readReceiptFlusher struct {
-	mu      sync.Mutex
-	entries map[string]*readReceiptEntry
-	seeded  map[string]bool
-	now     func() time.Time
-}
-
-func (f *readReceiptFlusher) needsSeed(agentID string) bool {
-	if f == nil || agentID == "" {
-		return false
-	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return !f.seeded[agentID]
-}
-
-func (f *readReceiptFlusher) markSeeded(agentID string, inputs []Input) {
-	if f == nil || agentID == "" {
-		return
-	}
-	f.recordInputs(agentID, inputs)
-	f.mu.Lock()
-	if f.seeded == nil {
-		f.seeded = make(map[string]bool)
-	}
-	f.seeded[agentID] = true
-	f.mu.Unlock()
-}
-
-func (f *readReceiptFlusher) recordInputs(agentID string, inputs []Input) {
-	if f == nil || agentID == "" {
-		return
-	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.entries == nil {
-		f.entries = make(map[string]*readReceiptEntry)
-	}
-	for _, in := range inputs {
-		if in.Kind != "" || !validUUID(in.ConversationID) || in.Seq <= 0 {
-			continue
-		}
-		key := agentID + "/" + in.ConversationID
-		ent := f.entries[key]
-		if ent == nil {
-			ent = &readReceiptEntry{conversationID: in.ConversationID}
-			f.entries[key] = ent
-		}
-		if in.Seq > ent.pendingSeq {
-			ent.pendingSeq = in.Seq
-		}
-	}
-}
-
-func (f *readReceiptFlusher) flush(ctx context.Context, agentID string, markRead func(context.Context, string, int64) error) {
-	if f == nil || agentID == "" || markRead == nil {
-		return
-	}
-	nowFn := time.Now
-	if f.now != nil {
-		nowFn = f.now
-	}
-	now := nowFn()
-
-	type target struct {
-		key    string
-		convID string
-		seq    int64
-	}
-	var due []target
-	prefix := agentID + "/"
-
-	f.mu.Lock()
-	for key, ent := range f.entries {
-		if len(key) <= len(prefix) || key[:len(prefix)] != prefix {
-			continue
-		}
-		if ent.pendingSeq > ent.ackedSeq && (ent.lastSentAt.IsZero() || now.Sub(ent.lastSentAt) >= readReceiptCoalesceInterval) {
-			due = append(due, target{key: key, convID: ent.conversationID, seq: ent.pendingSeq})
-		}
-	}
-	f.mu.Unlock()
-
-	for _, t := range due {
-		if ctx.Err() != nil {
-			return
-		}
-		rc, cancel := context.WithTimeout(ctx, 2*time.Second)
-		err := markRead(rc, t.convID, t.seq)
-		cancel()
-		var api *APIError
-		terminalDrop := errors.As(err, &api) && (api.Status == 400 || api.Status == 403 || api.Status == 404)
-		if err == nil || terminalDrop {
-			f.mu.Lock()
-			if ent := f.entries[t.key]; ent != nil {
-				if t.seq > ent.ackedSeq {
-					ent.ackedSeq = t.seq
-				}
-				if err == nil {
-					ent.lastSentAt = nowFn()
-				}
-			}
-			f.mu.Unlock()
-		}
-	}
 }
 
 func typingConversations(inputs []Input) []string {

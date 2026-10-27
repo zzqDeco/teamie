@@ -36,6 +36,9 @@ func (f *fakeSessions) CheckLeaseForUpdate(context.Context, *domain.Lease) error
 func (f *fakeSessions) GetCursor(context.Context, *domain.Lease) (string, error) {
 	return "", nil
 }
+func (f *fakeSessions) ListReadReceiptInputs(context.Context, *domain.Lease, string, string, int) (domain.ReadReceiptInputPage, error) {
+	return domain.ReadReceiptInputPage{}, nil
+}
 func (f *fakeSessions) IngestInputs(context.Context, *domain.Lease, string, []domain.Input) error {
 	return nil
 }

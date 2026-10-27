@@ -153,7 +153,7 @@ func TestFileOnlyInboxDeliversDescriptorsWithoutBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 	im := &IM{BaseURL: e.Config.IMURL, AgentID: f.agent, Identity: e.Identity, ServiceKey: e.Config.IMToken}
-	if err = e.ingest(context.Background(), im, lease); err != nil {
+	if _, err = e.ingest(context.Background(), im, lease); err != nil {
 		t.Fatal(err)
 	}
 	var payload []byte
