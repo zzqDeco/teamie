@@ -49,6 +49,51 @@ func contextMessageSource(message Message) InputSource {
 	return ref
 }
 
+func emptyIMTombstone(message Message) bool {
+	return message.RetractedAt != nil && message.Body == "" && len(message.Attachments) == 0 && len(message.Mentions) == 0
+}
+
+func (a *ContextArchive) authorizeIMReadReplay(ctx context.Context, refs []InputSource, name string, raw []byte) error {
+	var observation struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if json.Unmarshal(raw, &observation) != nil {
+		return ErrReplayConflict
+	}
+	var messages []Message
+	switch name {
+	case "im_get_message":
+		var message Message
+		if json.Unmarshal(observation.Data, &message) != nil {
+			return errContextUnavailable
+		}
+		messages = []Message{message}
+	case "im_list_messages":
+		var page struct {
+			Messages []Message `json:"messages"`
+		}
+		if json.Unmarshal(observation.Data, &page) != nil {
+			return errContextUnavailable
+		}
+		messages = page.Messages
+	}
+	tombstones := map[string]Message{}
+	seen := map[string]bool{}
+	for _, message := range messages {
+		if seen[message.ID] {
+			return errContextUnavailable
+		}
+		seen[message.ID] = true
+		if message.RetractedAt != nil {
+			if !emptyIMTombstone(message) {
+				return errContextUnavailable
+			}
+			tombstones[message.ID] = message
+		}
+	}
+	return a.authorizeSourcesWithTombstones(ctx, refs, tombstones)
+}
+
 func (a *ContextArchive) imArguments(ctx context.Context, runID, call, name string) (json.RawMessage, error) {
 	hash, actualName, raw, err := a.Store.DB.GetToolCallObservationWithMeta(ctx, runID, call, contextIMArgumentsKey)
 	if err != nil {

@@ -359,6 +359,12 @@ func (a *ContextArchive) load(ctx context.Context, r *Run, ref string) (*context
 }
 
 func (a *ContextArchive) authorizeSources(ctx context.Context, refs []InputSource) error {
+	return a.authorizeSourcesWithTombstones(ctx, refs, nil)
+}
+
+// Tombstone exceptions are confined to the exact committed IM read being replayed.
+// Historical source closures still require unretracted content by default.
+func (a *ContextArchive) authorizeSourcesWithTombstones(ctx context.Context, refs []InputSource, tombstones map[string]Message) error {
 	if len(refs) == 0 {
 		return nil
 	}
@@ -424,6 +430,16 @@ func (a *ContextArchive) authorizeSources(ctx context.Context, refs []InputSourc
 				Retracted:      message.RetractedAt != nil,
 				AttachmentIDs:  attIDs,
 			}
+		}
+		if original, ok := tombstones[ref.MessageID]; ok {
+			if message == nil || message.ConversationID != original.ConversationID ||
+				message.SenderID != original.SenderID || message.Seq != original.Seq ||
+				!emptyIMTombstone(*message) || *message.RetractedAt != *original.RetractedAt {
+				return errContextUnavailable
+			}
+			// The receipt never contained live content. Keep identity/attachment
+			// checks below, without treating this empty placeholder as revoked text.
+			snap.Retracted = false
 		}
 		if err := domain.VerifyMessageSourceAccess(ref, snap); err != nil {
 			return err

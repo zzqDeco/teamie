@@ -358,7 +358,7 @@ func (t *Tools) execute(ctx context.Context, name string, args any, fn func(cont
 					}
 				}
 			}
-			if e = archive.authorizeSources(ctx, refs); e != nil {
+			if e = archive.authorizeIMReadReplay(ctx, refs, name, cached); e != nil {
 				return nil, e
 			}
 		}
