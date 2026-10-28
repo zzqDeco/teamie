@@ -6,6 +6,7 @@ package app
 
 import (
 	"context"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,6 +15,44 @@ import (
 
 	"teamie/services/llm-gateway/internal/domain"
 )
+
+// DefaultMaxConcurrentCalls is the default upper bound on concurrent foreground
+// model calls across Agents. It is > 1 so concurrent Agents do not serialize on a
+// global 1-slot ceiling while still bounding gateway memory and upstream connections.
+const DefaultMaxConcurrentCalls = 16
+
+// Option configures a gateway Service.
+type Option func(*Service)
+
+// WithMaxConcurrentCalls overrides the default foreground model concurrency cap.
+func WithMaxConcurrentCalls(n int) Option {
+	return func(s *Service) {
+		s.SetMaxConcurrentCalls(n)
+	}
+}
+
+// ParseMaxConcurrentCalls parses GATEWAY_MAX_CONCURRENT_CALLS.
+// An empty value returns DefaultMaxConcurrentCalls. A non-empty value must be an
+// integer >= 2 so foreground calls across different Agents can execute concurrently
+// while remaining bounded.
+func ParseMaxConcurrentCalls(raw string) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return DefaultMaxConcurrentCalls, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 2 {
+		return 0, domain.Err(400, "invalid_concurrency_cap", "GATEWAY_MAX_CONCURRENT_CALLS must be an integer >= 2")
+	}
+	return n, nil
+}
+
+func defaultSlotCap() int {
+	if n, err := ParseMaxConcurrentCalls(os.Getenv("GATEWAY_MAX_CONCURRENT_CALLS")); err == nil {
+		return n
+	}
+	return DefaultMaxConcurrentCalls
+}
 
 // Service coordinates Model Gateway use cases, slot admission, and run cancellation.
 type Service struct {
@@ -41,23 +80,52 @@ type activeCall struct {
 }
 
 // New constructs a new gateway application Service.
-func New(store domain.ConfigStore, cipher domain.Cipher, model domain.UpstreamModel, webSearch domain.WebSearchProvider, token string) *Service {
-	return &Service{
+func New(store domain.ConfigStore, cipher domain.Cipher, model domain.UpstreamModel, webSearch domain.WebSearchProvider, token string, opts ...Option) *Service {
+	s := &Service{
 		Store:        store,
 		Cipher:       cipher,
 		Model:        model,
 		WebSearch:    webSearch,
 		Token:        token,
 		WebSearchURL: domain.DefaultTavilyBaseURL,
+		slots:        make(chan struct{}, defaultSlotCap()),
 		webSlots:     make(chan struct{}, 4),
 		active:       make(map[string]activeCall),
 		canceled:     make(map[string]time.Time),
 	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(s)
+		}
+	}
+	return s
+}
+
+// SetMaxConcurrentCalls configures the foreground model concurrency cap.
+// Values <= 0 fall back to DefaultMaxConcurrentCalls.
+func (s *Service) SetMaxConcurrentCalls(n int) {
+	if n <= 0 {
+		n = DefaultMaxConcurrentCalls
+	}
+	s.mu.Lock()
+	s.slots = make(chan struct{}, n)
+	s.mu.Unlock()
+}
+
+// MaxConcurrentCalls returns the configured foreground model concurrency cap.
+func (s *Service) MaxConcurrentCalls() int {
+	s.ensureInit()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return cap(s.slots)
 }
 
 func (s *Service) ensureInit() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.slots == nil {
+		s.slots = make(chan struct{}, defaultSlotCap())
+	}
 	if s.webSlots == nil {
 		s.webSlots = make(chan struct{}, 4)
 	}
@@ -72,8 +140,11 @@ func (s *Service) ensureInit() {
 // InFlightSlots returns the number of currently occupied foreground model calls.
 func (s *Service) InFlightSlots() int {
 	s.ensureInit()
-	if s.slots != nil {
-		return len(s.slots)
+	s.mu.Lock()
+	slots := s.slots
+	s.mu.Unlock()
+	if slots != nil {
+		return len(slots)
 	}
 	return int(s.inFlight.Load())
 }
@@ -98,31 +169,25 @@ func (s *Service) ValidateUnaryChat(serviceToken, ownerID, agentID, sessionID, r
 	return domain.Err(400, "protocol_unsupported", "Model generation requires the private HTTP transport")
 }
 
-// AcquireSlot tracks an in-flight model execution call (or acquires a bounded slot if configured).
+// AcquireSlot acquires a bounded foreground model execution slot.
 func (s *Service) AcquireSlot() (func(), bool) {
 	s.ensureInit()
-	if s.slots != nil {
-		select {
-		case s.slots <- struct{}{}:
-			s.inFlight.Add(1)
-			var once sync.Once
-			return func() {
-				once.Do(func() {
-					<-s.slots
-					s.inFlight.Add(-1)
-				})
-			}, true
-		default:
-			return nil, false
-		}
+	s.mu.Lock()
+	slots := s.slots
+	s.mu.Unlock()
+	select {
+	case slots <- struct{}{}:
+		s.inFlight.Add(1)
+		var once sync.Once
+		return func() {
+			once.Do(func() {
+				<-slots
+				s.inFlight.Add(-1)
+			})
+		}, true
+	default:
+		return nil, false
 	}
-	s.inFlight.Add(1)
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			s.inFlight.Add(-1)
-		})
-	}, true
 }
 
 // AcquireWebSlot attempts to acquire a web-search execution slot.
