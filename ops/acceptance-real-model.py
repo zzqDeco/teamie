@@ -163,6 +163,7 @@ class Client:
         path: str,
         body: dict | None = None,
         status: int | tuple[int, ...] = 200,
+        *, idempotency_key: str | None = None,
     ) -> dict:
         headers = {
             "Origin": self.urls["origin"],
@@ -170,6 +171,8 @@ class Client:
         }
         if method not in ("GET", "HEAD") and self.csrf:
             headers["X-CSRF-Token"] = self.csrf
+        if method == "POST" and path == "/api/v1/agents":
+            headers["Idempotency-Key"] = idempotency_key or secrets.token_hex(16)
         payload = None
         if body is not None:
             payload = json.dumps(body).encode("utf-8")

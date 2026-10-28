@@ -329,6 +329,7 @@ class AgentManifestTest(unittest.TestCase):
         current = self.modern()
         current["version"] = "v0.3.31"
         current["source"]["ref"] = "refs/heads/release/v0.3.31"
+        current["schema"]["agent_control"] = 2
         self.assertEqual(current["schema"]["agent_control"], 2)
         self.assertEqual(current["schema"]["gateway"], 5)
         manifest.validate(previous)
@@ -337,6 +338,15 @@ class AgentManifestTest(unittest.TestCase):
             manifest.check_transition(previous, current, rollback=True)
         with self.assertRaisesRegex(ValueError, "identical schema versions"):
             manifest.compatible(current, previous)
+
+    def test_agent_creation_hash_schema_rejects_image_only_rollback(self):
+        previous = self.modern()
+        previous["schema"]["agent_control"] = 2
+        current = self.modern()
+        self.assertEqual(current["schema"]["agent_control"], 3)
+        manifest.check_transition(current, previous, previous)
+        with self.assertRaisesRegex(ValueError, "identical schema versions"):
+            manifest.check_transition(previous, current, rollback=True)
 
     def test_direct_message_schema_fences_previous_writer_and_allows_same_schema_rollback(self):
         previous = self.modern()

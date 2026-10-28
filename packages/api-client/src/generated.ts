@@ -611,6 +611,7 @@ export interface CreateAgentReq {
   workspaceIds?: string[];
   enabled?: boolean;
   modelId?: string;
+  idempotencyKey?: string;
 }
 
 export interface GetAgentProfileReq {

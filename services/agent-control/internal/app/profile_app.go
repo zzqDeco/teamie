@@ -37,11 +37,8 @@ func (s *Service) Create(ctx context.Context, owner string, in domain.Changes) (
 		return domain.Agent{}, err
 	}
 	key := strings.TrimSpace(in.IdempotencyKey)
-	if key == "" {
-		key = strings.TrimSpace(domain.IdempotencyKeyFromContext(ctx))
-	}
-	if len(key) > 128 {
-		return domain.Agent{}, domain.ErrInvalidRequest("Idempotency key must contain at most 128 characters")
+	if key == "" || len(key) > 128 {
+		return domain.Agent{}, domain.ErrInvalidRequest("Idempotency-Key is required and must contain at most 128 bytes")
 	}
 	enabled := true
 	if in.Enabled != nil {
@@ -57,83 +54,28 @@ func (s *Service) Create(ctx context.Context, owner string, in domain.Changes) (
 	}
 	policyEnabled := s.flagEnabled("agents.enabled")
 
+	intent := domain.Agent{
+		ID: domain.DeterministicID(owner, key), OwnerID: owner,
+		Name: *in.Name, Description: description, ModelID: modelID,
+		WorkspaceIDs: *in.WorkspaceIDs, Enabled: enabled, PolicyEnabled: policyEnabled,
+	}
+	intent.CreationHash = domain.CreationHash(intent)
 	var a domain.Agent
 	if err := s.Tx.WithinTx(ctx, func(txCtx context.Context) error {
-		applyPending := func(existing domain.Agent) (domain.Agent, error) {
-			sameIntent := existing.Name == *in.Name &&
-				existing.Description == description &&
-				existing.ModelID == modelID &&
-				existing.Enabled == enabled &&
-				domain.Same(existing.WorkspaceIDs, *in.WorkspaceIDs)
-			if !sameIntent {
-				if existing.AppliedRevision > 0 {
-					return existing, domain.ErrIdempotencyConflict()
-				}
-				existing.Name = *in.Name
-				existing.Description = description
-				existing.ModelID = modelID
-				if !domain.Same(existing.WorkspaceIDs, *in.WorkspaceIDs) {
-					existing.WorkspaceIDs = *in.WorkspaceIDs
-					existing.MembershipRevision++
-				}
-				existing.Enabled = enabled
-				if err := s.Agents.UpdateProfile(txCtx, existing); err != nil {
-					return existing, err
-				}
-			}
-			return existing, nil
-		}
-
-		if key != "" {
-			targetID := domain.DeterministicID(owner, key)
-			existing, err := s.Agents.GetForUpdate(txCtx, owner, targetID)
-			if err == nil {
-				a, err = applyPending(existing)
-				return err
-			}
-			if !domain.IsNotFound(err) {
-				return err
-			}
-			a, err = s.Agents.Insert(txCtx, domain.Agent{
-				ID:            targetID,
-				OwnerID:       owner,
-				Name:          *in.Name,
-				Description:   description,
-				ModelID:       modelID,
-				WorkspaceIDs:  *in.WorkspaceIDs,
-				Enabled:       enabled,
-				PolicyEnabled: policyEnabled,
-			})
-			return err
-		}
-
-		owned, err := s.Agents.ListOwned(txCtx, owner)
+		var err error
+		a, err = s.Agents.InsertOrGetCreation(txCtx, intent)
 		if err != nil {
 			return err
 		}
-		for _, cand := range owned {
-			if cand.AppliedRevision == 0 && cand.Name == *in.Name {
-				existing, lockErr := s.Agents.GetForUpdate(txCtx, owner, cand.ID)
-				if lockErr == nil && existing.AppliedRevision == 0 {
-					a, err = applyPending(existing)
-					return err
-				}
-			}
+		if a.OwnerID != owner || a.CreationHash != intent.CreationHash {
+			return domain.ErrIdempotencyConflict()
 		}
-
-		a, err = s.Agents.Insert(txCtx, domain.Agent{
-			ID:            domain.NewID(),
-			OwnerID:       owner,
-			Name:          *in.Name,
-			Description:   description,
-			ModelID:       modelID,
-			WorkspaceIDs:  *in.WorkspaceIDs,
-			Enabled:       enabled,
-			PolicyEnabled: policyEnabled,
-		})
-		return err
+		if a.DeletedAt != nil {
+			return domain.ErrNotFound("Agent is unavailable")
+		}
+		return nil
 	}); err != nil {
-		return a, err
+		return domain.Agent{}, err
 	}
 
 	reconcileErr := s.Reconcile(ctx, a.ID)

@@ -148,6 +148,9 @@ func RegisterAgentControlHTTPServiceHertzServer(r *route.RouterGroup, srv AgentC
 					m.WriteBindError(ctx, c, err)
 					return
 				}
+				if v := string(c.GetHeader("Idempotency-Key")); v != "" {
+					req.IdempotencyKey = &v
+				}
 				resp, err := srv.CreateAgent(ctx, &req)
 				if err != nil {
 					m.WriteDomainError(ctx, c, err)
@@ -162,6 +165,9 @@ func RegisterAgentControlHTTPServiceHertzServer(r *route.RouterGroup, srv AgentC
 			if err := c.BindAndValidate(&req); err != nil {
 				m.WriteBindError(ctx, c, err)
 				return
+			}
+			if v := string(c.GetHeader("Idempotency-Key")); v != "" {
+				req.IdempotencyKey = &v
 			}
 			resp, err := srv.CreateAgent(ctx, &req)
 			if err != nil {
@@ -357,6 +363,9 @@ func RegisterAgentControlHTTPServer(mux *http.ServeMux, srv AgentControlHTTPServ
 			if err := m.DecodeRequest(w, r, &req); err != nil {
 				m.WriteBindErrorHTTP(w, r, err)
 				return
+			}
+			if v := r.Header.Get("Idempotency-Key"); v != "" {
+				req.IdempotencyKey = &v
 			}
 			resp, err := srv.CreateAgent(r.Context(), &req)
 			if err != nil {

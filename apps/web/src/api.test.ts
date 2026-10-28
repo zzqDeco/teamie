@@ -539,7 +539,7 @@ describe("Agent and model gateway boundaries", () => {
         await client.createAgent({
           name: profile.name,
           workspaceIds: profile.workspaceIds,
-        })
+        }, "create-profile-test")
       ).agent,
       (await client.updateAgent(profile.id, { enabled: false })).agent,
     ];
@@ -596,7 +596,7 @@ describe("Agent and model gateway boundaries", () => {
     );
     vi.stubGlobal("fetch", fetch);
     const client = new TeamieClient();
-    await client.createAgent(unsafeProfile);
+    await client.createAgent(unsafeProfile, "create-unsafe-test");
     await client.updateAgent(profile.id, { ...unsafeProfile, enabled: false });
     for (const call of fetch.mock.calls) {
       const options = call[1] as RequestInit;

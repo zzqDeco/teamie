@@ -128,11 +128,12 @@ func (p *AgentListResp) String() string {
 }
 
 type CreateAgentReq struct {
-	Name         *string  `thrift:"name,1,optional" json:"name,omitempty"`
-	Description  *string  `thrift:"description,2,optional" json:"description,omitempty"`
-	WorkspaceIds []string `thrift:"workspaceIds,3,optional,list<string>" json:"workspaceIds,omitempty"`
-	Enabled      *bool    `thrift:"enabled,4,optional" json:"enabled,omitempty"`
-	ModelId      *string  `thrift:"modelId,5,optional" json:"modelId,omitempty"`
+	Name           *string  `thrift:"name,1,optional" json:"name,omitempty"`
+	Description    *string  `thrift:"description,2,optional" json:"description,omitempty"`
+	WorkspaceIds   []string `thrift:"workspaceIds,3,optional,list<string>" json:"workspaceIds,omitempty"`
+	Enabled        *bool    `thrift:"enabled,4,optional" json:"enabled,omitempty"`
+	ModelId        *string  `thrift:"modelId,5,optional" json:"modelId,omitempty"`
+	IdempotencyKey *string  `thrift:"idempotencyKey,6,optional" json:"-"`
 }
 
 func NewCreateAgentReq() *CreateAgentReq {
@@ -187,6 +188,15 @@ func (p *CreateAgentReq) GetModelId() (v string) {
 	return *p.ModelId
 }
 
+var CreateAgentReq_IdempotencyKey_DEFAULT string
+
+func (p *CreateAgentReq) GetIdempotencyKey() (v string) {
+	if !p.IsSetIdempotencyKey() {
+		return CreateAgentReq_IdempotencyKey_DEFAULT
+	}
+	return *p.IdempotencyKey
+}
+
 func (p *CreateAgentReq) IsSetName() bool {
 	return p.Name != nil
 }
@@ -205,6 +215,10 @@ func (p *CreateAgentReq) IsSetEnabled() bool {
 
 func (p *CreateAgentReq) IsSetModelId() bool {
 	return p.ModelId != nil
+}
+
+func (p *CreateAgentReq) IsSetIdempotencyKey() bool {
+	return p.IdempotencyKey != nil
 }
 
 func (p *CreateAgentReq) String() string {

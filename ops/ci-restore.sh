@@ -14,7 +14,7 @@ for suffix in identity chat agent_control agent_runtime gateway; do
   # contract, so updating a migration without its manifest fails before deploy.
   version=$(python3 -c 'import sys; from ops.manifest import SCHEMA_V2; print(SCHEMA_V2[sys.argv[1]])' "$suffix")
   # Identity's real schema creates its complete production migration ledger.
-  if [[ $suffix != identity && $suffix != agent_runtime && $suffix != chat ]]; then
+  if [[ $suffix != identity && $suffix != agent_runtime && $suffix != chat && $suffix != agent_control ]]; then
     "${pg[@]}" psql -U postgres -d "teamie_$suffix" -v ON_ERROR_STOP=1 -v ledger="${suffix}_schema_migrations" -v version="$version" <<'SQL'
 CREATE TABLE :"ledger"(version INTEGER PRIMARY KEY);
 INSERT INTO :"ledger" VALUES(:version);
@@ -72,6 +72,18 @@ INSERT INTO messages(id,conversation_id,sender_id,sender_name,sender_kind,client
 VALUES('restore-empty-reactions','restore-conversation','owner','Owner','human','restore-empty-send',2,'Persist the empty reaction watermark','fixture',4);
 INSERT INTO conversation_notification_levels(conversation_id,user_id,level)
 VALUES('restore-conversation','owner','mentions'),('restore-conversation','reader','none');
+SQL
+  fi
+  if [[ $suffix == agent_control ]]; then
+    # Restore the real creation identity alongside mutable profile/reconcile state.
+    for migration in services/agent-control/internal/infra/pg/migrations/*.sql; do
+      "${pg[@]}" psql -U postgres -d teamie_agent_control -v ON_ERROR_STOP=1 < "$migration"
+    done
+    "${pg[@]}" psql -U postgres -d teamie_agent_control -v ON_ERROR_STOP=1 <<'SQL'
+CREATE TABLE agent_control_schema_migrations(version INTEGER PRIMARY KEY,applied_at timestamptz NOT NULL DEFAULT now());
+INSERT INTO agent_control_schema_migrations(version) VALUES(1),(2),(3);
+INSERT INTO agents(id,owner_id,name,model_id,workspace_ids,enabled,revision,applied_revision,creation_hash)
+VALUES('restore-agent','restore-owner','Edited profile','model-one',ARRAY['restore-workspace'],true,4,4,repeat('a',64));
 SQL
   fi
   if [[ $suffix == agent_runtime ]]; then
@@ -148,6 +160,12 @@ SQL
   actual=$("${pg[@]}" psql -U postgres -d "restore_$suffix" -At -v ON_ERROR_STOP=1 -c \
     "SELECT (SELECT max(version) FROM ${suffix}_schema_migrations)||':'||(payload->>'message')||':'||encode(encrypted_value,'hex') FROM restore_fixture WHERE id=1;")
   [[ $actual == "$version:persisted:010203aaff" ]] || { echo "Restore verification failed for $suffix" >&2; exit 1; }
+  if [[ $suffix == agent_control ]]; then
+    actual=$("${pg[@]}" psql -U postgres -d restore_agent_control -Atqc \
+      "SELECT (SELECT string_agg(version::text,',' ORDER BY version) FROM agent_control_schema_migrations)||':'||creation_hash||':'||name||':'||revision||':'||applied_revision FROM agents WHERE id='restore-agent' AND owner_id='restore-owner' AND model_id='model-one' AND workspace_ids=ARRAY['restore-workspace'] AND enabled;")
+    expected="1,2,3:$(printf '%064d' 0 | tr '0' 'a'):Edited profile:4:4"
+    [[ $actual == "$expected" ]] || { echo 'Agent creation identity restore verification failed.' >&2; exit 1; }
+  fi
   if [[ $suffix == identity ]]; then
     actual=$("${pg[@]}" psql -U postgres -d restore_identity -At -v ON_ERROR_STOP=1 -c \
       "SELECT (SELECT string_agg(version::text,',' ORDER BY version) FROM identity_schema_migrations)||':'||(SELECT count(applied_at) FROM identity_schema_migrations)||':'||u.platform_role||':'||u.password_hash||':'||(SELECT count(*) FROM identity_sessions WHERE user_id=u.id)||':'||(SELECT count(*) FROM registration_invites WHERE created_by=u.id)||':'||(SELECT count(*) FROM identity_password_resets WHERE user_id=u.id AND used_at IS NULL AND revoked_at IS NULL AND token_hash=repeat('1',64))||':'||(SELECT count(*) FROM identity_password_resets WHERE user_id=u.id AND used_at IS NOT NULL AND revoked_at IS NULL AND token_hash=repeat('2',64))||':'||(SELECT count(*) FROM identity_password_resets WHERE user_id=u.id AND used_at IS NULL AND revoked_at IS NOT NULL AND token_hash=repeat('3',64) AND created_by IS NULL) FROM identity_users u WHERE u.id='restore-owner';")

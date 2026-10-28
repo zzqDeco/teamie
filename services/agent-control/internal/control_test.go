@@ -304,6 +304,9 @@ func TestHumanOnlyHTTPStrictSettingsAndCSRF(t *testing.T) {
 	h := (&Handler{Store: s, Origin: "https://teamie.example"}).Routes()
 	call := func(method, path, body, token, csrf, origin, bearer string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		if method == "POST" && path == "/api/v1/agents" {
+			r.Header.Set("Idempotency-Key", id())
+		}
 		r.AddCookie(&http.Cookie{Name: "teamie_session", Value: token})
 		r.Header.Set("X-CSRF-Token", csrf)
 		r.Header.Set("Origin", origin)
@@ -416,9 +419,9 @@ func TestCreateAndUpdateSurfaceReconcileFailuresAndIdempotentRetry(t *testing.T)
 		t.Fatalf("expected 409 on conflicting idempotency key reuse, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// 2. Create failure when Chat membership sync fails (without header), followed by retry without duplicating.
+	// 2. Chat membership failure also retains an explicit creation identity across retry.
 	f.failMemberships = true
-	pendingChat, err := s.Create(ctx, "owner", Changes{Name: ptr("ChatSyncedAgent"), WorkspaceIDs: ptr([]string{"ws1"})})
+	pendingChat, err := s.Create(ctx, "owner", Changes{Name: ptr("ChatSyncedAgent"), WorkspaceIDs: ptr([]string{"ws1"}), IdempotencyKey: "chat-retry"})
 	if err == nil {
 		t.Fatal("expected create error when Chat membership sync fails")
 	}
@@ -426,7 +429,7 @@ func TestCreateAndUpdateSurfaceReconcileFailuresAndIdempotentRetry(t *testing.T)
 		t.Fatalf("unexpected state after Chat membership failure: %+v principal=%+v", pendingChat, f.principals[pendingChat.ID])
 	}
 	f.failMemberships = false
-	recoveredChat, err := s.Create(ctx, "owner", Changes{Name: ptr("ChatSyncedAgent"), WorkspaceIDs: ptr([]string{"ws1"})})
+	recoveredChat, err := s.Create(ctx, "owner", Changes{Name: ptr("ChatSyncedAgent"), WorkspaceIDs: ptr([]string{"ws1"}), IdempotencyKey: "chat-retry"})
 	if err != nil {
 		t.Fatalf("expected retry of pending create to succeed: %v", err)
 	}

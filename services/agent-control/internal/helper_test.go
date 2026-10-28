@@ -188,6 +188,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 	return pg.Migrate(ctx, s.DB)
 }
 func (s *Store) Create(ctx context.Context, owner string, in Changes) (Agent, error) {
+	if in.IdempotencyKey == "" {
+		in.IdempotencyKey = id()
+	}
 	return s.App().Create(ctx, owner, in)
 }
 func (s *Store) Owned(ctx context.Context, owner, id string) (Agent, error) {

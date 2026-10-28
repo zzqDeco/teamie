@@ -10,7 +10,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
@@ -82,10 +81,11 @@ func toPublicAgentDTOList(agents []domain.Agent, workspaceID string) []*controlg
 
 func toCreateChanges(req *controlgen.CreateAgentReq) domain.Changes {
 	ch := domain.Changes{
-		Name:        req.Name,
-		Description: req.Description,
-		ModelID:     req.ModelId,
-		Enabled:     req.Enabled,
+		IdempotencyKey: req.GetIdempotencyKey(),
+		Name:           req.Name,
+		Description:    req.Description,
+		ModelID:        req.ModelId,
+		Enabled:        req.Enabled,
 	}
 	if req.WorkspaceIds != nil {
 		ws := req.WorkspaceIds
@@ -291,11 +291,6 @@ func (a *Adapter) Auth(next func(w http.ResponseWriter, r *http.Request, ctx con
 			}
 		}
 		ctx := WithActor(r.Context(), *user)
-		if key := strings.TrimSpace(r.Header.Get("Idempotency-Key")); key != "" {
-			ctx = domain.WithIdempotencyKey(ctx, key)
-		} else if key := strings.TrimSpace(r.Header.Get("X-Idempotency-Key")); key != "" {
-			ctx = domain.WithIdempotencyKey(ctx, key)
-		}
 		if err := next(w, r, ctx, *user); err != nil {
 			Fail(w, err)
 		}

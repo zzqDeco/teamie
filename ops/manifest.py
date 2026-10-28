@@ -13,7 +13,7 @@ from urllib.parse import unquote, urlsplit
 
 LEGACY_SERVICES = ("identity", "chat", "realtime", "web", "caddy", "postgres", "redis")
 SERVICES = LEGACY_SERVICES + ("agent-control", "agent-runtime", "llm-gateway", "sandbox", "sandbox-runner")
-SCHEMA_V2 = {"identity": 3, "chat": 7, "agent_control": 2, "agent_runtime": 13, "gateway": 5}
+SCHEMA_V2 = {"identity": 3, "chat": 7, "agent_control": 3, "agent_runtime": 13, "gateway": 5}
 VERSION = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 SHA = re.compile(r"[0-9a-f]{40}$")
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}$")
