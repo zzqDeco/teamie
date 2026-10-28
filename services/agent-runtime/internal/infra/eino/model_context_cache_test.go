@@ -173,7 +173,7 @@ func TestContextV1RealIMReceiptReplaysBeforeCountingAndExactCache(t *testing.T) 
 			}
 		}
 	}
-	if reads.Load() != 1 || fixture.calls.Load() != 2 || count(t, s, `SELECT count(*) FROM runtime_tool_calls`) != 1 || count(t, s, `SELECT count(*) FROM runtime_model_calls`) != 2 {
+	if reads.Load() != 2 || fixture.calls.Load() != 2 || count(t, s, `SELECT count(*) FROM runtime_tool_calls`) != 1 || count(t, s, `SELECT count(*) FROM runtime_model_calls`) != 2 {
 		t.Fatal("replay repeated IM/provider effects", reads.Load(), fixture.calls.Load())
 	}
 	var receipt []byte

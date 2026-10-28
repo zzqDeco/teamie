@@ -39,9 +39,11 @@ func contextRealIMDetail(name, call string, args any, wire string) *reduction.To
 
 func contextAddForeignMessage(f *contextArchiveFixture, text string) Message {
 	message := Message{ID: uuid.NewString(), ConversationID: uuid.NewString(), SenderID: uuid.NewString(), SenderKind: "human", Body: text, Seq: 7}
+	wsID := uuid.NewString()
 	f.mu.Lock()
 	f.messages[message.ID] = message
-	f.conversations[message.ConversationID] = Conversation{ID: message.ConversationID, WorkspaceID: uuid.NewString(), Name: text, MemberIDs: []string{message.SenderID, f.l.AgentID}}
+	f.conversations[message.ConversationID] = Conversation{ID: message.ConversationID, WorkspaceID: wsID, Name: text, MemberIDs: []string{message.SenderID, f.l.AgentID}}
+	f.workspaces[wsID] = true
 	f.mu.Unlock()
 	return message
 }
@@ -589,5 +591,140 @@ func TestContextRealIMReductionNoticesPreserveReceiptParents(t *testing.T) {
 	page, err := f.a.Search(f.ctx(), "TRUNCATED_IM_DERIVED", "", 8)
 	if err != nil || len(page.Hits) != 0 {
 		t.Fatal("native IM truncation leaked a derived historical excerpt", err)
+	}
+}
+
+func TestCachedIMReadToolsRevalidateCurrentACLOnReplay(t *testing.T) {
+	for _, revocation := range []string{"group_member_removal", "workspace_revocation"} {
+		for _, mode := range []string{
+			"im_get_message",
+			"im_list_messages_non_empty",
+			"im_list_messages_empty",
+			"im_list_conversations_non_empty",
+			"im_list_conversations_empty",
+		} {
+			t.Run(revocation+"/"+mode, func(t *testing.T) {
+				f := newContextArchiveFixture(t)
+				const private = "CACHED_IM_READ_PRIVATE_B"
+				b := contextAddForeignMessage(f, private)
+				wsID := f.conversations[b.ConversationID].WorkspaceID
+				// Keep a sibling conversation in the same workspace so group-member
+				// removal on B does not collapse into whole-workspace emptiness.
+				siblingID := uuid.NewString()
+				f.mu.Lock()
+				f.conversations[siblingID] = Conversation{ID: siblingID, WorkspaceID: wsID, Type: "direct", Name: "sibling-direct", MemberIDs: []string{uuid.NewString(), f.l.AgentID}}
+				f.mu.Unlock()
+
+				toolName := mode
+				var args any
+				switch mode {
+				case "im_get_message":
+					args = getMessageArgs{ConversationID: b.ConversationID, MessageID: b.ID}
+				case "im_list_messages_non_empty":
+					toolName = "im_list_messages"
+					args = listMessagesArgs{ConversationID: b.ConversationID}
+				case "im_list_messages_empty":
+					toolName = "im_list_messages"
+					f.mu.Lock()
+					delete(f.messages, b.ID)
+					f.mu.Unlock()
+					args = listMessagesArgs{ConversationID: b.ConversationID}
+				case "im_list_conversations_non_empty":
+					toolName = "im_list_conversations"
+					args = listConversationsArgs{WorkspaceID: wsID}
+				case "im_list_conversations_empty":
+					toolName = "im_list_conversations"
+					f.mu.Lock()
+					delete(f.conversations, b.ConversationID)
+					delete(f.conversations, siblingID)
+					if revocation == "group_member_removal" {
+						// Unfiltered empty conversation list falls back to the Run's
+						// conversation source when no workspace filter is supplied.
+						delete(f.conversations, f.input.ConversationID)
+					}
+					f.mu.Unlock()
+					if revocation == "workspace_revocation" {
+						args = listConversationsArgs{WorkspaceID: wsID}
+					} else {
+						args = listConversationsArgs{}
+						f.mu.Lock()
+						f.conversations[f.input.ConversationID] = Conversation{ID: f.input.ConversationID, WorkspaceID: f.input.WorkspaceID, Name: "run conversation"}
+						f.mu.Unlock()
+					}
+				}
+				if mode == "im_list_conversations_empty" && revocation == "group_member_removal" {
+					// Return an empty list on the initial read for a foreign workspace,
+					// or for unfiltered list when the run conversation is temporarily absent.
+					// To get a genuine empty initial response with no workspace filter,
+					// remove the run conversation during initial read and restore before
+					// authorized replay, then deny it for group-member removal.
+					f.mu.Lock()
+					delete(f.conversations, f.input.ConversationID)
+					f.mu.Unlock()
+				}
+
+				node := contextRealIMNode(t, f)
+				callID := "cached-read-" + revocation + "-" + mode
+				first, err := invokeContextTool(node, f.ctx(), callID, toolName, args)
+				if err != nil || !strings.Contains(first, `"ok":true`) {
+					t.Fatal("initial IM read failed", first, err)
+				}
+				if (mode == "im_get_message" || mode == "im_list_messages_non_empty" || mode == "im_list_conversations_non_empty") && !strings.Contains(first, private) {
+					t.Fatal("initial IM read did not return private fixture content", first)
+				}
+				if mode == "im_list_conversations_empty" && revocation == "group_member_removal" {
+					f.mu.Lock()
+					f.conversations[f.input.ConversationID] = Conversation{ID: f.input.ConversationID, WorkspaceID: f.input.WorkspaceID, Name: "run conversation"}
+					f.mu.Unlock()
+				}
+
+				var savedBefore []byte
+				if err = f.s.DB.QueryRow(f.ctx(), `SELECT result FROM runtime_tool_calls WHERE run_id=$1 AND call_id=$2`, f.run.ID, callID).Scan(&savedBefore); err != nil {
+					t.Fatal(err)
+				}
+
+				// Replay while still authorized must be byte-stable and preserve the receipt.
+				replayed, err := invokeContextTool(node, f.ctx(), callID, toolName, args)
+				if err != nil || replayed != first {
+					t.Fatal("authorized replay changed tool output", replayed, first, err)
+				}
+				var savedAfterAuthorized []byte
+				if err = f.s.DB.QueryRow(f.ctx(), `SELECT result FROM runtime_tool_calls WHERE run_id=$1 AND call_id=$2`, f.run.ID, callID).Scan(&savedAfterAuthorized); err != nil {
+					t.Fatal(err)
+				}
+				if string(savedAfterAuthorized) != string(savedBefore) {
+					t.Fatal("authorized replay mutated stored tool receipt")
+				}
+
+				// Now revoke access via group-member removal or workspace revocation.
+				f.mu.Lock()
+				if revocation == "group_member_removal" {
+					if mode == "im_list_conversations_empty" {
+						f.deniedConversations[f.input.ConversationID] = true
+					} else {
+						f.deniedConversations[b.ConversationID] = true
+					}
+				} else {
+					f.deniedWorkspaces[wsID] = true
+				}
+				f.mu.Unlock()
+
+				deniedOut, err := invokeContextTool(node, f.ctx(), callID, toolName, args)
+				if !errors.Is(err, errContextUnavailable) {
+					t.Fatalf("cached %s replay after %s did not fail with errContextUnavailable: out=%q err=%v", mode, revocation, deniedOut, err)
+				}
+				if strings.Contains(deniedOut, private) {
+					t.Fatal("revoked cached replay leaked private content")
+				}
+
+				var savedAfterRevocation []byte
+				if err = f.s.DB.QueryRow(f.ctx(), `SELECT result FROM runtime_tool_calls WHERE run_id=$1 AND call_id=$2`, f.run.ID, callID).Scan(&savedAfterRevocation); err != nil {
+					t.Fatal(err)
+				}
+				if string(savedAfterRevocation) != string(savedBefore) {
+					t.Fatal("revoked replay mutated stored tool receipt")
+				}
+			})
+		}
 	}
 }

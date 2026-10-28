@@ -49,6 +49,51 @@ func contextMessageSource(message Message) InputSource {
 	return ref
 }
 
+func emptyIMTombstone(message Message) bool {
+	return message.RetractedAt != nil && message.Body == "" && len(message.Attachments) == 0 && len(message.Mentions) == 0
+}
+
+func (a *ContextArchive) authorizeIMReadReplay(ctx context.Context, refs []InputSource, name string, raw []byte) error {
+	var observation struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if json.Unmarshal(raw, &observation) != nil {
+		return ErrReplayConflict
+	}
+	var messages []Message
+	switch name {
+	case "im_get_message":
+		var message Message
+		if json.Unmarshal(observation.Data, &message) != nil {
+			return errContextUnavailable
+		}
+		messages = []Message{message}
+	case "im_list_messages":
+		var page struct {
+			Messages []Message `json:"messages"`
+		}
+		if json.Unmarshal(observation.Data, &page) != nil {
+			return errContextUnavailable
+		}
+		messages = page.Messages
+	}
+	tombstones := map[string]Message{}
+	seen := map[string]bool{}
+	for _, message := range messages {
+		if seen[message.ID] {
+			return errContextUnavailable
+		}
+		seen[message.ID] = true
+		if message.RetractedAt != nil {
+			if !emptyIMTombstone(message) {
+				return errContextUnavailable
+			}
+			tombstones[message.ID] = message
+		}
+	}
+	return a.authorizeSourcesWithTombstones(ctx, refs, tombstones)
+}
+
 func (a *ContextArchive) imArguments(ctx context.Context, runID, call, name string) (json.RawMessage, error) {
 	hash, actualName, raw, err := a.Store.DB.GetToolCallObservationWithMeta(ctx, runID, call, contextIMArgumentsKey)
 	if err != nil {
@@ -64,10 +109,28 @@ func (a *ContextArchive) imArguments(ctx context.Context, runID, call, name stri
 	return saved.Arguments, nil
 }
 
+func (a *ContextArchive) imArgumentsOrFallback(ctx context.Context, runID, call, name string, fallbackArgs []byte) (json.RawMessage, error) {
+	args, err := a.imArguments(ctx, runID, call, name)
+	if postgres.IsNoRows(err) && len(fallbackArgs) > 0 {
+		return json.RawMessage(fallbackArgs), nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(fallbackArgs) > 0 && digest(args) != digest(fallbackArgs) {
+		return nil, ErrReplayConflict
+	}
+	return args, nil
+}
+
 // Parse only the typed output persisted by the authenticated IM tool. Source
 // fields embedded in a message body, native argument text or a model response
 // are never inspected here.
 func (a *ContextArchive) imReceiptSources(ctx context.Context, runID, call, name string, raw []byte) ([]InputSource, error) {
+	return a.imReceiptSourcesWithArgs(ctx, runID, call, name, raw, nil)
+}
+
+func (a *ContextArchive) imReceiptSourcesWithArgs(ctx context.Context, runID, call, name string, raw, fallbackArgs []byte) ([]InputSource, error) {
 	if !contextIMTool(name) {
 		return nil, nil
 	}
@@ -88,6 +151,12 @@ func (a *ContextArchive) imReceiptSources(ctx context.Context, runID, call, name
 		if json.Unmarshal(observation.Data, &message) != nil || !validUUID(message.ID) {
 			return nil, errContextUnavailable
 		}
+		if name == "im_get_message" && len(fallbackArgs) > 0 {
+			var request getMessageArgs
+			if json.Unmarshal(fallbackArgs, &request) != nil || request.ConversationID != message.ConversationID || request.MessageID != message.ID {
+				return nil, errContextUnavailable
+			}
+		}
 		refs = append(refs, contextMessageSource(message))
 	case "im_list_messages":
 		var page struct {
@@ -96,8 +165,21 @@ func (a *ContextArchive) imReceiptSources(ctx context.Context, runID, call, name
 		if json.Unmarshal(observation.Data, &page) != nil || page.Messages == nil {
 			return nil, errContextUnavailable
 		}
+		var request listMessagesArgs
+		if len(page.Messages) == 0 || len(fallbackArgs) > 0 {
+			args, err := a.imArgumentsOrFallback(ctx, runID, call, name, fallbackArgs)
+			if postgres.IsNoRows(err) {
+				return nil, errContextUnavailable
+			}
+			if err != nil {
+				return nil, err
+			}
+			if json.Unmarshal(args, &request) != nil {
+				return nil, errContextUnavailable
+			}
+		}
 		for _, message := range page.Messages {
-			if !validUUID(message.ID) {
+			if !validUUID(message.ID) || (request.ConversationID != "" && message.ConversationID != request.ConversationID) {
 				return nil, errContextUnavailable
 			}
 			refs = append(refs, contextMessageSource(message))
@@ -105,17 +187,6 @@ func (a *ContextArchive) imReceiptSources(ctx context.Context, runID, call, name
 		// A successful empty page still contains private cursor/coverage
 		// metadata. Its authenticated request supplies the conversation scope.
 		if len(page.Messages) == 0 {
-			args, err := a.imArguments(ctx, runID, call, name)
-			if postgres.IsNoRows(err) {
-				return nil, errContextUnavailable
-			}
-			if err != nil {
-				return nil, err
-			}
-			var request listMessagesArgs
-			if json.Unmarshal(args, &request) != nil {
-				return nil, errContextUnavailable
-			}
 			refs = append(refs, InputSource{ConversationID: request.ConversationID})
 		}
 	case "im_list_conversations":
@@ -123,8 +194,27 @@ func (a *ContextArchive) imReceiptSources(ctx context.Context, runID, call, name
 		if json.Unmarshal(observation.Data, &conversations) != nil || conversations == nil {
 			return nil, errContextUnavailable
 		}
+		var request listConversationsArgs
+		if len(conversations) == 0 || len(fallbackArgs) > 0 {
+			args, err := a.imArgumentsOrFallback(ctx, runID, call, name, fallbackArgs)
+			if postgres.IsNoRows(err) {
+				return nil, errContextUnavailable
+			}
+			if err != nil {
+				return nil, err
+			}
+			if json.Unmarshal(args, &request) != nil || (request.WorkspaceID != "" && !validUUID(request.WorkspaceID)) {
+				return nil, errContextUnavailable
+			}
+		}
 		for _, conversation := range conversations {
+			if request.WorkspaceID != "" && conversation.WorkspaceID != request.WorkspaceID {
+				return nil, errContextUnavailable
+			}
 			refs = append(refs, InputSource{ConversationID: conversation.ID, WorkspaceID: conversation.WorkspaceID})
+		}
+		if len(conversations) == 0 && request.WorkspaceID != "" {
+			refs = append(refs, InputSource{WorkspaceID: request.WorkspaceID})
 		}
 	case "im_get_attachment":
 		args, err := a.imArguments(ctx, runID, call, name)

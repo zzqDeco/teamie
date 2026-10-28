@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/middlewares/summarization"
@@ -60,12 +63,17 @@ func oldUnescapedOutput(t *testing.T, output any) string {
 
 func TestCommittedIMToolOutputIsByteStableAndKeepsLargeIntegers(t *testing.T) {
 	s, lease, run := nativeModelRun(t)
-	tools := &Tools{Store: s, Lease: lease}
+	conversationID, messageID := uuid.NewString(), uuid.NewString()
+	imHTTP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"message": Message{ID: messageID, ConversationID: conversationID, Body: "<tag>&中文😀", Seq: 9007199254740993}})
+	}))
+	defer imHTTP.Close()
+	tools := &Tools{Store: s, Lease: lease, IM: &IM{BaseURL: imHTTP.URL, token: "fixture-principal-token", expiry: time.Now().Add(time.Hour)}}
 	var effects int
 	item, err := utils.InferTool("im_get_message", "Synthetic structured observation", func(ctx context.Context, args *getMessageArgs) (*Observation, error) {
 		return tools.execute(ctx, "im_get_message", args, func(context.Context, string) (*Observation, error) {
 			effects++
-			return &Observation{OK: true, Data: Message{ID: args.MessageID, Body: "<tag>&中文😀", Seq: 9007199254740993}}, nil
+			return &Observation{OK: true, Data: Message{ID: args.MessageID, ConversationID: args.ConversationID, Body: "<tag>&中文😀", Seq: 9007199254740993}}, nil
 		})
 	}, utils.WithMarshalOutput(marshalObservation))
 	if err != nil {
@@ -76,7 +84,7 @@ func TestCommittedIMToolOutputIsByteStableAndKeepsLargeIntegers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	args, _ := json.Marshal(getMessageArgs{ConversationID: uuid.NewString(), MessageID: uuid.NewString()})
+	args, _ := json.Marshal(getMessageArgs{ConversationID: conversationID, MessageID: messageID})
 	call := &schema.Message{Role: schema.Assistant, ToolCalls: []schema.ToolCall{{ID: "large-output", Type: "function", Function: schema.FunctionCall{Name: "im_get_message", Arguments: string(args)}}}}
 	first, err := node.Invoke(ctx, call)
 	if err != nil {
