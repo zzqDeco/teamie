@@ -1,4 +1,4 @@
-import { Fragment, memo, useEffect, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent, RefObject } from "react";
 import {
   Copy,
@@ -22,7 +22,7 @@ import type {
 import { sendMessage } from "./chat";
 import { chatStore } from "./store";
 import type { LocalMessage } from "./store";
-import { COMMON_REACTION_EMOJIS } from "./engagement-store";
+import { ReactionPicker } from "./chat/reaction-picker";
 import { MentionInput } from "./mentions";
 import { restoreComposerDraft } from "./composer-drafts";
 import { MessageAttachments } from "./attachments";
@@ -150,36 +150,13 @@ export const MessageItem = memo(function MessageItem({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [reactionBusy, setReactionBusy] = useState(false);
   const pickerWrapRef = useRef<HTMLDivElement>(null);
+  const closePicker = useCallback(() => setPickerOpen(false), []);
 
   useEffect(() => {
     if (!copyFeedback) return;
     const timer = window.setTimeout(() => setCopyFeedback(null), 2400);
     return () => window.clearTimeout(timer);
   }, [copyFeedback]);
-
-  useEffect(() => {
-    if (!pickerOpen) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (
-        event.target instanceof Node &&
-        !pickerWrapRef.current?.contains(event.target)
-      ) {
-        setPickerOpen(false);
-      }
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        setPickerOpen(false);
-      }
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown, true);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown, true);
-    };
-  }, [pickerOpen]);
 
   async function toggleReaction(emoji: string) {
     if (reactionBusy || message.retractedAt || message.status) {
@@ -526,30 +503,13 @@ export const MessageItem = memo(function MessageItem({
                       <SmilePlus size={ICON.sm} />
                     </IconButton>
                     {pickerOpen && (
-                      <div
-                        className="reaction-picker-popover"
-                        role="menu"
-                        aria-label="选择表情回应"
-                      >
-                        {COMMON_REACTION_EMOJIS.map((emoji) => {
-                          const active =
-                            !!message.reactions
-                              ?.find((item) => item.emoji === emoji)
-                              ?.userIds.includes(userId);
-                          return (
-                            <button
-                              key={emoji}
-                              type="button"
-                              role="menuitem"
-                              className={`reaction-picker-emoji ${active ? "active" : ""}`}
-                              aria-label={`表情回应 ${emoji}`}
-                              onClick={() => void toggleReaction(emoji)}
-                            >
-                              {emoji}
-                            </button>
-                          );
-                        })}
-                      </div>
+                      <ReactionPicker
+                        anchorRef={pickerWrapRef}
+                        reactions={message.reactions}
+                        userId={userId}
+                        onSelect={(emoji) => void toggleReaction(emoji)}
+                        onClose={closePicker}
+                      />
                     )}
                   </div>
                 )}

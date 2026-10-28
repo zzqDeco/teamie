@@ -284,7 +284,7 @@ describe("versioned reaction state across message windows", () => {
     expect(picker).toBeTruthy();
     await act(async () => picker.click());
     await flush();
-    const emoji = host.querySelector<HTMLButtonElement>(".reaction-picker-emoji")!;
+    const emoji = document.querySelector<HTMLButtonElement>(".reaction-picker-emoji")!;
     await act(async () => emoji.click());
     await flush();
     expect(add).toHaveBeenCalledWith(conv.id, old.id, "👍");
@@ -337,7 +337,7 @@ describe("versioned reaction state across message windows", () => {
     await flush();
     await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="添加表情回应"]')!.click());
     await flush();
-    await act(async () => host.querySelector<HTMLButtonElement>(".reaction-picker-emoji")!.click());
+    await act(async () => document.querySelector<HTMLButtonElement>(".reaction-picker-emoji")!.click());
     expect(add).toHaveBeenCalledWith(conv.id, old.id, "👍");
     await act(async () => chatStore.apply({ cursor: "12", hasMore: false, events: [{ id: "12", type: "reaction.updated", conversationId: conv.id, messageId: old.id, reactions: [], reactionsVersion: "2", createdAt: "2026-10-27T01:00:00Z" }] }));
     expect(host.querySelector(".reaction-chip")).toBeNull();

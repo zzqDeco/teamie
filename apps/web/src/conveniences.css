@@ -320,10 +320,10 @@
   }
 
   .reaction-picker-popover {
-    position: absolute;
-    top: calc(100% + 6px);
-    right: 0;
+    position: fixed;
     display: flex;
+    flex-wrap: wrap;
+    width: max-content;
     align-items: center;
     gap: 2px;
     padding: 4px;

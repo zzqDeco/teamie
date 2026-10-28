@@ -298,7 +298,7 @@ describe("IM engagement suite: reactions, read receipts, presence, and notificat
       addReactionBtn.click();
     });
     await flush();
-    const thumbsUpOption = host.querySelector<HTMLButtonElement>(
+    const thumbsUpOption = document.querySelector<HTMLButtonElement>(
       '.reaction-picker-emoji',
     )!;
     expect(thumbsUpOption).toBeTruthy();
