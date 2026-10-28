@@ -24,12 +24,15 @@ struct AgentListResp {
   1: required list<PublicAgentDTO> agents (api.body="agents")
 }
 
+// POST requires Idempotency-Key (1-128 bytes), scoped to the authenticated owner.
+// Identical retries reuse the Agent; a different normalized payload returns 409.
 struct CreateAgentReq {
   1: optional string name (api.body="name")
   2: optional string description (api.body="description")
   3: optional list<string> workspaceIds (api.body="workspaceIds")
   4: optional bool enabled (api.body="enabled")
   5: optional string modelId (api.body="modelId")
+  6: optional string idempotencyKey (api.header="Idempotency-Key", go.tag="json:\"-\"")
 }
 
 struct GetAgentProfileReq {

@@ -501,11 +501,12 @@ export class TeamieClient {
       ).agent,
     ),
   });
-  createAgent = async (profile: AgentProfileInput) => ({
+  createAgent = async (profile: AgentProfileInput, idempotencyKey: string) => ({
     agent: publicAgent(
       (
         await this.#request<AgentResp>(IDL_ROUTES.CreateAgent.clientPath, {
           method: IDL_ROUTES.CreateAgent.method,
+          headers: { "Idempotency-Key": idempotencyKey },
           body: JSON.stringify(
             publicAgentProfile(profile) satisfies CreateAgentReq,
           ),

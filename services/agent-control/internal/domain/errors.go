@@ -60,6 +60,20 @@ func ErrNotFound(message string) error {
 	return Err(404, "not_found", message)
 }
 
+func IsNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	if coded, ok := err.(*Error); ok {
+		return coded.Status == 404 || coded.Code == "not_found"
+	}
+	return false
+}
+
+func ErrIdempotencyConflict() error {
+	return Err(409, "idempotency_conflict", "Idempotency key is already used for a different Agent request")
+}
+
 func ErrInvalidRequest(message string) error {
 	return Err(400, "invalid_request", message)
 }
@@ -76,11 +90,15 @@ func ErrInvalidWorkspaces() error {
 	return Err(400, "invalid_workspaces", "Select at most 100 workspaces")
 }
 
-func ErrControlUnavailable(message string) error {
+func ErrControlUnavailable(message string, cause ...error) error {
 	if message == "" {
 		message = "Agent control is temporarily unavailable"
 	}
-	return Err(503, "control_unavailable", message)
+	var err error
+	if len(cause) > 0 {
+		err = cause[0]
+	}
+	return &Error{Status: 503, Code: "control_unavailable", Message: message, Cause: err}
 }
 
 func ErrSchemaUnavailable(cause ...error) error {

@@ -81,10 +81,11 @@ func toPublicAgentDTOList(agents []domain.Agent, workspaceID string) []*controlg
 
 func toCreateChanges(req *controlgen.CreateAgentReq) domain.Changes {
 	ch := domain.Changes{
-		Name:        req.Name,
-		Description: req.Description,
-		ModelID:     req.ModelId,
-		Enabled:     req.Enabled,
+		IdempotencyKey: req.GetIdempotencyKey(),
+		Name:           req.Name,
+		Description:    req.Description,
+		ModelID:        req.ModelId,
+		Enabled:        req.Enabled,
 	}
 	if req.WorkspaceIds != nil {
 		ws := req.WorkspaceIds

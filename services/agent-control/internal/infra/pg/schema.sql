@@ -1,6 +1,7 @@
 CREATE TABLE agents (
  id text PRIMARY KEY,owner_id text NOT NULL,name text NOT NULL,description text NOT NULL DEFAULT '',
  model_id text NOT NULL DEFAULT '',
+ creation_hash text NOT NULL DEFAULT '',
  workspace_ids text[] NOT NULL DEFAULT '{}',enabled boolean NOT NULL DEFAULT false,
  revision bigint NOT NULL DEFAULT 1,membership_revision bigint NOT NULL DEFAULT 1,
  applied_revision bigint NOT NULL DEFAULT 0,applied_membership_revision bigint NOT NULL DEFAULT 0,

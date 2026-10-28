@@ -18,18 +18,22 @@ var SchemaV1 string
 //go:embed migrations/002_agent_model_id.sql
 var SchemaV2 string
 
+//go:embed migrations/003_agent_creation_hash.sql
+var SchemaV3 string
+
 // Migrate applies all Agent Control Plane PostgreSQL schema migrations under advisory lock 704201.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	if err := postgres.Migrate(ctx, pool, 704201, "agent_control_schema_migrations", []postgres.Migration{
 		{Version: 1, SQL: SchemaV1},
 		{Version: 2, SQL: SchemaV2},
+		{Version: 3, SQL: SchemaV3},
 	}); err != nil {
 		return domain.ErrSchemaUnavailable(err)
 	}
 	return nil
 }
 
-const columns = "id,owner_id,name,description,model_id,workspace_ids,enabled,revision,created_at,updated_at,deleted_at,runtime_state,last_active_at,last_error,membership_revision,applied_revision,applied_membership_revision,policy_enabled"
+const columns = "creation_hash,id,owner_id,name,description,model_id,workspace_ids,enabled,revision,created_at,updated_at,deleted_at,runtime_state,last_active_at,last_error,membership_revision,applied_revision,applied_membership_revision,policy_enabled"
 
 type scanner interface {
 	Scan(...any) error
@@ -38,7 +42,7 @@ type scanner interface {
 func scanAgent(row scanner) (domain.Agent, error) {
 	var a domain.Agent
 	err := row.Scan(
-		&a.ID,
+		&a.CreationHash, &a.ID,
 		&a.OwnerID,
 		&a.Name,
 		&a.Description,
@@ -91,12 +95,17 @@ func (r *Repository) Ping(ctx context.Context) error {
 	return r.db.Ping(ctx)
 }
 
-func (r *Repository) Insert(ctx context.Context, a domain.Agent) (domain.Agent, error) {
-	return scanAgent(r.db.Conn(ctx).QueryRow(
-		ctx,
-		"INSERT INTO agents(id,owner_id,name,description,model_id,workspace_ids,enabled,policy_enabled) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING "+columns,
-		a.ID, a.OwnerID, a.Name, a.Description, a.ModelID, a.WorkspaceIDs, a.Enabled, a.PolicyEnabled,
-	))
+// InsertOrGetCreation uses the unique ID to serialize concurrent retries before
+// reading the committed original hash. The caller holds the transaction until
+// the intent is verified, including tombstones, so retries cannot resurrect it.
+func (r *Repository) InsertOrGetCreation(ctx context.Context, a domain.Agent) (domain.Agent, error) {
+	_, err := r.db.Conn(ctx).Exec(ctx,
+		"INSERT INTO agents(id,owner_id,name,description,model_id,workspace_ids,enabled,policy_enabled,creation_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO NOTHING",
+		a.ID, a.OwnerID, a.Name, a.Description, a.ModelID, a.WorkspaceIDs, a.Enabled, a.PolicyEnabled, a.CreationHash)
+	if err != nil {
+		return domain.Agent{}, err
+	}
+	return r.GetByIDForUpdate(ctx, a.ID)
 }
 
 func (r *Repository) GetOwned(ctx context.Context, ownerID, id string) (domain.Agent, error) {

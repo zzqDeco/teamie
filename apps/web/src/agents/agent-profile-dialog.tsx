@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -101,11 +101,13 @@ export function AgentProfileDialog({
         ? [initialWorkspaceId]
         : [],
   );
+  const createIntent = useRef<{ fingerprint: string; key: string } | null>(null);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [dirty, setDirty] = useState(false);
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (busy) return;
     setBusy(true);
     setError("");
     const sessionToken = api.csrfToken;
@@ -131,9 +133,19 @@ export function AgentProfileDialog({
         onClose();
         return;
       }
+      if (!initialAgent) {
+        const fingerprint = JSON.stringify({
+          ownerId: user!.id,
+          ...profile,
+          workspaceIds: [...profile.workspaceIds].sort(),
+        });
+        if (createIntent.current?.fingerprint !== fingerprint) {
+          createIntent.current = { fingerprint, key: crypto.randomUUID() };
+        }
+      }
       const response = initialAgent
         ? await api.updateAgent(initialAgent.id, changes)
-        : await api.createAgent(profile);
+        : await api.createAgent(profile, createIntent.current!.key);
       if (sessionToken !== api.csrfToken) return;
       client.setQueryData(["agent", user!.id, response.agent.id], response);
       await Promise.all([

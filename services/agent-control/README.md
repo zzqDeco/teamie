@@ -15,6 +15,7 @@ Independent Go 1.27.2 module using CloudWeGo Hertz v0.10.6, Kitex v0.16.4, and P
 ## Ownership & Privacy Boundaries
 
 - Agent ID equals its IM principal ID; its single durable runtime Session is `agent:<id>`.
+- Agent creation requires an owner-scoped `Idempotency-Key`. The immutable `creation_hash` binds it to the normalized original request; same-key retries reuse the Agent after reconciliation or profile changes, and conflicting payloads return 409. Reconciliation failures return 503 so callers can retry with the same key.
 - Human cookie sessions own the control API; mutating requests require a trusted `Origin` and CSRF token. Platform administrators do not bypass Agent ownership.
 - Browser responses expose only the public profile DTO: ID/principal, owner attribution, name, description, selected workspace IDs, enabled state, and timestamps.
 - Workspace discovery (`GET /api/v1/workspaces/:workspaceId/agents`) verifies both the caller's membership and the Agent's current normal IM membership, returning only `[workspaceId]` in `workspaceIds` without leaking other selected workspaces.
@@ -32,7 +33,7 @@ Independent Go 1.27.2 module using CloudWeGo Hertz v0.10.6, Kitex v0.16.4, and P
 
 ---
 
-## Storage & Reconciliation (`agent_control_schema_migrations` v1)
+## Storage & Reconciliation (`agent_control_schema_migrations` v3)
 
 Startup applies schema version **1** under a PostgreSQL advisory lock (`pkg/postgres.Migrate`) and rejects unknown future schema versions.
 

@@ -13,7 +13,8 @@ type TxManager interface {
 
 // AgentRepository defines the persistence port for Agent definitions.
 type AgentRepository interface {
-	Insert(ctx context.Context, a Agent) (Agent, error)
+	// InsertOrGetCreation atomically deduplicates an owner/key-derived ID in a transaction.
+	InsertOrGetCreation(ctx context.Context, a Agent) (Agent, error)
 	GetOwned(ctx context.Context, ownerID, id string) (Agent, error)
 	GetForUpdate(ctx context.Context, ownerID, id string) (Agent, error)
 	GetByIDForUpdate(ctx context.Context, id string) (Agent, error)

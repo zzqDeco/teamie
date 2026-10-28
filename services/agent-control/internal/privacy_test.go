@@ -19,6 +19,9 @@ func publicRequest(h http.Handler, method, path, token, body string) *httptest.R
 	if token != "" {
 		r.AddCookie(&http.Cookie{Name: "teamie_session", Value: token})
 	}
+	if method == "POST" && path == "/api/v1/agents" {
+		r.Header.Set("Idempotency-Key", id())
+	}
 	r.Header.Set("Origin", "https://teamie.test")
 	r.Header.Set("X-CSRF-Token", "csrf")
 	w := httptest.NewRecorder()
