@@ -273,6 +273,13 @@ func (h *Handler) Routes() http.Handler {
 	return h.adapter.Routes()
 }
 
+func (h *Handler) BucketCount() int {
+	if h.adapter == nil {
+		return 0
+	}
+	return h.adapter.Limiter.BucketCount()
+}
+
 type RPC struct {
 	Store *Store
 }

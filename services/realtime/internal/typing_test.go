@@ -259,3 +259,113 @@ func TestCanceledQueuedHeartbeatCannotPublishAfterClear(t *testing.T) {
 	default:
 	}
 }
+
+type countingTypingAccess struct {
+	mu      sync.Mutex
+	allowed map[string]bool
+	calls   map[string]int
+}
+
+func (a *countingTypingAccess) CheckAccess(_ context.Context, user, conversation string) (*im.AccessResponse, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.calls == nil {
+		a.calls = make(map[string]int)
+	}
+	a.calls[user]++
+	return &im.AccessResponse{
+		Allowed:       conversation == "conversation" && a.allowed[user],
+		MemberIds:     []string{"alice", "bob", "carol", "dave"},
+		TypingEnabled: true,
+	}, nil
+}
+
+func (*countingTypingAccess) Ping(context.Context) error { return nil }
+
+type countingIdentity struct {
+	mu       sync.Mutex
+	sessions map[string]httpx.User
+	calls    map[string]int
+}
+
+func (i *countingIdentity) Validate(_ context.Context, token string) (httpx.Session, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if i.calls == nil {
+		i.calls = make(map[string]int)
+	}
+	i.calls[token]++
+	u, ok := i.sessions[token]
+	if !ok {
+		return httpx.Session{}, httpx.Err(401, "unauthenticated", "revoked")
+	}
+	return httpx.Session{User: u, CSRFToken: "csrf"}, nil
+}
+
+func (*countingIdentity) Users(context.Context, []string) ([]httpx.User, error) { return nil, nil }
+func (*countingIdentity) Ping(context.Context) error                             { return nil }
+
+func TestTypingFanoutDeduplicatesRecipientACLAndSessionChecks(t *testing.T) {
+	access := &countingTypingAccess{
+		allowed: map[string]bool{"alice": true, "bob": true, "carol": true, "dave": true},
+	}
+	identity := &countingIdentity{
+		sessions: map[string]httpx.User{
+			"tok-bob-1": {ID: "bob", DisplayName: "Bob", Kind: "human"},
+			"tok-bob-2": {ID: "bob", DisplayName: "Bob", Kind: "human"},
+			"tok-carol": {ID: "carol", DisplayName: "Carol", Kind: "human"},
+		},
+	}
+
+	// When no local recipients are connected, Deliver performs zero RPCs.
+	emptyHub := &Hub{Identity: identity, Chat: access, peers: map[*peer]struct{}{}}
+	hint := Hint{
+		Type:           "typing",
+		UserIDs:        []string{"alice", "bob", "carol", "dave"},
+		UserID:         "alice",
+		DisplayName:    "Alice",
+		ConversationID: "conversation",
+		IsTyping:       true,
+	}
+	emptyHub.deliver(context.Background(), hint)
+	if len(access.calls) != 0 || len(identity.calls) != 0 {
+		t.Fatalf("expected 0 RPCs when no local recipients are connected, got access=%v identity=%v", access.calls, identity.calls)
+	}
+
+	// Bob has 4 connected peers (3 sharing tok-bob-1, 1 on tok-bob-2); Carol has 3 connected peers sharing tok-carol.
+	bobPeers := []*peer{
+		{user: "bob", token: "tok-bob-1", queue: make(chan Hint, 2), done: make(chan struct{})},
+		{user: "bob", token: "tok-bob-1", queue: make(chan Hint, 2), done: make(chan struct{})},
+		{user: "bob", token: "tok-bob-1", queue: make(chan Hint, 2), done: make(chan struct{})},
+		{user: "bob", token: "tok-bob-2", queue: make(chan Hint, 2), done: make(chan struct{})},
+	}
+	carolPeers := []*peer{
+		{user: "carol", token: "tok-carol", queue: make(chan Hint, 2), done: make(chan struct{})},
+		{user: "carol", token: "tok-carol", queue: make(chan Hint, 2), done: make(chan struct{})},
+		{user: "carol", token: "tok-carol", queue: make(chan Hint, 2), done: make(chan struct{})},
+	}
+	peers := map[*peer]struct{}{}
+	for _, p := range append(append([]*peer{}, bobPeers...), carolPeers...) {
+		peers[p] = struct{}{}
+	}
+	h := &Hub{Identity: identity, Chat: access, peers: peers}
+	h.deliver(context.Background(), hint)
+
+	for _, p := range append(append([]*peer{}, bobPeers...), carolPeers...) {
+		select {
+		case ev := <-p.queue:
+			if ev.Type != "typing" || ev.UserID != "alice" || !ev.IsTyping {
+				t.Fatalf("unexpected typing event: %#v", ev)
+			}
+		default:
+			t.Fatalf("peer for user %s did not receive typing event", p.user)
+		}
+	}
+
+	if access.calls["alice"] != 1 || access.calls["bob"] != 1 || access.calls["carol"] != 1 || access.calls["dave"] != 0 {
+		t.Fatalf("expected 1 CheckAccess per unique connected user (alice, bob, carol) and 0 for disconnected dave, got %v", access.calls)
+	}
+	if identity.calls["tok-bob-1"] != 1 || identity.calls["tok-bob-2"] != 1 || identity.calls["tok-carol"] != 1 {
+		t.Fatalf("expected 1 Identity.Validate per unique session token, got %v", identity.calls)
+	}
+}

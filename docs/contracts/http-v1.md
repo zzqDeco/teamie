@@ -47,7 +47,7 @@ This file coordinates the initial frontend, backend and deployment. The machine-
 - `GET /api/v1/workspaces/:id/members` -> `{members:[{userId,displayName,role,kind}]}`. `role` is owner/member. Profiles may be resolved through Identity RPC.
 - `POST /api/v1/workspaces/:id/invites` -> `{code,expiresAt}`. Owner only; return a frontend-relative `/join/<code>` link if useful.
 - `GET /api/v1/invites/:code` -> `{workspace:{id,name},expiresAt}`. Public metadata only.
-- `POST /api/v1/invites/:code/accept` -> `{workspace,conversations}`. Authenticated and idempotent membership admission.
+- `POST /api/v1/invites/:code/accept` -> `{workspace,conversations}`. Authenticated and idempotent membership admission. Workspaces support at most 500 participants (`400 invalid_members` when full).
 - `DELETE /api/v1/workspaces/:id/members/:userId` -> 204. Owner only, cannot remove owner; removal revokes sends, reads and live delivery.
 
 ## Conversations and messages

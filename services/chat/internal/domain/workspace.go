@@ -11,6 +11,11 @@ import (
 	"time"
 )
 
+const (
+	MaxWorkspaceMembers = 500
+	MaxGroupMembers     = 50
+)
+
 type User struct {
 	ID           string    `json:"id"`
 	Email        string    `json:"email"`
