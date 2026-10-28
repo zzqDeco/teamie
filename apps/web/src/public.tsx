@@ -17,6 +17,8 @@ import {
 import { useAuth } from "./auth";
 import { Avatar, Logo, PublicHeader } from "./ui";
 import { ICON } from "./icons";
+import { resetPageScroll } from "./public/scroll";
+export { resetPageScroll };
 export { Login, Join } from "./public/auth-views";
 
 const STORY_SCENES = [
@@ -66,19 +68,6 @@ function isStickyStoryActive() {
   )
     return false;
   return window.innerWidth > 780 && window.innerHeight > 700;
-}
-
-export function resetPageScroll() {
-  if (typeof window === "undefined") return;
-  const scrolled =
-    window.scrollY !== 0 ||
-    document.documentElement.scrollTop !== 0 ||
-    document.body.scrollTop !== 0;
-  document.documentElement.scrollTop = 0;
-  document.body.scrollTop = 0;
-  if (scrolled && typeof window.scrollTo === "function") {
-    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
-  }
 }
 
 export function Landing() {

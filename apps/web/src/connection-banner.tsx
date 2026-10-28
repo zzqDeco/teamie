@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { RefreshCw, WifiOff } from "lucide-react";
 import type { Connection } from "./chat";
 import { ICON } from "./icons";
-import "./connection-banner.css";
+import "./styles/connection-banner.css";
 
 type Shown = "offline" | "reconnecting" | "restored" | null;
 

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect } from "react";
 import type { Dispatch, MutableRefObject, RefObject, SetStateAction } from "react";
 import { api } from "@teamie/api-client";
 import type { Conversation, Message } from "@teamie/api-client";
-import { errorText } from "../chat";
+import { errorText } from "../errors";
 import { chatStore, reconcileMessages } from "../store";
 import type { LocalMessage } from "../store";
 

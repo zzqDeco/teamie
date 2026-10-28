@@ -5,7 +5,8 @@ import { ArrowLeft, Bell, CheckCheck, RefreshCw } from "lucide-react";
 import { api, ApiError } from "@teamie/api-client";
 import type { AttentionItem } from "@teamie/api-client";
 import { useAuth } from "./auth";
-import { errorText, useChatState } from "./chat";
+import { useChatState } from "./chat";
+import { errorText } from "./errors";
 import {
   chatStore,
   reconcileMessages,
@@ -16,7 +17,7 @@ import { AgentAvatar, AgentBadge } from "./agent-ui";
 import { MentionText } from "./mentions";
 import { Avatar, Button, date, IconButton, Notice, time } from "./ui";
 import { ICON } from "./icons";
-import "./attention.css";
+import "./styles/attention.css";
 
 function useAttentionScope() {
   const { user } = useAuth();

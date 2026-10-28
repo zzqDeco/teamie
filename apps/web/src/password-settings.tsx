@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { api, ApiError } from "@teamie/api-client";
 import { useAuth } from "./auth";
-import { errorText } from "./chat";
+import { errorText } from "./errors";
 import { passwordPolicyError } from "./password-policy";
 import { PasswordField } from "./password-field";
 import { toast } from "./toast";

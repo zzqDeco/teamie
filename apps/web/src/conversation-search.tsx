@@ -3,12 +3,13 @@ import { CornerUpLeft, LoaderCircle, Search } from "lucide-react";
 import { api } from "@teamie/api-client";
 import type { MessagePage } from "@teamie/api-client";
 import { MessageAttachments } from "./attachments";
-import { errorText, useChatState } from "./chat";
+import { useChatState } from "./chat";
+import { errorText } from "./errors";
 import { chatStore, reconcileMessages } from "./store";
 import { AgentBadge } from "./agent-ui";
 import { Button, date, IconButton, Modal, Notice, time } from "./ui";
 import { ICON } from "./icons";
-import "./conversation-search.css";
+import "./styles/conversation-search.css";
 
 type SearchResult = MessagePage & {
   key: string;

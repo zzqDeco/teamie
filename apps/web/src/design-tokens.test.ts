@@ -26,18 +26,21 @@ const modularLayoutFiles = [
   "styles/layout-mobile.css",
   "styles/layout-mobile-compact.css",
 ];
+const modularFeatureFiles = [
+  "styles/attention.css",
+  "styles/attachments.css",
+  "styles/connection-banner.css",
+  "styles/conversation-search.css",
+  "styles/mentions.css",
+  "styles/password-recovery.css",
+  "styles/feedback.css",
+  "styles/conveniences.css",
+];
 const cssFiles = [
   "tokens.css",
   ...modularStyleFiles,
   ...modularLayoutFiles,
-  "attention.css",
-  "attachments.css",
-  "connection-banner.css",
-  "conversation-search.css",
-  "mentions.css",
-  "password-recovery.css",
-  "feedback.css",
-  "conveniences.css",
+  ...modularFeatureFiles,
 ];
 
 function listRelativeFiles(dir: string, root = dir): string[] {
@@ -433,5 +436,109 @@ describe("PR-5 CSS cleanup, unified focus, icon scale & self-hosted DM Sans", ()
         ).toBe(true);
       }
     }
+  });
+
+  it("enforces @teamie/api-client <=700-line module bounds, zero frontend import cycles (SCCs > 1), and root CSS consolidation", () => {
+    const apiClientSrcDir = join(srcDir, "../../../packages/api-client/src");
+    const apiClientFiles = listRelativeFiles(apiClientSrcDir).filter(
+      (f) => f.endsWith(".ts") && f !== "generated.ts",
+    );
+    expect(apiClientFiles.length).toBeGreaterThanOrEqual(4);
+    for (const file of apiClientFiles) {
+      const lineCount = readFileSync(join(apiClientSrcDir, file), "utf8").split(
+        "\n",
+      ).length;
+      expect(
+        lineCount,
+        `packages/api-client/src/${file} (${lineCount} lines) exceeds modular 500-line ceiling`,
+      ).toBeLessThanOrEqual(500);
+    }
+
+    const rootCssFiles = readdirSync(srcDir)
+      .filter((entry) => entry.endsWith(".css"))
+      .sort();
+    expect(rootCssFiles).toEqual([
+      "layers.css",
+      "layout.css",
+      "styles.css",
+      "tokens.css",
+    ]);
+    const nonStylesCss = listRelativeFiles(srcDir).filter(
+      (f) =>
+        f.endsWith(".css") &&
+        !rootCssFiles.includes(f) &&
+        !f.startsWith("styles/"),
+    );
+    expect(nonStylesCss).toEqual([]);
+
+    const nonTestSourceFiles = listRelativeFiles(srcDir).filter(
+      (f) =>
+        (f.endsWith(".ts") || f.endsWith(".tsx")) &&
+        !f.endsWith(".test.ts") &&
+        !f.endsWith(".test.tsx"),
+    );
+    const fullPathSet = new Set(
+      nonTestSourceFiles.map((f) => join(srcDir, f)),
+    );
+    const resolveRelativeImport = (
+      fromFile: string,
+      spec: string,
+    ): string | null => {
+      if (!spec.startsWith(".")) return null;
+      const base = join(dirname(fromFile), spec);
+      for (const ext of ["", ".ts", ".tsx", "/index.ts", "/index.tsx"]) {
+        if (fullPathSet.has(base + ext)) return base + ext;
+      }
+      return null;
+    };
+    const adjacency = new Map<string, string[]>();
+    for (const rel of nonTestSourceFiles) {
+      const full = join(srcDir, rel);
+      const content = readFileSync(full, "utf8");
+      const deps = new Set<string>();
+      for (const m of content.matchAll(
+        /(?:import|export)\s+(?:type\s+)?(?:[\s\S]*?\s+from\s+)?["'](\.[^"']+)["']/g,
+      )) {
+        const target = resolveRelativeImport(full, m[1]);
+        if (target && target !== full) deps.add(target);
+      }
+      adjacency.set(full, [...deps]);
+    }
+
+    let index = 0;
+    const indices = new Map<string, number>();
+    const lowlink = new Map<string, number>();
+    const onStack = new Set<string>();
+    const stack: string[] = [];
+    const circularSccs: string[][] = [];
+    const strongConnect = (v: string) => {
+      indices.set(v, index);
+      lowlink.set(v, index);
+      index++;
+      stack.push(v);
+      onStack.add(v);
+      for (const w of adjacency.get(v) || []) {
+        if (!indices.has(w)) {
+          strongConnect(w);
+          lowlink.set(v, Math.min(lowlink.get(v)!, lowlink.get(w)!));
+        } else if (onStack.has(w)) {
+          lowlink.set(v, Math.min(lowlink.get(v)!, indices.get(w)!));
+        }
+      }
+      if (lowlink.get(v) === indices.get(v)) {
+        const scc: string[] = [];
+        let w: string;
+        do {
+          w = stack.pop()!;
+          onStack.delete(w);
+          scc.push(relative(srcDir, w).replace(/\\/g, "/"));
+        } while (w !== v);
+        if (scc.length > 1) circularSccs.push(scc.sort());
+      }
+    };
+    for (const full of fullPathSet) {
+      if (!indices.has(full)) strongConnect(full);
+    }
+    expect(circularSccs, "circular relative import SCCs").toEqual([]);
   });
 });

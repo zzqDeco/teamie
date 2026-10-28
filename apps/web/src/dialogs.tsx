@@ -15,7 +15,8 @@ import {
 import { api } from "@teamie/api-client";
 import type { Conversation, Workspace } from "@teamie/api-client";
 import { useAuth } from "./auth";
-import { errorText, useChat } from "./chat";
+import { useChat } from "./chat";
+import { errorText } from "./errors";
 import { chatStore } from "./store";
 import { Avatar, Button, Modal, Notice, SwitchField } from "./ui";
 import { enrichParticipants } from "./participants";

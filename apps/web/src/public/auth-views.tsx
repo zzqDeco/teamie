@@ -14,12 +14,12 @@ import type { Bootstrap } from "@teamie/api-client";
 import { chatStore } from "../store";
 import { useAuth } from "../auth";
 import { clearSessionExpired, readSessionExpired } from "../session-notice";
-import { errorText } from "../chat";
+import { errorText } from "../errors";
 import { Avatar, Button, Logo, Notice, PublicHeader } from "../ui";
 import { passwordPolicyError } from "../password-policy";
 import { FieldError, PasswordField, fieldErrorProps } from "../password-field";
 import { ICON } from "../icons";
-import { resetPageScroll } from "../public";
+import { resetPageScroll } from "./scroll";
 
 type LoginField =
   | "inviteCode"

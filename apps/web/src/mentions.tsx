@@ -3,7 +3,7 @@ import type { ClipboardEvent, KeyboardEvent, RefObject } from "react";
 import type { Member, Mention } from "@teamie/api-client";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
 import { Avatar } from "./ui";
-import "./mentions.css";
+import "./styles/mentions.css";
 
 // Offsets use the browser's UTF-16 selection units. Any edit intersecting a
 // selected name drops its identity instead of guessing who the text names.
