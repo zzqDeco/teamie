@@ -57,6 +57,7 @@ type ConversationRepository interface {
 	ListAuthorizedConversationIDs(ctx context.Context, userID, workspaceID string) ([]string, error)
 	ConversationAccess(ctx context.Context, conversationID, userID string) (Conversation, error)
 	LockConversation(ctx context.Context, conversationID, userID string) (Conversation, error)
+	LockConversationForShare(ctx context.Context, conversationID string) error
 	GetConversationWorkspaceID(ctx context.Context, conversationID string) (string, error)
 	FindDirectConversationByPairKey(ctx context.Context, workspaceID, pairKey string) (string, bool, error)
 	InsertConversation(ctx context.Context, c Conversation, pairKey string) (time.Time, error)
