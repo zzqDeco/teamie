@@ -3,9 +3,12 @@
 package ws
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -112,8 +115,11 @@ type Adapter struct {
 	RegisterPeer         func(userID, token string, conn *websocket.Conn) (domain.Client, <-chan domain.Event, <-chan struct{})
 	UnregisterPeer       func(c domain.Client)
 
-	mu    sync.Mutex
-	peers map[*peer]struct{}
+	mu             sync.Mutex
+	peers          map[*peer]struct{}
+	peersByUser    map[string]int
+	reservedByUser map[string]int
+	reservedTotal  int
 }
 
 var _ realtimegen.RealtimeWSService = (*Adapter)(nil)
@@ -148,7 +154,58 @@ func (a *Adapter) CloseAll() {
 	}
 }
 
+func (a *Adapter) tryReservePeer(userID string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	userCount := a.reservedByUser[userID]
+	totalCount := a.reservedTotal
+	if a.Clients != nil {
+		clients := a.Clients()
+		totalCount += len(clients)
+		for _, c := range clients {
+			if c.UserID() == userID {
+				userCount++
+			}
+		}
+	} else {
+		totalCount += len(a.peers)
+		userCount += a.peersByUser[userID]
+	}
+	if userCount >= domain.MaxPeersPerUser || totalCount >= domain.MaxTotalPeers {
+		return domain.ErrTooManyConnections()
+	}
+	if a.reservedByUser == nil {
+		a.reservedByUser = make(map[string]int)
+	}
+	a.reservedByUser[userID]++
+	a.reservedTotal++
+	return nil
+}
+
+func (a *Adapter) releasePeerReservation(userID string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.consumeReservationLocked(userID)
+}
+
+func (a *Adapter) consumeReservationLocked(userID string) {
+	if n := a.reservedByUser[userID]; n > 0 {
+		if n == 1 {
+			delete(a.reservedByUser, userID)
+		} else {
+			a.reservedByUser[userID] = n - 1
+		}
+		if a.reservedTotal > 0 {
+			a.reservedTotal--
+		}
+	}
+}
+
 func (a *Adapter) registerPeer(userID, token string, conn *websocket.Conn) (domain.Client, <-chan domain.Event, <-chan struct{}) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.consumeReservationLocked(userID)
 	if a.RegisterPeer != nil {
 		return a.RegisterPeer(userID, token, conn)
 	}
@@ -159,12 +216,14 @@ func (a *Adapter) registerPeer(userID, token string, conn *websocket.Conn) (doma
 		queue: make(chan domain.Hint, 16),
 		done:  make(chan struct{}),
 	}
-	a.mu.Lock()
 	if a.peers == nil {
 		a.peers = map[*peer]struct{}{}
 	}
+	if a.peersByUser == nil {
+		a.peersByUser = map[string]int{}
+	}
 	a.peers[p] = struct{}{}
-	a.mu.Unlock()
+	a.peersByUser[userID]++
 	return p, p.queue, p.done
 }
 
@@ -180,7 +239,14 @@ func (a *Adapter) unregisterPeer(c domain.Client) {
 	}
 	p.close()
 	a.mu.Lock()
-	delete(a.peers, p)
+	if _, exists := a.peers[p]; exists {
+		delete(a.peers, p)
+		if n := a.peersByUser[p.user]; n <= 1 {
+			delete(a.peersByUser, p.user)
+		} else {
+			a.peersByUser[p.user] = n - 1
+		}
+	}
 	a.mu.Unlock()
 }
 
@@ -297,7 +363,7 @@ func (a *Adapter) handleWS(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, err)
 		return
 	}
-	if err := svc.CheckConnectionCapacity(a.ActiveClients(), ss.User.ID); err != nil {
+	if err := a.tryReservePeer(ss.User.ID); err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
@@ -309,6 +375,7 @@ func (a *Adapter) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
+		a.releasePeerReservation(ss.User.ID)
 		return
 	}
 	client, queue, done := a.registerPeer(ss.User.ID, httpx.Token(r), conn)
@@ -328,12 +395,12 @@ func (a *Adapter) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 		var frame realtimegen.RealtimeClientFrame
 		if err = json.Unmarshal(rawMsg, &frame); err != nil {
-			return
+			continue
 		}
 		curSvc := a.hubService()
 		switch frame.GetType() {
 		case "typing":
-			if frame.GetConversationId() == "" || (curSvc.Flags != nil && !curSvc.Flags.TypingPublishEnabled()) {
+			if !validTypingFrame(rawMsg, frame) || (curSvc.Flags != nil && !curSvc.Flags.TypingPublishEnabled()) {
 				continue
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -423,4 +490,42 @@ func (a *Adapter) writeLoop(client domain.Client, conn *websocket.Conn, queue <-
 			}
 		}
 	}
+}
+
+type typingClientFrame struct {
+	Type           string  `json:"type"`
+	ConversationID *string `json:"conversationId"`
+	IsTyping       *bool   `json:"isTyping"`
+}
+
+func validConversationID(id string) bool {
+	return id != "" && len(id) <= 160 && strings.TrimSpace(id) == id && !strings.ContainsAny(id, "\x00\r\n")
+}
+
+func validTypingFrame(rawMsg []byte, frame realtimegen.RealtimeClientFrame) bool {
+	if !frame.IsSetConversationId() || !frame.IsSetIsTyping() || !validConversationID(frame.GetConversationId()) {
+		return false
+	}
+	var strict typingClientFrame
+	dec := json.NewDecoder(bytes.NewReader(rawMsg))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&strict); err != nil {
+		return false
+	}
+	if err := dec.Decode(new(any)); err != io.EOF {
+		return false
+	}
+	if strict.Type != "typing" || strict.ConversationID == nil || strict.IsTyping == nil || !validConversationID(*strict.ConversationID) {
+		return false
+	}
+	var rawFields map[string]json.RawMessage
+	if json.Unmarshal(rawMsg, &rawFields) != nil || len(rawFields) != 3 {
+		return false
+	}
+	for k := range rawFields {
+		if k != "type" && k != "conversationId" && k != "isTyping" {
+			return false
+		}
+	}
+	return true
 }
