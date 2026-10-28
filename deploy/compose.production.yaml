@@ -251,6 +251,7 @@ services:
       IDENTITY_RPC_ADDR: identity:8881
       APP_ORIGIN: ${APP_ORIGIN:?HTTPS origin required}
       COOKIE_SECURE: "true"
+      GATEWAY_MAX_CONCURRENT_CALLS: ${GATEWAY_MAX_CONCURRENT_CALLS:-16}
       GATEWAY_MASTER_KEY: ${GATEWAY_MASTER_KEY:?64 hex master key required}
       GATEWAY_RUNTIME_TOKEN: ${GATEWAY_RUNTIME_TOKEN:?gateway runtime credential required}
       GOMEMLIMIT: 96MiB

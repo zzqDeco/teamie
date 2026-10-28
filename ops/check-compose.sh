@@ -38,6 +38,17 @@ python3 - "$scratch/default-bootstrap.json" <<'PY'
 import json,sys
 assert json.load(open(sys.argv[1]))['services']['identity']['environment']['BOOTSTRAP_INVITE_CODE']=='teamie-bootstrap'
 PY
+# Verify both default and host-file override reach the actual gateway container.
+for cap in '' 7; do
+  printf 'GATEWAY_MAX_CONCURRENT_CALLS=%s\n' "$cap" > "$scratch/gateway-cap.env"
+  env -u GATEWAY_MAX_CONCURRENT_CALLS docker compose --file deploy/compose.production.yaml \
+    --env-file deploy/production.env.example --env-file "$scratch/images.env" \
+    --env-file "$scratch/gateway-cap.env" config --format json > "$scratch/gateway-cap.json"
+  python3 - "$scratch/gateway-cap.json" "${cap:-16}" <<'PY_CAP'
+import json,sys
+assert json.load(open(sys.argv[1]))['services']['llm-gateway']['environment']['GATEWAY_MAX_CONCURRENT_CALLS']==sys.argv[2]
+PY_CAP
+done
 # Render a fully valid disposable secret set and exercise production-only guards.
 python3 - "$scratch/production.env" <<'PY'
 import hashlib,pathlib,re,sys
