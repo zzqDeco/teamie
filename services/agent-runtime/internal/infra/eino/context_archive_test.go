@@ -32,8 +32,10 @@ type contextArchiveFixture struct {
 	mu                  sync.Mutex
 	messages            map[string]Message
 	conversations       map[string]Conversation
+	workspaces          map[string]bool
 	attachmentContent   map[string][]byte
 	deniedConversations map[string]bool
+	deniedWorkspaces    map[string]bool
 	denied              atomic.Bool
 	checks              atomic.Int64
 }
@@ -53,7 +55,7 @@ func newContextArchiveFixture(t *testing.T, budgets ...json.RawMessage) *context
 	if _, err := s.DB.Exec(context.Background(), contextArchiveSchemaSQL); err != nil {
 		t.Fatal(err)
 	}
-	f := &contextArchiveFixture{s: s, messages: map[string]Message{}, conversations: map[string]Conversation{}, attachmentContent: map[string][]byte{}, deniedConversations: map[string]bool{}}
+	f := &contextArchiveFixture{s: s, messages: map[string]Message{}, conversations: map[string]Conversation{}, workspaces: map[string]bool{}, attachmentContent: map[string][]byte{}, deniedConversations: map[string]bool{}, deniedWorkspaces: map[string]bool{}}
 	agent := uuid.NewString()
 	var err error
 	f.l, err = s.Acquire(context.Background(), agent, "context-archive-test")
@@ -84,21 +86,28 @@ func newContextArchiveFixture(t *testing.T, budgets ...json.RawMessage) *context
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		if request.Method == http.MethodGet && request.URL.Path == "/api/v1/bootstrap" {
+			workspaces := []Workspace{}
+			for wsID := range f.workspaces {
+				if !f.deniedWorkspaces[wsID] {
+					workspaces = append(workspaces, Workspace{ID: wsID, Name: "fixture workspace"})
+				}
+			}
+			sort.Slice(workspaces, func(i, j int) bool { return workspaces[i].ID < workspaces[j].ID })
 			conversations := []Conversation{}
 			for _, conversation := range f.conversations {
-				if !f.deniedConversations[conversation.ID] {
+				if !f.deniedConversations[conversation.ID] && !f.deniedWorkspaces[conversation.WorkspaceID] {
 					conversations = append(conversations, conversation)
 				}
 			}
 			sort.Slice(conversations, func(i, j int) bool { return conversations[i].ID < conversations[j].ID })
-			_ = json.NewEncoder(w).Encode(map[string]any{"conversations": conversations})
+			_ = json.NewEncoder(w).Encode(map[string]any{"workspaces": workspaces, "conversations": conversations})
 			return
 		}
 		if len(parts) < 6 || parts[3] != "conversations" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		if f.deniedConversations[parts[4]] {
+		if f.deniedConversations[parts[4]] || f.deniedWorkspaces[f.conversations[parts[4]].WorkspaceID] {
 			w.WriteHeader(http.StatusForbidden)
 			return
 		}
@@ -165,6 +174,9 @@ func (f *contextArchiveFixture) addMessage(input Input) {
 	f.mu.Lock()
 	f.messages[input.MessageID] = Message{ID: input.MessageID, ConversationID: input.ConversationID, SenderID: input.SenderID, SenderKind: input.SenderKind, Body: input.Body, Attachments: input.Attachments}
 	f.conversations[input.ConversationID] = Conversation{ID: input.ConversationID, WorkspaceID: input.WorkspaceID, Name: "fixture conversation"}
+	if input.WorkspaceID != "" {
+		f.workspaces[input.WorkspaceID] = true
+	}
 	f.mu.Unlock()
 }
 

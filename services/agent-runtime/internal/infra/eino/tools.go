@@ -334,6 +334,34 @@ func (t *Tools) execute(ctx context.Context, name string, args any, fn func(cont
 		if e = json.Unmarshal(cached, &out); e != nil {
 			return nil, e
 		}
+		if (name == "im_get_message" || name == "im_list_messages" || name == "im_list_conversations") && out.OK {
+			archive := &ContextArchive{Store: t.Store, Lease: t.Lease, IM: t.IM, Authorize: t.Authorize}
+			refs, srcErr := archive.imReceiptSourcesWithArgs(ctx, run.ID, callID, name, cached, payload)
+			if srcErr != nil {
+				return nil, srcErr
+			}
+			if name == "im_list_conversations" && len(refs) == 0 {
+				refs, srcErr = archive.runSources(ctx, run.ID)
+				if srcErr != nil {
+					return nil, srcErr
+				}
+				if len(refs) == 0 {
+					if t.IM == nil {
+						return nil, errContextUnavailable
+					}
+					if _, e = t.IM.Bootstrap(ctx); e != nil {
+						var api *APIError
+						if errors.As(e, &api) && api.Status >= 400 && api.Status < 500 {
+							return nil, errContextUnavailable
+						}
+						return nil, e
+					}
+				}
+			}
+			if e = archive.authorizeSources(ctx, refs); e != nil {
+				return nil, e
+			}
+		}
 		if name == "im_get_attachment" && out.OK {
 			archive := &ContextArchive{Store: t.Store, Lease: t.Lease, IM: t.IM, Authorize: t.Authorize}
 			if e = archive.captureWorkspaceSources(ctx, run, callID, name, payload); e != nil {
