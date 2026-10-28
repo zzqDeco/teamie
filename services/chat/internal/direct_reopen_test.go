@@ -36,7 +36,7 @@ func TestDirectReopenRestoresDurableAudienceOnce(t *testing.T) {
 	}
 	cursors := map[string]string{}
 	for _, id := range []string{owner.ID, member.ID} {
-		_, cursor, more, err := s.Sync(ctx, id, "0", 500)
+		_, cursor, more, err := s.Sync(ctx, id, "0", 100)
 		if err != nil || more {
 			t.Fatal(err)
 		}
@@ -65,11 +65,11 @@ func TestDirectReopenRestoresDurableAudienceOnce(t *testing.T) {
 	}
 	wg.Wait()
 	for _, id := range []string{owner.ID, member.ID} {
-		events, cursor, more, err := s.Sync(ctx, id, cursors[id], 500)
+		events, cursor, more, err := s.Sync(ctx, id, cursors[id], 100)
 		if err != nil || more || len(events) != 1 || events[0].Type != "conversation.created" || events[0].ConversationID != direct.ID || events[0].Conversation == nil || len(events[0].Conversation.MemberIDs) != 2 || events[0].Conversation.LastSeq != message.Seq {
 			t.Fatalf("reconnect missed or duplicated restored direct chat for %s: %#v %v", id, events, err)
 		}
-		again, next, more, err := s.Sync(ctx, id, cursor, 500)
+		again, next, more, err := s.Sync(ctx, id, cursor, 100)
 		if err != nil || more || len(again) != 0 || next != cursor {
 			t.Fatal("accepted cursor replayed a restoration", err)
 		}

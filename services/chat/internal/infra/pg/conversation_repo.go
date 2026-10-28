@@ -239,54 +239,77 @@ func (r *Repository) SyncHead(ctx context.Context, userID string) (int64, error)
 }
 
 func (r *Repository) EnsureAndLockSyncHeads(ctx context.Context, userIDs []string) error {
-	conn := r.DB.Conn(ctx)
-	for _, id := range userIDs {
-		if _, err := conn.Exec(ctx, "INSERT INTO sync_heads(user_id) VALUES($1) ON CONFLICT DO NOTHING", id); err != nil {
-			return err
-		}
-		if _, err := conn.Exec(ctx, "SELECT user_id FROM sync_heads WHERE user_id=$1 FOR UPDATE", id); err != nil {
-			return err
-		}
+	unique := domain.NormalizedIDs(userIDs)
+	if len(unique) == 0 {
+		return nil
 	}
-	return nil
+	conn := r.DB.Conn(ctx)
+	if _, err := conn.Exec(ctx, "INSERT INTO sync_heads(user_id) SELECT u FROM unnest($1::text[]) AS u ORDER BY u ON CONFLICT DO NOTHING", unique); err != nil {
+		return err
+	}
+	_, err := conn.Exec(ctx, "SELECT user_id FROM sync_heads WHERE user_id=ANY($1::text[]) ORDER BY user_id FOR UPDATE", unique)
+	return err
 }
 
 // Fanout acquires sorted sync_head updates so fanout is atomic and deadlock-free across overlapping audiences.
 func (r *Repository) Fanout(ctx context.Context, ids []string, event domain.Event) error {
+	unique := domain.NormalizedIDs(ids)
+	if len(unique) == 0 {
+		return nil
+	}
 	conn := r.DB.Conn(ctx)
-	ids = append([]string(nil), ids...)
-	sort.Strings(ids)
 	event.CreatedAt = time.Now().UTC()
-	last := ""
-	for _, id := range ids {
-		if id == last {
-			continue
-		}
-		last = id
-		if _, err := conn.Exec(ctx, "INSERT INTO sync_heads(user_id) VALUES($1) ON CONFLICT DO NOTHING", id); err != nil {
-			return err
-		}
+	if _, err := conn.Exec(ctx, "INSERT INTO sync_heads(user_id) SELECT u FROM unnest($1::text[]) AS u ORDER BY u ON CONFLICT DO NOTHING", unique); err != nil {
+		return err
+	}
+	rows, err := conn.Query(ctx, "WITH locked AS (SELECT user_id FROM sync_heads WHERE user_id=ANY($1::text[]) ORDER BY user_id FOR UPDATE) UPDATE sync_heads h SET last_id=h.last_id+1 FROM locked WHERE h.user_id=locked.user_id RETURNING h.user_id,h.last_id", unique)
+	if err != nil {
+		return err
+	}
+	cursors := make(map[string]int64, len(unique))
+	for rows.Next() {
+		var uid string
 		var cursor int64
-		if err := conn.QueryRow(ctx, "UPDATE sync_heads SET last_id=last_id+1 WHERE user_id=$1 RETURNING last_id", id).Scan(&cursor); err != nil {
+		if err = rows.Scan(&uid, &cursor); err != nil {
+			rows.Close()
 			return err
 		}
-		if event.Conversation != nil {
-			c, err := r.ConversationAccess(ctx, event.Conversation.ID, id)
+		cursors[uid] = cursor
+	}
+	if err = rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+
+	baseConvID := ""
+	if event.Conversation != nil {
+		baseConvID = event.Conversation.ID
+	}
+	eventIDs := make([]int64, len(unique))
+	payloads := make([]string, len(unique))
+	for i, id := range unique {
+		cursor := cursors[id]
+		ev := event
+		if baseConvID != "" {
+			c, err := r.ConversationAccess(ctx, baseConvID, id)
 			if err != nil {
 				return err
 			}
-			event.Conversation = &c
+			ev.Conversation = &c
 		}
-		event.ID = strconv.FormatInt(cursor, 10)
-		b, err := json.Marshal(event)
+		ev.ID = strconv.FormatInt(cursor, 10)
+		b, err := json.Marshal(ev)
 		if err != nil {
 			return err
 		}
-		if _, err = conn.Exec(ctx, "INSERT INTO sync_events(user_id,id,workspace_id,conversation_id,payload) VALUES($1,$2,NULLIF($3,''),NULLIF($4,''),$5)", id, cursor, event.WorkspaceID, event.ConversationID, b); err != nil {
-			return err
-		}
+		eventIDs[i] = cursor
+		payloads[i] = string(b)
 	}
-	b, err := json.Marshal(map[string]any{"type": "sync.required", "userIds": ids})
+	if _, err = conn.Exec(ctx, "INSERT INTO sync_events(user_id,id,workspace_id,conversation_id,payload) SELECT u,seq,NULLIF($3,''),NULLIF($4,''),p::jsonb FROM unnest($1::text[],$2::bigint[],$5::text[]) AS t(u,seq,p)", unique, eventIDs, event.WorkspaceID, event.ConversationID, payloads); err != nil {
+		return err
+	}
+	b, err := json.Marshal(map[string]any{"type": "sync.required", "userIds": unique})
 	if err != nil {
 		return err
 	}

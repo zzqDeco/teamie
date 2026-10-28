@@ -217,11 +217,11 @@ func TestReactionsReadReceiptsAndNotificationLevels(t *testing.T) {
 	}
 
 	// 3. Notification levels and caller-scoped preference.updated sync event
-	_, startCursor, _, err := s.Sync(ctx, owner.ID, "0", 500)
+	_, startCursor, _, err := s.Sync(ctx, owner.ID, "0", 100)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, memberCursor, _, err := s.Sync(ctx, member.ID, "0", 500)
+	_, memberCursor, _, err := s.Sync(ctx, member.ID, "0", 100)
 	if err != nil {
 		t.Fatal(err)
 	}

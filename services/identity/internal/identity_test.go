@@ -94,3 +94,60 @@ func TestInvitationSessionCSRFAndRevocation(t *testing.T) {
 		t.Fatal("login CSRF missing")
 	}
 }
+
+func TestRateLimiterSharesNormalizedEmailBucketAndSkipsInvalidEmailBuckets(t *testing.T) {
+	handler := &Handler{Store: &Store{}, Origin: "https://teamie.example", Secure: true}
+	routes := handler.Routes()
+
+	postJSON := func(path, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		r.Header.Set("Origin", "https://teamie.example")
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		routes.ServeHTTP(w, r)
+		return w
+	}
+
+	// Invalid emails fail without creating per-email rate-limit buckets.
+	for _, invalid := range []string{"", "   ", "not-an-email", "Alice <a@x.com>", "a@b@c.com"} {
+		w := postJSON("/api/v1/auth/register", `{"email":`+strconvQuote(invalid)+`,"password":"very-long-password","displayName":"Alice","inviteCode":"test-bootstrap-code"}`)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("register invalid email %q: got %d, want 400", invalid, w.Code)
+		}
+		wLogin := postJSON("/api/v1/auth/login", `{"email":`+strconvQuote(invalid)+`,"password":"very-long-password"}`)
+		if wLogin.Code != http.StatusUnauthorized {
+			t.Fatalf("login invalid email %q: got %d, want 401", invalid, wLogin.Code)
+		}
+	}
+	if got := handler.BucketCount(); got != 0 {
+		t.Fatalf("invalid emails created %d rate-limit buckets, want 0", got)
+	}
+
+	// Case and surrounding-whitespace variants share one 20/min bucket.
+	variants := []string{"A@x.com", "a@x.com", " a@x.com "}
+	for i := 0; i < 20; i++ {
+		email := variants[i%len(variants)]
+		w := postJSON("/api/v1/auth/register", `{"email":`+strconvQuote(email)+`,"password":"short","displayName":"Alice","inviteCode":"wrong"}`)
+		if w.Code == http.StatusTooManyRequests {
+			t.Fatalf("request %d (%q) throttled early: %d", i+1, email, w.Code)
+		}
+	}
+	if got := handler.BucketCount(); got != 1 {
+		t.Fatalf("expected 1 shared email bucket across variants, got %d", got)
+	}
+	for _, email := range variants {
+		w := postJSON("/api/v1/auth/register", `{"email":`+strconvQuote(email)+`,"password":"very-long-password","displayName":"Alice","inviteCode":"test-bootstrap-code"}`)
+		if w.Code != http.StatusTooManyRequests {
+			t.Fatalf("21st+ register for %q was not rate-limited: %d %s", email, w.Code, w.Body.String())
+		}
+		wLogin := postJSON("/api/v1/auth/login", `{"email":`+strconvQuote(email)+`,"password":"very-long-password"}`)
+		if wLogin.Code != http.StatusTooManyRequests {
+			t.Fatalf("21st+ login for %q was not rate-limited: %d %s", email, wLogin.Code, wLogin.Body.String())
+		}
+	}
+}
+
+func strconvQuote(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}

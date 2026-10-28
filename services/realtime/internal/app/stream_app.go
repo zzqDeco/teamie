@@ -20,6 +20,7 @@ type StreamApp struct {
 	Policy        *domain.TypingTracker
 	Presence      *domain.PresenceTracker
 	PresenceStore domain.PresenceStore
+	PresenceTTL   time.Duration
 	Clients       func() []domain.Client
 }
 
@@ -90,7 +91,35 @@ func (s *StreamApp) deliverReceiptToUser(ctx context.Context, clients []domain.C
 func (s *StreamApp) Deliver(ctx context.Context, clients []domain.Client, hint domain.Event) {
 	switch hint.Type {
 	case "typing":
-		if s.Chat == nil {
+		if s.Chat == nil || (s.Flags != nil && !s.Flags.TypingPublishEnabled()) {
+			return
+		}
+		if len(clients) == 0 {
+			return
+		}
+		hasLocalRecipient := false
+		if len(hint.UserIDs) == 0 {
+			for _, c := range clients {
+				if c.UserID() != hint.UserID {
+					hasLocalRecipient = true
+					break
+				}
+			}
+		} else {
+			wanted := make(map[string]bool, len(hint.UserIDs))
+			for _, id := range hint.UserIDs {
+				if id != hint.UserID {
+					wanted[id] = true
+				}
+			}
+			for _, c := range clients {
+				if wanted[c.UserID()] {
+					hasLocalRecipient = true
+					break
+				}
+			}
+		}
+		if !hasLocalRecipient {
 			return
 		}
 		access, err := s.Chat.CheckAccess(ctx, hint.UserID, hint.ConversationID)
@@ -114,7 +143,12 @@ func (s *StreamApp) Deliver(ctx context.Context, clients []domain.Client, hint d
 				s.deliverReceiptToUser(tCtx, cur, convID, uid)
 			})
 		}
+		seen := make(map[string]bool, len(admitted))
 		for _, uid := range admitted {
+			if seen[uid] {
+				continue
+			}
+			seen[uid] = true
 			s.deliverReceiptToUser(ctx, clients, convID, uid)
 		}
 		return
@@ -124,6 +158,25 @@ func (s *StreamApp) Deliver(ctx context.Context, clients []domain.Client, hint d
 		}
 		if hint.State != "online" && hint.State != "away" && hint.State != "offline" {
 			return
+		}
+		if len(clients) == 0 {
+			return
+		}
+		if len(hint.UserIDs) > 0 {
+			wanted := make(map[string]bool, len(hint.UserIDs))
+			for _, id := range hint.UserIDs {
+				wanted[id] = true
+			}
+			hasLocal := false
+			for _, c := range clients {
+				if wanted[c.UserID()] {
+					hasLocal = true
+					break
+				}
+			}
+			if !hasLocal {
+				return
+			}
 		}
 		if s.Chat != nil {
 			memberIDs, enabled, err := s.Chat.SharedWorkspaceMembers(ctx, hint.UserID)
@@ -157,18 +210,36 @@ func (s *StreamApp) Deliver(ctx context.Context, clients []domain.Client, hint d
 			targets = append(targets, c)
 		}
 	}
+	var recipientAllowed map[string]bool
+	var tokenValid map[string]bool
+	if hint.Type == "typing" {
+		recipientAllowed = make(map[string]bool)
+		tokenValid = make(map[string]bool)
+	}
 	for _, c := range targets {
 		switch hint.Type {
 		case "typing":
 			if c.UserID() == hint.UserID || (s.Flags != nil && !s.Flags.TypingPublishEnabled()) {
 				continue
 			}
-			access, err := s.Chat.CheckAccess(ctx, c.UserID(), hint.ConversationID)
-			if err != nil || !access.Allowed || !access.TypingEnabled {
+			allowed, checked := recipientAllowed[c.UserID()]
+			if !checked {
+				access, err := s.Chat.CheckAccess(ctx, c.UserID(), hint.ConversationID)
+				allowed = err == nil && access.Allowed && access.TypingEnabled
+				recipientAllowed[c.UserID()] = allowed
+			}
+			if !allowed {
 				continue
 			}
 			if s.Identity != nil {
-				if _, err = s.Identity.Validate(ctx, c.Token()); err != nil {
+				tok := c.Token()
+				valid, tokChecked := tokenValid[tok]
+				if !tokChecked {
+					_, err := s.Identity.Validate(ctx, tok)
+					valid = err == nil
+					tokenValid[tok] = valid
+				}
+				if !valid {
 					c.Close()
 					continue
 				}
@@ -248,7 +319,11 @@ func (s *StreamApp) PublishTyping(ctx context.Context, clients func() []domain.C
 
 func (s *StreamApp) savePresence(ctx context.Context, userID, state string) {
 	if s.PresenceStore != nil {
-		_ = s.PresenceStore.SaveUserPresence(ctx, userID, state, 10*time.Minute)
+		ttl := s.PresenceTTL
+		if ttl <= 0 {
+			ttl = domain.PresenceStoreTTL
+		}
+		_ = s.PresenceStore.SaveUserPresence(ctx, userID, state, ttl)
 	}
 }
 
@@ -333,13 +408,15 @@ func (s *StreamApp) DisconnectPresence(clients func() []domain.Client, c domain.
 	})
 }
 
-// SweepPresence evaluates idle timeouts and offline grace expirations.
+// SweepPresence evaluates idle timeouts, offline grace expirations, and store TTL refreshes.
 func (s *StreamApp) SweepPresence(ctx context.Context, clients func() []domain.Client) {
 	if s.Presence == nil {
 		return
 	}
-	s.Presence.Sweep(func(userID, state string) {
+	s.Presence.SweepAndRefresh(func(userID, state string) {
 		s.publishPresenceTransition(ctx, clients, userID, state, nil)
+	}, func(userID, state string) {
+		s.savePresence(ctx, userID, state)
 	})
 }
 
