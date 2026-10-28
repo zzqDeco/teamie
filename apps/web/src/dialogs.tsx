@@ -17,7 +17,7 @@ import type { Conversation, Workspace } from "@teamie/api-client";
 import { useAuth } from "./auth";
 import { errorText, useChat } from "./chat";
 import { chatStore } from "./store";
-import { Avatar, Button, Modal, Notice } from "./ui";
+import { Avatar, Button, Modal, Notice, SwitchField } from "./ui";
 import { enrichParticipants } from "./participants";
 import { ParticipantIdentity } from "./group-members";
 import { canConfigureModelGateway } from "./agent-management";
@@ -434,49 +434,39 @@ export function ProfileSettings() {
         <p className="field-help">
           当页面在后台或正在浏览其他会话时，对提及、回复和私信发送浏览器系统通知（仅当前页面打开时生效）。
         </p>
-        <label className="agent-enabled-switch notification-enable-switch">
-          <input
-            type="checkbox"
-            checked={effectiveNotificationsEnabled}
-            disabled={
-              notificationPermission === "unsupported" ||
-              notificationPermission === "denied"
+        <SwitchField
+          className="notification-enable-switch"
+          checked={effectiveNotificationsEnabled}
+          disabled={
+            notificationPermission === "unsupported" ||
+            notificationPermission === "denied"
+          }
+          title="开启浏览器通知"
+          description={
+            notificationPermission === "unsupported"
+              ? "当前浏览器不支持系统通知。"
+              : notificationPermission === "denied"
+                ? "浏览器通知权限已被阻止，请在浏览器地址栏设置中允许通知后再试。"
+                : "收到 @提及、回复或私信时在系统通知栏提醒。"
+          }
+          onChange={(checked) => {
+            if (checked) {
+              void enableNotifications();
+            } else {
+              disableNotifications();
             }
-            onChange={(e) => {
-              if (e.target.checked) {
-                void enableNotifications();
-              } else {
-                disableNotifications();
-              }
-            }}
-          />
-          <span>
-            <b>开启浏览器通知</b>
-            <small>
-              {notificationPermission === "unsupported"
-                ? "当前浏览器不支持系统通知。"
-                : notificationPermission === "denied"
-                  ? "浏览器通知权限已被阻止，请在浏览器地址栏设置中允许通知后再试。"
-                  : "收到 @提及、回复或私信时在系统通知栏提醒。"}
-            </small>
-          </span>
-          <i aria-hidden="true" />
-        </label>
-        <label className="agent-enabled-switch notification-preview-switch">
-          <input
-            type="checkbox"
-            checked={notificationPrefs.showPreview}
-            disabled={!effectiveNotificationsEnabled}
-            onChange={(e) =>
-              setNotificationPrefs({ showPreview: e.target.checked })
-            }
-          />
-          <span>
-            <b>显示消息内容</b>
-            <small>默认关闭以保护隐私；开启后在通知中显示消息正文预览。</small>
-          </span>
-          <i aria-hidden="true" />
-        </label>
+          }}
+        />
+        <SwitchField
+          className="notification-preview-switch"
+          checked={notificationPrefs.showPreview}
+          disabled={!effectiveNotificationsEnabled}
+          title="显示消息内容"
+          description="默认关闭以保护隐私；开启后在通知中显示消息正文预览。"
+          onChange={(checked) =>
+            setNotificationPrefs({ showPreview: checked })
+          }
+        />
       </section>
       <PasswordSettings />
       {canConfigureModelGateway(user) && (

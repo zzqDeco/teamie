@@ -28,6 +28,8 @@ import {
 } from "./message-item";
 import { MessageComposer } from "./message-composer";
 import { useConversationReceiptsSync } from "./engagement-store";
+import { useConversationReadTracking } from "./chat/conversation-read-tracking";
+import { useConversationContextLoader } from "./chat/conversation-context-loader";
 
 const noMessages: LocalMessage[] = [];
 const noMembers: Member[] = [];
@@ -141,203 +143,43 @@ export function ConversationView({
   useEffect(() => {
     setDraggingFiles(false);
   }, [conversation.id, uploadsEnabled]);
-  const fetchLatest = useCallback(async () => {
-    const token = chatStore.generation;
-    const reactionScope = chatStore.reactionScope(conversation.id);
-    const operation = ++navigation.current;
-    const hasConfirmed = (chatStore.getSnapshot().messages[conversation.id] || []).some(
-      (m) => !m.status,
-    );
-    if (fetchedLatest.current) {
-      const current = chatStore.getSnapshot().conversations[conversation.id];
-      if (current) {
-        setEntry({ readSeq: current.readSeq, lastSeq: current.lastSeq });
-        setAnchorPending(current.lastSeq > current.readSeq);
-      }
-    }
-    fetchedLatest.current = true;
-    acknowledgement.current = null;
-    historyBefore.current = null;
-    setHasMore(false);
-    setLocated(null);
-    setUnreadContext(false);
-    setHighlightId("");
-    setLocating(false);
-    setLoadingOlder(false);
-    setLoadingNewer(false);
-    initialScroll.current = true;
-    setAtBottom(true);
-    setLoading(!hasConfirmed);
-    setError("");
-    try {
-      const page = await api.messages(conversation.id);
-      if (token !== chatStore.generation || operation !== navigation.current || (reactionScope && !chatStore.reactionScopeCurrent(reactionScope))) return;
-      historyBefore.current = page.messages[0]
-        ? { seq: page.messages[0].seq, generation: token }
-        : null;
-      chatStore.merge(page.messages);
-      setHasMore(page.hasMore);
-      setLatestLoaded(true);
-    } catch (e) {
-      if (token === chatStore.generation && operation === navigation.current)
-        setError(errorText(e));
-    } finally {
-      if (token === chatStore.generation && operation === navigation.current)
-        setLoading(false);
-    }
-  }, [conversation.id]);
-
-  const focusMessage = useCallback((id: string) => {
-    const target = document.getElementById(`message-${id}`);
-    if (!target || !scrollRef.current?.contains(target) || target.closest("[inert]")) return;
-    target.scrollIntoView({
-      block: "center",
-      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth",
-    });
-    target.focus({ preventScroll: true });
-  }, []);
-
-  useLayoutEffect(() => {
-    if (highlightId) focusMessage(highlightId);
-  }, [highlightId, focusMessage, visible, membersOpen]);
-
-  const loadContext = useCallback(
-    async (id: string, readOnDisplay = false) => {
-      const token = chatStore.generation;
-      const reactionScope = chatStore.reactionScope(conversation.id);
-      const operation = ++navigation.current;
-      const current = () =>
-        token === chatStore.generation && operation === navigation.current && (!reactionScope || chatStore.reactionScopeCurrent(reactionScope));
-      setAtBottom(false);
-      setLoading(false);
-      setLoadingOlder(false);
-      setLoadingNewer(false);
-      setLocating(true);
-      acknowledgement.current = null;
-      historyBefore.current = null;
-      setHasMore(false);
-      initialScroll.current = false;
-      setError("");
-      try {
-        const target = await api.message(conversation.id, id);
-        if (!current()) return;
-        chatStore.ingestMessageReactions([target.message], reactionScope);
-        setResolvedTargets((old) => ({
-          ...old,
-          [target.message.id]: old[target.message.id]
-            ? reconcileMessages([old[target.message.id]], [target.message])[0]
-            : target.message,
-        }));
-        const page = await api.messagesAround(conversation.id, target.message.seq);
-        if (!current()) return;
-        chatStore.ingestMessageReactions(page.messages, reactionScope);
-        const currentTarget = chatStore
-          .getSnapshot()
-          .messages[conversation.id]?.find((message) => message.id === id);
-        const context = reconcileMessages(page.messages, [
-          target.message,
-          ...(currentTarget ? [currentTarget] : []),
-        ]);
-        const resolved = context.find((m) => m.id === target.message.id) || target.message;
-        setResolvedTargets((old) => ({
-          ...old,
-          [resolved.id]: old[resolved.id]
-            ? reconcileMessages([old[resolved.id]], [resolved])[0]
-            : resolved,
-        }));
-        if (readOnDisplay && !resolved.retractedAt)
-          acknowledgement.current = { id, seq: resolved.seq, generation: token, operation };
-        setLocated(context);
-        setUnreadContext(false);
-        historyBefore.current = context[0] ? { seq: context[0].seq, generation: token } : null;
-        setHasMore((historyBefore.current?.seq ?? 1) > 1);
-        setHighlightId(id);
-      } catch (e) {
-        if (current())
-          setError(
-            e instanceof Error && "status" in e && e.status === 404
-              ? "原消息已不可访问"
-              : errorText(e),
-          );
-      } finally {
-        if (current()) setLocating(false);
-      }
-    },
-    [conversation.id],
-  );
-
-  const loadUnreadContext = useCallback(async () => {
-    const seq = readSeq + 1;
-    const token = chatStore.generation;
-    const reactionScope = chatStore.reactionScope(conversation.id);
-    const operation = ++navigation.current;
-    const current = () =>
-      token === chatStore.generation && operation === navigation.current && (!reactionScope || chatStore.reactionScopeCurrent(reactionScope));
-    setAnchorPending(false);
-    setAtBottom(false);
-    setLoading(false);
-    setLoadingOlder(false);
-    setLoadingNewer(false);
-    setLocating(true);
-    acknowledgement.current = null;
-    historyBefore.current = null;
-    setHasMore(false);
-    initialScroll.current = false;
-    setError("");
-    try {
-      const page = await api.messagesAround(conversation.id, seq);
-      if (!current()) return;
-      chatStore.ingestMessageReactions(page.messages, reactionScope);
-      const context = reconcileMessages(
-        page.messages,
-        (chatStore.getSnapshot().messages[conversation.id] || []).filter((message) =>
-          page.messages.some((m) => m.id === message.id),
-        ),
-      );
-      setLocated(context);
-      setUnreadContext(true);
-      historyBefore.current = context[0] ? { seq: context[0].seq, generation: token } : null;
-      setHasMore((historyBefore.current?.seq ?? 1) > 1);
-      const target = context.find((m) => !m.status && m.seq >= seq);
-      if (target) setHighlightId(target.id);
-    } catch (e) {
-      if (current()) setError(errorText(e));
-    } finally {
-      if (current()) setLocating(false);
-    }
-  }, [conversation.id, readSeq]);
-
-  function returnToLatest() {
-    const current = chatStore.getSnapshot().conversations[conversation.id];
-    if (current) {
-      setEntry({ readSeq: current.readSeq, lastSeq: current.lastSeq });
-      setAnchorPending(current.lastSeq > current.readSeq);
-    }
-    if (initialMessageId && onClearMessageTarget) onClearMessageTarget();
-    else void fetchLatest();
-  }
-
-  async function locate(id: string) {
-    if (!messages.some((message) => message.id === id)) return loadContext(id);
-    navigation.current++;
-    acknowledgement.current = null;
-    setLoading(false);
-    setLoadingOlder(false);
-    setLoadingNewer(false);
-    setLocating(false);
-    initialScroll.current = false;
-    setError("");
-    setHighlightId(id);
-    focusMessage(id);
-    const el = scrollRef.current;
-    if (el) setAtBottom(!located && el.scrollHeight - el.scrollTop - el.clientHeight < 80);
-  }
-
-  useEffect(() => {
-    if (initialMessageId) void loadContext(initialMessageId, true);
-    else void fetchLatest();
-  }, [fetchLatest, loadContext, initialMessageId]);
-
+  const {
+    fetchLatest,
+    focusMessage,
+    loadUnreadContext,
+    returnToLatest,
+    locate,
+  } = useConversationContextLoader({
+    conversation,
+    messages,
+    located,
+    readSeq,
+    initialMessageId,
+    onClearMessageTarget,
+    visible,
+    membersOpen,
+    highlightId,
+    setHighlightId,
+    setEntry,
+    setAnchorPending,
+    setHasMore,
+    setLatestLoaded,
+    setLocated,
+    setUnreadContext,
+    setLocating,
+    setLoadingOlder,
+    setLoadingNewer,
+    setAtBottom,
+    setLoading,
+    setError,
+    setResolvedTargets,
+    fetchedLatestRef: fetchedLatest,
+    acknowledgementRef: acknowledgement,
+    historyBeforeRef: historyBefore,
+    initialScrollRef: initialScroll,
+    navigationRef: navigation,
+    scrollRef,
+  });
   const latest = messages.filter((m) => !m.status).at(-1)?.seq || 0;
   const currentLastSeq = Math.max(
     conversation.lastSeq,
@@ -377,211 +219,36 @@ export function ConversationView({
     !messages.some((m) => !m.status && m.seq === nextUnreadSeq) &&
     messages.some((m) => !m.status && m.seq > nextUnreadSeq);
 
-  const seenRows = useRef(new Set<number>());
-  const [readCandidate, setReadCandidate] = useState(0);
-  const ackState = useRef({ allowed: true, blocked: false });
-  const dwell = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const readFailures = useRef(0);
-  useEffect(() => {
-    ackState.current = {
-      allowed: !located || unreadContext,
-      blocked: searchOpen || !visible || loading,
-    };
-  }, [located, unreadContext, searchOpen, visible, loading]);
-  // Rows near the viewport, tracked by IntersectionObserver so the dwell check
-  // measures only those instead of every rendered row. Without IO (jsdom,
-  // old engines) the check falls back to scanning all rows.
-  const rowVisibility = useRef<{
-    observer: IntersectionObserver;
-    observed: Set<HTMLElement>;
-    near: Set<HTMLElement>;
-    unreported: Set<HTMLElement>;
-  } | null>(null);
-  const scheduleSeen = useCallback(() => {
-    clearTimeout(dwell.current);
-    dwell.current = setTimeout(() => {
-      const el = scrollRef.current;
-      if (!el || !ackState.current.allowed || ackState.current.blocked) return;
-      const root = el.getBoundingClientRect();
-      const tracked = rowVisibility.current;
-      // The exact visibility test below is unchanged; IO only narrows the
-      // candidates to a superset of rows that can pass it.
-      const candidates = tracked
-        ? [...tracked.near, ...tracked.unreported]
-        : el.querySelectorAll<HTMLElement>("article[data-seq]");
-      for (const row of candidates) {
-        if (!row.dataset.seq || !el.contains(row)) continue;
-        const rect = row.getBoundingClientRect();
-        const inside = rect.top >= root.top - 1 && rect.bottom <= root.bottom + 1;
-        const visibleHeight = Math.min(rect.bottom, root.bottom) - Math.max(rect.top, root.top);
-        const tallAndCovering =
-          rect.height > root.height * 0.8 && visibleHeight >= root.height * 0.5 && visibleHeight > 0;
-        if (inside || tallAndCovering || row.dataset.own === "true")
-          seenRows.current.add(Number(row.dataset.seq));
-      }
-      for (const row of el.querySelectorAll<HTMLElement>('article[data-seq][data-own="true"]'))
-        seenRows.current.add(Number(row.dataset.seq));
-      const base = chatStore.getSnapshot().conversations[conversation.id]?.readSeq ?? 0;
-      let end = base;
-      while (seenRows.current.has(end + 1)) end++;
-      setReadCandidate(end);
-    }, 400);
-  }, [conversation.id]);
-  useEffect(() => () => clearTimeout(dwell.current), []);
-  useEffect(() => {
-    const scroll = scrollRef.current;
-    if (!scroll || typeof IntersectionObserver === "undefined") return;
-    const near = new Set<HTMLElement>();
-    const unreported = new Set<HTMLElement>();
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          const row = entry.target as HTMLElement;
-          unreported.delete(row);
-          if (entry.isIntersecting) near.add(row);
-          else near.delete(row);
-        }
-      },
-      // The margin keeps the candidate set a strict superset of rows within
-      // the 1px tolerance of the exact check.
-      { root: scroll, rootMargin: "64px 0px" },
-    );
-    rowVisibility.current = { observer, observed: new Set(), near, unreported };
-    return () => {
-      observer.disconnect();
-      rowVisibility.current = null;
-    };
-  }, []);
-  useEffect(() => {
-    const tracked = rowVisibility.current;
-    const scroll = scrollRef.current;
-    if (!tracked || !scroll) return;
-    for (const row of tracked.observed) {
-      if (row.isConnected) continue;
-      tracked.observer.unobserve(row);
-      tracked.observed.delete(row);
-      tracked.near.delete(row);
-      tracked.unreported.delete(row);
-    }
-    for (const row of scroll.querySelectorAll<HTMLElement>("article")) {
-      if (tracked.observed.has(row)) continue;
-      tracked.observed.add(row);
-      // Until IO reports a new row it is measured directly.
-      tracked.unreported.add(row);
-      tracked.observer.observe(row);
-    }
-  }, [messages]);
-
-  useEffect(() => {
-    const change = () => setVisible(document.visibilityState === "visible");
-    document.addEventListener("visibilitychange", change);
-    return () => document.removeEventListener("visibilitychange", change);
-  }, []);
-  useEffect(() => {
-    const scroll = scrollRef.current;
-    if (!scroll || !atBottom || located || locating) return;
-    const observer = new ResizeObserver(() => { scroll.scrollTop = scroll.scrollHeight; });
-    // The viewport shrinking (composer growth) and the content growing (edits,
-    // late KaTeX/font/image layout) both keep a view that was at bottom pinned.
-    observer.observe(scroll);
-    if (contentRef.current) observer.observe(contentRef.current);
-    return () => observer.disconnect();
-  }, [atBottom, located, locating]);
-  const lastTailId = useRef<string | undefined>(undefined);
-  useEffect(() => {
-    if (loading) return;
-    const el = scrollRef.current;
-    const tailChanged = tailId !== lastTailId.current;
-    lastTailId.current = tailId;
-    if (anchorPending && !located) {
-      const anchor = firstUnread ? document.getElementById(`message-${firstUnread}`) : null;
-      if (el && anchor && el.contains(anchor)) {
-        setAnchorPending(false);
-        initialScroll.current = false;
-        el.scrollTop += anchor.getBoundingClientRect().top - el.getBoundingClientRect().top - 56;
-        setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
-        scheduleSeen();
-        return;
-      }
-      if (latestLoaded) setAnchorPending(false);
-      else return;
-    }
-    if (!located && !locating && (initialScroll.current || (atBottom && tailChanged))) {
-      el?.scrollTo({ top: el.scrollHeight });
-      initialScroll.current = false;
-    }
-    scheduleSeen();
-  }, [
-    loading, tailId, atBottom, anchorPending, firstUnread, latestLoaded,
-    located, locating, visible, searchOpen, readSeq, scheduleSeen,
-  ]);
-  useLayoutEffect(() => {
-    const pending = acknowledgement.current;
-    if (
-      !visible || !pending || pending.id !== highlightId ||
-      pending.generation !== chatStore.generation || pending.operation !== navigation.current
-    )
-      return;
-    const target = document.getElementById(`message-${pending.id}`);
-    if (!target || !scrollRef.current?.contains(target) || target.closest("[inert]")) return;
-    acknowledgement.current = null;
-    if (
-      messages.some((m) => m.id === pending.id && m.retractedAt) ||
-      chatStore.getSnapshot().messages[conversation.id]?.some((m) => m.id === pending.id && m.retractedAt)
-    )
-      return;
-    void api
-      .read(conversation.id, pending.seq)
-      .then((result) => {
-        if (pending.generation === chatStore.generation && pending.operation === navigation.current) {
-          lastRead.current = Math.max(lastRead.current, result.readSeq);
-          chatStore.markRead(conversation.id, result.readSeq);
-        }
-      })
-      .catch(() => {
-        if (pending.generation === chatStore.generation && pending.operation === navigation.current)
-          setError("已读状态暂未同步");
-      });
-  }, [conversation.id, highlightId, located, membersOpen, messages, visible]);
-  useEffect(() => {
-    const nextRead = Math.min(readCandidate, latest);
-    if (!nextRead || nextRead <= Math.max(lastRead.current, readSeq) || generation !== chatStore.generation)
-      return;
-    void api
-      .read(conversation.id, nextRead)
-      .then((result) => {
-        if (generation === chatStore.generation) {
-          readFailures.current = 0;
-          lastRead.current = Math.max(lastRead.current, result.readSeq);
-          chatStore.markRead(conversation.id, result.readSeq);
-        }
-      })
-      .catch(() => {
-        if (generation === chatStore.generation) {
-          setReadCandidate(0);
-          if (readFailures.current < 1) {
-            readFailures.current++;
-            scheduleSeen();
-          }
-        }
-      });
-  }, [conversation.id, generation, latest, readCandidate, readSeq, scheduleSeen]);
-  const markLatestRead = useCallback(() => {
-    if (!latest || latest <= readSeq) return;
-    const token = chatStore.generation;
-    void api
-      .read(conversation.id, latest)
-      .then((result) => {
-        if (token === chatStore.generation) {
-          lastRead.current = Math.max(lastRead.current, result.readSeq);
-          chatStore.markRead(conversation.id, result.readSeq);
-        }
-      })
-      .catch((e) => {
-        if (token === chatStore.generation) setError(errorText(e));
-      });
-  }, [conversation.id, latest, readSeq]);
-
+  const { scheduleSeen, markLatestRead, resetReadFailures } = useConversationReadTracking({
+    conversation,
+    messages,
+    located,
+    unreadContext,
+    searchOpen,
+    visible,
+    setVisible,
+    loading,
+    atBottom,
+    setAtBottom,
+    locating,
+    anchorPending,
+    setAnchorPending,
+    firstUnread,
+    latestLoaded,
+    tailId,
+    readSeq,
+    latest,
+    generation,
+    highlightId,
+    membersOpen,
+    scrollRef,
+    contentRef,
+    initialScrollRef: initialScroll,
+    acknowledgementRef: acknowledgement,
+    navigationRef: navigation,
+    lastReadRef: lastRead,
+    setError,
+  });
   async function older() {
     const boundary = historyBefore.current;
     if (!boundary || boundary.generation !== chatStore.generation || loadingOlder) return;
@@ -827,7 +494,7 @@ export function ConversationView({
             setLeftBottomSeq((prev) => Math.max(prev, readSeq, currentLastSeq));
           }
           setAtBottom(bottom);
-          readFailures.current = 0;
+          resetReadFailures();
           scheduleSeen();
         }}
       >
@@ -952,3 +619,5 @@ export function ConversationView({
     </section>
   );
 }
+
+

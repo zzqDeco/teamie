@@ -1,0 +1,354 @@
+/* Features layer: workspace member directory, platform admin invitations, and role badges. */
+
+@layer features {
+  .platform-role-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 8px;
+    background: var(--lavender);
+    color: var(--brand-text);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-sm);
+    font-size: var(--font-xs);
+    letter-spacing: 0;
+    vertical-align: middle;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .admin-profile-tag,
+  .profile-tag.admin-profile-tag {
+    background: var(--lavender);
+    color: var(--brand-text);
+  }
+  .admin-view {
+    flex: 1;
+    overflow: auto;
+    max-width: 1040px;
+    width: 100%;
+    margin: 0 auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+    min-height: 0;
+    overscroll-behavior: contain;
+    padding: 30px;
+  }
+  .admin-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+  }
+  .admin-heading .eyebrow {
+    font-size: var(--font-xs);
+    letter-spacing: 1.6px;
+    color: var(--text-subtle);
+  }
+  .admin-heading h1 {
+    font-weight: 600;
+    letter-spacing: -0.7px;
+    color: var(--text-strong);
+    margin: 12px 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: var(--font-3xl);
+  }
+  .admin-heading > div > p {
+    line-height: 1.9;
+    color: var(--text-muted);
+    font-size: var(--font-base);
+  }
+  .admin-heading-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 66px;
+    height: 66px;
+    border-radius: var(--r-xl);
+    background: var(--lavender);
+    color: var(--text-subtle);
+    transform: rotate(-6deg);
+    flex-shrink: 0;
+  }
+  .admin-generate {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 11px 0 25px;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .admin-generate h2,
+  .admin-invite-history h2 {
+    font-weight: 600;
+    color: var(--text-strong);
+    font-size: var(--font-subhead);
+  }
+  .admin-generate p {
+    color: var(--text-subtle);
+    margin-top: 7px;
+    line-height: 1.8;
+    font-size: var(--font-base);
+  }
+  .admin-generate .button {
+    font-size: var(--font-base);
+    min-height: 39px;
+    padding: 11px 15px;
+  }
+  .created-invite {
+    border: 1px solid var(--success-border);
+    background: var(--surface);
+    border-radius: var(--r-md);
+    margin: 0 0 30px;
+    position: relative;
+    padding: 20px;
+  }
+  .created-invite-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+  }
+  .created-invite-heading > span {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--success-text);
+    font-weight: 600;
+    font-size: var(--font-base);
+  }
+  .created-invite-heading small {
+    color: var(--success-text);
+    font-size: var(--font-xs);
+  }
+  .created-invite > p {
+    line-height: 1.9;
+    color: var(--success-text);
+    margin: 12px 0 20px;
+    font-size: var(--font-base);
+  }
+  .created-invite label {
+    color: var(--success-text);
+    margin-bottom: 16px;
+    font-size: var(--font-base);
+  }
+  .created-invite .copy-input {
+    border-color: var(--success-border);
+    background: var(--surface);
+  }
+  .created-invite .copy-input > input {
+    font-size: var(--font-sm);
+    color: var(--text);
+  }
+  .created-invite .copy-input > button {
+    color: var(--success-text);
+  }
+  .created-invite .copy-input > button:hover {
+    background: var(--success-bg);
+  }
+  .created-invite-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 5px;
+  }
+  .created-invite-footer > small {
+    font-size: var(--font-xs);
+    color: var(--success-text);
+    line-height: 1.8;
+  }
+  .created-invite-footer > button {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    font-size: var(--font-sm);
+    color: var(--success-text);
+    padding: 4px 0;
+    white-space: nowrap;
+  }
+  .created-invite-footer > button:hover {
+    color: var(--success-text);
+  }
+  .copy-confirmation {
+    display: block;
+    color: var(--success-text);
+    font-size: var(--font-xs);
+    margin-top: 12px;
+  }
+  .admin-invite-history {
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    overflow: hidden;
+    background: var(--surface);
+  }
+  .admin-invite-history > header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 19px 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    gap: 14px;
+  }
+  .admin-invite-history > header > div > span {
+    display: block;
+    margin-top: 7px;
+    font-size: var(--font-xs);
+    color: var(--text-subtle);
+  }
+  .admin-invite-history > header > .icon-button {
+    color: var(--text-subtle);
+  }
+  .admin-invites-table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+    white-space: nowrap;
+    min-width: 450px;
+  }
+  .admin-invites-table th {
+    font-weight: 500;
+    color: var(--text-subtle);
+    padding: 13px 19px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    font-size: var(--font-xs);
+  }
+  .admin-invites-table td {
+    padding: 16px 19px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-muted);
+    line-height: 1.6;
+    font-size: var(--font-base);
+  }
+  .admin-invites-table tr:last-child td {
+    border-bottom: 0;
+  }
+  .admin-invites-table td > span:not(.invite-status) {
+    display: block;
+  }
+  .admin-invites-table td > small {
+    display: block;
+    color: var(--text-subtle);
+    margin-top: 6px;
+    line-height: 1.5;
+    font-size: var(--font-xs);
+  }
+  .invite-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-radius: var(--r-xs);
+    font-size: var(--font-xs);
+    background: var(--lavender);
+    color: var(--text-subtle);
+  }
+  .invite-status i {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  .invite-status.available {
+    color: var(--success-text);
+    background: var(--success-bg);
+  }
+  .invite-status.used {
+    color: var(--text-muted);
+    background: var(--lavender);
+  }
+  .invite-status.revoked {
+    color: var(--text-subtle);
+    background: var(--danger-bg);
+  }
+  .invite-status.expired {
+    color: var(--text-subtle);
+    background: var(--lavender);
+  }
+  .revoke-invite {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--text-subtle);
+    font-size: var(--font-sm);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    padding: 6px 8px;
+  }
+  .revoke-invite:hover {
+    background: var(--surface-sunken);
+    color: var(--text-muted);
+  }
+  .revoke-invite:disabled {
+    opacity: 0.45;
+  }
+  .admin-empty {
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 13px;
+    min-height: 220px;
+    padding: 25px;
+    color: var(--text-subtle);
+  }
+  .admin-empty > span {
+    width: 51px;
+    height: 51px;
+    border-radius: var(--r-lg);
+    background: var(--lavender);
+    color: var(--text-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .admin-empty h3 {
+    font-size: var(--font-md);
+    font-weight: 600;
+    color: var(--text-strong);
+  }
+  .admin-empty p {
+    line-height: 1.8;
+    color: var(--text-subtle);
+    font-size: var(--font-base);
+  }
+  .admin-footnote {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-top: 20px;
+    line-height: 1.8;
+    font-size: var(--font-sm);
+    color: var(--text-muted);
+  }
+  .admin-footnote > svg {
+    flex-shrink: 0;
+  }
+  .revoke-details {
+    padding: 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    color: var(--text-subtle);
+    font-size: var(--font-sm);
+  }
+  .revoke-details b {
+    font-size: var(--font-sm);
+    font-weight: 500;
+    color: var(--text-muted);
+  }
+  .revoke-details small {
+    width: 100%;
+    font-size: var(--font-xs);
+    color: var(--text-subtle);
+    margin-top: 3px;
+  }
+}

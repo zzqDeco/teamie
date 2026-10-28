@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { Bot, Check, CirclePause, Eye, LockKeyhole } from "lucide-react";
 import type { WebSearchGatewayConfig, Workspace } from "@teamie/api-client";
-import { Button, Modal, Notice } from "./ui";
+import { Button, Modal, Notice, SwitchField } from "./ui";
 import { ICON } from "./icons";
 
 export function AgentBadge({
@@ -157,17 +157,13 @@ export function WebSearchConfigurationFields({
         autoComplete="off"
       >
         <Notice>{error}</Notice>
-        <label className="agent-enabled-switch">
-          <input
-            name="gatewayWebSearchEnabled"
-            type="checkbox"
-            checked={enabled}
-            onChange={(e) => setEnabled(e.target.checked)}
-            disabled={busy}
-          />
-          <span>启用联网搜索与网页提取</span>
-          <i />
-        </label>
+        <SwitchField
+          name="gatewayWebSearchEnabled"
+          checked={enabled}
+          disabled={busy}
+          title="启用联网搜索与网页提取"
+          onChange={setEnabled}
+        />
         <label>
           Tavily API Key{" "}
           <span className="optional">

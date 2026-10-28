@@ -20,8 +20,12 @@ import {
 } from "./group-members";
 import type { Participant } from "./participants";
 import { chatStore } from "./store";
-import { formatPresenceLabel, usePresenceMap } from "./engagement-store";
-import { Button, Notice } from "./ui";
+import {
+  formatPresenceLabel,
+  presenceClassName,
+  usePresenceMap,
+} from "./engagement-store";
+import { BadgePill, Button, Notice } from "./ui";
 import { ICON } from "./icons";
 
 export function WorkspaceMembers({
@@ -151,22 +155,36 @@ export function WorkspaceMembers({
             return (
               <li key={member.userId} className="member-directory-row">
                 <div className="member-directory-identity">
-                  <ParticipantIdentity member={member} />
-                  {self && <span className="member-self-label">你</span>}
-                  {humanPresence && (
-                    <span
-                      className={`member-presence-badge presence-${humanPresence}`}
-                      aria-label={`在线状态：${formatPresenceLabel(humanPresence)}`}
-                    >
-                      <i className={`presence-dot presence-${humanPresence}`} aria-hidden="true" />
-                      {formatPresenceLabel(humanPresence)}
-                    </span>
-                  )}
-                  {member.kind === "agent" && member.selectable === false && (
-                    <span className="member-unavailable">
-                      {agent && !agent.enabled ? "已停用" : "暂不可添加"}
-                    </span>
-                  )}
+                  <ParticipantIdentity
+                    member={member}
+                    badges={
+                      <>
+                        {self && (
+                          <BadgePill className="member-self-label">
+                            你
+                          </BadgePill>
+                        )}
+                        {humanPresence && (
+                          <BadgePill
+                            className={`member-presence-badge ${presenceClassName(humanPresence)}`}
+                            ariaLabel={`在线状态：${formatPresenceLabel(humanPresence)}`}
+                          >
+                            <i
+                              className={`presence-dot ${presenceClassName(humanPresence)}`}
+                              aria-hidden="true"
+                            />
+                            {formatPresenceLabel(humanPresence)}
+                          </BadgePill>
+                        )}
+                        {member.kind === "agent" &&
+                          member.selectable === false && (
+                            <BadgePill className="member-unavailable">
+                              {agent && !agent.enabled ? "已停用" : "暂不可添加"}
+                            </BadgePill>
+                          )}
+                      </>
+                    }
+                  />
                 </div>
                 <div className="member-directory-actions">
                   {!self && data?.capabilities["im.dm.create"] && (

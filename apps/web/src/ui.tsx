@@ -134,6 +134,82 @@ export function Notice({
     </div>
   ) : null;
 }
+export function BadgePill({
+  children,
+  className = "",
+  title,
+  ariaLabel,
+}: {
+  children: ReactNode;
+  className?: string;
+  title?: string;
+  ariaLabel?: string;
+}) {
+  return (
+    <span
+      className={`badge-pill ${className}`.trim()}
+      title={title}
+      aria-label={ariaLabel}
+    >
+      {children}
+    </span>
+  );
+}
+export function FormRow({
+  children,
+  className = "",
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={`gateway-form-row ${className}`.trim()}>{children}</div>
+  );
+}
+export function SwitchField({
+  checked,
+  onChange,
+  disabled = false,
+  name,
+  title,
+  description,
+  reason,
+  reasonId,
+  className = "",
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  disabled?: boolean;
+  name?: string;
+  title: ReactNode;
+  description?: ReactNode;
+  reason?: ReactNode;
+  reasonId?: string;
+  className?: string;
+}) {
+  return (
+    <label className={`agent-enabled-switch ${className}`.trim()}>
+      <input
+        type="checkbox"
+        name={name}
+        checked={checked}
+        disabled={disabled}
+        aria-describedby={reason && reasonId ? reasonId : undefined}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <span>
+        {description || reason ? <b>{title}</b> : title}
+        {description && <small>{description}</small>}
+        {reason && (
+          <small id={reasonId} className="agent-disabled-reason">
+            {reason}
+          </small>
+        )}
+      </span>
+      <i aria-hidden="true" />
+    </label>
+  );
+}
 export function Loading({ label = "正在加载你的空间…" }: { label?: string }) {
   return (
     <div className="loading-screen">
