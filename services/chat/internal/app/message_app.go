@@ -19,6 +19,9 @@ func (s *Service) Message(ctx context.Context, userID, conversationID, messageID
 		if err = s.Workspaces.WorkspaceLock(txCtx, ws, userID, false, false); err != nil {
 			return err
 		}
+		if err = s.Conversations.LockConversationForShare(txCtx, conversationID); err != nil {
+			return err
+		}
 		if _, err = s.Conversations.ConversationAccess(txCtx, conversationID, userID); err != nil {
 			return err
 		}
@@ -51,6 +54,9 @@ func (s *Service) messageHistory(ctx context.Context, userID, conversationID str
 			return err
 		}
 		if err = s.Workspaces.WorkspaceLock(txCtx, ws, userID, false, false); err != nil {
+			return err
+		}
+		if err = s.Conversations.LockConversationForShare(txCtx, conversationID); err != nil {
 			return err
 		}
 		if _, err = s.Conversations.ConversationAccess(txCtx, conversationID, userID); err != nil {
@@ -326,6 +332,9 @@ func (s *Service) ReadReceipts(ctx context.Context, userID, conversationID strin
 			return err
 		}
 		if err = s.Workspaces.WorkspaceLock(txCtx, ws, userID, false, false); err != nil {
+			return err
+		}
+		if err = s.Conversations.LockConversationForShare(txCtx, conversationID); err != nil {
 			return err
 		}
 		c, err := s.Conversations.ConversationAccess(txCtx, conversationID, userID)

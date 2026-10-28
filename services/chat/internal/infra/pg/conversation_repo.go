@@ -79,6 +79,12 @@ func (r *Repository) LockConversation(ctx context.Context, conversationID, userI
 	return r.ConversationAccess(ctx, conversationID, userID)
 }
 
+func (r *Repository) LockConversationForShare(ctx context.Context, conversationID string) error {
+	var id string
+	err := r.DB.Conn(ctx).QueryRow(ctx, "SELECT id FROM conversations WHERE id=$1 FOR SHARE", conversationID).Scan(&id)
+	return notFound(err)
+}
+
 func (r *Repository) FindDirectConversationByPairKey(ctx context.Context, workspaceID, pairKey string) (string, bool, error) {
 	var existing string
 	err := r.DB.Conn(ctx).QueryRow(ctx, "SELECT id FROM conversations WHERE workspace_id=$1 AND pair_key=$2", workspaceID, pairKey).Scan(&existing)
