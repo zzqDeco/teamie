@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowRight,
+  Blocks,
   LoaderCircle,
   MessageCircle,
   Search,
@@ -14,6 +15,7 @@ import { useAuth } from "./auth";
 import { canManageAgent } from "./agent-management";
 import { errorText, useChat } from "./chat";
 import { WorkspaceDialog } from "./dialogs";
+import { WorkspaceMarketplaceModal } from "./marketplace";
 import {
   AddParticipantToGroupDialog,
   ParticipantIdentity,
@@ -53,9 +55,11 @@ export function WorkspaceMembers({
   const [busyId, setBusyId] = useState("");
   const [error, setError] = useState("");
   const [inviting, setInviting] = useState(false);
+  const [managingApps, setManagingApps] = useState(false);
   const [groupMemberId, setGroupMemberId] = useState("");
   const [newGroupMemberId, setNewGroupMemberId] = useState("");
   const closeInviting = useCallback(() => setInviting(false), []);
+  const closeManagingApps = useCallback(() => setManagingApps(false), []);
   const closeGroup = useCallback(() => setGroupMemberId(""), []);
   const closeNewGroup = useCallback(() => setNewGroupMemberId(""), []);
   const eligibleMember = (id: string) =>
@@ -109,9 +113,16 @@ export function WorkspaceMembers({
           <p>{workspace.name}</p>
         </div>
         {owner ? (
-          <Button onClick={() => setInviting(true)}>
-            <UserPlus size={ICON.sm} /> 邀请成员
-          </Button>
+          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            {data?.capabilities["im.marketplace.enabled"] !== false && (
+              <Button className="secondary" onClick={() => setManagingApps(true)}>
+                <Blocks size={ICON.sm} /> 工作区应用
+              </Button>
+            )}
+            <Button onClick={() => setInviting(true)}>
+              <UserPlus size={ICON.sm} /> 邀请成员
+            </Button>
+          </div>
         ) : (
           <span className="members-invite-hint">请联系空间创建者邀请</span>
         )}
@@ -253,6 +264,13 @@ export function WorkspaceMembers({
           kind="invite"
           workspace={workspace}
           onClose={closeInviting}
+        />
+      )}
+      {managingApps && owner && (
+        <WorkspaceMarketplaceModal
+          workspace={workspace}
+          isOwner={owner}
+          onClose={closeManagingApps}
         />
       )}
     </div>

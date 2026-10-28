@@ -58,7 +58,7 @@ func ExtractInputSources(inputs []Input) ([]InputSource, bool) {
 		if in.SourceOverflow {
 			overflow = true
 		}
-		if in.Kind != "task.notification" && in.Kind != "schedule.wakeup" {
+		if in.Kind != "task.notification" && in.Kind != "schedule.wakeup" && in.Kind != "app.notification" {
 			if in.ConversationID != "" && in.MessageID != "" {
 				ref := InputSource{
 					EventID:        in.EventID,

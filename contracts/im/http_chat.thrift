@@ -393,6 +393,80 @@ struct DownloadAttachmentResp {
   2: required binary content
 }
 
+struct MarketplaceAppDTO {
+  1: required string id (api.body="id")
+  2: required string slug (api.body="slug")
+  3: required string name (api.body="name")
+  4: required string description (api.body="description")
+  5: required string webUrl (api.body="webUrl")
+  6: required string mcpUrl (api.body="mcpUrl")
+  7: required bool enabled (api.body="enabled")
+  8: required string createdAt (api.body="createdAt")
+  9: required string updatedAt (api.body="updatedAt")
+}
+
+struct MarketplaceAppResp {
+  1: required MarketplaceAppDTO app (api.body="app")
+}
+
+struct CreatedMarketplaceAppResp {
+  1: required MarketplaceAppDTO app (api.body="app")
+  2: required string signingSecret (api.body="signingSecret")
+}
+
+struct RotateMarketplaceAppSecretResp {
+  1: required MarketplaceAppDTO app (api.body="app")
+  2: required string signingSecret (api.body="signingSecret")
+}
+
+struct MarketplaceAppListResp {
+  1: required list<MarketplaceAppDTO> apps (api.body="apps")
+}
+
+struct CreateMarketplaceAppReq {
+  1: required string slug (api.body="slug")
+  2: required string name (api.body="name")
+  3: optional string description (api.body="description")
+  4: required string webUrl (api.body="webUrl")
+  5: required string mcpUrl (api.body="mcpUrl")
+  6: optional bool enabled (api.body="enabled")
+}
+
+struct UpdateMarketplaceAppReq {
+  1: required string id (api.path="id", go.tag="json:\"-\"")
+  2: optional string slug (api.body="slug")
+  3: optional string name (api.body="name")
+  4: optional string description (api.body="description")
+  5: optional string webUrl (api.body="webUrl")
+  6: optional string mcpUrl (api.body="mcpUrl")
+  7: optional bool enabled (api.body="enabled")
+}
+
+struct MarketplaceAppIDReq {
+  1: required string id (api.path="id")
+}
+
+struct InstallWorkspaceAppReq {
+  1: required string id (api.path="id", go.tag="json:\"-\"")
+  2: required string appId (api.body="appId")
+}
+
+struct UninstallWorkspaceAppReq {
+  1: required string id (api.path="id")
+  2: required string appId (api.path="appId")
+}
+
+struct CreateConversationAppSessionReq {
+  1: required string id (api.path="id")
+  2: required string appId (api.path="appId")
+}
+
+struct ConversationAppSessionResp {
+  1: required MarketplaceAppDTO app (api.body="app")
+  2: required string token (api.body="token")
+  3: required string expiresAt (api.body="expiresAt")
+}
+
 service ChatHTTPService {
   BootstrapResp GetBootstrap(1: GetBootstrapReq req) (api.get="/api/v1/bootstrap")
   CreateWorkspaceResp CreateWorkspace(1: CreateWorkspaceReq req) (api.post="/api/v1/workspaces", api.status="201")
@@ -422,4 +496,15 @@ service ChatHTTPService {
   AttachmentResp GetAttachmentUpload(1: GetAttachmentUploadReq req) (api.get="/api/v1/conversations/:id/attachment-uploads/:uploadKey")
   EmptyResp DeletePendingAttachment(1: DeletePendingAttachmentReq req) (api.delete="/api/v1/conversations/:id/attachments/:attachmentId")
   DownloadAttachmentResp DownloadAttachment(1: DownloadAttachmentReq req) (api.get="/api/v1/conversations/:id/attachments/:attachmentId/content")
+  MarketplaceAppListResp ListAdminMarketplaceApps(1: GetBootstrapReq req) (api.get="/api/v1/admin/marketplace/apps")
+  CreatedMarketplaceAppResp CreateAdminMarketplaceApp(1: CreateMarketplaceAppReq req) (api.post="/api/v1/admin/marketplace/apps", api.status="201")
+  MarketplaceAppResp UpdateAdminMarketplaceApp(1: UpdateMarketplaceAppReq req) (api.patch="/api/v1/admin/marketplace/apps/:id")
+  RotateMarketplaceAppSecretResp RotateAdminMarketplaceAppSecret(1: MarketplaceAppIDReq req) (api.post="/api/v1/admin/marketplace/apps/:id/rotate-secret")
+  EmptyResp DeleteAdminMarketplaceApp(1: MarketplaceAppIDReq req) (api.delete="/api/v1/admin/marketplace/apps/:id")
+  MarketplaceAppListResp ListMarketplaceCatalog(1: GetBootstrapReq req) (api.get="/api/v1/marketplace/catalog")
+  MarketplaceAppListResp ListWorkspaceApps(1: ListWorkspaceMembersReq req) (api.get="/api/v1/workspaces/:id/apps")
+  MarketplaceAppResp InstallWorkspaceApp(1: InstallWorkspaceAppReq req) (api.post="/api/v1/workspaces/:id/apps", api.status="201")
+  EmptyResp UninstallWorkspaceApp(1: UninstallWorkspaceAppReq req) (api.delete="/api/v1/workspaces/:id/apps/:appId")
+  MarketplaceAppListResp ListConversationApps(1: GetReadReceiptsReq req) (api.get="/api/v1/conversations/:id/apps")
+  ConversationAppSessionResp CreateConversationAppSession(1: CreateConversationAppSessionReq req) (api.post="/api/v1/conversations/:id/apps/:appId/session")
 }

@@ -42,7 +42,7 @@ func (r *Repository) ResolveRunSources(ctx context.Context, agentID, runID strin
 			return domain.ErrContextUnavailable
 		}
 		for _, in := range inputs {
-			if in.Kind != "task.notification" && in.Kind != "schedule.wakeup" && in.ConversationID != "" && in.MessageID != "" {
+			if in.Kind != "task.notification" && in.Kind != "schedule.wakeup" && in.Kind != "app.notification" && in.ConversationID != "" && in.MessageID != "" {
 				ref := domain.InputSource{
 					EventID:        in.EventID,
 					WorkspaceID:    in.WorkspaceID,

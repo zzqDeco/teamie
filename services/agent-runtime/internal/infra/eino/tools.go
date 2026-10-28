@@ -450,6 +450,38 @@ func (t *Tools) execute(ctx context.Context, name string, args any, fn func(cont
 				return nil, e
 			}
 		}
+		if strings.HasPrefix(name, "mcp__") && out.OK {
+			var receipt struct {
+				Data struct {
+					AppID          string `json:"appId"`
+					WorkspaceID    string `json:"workspaceId"`
+					ConversationID string `json:"conversationId"`
+				} `json:"data"`
+			}
+			if e = json.Unmarshal(cached, &receipt); e != nil || !validUUID(receipt.Data.ConversationID) || !validUUID(receipt.Data.AppID) {
+				return nil, ErrReplayConflict
+			}
+			var appsOut struct {
+				Apps []imMarketplaceApp `json:"apps"`
+			}
+			if e = t.IM.Call(ctx, http.MethodGet, "/api/v1/conversations/"+url.PathEscape(receipt.Data.ConversationID)+"/apps", nil, &appsOut); e != nil {
+				var api *APIError
+				if errors.As(e, &api) && (api.Status == 400 || api.Status == 403 || api.Status == 404) {
+					return nil, errContextUnavailable
+				}
+				return nil, e
+			}
+			installed := false
+			for _, app := range appsOut.Apps {
+				if app.ID == receipt.Data.AppID && app.Enabled {
+					installed = true
+					break
+				}
+			}
+			if !installed {
+				return nil, errContextUnavailable
+			}
+		}
 		out.raw, e = t.Store.replayToolWire(ctx, run, callID, name, cached)
 		if e != nil {
 			return nil, e

@@ -36,11 +36,11 @@ const noMembers: Member[] = [];
 const noMentions: Mention[] = [];
 
 export function ConversationView({
-  conversation, members, onMembers, membersOpen, onMenu,
+  conversation, members, onMembers, membersOpen, appsOpen = false, onApps, onMenu,
   initialMessageId = "", onClearMessageTarget, isWorkspaceOwner, onInvite,
 }: {
   conversation: Conversation; members: Member[]; onMembers: () => void;
-  membersOpen: boolean; onMenu: () => void; initialMessageId?: string;
+  membersOpen: boolean; appsOpen?: boolean; onApps?: () => void; onMenu: () => void; initialMessageId?: string;
   onClearMessageTarget?: () => void; isWorkspaceOwner?: boolean; onInvite?: () => void;
 }) {
   const { user } = useAuth();
@@ -457,6 +457,7 @@ export function ConversationView({
       )}
       <ConversationHeader
         conversation={conversation} name={name} membersOpen={membersOpen}
+        appsOpen={appsOpen} onApps={onApps}
         onMenu={onMenu} onSearchOpen={() => setSearchOpen(true)} onMembers={onMembers}
         members={mentionMembers} userId={userId}
         canConfigureNotifications={canConfigureNotifications}

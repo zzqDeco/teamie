@@ -13,8 +13,11 @@ import {
   type BootstrapResp,
   type ChangePasswordReq,
   type ConversationDTO,
+  type ConversationAppSessionResp,
   type CreateAdminModelProfileReq,
   type CreateAgentReq,
+  type CreatedMarketplaceAppResp,
+  type CreateMarketplaceAppReq,
   type CreatePasswordResetLinkResp,
   type CreateWorkspaceReq,
   type EventDTO,
@@ -23,6 +26,9 @@ import {
   type ListInvitesResp,
   type ListMessagesResp,
   type LoginReq,
+  type MarketplaceAppDTO,
+  type MarketplaceAppListResp,
+  type MarketplaceAppResp,
   type MarkReadResp,
   type MemberDTO,
   type MemberReadReceiptDTO,
@@ -44,6 +50,7 @@ import {
   type RegistrationInviteDTO,
   type RegistrationMetadataResp,
   type ResetPasswordReq,
+  type RotateMarketplaceAppSecretResp,
   type SendMessageReq,
   type SessionResp,
   type SyncResp,
@@ -51,6 +58,7 @@ import {
   type UpdateAdminWebSearchConfigReq,
   type UpdateAdminModelRoutingReq,
   type UpdateAdminModelProfileReq,
+  type UpdateMarketplaceAppReq,
   type UpdateProfileReq,
   type UserDTO,
   type WebSearchConfigDTO,
@@ -306,6 +314,25 @@ export type WorkspaceSearchItem = Omit<
 export type WorkspaceSearchPage = Omit<WorkspaceSearchPageResp, "items"> & {
   items: WorkspaceSearchItem[];
 };
+export type MarketplaceApp = MarketplaceAppDTO;
+export type CreateMarketplaceAppInput = CreateMarketplaceAppReq;
+export type UpdateMarketplaceAppInput = Omit<UpdateMarketplaceAppReq, "id">;
+export type CreatedMarketplaceApp = CreatedMarketplaceAppResp;
+export type RotatedMarketplaceAppSecret = RotateMarketplaceAppSecretResp;
+export type ConversationAppSession = ConversationAppSessionResp;
+function publicMarketplaceApp(app: MarketplaceApp): MarketplaceApp {
+  return {
+    id: app.id,
+    slug: app.slug,
+    name: app.name,
+    description: app.description,
+    webUrl: app.webUrl,
+    mcpUrl: app.mcpUrl,
+    enabled: app.enabled,
+    createdAt: app.createdAt,
+    updatedAt: app.updatedAt,
+  };
+}
 export class ApiError extends Error {
   status: number;
   code: string;
@@ -893,6 +920,126 @@ export class TeamieClient {
     >(routePath(IDL_ROUTES.GetWorkspacePresence, { id: workspaceId }), {
       signal,
     });
+  adminMarketplaceApps = async () => ({
+    apps: (
+      await this.#request<MarketplaceAppListResp>(
+        IDL_ROUTES.ListAdminMarketplaceApps.clientPath,
+      )
+    ).apps.map(publicMarketplaceApp),
+  });
+  createAdminMarketplaceApp = async (input: CreateMarketplaceAppInput) => {
+    const res = await this.#request<CreatedMarketplaceAppResp>(
+      IDL_ROUTES.CreateAdminMarketplaceApp.clientPath,
+      {
+        method: IDL_ROUTES.CreateAdminMarketplaceApp.method,
+        body: JSON.stringify(input),
+      },
+    );
+    return {
+      app: publicMarketplaceApp(res.app),
+      signingSecret: res.signingSecret,
+    };
+  };
+  updateAdminMarketplaceApp = async (
+    id: string,
+    input: UpdateMarketplaceAppInput,
+  ) => ({
+    app: publicMarketplaceApp(
+      (
+        await this.#request<MarketplaceAppResp>(
+          routePath(IDL_ROUTES.UpdateAdminMarketplaceApp, { id }),
+          {
+            method: IDL_ROUTES.UpdateAdminMarketplaceApp.method,
+            body: JSON.stringify(input),
+          },
+        )
+      ).app,
+    ),
+  });
+  rotateAdminMarketplaceAppSecret = async (id: string) => {
+    const res = await this.#request<RotateMarketplaceAppSecretResp>(
+      routePath(IDL_ROUTES.RotateAdminMarketplaceAppSecret, { id }),
+      {
+        method: IDL_ROUTES.RotateAdminMarketplaceAppSecret.method,
+        body: JSON.stringify({}),
+      },
+    );
+    return {
+      app: publicMarketplaceApp(res.app),
+      signingSecret: res.signingSecret,
+    };
+  };
+  deleteAdminMarketplaceApp = (id: string) =>
+    this.#request<void>(
+      routePath(IDL_ROUTES.DeleteAdminMarketplaceApp, { id }),
+      {
+        method: IDL_ROUTES.DeleteAdminMarketplaceApp.method,
+      },
+    );
+  marketplaceCatalog = async () => ({
+    apps: (
+      await this.#request<MarketplaceAppListResp>(
+        IDL_ROUTES.ListMarketplaceCatalog.clientPath,
+      )
+    ).apps.map(publicMarketplaceApp),
+  });
+  workspaceApps = async (workspaceId: string) => ({
+    apps: (
+      await this.#request<MarketplaceAppListResp>(
+        routePath(IDL_ROUTES.ListWorkspaceApps, { id: workspaceId }),
+      )
+    ).apps.map(publicMarketplaceApp),
+  });
+  installWorkspaceApp = async (workspaceId: string, appId: string) => ({
+    app: publicMarketplaceApp(
+      (
+        await this.#request<MarketplaceAppResp>(
+          routePath(IDL_ROUTES.InstallWorkspaceApp, { id: workspaceId }),
+          {
+            method: IDL_ROUTES.InstallWorkspaceApp.method,
+            body: JSON.stringify({ appId }),
+          },
+        )
+      ).app,
+    ),
+  });
+  uninstallWorkspaceApp = (workspaceId: string, appId: string) =>
+    this.#request<void>(
+      routePath(IDL_ROUTES.UninstallWorkspaceApp, {
+        id: workspaceId,
+        appId,
+      }),
+      {
+        method: IDL_ROUTES.UninstallWorkspaceApp.method,
+      },
+    );
+  conversationApps = async (conversationId: string) => ({
+    apps: (
+      await this.#request<MarketplaceAppListResp>(
+        routePath(IDL_ROUTES.ListConversationApps, { id: conversationId }),
+      )
+    ).apps.map(publicMarketplaceApp),
+  });
+  createConversationAppSession = async (
+    conversationId: string,
+    appId: string,
+  ): Promise<ConversationAppSession> => {
+    const res = await this.#request<ConversationAppSessionResp>(
+      routePath(IDL_ROUTES.CreateConversationAppSession, {
+        id: conversationId,
+        appId,
+      }),
+      {
+        method: IDL_ROUTES.CreateConversationAppSession.method,
+        body: JSON.stringify({}),
+      },
+    );
+    return {
+      app: publicMarketplaceApp(res.app),
+      token: res.token,
+      expiresAt: res.expiresAt,
+    };
+  };
   sync = (cursor: string) =>
     this.#request<SyncPage>(
       `${IDL_ROUTES.Sync.clientPath}?cursor=${part(cursor)}&limit=100`,

@@ -75,9 +75,20 @@ const (
 	PatternGetAttachmentUpload = "GET /api/v1/conversations/{id}/attachment-uploads/{uploadKey}"
 	PatternDeletePendingAttachment = "DELETE /api/v1/conversations/{id}/attachments/{attachmentId}"
 	PatternDownloadAttachment = "GET /api/v1/conversations/{id}/attachments/{attachmentId}/content"
+	PatternListAdminMarketplaceApps = "GET /api/v1/admin/marketplace/apps"
+	PatternCreateAdminMarketplaceApp = "POST /api/v1/admin/marketplace/apps"
+	PatternUpdateAdminMarketplaceApp = "PATCH /api/v1/admin/marketplace/apps/{id}"
+	PatternRotateAdminMarketplaceAppSecret = "POST /api/v1/admin/marketplace/apps/{id}/rotate-secret"
+	PatternDeleteAdminMarketplaceApp = "DELETE /api/v1/admin/marketplace/apps/{id}"
+	PatternListMarketplaceCatalog = "GET /api/v1/marketplace/catalog"
+	PatternListWorkspaceApps = "GET /api/v1/workspaces/{id}/apps"
+	PatternInstallWorkspaceApp = "POST /api/v1/workspaces/{id}/apps"
+	PatternUninstallWorkspaceApp = "DELETE /api/v1/workspaces/{id}/apps/{appId}"
+	PatternListConversationApps = "GET /api/v1/conversations/{id}/apps"
+	PatternCreateConversationAppSession = "POST /api/v1/conversations/{id}/apps/{appId}/session"
 )
 
-// ChatHTTPServiceRoutes lists all 28 route specifications declared on ChatHTTPService.
+// ChatHTTPServiceRoutes lists all 39 route specifications declared on ChatHTTPService.
 var ChatHTTPServiceRoutes = []RouteSpec{
 	{Name: "GetBootstrap", Method: "GET", Path: "/api/v1/bootstrap", MuxPattern: PatternGetBootstrap, RequestType: "GetBootstrapReq", ResponseType: "BootstrapResp"},
 	{Name: "CreateWorkspace", Method: "POST", Path: "/api/v1/workspaces", MuxPattern: PatternCreateWorkspace, RequestType: "CreateWorkspaceReq", ResponseType: "CreateWorkspaceResp"},
@@ -107,6 +118,17 @@ var ChatHTTPServiceRoutes = []RouteSpec{
 	{Name: "GetAttachmentUpload", Method: "GET", Path: "/api/v1/conversations/:id/attachment-uploads/:uploadKey", MuxPattern: PatternGetAttachmentUpload, RequestType: "GetAttachmentUploadReq", ResponseType: "AttachmentResp"},
 	{Name: "DeletePendingAttachment", Method: "DELETE", Path: "/api/v1/conversations/:id/attachments/:attachmentId", MuxPattern: PatternDeletePendingAttachment, RequestType: "DeletePendingAttachmentReq", ResponseType: "EmptyResp"},
 	{Name: "DownloadAttachment", Method: "GET", Path: "/api/v1/conversations/:id/attachments/:attachmentId/content", MuxPattern: PatternDownloadAttachment, RequestType: "DownloadAttachmentReq", ResponseType: "DownloadAttachmentResp"},
+	{Name: "ListAdminMarketplaceApps", Method: "GET", Path: "/api/v1/admin/marketplace/apps", MuxPattern: PatternListAdminMarketplaceApps, RequestType: "GetBootstrapReq", ResponseType: "MarketplaceAppListResp"},
+	{Name: "CreateAdminMarketplaceApp", Method: "POST", Path: "/api/v1/admin/marketplace/apps", MuxPattern: PatternCreateAdminMarketplaceApp, RequestType: "CreateMarketplaceAppReq", ResponseType: "CreatedMarketplaceAppResp"},
+	{Name: "UpdateAdminMarketplaceApp", Method: "PATCH", Path: "/api/v1/admin/marketplace/apps/:id", MuxPattern: PatternUpdateAdminMarketplaceApp, RequestType: "UpdateMarketplaceAppReq", ResponseType: "MarketplaceAppResp"},
+	{Name: "RotateAdminMarketplaceAppSecret", Method: "POST", Path: "/api/v1/admin/marketplace/apps/:id/rotate-secret", MuxPattern: PatternRotateAdminMarketplaceAppSecret, RequestType: "MarketplaceAppIDReq", ResponseType: "RotateMarketplaceAppSecretResp"},
+	{Name: "DeleteAdminMarketplaceApp", Method: "DELETE", Path: "/api/v1/admin/marketplace/apps/:id", MuxPattern: PatternDeleteAdminMarketplaceApp, RequestType: "MarketplaceAppIDReq", ResponseType: "EmptyResp"},
+	{Name: "ListMarketplaceCatalog", Method: "GET", Path: "/api/v1/marketplace/catalog", MuxPattern: PatternListMarketplaceCatalog, RequestType: "GetBootstrapReq", ResponseType: "MarketplaceAppListResp"},
+	{Name: "ListWorkspaceApps", Method: "GET", Path: "/api/v1/workspaces/:id/apps", MuxPattern: PatternListWorkspaceApps, RequestType: "ListWorkspaceMembersReq", ResponseType: "MarketplaceAppListResp"},
+	{Name: "InstallWorkspaceApp", Method: "POST", Path: "/api/v1/workspaces/:id/apps", MuxPattern: PatternInstallWorkspaceApp, RequestType: "InstallWorkspaceAppReq", ResponseType: "MarketplaceAppResp"},
+	{Name: "UninstallWorkspaceApp", Method: "DELETE", Path: "/api/v1/workspaces/:id/apps/:appId", MuxPattern: PatternUninstallWorkspaceApp, RequestType: "UninstallWorkspaceAppReq", ResponseType: "EmptyResp"},
+	{Name: "ListConversationApps", Method: "GET", Path: "/api/v1/conversations/:id/apps", MuxPattern: PatternListConversationApps, RequestType: "GetReadReceiptsReq", ResponseType: "MarketplaceAppListResp"},
+	{Name: "CreateConversationAppSession", Method: "POST", Path: "/api/v1/conversations/:id/apps/:appId/session", MuxPattern: PatternCreateConversationAppSession, RequestType: "CreateConversationAppSessionReq", ResponseType: "ConversationAppSessionResp"},
 }
 
 // ChatHTTPServiceRouteHandlers binds every endpoint in ChatHTTPService to an http.HandlerFunc.
@@ -139,6 +161,17 @@ type ChatHTTPServiceRouteHandlers struct {
 	GetAttachmentUpload http.HandlerFunc
 	DeletePendingAttachment http.HandlerFunc
 	DownloadAttachment http.HandlerFunc
+	ListAdminMarketplaceApps http.HandlerFunc
+	CreateAdminMarketplaceApp http.HandlerFunc
+	UpdateAdminMarketplaceApp http.HandlerFunc
+	RotateAdminMarketplaceAppSecret http.HandlerFunc
+	DeleteAdminMarketplaceApp http.HandlerFunc
+	ListMarketplaceCatalog http.HandlerFunc
+	ListWorkspaceApps http.HandlerFunc
+	InstallWorkspaceApp http.HandlerFunc
+	UninstallWorkspaceApp http.HandlerFunc
+	ListConversationApps http.HandlerFunc
+	CreateConversationAppSession http.HandlerFunc
 }
 
 // RegisterChatHTTPServiceRoutes registers all ChatHTTPService endpoints on mux and panics if any IDL endpoint handler is nil.
@@ -255,6 +288,50 @@ func RegisterChatHTTPServiceRoutes(mux *http.ServeMux, h ChatHTTPServiceRouteHan
 		panic("ChatHTTPServiceRouteHandlers.DownloadAttachment (" + PatternDownloadAttachment + ") is nil")
 	}
 	mux.HandleFunc(PatternDownloadAttachment, h.DownloadAttachment)
+	if h.ListAdminMarketplaceApps == nil {
+		panic("ChatHTTPServiceRouteHandlers.ListAdminMarketplaceApps (" + PatternListAdminMarketplaceApps + ") is nil")
+	}
+	mux.HandleFunc(PatternListAdminMarketplaceApps, h.ListAdminMarketplaceApps)
+	if h.CreateAdminMarketplaceApp == nil {
+		panic("ChatHTTPServiceRouteHandlers.CreateAdminMarketplaceApp (" + PatternCreateAdminMarketplaceApp + ") is nil")
+	}
+	mux.HandleFunc(PatternCreateAdminMarketplaceApp, h.CreateAdminMarketplaceApp)
+	if h.UpdateAdminMarketplaceApp == nil {
+		panic("ChatHTTPServiceRouteHandlers.UpdateAdminMarketplaceApp (" + PatternUpdateAdminMarketplaceApp + ") is nil")
+	}
+	mux.HandleFunc(PatternUpdateAdminMarketplaceApp, h.UpdateAdminMarketplaceApp)
+	if h.RotateAdminMarketplaceAppSecret == nil {
+		panic("ChatHTTPServiceRouteHandlers.RotateAdminMarketplaceAppSecret (" + PatternRotateAdminMarketplaceAppSecret + ") is nil")
+	}
+	mux.HandleFunc(PatternRotateAdminMarketplaceAppSecret, h.RotateAdminMarketplaceAppSecret)
+	if h.DeleteAdminMarketplaceApp == nil {
+		panic("ChatHTTPServiceRouteHandlers.DeleteAdminMarketplaceApp (" + PatternDeleteAdminMarketplaceApp + ") is nil")
+	}
+	mux.HandleFunc(PatternDeleteAdminMarketplaceApp, h.DeleteAdminMarketplaceApp)
+	if h.ListMarketplaceCatalog == nil {
+		panic("ChatHTTPServiceRouteHandlers.ListMarketplaceCatalog (" + PatternListMarketplaceCatalog + ") is nil")
+	}
+	mux.HandleFunc(PatternListMarketplaceCatalog, h.ListMarketplaceCatalog)
+	if h.ListWorkspaceApps == nil {
+		panic("ChatHTTPServiceRouteHandlers.ListWorkspaceApps (" + PatternListWorkspaceApps + ") is nil")
+	}
+	mux.HandleFunc(PatternListWorkspaceApps, h.ListWorkspaceApps)
+	if h.InstallWorkspaceApp == nil {
+		panic("ChatHTTPServiceRouteHandlers.InstallWorkspaceApp (" + PatternInstallWorkspaceApp + ") is nil")
+	}
+	mux.HandleFunc(PatternInstallWorkspaceApp, h.InstallWorkspaceApp)
+	if h.UninstallWorkspaceApp == nil {
+		panic("ChatHTTPServiceRouteHandlers.UninstallWorkspaceApp (" + PatternUninstallWorkspaceApp + ") is nil")
+	}
+	mux.HandleFunc(PatternUninstallWorkspaceApp, h.UninstallWorkspaceApp)
+	if h.ListConversationApps == nil {
+		panic("ChatHTTPServiceRouteHandlers.ListConversationApps (" + PatternListConversationApps + ") is nil")
+	}
+	mux.HandleFunc(PatternListConversationApps, h.ListConversationApps)
+	if h.CreateConversationAppSession == nil {
+		panic("ChatHTTPServiceRouteHandlers.CreateConversationAppSession (" + PatternCreateConversationAppSession + ") is nil")
+	}
+	mux.HandleFunc(PatternCreateConversationAppSession, h.CreateConversationAppSession)
 }
 
 // RegisterChatHTTPServiceHertzServer registers ChatHTTPServer endpoints on a native Hertz route.RouterGroup.
@@ -1496,6 +1573,429 @@ func RegisterChatHTTPServiceHertzServer(r *route.RouterGroup, srv ChatHTTPServer
 			m.WriteOK(ctx, c, resp)
 		})
 	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "ListAdminMarketplaceApps", Method: "GET", Path: "/api/v1/admin/marketplace/apps", MuxPattern: PatternListAdminMarketplaceApps, RequestType: "GetBootstrapReq", ResponseType: "MarketplaceAppListResp"}); hfn != nil {
+			r.GET("/api/v1/admin/marketplace/apps", hfn)
+		} else {
+			r.GET("/api/v1/admin/marketplace/apps", func(ctx context.Context, c *app.RequestContext) {
+				var req GetBootstrapReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				resp, err := srv.ListAdminMarketplaceApps(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.GET("/api/v1/admin/marketplace/apps", func(ctx context.Context, c *app.RequestContext) {
+			var req GetBootstrapReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			resp, err := srv.ListAdminMarketplaceApps(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "CreateAdminMarketplaceApp", Method: "POST", Path: "/api/v1/admin/marketplace/apps", MuxPattern: PatternCreateAdminMarketplaceApp, RequestType: "CreateMarketplaceAppReq", ResponseType: "CreatedMarketplaceAppResp"}); hfn != nil {
+			r.POST("/api/v1/admin/marketplace/apps", hfn)
+		} else {
+			r.POST("/api/v1/admin/marketplace/apps", func(ctx context.Context, c *app.RequestContext) {
+				var req CreateMarketplaceAppReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				resp, err := srv.CreateAdminMarketplaceApp(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.POST("/api/v1/admin/marketplace/apps", func(ctx context.Context, c *app.RequestContext) {
+			var req CreateMarketplaceAppReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			resp, err := srv.CreateAdminMarketplaceApp(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "UpdateAdminMarketplaceApp", Method: "PATCH", Path: "/api/v1/admin/marketplace/apps/:id", MuxPattern: PatternUpdateAdminMarketplaceApp, RequestType: "UpdateMarketplaceAppReq", ResponseType: "MarketplaceAppResp"}); hfn != nil {
+			r.PATCH("/api/v1/admin/marketplace/apps/:id", hfn)
+		} else {
+			r.PATCH("/api/v1/admin/marketplace/apps/:id", func(ctx context.Context, c *app.RequestContext) {
+				var req UpdateMarketplaceAppReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				resp, err := srv.UpdateAdminMarketplaceApp(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.PATCH("/api/v1/admin/marketplace/apps/:id", func(ctx context.Context, c *app.RequestContext) {
+			var req UpdateMarketplaceAppReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			resp, err := srv.UpdateAdminMarketplaceApp(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "RotateAdminMarketplaceAppSecret", Method: "POST", Path: "/api/v1/admin/marketplace/apps/:id/rotate-secret", MuxPattern: PatternRotateAdminMarketplaceAppSecret, RequestType: "MarketplaceAppIDReq", ResponseType: "RotateMarketplaceAppSecretResp"}); hfn != nil {
+			r.POST("/api/v1/admin/marketplace/apps/:id/rotate-secret", hfn)
+		} else {
+			r.POST("/api/v1/admin/marketplace/apps/:id/rotate-secret", func(ctx context.Context, c *app.RequestContext) {
+				var req MarketplaceAppIDReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				resp, err := srv.RotateAdminMarketplaceAppSecret(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.POST("/api/v1/admin/marketplace/apps/:id/rotate-secret", func(ctx context.Context, c *app.RequestContext) {
+			var req MarketplaceAppIDReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			resp, err := srv.RotateAdminMarketplaceAppSecret(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "DeleteAdminMarketplaceApp", Method: "DELETE", Path: "/api/v1/admin/marketplace/apps/:id", MuxPattern: PatternDeleteAdminMarketplaceApp, RequestType: "MarketplaceAppIDReq", ResponseType: "EmptyResp"}); hfn != nil {
+			r.DELETE("/api/v1/admin/marketplace/apps/:id", hfn)
+		} else {
+			r.DELETE("/api/v1/admin/marketplace/apps/:id", func(ctx context.Context, c *app.RequestContext) {
+				var req MarketplaceAppIDReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				resp, err := srv.DeleteAdminMarketplaceApp(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.DELETE("/api/v1/admin/marketplace/apps/:id", func(ctx context.Context, c *app.RequestContext) {
+			var req MarketplaceAppIDReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			resp, err := srv.DeleteAdminMarketplaceApp(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "ListMarketplaceCatalog", Method: "GET", Path: "/api/v1/marketplace/catalog", MuxPattern: PatternListMarketplaceCatalog, RequestType: "GetBootstrapReq", ResponseType: "MarketplaceAppListResp"}); hfn != nil {
+			r.GET("/api/v1/marketplace/catalog", hfn)
+		} else {
+			r.GET("/api/v1/marketplace/catalog", func(ctx context.Context, c *app.RequestContext) {
+				var req GetBootstrapReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				resp, err := srv.ListMarketplaceCatalog(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.GET("/api/v1/marketplace/catalog", func(ctx context.Context, c *app.RequestContext) {
+			var req GetBootstrapReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			resp, err := srv.ListMarketplaceCatalog(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "ListWorkspaceApps", Method: "GET", Path: "/api/v1/workspaces/:id/apps", MuxPattern: PatternListWorkspaceApps, RequestType: "ListWorkspaceMembersReq", ResponseType: "MarketplaceAppListResp"}); hfn != nil {
+			r.GET("/api/v1/workspaces/:id/apps", hfn)
+		} else {
+			r.GET("/api/v1/workspaces/:id/apps", func(ctx context.Context, c *app.RequestContext) {
+				var req ListWorkspaceMembersReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				resp, err := srv.ListWorkspaceApps(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.GET("/api/v1/workspaces/:id/apps", func(ctx context.Context, c *app.RequestContext) {
+			var req ListWorkspaceMembersReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			resp, err := srv.ListWorkspaceApps(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "InstallWorkspaceApp", Method: "POST", Path: "/api/v1/workspaces/:id/apps", MuxPattern: PatternInstallWorkspaceApp, RequestType: "InstallWorkspaceAppReq", ResponseType: "MarketplaceAppResp"}); hfn != nil {
+			r.POST("/api/v1/workspaces/:id/apps", hfn)
+		} else {
+			r.POST("/api/v1/workspaces/:id/apps", func(ctx context.Context, c *app.RequestContext) {
+				var req InstallWorkspaceAppReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				resp, err := srv.InstallWorkspaceApp(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.POST("/api/v1/workspaces/:id/apps", func(ctx context.Context, c *app.RequestContext) {
+			var req InstallWorkspaceAppReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			resp, err := srv.InstallWorkspaceApp(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "UninstallWorkspaceApp", Method: "DELETE", Path: "/api/v1/workspaces/:id/apps/:appId", MuxPattern: PatternUninstallWorkspaceApp, RequestType: "UninstallWorkspaceAppReq", ResponseType: "EmptyResp"}); hfn != nil {
+			r.DELETE("/api/v1/workspaces/:id/apps/:appId", hfn)
+		} else {
+			r.DELETE("/api/v1/workspaces/:id/apps/:appId", func(ctx context.Context, c *app.RequestContext) {
+				var req UninstallWorkspaceAppReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				if req.AppId == "" {
+					req.AppId = c.Param("appId")
+				}
+				resp, err := srv.UninstallWorkspaceApp(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.DELETE("/api/v1/workspaces/:id/apps/:appId", func(ctx context.Context, c *app.RequestContext) {
+			var req UninstallWorkspaceAppReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			if req.AppId == "" {
+				req.AppId = c.Param("appId")
+			}
+			resp, err := srv.UninstallWorkspaceApp(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "ListConversationApps", Method: "GET", Path: "/api/v1/conversations/:id/apps", MuxPattern: PatternListConversationApps, RequestType: "GetReadReceiptsReq", ResponseType: "MarketplaceAppListResp"}); hfn != nil {
+			r.GET("/api/v1/conversations/:id/apps", hfn)
+		} else {
+			r.GET("/api/v1/conversations/:id/apps", func(ctx context.Context, c *app.RequestContext) {
+				var req GetReadReceiptsReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				resp, err := srv.ListConversationApps(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.GET("/api/v1/conversations/:id/apps", func(ctx context.Context, c *app.RequestContext) {
+			var req GetReadReceiptsReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			resp, err := srv.ListConversationApps(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "CreateConversationAppSession", Method: "POST", Path: "/api/v1/conversations/:id/apps/:appId/session", MuxPattern: PatternCreateConversationAppSession, RequestType: "CreateConversationAppSessionReq", ResponseType: "ConversationAppSessionResp"}); hfn != nil {
+			r.POST("/api/v1/conversations/:id/apps/:appId/session", hfn)
+		} else {
+			r.POST("/api/v1/conversations/:id/apps/:appId/session", func(ctx context.Context, c *app.RequestContext) {
+				var req CreateConversationAppSessionReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				if req.AppId == "" {
+					req.AppId = c.Param("appId")
+				}
+				resp, err := srv.CreateConversationAppSession(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.POST("/api/v1/conversations/:id/apps/:appId/session", func(ctx context.Context, c *app.RequestContext) {
+			var req CreateConversationAppSessionReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			if req.AppId == "" {
+				req.AppId = c.Param("appId")
+			}
+			resp, err := srv.CreateConversationAppSession(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
 }
 
 // RegisterChatHTTPServer binds ChatHTTPServer methods using HTTPResponder with optional per-route handler overrides.
@@ -2040,6 +2540,193 @@ func RegisterChatHTTPServer(mux *http.ServeMux, srv ChatHTTPServer, m HTTPRespon
 			fn = mw.WrapRoute(RouteSpec{Name: "DownloadAttachment", Method: "GET", Path: "/api/v1/conversations/:id/attachments/:attachmentId/content", MuxPattern: PatternDownloadAttachment, RequestType: "DownloadAttachmentReq", ResponseType: "DownloadAttachmentResp"}, fn)
 		}
 		h.DownloadAttachment = fn
+	}
+	if h.ListAdminMarketplaceApps == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req GetBootstrapReq
+			resp, err := srv.ListAdminMarketplaceApps(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "ListAdminMarketplaceApps", Method: "GET", Path: "/api/v1/admin/marketplace/apps", MuxPattern: PatternListAdminMarketplaceApps, RequestType: "GetBootstrapReq", ResponseType: "MarketplaceAppListResp"}, fn)
+		}
+		h.ListAdminMarketplaceApps = fn
+	}
+	if h.CreateAdminMarketplaceApp == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req CreateMarketplaceAppReq
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
+			}
+			resp, err := srv.CreateAdminMarketplaceApp(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusCreated, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "CreateAdminMarketplaceApp", Method: "POST", Path: "/api/v1/admin/marketplace/apps", MuxPattern: PatternCreateAdminMarketplaceApp, RequestType: "CreateMarketplaceAppReq", ResponseType: "CreatedMarketplaceAppResp"}, fn)
+		}
+		h.CreateAdminMarketplaceApp = fn
+	}
+	if h.UpdateAdminMarketplaceApp == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req UpdateMarketplaceAppReq
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
+			}
+			req.ID = r.PathValue("id")
+			resp, err := srv.UpdateAdminMarketplaceApp(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "UpdateAdminMarketplaceApp", Method: "PATCH", Path: "/api/v1/admin/marketplace/apps/:id", MuxPattern: PatternUpdateAdminMarketplaceApp, RequestType: "UpdateMarketplaceAppReq", ResponseType: "MarketplaceAppResp"}, fn)
+		}
+		h.UpdateAdminMarketplaceApp = fn
+	}
+	if h.RotateAdminMarketplaceAppSecret == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req MarketplaceAppIDReq
+			req.ID = r.PathValue("id")
+			resp, err := srv.RotateAdminMarketplaceAppSecret(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "RotateAdminMarketplaceAppSecret", Method: "POST", Path: "/api/v1/admin/marketplace/apps/:id/rotate-secret", MuxPattern: PatternRotateAdminMarketplaceAppSecret, RequestType: "MarketplaceAppIDReq", ResponseType: "RotateMarketplaceAppSecretResp"}, fn)
+		}
+		h.RotateAdminMarketplaceAppSecret = fn
+	}
+	if h.DeleteAdminMarketplaceApp == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req MarketplaceAppIDReq
+			req.ID = r.PathValue("id")
+			_, err := srv.DeleteAdminMarketplaceApp(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusNoContent, nil)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "DeleteAdminMarketplaceApp", Method: "DELETE", Path: "/api/v1/admin/marketplace/apps/:id", MuxPattern: PatternDeleteAdminMarketplaceApp, RequestType: "MarketplaceAppIDReq", ResponseType: "EmptyResp"}, fn)
+		}
+		h.DeleteAdminMarketplaceApp = fn
+	}
+	if h.ListMarketplaceCatalog == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req GetBootstrapReq
+			resp, err := srv.ListMarketplaceCatalog(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "ListMarketplaceCatalog", Method: "GET", Path: "/api/v1/marketplace/catalog", MuxPattern: PatternListMarketplaceCatalog, RequestType: "GetBootstrapReq", ResponseType: "MarketplaceAppListResp"}, fn)
+		}
+		h.ListMarketplaceCatalog = fn
+	}
+	if h.ListWorkspaceApps == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req ListWorkspaceMembersReq
+			req.ID = r.PathValue("id")
+			resp, err := srv.ListWorkspaceApps(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "ListWorkspaceApps", Method: "GET", Path: "/api/v1/workspaces/:id/apps", MuxPattern: PatternListWorkspaceApps, RequestType: "ListWorkspaceMembersReq", ResponseType: "MarketplaceAppListResp"}, fn)
+		}
+		h.ListWorkspaceApps = fn
+	}
+	if h.InstallWorkspaceApp == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req InstallWorkspaceAppReq
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
+			}
+			req.ID = r.PathValue("id")
+			resp, err := srv.InstallWorkspaceApp(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusCreated, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "InstallWorkspaceApp", Method: "POST", Path: "/api/v1/workspaces/:id/apps", MuxPattern: PatternInstallWorkspaceApp, RequestType: "InstallWorkspaceAppReq", ResponseType: "MarketplaceAppResp"}, fn)
+		}
+		h.InstallWorkspaceApp = fn
+	}
+	if h.UninstallWorkspaceApp == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req UninstallWorkspaceAppReq
+			req.ID = r.PathValue("id")
+			req.AppId = r.PathValue("appId")
+			_, err := srv.UninstallWorkspaceApp(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusNoContent, nil)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "UninstallWorkspaceApp", Method: "DELETE", Path: "/api/v1/workspaces/:id/apps/:appId", MuxPattern: PatternUninstallWorkspaceApp, RequestType: "UninstallWorkspaceAppReq", ResponseType: "EmptyResp"}, fn)
+		}
+		h.UninstallWorkspaceApp = fn
+	}
+	if h.ListConversationApps == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req GetReadReceiptsReq
+			req.ID = r.PathValue("id")
+			resp, err := srv.ListConversationApps(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "ListConversationApps", Method: "GET", Path: "/api/v1/conversations/:id/apps", MuxPattern: PatternListConversationApps, RequestType: "GetReadReceiptsReq", ResponseType: "MarketplaceAppListResp"}, fn)
+		}
+		h.ListConversationApps = fn
+	}
+	if h.CreateConversationAppSession == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req CreateConversationAppSessionReq
+			req.ID = r.PathValue("id")
+			req.AppId = r.PathValue("appId")
+			resp, err := srv.CreateConversationAppSession(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "CreateConversationAppSession", Method: "POST", Path: "/api/v1/conversations/:id/apps/:appId/session", MuxPattern: PatternCreateConversationAppSession, RequestType: "CreateConversationAppSessionReq", ResponseType: "ConversationAppSessionResp"}, fn)
+		}
+		h.CreateConversationAppSession = fn
 	}
 	RegisterChatHTTPServiceRoutes(mux, h)
 }

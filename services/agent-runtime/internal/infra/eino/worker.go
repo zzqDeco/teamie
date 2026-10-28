@@ -304,6 +304,10 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		if err != nil {
 			return nil, err
 		}
+		mcpTools, err := (&Tools{Store: e.Store, Lease: lease, IM: imc, OwnerID: def.OwnerId, AgentID: def.Id, FlagsFile: e.Config.FlagsFile, Authorize: authorize}).BuildMCPTools(ctx, run)
+		if err != nil {
+			return nil, err
+		}
 		if contextProfile(run) == contextProfileV1 {
 			budget, err := ParseContextBudgetSnapshot(run.ContextBudget)
 			if err != nil {
@@ -341,6 +345,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 				}
 				activeTools = append(activeTools, dmTools...)
 			}
+			activeTools = append(activeTools, mcpTools...)
 			pipeline, err := NewContextPipeline(ctx, ContextPipelineConfig{Model: gatewayModel, Budget: budget, Backend: archive, ArchivePath: archive.Path, ArchiveToolPath: archive.ArchiveToolPath, ArchiveTranscript: archive.ArchiveTranscript})
 			if err != nil {
 				return nil, err
@@ -366,7 +371,15 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 			if budget.DirectMessages {
 				instruction += directMessageGuidance
 			}
+			if len(mcpTools) > 0 {
+				instruction += marketplaceAppGuidance
+			}
 			return adk.NewTypedChatModelAgent(ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{Name: "teamie_agent", Description: "A user-owned Teamie participant", Instruction: instruction, Model: gatewayModel, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: activeTools, ExecuteSequentially: true}}, MaxIterations: math.MaxInt, Handlers: handlers, ModelRetryConfig: pipeline.RetryConfig()})
+		}
+		activeTools = append(activeTools, mcpTools...)
+		legacyInstruction := instruction(def)
+		if len(mcpTools) > 0 {
+			legacyInstruction += marketplaceAppGuidance
 		}
 		trigger := summaryTrigger(int(contextWindow.Load()))
 		finalize := finalizeSummary
@@ -389,7 +402,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 			return nil, err
 		}
 		handlers := append([]adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]{summary}, tasks.handlers...)
-		return adk.NewTypedChatModelAgent(ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{Name: "teamie_agent", Description: "A user-owned Teamie participant", Instruction: instruction(def), Model: gatewayModel, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: activeTools, ExecuteSequentially: true}}, MaxIterations: math.MaxInt, Handlers: handlers})
+		return adk.NewTypedChatModelAgent(ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{Name: "teamie_agent", Description: "A user-owned Teamie participant", Instruction: legacyInstruction, Model: gatewayModel, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: activeTools, ExecuteSequentially: true}}, MaxIterations: math.MaxInt, Handlers: handlers})
 	}
 	validate := func(ctx context.Context, inputs []Input) ([]Input, error) {
 		valid := []Input{}
@@ -404,6 +417,19 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 						if in.ScheduleID != "" {
 							_ = e.Store.DB.CancelActiveSchedule(ctx, lease.AgentID, in.ScheduleID)
 						}
+						if err = e.Store.Skip(ctx, lease, in.EventID); err != nil {
+							return nil, err
+						}
+						continue
+					}
+					return nil, err
+				}
+				valid = append(valid, in)
+				continue
+			}
+			if in.Kind == "app.notification" {
+				if err := e.authorizeAppNotificationInput(ctx, imc, lease, in); err != nil {
+					if errors.Is(err, errContextUnavailable) {
 						if err = e.Store.Skip(ctx, lease, in.EventID); err != nil {
 							return nil, err
 						}
@@ -500,6 +526,17 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 						if in.ScheduleID != "" {
 							_ = e.Store.DB.CancelActiveSchedule(ctx, lease.AgentID, in.ScheduleID)
 						}
+						invalid = append(invalid, in.EventID)
+						continue
+					}
+					_ = e.Store.FinishRun(ctx, lease, run, "retry", "im_unavailable", true)
+					return nil, nil, nil, &ModelError{Code: "im_unavailable", Retry: true}
+				}
+				continue
+			}
+			if in.Kind == "app.notification" {
+				if readErr := e.authorizeAppNotificationInput(ctx, imc, lease, in); readErr != nil {
+					if errors.Is(readErr, errContextUnavailable) {
 						invalid = append(invalid, in.EventID)
 						continue
 					}
@@ -753,6 +790,8 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		return authorize(rc)
 	}, imc.MarkRead)
 	defer stopReads()
+	mcpWatcher := newMCPNotificationWatcher(e.Store, lease, imc, e.Config.FlagsFile)
+	defer mcpWatcher.closeAll()
 	poll := time.NewTicker(time.Second)
 	defer poll.Stop()
 	lastState := ""
@@ -783,6 +822,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		if err := e.drainSchedules(ctx, lease); errors.Is(err, ErrLeaseLost) {
 			return false
 		}
+		mcpWatcher.sync(ctx)
 		if loop != nil {
 			select {
 			case exit := <-loopDone:
@@ -891,6 +931,10 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		select {
 		case <-ctx.Done():
 			return
+		case <-mcpWatcher.wake():
+			if !tick() {
+				return
+			}
 		case <-poll.C:
 			if !tick() {
 				return

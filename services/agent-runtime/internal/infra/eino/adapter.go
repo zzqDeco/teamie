@@ -85,6 +85,8 @@ func FormatInputEnvelope(kind string, rawJSON []byte) string {
 		prefix = "TEAMIE_TASK_NOTIFICATION "
 	} else if kind == "schedule.wakeup" {
 		prefix = "TEAMIE_SCHEDULE_WAKEUP "
+	} else if kind == "app.notification" {
+		prefix = "TEAMIE_APP_NOTIFICATION "
 	}
 	return prefix + string(rawJSON)
 }

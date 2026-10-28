@@ -2619,6 +2619,508 @@ func (p *DownloadAttachmentResp) String() string {
 	return fmt.Sprintf("DownloadAttachmentResp(%+v)", *p)
 }
 
+type MarketplaceAppDTO struct {
+	ID          string `thrift:"id,1,required" json:"id"`
+	Slug        string `thrift:"slug,2,required" json:"slug"`
+	Name        string `thrift:"name,3,required" json:"name"`
+	Description string `thrift:"description,4,required" json:"description"`
+	WebUrl      string `thrift:"webUrl,5,required" json:"webUrl"`
+	McpUrl      string `thrift:"mcpUrl,6,required" json:"mcpUrl"`
+	Enabled     bool   `thrift:"enabled,7,required" json:"enabled"`
+	CreatedAt   string `thrift:"createdAt,8,required" json:"createdAt"`
+	UpdatedAt   string `thrift:"updatedAt,9,required" json:"updatedAt"`
+}
+
+func NewMarketplaceAppDTO() *MarketplaceAppDTO {
+	return &MarketplaceAppDTO{}
+}
+
+func (p *MarketplaceAppDTO) InitDefault() {
+}
+
+func (p *MarketplaceAppDTO) GetID() (v string) {
+	return p.ID
+}
+
+func (p *MarketplaceAppDTO) GetSlug() (v string) {
+	return p.Slug
+}
+
+func (p *MarketplaceAppDTO) GetName() (v string) {
+	return p.Name
+}
+
+func (p *MarketplaceAppDTO) GetDescription() (v string) {
+	return p.Description
+}
+
+func (p *MarketplaceAppDTO) GetWebUrl() (v string) {
+	return p.WebUrl
+}
+
+func (p *MarketplaceAppDTO) GetMcpUrl() (v string) {
+	return p.McpUrl
+}
+
+func (p *MarketplaceAppDTO) GetEnabled() (v bool) {
+	return p.Enabled
+}
+
+func (p *MarketplaceAppDTO) GetCreatedAt() (v string) {
+	return p.CreatedAt
+}
+
+func (p *MarketplaceAppDTO) GetUpdatedAt() (v string) {
+	return p.UpdatedAt
+}
+
+func (p *MarketplaceAppDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("MarketplaceAppDTO(%+v)", *p)
+}
+
+type MarketplaceAppResp struct {
+	App *MarketplaceAppDTO `thrift:"app,1,required" json:"app"`
+}
+
+func NewMarketplaceAppResp() *MarketplaceAppResp {
+	return &MarketplaceAppResp{}
+}
+
+func (p *MarketplaceAppResp) InitDefault() {
+}
+
+var MarketplaceAppResp_App_DEFAULT *MarketplaceAppDTO
+
+func (p *MarketplaceAppResp) GetApp() (v *MarketplaceAppDTO) {
+	if !p.IsSetApp() {
+		return MarketplaceAppResp_App_DEFAULT
+	}
+	return p.App
+}
+
+func (p *MarketplaceAppResp) IsSetApp() bool {
+	return p.App != nil
+}
+
+func (p *MarketplaceAppResp) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("MarketplaceAppResp(%+v)", *p)
+}
+
+type CreatedMarketplaceAppResp struct {
+	App           *MarketplaceAppDTO `thrift:"app,1,required" json:"app"`
+	SigningSecret string             `thrift:"signingSecret,2,required" json:"signingSecret"`
+}
+
+func NewCreatedMarketplaceAppResp() *CreatedMarketplaceAppResp {
+	return &CreatedMarketplaceAppResp{}
+}
+
+func (p *CreatedMarketplaceAppResp) InitDefault() {
+}
+
+var CreatedMarketplaceAppResp_App_DEFAULT *MarketplaceAppDTO
+
+func (p *CreatedMarketplaceAppResp) GetApp() (v *MarketplaceAppDTO) {
+	if !p.IsSetApp() {
+		return CreatedMarketplaceAppResp_App_DEFAULT
+	}
+	return p.App
+}
+
+func (p *CreatedMarketplaceAppResp) GetSigningSecret() (v string) {
+	return p.SigningSecret
+}
+
+func (p *CreatedMarketplaceAppResp) IsSetApp() bool {
+	return p.App != nil
+}
+
+func (p *CreatedMarketplaceAppResp) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("CreatedMarketplaceAppResp(%+v)", *p)
+}
+
+type RotateMarketplaceAppSecretResp struct {
+	App           *MarketplaceAppDTO `thrift:"app,1,required" json:"app"`
+	SigningSecret string             `thrift:"signingSecret,2,required" json:"signingSecret"`
+}
+
+func NewRotateMarketplaceAppSecretResp() *RotateMarketplaceAppSecretResp {
+	return &RotateMarketplaceAppSecretResp{}
+}
+
+func (p *RotateMarketplaceAppSecretResp) InitDefault() {
+}
+
+var RotateMarketplaceAppSecretResp_App_DEFAULT *MarketplaceAppDTO
+
+func (p *RotateMarketplaceAppSecretResp) GetApp() (v *MarketplaceAppDTO) {
+	if !p.IsSetApp() {
+		return RotateMarketplaceAppSecretResp_App_DEFAULT
+	}
+	return p.App
+}
+
+func (p *RotateMarketplaceAppSecretResp) GetSigningSecret() (v string) {
+	return p.SigningSecret
+}
+
+func (p *RotateMarketplaceAppSecretResp) IsSetApp() bool {
+	return p.App != nil
+}
+
+func (p *RotateMarketplaceAppSecretResp) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("RotateMarketplaceAppSecretResp(%+v)", *p)
+}
+
+type MarketplaceAppListResp struct {
+	Apps []*MarketplaceAppDTO `thrift:"apps,1,required,list<MarketplaceAppDTO>" json:"apps"`
+}
+
+func NewMarketplaceAppListResp() *MarketplaceAppListResp {
+	return &MarketplaceAppListResp{}
+}
+
+func (p *MarketplaceAppListResp) InitDefault() {
+}
+
+func (p *MarketplaceAppListResp) GetApps() (v []*MarketplaceAppDTO) {
+	return p.Apps
+}
+
+func (p *MarketplaceAppListResp) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("MarketplaceAppListResp(%+v)", *p)
+}
+
+type CreateMarketplaceAppReq struct {
+	Slug        string  `thrift:"slug,1,required" json:"slug"`
+	Name        string  `thrift:"name,2,required" json:"name"`
+	Description *string `thrift:"description,3,optional" json:"description,omitempty"`
+	WebUrl      string  `thrift:"webUrl,4,required" json:"webUrl"`
+	McpUrl      string  `thrift:"mcpUrl,5,required" json:"mcpUrl"`
+	Enabled     *bool   `thrift:"enabled,6,optional" json:"enabled,omitempty"`
+}
+
+func NewCreateMarketplaceAppReq() *CreateMarketplaceAppReq {
+	return &CreateMarketplaceAppReq{}
+}
+
+func (p *CreateMarketplaceAppReq) InitDefault() {
+}
+
+func (p *CreateMarketplaceAppReq) GetSlug() (v string) {
+	return p.Slug
+}
+
+func (p *CreateMarketplaceAppReq) GetName() (v string) {
+	return p.Name
+}
+
+var CreateMarketplaceAppReq_Description_DEFAULT string
+
+func (p *CreateMarketplaceAppReq) GetDescription() (v string) {
+	if !p.IsSetDescription() {
+		return CreateMarketplaceAppReq_Description_DEFAULT
+	}
+	return *p.Description
+}
+
+func (p *CreateMarketplaceAppReq) GetWebUrl() (v string) {
+	return p.WebUrl
+}
+
+func (p *CreateMarketplaceAppReq) GetMcpUrl() (v string) {
+	return p.McpUrl
+}
+
+var CreateMarketplaceAppReq_Enabled_DEFAULT bool
+
+func (p *CreateMarketplaceAppReq) GetEnabled() (v bool) {
+	if !p.IsSetEnabled() {
+		return CreateMarketplaceAppReq_Enabled_DEFAULT
+	}
+	return *p.Enabled
+}
+
+func (p *CreateMarketplaceAppReq) IsSetDescription() bool {
+	return p.Description != nil
+}
+
+func (p *CreateMarketplaceAppReq) IsSetEnabled() bool {
+	return p.Enabled != nil
+}
+
+func (p *CreateMarketplaceAppReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("CreateMarketplaceAppReq(%+v)", *p)
+}
+
+type UpdateMarketplaceAppReq struct {
+	ID          string  `thrift:"id,1,required" json:"-"`
+	Slug        *string `thrift:"slug,2,optional" json:"slug,omitempty"`
+	Name        *string `thrift:"name,3,optional" json:"name,omitempty"`
+	Description *string `thrift:"description,4,optional" json:"description,omitempty"`
+	WebUrl      *string `thrift:"webUrl,5,optional" json:"webUrl,omitempty"`
+	McpUrl      *string `thrift:"mcpUrl,6,optional" json:"mcpUrl,omitempty"`
+	Enabled     *bool   `thrift:"enabled,7,optional" json:"enabled,omitempty"`
+}
+
+func NewUpdateMarketplaceAppReq() *UpdateMarketplaceAppReq {
+	return &UpdateMarketplaceAppReq{}
+}
+
+func (p *UpdateMarketplaceAppReq) InitDefault() {
+}
+
+func (p *UpdateMarketplaceAppReq) GetID() (v string) {
+	return p.ID
+}
+
+var UpdateMarketplaceAppReq_Slug_DEFAULT string
+
+func (p *UpdateMarketplaceAppReq) GetSlug() (v string) {
+	if !p.IsSetSlug() {
+		return UpdateMarketplaceAppReq_Slug_DEFAULT
+	}
+	return *p.Slug
+}
+
+var UpdateMarketplaceAppReq_Name_DEFAULT string
+
+func (p *UpdateMarketplaceAppReq) GetName() (v string) {
+	if !p.IsSetName() {
+		return UpdateMarketplaceAppReq_Name_DEFAULT
+	}
+	return *p.Name
+}
+
+var UpdateMarketplaceAppReq_Description_DEFAULT string
+
+func (p *UpdateMarketplaceAppReq) GetDescription() (v string) {
+	if !p.IsSetDescription() {
+		return UpdateMarketplaceAppReq_Description_DEFAULT
+	}
+	return *p.Description
+}
+
+var UpdateMarketplaceAppReq_WebUrl_DEFAULT string
+
+func (p *UpdateMarketplaceAppReq) GetWebUrl() (v string) {
+	if !p.IsSetWebUrl() {
+		return UpdateMarketplaceAppReq_WebUrl_DEFAULT
+	}
+	return *p.WebUrl
+}
+
+var UpdateMarketplaceAppReq_McpUrl_DEFAULT string
+
+func (p *UpdateMarketplaceAppReq) GetMcpUrl() (v string) {
+	if !p.IsSetMcpUrl() {
+		return UpdateMarketplaceAppReq_McpUrl_DEFAULT
+	}
+	return *p.McpUrl
+}
+
+var UpdateMarketplaceAppReq_Enabled_DEFAULT bool
+
+func (p *UpdateMarketplaceAppReq) GetEnabled() (v bool) {
+	if !p.IsSetEnabled() {
+		return UpdateMarketplaceAppReq_Enabled_DEFAULT
+	}
+	return *p.Enabled
+}
+
+func (p *UpdateMarketplaceAppReq) IsSetSlug() bool {
+	return p.Slug != nil
+}
+
+func (p *UpdateMarketplaceAppReq) IsSetName() bool {
+	return p.Name != nil
+}
+
+func (p *UpdateMarketplaceAppReq) IsSetDescription() bool {
+	return p.Description != nil
+}
+
+func (p *UpdateMarketplaceAppReq) IsSetWebUrl() bool {
+	return p.WebUrl != nil
+}
+
+func (p *UpdateMarketplaceAppReq) IsSetMcpUrl() bool {
+	return p.McpUrl != nil
+}
+
+func (p *UpdateMarketplaceAppReq) IsSetEnabled() bool {
+	return p.Enabled != nil
+}
+
+func (p *UpdateMarketplaceAppReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("UpdateMarketplaceAppReq(%+v)", *p)
+}
+
+type MarketplaceAppIDReq struct {
+	ID string `thrift:"id,1,required" json:"id"`
+}
+
+func NewMarketplaceAppIDReq() *MarketplaceAppIDReq {
+	return &MarketplaceAppIDReq{}
+}
+
+func (p *MarketplaceAppIDReq) InitDefault() {
+}
+
+func (p *MarketplaceAppIDReq) GetID() (v string) {
+	return p.ID
+}
+
+func (p *MarketplaceAppIDReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("MarketplaceAppIDReq(%+v)", *p)
+}
+
+type InstallWorkspaceAppReq struct {
+	ID    string `thrift:"id,1,required" json:"-"`
+	AppId string `thrift:"appId,2,required" json:"appId"`
+}
+
+func NewInstallWorkspaceAppReq() *InstallWorkspaceAppReq {
+	return &InstallWorkspaceAppReq{}
+}
+
+func (p *InstallWorkspaceAppReq) InitDefault() {
+}
+
+func (p *InstallWorkspaceAppReq) GetID() (v string) {
+	return p.ID
+}
+
+func (p *InstallWorkspaceAppReq) GetAppId() (v string) {
+	return p.AppId
+}
+
+func (p *InstallWorkspaceAppReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("InstallWorkspaceAppReq(%+v)", *p)
+}
+
+type UninstallWorkspaceAppReq struct {
+	ID    string `thrift:"id,1,required" json:"id"`
+	AppId string `thrift:"appId,2,required" json:"appId"`
+}
+
+func NewUninstallWorkspaceAppReq() *UninstallWorkspaceAppReq {
+	return &UninstallWorkspaceAppReq{}
+}
+
+func (p *UninstallWorkspaceAppReq) InitDefault() {
+}
+
+func (p *UninstallWorkspaceAppReq) GetID() (v string) {
+	return p.ID
+}
+
+func (p *UninstallWorkspaceAppReq) GetAppId() (v string) {
+	return p.AppId
+}
+
+func (p *UninstallWorkspaceAppReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("UninstallWorkspaceAppReq(%+v)", *p)
+}
+
+type CreateConversationAppSessionReq struct {
+	ID    string `thrift:"id,1,required" json:"id"`
+	AppId string `thrift:"appId,2,required" json:"appId"`
+}
+
+func NewCreateConversationAppSessionReq() *CreateConversationAppSessionReq {
+	return &CreateConversationAppSessionReq{}
+}
+
+func (p *CreateConversationAppSessionReq) InitDefault() {
+}
+
+func (p *CreateConversationAppSessionReq) GetID() (v string) {
+	return p.ID
+}
+
+func (p *CreateConversationAppSessionReq) GetAppId() (v string) {
+	return p.AppId
+}
+
+func (p *CreateConversationAppSessionReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("CreateConversationAppSessionReq(%+v)", *p)
+}
+
+type ConversationAppSessionResp struct {
+	App       *MarketplaceAppDTO `thrift:"app,1,required" json:"app"`
+	Token     string             `thrift:"token,2,required" json:"token"`
+	ExpiresAt string             `thrift:"expiresAt,3,required" json:"expiresAt"`
+}
+
+func NewConversationAppSessionResp() *ConversationAppSessionResp {
+	return &ConversationAppSessionResp{}
+}
+
+func (p *ConversationAppSessionResp) InitDefault() {
+}
+
+var ConversationAppSessionResp_App_DEFAULT *MarketplaceAppDTO
+
+func (p *ConversationAppSessionResp) GetApp() (v *MarketplaceAppDTO) {
+	if !p.IsSetApp() {
+		return ConversationAppSessionResp_App_DEFAULT
+	}
+	return p.App
+}
+
+func (p *ConversationAppSessionResp) GetToken() (v string) {
+	return p.Token
+}
+
+func (p *ConversationAppSessionResp) GetExpiresAt() (v string) {
+	return p.ExpiresAt
+}
+
+func (p *ConversationAppSessionResp) IsSetApp() bool {
+	return p.App != nil
+}
+
+func (p *ConversationAppSessionResp) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ConversationAppSessionResp(%+v)", *p)
+}
+
 type ChatHTTPService interface {
 	GetBootstrap(ctx context.Context, req *GetBootstrapReq) (r *BootstrapResp, err error)
 
@@ -2675,4 +3177,26 @@ type ChatHTTPService interface {
 	DeletePendingAttachment(ctx context.Context, req *DeletePendingAttachmentReq) (r *EmptyResp, err error)
 
 	DownloadAttachment(ctx context.Context, req *DownloadAttachmentReq) (r *DownloadAttachmentResp, err error)
+
+	ListAdminMarketplaceApps(ctx context.Context, req *GetBootstrapReq) (r *MarketplaceAppListResp, err error)
+
+	CreateAdminMarketplaceApp(ctx context.Context, req *CreateMarketplaceAppReq) (r *CreatedMarketplaceAppResp, err error)
+
+	UpdateAdminMarketplaceApp(ctx context.Context, req *UpdateMarketplaceAppReq) (r *MarketplaceAppResp, err error)
+
+	RotateAdminMarketplaceAppSecret(ctx context.Context, req *MarketplaceAppIDReq) (r *RotateMarketplaceAppSecretResp, err error)
+
+	DeleteAdminMarketplaceApp(ctx context.Context, req *MarketplaceAppIDReq) (r *EmptyResp, err error)
+
+	ListMarketplaceCatalog(ctx context.Context, req *GetBootstrapReq) (r *MarketplaceAppListResp, err error)
+
+	ListWorkspaceApps(ctx context.Context, req *ListWorkspaceMembersReq) (r *MarketplaceAppListResp, err error)
+
+	InstallWorkspaceApp(ctx context.Context, req *InstallWorkspaceAppReq) (r *MarketplaceAppResp, err error)
+
+	UninstallWorkspaceApp(ctx context.Context, req *UninstallWorkspaceAppReq) (r *EmptyResp, err error)
+
+	ListConversationApps(ctx context.Context, req *GetReadReceiptsReq) (r *MarketplaceAppListResp, err error)
+
+	CreateConversationAppSession(ctx context.Context, req *CreateConversationAppSessionReq) (r *ConversationAppSessionResp, err error)
 }

@@ -64,6 +64,7 @@ func main() {
 		Memberships:    repo,
 		Messages:       repo,
 		Attachments:    repo,
+		Marketplace:    repo,
 		Outbox:         repo,
 		Identity:       rpcclient.NewIdentity(identityClient),
 		Flags:          flags.New(cfgFlags),

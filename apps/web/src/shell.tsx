@@ -28,6 +28,7 @@ import {
   useShellViewportAndFocus,
 } from "./shell-sidebar";
 import { RemoveMemberModal, ShellMembersPane } from "./shell-members-pane";
+import { ConversationAppsPane, WorkspaceMarketplaceModal } from "./marketplace";
 import { parseInviteCode, Welcome } from "./shell-welcome";
 import {
   clearPersistedShellNav,
@@ -74,6 +75,8 @@ export function Shell() {
   const [dialog, setDialog] = useState<DialogKind | null>(null),
     [sidebar, setSidebar] = useState(false),
     [details, setDetails] = useState(false),
+    [appsOpen, setAppsOpen] = useState(false),
+    [managingWorkspaceApps, setManagingWorkspaceApps] = useState(false),
     [managingGroup, setManagingGroup] = useState(false),
     [removingFromGroup, setRemovingFromGroup] = useState(false);
   const [removing, setRemoving] = useState<Member | null>(null),
@@ -209,6 +212,7 @@ export function Shell() {
   useEffect(() => {
     setSidebar(false);
     setManagingGroup(false);
+    setAppsOpen(false);
     setError("");
     setDirectError("");
     if (
@@ -220,21 +224,24 @@ export function Shell() {
   const closeSidebar = useCallback(() => setSidebar(false), []);
   const closeDetails = useCallback(() => {
     setDetails(false);
+    setAppsOpen(false);
     setDirectError("");
   }, []);
   const hasOverlayModal =
-    !!dialog || quickSwitcherOpen || shortcutsOpen || managingGroup || !!removing;
+    !!dialog || quickSwitcherOpen || shortcutsOpen || managingGroup || managingWorkspaceApps || !!removing;
   useShellViewportAndFocus({
-    navigationRef, membersRef, mobile, overlayMembers, sidebar, details,
+    navigationRef, membersRef, mobile, overlayMembers, sidebar, details: details || appsOpen,
     hasOverlayModal, hasConversation: !!conversation, pathname: location.pathname,
     closeSidebar, closeDetails,
   });
   const pathname = location.pathname.replace(/\/+$/, "") || "/app";
   const caps = chat.data?.capabilities || {};
+  const marketplaceEnabled = caps["im.marketplace.enabled"] !== false;
   const isSettings = ["/app/settings", "/app/profile"].includes(pathname);
   const isAdminPage = pathname === "/app/admin";
   const isGatewayPage = pathname === "/app/admin/gateway";
   const isUsersPage = pathname === "/app/admin/users";
+  const isMarketplacePage = pathname === "/app/admin/marketplace";
   const isAgentsPage = pathname === "/app/agents" || !!agentMatch;
   const isDirectoryPage = !!directoryMatch;
   const isAttentionPage = pathname === "/app/attention";
@@ -246,7 +253,7 @@ export function Shell() {
       attentionData: attentionCount.data,
     });
   const pageTitle = computePageTitle({
-    isAttentionPage, isGatewayPage, isUsersPage, isAdminPage, isAgentsPage,
+    isAttentionPage, isGatewayPage, isUsersPage, isMarketplacePage, isAdminPage, isAgentsPage,
     isDirectoryPage, isSettings, workspace, conversation, userId: user!.id, members,
   });
   useDocumentTitle(pageTitle, urgentCount, hasChannelUnread);
@@ -266,7 +273,7 @@ export function Shell() {
   )
     setViewKey({ conversation: viewConversationId, target: initialMessageId });
   const isManagement =
-    isSettings || isAdminPage || isGatewayPage || isUsersPage || isAgentsPage || isDirectoryPage;
+    isSettings || isAdminPage || isGatewayPage || isUsersPage || isMarketplacePage || isAgentsPage || isDirectoryPage;
   const backChatRoute = Object.values(snapshot.conversations).some((c) => route(c) === lastChatPath)
     ? lastChatPath
     : "/app";
@@ -396,12 +403,12 @@ export function Shell() {
     chat.data && !match && !directoryMatch && !legacyDirectoryMatch && !agentMatch &&
     ![
       "/app", "/app/agents", "/app/settings", "/app/profile",
-      "/app/admin", "/app/admin/gateway", "/app/admin/users", "/app/attention",
+      "/app/admin", "/app/admin/gateway", "/app/admin/users", "/app/admin/marketplace", "/app/attention",
     ].includes(pathname)
   )
     return <Navigate to="/app" replace />;
   return (
-    <div className={`app-shell ${sidebar ? "sidebar-open" : ""} ${details ? "details-open" : ""}`}>
+    <div className={`app-shell ${sidebar ? "sidebar-open" : ""} ${details || appsOpen ? "details-open" : ""}`}>
       <ShellSidebar
         navigationRef={navigationRef} mobile={mobile} sidebar={sidebar}
         hasOverlayModal={hasOverlayModal} user={user!} busy={busy}
@@ -423,7 +430,7 @@ export function Shell() {
       )}
       <main
         className="app-main"
-        inert={(mobile && sidebar) || (overlayMembers && details && !isManagement && !!conversation)}
+        inert={(mobile && sidebar) || (overlayMembers && (details || appsOpen) && !isManagement && !!conversation)}
       >
         <ConnectionBanner
           connection={chat.connection} syncError={chat.syncError}
@@ -436,6 +443,7 @@ export function Shell() {
         ) : isManagement ? (
           <ShellManagementView
             user={user!} isGatewayPage={isGatewayPage} isUsersPage={isUsersPage}
+            isMarketplacePage={isMarketplacePage}
             isAdminPage={isAdminPage} isAgentsPage={isAgentsPage}
             isDirectoryPage={isDirectoryPage} agentId={agentMatch?.params.agentId}
             backChatRoute={backChatRoute} workspace={workspace} members={members}
@@ -461,9 +469,21 @@ export function Shell() {
             onMembers={() => {
               setSidebar(false);
               setDirectError("");
+              setAppsOpen(false);
               setDetails(!details);
             }}
-            membersOpen={details} onMenu={() => setSidebar(true)}
+            membersOpen={details}
+            appsOpen={appsOpen}
+            onApps={
+              conversation.type === "group" && marketplaceEnabled
+                ? () => {
+                    setSidebar(false);
+                    setDetails(false);
+                    setAppsOpen(!appsOpen);
+                  }
+                : undefined
+            }
+            onMenu={() => setSidebar(true)}
             isWorkspaceOwner={owner} onInvite={() => openDialog("invite")}
           />
         ) : chat.data?.workspaces.length === 0 ? (
@@ -499,6 +519,27 @@ export function Shell() {
           }}
           onManageGroup={() => setManagingGroup(true)}
           onInvite={() => setDialog("invite")}
+        />
+      )}
+      {appsOpen && !details && !isManagement && workspace && conversation && conversation.type === "group" && marketplaceEnabled && (
+        <ConversationAppsPane
+          paneRef={membersRef}
+          overlayMembers={overlayMembers}
+          mobile={mobile}
+          sidebar={sidebar}
+          workspace={workspace}
+          conversation={conversation}
+          user={user!}
+          owner={owner}
+          onClose={() => setAppsOpen(false)}
+          onOpenWorkspaceApps={() => setManagingWorkspaceApps(true)}
+        />
+      )}
+      {managingWorkspaceApps && workspace && (
+        <WorkspaceMarketplaceModal
+          workspace={workspace}
+          isOwner={owner}
+          onClose={() => setManagingWorkspaceApps(false)}
         />
       )}
       {dialog && <WorkspaceDialog kind={dialog} workspace={workspace} onClose={closeDialog} />}

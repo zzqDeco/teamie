@@ -229,6 +229,8 @@ func (a *ContextArchive) inputMessageSources(ctx context.Context, r *Run, messag
 		prefix = "TEAMIE_TASK_NOTIFICATION "
 	} else if strings.HasPrefix(text, "TEAMIE_SCHEDULE_WAKEUP ") {
 		prefix = "TEAMIE_SCHEDULE_WAKEUP "
+	} else if strings.HasPrefix(text, "TEAMIE_APP_NOTIFICATION ") {
+		prefix = "TEAMIE_APP_NOTIFICATION "
 	}
 	if !strings.HasPrefix(text, prefix) {
 		return nil, false, nil
@@ -259,7 +261,7 @@ func (a *ContextArchive) inputMessageSources(ctx context.Context, r *Run, messag
 		return nil, false, nil
 	}
 	refs, overflow := inputSources([]Input{actual})
-	if overflow || actual.Kind == "task.notification" || actual.Kind == "schedule.wakeup" {
+	if overflow || actual.Kind == "task.notification" || actual.Kind == "schedule.wakeup" || actual.Kind == "app.notification" {
 		refs, err = a.runSources(ctx, runID)
 	} else {
 		refs, err = canonicalContextSources(refs)
