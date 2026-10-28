@@ -1,7 +1,9 @@
 package domain
 
 import (
+	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
@@ -43,11 +45,28 @@ func (a Agent) EffectiveEnabled(globalEnabled bool) bool {
 
 // Changes represents a partial or complete owner mutation to an Agent profile.
 type Changes struct {
-	Name         *string   `json:"name"`
-	Description  *string   `json:"description"`
-	ModelID      *string   `json:"modelId"`
-	WorkspaceIDs *[]string `json:"workspaceIds"`
-	Enabled      *bool     `json:"enabled"`
+	Name           *string   `json:"name"`
+	Description    *string   `json:"description"`
+	ModelID        *string   `json:"modelId"`
+	WorkspaceIDs   *[]string `json:"workspaceIds"`
+	Enabled        *bool     `json:"enabled"`
+	IdempotencyKey string    `json:"-"`
+}
+
+type idempotencyContextKey struct{}
+
+// WithIdempotencyKey attaches a caller-supplied request idempotency key to ctx.
+func WithIdempotencyKey(ctx context.Context, key string) context.Context {
+	return context.WithValue(ctx, idempotencyContextKey{}, strings.TrimSpace(key))
+}
+
+// IdempotencyKeyFromContext returns the caller-supplied idempotency key from ctx, if any.
+func IdempotencyKeyFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	v, _ := ctx.Value(idempotencyContextKey{}).(string)
+	return v
 }
 
 // PublicAgent is the browser contract. Internal runtime state, session
@@ -137,6 +156,16 @@ func NewID() string {
 	if _, e := rand.Read(b); e != nil {
 		panic(e)
 	}
+	b[6] = (b[6] & 15) | 64
+	b[8] = (b[8] & 63) | 128
+	raw := hex.EncodeToString(b)
+	return fmt.Sprintf("%s-%s-%s-%s-%s", raw[:8], raw[8:12], raw[12:16], raw[16:20], raw[20:])
+}
+
+// DeterministicID derives a stable caller-scoped UUIDv4-formatted identifier from owner and key.
+func DeterministicID(owner, key string) string {
+	sum := sha256.Sum256([]byte("teamie:agent-create:v1\x00" + owner + "\x00" + key))
+	b := sum[:16]
 	b[6] = (b[6] & 15) | 64
 	b[8] = (b[8] & 63) | 128
 	raw := hex.EncodeToString(b)

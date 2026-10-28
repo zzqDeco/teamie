@@ -10,6 +10,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
@@ -290,6 +291,11 @@ func (a *Adapter) Auth(next func(w http.ResponseWriter, r *http.Request, ctx con
 			}
 		}
 		ctx := WithActor(r.Context(), *user)
+		if key := strings.TrimSpace(r.Header.Get("Idempotency-Key")); key != "" {
+			ctx = domain.WithIdempotencyKey(ctx, key)
+		} else if key := strings.TrimSpace(r.Header.Get("X-Idempotency-Key")); key != "" {
+			ctx = domain.WithIdempotencyKey(ctx, key)
+		}
 		if err := next(w, r, ctx, *user); err != nil {
 			Fail(w, err)
 		}
