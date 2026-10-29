@@ -17,6 +17,7 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/middlewares/summarization"
 	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
@@ -31,14 +32,26 @@ import (
 
 type Config struct{ ControlAddr, GatewayAddr, SandboxAddr, IdentityAddr, IMURL, IMRealtimeURL, ControlToken, GatewayToken, SandboxToken, IMToken, FlagsFile, GatewayStreamURL string }
 type Engine struct {
-	Store    *Store
-	Config   Config
-	Control  agentcontrolservice.Client
-	Gateway  modelgatewayservice.Client
-	Sandbox  sandboxservice.Client
-	Identity identityservice.Client
-	slots    chan struct{}
-	owner    string
+	Store                *Store
+	Config               Config
+	Control              agentcontrolservice.Client
+	Gateway              modelgatewayservice.Client
+	Sandbox              sandboxservice.Client
+	Identity             identityservice.Client
+	UnreadDigestInterval time.Duration
+	slots                chan struct{}
+	owner                string
+}
+
+func (e *Engine) unreadDigestInterval() time.Duration {
+	if e != nil && e.UnreadDigestInterval > 0 {
+		return e.UnreadDigestInterval
+	}
+	return defaultUnreadDigestInterval
+}
+
+func (e *Engine) presenceEnabled() bool {
+	return e != nil && e.Config.FlagsFile != "" && runtimeFlag(e.Config.FlagsFile, "im.marketplace.enabled")
 }
 
 func New(store *Store, c Config) (*Engine, error) {
@@ -282,31 +295,87 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		clearQueue()
 	}
 	defer stop()
+	mcpWatcher := newMCPNotificationWatcher(e.Store, lease, imc, e.Config.FlagsFile)
+	presence := newConversationPresenceState(e.unreadDigestInterval(), mcpWatcher.triggerWake)
+	_ = presence.Restore(ctx, e.Store, lease)
+	mcpWatcher.setPresence(presence)
 	makeAgent := func(ctx context.Context) (adk.TypedAgent[*schema.AgenticMessage], error) {
 		run, err := CurrentRun(ctx)
 		if err != nil {
 			return nil, err
 		}
+		imToolBuilder := &Tools{
+			Store:            e.Store,
+			Lease:            lease,
+			IM:               imc,
+			Sandbox:          e.Sandbox,
+			SandboxToken:     e.Config.SandboxToken,
+			GatewayStreamURL: e.Config.GatewayStreamURL,
+			GatewayToken:     e.Config.GatewayToken,
+			OwnerID:          def.OwnerId,
+			AgentID:          def.Id,
+			FlagsFile:        e.Config.FlagsFile,
+			Authorize:        authorize,
+		}
+		if e.presenceEnabled() {
+			imToolBuilder.Presence = presence
+		}
+		presenceActive, err := imToolBuilder.initRunPresence(ctx, run)
+		if err != nil {
+			return nil, err
+		}
+		if presenceActive {
+			imToolBuilder.Presence = presence
+		} else {
+			imToolBuilder.Presence = nil
+		}
+
 		availableTools := tools
-		if fileDeliveryForRun(run) {
-			availableTools, err = (&Tools{Store: e.Store, Lease: lease, IM: imc, Sandbox: e.Sandbox, SandboxToken: e.Config.SandboxToken, Authorize: authorize}).BuildIMWithFiles()
+		if presenceActive {
+			if mentionsForRun(run) {
+				availableTools, err = imToolBuilder.BuildIMWithMentions(fileDeliveryForRun(run))
+			} else if fileDeliveryForRun(run) {
+				availableTools, err = imToolBuilder.BuildIMWithFiles()
+			} else {
+				availableTools, err = imToolBuilder.BuildIM()
+			}
 			if err != nil {
 				return nil, err
 			}
-		}
-		if mentionsForRun(run) {
-			availableTools, err = (&Tools{Store: e.Store, Lease: lease, IM: imc, Sandbox: e.Sandbox, SandboxToken: e.Config.SandboxToken, Authorize: authorize}).BuildIMWithMentions(fileDeliveryForRun(run))
-			if err != nil {
-				return nil, err
+		} else {
+			if fileDeliveryForRun(run) {
+				availableTools, err = imToolBuilder.BuildIMWithFiles()
+				if err != nil {
+					return nil, err
+				}
+			}
+			if mentionsForRun(run) {
+				availableTools, err = imToolBuilder.BuildIMWithMentions(fileDeliveryForRun(run))
+				if err != nil {
+					return nil, err
+				}
 			}
 		}
 		activeTools, err := toolsForRun(ctx, availableTools, run)
 		if err != nil {
 			return nil, err
 		}
-		mcpTools, err := (&Tools{Store: e.Store, Lease: lease, IM: imc, OwnerID: def.OwnerId, AgentID: def.Id, FlagsFile: e.Config.FlagsFile, Authorize: authorize}).BuildMCPTools(ctx, run)
-		if err != nil {
-			return nil, err
+		var (
+			mcpTools       []tool.BaseTool
+			presenceTools  []tool.BaseTool
+			unknownHandler func(context.Context, string, string) (string, error)
+		)
+		if presenceActive {
+			presenceTools, err = imToolBuilder.BuildPresenceTools()
+			if err != nil {
+				return nil, err
+			}
+			unknownHandler = imToolBuilder.HandleUnknownMCPTool
+		} else {
+			mcpTools, err = imToolBuilder.BuildMCPTools(ctx, run)
+			if err != nil {
+				return nil, err
+			}
 		}
 		if contextProfile(run) == contextProfileV1 {
 			budget, err := ParseContextBudgetSnapshot(run.ContextBudget)
@@ -325,32 +394,41 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 			activeTools = append(activeTools, contextTools...)
 			activeTools = append(activeTools, pageTool)
 			if budget.WebSearch {
-				webTools, err := (&Tools{Store: e.Store, Lease: lease, IM: imc, Sandbox: e.Sandbox, SandboxToken: e.Config.SandboxToken, GatewayStreamURL: e.Config.GatewayStreamURL, GatewayToken: e.Config.GatewayToken, OwnerID: def.OwnerId, AgentID: def.Id, Authorize: authorize}).BuildWebTools()
+				webTools, err := imToolBuilder.BuildWebTools()
 				if err != nil {
 					return nil, err
 				}
 				activeTools = append(activeTools, webTools...)
 			}
 			if budget.ScheduledWakeups {
-				scheduleTools, err := (&Tools{Store: e.Store, Lease: lease, IM: imc, OwnerID: def.OwnerId, AgentID: def.Id, FlagsFile: e.Config.FlagsFile, Authorize: authorize}).BuildScheduleTools(budget.DirectMessages)
+				scheduleTools, err := imToolBuilder.BuildScheduleTools(budget.DirectMessages)
 				if err != nil {
 					return nil, err
 				}
 				activeTools = append(activeTools, scheduleTools...)
 			}
 			if budget.DirectMessages {
-				dmTools, err := (&Tools{Store: e.Store, Lease: lease, IM: imc, OwnerID: def.OwnerId, AgentID: def.Id, FlagsFile: e.Config.FlagsFile, Authorize: authorize}).BuildDirectMessageTools()
+				dmTools, err := imToolBuilder.BuildDirectMessageTools()
 				if err != nil {
 					return nil, err
 				}
 				activeTools = append(activeTools, dmTools...)
 			}
-			activeTools = append(activeTools, mcpTools...)
+			if presenceActive {
+				activeTools = append(activeTools, presenceTools...)
+			} else {
+				activeTools = append(activeTools, mcpTools...)
+			}
 			pipeline, err := NewContextPipeline(ctx, ContextPipelineConfig{Model: gatewayModel, Budget: budget, Backend: archive, ArchivePath: archive.Path, ArchiveToolPath: archive.ArchiveToolPath, ArchiveTranscript: archive.ArchiveTranscript})
 			if err != nil {
 				return nil, err
 			}
-			handlers := append([]adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]{pipeline}, tasks.handlers...)
+			handlers := []adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]{}
+			if presenceActive {
+				handlers = append(handlers, imToolBuilder.NewMCPDynamicToolMiddleware())
+			}
+			handlers = append(handlers, pipeline)
+			handlers = append(handlers, tasks.handlers...)
 			instruction := contextInstruction(def, budget)
 			if budget.FileDelivery {
 				instruction += fileDeliveryGuidance
@@ -371,14 +449,22 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 			if budget.DirectMessages {
 				instruction += directMessageGuidance
 			}
-			if len(mcpTools) > 0 {
+			if presenceActive {
+				instruction += presenceAndMarketplaceGuidance
+			} else if len(mcpTools) > 0 {
 				instruction += marketplaceAppGuidance
 			}
-			return adk.NewTypedChatModelAgent(ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{Name: "teamie_agent", Description: "A user-owned Teamie participant", Instruction: instruction, Model: gatewayModel, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: activeTools, ExecuteSequentially: true}}, MaxIterations: math.MaxInt, Handlers: handlers, ModelRetryConfig: pipeline.RetryConfig()})
+			return adk.NewTypedChatModelAgent(ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{Name: "teamie_agent", Description: "A user-owned Teamie participant", Instruction: instruction, Model: gatewayModel, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: activeTools, ExecuteSequentially: true, UnknownToolsHandler: unknownHandler}}, MaxIterations: math.MaxInt, Handlers: handlers, ModelRetryConfig: pipeline.RetryConfig()})
 		}
-		activeTools = append(activeTools, mcpTools...)
+		if presenceActive {
+			activeTools = append(activeTools, presenceTools...)
+		} else {
+			activeTools = append(activeTools, mcpTools...)
+		}
 		legacyInstruction := instruction(def)
-		if len(mcpTools) > 0 {
+		if presenceActive {
+			legacyInstruction += presenceAndMarketplaceGuidance
+		} else if len(mcpTools) > 0 {
 			legacyInstruction += marketplaceAppGuidance
 		}
 		trigger := summaryTrigger(int(contextWindow.Load()))
@@ -401,8 +487,13 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		if err != nil {
 			return nil, err
 		}
-		handlers := append([]adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]{summary}, tasks.handlers...)
-		return adk.NewTypedChatModelAgent(ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{Name: "teamie_agent", Description: "A user-owned Teamie participant", Instruction: legacyInstruction, Model: gatewayModel, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: activeTools, ExecuteSequentially: true}}, MaxIterations: math.MaxInt, Handlers: handlers})
+		handlers := []adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]{}
+		if presenceActive {
+			handlers = append(handlers, imToolBuilder.NewMCPDynamicToolMiddleware())
+		}
+		handlers = append(handlers, summary)
+		handlers = append(handlers, tasks.handlers...)
+		return adk.NewTypedChatModelAgent(ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{Name: "teamie_agent", Description: "A user-owned Teamie participant", Instruction: legacyInstruction, Model: gatewayModel, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: activeTools, ExecuteSequentially: true, UnknownToolsHandler: unknownHandler}}, MaxIterations: math.MaxInt, Handlers: handlers})
 	}
 	validate := func(ctx context.Context, inputs []Input) ([]Input, error) {
 		valid := []Input{}
@@ -429,6 +520,19 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 			}
 			if in.Kind == "app.notification" {
 				if err := e.authorizeAppNotificationInput(ctx, imc, lease, in); err != nil {
+					if errors.Is(err, errContextUnavailable) {
+						if err = e.Store.Skip(ctx, lease, in.EventID); err != nil {
+							return nil, err
+						}
+						continue
+					}
+					return nil, err
+				}
+				valid = append(valid, in)
+				continue
+			}
+			if in.Kind == "im.unread_digest" {
+				if err := e.authorizeUnreadDigestInput(ctx, imc, lease, in); err != nil {
 					if errors.Is(err, errContextUnavailable) {
 						if err = e.Store.Skip(ctx, lease, in.EventID); err != nil {
 							return nil, err
@@ -536,6 +640,17 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 			}
 			if in.Kind == "app.notification" {
 				if readErr := e.authorizeAppNotificationInput(ctx, imc, lease, in); readErr != nil {
+					if errors.Is(readErr, errContextUnavailable) {
+						invalid = append(invalid, in.EventID)
+						continue
+					}
+					_ = e.Store.FinishRun(ctx, lease, run, "retry", "im_unavailable", true)
+					return nil, nil, nil, &ModelError{Code: "im_unavailable", Retry: true}
+				}
+				continue
+			}
+			if in.Kind == "im.unread_digest" {
+				if readErr := e.authorizeUnreadDigestInput(ctx, imc, lease, in); readErr != nil {
 					if errors.Is(readErr, errContextUnavailable) {
 						invalid = append(invalid, in.EventID)
 						continue
@@ -790,15 +905,22 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		return authorize(rc)
 	}, imc.MarkRead)
 	defer stopReads()
-	mcpWatcher := newMCPNotificationWatcher(e.Store, lease, imc, e.Config.FlagsFile)
 	defer mcpWatcher.closeAll()
-	poll := time.NewTicker(time.Second)
+	pollInterval := time.Second
+	if d := e.unreadDigestInterval(); d > 0 && d < pollInterval {
+		pollInterval = d
+	}
+	poll := time.NewTicker(pollInterval)
 	defer poll.Stop()
 	lastState := ""
 	lastReport := time.Time{}
 	heartbeatEnsured := false
 	tick := func() bool {
-		inputs, err := e.ingest(ctx, imc, lease)
+		var activePresence *conversationPresenceState
+		if e.presenceEnabled() {
+			activePresence = presence
+		}
+		inputs, err := e.ingestWithPresence(ctx, imc, lease, activePresence)
 		if err != nil {
 			if errors.Is(err, ErrLeaseLost) {
 				return false
@@ -807,6 +929,11 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 			return true
 		}
 		reads.recordInputs(inputs)
+		if activePresence != nil {
+			if _, digestErr := activePresence.FlushDueDigest(ctx, e.Store, lease, time.Now().UTC()); errors.Is(digestErr, ErrLeaseLost) {
+				return false
+			}
+		}
 		if err := tasks.notifications(ctx, lease); errors.Is(err, ErrLeaseLost) {
 			return false
 		}
@@ -943,6 +1070,12 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 	}
 }
 func (e *Engine) ingest(ctx context.Context, imc *IM, l *Lease) (committed []Input, failure error) {
+	return e.ingestWithPresence(ctx, imc, leaseOrNil(l), nil)
+}
+
+func leaseOrNil(l *Lease) *Lease { return l }
+
+func (e *Engine) ingestWithPresence(ctx context.Context, imc *IM, l *Lease, presence *conversationPresenceState) (committed []Input, failure error) {
 	ctx, operation := observability.Begin(ctx, "agent-input-ingest", zap.String("custom.agent.id", l.AgentID))
 	defer func() { operation.EndQuiet(failure) }()
 	cursor, err := e.Store.Cursor(ctx, l)
@@ -965,20 +1098,57 @@ func (e *Engine) ingest(ctx context.Context, imc *IM, l *Lease) (committed []Inp
 	}
 	inputs := []Input{}
 	var bootstrap *Bootstrap
+	ensureBootstrap := func() (*Bootstrap, error) {
+		if bootstrap != nil {
+			return bootstrap, nil
+		}
+		b, bErr := imc.Bootstrap(ctx)
+		if bErr != nil {
+			return nil, bErr
+		}
+		bootstrap = b
+		return bootstrap, nil
+	}
+	now := time.Now().UTC()
+	unreadUpdated := false
+	activeConvID := ""
+	if presence != nil {
+		activeConvID = presence.ActiveConversationID()
+	}
 	for _, event := range page.Events {
 		m := event.Message
 		if event.Type != "message.created" || m == nil || m.SenderID == l.AgentID || m.RetractedAt != nil || m.Body == "" && len(m.Attachments) == 0 {
 			continue
 		}
-		ws := event.WorkspaceID
-		if ws == "" {
-			if bootstrap == nil {
-				bootstrap, err = imc.Bootstrap(ctx)
-				if err != nil {
-					return nil, err
+		if presence != nil && event.ConversationID != activeConvID {
+			b, bErr := ensureBootstrap()
+			if bErr != nil {
+				return nil, bErr
+			}
+			var convMeta *Conversation
+			for i := range b.Conversations {
+				if b.Conversations[i].ID == event.ConversationID {
+					convMeta = &b.Conversations[i]
+					break
 				}
 			}
-			for _, c := range bootstrap.Conversations {
+			ws := event.WorkspaceID
+			if convMeta != nil && ws == "" {
+				ws = convMeta.WorkspaceID
+			}
+			if convMeta != nil && ws != "" {
+				presence.RecordUnread(ws, *convMeta, m, l.AgentID, now)
+				unreadUpdated = true
+			}
+			continue
+		}
+		ws := event.WorkspaceID
+		if ws == "" {
+			b, bErr := ensureBootstrap()
+			if bErr != nil {
+				return nil, bErr
+			}
+			for _, c := range b.Conversations {
 				if c.ID == event.ConversationID {
 					ws = c.WorkspaceID
 					break
@@ -986,6 +1156,11 @@ func (e *Engine) ingest(ctx context.Context, imc *IM, l *Lease) (committed []Inp
 			}
 		}
 		inputs = append(inputs, Input{EventID: event.ID, WorkspaceID: ws, ConversationID: event.ConversationID, MessageID: m.ID, SenderID: m.SenderID, SenderName: m.SenderName, SenderKind: m.SenderKind, Body: m.Body, Attachments: m.Attachments, Mentions: m.Mentions, ReplyToID: m.ReplyToID, Seq: m.Seq, CreatedAt: m.CreatedAt})
+	}
+	if unreadUpdated {
+		if err = presence.Persist(ctx, e.Store, l); err != nil {
+			return nil, err
+		}
 	}
 	if err = e.Store.Ingest(ctx, l, page.Cursor, inputs); err != nil {
 		return nil, err

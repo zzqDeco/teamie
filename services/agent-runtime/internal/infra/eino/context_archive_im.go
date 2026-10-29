@@ -17,7 +17,7 @@ const contextIMArgumentsKey = "context-im-arguments-v1"
 
 func contextIMTool(name string) bool {
 	switch name {
-	case "im_get_message", "im_list_messages", "im_list_conversations", "im_send_message", "im_get_attachment", "im_upload_file", "im_list_workspace_members", "im_open_direct_conversation", "im_create_group_conversation", "im_add_conversation_members", "im_retract_message", "schedule_create", "schedule_update", "schedule_list", "schedule_cancel":
+	case "im_get_message", "im_list_messages", "im_list_conversations", "im_send_message", "im_get_attachment", "im_upload_file", "im_list_workspace_members", "im_open_direct_conversation", "im_create_group_conversation", "im_add_conversation_members", "im_retract_message", "im_enter_conversation", "schedule_create", "schedule_update", "schedule_list", "schedule_cancel":
 		return true
 	}
 	return false
@@ -76,6 +76,12 @@ func (a *ContextArchive) authorizeIMReadReplay(ctx context.Context, refs []Input
 			return errContextUnavailable
 		}
 		messages = page.Messages
+	case "im_enter_conversation":
+		var entered enterConversationResult
+		if json.Unmarshal(observation.Data, &entered) != nil {
+			return errContextUnavailable
+		}
+		messages = entered.Messages
 	}
 	tombstones := map[string]Message{}
 	seen := map[string]bool{}
@@ -256,6 +262,20 @@ func (a *ContextArchive) imReceiptSourcesWithArgs(ctx context.Context, runID, ca
 			return nil, errContextUnavailable
 		}
 		refs = append(refs, InputSource{ConversationID: message.ConversationID})
+	case "im_enter_conversation":
+		var entered enterConversationResult
+		if json.Unmarshal(observation.Data, &entered) != nil || !validUUID(entered.ActiveConversationID) || !validUUID(entered.WorkspaceID) || entered.Messages == nil {
+			return nil, errContextUnavailable
+		}
+		for _, message := range entered.Messages {
+			if !validUUID(message.ID) || message.ConversationID != entered.ActiveConversationID {
+				return nil, errContextUnavailable
+			}
+			refs = append(refs, contextMessageSource(message))
+		}
+		if len(entered.Messages) == 0 {
+			refs = append(refs, InputSource{ConversationID: entered.ActiveConversationID, WorkspaceID: entered.WorkspaceID})
+		}
 	case "schedule_create", "schedule_update":
 		var created struct {
 			Schedule scheduleView `json:"schedule"`
@@ -310,13 +330,50 @@ func (a *ContextArchive) imReceiptSourcesWithArgs(ctx context.Context, runID, ca
 	return canonicalContextSources(refs)
 }
 
+func mcpReceiptSources(raw []byte) ([]InputSource, error) {
+	var observation struct {
+		OK   bool            `json:"ok"`
+		Data json.RawMessage `json:"data"`
+	}
+	if json.Unmarshal(raw, &observation) != nil {
+		return nil, ErrReplayConflict
+	}
+	if len(observation.Data) == 0 {
+		if observation.OK {
+			return nil, errContextUnavailable
+		}
+		return nil, nil
+	}
+	var data struct {
+		WorkspaceID    string `json:"workspaceId"`
+		ConversationID string `json:"conversationId"`
+	}
+	if json.Unmarshal(observation.Data, &data) != nil {
+		if observation.OK {
+			return nil, errContextUnavailable
+		}
+		return nil, nil
+	}
+	if !validUUID(data.ConversationID) {
+		if observation.OK {
+			return nil, errContextUnavailable
+		}
+		return nil, nil
+	}
+	ref := InputSource{ConversationID: data.ConversationID}
+	if validUUID(data.WorkspaceID) {
+		ref.WorkspaceID = data.WorkspaceID
+	}
+	return canonicalContextSources([]InputSource{ref})
+}
+
 // An original native result can be archived without ever being truncated.
 // Match its outer identity and exact committed output, then retain the real
 // returned-message scope alongside the Run's original input scope.
 func (a *ContextArchive) toolMessageSources(ctx context.Context, r *Run, message *schema.AgenticMessage, originRun string) ([]InputSource, bool, error) {
 	refs, found := []InputSource{}, false
 	for _, block := range message.ContentBlocks {
-		if block == nil || block.FunctionToolResult == nil || !contextIMTool(block.FunctionToolResult.Name) && !workspaceTool(block.FunctionToolResult.Name) {
+		if block == nil || block.FunctionToolResult == nil || !contextIMTool(block.FunctionToolResult.Name) && !workspaceTool(block.FunctionToolResult.Name) && !strings.HasPrefix(block.FunctionToolResult.Name, "mcp__") {
 			continue
 		}
 		found = true
@@ -330,7 +387,7 @@ func (a *ContextArchive) toolMessageSources(ctx context.Context, r *Run, message
 		}
 		detail := &reduction.ToolDetail{ToolResult: &schema.ToolResult{Parts: parts}}
 		receiptName := result.Name
-		if !contextIMTool(receiptName) {
+		if !contextIMTool(receiptName) && !strings.HasPrefix(receiptName, "mcp__") {
 			receiptName = "native:" + receiptName
 		}
 		names := []string{receiptName}
@@ -364,6 +421,8 @@ func (a *ContextArchive) toolMessageSources(ctx context.Context, r *Run, message
 			var actual []InputSource
 			if contextIMTool(result.Name) {
 				actual, err = a.imReceiptSources(ctx, match.RunID, result.CallID, result.Name, match.Raw)
+			} else if strings.HasPrefix(result.Name, "mcp__") {
+				actual, err = mcpReceiptSources(match.Raw)
 			} else {
 				actual, err = a.workspaceToolSources(ctx, r, match.RunID, result.CallID, match.Name, nil)
 			}
@@ -389,7 +448,7 @@ func (a *ContextArchive) toolReducedParents(ctx context.Context, r *Run, message
 			continue
 		}
 		for _, block := range message.ContentBlocks {
-			if block == nil || block.FunctionToolResult == nil || !contextIMTool(block.FunctionToolResult.Name) && !workspaceTool(block.FunctionToolResult.Name) {
+			if block == nil || block.FunctionToolResult == nil || !contextIMTool(block.FunctionToolResult.Name) && !workspaceTool(block.FunctionToolResult.Name) && !strings.HasPrefix(block.FunctionToolResult.Name, "mcp__") {
 				continue
 			}
 			result := block.FunctionToolResult
@@ -403,7 +462,7 @@ func (a *ContextArchive) toolReducedParents(ctx context.Context, r *Run, message
 			// Before workspace results had the exact-notice recognizer, native
 			// reduction updates were persisted as views. Preserve those immutable
 			// views only with an exact server event plus owning artifact identity.
-			if !contextIMTool(result.Name) {
+			if workspaceTool(result.Name) {
 				legacy, err := a.workspaceUpdatedParents(ctx, r, message, result, originRun)
 				if err != nil {
 					return nil, err

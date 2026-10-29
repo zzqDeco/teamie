@@ -17,9 +17,9 @@ import (
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 	"github.com/cloudwego/kitex/client/callopt"
+	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
 	wire "teamie/contracts/gen/agent/kitex_gen/agent"
 	"teamie/contracts/gen/agent/kitex_gen/agent/modelgatewayservice"
-	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
 )
 
 type recordingContextModel struct {

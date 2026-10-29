@@ -68,6 +68,9 @@ func (t *Tools) sendMentioned(ctx context.Context, args *mentionedSendArgs) (*Ob
 		if !validUUID(args.ConversationID) || args.ReplyToID != "" && !validUUID(args.ReplyToID) || len([]rune(args.Body)) > 8000 || strings.TrimSpace(args.Body) == "" && len(args.AttachmentIDs) == 0 || imtext.ValidateMentions(args.Body, args.Mentions) != nil || len(args.AttachmentIDs) > imlimits.AttachmentsPerMessage || len(args.AttachmentIDs) > 0 && !fileDeliveryForRun(run) {
 			return &Observation{Error: "invalid_arguments"}, nil
 		}
+		if obs := t.checkSendPresence(run, args.ConversationID); obs != nil {
+			return obs, nil
+		}
 		seen := map[string]bool{}
 		for _, attachment := range args.AttachmentIDs {
 			if !validUUID(attachment) || seen[attachment] {

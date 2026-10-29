@@ -206,7 +206,7 @@ func ResumeCompatible(m *CheckpointMetadata, revision int64, runID string) bool 
 // RelevantPreemptInput reports whether a newly arrived input should preempt an in-flight
 // turn after tool calls complete (only human messages in a conversation already active in the turn).
 func RelevantPreemptInput(in Input, consumed []Input) bool {
-	if in.Kind == "task.notification" || in.Kind == "schedule.wakeup" || in.Kind == "app.notification" {
+	if in.Kind == "task.notification" || in.Kind == "schedule.wakeup" || in.Kind == "app.notification" || in.Kind == "im.unread_digest" {
 		return false
 	}
 	for _, old := range consumed {
