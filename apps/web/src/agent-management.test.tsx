@@ -10,7 +10,10 @@ import {
   canManageAgent,
   agentFailureText,
   gatewayFailureText,
+  modelProfileCreateInput,
   modelProfileUpdateInput,
+  providerProfileCreateInput,
+  providerProfileUpdateInput,
   webSearchInput,
   snapshotAgentProfile,
 } from "./agent-management";
@@ -238,29 +241,57 @@ describe("Agent ownership and visible teams", () => {
   });
 });
 describe("independent gateway configuration commands", () => {
-  const model = {
-    displayName: "A",
-    description: "",
+  const provider = {
+    displayName: "OpenAI 主连接",
     baseUrl: "https://model.example.test/v1",
-    model: "model-a",
     enabled: true,
     apiKey: "",
   };
-  it("preserves omitted model keys and uses explicit removal", () => {
-    expect(modelProfileUpdateInput(model)).not.toHaveProperty("apiKey");
+  const model = {
+    providerId: "openai-main",
+    displayName: "A",
+    description: "",
+    model: "model-a",
+    enabled: true,
+  };
+  it("preserves omitted provider keys, uses explicit removal, and keeps model payloads free of credentials", () => {
     expect(
-      modelProfileUpdateInput({ ...model, clearApiKey: true }),
+      providerProfileCreateInput({ ...provider, id: "openai-main" }),
+    ).toEqual({
+      id: "openai-main",
+      displayName: "OpenAI 主连接",
+      baseUrl: "https://model.example.test/v1",
+      enabled: true,
+    });
+    expect(providerProfileUpdateInput(provider)).not.toHaveProperty("apiKey");
+    expect(
+      providerProfileUpdateInput({ ...provider, clearApiKey: true }),
     ).toMatchObject({ clearApiKey: true });
     expect(() =>
-      modelProfileUpdateInput({
-        ...model,
+      providerProfileUpdateInput({
+        ...provider,
         apiKey: "secret",
         clearApiKey: true,
       }),
     ).toThrow();
+    const createdModel = modelProfileCreateInput({
+      ...model,
+      id: "gpt-4o",
+      contextWindowTokens: 32768,
+    });
+    expect(createdModel).toEqual({
+      id: "gpt-4o",
+      providerId: "openai-main",
+      displayName: "A",
+      model: "model-a",
+      enabled: true,
+      contextWindowTokens: 32768,
+    });
+    expect(createdModel).not.toHaveProperty("baseUrl");
+    expect(createdModel).not.toHaveProperty("apiKey");
   });
   it("search commands never contain model or routing fields, including stale form properties", () => {
-    const form = { ...model, apiKey: " search-key ", defaultModelId: "a" };
+    const form = { ...provider, apiKey: " search-key ", defaultModelId: "a" };
     expect(webSearchInput(form)).toEqual({
       enabled: true,
       apiKey: "search-key",
@@ -272,7 +303,7 @@ describe("independent gateway configuration commands", () => {
       webSearchInput({ enabled: true, apiKey: "secret", clearApiKey: true }),
     ).toThrow();
   });
-  it("rejects credentials in provider URLs and invalid windows with safe errors", () => {
+  it("rejects credentials in provider URLs, invalid windows, and maps conflict codes safely", () => {
     for (const baseUrl of [
       "not a url",
       "https://user:secret@example.test/v1",
@@ -280,7 +311,7 @@ describe("independent gateway configuration commands", () => {
       "https://example.test/v1#secret",
     ]) {
       try {
-        modelProfileUpdateInput({ ...model, baseUrl });
+        providerProfileUpdateInput({ ...provider, baseUrl });
         throw new Error("accepted invalid URL");
       } catch (e) {
         expect(e).toBeInstanceOf(AgentInputError);
@@ -293,6 +324,9 @@ describe("independent gateway configuration commands", () => {
     expect(
       gatewayFailureText(new ApiError(500, "provider_failure", "private-key")),
     ).not.toContain("private-key");
+    expect(
+      gatewayFailureText(new ApiError(409, "provider_in_use", "in use")),
+    ).toContain("关联的模型");
   });
   it("never loads saved search secrets or model inputs into the search form", () => {
     const html = renderToStaticMarkup(

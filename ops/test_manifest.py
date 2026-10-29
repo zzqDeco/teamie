@@ -330,6 +330,7 @@ class AgentManifestTest(unittest.TestCase):
         current["version"] = "v0.3.31"
         current["source"]["ref"] = "refs/heads/release/v0.3.31"
         current["schema"]["agent_control"] = 2
+        current["schema"]["gateway"] = 5
         self.assertEqual(current["schema"]["agent_control"], 2)
         self.assertEqual(current["schema"]["gateway"], 5)
         manifest.validate(previous)
@@ -372,6 +373,18 @@ class AgentManifestTest(unittest.TestCase):
         previous["schema"]["chat"] = 6
         current = self.modern()
         self.assertEqual(current["schema"]["chat"], 7)
+        with self.assertRaisesRegex(ValueError, "identical schema versions"):
+            manifest.compatible(current, previous)
+        manifest.compatible(current, copy.deepcopy(current))
+
+    def test_provider_multi_model_gateway_schema_rejects_image_only_rollback(self):
+        previous = self.modern()
+        previous["schema"]["gateway"] = 5
+        current = self.modern()
+        self.assertEqual(current["schema"]["gateway"], 6)
+        manifest.check_transition(current, previous, previous)
+        with self.assertRaisesRegex(ValueError, "identical schema versions"):
+            manifest.check_transition(previous, current, rollback=True)
         with self.assertRaisesRegex(ValueError, "identical schema versions"):
             manifest.compatible(current, previous)
         manifest.compatible(current, copy.deepcopy(current))

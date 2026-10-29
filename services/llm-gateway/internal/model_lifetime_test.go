@@ -31,7 +31,10 @@ func lifetimeService(t *testing.T, transport http.RoundTripper) *Service {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(&memoryStore{c: singleModel(ModelProfile{BaseURL: "https://provider.example/v1", Model: "fixture", Enabled: true, CipherKey: encrypted})}, cipher, testToken)
+	s := New(&memoryStore{c: singleModel(
+		ProviderProfile{BaseURL: "https://provider.example/v1", CipherKey: encrypted, Enabled: true},
+		ModelProfile{Model: "fixture", Enabled: true},
+	)}, cipher, testToken)
 	// The adapter must use the owning context in either mode, even when it
 	// receives a client originally configured for bounded ordinary HTTP work.
 	s.Provider.HTTP = &http.Client{Transport: transport, Timeout: 50 * time.Second}

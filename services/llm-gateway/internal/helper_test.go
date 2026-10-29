@@ -20,6 +20,7 @@ import (
 type AdminAuth = rpcclient.AdminAuth
 
 type Config = domain.Config
+type ProviderProfile = domain.ProviderProfile
 type ModelProfile = domain.ModelProfile
 type ResolvedModel = domain.ResolvedModel
 type ModelRoutingConfig = domain.ModelRoutingConfig
@@ -43,11 +44,22 @@ func NewCipher(master string) (Cipher, error) { return kms.NewCipher(master) }
 func Open(ctx context.Context, url string) (*pg.PGStore, error) {
 	return pg.Open(ctx, url)
 }
-func singleModel(m ModelProfile) Config {
+func singleModel(p ProviderProfile, m ModelProfile) Config {
 	if m.ID == "" {
 		m.ID = "default"
 	}
-	return Config{Models: []ModelProfile{m}, Routing: ModelRoutingConfig{DefaultModelID: m.ID}}
+	if p.ID == "" {
+		p.ID = m.ID
+	}
+	if p.DisplayName == "" {
+		p.DisplayName = p.ID
+	}
+	m.ProviderID = p.ID
+	return Config{
+		Providers: []ProviderProfile{p},
+		Models:    []ModelProfile{m},
+		Routing:   ModelRoutingConfig{DefaultModelID: m.ID},
+	}
 }
 func PublicIP(ip net.IP) bool { return domain.PublicIP(ip) }
 func ValidateEndpoint(ctx context.Context, raw string) error {

@@ -1,26 +1,33 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import type { AdminModelProfile } from "@teamie/api-client";
+import type {
+  AdminModelProfile,
+  AdminModelProvider,
+} from "@teamie/api-client";
 import { gatewayFailureText } from "../agent-management";
 import type { ModelProfileFormValue } from "../agent-management";
 import { Button, FormRow, Modal, Notice, SwitchField } from "../ui";
 
 export function ModelProfileDialog({
+  providers,
+  defaultProviderId,
   initial,
   onSave,
   onClose,
 }: {
+  providers: AdminModelProvider[];
+  defaultProviderId?: string;
   initial?: AdminModelProfile;
   onSave: (value: ModelProfileFormValue) => Promise<boolean>;
   onClose: () => void;
 }) {
   const [id, setId] = useState(initial?.id || ""),
+    [providerId, setProviderId] = useState(
+      initial?.providerId || defaultProviderId || providers[0]?.id || "",
+    ),
     [displayName, setDisplayName] = useState(initial?.displayName || ""),
     [description, setDescription] = useState(initial?.description || ""),
-    [baseUrl, setBaseUrl] = useState(initial?.baseUrl || ""),
     [model, setModel] = useState(initial?.model || ""),
-    [apiKey, setApiKey] = useState(""),
-    [clearApiKey, setClearApiKey] = useState(false),
     [contextWindowTokens, setContextWindowTokens] = useState(
       initial?.contextWindowTokens ?? 16384,
     ),
@@ -36,12 +43,10 @@ export function ModelProfileDialog({
     try {
       const ok = await onSave({
         ...(initial ? {} : { id }),
+        providerId,
         displayName,
         description,
-        baseUrl,
         model,
-        apiKey,
-        ...(clearApiKey ? { clearApiKey: true } : {}),
         enabled,
         contextWindowTokens,
       });
@@ -67,6 +72,22 @@ export function ModelProfileDialog({
         autoComplete="off"
       >
         <Notice>{error}</Notice>
+        <label>
+          所属模型服务商
+          <select
+            name="profileProviderId"
+            value={providerId}
+            onChange={(e) => setProviderId(e.target.value)}
+            required
+            disabled={busy}
+          >
+            {providers.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.displayName}（{item.id}）
+              </option>
+            ))}
+          </select>
+        </label>
         <FormRow>
           <label>
             显示名称
@@ -102,18 +123,6 @@ export function ModelProfileDialog({
             autoComplete="off"
           />
         </label>
-        <label>
-          OpenAI 兼容服务地址
-          <input
-            type="url"
-            name="profileBaseUrl"
-            value={baseUrl}
-            onChange={(e) => setBaseUrl(e.target.value)}
-            placeholder="https://api.example.com/v1"
-            autoComplete="off"
-            required
-          />
-        </label>
         <FormRow>
           <label>
             上游模型 ID
@@ -121,7 +130,7 @@ export function ModelProfileDialog({
               name="profileModel"
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              placeholder="服务支持的模型名称"
+              placeholder="服务商支持的模型名称，如 gpt-4o"
               autoComplete="off"
               required
             />
@@ -141,46 +150,11 @@ export function ModelProfileDialog({
             />
           </label>
         </FormRow>
-        <label>
-          API Key{" "}
-          <span className="optional">
-            {initial?.hasApiKey ? "已有密钥 · 留空保留" : "尚未配置"}
-          </span>
-          <input
-            type="password"
-            name="profileApiKey"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            placeholder={
-              initial?.hasApiKey
-                ? "留空保留已有密钥，填写以替换"
-                : "输入服务提供的 API Key"
-            }
-            autoComplete="new-password"
-            spellCheck={false}
-            required={!initial?.hasApiKey && enabled && !clearApiKey}
-            disabled={clearApiKey || busy}
-          />
-        </label>
-        {initial?.hasApiKey && (
-          <label className="gateway-clear-key">
-            <input
-              type="checkbox"
-              name="profileClearApiKey"
-              checked={clearApiKey}
-              onChange={(e) => {
-                setClearApiKey(e.target.checked);
-                setApiKey("");
-              }}
-            />
-            <span>清除已保存的 API Key</span>
-          </label>
-        )}
         <SwitchField
           name="profileEnabled"
           checked={enabled}
           title="启用该模型"
-          description="启用且配置密钥后，用户创建 Agent 时可选择此模型。"
+          description="启用且所属服务商可用时，用户创建 Agent 时可选择此模型。"
           onChange={setEnabled}
         />
         <div className="modal-actions">
@@ -195,4 +169,3 @@ export function ModelProfileDialog({
     </Modal>
   );
 }
-

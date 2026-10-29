@@ -738,7 +738,7 @@ describe("Agent and model gateway boundaries", () => {
     expect(fetch.mock.calls[0][0]).toBe("/api/v1/admin/model-gateway/test");
     expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({});
   });
-  it("exposes a public model catalog without provider URLs or secrets and supports admin model profile CRUD", async () => {
+  it("exposes a public model catalog without provider URLs or secrets and supports admin provider + model profile CRUD", async () => {
     const unsafeCatalog = {
       defaultModelId: "deepseek-r1",
       models: [
@@ -754,53 +754,77 @@ describe("Agent and model gateway boundaries", () => {
         },
       ],
     };
+    const adminGatewayPayload = {
+      routing: {
+        defaultModelId: "deepseek-r1",
+        effectiveModelId: "deepseek-r1",
+      },
+      webSearch: {
+        provider: "tavily",
+        hasApiKey: false,
+        enabled: false,
+        configured: false,
+      },
+      config: {
+        baseUrl: "https://model.example.test/v1",
+        model: "deepseek-reasoner",
+        hasApiKey: true,
+        enabled: true,
+        configured: true,
+        updatedAt: "2026-10-16T07:00:00Z",
+      },
+      status: "ready",
+      defaultModelId: "deepseek-r1",
+      providers: [
+        {
+          id: "deepseek-prov",
+          displayName: "DeepSeek 官方",
+          baseUrl: "https://model.example.test/v1",
+          hasApiKey: true,
+          enabled: true,
+          configured: true,
+          modelCount: 1,
+          updatedAt: "2026-10-16T07:00:00Z",
+          apiKey: "sk-never-returned-provider-secret",
+        },
+      ],
+      models: [
+        {
+          id: "deepseek-r1",
+          providerId: "deepseek-prov",
+          providerDisplayName: "DeepSeek 官方",
+          providerEnabled: true,
+          displayName: "DeepSeek R1",
+          description: "推理模型",
+          baseUrl: "https://model.example.test/v1",
+          model: "deepseek-reasoner",
+          contextWindowTokens: 65536,
+          hasApiKey: true,
+          enabled: true,
+          effectiveEnabled: true,
+          configured: true,
+          isDefault: true,
+          updatedAt: "2026-10-16T07:00:00Z",
+          apiKey: "sk-never-returned-secret",
+        },
+      ],
+    };
     const fetch = vi
       .fn()
       .mockResolvedValueOnce(
         new Response(JSON.stringify(unsafeCatalog), { status: 200 }),
       )
       .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            routing: {
-              defaultModelId: "deepseek-r1",
-              effectiveModelId: "deepseek-r1",
-            },
-            webSearch: {
-              provider: "tavily",
-              hasApiKey: false,
-              enabled: false,
-              configured: false,
-            },
-            config: {
-              baseUrl: "https://model.example.test/v1",
-              model: "deepseek-reasoner",
-              hasApiKey: true,
-              enabled: true,
-              configured: true,
-              updatedAt: "2026-10-16T07:00:00Z",
-            },
-            status: "ready",
-            defaultModelId: "deepseek-r1",
-            models: [
-              {
-                id: "deepseek-r1",
-                displayName: "DeepSeek R1",
-                description: "推理模型",
-                baseUrl: "https://model.example.test/v1",
-                model: "deepseek-reasoner",
-                contextWindowTokens: 65536,
-                hasApiKey: true,
-                enabled: true,
-                configured: true,
-                isDefault: true,
-                updatedAt: "2026-10-16T07:00:00Z",
-                apiKey: "sk-never-returned-secret",
-              },
-            ],
-          }),
-          { status: 201 },
-        ),
+        new Response(JSON.stringify(adminGatewayPayload), { status: 201 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(adminGatewayPayload), { status: 201 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(adminGatewayPayload), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(adminGatewayPayload), { status: 200 }),
       );
     vi.stubGlobal("fetch", fetch);
     const client = new TeamieClient();
@@ -819,19 +843,43 @@ describe("Agent and model gateway boundaries", () => {
       ],
     });
     expect(JSON.stringify(catalog)).not.toContain("never-returned");
+    const createdProvider = await client.createModelProvider({
+      id: "deepseek-prov",
+      displayName: "DeepSeek 官方",
+      baseUrl: "https://model.example.test/v1",
+      apiKey: "sk-write-only",
+      enabled: true,
+    });
+    expect(JSON.stringify(createdProvider)).not.toContain(
+      "sk-never-returned-provider-secret",
+    );
+    expect(createdProvider.providers?.[0]?.id).toBe("deepseek-prov");
     const created = await client.createModelProfile({
       id: "deepseek-r1",
+      providerId: "deepseek-prov",
       displayName: "DeepSeek R1",
-      baseUrl: "https://model.example.test/v1",
       model: "deepseek-reasoner",
-      apiKey: "sk-write-only",
       enabled: true,
       contextWindowTokens: 65536,
     });
     expect(JSON.stringify(created)).not.toContain("sk-never-returned-secret");
     expect(created.models?.[0]?.id).toBe("deepseek-r1");
+    expect(created.models?.[0]?.providerId).toBe("deepseek-prov");
+    await client.updateModelProvider("deepseek-prov", { enabled: false });
+    await client.deleteModelProvider("deepseek-prov");
     expect(fetch.mock.calls[0][0]).toBe("/api/v1/model-gateway/catalog");
-    expect(fetch.mock.calls[1][0]).toBe("/api/v1/admin/model-gateway/models");
+    expect(fetch.mock.calls[1][0]).toBe(
+      "/api/v1/admin/model-gateway/providers",
+    );
+    expect(fetch.mock.calls[2][0]).toBe("/api/v1/admin/model-gateway/models");
+    expect(fetch.mock.calls[3][0]).toBe(
+      "/api/v1/admin/model-gateway/providers/deepseek-prov",
+    );
+    expect(fetch.mock.calls[3][1].method).toBe("PATCH");
+    expect(fetch.mock.calls[4][0]).toBe(
+      "/api/v1/admin/model-gateway/providers/deepseek-prov",
+    );
+    expect(fetch.mock.calls[4][1].method).toBe("DELETE");
   });
 });
 

@@ -232,6 +232,63 @@ func (p *ModelConfigDTO) String() string {
 	return fmt.Sprintf("ModelConfigDTO(%+v)", *p)
 }
 
+type AdminModelProviderDTO struct {
+	ID          string `thrift:"id,1,required" json:"id"`
+	DisplayName string `thrift:"displayName,2,required" json:"displayName"`
+	BaseUrl     string `thrift:"baseUrl,3,required" json:"baseUrl"`
+	HasApiKey   bool   `thrift:"hasApiKey,4,required" json:"hasApiKey"`
+	Enabled     bool   `thrift:"enabled,5,required" json:"enabled"`
+	Configured  bool   `thrift:"configured,6,required" json:"configured"`
+	ModelCount  int32  `thrift:"modelCount,7,required" json:"modelCount"`
+	UpdatedAt   string `thrift:"updatedAt,8,required" json:"updatedAt"`
+}
+
+func NewAdminModelProviderDTO() *AdminModelProviderDTO {
+	return &AdminModelProviderDTO{}
+}
+
+func (p *AdminModelProviderDTO) InitDefault() {
+}
+
+func (p *AdminModelProviderDTO) GetID() (v string) {
+	return p.ID
+}
+
+func (p *AdminModelProviderDTO) GetDisplayName() (v string) {
+	return p.DisplayName
+}
+
+func (p *AdminModelProviderDTO) GetBaseUrl() (v string) {
+	return p.BaseUrl
+}
+
+func (p *AdminModelProviderDTO) GetHasApiKey() (v bool) {
+	return p.HasApiKey
+}
+
+func (p *AdminModelProviderDTO) GetEnabled() (v bool) {
+	return p.Enabled
+}
+
+func (p *AdminModelProviderDTO) GetConfigured() (v bool) {
+	return p.Configured
+}
+
+func (p *AdminModelProviderDTO) GetModelCount() (v int32) {
+	return p.ModelCount
+}
+
+func (p *AdminModelProviderDTO) GetUpdatedAt() (v string) {
+	return p.UpdatedAt
+}
+
+func (p *AdminModelProviderDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AdminModelProviderDTO(%+v)", *p)
+}
+
 type AdminModelProfileDTO struct {
 	ID                  string `thrift:"id,1,required" json:"id"`
 	DisplayName         string `thrift:"displayName,2,required" json:"displayName"`
@@ -244,6 +301,10 @@ type AdminModelProfileDTO struct {
 	Configured          bool   `thrift:"configured,9,required" json:"configured"`
 	IsDefault           bool   `thrift:"isDefault,10,required" json:"isDefault"`
 	UpdatedAt           string `thrift:"updatedAt,11,required" json:"updatedAt"`
+	ProviderId          string `thrift:"providerId,12,required" json:"providerId"`
+	ProviderDisplayName string `thrift:"providerDisplayName,13,required" json:"providerDisplayName"`
+	ProviderEnabled     bool   `thrift:"providerEnabled,14,required" json:"providerEnabled"`
+	EffectiveEnabled    bool   `thrift:"effectiveEnabled,15,required" json:"effectiveEnabled"`
 }
 
 func NewAdminModelProfileDTO() *AdminModelProfileDTO {
@@ -295,6 +356,22 @@ func (p *AdminModelProfileDTO) GetIsDefault() (v bool) {
 
 func (p *AdminModelProfileDTO) GetUpdatedAt() (v string) {
 	return p.UpdatedAt
+}
+
+func (p *AdminModelProfileDTO) GetProviderId() (v string) {
+	return p.ProviderId
+}
+
+func (p *AdminModelProfileDTO) GetProviderDisplayName() (v string) {
+	return p.ProviderDisplayName
+}
+
+func (p *AdminModelProfileDTO) GetProviderEnabled() (v bool) {
+	return p.ProviderEnabled
+}
+
+func (p *AdminModelProfileDTO) GetEffectiveEnabled() (v bool) {
+	return p.EffectiveEnabled
 }
 
 func (p *AdminModelProfileDTO) String() string {
@@ -417,12 +494,13 @@ func (p *GetAdminModelConfigReq) String() string {
 }
 
 type AdminModelConfigResp struct {
-	Config         *ModelConfigDTO         `thrift:"config,1,required" json:"config"`
-	Status         string                  `thrift:"status,2,required" json:"status"`
-	Models         []*AdminModelProfileDTO `thrift:"models,3,optional,list<AdminModelProfileDTO>" json:"models,omitempty"`
-	DefaultModelId *string                 `thrift:"defaultModelId,4,optional" json:"defaultModelId,omitempty"`
-	Routing        *ModelRoutingConfigDTO  `thrift:"routing,5,required" json:"routing"`
-	WebSearch      *WebSearchConfigDTO     `thrift:"webSearch,6,required" json:"webSearch"`
+	Config         *ModelConfigDTO          `thrift:"config,1,required" json:"config"`
+	Status         string                   `thrift:"status,2,required" json:"status"`
+	Models         []*AdminModelProfileDTO  `thrift:"models,3,optional,list<AdminModelProfileDTO>" json:"models,omitempty"`
+	DefaultModelId *string                  `thrift:"defaultModelId,4,optional" json:"defaultModelId,omitempty"`
+	Routing        *ModelRoutingConfigDTO   `thrift:"routing,5,required" json:"routing"`
+	WebSearch      *WebSearchConfigDTO      `thrift:"webSearch,6,required" json:"webSearch"`
+	Providers      []*AdminModelProviderDTO `thrift:"providers,7,optional,list<AdminModelProviderDTO>" json:"providers,omitempty"`
 }
 
 func NewAdminModelConfigResp() *AdminModelConfigResp {
@@ -481,6 +559,15 @@ func (p *AdminModelConfigResp) GetWebSearch() (v *WebSearchConfigDTO) {
 	return p.WebSearch
 }
 
+var AdminModelConfigResp_Providers_DEFAULT []*AdminModelProviderDTO
+
+func (p *AdminModelConfigResp) GetProviders() (v []*AdminModelProviderDTO) {
+	if !p.IsSetProviders() {
+		return AdminModelConfigResp_Providers_DEFAULT
+	}
+	return p.Providers
+}
+
 func (p *AdminModelConfigResp) IsSetConfig() bool {
 	return p.Config != nil
 }
@@ -499,6 +586,10 @@ func (p *AdminModelConfigResp) IsSetRouting() bool {
 
 func (p *AdminModelConfigResp) IsSetWebSearch() bool {
 	return p.WebSearch != nil
+}
+
+func (p *AdminModelConfigResp) IsSetProviders() bool {
+	return p.Providers != nil
 }
 
 func (p *AdminModelConfigResp) String() string {
@@ -624,15 +715,197 @@ func (p *UpdateAdminModelConfigReq) String() string {
 	return fmt.Sprintf("UpdateAdminModelConfigReq(%+v)", *p)
 }
 
+type CreateAdminModelProviderReq struct {
+	ID          *string `thrift:"id,1,optional" json:"id,omitempty"`
+	DisplayName *string `thrift:"displayName,2,optional" json:"displayName,omitempty"`
+	BaseUrl     string  `thrift:"baseUrl,3,required" json:"baseUrl"`
+	ApiKey      *string `thrift:"apiKey,4,optional" json:"apiKey,omitempty"`
+	Enabled     bool    `thrift:"enabled,5,required" json:"enabled"`
+}
+
+func NewCreateAdminModelProviderReq() *CreateAdminModelProviderReq {
+	return &CreateAdminModelProviderReq{}
+}
+
+func (p *CreateAdminModelProviderReq) InitDefault() {
+}
+
+var CreateAdminModelProviderReq_ID_DEFAULT string
+
+func (p *CreateAdminModelProviderReq) GetID() (v string) {
+	if !p.IsSetID() {
+		return CreateAdminModelProviderReq_ID_DEFAULT
+	}
+	return *p.ID
+}
+
+var CreateAdminModelProviderReq_DisplayName_DEFAULT string
+
+func (p *CreateAdminModelProviderReq) GetDisplayName() (v string) {
+	if !p.IsSetDisplayName() {
+		return CreateAdminModelProviderReq_DisplayName_DEFAULT
+	}
+	return *p.DisplayName
+}
+
+func (p *CreateAdminModelProviderReq) GetBaseUrl() (v string) {
+	return p.BaseUrl
+}
+
+var CreateAdminModelProviderReq_ApiKey_DEFAULT string
+
+func (p *CreateAdminModelProviderReq) GetApiKey() (v string) {
+	if !p.IsSetApiKey() {
+		return CreateAdminModelProviderReq_ApiKey_DEFAULT
+	}
+	return *p.ApiKey
+}
+
+func (p *CreateAdminModelProviderReq) GetEnabled() (v bool) {
+	return p.Enabled
+}
+
+func (p *CreateAdminModelProviderReq) IsSetID() bool {
+	return p.ID != nil
+}
+
+func (p *CreateAdminModelProviderReq) IsSetDisplayName() bool {
+	return p.DisplayName != nil
+}
+
+func (p *CreateAdminModelProviderReq) IsSetApiKey() bool {
+	return p.ApiKey != nil
+}
+
+func (p *CreateAdminModelProviderReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("CreateAdminModelProviderReq(%+v)", *p)
+}
+
+type UpdateAdminModelProviderReq struct {
+	ID          string  `thrift:"id,1,required" json:"-"`
+	DisplayName *string `thrift:"displayName,2,optional" json:"displayName,omitempty"`
+	BaseUrl     *string `thrift:"baseUrl,3,optional" json:"baseUrl,omitempty"`
+	ApiKey      *string `thrift:"apiKey,4,optional" json:"apiKey,omitempty"`
+	ClearApiKey *bool   `thrift:"clearApiKey,5,optional" json:"clearApiKey,omitempty"`
+	Enabled     *bool   `thrift:"enabled,6,optional" json:"enabled,omitempty"`
+}
+
+func NewUpdateAdminModelProviderReq() *UpdateAdminModelProviderReq {
+	return &UpdateAdminModelProviderReq{}
+}
+
+func (p *UpdateAdminModelProviderReq) InitDefault() {
+}
+
+func (p *UpdateAdminModelProviderReq) GetID() (v string) {
+	return p.ID
+}
+
+var UpdateAdminModelProviderReq_DisplayName_DEFAULT string
+
+func (p *UpdateAdminModelProviderReq) GetDisplayName() (v string) {
+	if !p.IsSetDisplayName() {
+		return UpdateAdminModelProviderReq_DisplayName_DEFAULT
+	}
+	return *p.DisplayName
+}
+
+var UpdateAdminModelProviderReq_BaseUrl_DEFAULT string
+
+func (p *UpdateAdminModelProviderReq) GetBaseUrl() (v string) {
+	if !p.IsSetBaseUrl() {
+		return UpdateAdminModelProviderReq_BaseUrl_DEFAULT
+	}
+	return *p.BaseUrl
+}
+
+var UpdateAdminModelProviderReq_ApiKey_DEFAULT string
+
+func (p *UpdateAdminModelProviderReq) GetApiKey() (v string) {
+	if !p.IsSetApiKey() {
+		return UpdateAdminModelProviderReq_ApiKey_DEFAULT
+	}
+	return *p.ApiKey
+}
+
+var UpdateAdminModelProviderReq_ClearApiKey_DEFAULT bool
+
+func (p *UpdateAdminModelProviderReq) GetClearApiKey() (v bool) {
+	if !p.IsSetClearApiKey() {
+		return UpdateAdminModelProviderReq_ClearApiKey_DEFAULT
+	}
+	return *p.ClearApiKey
+}
+
+var UpdateAdminModelProviderReq_Enabled_DEFAULT bool
+
+func (p *UpdateAdminModelProviderReq) GetEnabled() (v bool) {
+	if !p.IsSetEnabled() {
+		return UpdateAdminModelProviderReq_Enabled_DEFAULT
+	}
+	return *p.Enabled
+}
+
+func (p *UpdateAdminModelProviderReq) IsSetDisplayName() bool {
+	return p.DisplayName != nil
+}
+
+func (p *UpdateAdminModelProviderReq) IsSetBaseUrl() bool {
+	return p.BaseUrl != nil
+}
+
+func (p *UpdateAdminModelProviderReq) IsSetApiKey() bool {
+	return p.ApiKey != nil
+}
+
+func (p *UpdateAdminModelProviderReq) IsSetClearApiKey() bool {
+	return p.ClearApiKey != nil
+}
+
+func (p *UpdateAdminModelProviderReq) IsSetEnabled() bool {
+	return p.Enabled != nil
+}
+
+func (p *UpdateAdminModelProviderReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("UpdateAdminModelProviderReq(%+v)", *p)
+}
+
+type DeleteAdminModelProviderReq struct {
+	ID string `thrift:"id,1,required" json:"-"`
+}
+
+func NewDeleteAdminModelProviderReq() *DeleteAdminModelProviderReq {
+	return &DeleteAdminModelProviderReq{}
+}
+
+func (p *DeleteAdminModelProviderReq) InitDefault() {
+}
+
+func (p *DeleteAdminModelProviderReq) GetID() (v string) {
+	return p.ID
+}
+
+func (p *DeleteAdminModelProviderReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("DeleteAdminModelProviderReq(%+v)", *p)
+}
+
 type CreateAdminModelProfileReq struct {
 	ID                  *string `thrift:"id,1,optional" json:"id,omitempty"`
 	DisplayName         *string `thrift:"displayName,2,optional" json:"displayName,omitempty"`
 	Description         *string `thrift:"description,3,optional" json:"description,omitempty"`
-	BaseUrl             string  `thrift:"baseUrl,4,required" json:"baseUrl"`
 	Model               string  `thrift:"model,5,required" json:"model"`
-	ApiKey              *string `thrift:"apiKey,6,optional" json:"apiKey,omitempty"`
 	Enabled             bool    `thrift:"enabled,7,required" json:"enabled"`
 	ContextWindowTokens *int64  `thrift:"contextWindowTokens,8,optional" json:"contextWindowTokens,omitempty"`
+	ProviderId          string  `thrift:"providerId,10,required" json:"providerId"`
 }
 
 func NewCreateAdminModelProfileReq() *CreateAdminModelProfileReq {
@@ -669,21 +942,8 @@ func (p *CreateAdminModelProfileReq) GetDescription() (v string) {
 	return *p.Description
 }
 
-func (p *CreateAdminModelProfileReq) GetBaseUrl() (v string) {
-	return p.BaseUrl
-}
-
 func (p *CreateAdminModelProfileReq) GetModel() (v string) {
 	return p.Model
-}
-
-var CreateAdminModelProfileReq_ApiKey_DEFAULT string
-
-func (p *CreateAdminModelProfileReq) GetApiKey() (v string) {
-	if !p.IsSetApiKey() {
-		return CreateAdminModelProfileReq_ApiKey_DEFAULT
-	}
-	return *p.ApiKey
 }
 
 func (p *CreateAdminModelProfileReq) GetEnabled() (v bool) {
@@ -699,6 +959,10 @@ func (p *CreateAdminModelProfileReq) GetContextWindowTokens() (v int64) {
 	return *p.ContextWindowTokens
 }
 
+func (p *CreateAdminModelProfileReq) GetProviderId() (v string) {
+	return p.ProviderId
+}
+
 func (p *CreateAdminModelProfileReq) IsSetID() bool {
 	return p.ID != nil
 }
@@ -709,10 +973,6 @@ func (p *CreateAdminModelProfileReq) IsSetDisplayName() bool {
 
 func (p *CreateAdminModelProfileReq) IsSetDescription() bool {
 	return p.Description != nil
-}
-
-func (p *CreateAdminModelProfileReq) IsSetApiKey() bool {
-	return p.ApiKey != nil
 }
 
 func (p *CreateAdminModelProfileReq) IsSetContextWindowTokens() bool {
@@ -730,12 +990,10 @@ type UpdateAdminModelProfileReq struct {
 	ID                  string  `thrift:"id,1,required" json:"-"`
 	DisplayName         *string `thrift:"displayName,2,optional" json:"displayName,omitempty"`
 	Description         *string `thrift:"description,3,optional" json:"description,omitempty"`
-	BaseUrl             *string `thrift:"baseUrl,4,optional" json:"baseUrl,omitempty"`
 	Model               *string `thrift:"model,5,optional" json:"model,omitempty"`
-	ApiKey              *string `thrift:"apiKey,6,optional" json:"apiKey,omitempty"`
-	ClearApiKey         *bool   `thrift:"clearApiKey,7,optional" json:"clearApiKey,omitempty"`
 	Enabled             *bool   `thrift:"enabled,8,optional" json:"enabled,omitempty"`
 	ContextWindowTokens *int64  `thrift:"contextWindowTokens,9,optional" json:"contextWindowTokens,omitempty"`
+	ProviderId          *string `thrift:"providerId,11,optional" json:"providerId,omitempty"`
 }
 
 func NewUpdateAdminModelProfileReq() *UpdateAdminModelProfileReq {
@@ -767,15 +1025,6 @@ func (p *UpdateAdminModelProfileReq) GetDescription() (v string) {
 	return *p.Description
 }
 
-var UpdateAdminModelProfileReq_BaseUrl_DEFAULT string
-
-func (p *UpdateAdminModelProfileReq) GetBaseUrl() (v string) {
-	if !p.IsSetBaseUrl() {
-		return UpdateAdminModelProfileReq_BaseUrl_DEFAULT
-	}
-	return *p.BaseUrl
-}
-
 var UpdateAdminModelProfileReq_Model_DEFAULT string
 
 func (p *UpdateAdminModelProfileReq) GetModel() (v string) {
@@ -783,24 +1032,6 @@ func (p *UpdateAdminModelProfileReq) GetModel() (v string) {
 		return UpdateAdminModelProfileReq_Model_DEFAULT
 	}
 	return *p.Model
-}
-
-var UpdateAdminModelProfileReq_ApiKey_DEFAULT string
-
-func (p *UpdateAdminModelProfileReq) GetApiKey() (v string) {
-	if !p.IsSetApiKey() {
-		return UpdateAdminModelProfileReq_ApiKey_DEFAULT
-	}
-	return *p.ApiKey
-}
-
-var UpdateAdminModelProfileReq_ClearApiKey_DEFAULT bool
-
-func (p *UpdateAdminModelProfileReq) GetClearApiKey() (v bool) {
-	if !p.IsSetClearApiKey() {
-		return UpdateAdminModelProfileReq_ClearApiKey_DEFAULT
-	}
-	return *p.ClearApiKey
 }
 
 var UpdateAdminModelProfileReq_Enabled_DEFAULT bool
@@ -821,6 +1052,15 @@ func (p *UpdateAdminModelProfileReq) GetContextWindowTokens() (v int64) {
 	return *p.ContextWindowTokens
 }
 
+var UpdateAdminModelProfileReq_ProviderId_DEFAULT string
+
+func (p *UpdateAdminModelProfileReq) GetProviderId() (v string) {
+	if !p.IsSetProviderId() {
+		return UpdateAdminModelProfileReq_ProviderId_DEFAULT
+	}
+	return *p.ProviderId
+}
+
 func (p *UpdateAdminModelProfileReq) IsSetDisplayName() bool {
 	return p.DisplayName != nil
 }
@@ -829,20 +1069,8 @@ func (p *UpdateAdminModelProfileReq) IsSetDescription() bool {
 	return p.Description != nil
 }
 
-func (p *UpdateAdminModelProfileReq) IsSetBaseUrl() bool {
-	return p.BaseUrl != nil
-}
-
 func (p *UpdateAdminModelProfileReq) IsSetModel() bool {
 	return p.Model != nil
-}
-
-func (p *UpdateAdminModelProfileReq) IsSetApiKey() bool {
-	return p.ApiKey != nil
-}
-
-func (p *UpdateAdminModelProfileReq) IsSetClearApiKey() bool {
-	return p.ClearApiKey != nil
 }
 
 func (p *UpdateAdminModelProfileReq) IsSetEnabled() bool {
@@ -851,6 +1079,10 @@ func (p *UpdateAdminModelProfileReq) IsSetEnabled() bool {
 
 func (p *UpdateAdminModelProfileReq) IsSetContextWindowTokens() bool {
 	return p.ContextWindowTokens != nil
+}
+
+func (p *UpdateAdminModelProfileReq) IsSetProviderId() bool {
+	return p.ProviderId != nil
 }
 
 func (p *UpdateAdminModelProfileReq) String() string {
@@ -1666,6 +1898,12 @@ type ModelGatewayHTTPService interface {
 	UpdateAdminModelConfig(ctx context.Context, req *UpdateAdminModelConfigReq) (r *AdminModelConfigResp, err error)
 
 	TestAdminModelConfig(ctx context.Context, req *TestAdminModelConfigReq) (r *TestAdminModelConfigResp, err error)
+
+	CreateAdminModelProvider(ctx context.Context, req *CreateAdminModelProviderReq) (r *AdminModelConfigResp, err error)
+
+	UpdateAdminModelProvider(ctx context.Context, req *UpdateAdminModelProviderReq) (r *AdminModelConfigResp, err error)
+
+	DeleteAdminModelProvider(ctx context.Context, req *DeleteAdminModelProviderReq) (r *AdminModelConfigResp, err error)
 
 	CreateAdminModelProfile(ctx context.Context, req *CreateAdminModelProfileReq) (r *AdminModelConfigResp, err error)
 

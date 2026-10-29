@@ -11,7 +11,7 @@ type Cipher interface {
 // ConfigStore persists and retrieves model gateway configuration and usage records.
 type ConfigStore interface {
 	Load(ctx context.Context) (Config, error)
-	UpdateModels(ctx context.Context, change func([]ModelProfile) ([]ModelProfile, error)) (Config, error)
+	UpdateCatalog(ctx context.Context, change func(providers []ProviderProfile, models []ModelProfile) ([]ProviderProfile, []ModelProfile, error)) (Config, error)
 	UpdateRouting(ctx context.Context, routing ModelRoutingConfig) (Config, error)
 	UpdateWebSearch(ctx context.Context, change func(WebSearchConfig) (WebSearchConfig, error)) (Config, error)
 	Record(ctx context.Context, u Usage) error

@@ -43,10 +43,17 @@ func TestWebSearchAdminConfigRedactionAndPreservation(t *testing.T) {
 	crypto := testCipher(t)
 	aKey, _ := crypto.Encrypt("fixture-a")
 	bKey, _ := crypto.Encrypt("fixture-b")
-	store := &memoryStore{c: Config{Models: []ModelProfile{
-		{ID: "a", BaseURL: "https://1.1.1.1/v1", Model: "a", CipherKey: aKey, Enabled: false},
-		{ID: "b", BaseURL: "https://1.1.1.1/v1", Model: "b", CipherKey: bKey, Enabled: true},
-	}, Routing: ModelRoutingConfig{DefaultModelID: "a"}}}
+	store := &memoryStore{c: Config{
+		Providers: []ProviderProfile{
+			{ID: "pa", DisplayName: "Provider A", BaseURL: "https://1.1.1.1/v1", CipherKey: aKey, Enabled: true},
+			{ID: "pb", DisplayName: "Provider B", BaseURL: "https://1.1.1.1/v1", CipherKey: bKey, Enabled: true},
+		},
+		Models: []ModelProfile{
+			{ID: "a", ProviderID: "pa", Model: "a", Enabled: false},
+			{ID: "b", ProviderID: "pb", Model: "b", Enabled: true},
+		},
+		Routing: ModelRoutingConfig{DefaultModelID: "a"},
+	}}
 	service := New(store, crypto, testToken)
 	handler := service.Routes(testAdminAuth())
 	do := func(method, path, body string, authenticated, csrf bool) *httptest.ResponseRecorder {
@@ -82,8 +89,8 @@ func TestWebSearchAdminConfigRedactionAndPreservation(t *testing.T) {
 		t.Fatal("search save failed or leaked secret", saved.Code)
 	}
 	after, _ := store.Load(context.Background())
-	if !reflect.DeepEqual(before.Models, after.Models) || before.Routing != after.Routing {
-		t.Fatal("search changed models or routing")
+	if !reflect.DeepEqual(before.Providers, after.Providers) || !reflect.DeepEqual(before.Models, after.Models) || before.Routing != after.Routing {
+		t.Fatal("search changed providers, models or routing")
 	}
 	if got := do(http.MethodPatch, "/web-search", `{"enabled":false}`, true, true); got.Code != 200 {
 		t.Fatal(got.Code)

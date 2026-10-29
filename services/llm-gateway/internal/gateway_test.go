@@ -33,13 +33,14 @@ func (m *memoryStore) Load(context.Context) (Config, error) {
 	defer m.mu.Unlock()
 	return m.c, nil
 }
-func (m *memoryStore) UpdateModels(_ context.Context, change func([]ModelProfile) ([]ModelProfile, error)) (Config, error) {
+func (m *memoryStore) UpdateCatalog(_ context.Context, change func([]ProviderProfile, []ModelProfile) ([]ProviderProfile, []ModelProfile, error)) (Config, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	models, err := change(append([]ModelProfile(nil), m.c.Models...))
+	providers, models, err := change(append([]ProviderProfile(nil), m.c.Providers...), append([]ModelProfile(nil), m.c.Models...))
 	if err != nil {
 		return Config{}, err
 	}
+	m.c.Providers = providers
 	m.c.Models = models
 	return m.c, nil
 }
@@ -94,7 +95,10 @@ func TestEncryptionAndWriteOnlyConfig(t *testing.T) {
 	}
 	store := &memoryStore{}
 	service := New(store, crypto, testToken)
-	c, err := service.App.CreateModelProfile(context.Background(), app.CreateModelProfileInput{ID: "default", BaseURL: "https://1.1.1.1/v1", Model: "model", Enabled: true, APIKey: &key})
+	if _, err := service.App.CreateModelProvider(context.Background(), app.CreateModelProviderInput{ID: "default", DisplayName: "Default Provider", BaseURL: "https://1.1.1.1/v1", Enabled: true, APIKey: &key}); err != nil {
+		t.Fatal(err)
+	}
+	c, err := service.App.CreateModelProfile(context.Background(), app.CreateModelProfileInput{ID: "default", ProviderID: "default", Model: "model", Enabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,11 +113,16 @@ func TestEncryptionAndWriteOnlyConfig(t *testing.T) {
 	name := "next"
 	c, err = service.App.UpdateModelProfile(context.Background(), app.UpdateModelProfileInput{ID: "default", Model: &name})
 	if err != nil || !c.ResolveModel("").Configured() {
-		t.Fatal("omitted model key was removed", err)
+		t.Fatal("omitted provider key was removed during model update", err)
 	}
-	c, err = service.App.UpdateModelProfile(context.Background(), app.UpdateModelProfileInput{ID: "default", ClearAPIKey: true})
+	providerLabel := "Updated Provider"
+	c, err = service.App.UpdateModelProvider(context.Background(), app.UpdateModelProviderInput{ID: "default", DisplayName: &providerLabel})
+	if err != nil || !c.ResolveModel("").Configured() {
+		t.Fatal("omitted provider key was removed during provider update", err)
+	}
+	c, err = service.App.UpdateModelProvider(context.Background(), app.UpdateModelProviderInput{ID: "default", ClearAPIKey: true})
 	if err != nil || c.ResolveModel("").Configured() {
-		t.Fatal("explicit model key clear failed", err)
+		t.Fatal("explicit provider key clear failed", err)
 	}
 
 }
@@ -146,7 +155,10 @@ func TestProtocolFixtureModelLimitsToolsAndUsage(t *testing.T) {
 	defer fixture.Close()
 	crypto := testCipher(t)
 	encrypted, _ := crypto.Encrypt(key)
-	store := &memoryStore{c: singleModel(ModelProfile{BaseURL: fixture.URL + "/v1", Model: "configured", CipherKey: encrypted, Enabled: true})}
+	store := &memoryStore{c: singleModel(
+		ProviderProfile{BaseURL: fixture.URL + "/v1", CipherKey: encrypted, Enabled: true},
+		ModelProfile{Model: "configured", Enabled: true},
+	)}
 	s := New(store, crypto, testToken)
 	s.Provider = Provider{HTTP: fixture.Client()}
 	r, e := fixtureHTTPChat(t, s, context.Background(), &agent.GatewayChatRequest{ServiceToken: testToken, OwnerId: "owner", AgentId: "agent", SessionId: "session", RunId: "run", RequestJson: fixtureNativeRequest(`{"model":"bypass","messages":[{"role":"user","content":"hello"}],"max_tokens":262144,"tools":[{"type":"function","function":{"name":"exec","parameters":{"type":"object"}}}]}`, false)})
@@ -188,7 +200,10 @@ func TestCancellationAndRedactedUpstreamErrors(t *testing.T) {
 	defer fixture.Close()
 	crypto := testCipher(t)
 	encrypted, _ := crypto.Encrypt(key)
-	s := New(&memoryStore{c: singleModel(ModelProfile{BaseURL: fixture.URL, Model: "fixture", CipherKey: encrypted, Enabled: true})}, crypto, testToken)
+	s := New(&memoryStore{c: singleModel(
+		ProviderProfile{BaseURL: fixture.URL, CipherKey: encrypted, Enabled: true},
+		ModelProfile{Model: "fixture", Enabled: true},
+	)}, crypto, testToken)
 	s.Provider = Provider{HTTP: fixture.Client()}
 	done := make(chan *agent.GatewayChatResponse, 1)
 	go func() {
@@ -232,7 +247,10 @@ func TestCanceledAttemptDoesNotCancelNewAttempt(t *testing.T) {
 	defer fixture.Close()
 	crypto := testCipher(t)
 	encrypted, _ := crypto.Encrypt(key)
-	s := New(&memoryStore{c: singleModel(ModelProfile{BaseURL: fixture.URL, Model: "fixture", Enabled: true, CipherKey: encrypted})}, crypto, testToken)
+	s := New(&memoryStore{c: singleModel(
+		ProviderProfile{BaseURL: fixture.URL, CipherKey: encrypted, Enabled: true},
+		ModelProfile{Model: "fixture", Enabled: true},
+	)}, crypto, testToken)
 	s.Provider = Provider{HTTP: fixture.Client()}
 	_, _ = s.Cancel(context.Background(), &agent.CancelRequest{ServiceToken: testToken, AgentId: "a", RunId: "durable-run:attempt-1"})
 	req := &agent.GatewayChatRequest{ServiceToken: testToken, OwnerId: "owner", AgentId: "a", SessionId: "session", RunId: "durable-run:attempt-1", RequestJson: fixtureNativeRequest(`{"messages":[{"role":"user","content":"hi"}]}`, false)}
@@ -276,41 +294,53 @@ func TestMultiModelRoutingSmoothFallbackAndConcurrentForegroundCalls(t *testing.
 	encR1, _ := crypto.Encrypt(r1Key)
 	cfg := Config{
 		Routing: ModelRoutingConfig{DefaultModelID: "default"},
+		Providers: []ProviderProfile{
+			{
+				ID:          "openai-shared",
+				DisplayName: "OpenAI Shared",
+				BaseURL:     fixture.URL + "/v1",
+				CipherKey:   encDefault,
+				Enabled:     true,
+			},
+			{
+				ID:          "deepseek-shared",
+				DisplayName: "DeepSeek Shared",
+				BaseURL:     fixture.URL + "/v1",
+				CipherKey:   encR1,
+				Enabled:     true,
+			},
+		},
 		Models: []ModelProfile{
 			{
 				ID:                  "default",
+				ProviderID:          "openai-shared",
 				DisplayName:         "Default GPT-4o",
-				BaseURL:             fixture.URL + "/v1",
 				Model:               "gpt-4o-default",
 				ContextWindowTokens: 16384,
-				CipherKey:           encDefault,
 				Enabled:             true,
 			},
 			{
 				ID:                  "deepseek-r1",
+				ProviderID:          "deepseek-shared",
 				DisplayName:         "DeepSeek R1",
-				BaseURL:             fixture.URL + "/v1",
 				Model:               "deepseek-reasoner",
 				ContextWindowTokens: 65536,
-				CipherKey:           encR1,
 				Enabled:             true,
 			},
 			{
 				ID:                  "disabled-model",
+				ProviderID:          "deepseek-shared",
 				DisplayName:         "Disabled Model",
-				BaseURL:             fixture.URL + "/v1",
 				Model:               "should-not-be-used",
 				ContextWindowTokens: 16384,
-				CipherKey:           encR1,
 				Enabled:             false,
 			},
 			{
 				ID:                  "concurrent",
+				ProviderID:          "openai-shared",
 				DisplayName:         "Concurrent Model",
-				BaseURL:             fixture.URL + "/v1",
 				Model:               "concurrent-model",
 				ContextWindowTokens: 16384,
-				CipherKey:           encDefault,
 				Enabled:             true,
 			},
 		},
@@ -438,7 +468,10 @@ func TestGatewayForegroundConcurrencyCapUnaryAndStreaming(t *testing.T) {
 
 	crypto := testCipher(t)
 	encKey, _ := crypto.Encrypt("fixture-cap-key")
-	unaryStore := &memoryStore{c: singleModel(ModelProfile{BaseURL: unaryFixture.URL + "/v1", Model: "cap-model", CipherKey: encKey, Enabled: true})}
+	unaryStore := &memoryStore{c: singleModel(
+		ProviderProfile{BaseURL: unaryFixture.URL + "/v1", CipherKey: encKey, Enabled: true},
+		ModelProfile{Model: "cap-model", Enabled: true},
+	)}
 	unarySvc := New(unaryStore, crypto, testToken)
 	unarySvc.Provider = Provider{HTTP: unaryFixture.Client()}
 	if got := unarySvc.App.MaxConcurrentCalls(); got != unaryCap {

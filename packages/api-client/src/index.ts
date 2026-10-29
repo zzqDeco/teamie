@@ -15,11 +15,11 @@ import { executeTransportRequest, part, routePath } from "./transport";
 import type {
   AgentProfileInput, AttentionPage, Bootstrap, Conversation,
   CreatedPasswordResetLink, CreatedRegistrationInvite, CreateModelProfileInput,
-  Member, Mention, Message, MessagePage, ModelCatalog, ModelGateway,
-  ModelRoutingInput, NotificationLevel, PasswordResetInspection,
+  CreateModelProviderInput, Member, Mention, Message, MessagePage, ModelCatalog,
+  ModelGateway, ModelRoutingInput, NotificationLevel, PasswordResetInspection,
   PlatformUsersPage, PresenceItem, ReadReceipts, RegistrationPolicy, Session,
-  SyncPage, UpdateModelProfileInput, User, WebSearchInput, Workspace,
-  WorkspaceSearchPage,
+  SyncPage, UpdateModelProfileInput, UpdateModelProviderInput, User,
+  WebSearchInput, Workspace, WorkspaceSearchPage,
 } from "./types";
 
 export * from "./generated";
@@ -159,6 +159,27 @@ export class TeamieClient {
       method: IDL_ROUTES.TestAdminModelConfig.method,
       body: JSON.stringify({}),
     });
+  createModelProvider = async (input: CreateModelProviderInput) =>
+    publicModelGateway(
+      await this.#request<ModelGateway>(IDL_ROUTES.CreateAdminModelProvider.clientPath, {
+        method: IDL_ROUTES.CreateAdminModelProvider.method,
+        body: JSON.stringify(input),
+      }),
+    );
+  updateModelProvider = async (id: string, input: UpdateModelProviderInput) =>
+    publicModelGateway(
+      await this.#request<ModelGateway>(
+        routePath(IDL_ROUTES.UpdateAdminModelProvider, { id }),
+        { method: IDL_ROUTES.UpdateAdminModelProvider.method, body: JSON.stringify(input) },
+      ),
+    );
+  deleteModelProvider = async (id: string) =>
+    publicModelGateway(
+      await this.#request<ModelGateway>(
+        routePath(IDL_ROUTES.DeleteAdminModelProvider, { id }),
+        { method: IDL_ROUTES.DeleteAdminModelProvider.method },
+      ),
+    );
   createModelProfile = async (input: CreateModelProfileInput) =>
     publicModelGateway(
       await this.#request<ModelGateway>(IDL_ROUTES.CreateAdminModelProfile.clientPath, {

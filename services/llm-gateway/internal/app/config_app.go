@@ -10,6 +10,7 @@ import (
 
 type expectedConfigIDKey struct{}
 type requestedModelIDKey struct{}
+type strictModelSelectionKey struct{}
 
 // WithExpectedModelConfigID attaches an expected model config ID to ctx.
 func WithExpectedModelConfigID(ctx context.Context, configID string) context.Context {
@@ -30,6 +31,12 @@ func WithRequestedModelID(ctx context.Context, modelID string) context.Context {
 	return context.WithValue(ctx, requestedModelIDKey{}, strings.TrimSpace(modelID))
 }
 
+// WithStrictRequestedModelID attaches a requested model profile ID that must not fall back to another model.
+func WithStrictRequestedModelID(ctx context.Context, modelID string) context.Context {
+	ctx = WithRequestedModelID(ctx, modelID)
+	return context.WithValue(ctx, strictModelSelectionKey{}, true)
+}
+
 // RequestedModelID reads the requested model profile ID from ctx.
 func RequestedModelID(ctx context.Context) string {
 	if ctx == nil {
@@ -37,6 +44,15 @@ func RequestedModelID(ctx context.Context) string {
 	}
 	id, _ := ctx.Value(requestedModelIDKey{}).(string)
 	return id
+}
+
+// StrictModelSelection reports whether ctx forbids fallback to another model.
+func StrictModelSelection(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	strict, _ := ctx.Value(strictModelSelectionKey{}).(bool)
+	return strict
 }
 
 // PingStatus holds the gateway readiness and configuration summary.
@@ -48,14 +64,13 @@ type PingStatus struct {
 	ModelConfigID       *string
 }
 
-// CreateModelProfileInput holds the command to create a new model profile.
+// CreateModelProfileInput holds the command to create a new model profile under an existing provider.
 type CreateModelProfileInput struct {
 	ID                  string
+	ProviderID          string
 	DisplayName         string
 	Description         string
-	BaseURL             string
 	Model               string
-	APIKey              *string
 	Enabled             bool
 	ContextWindowTokens *int64
 }
@@ -63,12 +78,10 @@ type CreateModelProfileInput struct {
 // UpdateModelProfileInput holds the command to update an existing model profile.
 type UpdateModelProfileInput struct {
 	ID                  string
+	ProviderID          *string
 	DisplayName         *string
 	Description         *string
-	BaseURL             *string
 	Model               *string
-	APIKey              *string
-	ClearAPIKey         bool
 	Enabled             *bool
 	ContextWindowTokens *int64
 }
@@ -104,14 +117,26 @@ func (s *Service) LoadConfig(ctx context.Context) (domain.Config, error) {
 	return s.Store.Load(ctx)
 }
 
+func providerExists(providers []domain.ProviderProfile, id string) bool {
+	for _, p := range providers {
+		if p.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 // CreateModelProfile validates and adds a new model profile to the gateway catalog.
 func (s *Service) CreateModelProfile(ctx context.Context, in CreateModelProfileInput) (domain.Config, error) {
 	s.ensureInit()
 	in.ID = strings.TrimSpace(in.ID)
+	in.ProviderID = strings.TrimSpace(in.ProviderID)
 	in.DisplayName = strings.TrimSpace(in.DisplayName)
 	in.Description = strings.TrimSpace(in.Description)
-	in.BaseURL = strings.TrimRight(strings.TrimSpace(in.BaseURL), "/")
 	in.Model = strings.TrimSpace(in.Model)
+	if !domain.ValidProviderID(in.ProviderID) {
+		return domain.Config{}, domain.Err(400, "invalid_request", "Invalid model provider ID")
+	}
 	if in.Model == "" || len(in.Model) > 160 || strings.ContainsAny(in.Model, "\r\n\x00") ||
 		len(in.DisplayName) > 160 || strings.ContainsAny(in.DisplayName, "\r\n\x00") ||
 		len(in.Description) > 512 || strings.ContainsAny(in.Description, "\r\n\x00") {
@@ -120,9 +145,6 @@ func (s *Service) CreateModelProfile(ctx context.Context, in CreateModelProfileI
 	if in.ID != "" && !domain.ValidModelID(in.ID) {
 		return domain.Config{}, domain.Err(400, "invalid_request", "Invalid model ID")
 	}
-	if in.APIKey != nil && (len(*in.APIKey) == 0 || len(*in.APIKey) > 16384 || strings.ContainsAny(*in.APIKey, "\r\n\x00")) {
-		return domain.Config{}, domain.Err(400, "invalid_request", "Invalid model API key")
-	}
 	cw := domain.DefaultContextWindow
 	if in.ContextWindowTokens != nil {
 		if *in.ContextWindowTokens < domain.MinContextWindow || *in.ContextWindowTokens > domain.MaxContextWindow {
@@ -130,31 +152,21 @@ func (s *Service) CreateModelProfile(ctx context.Context, in CreateModelProfileI
 		}
 		cw = *in.ContextWindowTokens
 	}
-	validateCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	if err := domain.ValidateEndpoint(validateCtx, in.BaseURL); err != nil {
-		return domain.Config{}, err
-	}
 	s.modelConfigMu.Lock()
 	defer s.modelConfigMu.Unlock()
-	saved, err := s.Store.UpdateModels(validateCtx, func(models []domain.ModelProfile) ([]domain.ModelProfile, error) {
+	saved, err := s.Store.UpdateCatalog(ctx, func(providers []domain.ProviderProfile, models []domain.ModelProfile) ([]domain.ProviderProfile, []domain.ModelProfile, error) {
+		if !providerExists(providers, in.ProviderID) {
+			return nil, nil, domain.Err(404, "not_found", "Model provider not found")
+		}
 		id := in.ID
 		if id == "" {
 			id = domain.SuggestModelID(in.DisplayName, in.Model, models)
 		} else {
 			for _, m := range models {
 				if m.ID == id {
-					return nil, domain.Err(409, "model_exists", "Model ID already exists")
+					return nil, nil, domain.Err(409, "model_exists", "Model ID already exists")
 				}
 			}
-		}
-		var cipherKey []byte
-		if in.APIKey != nil {
-			enc, err := s.Cipher.Encrypt(*in.APIKey)
-			if err != nil {
-				return nil, err
-			}
-			cipherKey = enc
 		}
 		displayName := in.DisplayName
 		if displayName == "" {
@@ -163,17 +175,16 @@ func (s *Service) CreateModelProfile(ctx context.Context, in CreateModelProfileI
 		now := time.Now().UTC()
 		profile := domain.ModelProfile{
 			ID:                  id,
+			ProviderID:          in.ProviderID,
 			DisplayName:         displayName,
 			Description:         in.Description,
-			BaseURL:             in.BaseURL,
 			Model:               in.Model,
-			CipherKey:           cipherKey,
 			ContextWindowTokens: cw,
 			Enabled:             in.Enabled,
 			CreatedAt:           now,
 			UpdatedAt:           now,
 		}
-		return append(models, profile), nil
+		return providers, append(models, profile), nil
 	})
 	if err != nil {
 		return domain.Config{}, err
@@ -188,6 +199,13 @@ func (s *Service) UpdateModelProfile(ctx context.Context, in UpdateModelProfileI
 	in.ID = strings.TrimSpace(in.ID)
 	if !domain.ValidModelID(in.ID) {
 		return domain.Config{}, domain.Err(400, "invalid_request", "Invalid model ID")
+	}
+	if in.ProviderID != nil {
+		trimmed := strings.TrimSpace(*in.ProviderID)
+		if !domain.ValidProviderID(trimmed) {
+			return domain.Config{}, domain.Err(400, "invalid_request", "Invalid model provider ID")
+		}
+		in.ProviderID = &trimmed
 	}
 	if in.Model != nil {
 		trimmed := strings.TrimSpace(*in.Model)
@@ -210,24 +228,12 @@ func (s *Service) UpdateModelProfile(ctx context.Context, in UpdateModelProfileI
 		}
 		in.Description = &trimmed
 	}
-	if in.APIKey != nil && (in.ClearAPIKey || len(*in.APIKey) == 0 || len(*in.APIKey) > 16384 || strings.ContainsAny(*in.APIKey, "\r\n\x00")) {
-		return domain.Config{}, domain.Err(400, "invalid_request", "Invalid model API key")
-	}
 	if in.ContextWindowTokens != nil && (*in.ContextWindowTokens < domain.MinContextWindow || *in.ContextWindowTokens > domain.MaxContextWindow) {
 		return domain.Config{}, domain.Err(400, "invalid_request", "Context window must be between 4096 and 2000000 tokens")
 	}
-	validateCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	if in.BaseURL != nil {
-		trimmed := strings.TrimRight(strings.TrimSpace(*in.BaseURL), "/")
-		if err := domain.ValidateEndpoint(validateCtx, trimmed); err != nil {
-			return domain.Config{}, err
-		}
-		in.BaseURL = &trimmed
-	}
 	s.modelConfigMu.Lock()
 	defer s.modelConfigMu.Unlock()
-	saved, err := s.Store.UpdateModels(validateCtx, func(models []domain.ModelProfile) ([]domain.ModelProfile, error) {
+	saved, err := s.Store.UpdateCatalog(ctx, func(providers []domain.ProviderProfile, models []domain.ModelProfile) ([]domain.ProviderProfile, []domain.ModelProfile, error) {
 		idx := -1
 		for i, m := range models {
 			if m.ID == in.ID {
@@ -236,11 +242,14 @@ func (s *Service) UpdateModelProfile(ctx context.Context, in UpdateModelProfileI
 			}
 		}
 		if idx < 0 {
-			return nil, domain.Err(404, "not_found", "Model profile not found")
+			return nil, nil, domain.Err(404, "not_found", "Model profile not found")
+		}
+		if in.ProviderID != nil && !providerExists(providers, *in.ProviderID) {
+			return nil, nil, domain.Err(404, "not_found", "Model provider not found")
 		}
 		m := models[idx]
-		if in.BaseURL != nil {
-			m.BaseURL = *in.BaseURL
+		if in.ProviderID != nil {
+			m.ProviderID = *in.ProviderID
 		}
 		if in.Model != nil {
 			m.Model = *in.Model
@@ -260,19 +269,9 @@ func (s *Service) UpdateModelProfile(ctx context.Context, in UpdateModelProfileI
 		if in.Enabled != nil {
 			m.Enabled = *in.Enabled
 		}
-		if in.ClearAPIKey {
-			m.CipherKey = nil
-		}
-		if in.APIKey != nil {
-			enc, err := s.Cipher.Encrypt(*in.APIKey)
-			if err != nil {
-				return nil, err
-			}
-			m.CipherKey = enc
-		}
 		m.UpdatedAt = time.Now().UTC()
 		models[idx] = m
-		return models, nil
+		return providers, models, nil
 	})
 	if err != nil {
 		return domain.Config{}, err
@@ -290,7 +289,7 @@ func (s *Service) DeleteModelProfile(ctx context.Context, id string) (domain.Con
 	}
 	s.modelConfigMu.Lock()
 	defer s.modelConfigMu.Unlock()
-	saved, err := s.Store.UpdateModels(ctx, func(models []domain.ModelProfile) ([]domain.ModelProfile, error) {
+	saved, err := s.Store.UpdateCatalog(ctx, func(providers []domain.ProviderProfile, models []domain.ModelProfile) ([]domain.ProviderProfile, []domain.ModelProfile, error) {
 		filtered := make([]domain.ModelProfile, 0, len(models))
 		found := false
 		for _, m := range models {
@@ -301,9 +300,9 @@ func (s *Service) DeleteModelProfile(ctx context.Context, id string) (domain.Con
 			filtered = append(filtered, m)
 		}
 		if !found {
-			return nil, domain.Err(404, "not_found", "Model profile not found")
+			return nil, nil, domain.Err(404, "not_found", "Model profile not found")
 		}
-		return filtered, nil
+		return providers, filtered, nil
 	})
 	if err != nil {
 		return domain.Config{}, err
@@ -312,28 +311,30 @@ func (s *Service) DeleteModelProfile(ctx context.Context, id string) (domain.Con
 	return saved, nil
 }
 
-// ResolveModelProfileForTest validates that a specific model profile exists, is configured, and is enabled for admin testing.
-func (s *Service) ResolveModelProfileForTest(ctx context.Context, id string) (domain.ModelProfile, error) {
+// ResolveModelProfileForTest validates that a specific model profile and its provider exist, are configured, and are enabled for admin testing.
+func (s *Service) ResolveModelProfileForTest(ctx context.Context, id string) (domain.ResolvedModel, error) {
 	id = strings.TrimSpace(id)
 	if !domain.ValidModelID(id) {
-		return domain.ModelProfile{}, domain.Err(400, "invalid_request", "Invalid model ID")
+		return domain.ResolvedModel{}, domain.Err(400, "invalid_request", "Invalid model ID")
 	}
 	c, err := s.Store.Load(ctx)
 	if err != nil {
-		return domain.ModelProfile{}, err
+		return domain.ResolvedModel{}, err
 	}
-	for _, m := range c.Models {
-		if m.ID == id {
-			if !m.Configured() {
-				return domain.ModelProfile{}, domain.Err(409, "model_unconfigured", "The selected model profile is not configured")
-			}
-			if !m.Enabled {
-				return domain.ModelProfile{}, domain.Err(409, "model_disabled", "The selected model profile is disabled")
-			}
-			return m, nil
-		}
+	rm, ok := c.ResolveExactModel(id)
+	if !ok {
+		return domain.ResolvedModel{}, domain.Err(404, "not_found", "Model profile not found")
 	}
-	return domain.ModelProfile{}, domain.Err(404, "not_found", "Model profile not found")
+	if !rm.Configured() {
+		return domain.ResolvedModel{}, domain.Err(409, "model_unconfigured", "The selected model profile or provider is not configured")
+	}
+	if !rm.ProviderEnabled {
+		return domain.ResolvedModel{}, domain.Err(409, "model_disabled", "The selected model's provider is disabled")
+	}
+	if !rm.ModelEnabled {
+		return domain.ResolvedModel{}, domain.Err(409, "model_disabled", "The selected model profile is disabled")
+	}
+	return rm, nil
 }
 
 // UpdateRouting changes only the administrator's selected default model.
@@ -384,7 +385,7 @@ func (s *Service) UpdateWebSearch(ctx context.Context, in UpdateWebSearchInput) 
 func (s *Service) cancelUnavailableModels(c domain.Config) {
 	available := make(map[string]bool, len(c.Models))
 	for _, m := range c.Models {
-		available[m.ID] = m.Enabled && m.Configured()
+		available[m.ID] = c.ResolveModelProfile(m).Available()
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -394,6 +395,7 @@ func (s *Service) cancelUnavailableModels(c domain.Config) {
 		}
 	}
 }
+
 func (s *Service) cancelActiveCalls(web bool) {
 	s.ensureInit()
 	s.mu.Lock()

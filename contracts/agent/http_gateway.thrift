@@ -37,6 +37,17 @@ struct ModelConfigDTO {
   8: required string updatedAt (api.body="updatedAt")
 }
 
+struct AdminModelProviderDTO {
+  1: required string id (api.body="id")
+  2: required string displayName (api.body="displayName")
+  3: required string baseUrl (api.body="baseUrl")
+  4: required bool hasApiKey (api.body="hasApiKey")
+  5: required bool enabled (api.body="enabled")
+  6: required bool configured (api.body="configured")
+  7: required i32 modelCount (api.body="modelCount")
+  8: required string updatedAt (api.body="updatedAt")
+}
+
 struct AdminModelProfileDTO {
   1: required string id (api.body="id")
   2: required string displayName (api.body="displayName")
@@ -49,6 +60,10 @@ struct AdminModelProfileDTO {
   9: required bool configured (api.body="configured")
   10: required bool isDefault (api.body="isDefault")
   11: required string updatedAt (api.body="updatedAt")
+  12: required string providerId (api.body="providerId")
+  13: required string providerDisplayName (api.body="providerDisplayName")
+  14: required bool providerEnabled (api.body="providerEnabled")
+  15: required bool effectiveEnabled (api.body="effectiveEnabled")
 }
 
 struct GetModelCatalogReq {}
@@ -75,6 +90,7 @@ struct AdminModelConfigResp {
   4: optional string defaultModelId (api.body="defaultModelId")
   5: required ModelRoutingConfigDTO routing (api.body="routing")
   6: required WebSearchConfigDTO webSearch (api.body="webSearch")
+  7: optional list<AdminModelProviderDTO> providers (api.body="providers")
 }
 
 struct UpdateAdminModelConfigReq {
@@ -89,29 +105,51 @@ struct UpdateAdminModelConfigReq {
   9: optional bool clearWebSearchApiKey (api.body="clearWebSearchApiKey")
 }
 
+struct CreateAdminModelProviderReq {
+  1: optional string id (api.body="id")
+  2: optional string displayName (api.body="displayName")
+  3: required string baseUrl (api.body="baseUrl")
+  4: optional string apiKey (api.body="apiKey")
+  5: required bool enabled (api.body="enabled")
+}
+
+struct UpdateAdminModelProviderReq {
+  1: required string id (api.path="id", go.tag="json:\"-\"")
+  2: optional string displayName (api.body="displayName")
+  3: optional string baseUrl (api.body="baseUrl")
+  4: optional string apiKey (api.body="apiKey")
+  5: optional bool clearApiKey (api.body="clearApiKey")
+  6: optional bool enabled (api.body="enabled")
+}
+
+struct DeleteAdminModelProviderReq {
+  1: required string id (api.path="id", go.tag="json:\"-\"")
+}
+
 struct CreateAdminModelProfileReq {
   1: optional string id (api.body="id")
   2: optional string displayName (api.body="displayName")
   3: optional string description (api.body="description")
-  4: required string baseUrl (api.body="baseUrl")
+  // Field 4 retired: baseUrl belongs to the Provider resource.
   5: required string model (api.body="model")
-  6: optional string apiKey (api.body="apiKey")
+  // Field 6 retired: apiKey belongs to the Provider resource.
   7: required bool enabled (api.body="enabled")
   8: optional i64 contextWindowTokens (api.body="contextWindowTokens")
   // Field 9 retired: default selection is updated through the routing API.
+  10: required string providerId (api.body="providerId")
 }
 
 struct UpdateAdminModelProfileReq {
   1: required string id (api.path="id", go.tag="json:\"-\"")
   2: optional string displayName (api.body="displayName")
   3: optional string description (api.body="description")
-  4: optional string baseUrl (api.body="baseUrl")
+  // Field 4 retired: baseUrl belongs to the Provider resource.
   5: optional string model (api.body="model")
-  6: optional string apiKey (api.body="apiKey")
-  7: optional bool clearApiKey (api.body="clearApiKey")
+  // Fields 6-7 retired: apiKey and clearApiKey belong to the Provider resource.
   8: optional bool enabled (api.body="enabled")
   9: optional i64 contextWindowTokens (api.body="contextWindowTokens")
   // Field 10 retired: default selection is updated through the routing API.
+  11: optional string providerId (api.body="providerId")
 }
 
 struct DeleteAdminModelProfileReq {
@@ -222,6 +260,9 @@ service ModelGatewayHTTPService {
   // Retired combined write: returns 409 config_api_changed without side effects.
   AdminModelConfigResp UpdateAdminModelConfig(1: UpdateAdminModelConfigReq req) (api.put="/api/v1/admin/model-gateway")
   TestAdminModelConfigResp TestAdminModelConfig(1: TestAdminModelConfigReq req) (api.post="/api/v1/admin/model-gateway/test")
+  AdminModelConfigResp CreateAdminModelProvider(1: CreateAdminModelProviderReq req) (api.post="/api/v1/admin/model-gateway/providers", api.status="201")
+  AdminModelConfigResp UpdateAdminModelProvider(1: UpdateAdminModelProviderReq req) (api.patch="/api/v1/admin/model-gateway/providers/:id")
+  AdminModelConfigResp DeleteAdminModelProvider(1: DeleteAdminModelProviderReq req) (api.delete="/api/v1/admin/model-gateway/providers/:id")
   AdminModelConfigResp CreateAdminModelProfile(1: CreateAdminModelProfileReq req) (api.post="/api/v1/admin/model-gateway/models", api.status="201")
   AdminModelConfigResp UpdateAdminModelProfile(1: UpdateAdminModelProfileReq req) (api.patch="/api/v1/admin/model-gateway/models/:id")
   AdminModelConfigResp DeleteAdminModelProfile(1: DeleteAdminModelProfileReq req) (api.delete="/api/v1/admin/model-gateway/models/:id")

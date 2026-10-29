@@ -62,22 +62,44 @@ func toAdminModelConfigResp(c domain.Config) *gatewaygen.AdminModelConfigResp {
 	effDefault := c.EffectiveDefaultModelID()
 	rawModels := c.Models
 	resolved := c.ResolveModel("")
+	modelCounts := make(map[string]int32, len(c.Providers))
+	for _, m := range rawModels {
+		modelCounts[m.ProviderID]++
+	}
+	providerDTOs := make([]*gatewaygen.AdminModelProviderDTO, 0, len(c.Providers))
+	for _, p := range c.Providers {
+		displayName := p.DisplayName
+		if displayName == "" {
+			displayName = p.ID
+		}
+		providerDTOs = append(providerDTOs, &gatewaygen.AdminModelProviderDTO{
+			ID:          p.ID,
+			DisplayName: displayName,
+			BaseUrl:     p.BaseURL,
+			HasApiKey:   len(p.CipherKey) > 0,
+			Enabled:     p.Enabled,
+			Configured:  p.Configured(),
+			ModelCount:  modelCounts[p.ID],
+			UpdatedAt:   p.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		})
+	}
 	dtos := make([]*gatewaygen.AdminModelProfileDTO, 0, len(rawModels))
 	for _, m := range rawModels {
-		displayName := m.DisplayName
-		if displayName == "" {
-			displayName = m.Model
-		}
+		rm := c.ResolveModelProfile(m)
 		dtos = append(dtos, &gatewaygen.AdminModelProfileDTO{
 			ID:                  m.ID,
-			DisplayName:         displayName,
+			ProviderId:          m.ProviderID,
+			ProviderDisplayName: rm.ProviderDisplayName,
+			ProviderEnabled:     rm.ProviderEnabled,
+			EffectiveEnabled:    rm.Enabled,
+			DisplayName:         rm.DisplayName,
 			Description:         m.Description,
-			BaseUrl:             m.BaseURL,
+			BaseUrl:             rm.BaseURL,
 			Model:               m.Model,
 			ContextWindowTokens: m.ContextWindow(),
-			HasApiKey:           len(m.CipherKey) > 0,
+			HasApiKey:           len(rm.CipherKey) > 0,
 			Enabled:             m.Enabled,
-			Configured:          m.Configured(),
+			Configured:          rm.Configured(),
 			IsDefault:           m.ID == c.Routing.DefaultModelID,
 			UpdatedAt:           m.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		})
@@ -101,6 +123,7 @@ func toAdminModelConfigResp(c domain.Config) *gatewaygen.AdminModelConfigResp {
 		Routing:   &gatewaygen.ModelRoutingConfigDTO{DefaultModelId: c.Routing.DefaultModelID, EffectiveModelId: effDefault},
 		WebSearch: &gatewaygen.WebSearchConfigDTO{Provider: "tavily", Enabled: c.WebSearch.Enabled, HasApiKey: c.WebSearch.Configured(), Configured: c.WebSearch.Configured(), UpdatedAt: ptr(c.WebSearch.UpdatedAt.UTC().Format(time.RFC3339Nano))},
 		Status:    resolved.Status(),
+		Providers: providerDTOs,
 		Models:    dtos,
 	}
 	if effDefault != "" {

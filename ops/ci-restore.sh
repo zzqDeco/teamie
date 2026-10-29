@@ -13,13 +13,6 @@ for suffix in identity chat agent_control agent_runtime gateway; do
   # Compare the real restored migration ledger with the generated release
   # contract, so updating a migration without its manifest fails before deploy.
   version=$(python3 -c 'import sys; from ops.manifest import SCHEMA_V2; print(SCHEMA_V2[sys.argv[1]])' "$suffix")
-  # Identity's real schema creates its complete production migration ledger.
-  if [[ $suffix != identity && $suffix != agent_runtime && $suffix != chat && $suffix != agent_control ]]; then
-    "${pg[@]}" psql -U postgres -d "teamie_$suffix" -v ON_ERROR_STOP=1 -v ledger="${suffix}_schema_migrations" -v version="$version" <<'SQL'
-CREATE TABLE :"ledger"(version INTEGER PRIMARY KEY);
-INSERT INTO :"ledger" VALUES(:version);
-SQL
-  fi
   # Use a known fixture table so the restore asserts data and binary values.
   "${pg[@]}" psql -U postgres -d "teamie_$suffix" -v ON_ERROR_STOP=1 <<'SQL'
 CREATE TABLE restore_fixture(id INTEGER PRIMARY KEY,payload JSONB NOT NULL,encrypted_value BYTEA NOT NULL);
@@ -154,6 +147,18 @@ INSERT INTO runtime_context_recoveries(run_id,model_step,context_profile,request
 VALUES('20000000-0000-4000-8000-000000000001',2,'teamie-context-v038',repeat('b',64),true,'context_overflow',1,jsonb_build_object('version',1,'action','compact_prefix','budget',:'frozen_budget'::jsonb));
 SQL
   fi
+  if [[ $suffix == gateway ]]; then
+    "${pg[@]}" psql -U postgres -d teamie_gateway -v ON_ERROR_STOP=1 < services/llm-gateway/internal/infra/pg/migrations/001_gateway.sql >/dev/null
+    "${pg[@]}" psql -U postgres -d teamie_gateway -v ON_ERROR_STOP=1 <<'SQL'
+INSERT INTO gateway_providers(id,display_name,base_url,encrypted_key,enabled)
+VALUES('restore-provider','Restore Provider','https://1.1.1.1/v1',decode('00fffe80890a0d','hex'),true);
+INSERT INTO gateway_models(id,provider_id,display_name,description,model,context_window_tokens,enabled)
+VALUES('restore-model-a','restore-provider','Model A','Primary model','gpt-restore-a',32768,true),
+      ('restore-model-b','restore-provider','Model B','Secondary model','gpt-restore-b',131072,false);
+UPDATE gateway_model_routing SET default_model_id='restore-model-a' WHERE id=true;
+UPDATE gateway_web_search_config SET encrypted_key=decode('aabbccddeeff00','hex'),enabled=true WHERE id=true;
+SQL
+  fi
   "${pg[@]}" pg_dump -U postgres -d "teamie_$suffix" --format custom > "$scratch/$suffix.dump"
   "${pg[@]}" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE restore_$suffix;"
   "${pg[@]}" pg_restore -U postgres -d "restore_$suffix" --exit-on-error --no-owner --no-acl < "$scratch/$suffix.dump"
@@ -252,8 +257,11 @@ SELECT (SELECT context_budget=(:'schedule_budget'::jsonb||'{"directMessages":tru
 SQL
 )
     [[ $actual == t ]] || { echo 'Runtime direct-message policy restore failed.' >&2; exit 1; }
-
-
+  fi
+  if [[ $suffix == gateway ]]; then
+    actual=$("${pg[@]}" psql -U postgres -d restore_gateway -At -v ON_ERROR_STOP=1 -c \
+      "SELECT (SELECT string_agg(version::text,',' ORDER BY version) FROM gateway_schema_migrations)||':'||encode(p.encrypted_key,'hex')||':'||(SELECT string_agg(m.id||'='||m.model||':'||m.context_window_tokens||':'||m.enabled::text,',' ORDER BY m.id) FROM gateway_models m WHERE m.provider_id=p.id)||':'||(SELECT default_model_id FROM gateway_model_routing WHERE id=true)||':'||(SELECT encode(encrypted_key,'hex')||':'||enabled::text FROM gateway_web_search_config WHERE id=true) FROM gateway_providers p WHERE p.id='restore-provider';")
+    [[ $actual == '1,2,3,4,5,6:00fffe80890a0d:restore-model-a=gpt-restore-a:32768:true,restore-model-b=gpt-restore-b:131072:false:restore-model-a:aabbccddeeff00:true' ]] || { echo 'Gateway provider, multi-model catalog, routing and encrypted secret restore verification failed.' >&2; exit 1; }
   fi
   # Ordinary owners may not connect to another service's database.
   if "${pg[@]}" env PGPASSWORD=ci-identity-disposable-password psql -h 127.0.0.1 -U teamie_identity -d teamie_gateway -c 'SELECT 1' >/dev/null 2>&1; then

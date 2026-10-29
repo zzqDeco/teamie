@@ -54,7 +54,16 @@ func (s *Service) CallChat(ctx context.Context, owner, agentID, sessionID, runID
 	if err != nil {
 		return fail(err, "")
 	}
-	c := settings.ResolveModel(RequestedModelID(ctx))
+	var c domain.ResolvedModel
+	if StrictModelSelection(ctx) {
+		exact, ok := settings.ResolveExactModel(RequestedModelID(ctx))
+		if !ok {
+			return fail(domain.Err(404, "not_found", "Model profile not found"), "")
+		}
+		c = exact
+	} else {
+		c = settings.ResolveModel(RequestedModelID(ctx))
+	}
 	if !c.Configured() {
 		return fail(domain.Err(409, "model_unconfigured", "An administrator must configure the model gateway"), "")
 	}
@@ -153,7 +162,16 @@ func (s *Service) StreamChat(ctx context.Context, owner, agentID, sessionID, run
 	if err != nil {
 		return terminal(err)
 	}
-	c := settings.ResolveModel(RequestedModelID(ctx))
+	var c domain.ResolvedModel
+	if StrictModelSelection(ctx) {
+		exact, ok := settings.ResolveExactModel(RequestedModelID(ctx))
+		if !ok {
+			return terminal(domain.Err(404, "not_found", "Model profile not found"))
+		}
+		c = exact
+	} else {
+		c = settings.ResolveModel(RequestedModelID(ctx))
+	}
 	if !c.Configured() {
 		return terminal(domain.Err(409, "model_unconfigured", "An administrator must configure the model gateway"))
 	}
