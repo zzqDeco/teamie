@@ -23,9 +23,9 @@ import "@fontsource-variable/dm-sans";
 import "./tokens.css";
 import "./styles.css";
 import "./layout.css";
-import "./password-recovery.css";
-import "./feedback.css";
-import "./conveniences.css";
+import "./styles/password-recovery.css";
+import "./styles/feedback.css";
+import "./styles/conveniences.css";
 applyTheme();
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: true } },

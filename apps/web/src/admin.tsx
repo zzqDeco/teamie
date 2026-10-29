@@ -19,7 +19,7 @@ import type {
   RegistrationInvite,
 } from "@teamie/api-client";
 import { useAuth } from "./auth";
-import { errorText } from "./chat";
+import { errorText } from "./errors";
 import { Button, IconButton, Modal, Notice } from "./ui";
 import { toast } from "./toast";
 import { ICON } from "./icons";
