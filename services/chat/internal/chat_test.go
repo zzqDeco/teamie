@@ -3,13 +3,18 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"teamie/pkg/httpx"
 	"teamie/pkg/postgres/testdb"
+	"teamie/services/chat/internal/domain"
 	"testing"
 )
 
@@ -84,7 +89,7 @@ func TestAtomicWorkspaceAuthorizationAndMessageLifecycle(t *testing.T) {
 	if e != nil || len(history) != 1 || history[0].Body != "" || history[0].RetractedAt == nil {
 		t.Fatal("tombstone not durable", e)
 	}
-	events, cursor, more, e := s.Sync(ctx, member.ID, "0", 500)
+	events, cursor, more, e := s.Sync(ctx, member.ID, "0", 100)
 	if e != nil || more {
 		t.Fatal("sync", e)
 	}
@@ -106,7 +111,7 @@ func TestAtomicWorkspaceAuthorizationAndMessageLifecycle(t *testing.T) {
 	if _, _, e = s.Send(ctx, member, c.ID, "forbidden", "Denied", nil); e == nil {
 		t.Fatal("removed member sent")
 	}
-	events, next, more, e := s.Sync(ctx, member.ID, cursor, 500)
+	events, next, more, e := s.Sync(ctx, member.ID, cursor, 100)
 	if e != nil || more || next == cursor {
 		t.Fatal("filtered stream did not advance", e)
 	}
@@ -248,5 +253,119 @@ func TestWriteFlagsDoNotHidePersistedContent(t *testing.T) {
 	history, _, e := s.Messages(ctx, member.ID, c.ID, 0, 50)
 	if e != nil || len(history) != 1 || history[0].Body != "Persisted" {
 		t.Fatal("flag hid persisted content", e)
+	}
+}
+
+func TestWorkspaceMemberCapAndBatchedChannelFanout(t *testing.T) {
+	ctx := context.Background()
+	s, ws, channel, owner, member := setup(t)
+	code, _, err := s.CreateInvite(ctx, owner.ID, ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Fill workspace to MaxWorkspaceMembers - 1 (499 members: owner + member + 497 extra).
+	extra := make([]string, 0, domain.MaxWorkspaceMembers-3)
+	for len(extra) < domain.MaxWorkspaceMembers-3 {
+		extra = append(extra, httpx.ID())
+	}
+	if _, err = s.DB.Exec(ctx, `INSERT INTO workspace_members(workspace_id,user_id,role) SELECT $1,unnest($2::text[]),'member'`, ws.ID, extra); err != nil {
+		t.Fatal(err)
+	}
+
+	// Two concurrent invite acceptances race for the 500th slot: exactly 1 succeeds and 1 fails with 400 invalid_members.
+	candidates := []string{httpx.ID(), httpx.ID()}
+	start := make(chan struct{})
+	results := make(chan error, len(candidates))
+	var wg sync.WaitGroup
+	for _, cid := range candidates {
+		wg.Add(1)
+		go func(uid string) {
+			defer wg.Done()
+			<-start
+			_, _, acceptErr := s.AcceptInvite(ctx, uid, code)
+			results <- acceptErr
+		}(cid)
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+
+	succeeded := 0
+	for resErr := range results {
+		if resErr == nil {
+			succeeded++
+		} else {
+			var he *httpx.Error
+			if !errors.As(resErr, &he) || he.Status != 400 || he.Code != "invalid_members" {
+				t.Fatalf("expected 400 invalid_members at workspace capacity, got %v", resErr)
+			}
+		}
+	}
+	if succeeded != 1 {
+		t.Fatalf("expected 1 candidate to claim the 500th workspace slot, got %d", succeeded)
+	}
+
+	// Existing member re-accepting the invite at full capacity remains idempotent.
+	if _, _, err = s.AcceptInvite(ctx, member.ID, code); err != nil {
+		t.Fatalf("existing member idempotent invite acceptance failed at capacity: %v", err)
+	}
+
+	// Delegating an Agent into a full workspace is also rejected with 400 invalid_members.
+	agent := httpx.User{ID: httpx.ID(), DisplayName: "Agent", Kind: "agent"}
+	_, err = s.SetPrincipalWorkspaces(ctx, agent, owner, []string{ws.ID}, 1)
+	var he *httpx.Error
+	if !errors.As(err, &he) || he.Status != 400 || he.Code != "invalid_members" {
+		t.Fatalf("expected 400 invalid_members for agent delegation into full workspace, got %v", err)
+	}
+
+	// Sending a message to the 500-member channel fans out to all 500 members atomically.
+	msg, first, err := s.Send(ctx, owner, channel.ID, "fanout-500", "Hello 500 members", nil)
+	if err != nil || !first {
+		t.Fatalf("channel send to 500 members failed: %v", err)
+	}
+	var eventCount int
+	if err = s.DB.QueryRow(ctx, `SELECT count(*) FROM sync_events WHERE conversation_id=$1 AND payload#>>'{message,id}'=$2`, channel.ID, msg.ID).Scan(&eventCount); err != nil || eventCount != domain.MaxWorkspaceMembers {
+		t.Fatalf("expected %d sync_events for 500-member channel send, got %d (%v)", domain.MaxWorkspaceMembers, eventCount, err)
+	}
+}
+
+func TestSyncLimitMatchesContractCap(t *testing.T) {
+	ctx := context.Background()
+	s, _, c, owner, member := setup(t)
+	if _, _, err := s.Send(ctx, owner, c.ID, "sync-cap-1", "Message 1", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, invalidLimit := range []int{-1, 0, 101, 500} {
+		_, _, _, err := s.Sync(ctx, member.ID, "0", invalidLimit)
+		var he *httpx.Error
+		if !errors.As(err, &he) || he.Status != 400 || he.Code != "invalid_query" {
+			t.Fatalf("s.Sync limit=%d: expected 400 invalid_query, got %v", invalidLimit, err)
+		}
+	}
+
+	token := strings.Repeat("m", 64)
+	id := &fakeIdentity{users: map[string]httpx.User{token: member}}
+	routes := (&Handler{Store: s, Identity: id, Origin: "https://teamie.example"}).Routes()
+
+	callSync := func(query string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/sync"+query, nil)
+		req.AddCookie(&http.Cookie{Name: httpx.CookieName, Value: token})
+		w := httptest.NewRecorder()
+		routes.ServeHTTP(w, req)
+		return w
+	}
+
+	for _, okQuery := range []string{"?cursor=0", "?cursor=0&limit=1", "?cursor=0&limit=100"} {
+		if w := callSync(okQuery); w.Code != http.StatusOK {
+			t.Fatalf("GET /api/v1/sync%s: got %d %s, want 200", okQuery, w.Code, w.Body.String())
+		}
+	}
+	for _, badQuery := range []string{"?cursor=0&limit=0", "?cursor=0&limit=-1", "?cursor=0&limit=101", "?cursor=0&limit=500", "?cursor=0&limit=abc"} {
+		w := callSync(badQuery)
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), `"invalid_query"`) {
+			t.Fatalf("GET /api/v1/sync%s: got %d %s, want 400 invalid_query", badQuery, w.Code, w.Body.String())
+		}
 	}
 }

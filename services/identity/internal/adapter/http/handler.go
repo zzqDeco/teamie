@@ -36,6 +36,8 @@ type RateLimiter struct {
 }
 
 // Allow checks whether an operation keyed by bucketKey is within rate limits.
+// When bucketKey is empty, only the global rate limit is evaluated and no
+// per-key bucket is created.
 func (rl *RateLimiter) Allow(bucketKey string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
@@ -55,8 +57,12 @@ func (rl *RateLimiter) Allow(bucketKey string) bool {
 	if rl.hash != nil {
 		hashFn = rl.hash
 	}
+	buckets := map[string]int{"*": 600}
+	if normalized := strings.ToLower(strings.TrimSpace(bucketKey)); normalized != "" {
+		buckets[hashFn(normalized)] = 20
+	}
 	allowed := true
-	for key, max := range map[string]int{"*": 600, hashFn(strings.ToLower(strings.TrimSpace(bucketKey))): 20} {
+	for key, max := range buckets {
 		v := rl.rates[key]
 		if now.Sub(v.Start) > time.Minute {
 			v = rateEntry{Start: now}
@@ -66,6 +72,19 @@ func (rl *RateLimiter) Allow(bucketKey string) bool {
 		allowed = allowed && v.Count <= max
 	}
 	return allowed
+}
+
+// BucketCount returns the number of active per-key rate-limit buckets, excluding the global bucket.
+func (rl *RateLimiter) BucketCount() int {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	n := 0
+	for k := range rl.rates {
+		if k != "*" {
+			n++
+		}
+	}
+	return n
 }
 
 type actorContextKey struct{}
@@ -221,10 +240,14 @@ func (a *Adapter) GetRegistrationMetadata(ctx context.Context, _ *identitygen.Ge
 }
 
 func (a *Adapter) Register(ctx context.Context, req *identitygen.RegisterReq) (*identitygen.SessionResp, error) {
-	if !a.Limiter.Allow(req.Email) {
+	email, err := domain.NormalizeEmail(req.Email)
+	if !a.Limiter.Allow(email) {
 		return nil, domain.ErrRateLimited()
 	}
-	ss, token, err := a.App.Register(ctx, req.Email, req.Password, req.DisplayName, req.InviteCode)
+	if err != nil {
+		return nil, err
+	}
+	ss, token, err := a.App.Register(ctx, email, req.Password, req.DisplayName, req.InviteCode)
 	if err != nil {
 		return nil, err
 	}
@@ -233,10 +256,14 @@ func (a *Adapter) Register(ctx context.Context, req *identitygen.RegisterReq) (*
 }
 
 func (a *Adapter) Login(ctx context.Context, req *identitygen.LoginReq) (*identitygen.SessionResp, error) {
-	if !a.Limiter.Allow(req.Email) {
+	email, err := domain.NormalizeEmail(req.Email)
+	if !a.Limiter.Allow(email) {
 		return nil, domain.ErrRateLimited()
 	}
-	ss, token, err := a.App.Login(ctx, req.Email, req.Password)
+	if err != nil {
+		return nil, domain.ErrInvalidCredentials()
+	}
+	ss, token, err := a.App.Login(ctx, email, req.Password)
 	if err != nil {
 		return nil, err
 	}

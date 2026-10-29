@@ -10,6 +10,8 @@ const (
 	PresenceIdleTimeout      = 5 * time.Minute
 	PresenceOfflineGrace     = 30 * time.Second
 	PresenceThrottleInterval = 30 * time.Second
+	PresenceStoreTTL         = 10 * time.Minute
+	PresenceRefreshInterval  = 2 * time.Minute
 )
 
 type connPresence struct {
@@ -21,15 +23,17 @@ type userPresence struct {
 	conns          map[Client]*connPresence
 	disconnectedAt time.Time
 	lastPublished  string
+	lastSaved      time.Time
 	graceGen       uint64
 }
 
 // PresenceTracker tracks per-user and per-connection human presence state
 // (online, away, offline) with idle timeout and disconnect grace period.
 type PresenceTracker struct {
-	IdleTimeout  time.Duration
-	OfflineGrace time.Duration
-	Now          func() time.Time
+	IdleTimeout     time.Duration
+	OfflineGrace    time.Duration
+	RefreshInterval time.Duration
+	Now             func() time.Time
 
 	mu    sync.Mutex
 	users map[string]*userPresence
@@ -54,6 +58,13 @@ func (p *PresenceTracker) offlineGrace() time.Duration {
 		return p.OfflineGrace
 	}
 	return PresenceOfflineGrace
+}
+
+func (p *PresenceTracker) refreshInterval() time.Duration {
+	if p != nil && p.RefreshInterval > 0 {
+		return p.RefreshInterval
+	}
+	return PresenceRefreshInterval
 }
 
 func (p *PresenceTracker) ensureUsers() {
@@ -89,6 +100,7 @@ func (p *PresenceTracker) Connect(c Client, kind string) (changed bool, state st
 	}
 	up.conns[c] = &connPresence{lastActive: now, idle: false}
 	up.disconnectedAt = time.Time{}
+	up.lastSaved = now
 	up.graceGen++
 	state = computeConnectedState(up, now, idleTimeout)
 	if up.lastPublished != state {
@@ -128,6 +140,7 @@ func (p *PresenceTracker) Report(c Client, kind, clientState string) (changed bo
 		cp.idle = true
 	}
 	up.disconnectedAt = time.Time{}
+	up.lastSaved = now
 	state = computeConnectedState(up, now, idleTimeout)
 	if up.lastPublished != state {
 		up.lastPublished = state
@@ -162,6 +175,7 @@ func (p *PresenceTracker) Disconnect(c Client, onTransition func(userID, state s
 		state := computeConnectedState(up, now, idleTimeout)
 		if up.lastPublished != state {
 			up.lastPublished = state
+			up.lastSaved = now
 			immediateState = state
 		}
 	} else {
@@ -194,18 +208,26 @@ func (p *PresenceTracker) Disconnect(c Client, onTransition func(userID, state s
 
 // Sweep evaluates idle timeouts and offline grace expirations against p.Now().
 func (p *PresenceTracker) Sweep(onTransition func(userID, state string)) {
+	p.SweepAndRefresh(onTransition, nil)
+}
+
+// SweepAndRefresh evaluates idle timeouts, offline grace expirations, and
+// periodic store TTL refreshes for connected users against p.Now().
+func (p *PresenceTracker) SweepAndRefresh(onTransition, onRefresh func(userID, state string)) {
 	if p == nil {
 		return
 	}
 	now := p.now()
 	idleTimeout := p.idleTimeout()
 	grace := p.offlineGrace()
+	refreshInterval := p.refreshInterval()
 
 	type transition struct {
 		userID string
 		state  string
 	}
 	var transitions []transition
+	var refreshes []transition
 
 	p.mu.Lock()
 	for uid, up := range p.users {
@@ -213,7 +235,11 @@ func (p *PresenceTracker) Sweep(onTransition func(userID, state string)) {
 			state := computeConnectedState(up, now, idleTimeout)
 			if up.lastPublished != state {
 				up.lastPublished = state
+				up.lastSaved = now
 				transitions = append(transitions, transition{userID: uid, state: state})
+			} else if up.lastSaved.IsZero() || now.Sub(up.lastSaved) >= refreshInterval {
+				up.lastSaved = now
+				refreshes = append(refreshes, transition{userID: uid, state: state})
 			}
 		} else if !up.disconnectedAt.IsZero() && now.Sub(up.disconnectedAt) >= grace {
 			delete(p.users, uid)
@@ -225,6 +251,11 @@ func (p *PresenceTracker) Sweep(onTransition func(userID, state string)) {
 	if onTransition != nil {
 		for _, tr := range transitions {
 			onTransition(tr.userID, tr.state)
+		}
+	}
+	if onRefresh != nil {
+		for _, rf := range refreshes {
+			onRefresh(rf.userID, rf.state)
 		}
 	}
 }

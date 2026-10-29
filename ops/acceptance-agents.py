@@ -83,10 +83,12 @@ class Client:
         self.csrf = ""
         self.user: dict = {}
 
-    def call(self, method: str, path: str, body: dict | None = None, status: int | tuple[int, ...] = 200, *, csrf: bool = True, origin: str | None = None) -> dict:
+    def call(self, method: str, path: str, body: dict | None = None, status: int | tuple[int, ...] = 200, *, csrf: bool = True, origin: str | None = None, idempotency_key: str | None = None) -> dict:
         headers = {"Origin": ORIGIN if origin is None else origin, "Accept": "application/json"}
         if method not in ("GET", "HEAD") and csrf and self.csrf:
             headers["X-CSRF-Token"] = self.csrf
+        if method == "POST" and path == "/api/v1/agents":
+            headers["Idempotency-Key"] = idempotency_key or secrets.token_hex(16)
         payload = None
         if body is not None:
             payload = json.dumps(body).encode()

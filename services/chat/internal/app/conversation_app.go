@@ -53,6 +53,9 @@ func (s *Service) Head(ctx context.Context, userID string) (string, error) {
 
 // Sync returns a bounded page of durable sync events for user after cursor.
 func (s *Service) Sync(ctx context.Context, userID, cursor string, limit int) ([]domain.Event, string, bool, error) {
+	if limit < 1 || limit > 100 {
+		return nil, "", false, domain.Err(400, "invalid_query", "Invalid limit")
+	}
 	if cursor == "" {
 		cursor = "0"
 	}

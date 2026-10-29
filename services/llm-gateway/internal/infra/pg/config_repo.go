@@ -66,20 +66,88 @@ func (s *PGStore) loadModels(ctx context.Context, forUpdate bool) ([]domain.Mode
 	return models, rows.Err()
 }
 
-// Load assembles a read-only view of the three independently stored resources.
+// Load assembles a read-only view of the three independently stored resources
+// from a single SQL snapshot.
 func (s *PGStore) Load(ctx context.Context) (domain.Config, error) {
-	var c domain.Config
-	err := s.DB.Conn(ctx).QueryRow(ctx, `SELECT r.default_model_id,r.updated_at,w.encrypted_key,w.enabled,w.updated_at FROM gateway_model_routing r CROSS JOIN gateway_web_search_config w WHERE r.id AND w.id`).Scan(&c.Routing.DefaultModelID, &c.Routing.UpdatedAt, &c.WebSearch.CipherKey, &c.WebSearch.Enabled, &c.WebSearch.UpdatedAt)
+	rows, err := s.DB.Conn(ctx).Query(ctx, `SELECT r.default_model_id,r.updated_at,w.encrypted_key,w.enabled,w.updated_at,m.id,m.display_name,m.description,m.base_url,m.model,m.encrypted_key,m.context_window_tokens,m.enabled,m.created_at,m.updated_at FROM gateway_model_routing r CROSS JOIN gateway_web_search_config w LEFT JOIN gateway_models m ON true WHERE r.id AND w.id ORDER BY m.created_at ASC, m.id ASC`)
 	if err != nil {
 		return domain.Config{}, err
 	}
-	c.Models, err = s.loadModels(ctx, false)
-	return c, err
+	defer rows.Close()
+	var (
+		c      domain.Config
+		sawRow bool
+	)
+	for rows.Next() {
+		var (
+			defaultModelID                                    string
+			routingUpdatedAt, webUpdatedAt                    time.Time
+			webCipherKey, mCipherKey                          []byte
+			webEnabled                                        bool
+			mID, mDisplayName, mDescription, mBaseURL, mModel *string
+			mContextWindowTokens                              *int64
+			mEnabled                                          *bool
+			mCreatedAt, mUpdatedAt                            *time.Time
+		)
+		if err := rows.Scan(
+			&defaultModelID,
+			&routingUpdatedAt,
+			&webCipherKey,
+			&webEnabled,
+			&webUpdatedAt,
+			&mID,
+			&mDisplayName,
+			&mDescription,
+			&mBaseURL,
+			&mModel,
+			&mCipherKey,
+			&mContextWindowTokens,
+			&mEnabled,
+			&mCreatedAt,
+			&mUpdatedAt,
+		); err != nil {
+			return domain.Config{}, err
+		}
+		if !sawRow {
+			sawRow = true
+			c.Routing = domain.ModelRoutingConfig{
+				DefaultModelID: defaultModelID,
+				UpdatedAt:      routingUpdatedAt,
+			}
+			c.WebSearch = domain.WebSearchConfig{
+				CipherKey: webCipherKey,
+				Enabled:   webEnabled,
+				UpdatedAt: webUpdatedAt,
+			}
+		}
+		if mID != nil {
+			c.Models = append(c.Models, domain.ModelProfile{
+				ID:                  *mID,
+				DisplayName:         *mDisplayName,
+				Description:         *mDescription,
+				BaseURL:             *mBaseURL,
+				Model:               *mModel,
+				CipherKey:           mCipherKey,
+				ContextWindowTokens: *mContextWindowTokens,
+				Enabled:             *mEnabled,
+				CreatedAt:           *mCreatedAt,
+				UpdatedAt:           *mUpdatedAt,
+			})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return domain.Config{}, err
+	}
+	if !sawRow {
+		return domain.Config{}, errors.New("gateway configuration not initialized")
+	}
+	return c, nil
 }
 
 // UpdateModels serializes catalog mutations with routing validation. It does not
 // modify routing intent, search settings or the retired gateway_config record.
 func (s *PGStore) UpdateModels(ctx context.Context, change func([]domain.ModelProfile) ([]domain.ModelProfile, error)) (domain.Config, error) {
+	var c domain.Config
 	err := s.WithinTx(ctx, func(ctx context.Context) error {
 		if _, err := s.DB.Conn(ctx).Exec(ctx, `SELECT id FROM gateway_model_routing WHERE id FOR UPDATE`); err != nil {
 			return err
@@ -104,15 +172,17 @@ func (s *PGStore) UpdateModels(ctx context.Context, change func([]domain.ModelPr
 				return err
 			}
 		}
-		return nil
+		c, err = s.Load(ctx)
+		return err
 	})
 	if err != nil {
 		return domain.Config{}, err
 	}
-	return s.Load(ctx)
+	return c, nil
 }
 
 func (s *PGStore) UpdateRouting(ctx context.Context, routing domain.ModelRoutingConfig) (domain.Config, error) {
+	var c domain.Config
 	err := s.WithinTx(ctx, func(ctx context.Context) error {
 		if _, err := s.DB.Conn(ctx).Exec(ctx, `SELECT id FROM gateway_model_routing WHERE id FOR UPDATE`); err != nil {
 			return err
@@ -126,16 +196,21 @@ func (s *PGStore) UpdateRouting(ctx context.Context, routing domain.ModelRouting
 				return domain.Err(404, "not_found", "Model profile not found")
 			}
 		}
-		_, err := s.DB.Conn(ctx).Exec(ctx, `UPDATE gateway_model_routing SET default_model_id=$1,updated_at=now() WHERE id`, routing.DefaultModelID)
+		if _, err := s.DB.Conn(ctx).Exec(ctx, `UPDATE gateway_model_routing SET default_model_id=$1,updated_at=now() WHERE id`, routing.DefaultModelID); err != nil {
+			return err
+		}
+		var err error
+		c, err = s.Load(ctx)
 		return err
 	})
 	if err != nil {
 		return domain.Config{}, err
 	}
-	return s.Load(ctx)
+	return c, nil
 }
 
 func (s *PGStore) UpdateWebSearch(ctx context.Context, change func(domain.WebSearchConfig) (domain.WebSearchConfig, error)) (domain.Config, error) {
+	var c domain.Config
 	err := s.WithinTx(ctx, func(ctx context.Context) error {
 		var old domain.WebSearchConfig
 		if err := s.DB.Conn(ctx).QueryRow(ctx, `SELECT encrypted_key,enabled,updated_at FROM gateway_web_search_config WHERE id FOR UPDATE`).Scan(&old.CipherKey, &old.Enabled, &old.UpdatedAt); err != nil {
@@ -145,11 +220,14 @@ func (s *PGStore) UpdateWebSearch(ctx context.Context, change func(domain.WebSea
 		if err != nil {
 			return err
 		}
-		_, err = s.DB.Conn(ctx).Exec(ctx, `UPDATE gateway_web_search_config SET encrypted_key=$1,enabled=$2,updated_at=now() WHERE id`, next.CipherKey, next.Enabled)
+		if _, err = s.DB.Conn(ctx).Exec(ctx, `UPDATE gateway_web_search_config SET encrypted_key=$1,enabled=$2,updated_at=now() WHERE id`, next.CipherKey, next.Enabled); err != nil {
+			return err
+		}
+		c, err = s.Load(ctx)
 		return err
 	})
 	if err != nil {
 		return domain.Config{}, err
 	}
-	return s.Load(ctx)
+	return c, nil
 }

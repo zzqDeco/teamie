@@ -55,6 +55,7 @@ type authority struct {
 	principals          map[string]fakePrincipal
 	membershipRevisions map[string]int64
 	failProvision       bool
+	failMemberships     bool
 }
 
 func (f *authority) Validate(_ context.Context, token string) (*im.User, string, error) {
@@ -106,6 +107,9 @@ func (f *authority) Provision(_ context.Context, a Agent, revision int64, enable
 	return nil
 }
 func (f *authority) Memberships(_ context.Context, a Agent, ids []string) ([]string, error) {
+	if f.failMemberships {
+		return nil, fmt.Errorf("chat offline")
+	}
 	if a.MembershipRevision <= f.membershipRevisions[a.ID] {
 		return append([]string{}, f.members[a.ID]...), nil
 	}
@@ -235,9 +239,12 @@ func TestDurablePendingDisableDeleteAndRuntimeState(t *testing.T) {
 	ctx := context.Background()
 	s, f, _ := setupControl(t)
 	f.failProvision = true
-	a := createAgent(t, s, []string{"ws1"})
-	if s.definition(a).Enabled || a.AppliedRevision == a.Revision {
-		t.Fatal("unapplied principal advertised enabled")
+	a, e := s.Create(ctx, "owner", Changes{Name: ptr("Assistant"), WorkspaceIDs: ptr([]string{"ws1"})})
+	if e == nil {
+		t.Fatal("create succeeded while identity offline")
+	}
+	if a.ID == "" || s.definition(a).Enabled || a.AppliedRevision == a.Revision {
+		t.Fatal("unapplied principal advertised enabled", a)
 	}
 	f.failProvision = false
 	// A new process can recover from durable desired state without an in-memory queue.
@@ -245,7 +252,7 @@ func TestDurablePendingDisableDeleteAndRuntimeState(t *testing.T) {
 	if e := restarted.Reconcile(ctx, a.ID); e != nil {
 		t.Fatal(e)
 	}
-	a, e := s.Owned(ctx, "owner", a.ID)
+	a, e = s.Owned(ctx, "owner", a.ID)
 	if e != nil || !s.definition(a).Enabled {
 		t.Fatal("pending creation not recovered", e)
 	}
@@ -297,6 +304,9 @@ func TestHumanOnlyHTTPStrictSettingsAndCSRF(t *testing.T) {
 	h := (&Handler{Store: s, Origin: "https://teamie.example"}).Routes()
 	call := func(method, path, body, token, csrf, origin, bearer string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		if method == "POST" && path == "/api/v1/agents" {
+			r.Header.Set("Idempotency-Key", id())
+		}
 		r.AddCookie(&http.Cookie{Name: "teamie_session", Value: token})
 		r.Header.Set("X-CSRF-Token", csrf)
 		r.Header.Set("Origin", origin)
@@ -355,5 +365,114 @@ func TestFeatureFlagsDefaultFailClosed(t *testing.T) {
 	}
 	if (Flags{Path: path}).Enabled("agents.enabled") {
 		t.Fatal("malformed config enabled")
+	}
+}
+
+func TestCreateAndUpdateSurfaceReconcileFailuresAndIdempotentRetry(t *testing.T) {
+	ctx := context.Background()
+	s, f, _ := setupControl(t)
+	h := (&Handler{Store: s, Origin: "https://teamie.example"}).Routes()
+
+	callHTTP := func(method, path, body, idempotencyKey string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r.AddCookie(&http.Cookie{Name: "teamie_session", Value: "owner"})
+		r.Header.Set("X-CSRF-Token", "csrf")
+		r.Header.Set("Origin", "https://teamie.example")
+		if idempotencyKey != "" {
+			r.Header.Set("Idempotency-Key", idempotencyKey)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+
+	// 1. Create failure when Identity ProvisionPrincipal fails, followed by idempotent retry via Idempotency-Key.
+	f.failProvision = true
+	w := callHTTP("POST", "/api/v1/agents", `{"name":"KeyedAgent","workspaceIds":["ws1"]}`, "create-key-1")
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 when Identity fails during create, got %d: %s", w.Code, w.Body.String())
+	}
+	f.failProvision = false
+	w = callHTTP("POST", "/api/v1/agents", `{"name":"KeyedAgent","workspaceIds":["ws1"]}`, "create-key-1")
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201 on create retry after Identity recovers, got %d: %s", w.Code, w.Body.String())
+	}
+	var keyedOut struct {
+		Agent Agent `json:"agent"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &keyedOut); err != nil {
+		t.Fatal(err)
+	}
+	// Repeating the same Idempotency-Key after 201 returns the same Agent without duplicating.
+	w = callHTTP("POST", "/api/v1/agents", `{"name":"KeyedAgent","workspaceIds":["ws1"]}`, "create-key-1")
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201 on idempotent replay, got %d: %s", w.Code, w.Body.String())
+	}
+	var replayOut struct {
+		Agent Agent `json:"agent"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &replayOut); err != nil || replayOut.Agent.ID != keyedOut.Agent.ID {
+		t.Fatalf("idempotent replay returned different agent: %v vs %v", replayOut.Agent.ID, keyedOut.Agent.ID)
+	}
+	// Reusing the same Idempotency-Key with a conflicting payload is rejected with 409.
+	if w := callHTTP("POST", "/api/v1/agents", `{"name":"DifferentName","workspaceIds":["ws1"]}`, "create-key-1"); w.Code != http.StatusConflict {
+		t.Fatalf("expected 409 on conflicting idempotency key reuse, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// 2. Chat membership failure also retains an explicit creation identity across retry.
+	f.failMemberships = true
+	pendingChat, err := s.Create(ctx, "owner", Changes{Name: ptr("ChatSyncedAgent"), WorkspaceIDs: ptr([]string{"ws1"}), IdempotencyKey: "chat-retry"})
+	if err == nil {
+		t.Fatal("expected create error when Chat membership sync fails")
+	}
+	if pendingChat.ID == "" || pendingChat.AppliedRevision != 0 || f.principals[pendingChat.ID].enabled {
+		t.Fatalf("unexpected state after Chat membership failure: %+v principal=%+v", pendingChat, f.principals[pendingChat.ID])
+	}
+	f.failMemberships = false
+	recoveredChat, err := s.Create(ctx, "owner", Changes{Name: ptr("ChatSyncedAgent"), WorkspaceIDs: ptr([]string{"ws1"}), IdempotencyKey: "chat-retry"})
+	if err != nil {
+		t.Fatalf("expected retry of pending create to succeed: %v", err)
+	}
+	if recoveredChat.ID != pendingChat.ID || recoveredChat.AppliedRevision != recoveredChat.Revision || !f.principals[recoveredChat.ID].enabled {
+		t.Fatalf("retry did not reuse and reconcile pending agent: got %+v want ID %s", recoveredChat, pendingChat.ID)
+	}
+	ownedList, err := s.ListOwned(ctx, "owner")
+	if err != nil || len(ownedList) != 2 {
+		t.Fatalf("expected exactly 2 owned agents without duplicates, got %d (%v)", len(ownedList), err)
+	}
+
+	// 3. Ordinary Update (rename, workspace change, re-enable) fails with 503 when Identity or Chat fails.
+	f.failProvision = true
+	if w := callHTTP("PATCH", "/api/v1/agents/"+recoveredChat.ID, `{"name":"RenamedWhileOffline"}`, ""); w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 when Identity fails during rename update, got %d: %s", w.Code, w.Body.String())
+	}
+	stored, err := s.Owned(ctx, "owner", recoveredChat.ID)
+	if err != nil || stored.AppliedRevision == stored.Revision || stored.RuntimeState != "error" {
+		t.Fatalf("expected unapplied revision after failed rename update: %+v err=%v", stored, err)
+	}
+	f.failProvision = false
+	if w := callHTTP("PATCH", "/api/v1/agents/"+recoveredChat.ID, `{"name":"RenamedWhileOffline"}`, ""); w.Code != http.StatusOK {
+		t.Fatalf("expected 200 when retrying rename update, got %d: %s", w.Code, w.Body.String())
+	}
+	stored, err = s.Owned(ctx, "owner", recoveredChat.ID)
+	if err != nil || stored.AppliedRevision != stored.Revision || stored.Name != "RenamedWhileOffline" {
+		t.Fatalf("rename update did not converge on retry: %+v err=%v", stored, err)
+	}
+
+	f.failMemberships = true
+	if w := callHTTP("PATCH", "/api/v1/agents/"+recoveredChat.ID, `{"workspaceIds":["ws1","ws2"]}`, ""); w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 when Chat fails during workspace update, got %d: %s", w.Code, w.Body.String())
+	}
+	stored, err = s.Owned(ctx, "owner", recoveredChat.ID)
+	if err != nil || stored.AppliedRevision == stored.Revision || stored.AppliedMembershipRevision == stored.MembershipRevision {
+		t.Fatalf("expected unapplied membership revision after Chat failure: %+v err=%v", stored, err)
+	}
+	f.failMemberships = false
+	if w := callHTTP("PATCH", "/api/v1/agents/"+recoveredChat.ID, `{"workspaceIds":["ws1","ws2"]}`, ""); w.Code != http.StatusOK {
+		t.Fatalf("expected 200 when retrying workspace update, got %d: %s", w.Code, w.Body.String())
+	}
+	stored, err = s.Owned(ctx, "owner", recoveredChat.ID)
+	if err != nil || stored.AppliedRevision != stored.Revision || stored.AppliedMembershipRevision != stored.MembershipRevision || !contains(f.members[recoveredChat.ID], "ws2") {
+		t.Fatalf("workspace update did not converge on retry: %+v members=%v err=%v", stored, f.members[recoveredChat.ID], err)
 	}
 }

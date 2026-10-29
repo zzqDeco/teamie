@@ -59,7 +59,7 @@ func TestDelegatedMembershipAndExplicitGroupRevocation(t *testing.T) {
 	if _, _, e = s.Send(ctx, a, g.ID, "removed", "Denied", nil); e == nil {
 		t.Fatal("removed group participant sent")
 	}
-	events, _, _, e := s.Sync(ctx, a.ID, "0", 500)
+	events, _, _, e := s.Sync(ctx, a.ID, "0", 100)
 	if e != nil {
 		t.Fatal(e)
 	}

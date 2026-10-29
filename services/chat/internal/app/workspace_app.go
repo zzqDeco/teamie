@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"time"
 
@@ -123,12 +124,19 @@ func (s *Service) AcceptInvite(ctx context.Context, userID, code string) (domain
 		if lockErr != nil {
 			return lockErr
 		}
+		ids, memberErr := s.Workspaces.WorkspaceMemberIDs(txCtx, ws.ID)
+		if memberErr != nil {
+			return memberErr
+		}
+		if !slices.Contains(ids, userID) && len(ids) >= domain.MaxWorkspaceMembers {
+			return domain.ErrWorkspaceMemberLimit()
+		}
 		inserted, insertErr := s.Workspaces.InsertWorkspaceMember(txCtx, ws.ID, userID, "member", nil, true)
 		if insertErr != nil {
 			return insertErr
 		}
 		if inserted {
-			ids, memberErr := s.Workspaces.WorkspaceMemberIDs(txCtx, ws.ID)
+			ids, memberErr = s.Workspaces.WorkspaceMemberIDs(txCtx, ws.ID)
 			if memberErr != nil {
 				return memberErr
 			}
@@ -254,6 +262,9 @@ func (s *Service) SetPrincipalWorkspaces(ctx context.Context, principal, grantor
 			audience, memberErr := s.Workspaces.WorkspaceMemberIDs(txCtx, id)
 			if memberErr != nil {
 				return memberErr
+			}
+			if selected[id] && !oldSet[id] && len(audience) >= domain.MaxWorkspaceMembers {
+				return domain.ErrWorkspaceMemberLimit()
 			}
 			allHeads = append(allHeads, audience...)
 		}

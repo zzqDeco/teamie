@@ -107,6 +107,10 @@ func ErrGroupMemberLimit() error {
 	return Err(400, "invalid_members", "Groups support at most 50 participants")
 }
 
+func ErrWorkspaceMemberLimit() error {
+	return Err(400, "invalid_members", "Workspaces support at most 500 participants")
+}
+
 func ErrOnlyGroupMembershipChanged() error {
 	return Err(400, "invalid_conversation", "Only group membership can be changed")
 }

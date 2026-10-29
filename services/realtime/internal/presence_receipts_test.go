@@ -15,6 +15,8 @@ import (
 	"github.com/gorilla/websocket"
 	"teamie/contracts/gen/im/kitex_gen/im"
 	"teamie/pkg/httpx"
+	"teamie/services/realtime/internal/app"
+	"teamie/services/realtime/internal/domain"
 )
 
 type workspacePresenceAccess struct {
@@ -300,5 +302,143 @@ func TestReceiptsChangedCoalescingAndAccessCheck(t *testing.T) {
 	case ev := <-pBob.queue:
 		t.Fatalf("non-shared-workspace bob received presence: %#v", ev)
 	default:
+	}
+}
+
+type ttlPresenceEntry struct {
+	state     string
+	expiresAt time.Time
+}
+
+type fakeTTLPresenceStore struct {
+	mu      sync.Mutex
+	now     func() time.Time
+	entries map[string]ttlPresenceEntry
+}
+
+func (s *fakeTTLPresenceStore) SaveUserPresence(_ context.Context, userID, state string, ttl time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.entries == nil {
+		s.entries = make(map[string]ttlPresenceEntry)
+	}
+	if state == "" || state == "offline" {
+		delete(s.entries, userID)
+		return nil
+	}
+	if ttl <= 0 {
+		ttl = domain.PresenceStoreTTL
+	}
+	s.entries[userID] = ttlPresenceEntry{
+		state:     state,
+		expiresAt: s.now().Add(ttl),
+	}
+	return nil
+}
+
+func (s *fakeTTLPresenceStore) GetUsersPresence(_ context.Context, userIDs []string) (map[string]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.now()
+	out := make(map[string]string, len(userIDs))
+	for _, uid := range userIDs {
+		entry, ok := s.entries[uid]
+		if !ok {
+			continue
+		}
+		if !now.Before(entry.expiresAt) {
+			delete(s.entries, uid)
+			continue
+		}
+		out[uid] = entry.state
+	}
+	return out, nil
+}
+
+func TestPresenceStoreTTLRefreshedWhileConnectedAndAbandonedKeysExpire(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC)
+	var nowMu sync.Mutex
+	nowFn := func() time.Time {
+		nowMu.Lock()
+		defer nowMu.Unlock()
+		return now
+	}
+	advance := func(d time.Duration) {
+		nowMu.Lock()
+		now = now.Add(d)
+		nowMu.Unlock()
+	}
+
+	store := &fakeTTLPresenceStore{now: nowFn}
+	// Seed an abandoned key in Redis (e.g. from a crashed instance with no live socket).
+	_ = store.SaveUserPresence(ctx, "abandoned", "online", domain.PresenceStoreTTL)
+
+	access := &workspacePresenceAccess{
+		wsAllowed:       map[string]bool{"alice": true, "bob": true, "abandoned": true},
+		wsHumanMembers:  []string{"alice", "bob", "abandoned"},
+		sharedMembers:   []string{"alice", "bob", "abandoned"},
+		presenceEnabled: true,
+	}
+	tracker := &domain.PresenceTracker{
+		IdleTimeout:     5 * time.Minute,
+		OfflineGrace:    30 * time.Second,
+		RefreshInterval: 2 * time.Minute,
+		Now:             nowFn,
+	}
+	pAlice := &peer{user: "alice", token: "tok-a", queue: make(chan Hint, 8), done: make(chan struct{})}
+	clientsFn := func() []domain.Client { return []domain.Client{pAlice} }
+
+	chatAuth := (&Hub{Chat: access}).App().Chat
+	replicaA := &app.StreamApp{
+		Chat:          chatAuth,
+		Presence:      tracker,
+		PresenceStore: store,
+		Clients:       clientsFn,
+	}
+	// replicaB has no local connections in its tracker and relies on PresenceStore (Redis).
+	replicaB := &app.StreamApp{
+		Chat:          chatAuth,
+		Presence:      &domain.PresenceTracker{Now: nowFn},
+		PresenceStore: store,
+	}
+
+	aliceUser := domain.User{ID: "alice", DisplayName: "Alice", Kind: "human"}
+	bobUser := domain.User{ID: "bob", DisplayName: "Bob", Kind: "human"}
+	replicaA.ConnectPresence(ctx, clientsFn, pAlice, aliceUser)
+
+	// Transition Alice to idle/away at t + 1m, then keep her connected without further transitions for 24 minutes.
+	advance(1 * time.Minute)
+	if err := replicaA.ReportPresence(ctx, clientsFn, pAlice, aliceUser, "idle"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Advance in 2-minute increments past the 10-minute TTL window while SweepPresence runs on replicaA.
+	for i := 0; i < 6; i++ {
+		advance(2 * time.Minute)
+		replicaA.SweepPresence(ctx, clientsFn)
+	}
+	// Total elapsed time: 13 minutes (> 10m TTL).
+	// The abandoned key must have expired from PresenceStore, while live connected Alice remains "away" in PresenceStore.
+	items, err := replicaB.WorkspacePresence(ctx, nil, bobUser, "ws-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].UserID != "alice" || items[0].State != "away" {
+		t.Fatalf("after 13m: want only connected alice (away) in store, got %#v", items)
+	}
+
+	// Disconnect Alice and advance past the 30-second offline grace window.
+	clientsFn = func() []domain.Client { return nil }
+	replicaA.DisconnectPresence(clientsFn, pAlice)
+	advance(31 * time.Second)
+	replicaA.SweepPresence(ctx, clientsFn)
+
+	itemsAfterDisconnect, err := replicaB.WorkspacePresence(ctx, nil, bobUser, "ws-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(itemsAfterDisconnect) != 0 {
+		t.Fatalf("after disconnect + grace: want 0 presence items, got %#v", itemsAfterDisconnect)
 	}
 }

@@ -142,6 +142,7 @@ type toolPathIM struct {
 	base                 *fixtureIM
 	conversation         string
 	older, tombstone     Message
+	recent               [2]Message
 	mu                   sync.Mutex
 	requests             []toolPathHTTPRequest
 	revokeAfterFirstPage bool
@@ -154,6 +155,10 @@ func newToolPathIM(t *testing.T, e *Engine, base *fixtureIM) *toolPathIM {
 	f.older = Message{ID: uuid.NewString(), ConversationID: f.conversation, SenderID: uuid.NewString(), SenderName: "Historian", SenderKind: "human", Body: "Distant NeEdLe record outside recent context", Seq: 2, CreatedAt: "2026-10-01T00:00:00Z"}
 	retracted := "2026-10-02T00:00:00Z"
 	f.tombstone = Message{ID: uuid.NewString(), ConversationID: f.conversation, SenderID: base.agent, SenderName: "Agent", SenderKind: "agent", Seq: 3, CreatedAt: "2026-10-01T00:01:00Z", RetractedAt: &retracted}
+	first, second := f.older, f.older
+	first.ID, first.Seq, first.Body = uuid.NewString(), 40, "A recent unrelated message"
+	second.ID, second.Seq, second.Body = uuid.NewString(), 41, "Another unrelated message"
+	f.recent = [2]Message{first, second}
 	server := httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(server.Close)
 	e.Config.IMURL = server.URL
@@ -175,6 +180,14 @@ func (f *toolPathIM) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if !f.revoked && r.Method == http.MethodGet {
+		for _, message := range f.recent {
+			if r.URL.Path == prefix+"/"+message.ID {
+				write(map[string]any{"message": message})
+				return
+			}
+		}
+	}
 	before, _ := strconv.ParseInt(r.URL.Query().Get("beforeSeq"), 10, 64)
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	f.requests = append(f.requests, toolPathHTTPRequest{r.Method, r.URL.Path, before, limit})
@@ -198,10 +211,7 @@ func (f *toolPathIM) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if before == 0 {
-			first, second := f.older, f.older
-			first.ID, first.Seq, first.Body = uuid.NewString(), 40, "A recent unrelated message"
-			second.ID, second.Seq, second.Body = uuid.NewString(), 41, "Another unrelated message"
-			write(map[string]any{"messages": []Message{first, second}, "hasMore": true})
+			write(map[string]any{"messages": []Message{f.recent[0], f.recent[1]}, "hasMore": true})
 			f.revoked = f.revokeAfterFirstPage
 			return
 		}

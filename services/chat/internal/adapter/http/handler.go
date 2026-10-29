@@ -353,7 +353,7 @@ func (a *Adapter) Sync(ctx context.Context, req *chatgen.SyncReq) (*chatgen.Sync
 	if !ok {
 		return nil, domain.Err(401, "unauthenticated", "Sign in to continue")
 	}
-	limit, err := parseIntParam(req.GetLimit(), "limit", 100, 1, 500)
+	limit, err := parseIntParam(req.GetLimit(), "limit", 100, 1, 100)
 	if err != nil {
 		return nil, err
 	}

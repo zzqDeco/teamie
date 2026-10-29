@@ -83,6 +83,9 @@ func TestWebSocketOriginTypingAuthorizationAndRevocation(t *testing.T) {
 	if e := alice.WriteJSON(map[string]any{"type": "typing", "conversationId": "conversation", "isTyping": true, "userId": "forged"}); e != nil {
 		t.Fatal(e)
 	}
+	if e := alice.WriteJSON(map[string]any{"type": "typing", "conversationId": "conversation", "isTyping": true}); e != nil {
+		t.Fatal(e)
+	}
 	_ = bob.SetReadDeadline(time.Now().Add(time.Second))
 	var typing Hint
 	if e := bob.ReadJSON(&typing); e != nil || typing.Type != "typing" || typing.UserID != "alice" || typing.DisplayName != "Alice" || len(typing.UserIDs) != 0 {

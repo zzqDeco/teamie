@@ -6,6 +6,7 @@ import (
 	"time"
 
 	hertzserver "github.com/cloudwego/hertz/pkg/app/server"
+	"go.uber.org/zap"
 	"teamie/contracts/gen/agent/kitex_gen/agent/modelgatewayservice"
 	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
 	"teamie/pkg/httpx"
@@ -46,8 +47,17 @@ func main() {
 	if err != nil {
 		observability.Fatal("identity client initialization failed", err)
 	}
+	maxConcurrentCalls, err := app.ParseMaxConcurrentCalls(httpx.Env("GATEWAY_MAX_CONCURRENT_CALLS", ""))
+	if err != nil {
+		observability.Fatal("invalid GATEWAY_MAX_CONCURRENT_CALLS", err)
+	}
 	provider := upstream.Provider{HTTP: upstream.NewHTTPClient()}
-	svc := app.New(store, cipher, provider, provider, token)
+	svc := app.New(store, cipher, provider, provider, token, app.WithMaxConcurrentCalls(maxConcurrentCalls))
+	observability.L(nil).Info("Gateway concurrency configured",
+		zap.String("event.action", "gateway-concurrency-configured"),
+		zap.String("event.outcome", "success"),
+		zap.Int("custom.gateway.max_concurrent_calls", svc.MaxConcurrentCalls()),
+	)
 	rpcSrv := rpcAdapter.New(svc)
 	httpHandler := httpAdapter.New(svc)
 

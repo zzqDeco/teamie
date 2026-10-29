@@ -2,8 +2,10 @@ package domain
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -12,6 +14,7 @@ import (
 // Agent is the authoritative domain entity for an owned Agent definition and
 // its internal reconciliation/runtime state.
 type Agent struct {
+	CreationHash              string     `json:"-"`
 	ID                        string     `json:"id"`
 	PrincipalID               string     `json:"principalId"`
 	OwnerID                   string     `json:"ownerId"`
@@ -41,13 +44,28 @@ func (a Agent) EffectiveEnabled(globalEnabled bool) bool {
 	return a.Enabled && a.PolicyEnabled && globalEnabled && a.DeletedAt == nil && a.AppliedRevision == a.Revision
 }
 
+// CreationHash binds an idempotency key to the original normalized public intent.
+// It deliberately excludes mutable reconciliation state and profile revisions.
+func CreationHash(a Agent) string {
+	raw, _ := json.Marshal(struct {
+		Name         string   `json:"name"`
+		Description  string   `json:"description"`
+		ModelID      string   `json:"modelId"`
+		WorkspaceIDs []string `json:"workspaceIds"`
+		Enabled      bool     `json:"enabled"`
+	}{a.Name, a.Description, a.ModelID, Normalized(a.WorkspaceIDs), a.Enabled})
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
 // Changes represents a partial or complete owner mutation to an Agent profile.
 type Changes struct {
-	Name         *string   `json:"name"`
-	Description  *string   `json:"description"`
-	ModelID      *string   `json:"modelId"`
-	WorkspaceIDs *[]string `json:"workspaceIds"`
-	Enabled      *bool     `json:"enabled"`
+	Name           *string   `json:"name"`
+	Description    *string   `json:"description"`
+	ModelID        *string   `json:"modelId"`
+	WorkspaceIDs   *[]string `json:"workspaceIds"`
+	Enabled        *bool     `json:"enabled"`
+	IdempotencyKey string    `json:"-"`
 }
 
 // PublicAgent is the browser contract. Internal runtime state, session
@@ -137,6 +155,16 @@ func NewID() string {
 	if _, e := rand.Read(b); e != nil {
 		panic(e)
 	}
+	b[6] = (b[6] & 15) | 64
+	b[8] = (b[8] & 63) | 128
+	raw := hex.EncodeToString(b)
+	return fmt.Sprintf("%s-%s-%s-%s-%s", raw[:8], raw[8:12], raw[12:16], raw[16:20], raw[20:])
+}
+
+// DeterministicID derives a stable caller-scoped UUIDv4-formatted identifier from owner and key.
+func DeterministicID(owner, key string) string {
+	sum := sha256.Sum256([]byte("teamie:agent-create:v1\x00" + owner + "\x00" + key))
+	b := sum[:16]
 	b[6] = (b[6] & 15) | 64
 	b[8] = (b[8] & 63) | 128
 	raw := hex.EncodeToString(b)
