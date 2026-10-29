@@ -204,14 +204,36 @@ func ResumeCompatible(m *CheckpointMetadata, revision int64, runID string) bool 
 }
 
 // RelevantPreemptInput reports whether a newly arrived input should preempt an in-flight
-// turn after tool calls complete (only human messages in a conversation already active in the turn).
-func RelevantPreemptInput(in Input, consumed []Input) bool {
-	if in.Kind == "task.notification" || in.Kind == "schedule.wakeup" || in.Kind == "app.notification" || in.Kind == "im.unread_digest" {
+// turn after tool calls complete. Presence, when enabled, is authoritative even
+// after the Agent switches away from the conversation that started this turn.
+// Legacy turns use their consumed inputs' conversation provenance instead.
+func RelevantPreemptInput(in Input, consumed []Input, active *InputSource) bool {
+	if in.Kind == "task.notification" || in.Kind == "schedule.wakeup" || in.SourceOverflow {
 		return false
 	}
-	for _, old := range consumed {
-		if in.ConversationID != "" && in.ConversationID == old.ConversationID && in.SenderKind == "human" {
-			return true
+	machine := in.Kind == "app.notification" || in.Kind == "im.unread_digest"
+	if !machine && in.SenderKind != "human" {
+		return false
+	}
+	refs := []InputSource{{WorkspaceID: in.WorkspaceID, ConversationID: in.ConversationID}}
+	if machine {
+		refs = append(refs, in.SourceRefs...)
+	}
+	var targets []InputSource
+	if active != nil {
+		targets = []InputSource{*active}
+	} else {
+		for _, old := range consumed {
+			targets = append(targets, InputSource{WorkspaceID: old.WorkspaceID, ConversationID: old.ConversationID})
+			targets = append(targets, old.SourceRefs...)
+		}
+	}
+	for _, ref := range refs {
+		for _, target := range targets {
+			if ref.ConversationID != "" && ref.ConversationID == target.ConversationID &&
+				(ref.WorkspaceID == "" || target.WorkspaceID == "" || ref.WorkspaceID == target.WorkspaceID) {
+				return true
+			}
 		}
 	}
 	return false

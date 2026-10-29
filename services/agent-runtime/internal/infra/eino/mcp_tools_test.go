@@ -510,7 +510,7 @@ func (r *mcpInMemoryRepo) QueryRow(_ context.Context, sql string, args ...any) d
 	}
 	if strings.Contains(sql, "runtime_notification_input_seq") {
 		r.seq++
-		seqStr := fmt.Sprintf("90000000000000000%d", r.seq)
+		seqStr := fmt.Sprintf("9%019d", r.seq)
 		return mcpFakeRowScanner{scanFn: func(dest ...any) error {
 			if p, ok := dest[0].(*string); ok {
 				*p = seqStr
@@ -1166,7 +1166,7 @@ func TestConversationPresenceUnreadDigestAndProactiveList(t *testing.T) {
 	}
 
 	// Proactive confirmation tool: im_list_conversations immediately surfaces unreadCount/mentionCount/lastSeq before the 1-minute digest fires.
-	seedInput := Input{EventID: "seed-1", WorkspaceID: wsID, ConversationID: channelConvID, MessageID: uuid.NewString(), SenderID: ownerID, SenderKind: "human", Body: "seed"}
+	seedInput := Input{EventID: "100", WorkspaceID: wsID, ConversationID: channelConvID, MessageID: uuid.NewString(), SenderID: ownerID, SenderKind: "human", Body: "seed"}
 	listRun, err := s.StartRunWithContextPolicy(ctx, lease, []Input{seedInput}, contextProfileV1, archiveContextBudget(t))
 	if err != nil {
 		t.Fatal(err)
@@ -1283,14 +1283,16 @@ func TestConversationPresenceUnreadDigestAndProactiveList(t *testing.T) {
 
 type dynamicTurnGatewayFixture struct {
 	modelgatewayservice.Client
-	calls   atomic.Int32
-	stepsFn func(step int32) (*schema.AgenticMessage, error)
+	calls     atomic.Int32
+	lastError atomic.Value
+	stepsFn   func(step int32) (*schema.AgenticMessage, error)
 }
 
 func (g *dynamicTurnGatewayFixture) Chat(_ context.Context, _ *wire.GatewayChatRequest, _ ...callopt.Option) (*wire.GatewayChatResponse, error) {
 	step := g.calls.Add(1)
 	msg, err := g.stepsFn(step)
 	if err != nil {
+		g.lastError.Store(err.Error())
 		return nil, err
 	}
 	raw, err := (&schema.HumanReadableSerializer{}).Marshal(msg)
@@ -1335,6 +1337,19 @@ func (m *stepToolRecorderModel) Stream(ctx context.Context, msgs []*schema.Agent
 	return m.inner.Stream(ctx, msgs, opts...)
 }
 
+type mcpStreamReadyWriter struct {
+	http.ResponseWriter
+	ready chan<- struct{}
+}
+
+func (w *mcpStreamReadyWriter) Flush() {
+	w.ResponseWriter.(http.Flusher).Flush()
+	select {
+	case w.ready <- struct{}{}:
+	default:
+	}
+}
+
 func TestMidTurnDynamicMCPToolMountingSendGateAndSingleGroupWatcher(t *testing.T) {
 	ctx := context.Background()
 	var s *Store
@@ -1365,7 +1380,7 @@ func TestMidTurnDynamicMCPToolMountingSendGateAndSingleGroupWatcher(t *testing.T
 		readSeqByConv   = map[string]int64{}
 	)
 
-	makeMCPServer := func(name, toolName string, counter *atomic.Int32) (*server.MCPServer, *httptest.Server) {
+	makeMCPServer := func(name, toolName string, counter *atomic.Int32) (*server.MCPServer, *httptest.Server, <-chan struct{}) {
 		srv := server.NewMCPServer(name, "1.0.0", server.WithToolCapabilities(true))
 		srv.AddTool(
 			mcp.NewTool(
@@ -1391,20 +1406,26 @@ func TestMidTurnDynamicMCPToolMountingSendGateAndSingleGroupWatcher(t *testing.T
 			},
 		)
 		streamHTTP := server.NewStreamableHTTPServer(srv)
+		ready := make(chan struct{}, 1)
 		httpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authHeader := r.Header.Get("Authorization")
 			if _, ok := verifyTestMarketplaceToken(strings.TrimPrefix(authHeader, "Bearer "), appSecret); !ok {
 				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
+			if r.Method == http.MethodGet {
+				// The server registers its notification session before flushing
+				// the SSE headers. Initialize returning is not this readiness gate.
+				w = &mcpStreamReadyWriter{ResponseWriter: w, ready: ready}
+			}
 			streamHTTP.ServeHTTP(w, r)
 		}))
-		return srv, httpSrv
+		return srv, httpSrv, ready
 	}
 
-	mcpSrvA, mcpHTTPA := makeMCPServer("Board Room", "submit_turn_action", &groupAToolCalls)
+	mcpSrvA, mcpHTTPA, groupAStreamReady := makeMCPServer("Board Room", "submit_turn_action", &groupAToolCalls)
 	defer mcpHTTPA.Close()
-	mcpSrvB, mcpHTTPB := makeMCPServer("Dice Table", "roll_dice", &groupBToolCalls)
+	mcpSrvB, mcpHTTPB, _ := makeMCPServer("Dice Table", "roll_dice", &groupBToolCalls)
 	defer mcpHTTPB.Close()
 
 	imHTTP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1579,8 +1600,12 @@ func TestMidTurnDynamicMCPToolMountingSendGateAndSingleGroupWatcher(t *testing.T
 			{WorkspaceID: wsID, ConversationID: groupAConvID, Name: "Group A", Type: "group", UnreadCount: 1, LastSeq: 7},
 		},
 	})
+	var digestEventID string
+	if err := s.DB.QueryRow(ctx, `SELECT (90000000000000000000::numeric+nextval('runtime_notification_input_seq'))::text`).Scan(&digestEventID); err != nil {
+		t.Fatal(err)
+	}
 	turnInput := Input{
-		EventID:        "90000000000000000001",
+		EventID:        digestEventID,
 		Kind:           "im.unread_digest",
 		NotificationID: "unread-digest:turn-1",
 		Body:           string(digestBodyBytes),
@@ -1622,9 +1647,35 @@ func TestMidTurnDynamicMCPToolMountingSendGateAndSingleGroupWatcher(t *testing.T
 				if got := mcpWatcher.activeSubscriptionCount(); got != 1 {
 					return nil, fmt.Errorf("expected exactly 1 active MCP subscription (Group A only), got %d", got)
 				}
+				select {
+				case <-groupAStreamReady:
+				case <-time.After(5 * time.Second):
+					return nil, fmt.Errorf("Group A notification stream did not become ready")
+				}
 				// Push a notification on Group B (must NOT be received) and Group A (must be received).
 				mcpSrvB.SendNotificationToAllClients("notifications/dice_rolled", map[string]any{"roll": 6})
 				mcpSrvA.SendNotificationToAllClients("notifications/seat_assigned", map[string]any{"seat": 1})
+				// Do not leave A until the notification is durably accepted there.
+				deadline := time.NewTimer(5 * time.Second)
+				defer deadline.Stop()
+				for {
+					pending, err := s.Pending(ctx, lease)
+					if err != nil {
+						return nil, err
+					}
+					persisted := false
+					for _, in := range pending {
+						persisted = persisted || in.Kind == "app.notification" && in.ConversationID == groupAConvID && strings.Contains(in.Body, "notifications/seat_assigned")
+					}
+					if persisted {
+						break
+					}
+					select {
+					case <-mcpWatcher.wake():
+					case <-deadline.C:
+						return nil, fmt.Errorf("Group A notification was not persisted before switching away")
+					}
+				}
 
 				// Step 3 (same Turn!): invoke newly mounted mcp__board_room__submit_turn_action AND im_send_message.
 				return &schema.AgenticMessage{
@@ -1733,7 +1784,7 @@ func TestMidTurnDynamicMCPToolMountingSendGateAndSingleGroupWatcher(t *testing.T
 				},
 			},
 			MaxIterations:    10,
-			Handlers:         []adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]{toolBuilder.NewMCPDynamicToolMiddleware(), pipeline},
+			Handlers:         []adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]{toolBuilder.NewMCPDynamicToolMiddleware(), pipeline, &nativeToolReceipts{Store: s, Lease: lease, IM: imc}},
 			ModelRetryConfig: pipeline.RetryConfig(),
 		})
 		if err != nil {
@@ -1751,7 +1802,7 @@ func TestMidTurnDynamicMCPToolMountingSendGateAndSingleGroupWatcher(t *testing.T
 				break
 			}
 			if ev != nil && ev.Err != nil {
-				t.Fatalf("attempt %d failed with error: %v", attempt, ev.Err)
+				t.Fatalf("attempt %d failed with error: %v (fixture: %v)", attempt, ev.Err, gatewayFixture.lastError.Load())
 			}
 		}
 	}

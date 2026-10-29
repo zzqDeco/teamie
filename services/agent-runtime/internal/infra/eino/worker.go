@@ -296,7 +296,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 	}
 	defer stop()
 	mcpWatcher := newMCPNotificationWatcher(e.Store, lease, imc, e.Config.FlagsFile)
-	presence := newConversationPresenceState(e.unreadDigestInterval(), mcpWatcher.triggerWake)
+	presence := newConversationPresenceState(e.unreadDigestInterval(), mcpWatcher.presenceChanged)
 	_ = presence.Restore(ctx, e.Store, lease)
 	mcpWatcher.setPresence(presence)
 	makeAgent := func(ctx context.Context) (adk.TypedAgent[*schema.AgenticMessage], error) {
@@ -905,7 +905,8 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		return authorize(rc)
 	}, imc.MarkRead)
 	defer stopReads()
-	defer mcpWatcher.closeAll()
+	stopMCPWatcher := mcpWatcher.start(ctx)
+	defer stopMCPWatcher()
 	pollInterval := time.Second
 	if d := e.unreadDigestInterval(); d > 0 && d < pollInterval {
 		pollInterval = d
@@ -949,7 +950,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		if err := e.drainSchedules(ctx, lease); errors.Is(err, ErrLeaseLost) {
 			return false
 		}
-		mcpWatcher.sync(ctx)
+		mcpWatcher.requestSync()
 		if loop != nil {
 			select {
 			case exit := <-loopDone:
@@ -1019,7 +1020,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 					continue
 				}
 				ok, _ := loop.Push(in, adk.WithPushStrategy(func(_ context.Context, tc *adk.TurnContext[Input, *schema.AgenticMessage]) []adk.PushOption[Input, *schema.AgenticMessage] {
-					if relevantInput(in, tc) {
+					if relevantInput(in, tc, activePresence) {
 						// Complete the model's tool round and durable receipts before
 						// handing new input to the next serial turn.
 						return []adk.PushOption[Input, *schema.AgenticMessage]{adk.WithPreempt[Input, *schema.AgenticMessage](adk.AfterToolCalls)}
@@ -1113,6 +1114,11 @@ func (e *Engine) ingestWithPresence(ctx context.Context, imc *IM, l *Lease, pres
 	unreadUpdated := false
 	activeConvID := ""
 	if presence != nil {
+		b, bErr := ensureBootstrap()
+		if bErr != nil {
+			return nil, bErr
+		}
+		unreadUpdated = presence.ReconcileUnread(b.Conversations)
 		activeConvID = presence.ActiveConversationID()
 	}
 	for _, event := range page.Events {

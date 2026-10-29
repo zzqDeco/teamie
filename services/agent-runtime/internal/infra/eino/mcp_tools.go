@@ -179,6 +179,11 @@ func (p *conversationPresenceState) Persist(ctx context.Context, store *Store, l
 	if p == nil || store == nil || store.DB == nil || lease == nil || lease.AgentID == "" {
 		return nil
 	}
+	// Order snapshot creation through the durable write. The state mutex alone
+	// cannot prevent an older snapshot from overwriting a newer checkpoint after
+	// ingestion has advanced its IM cursor under the same worker lease.
+	p.persistMu.Lock()
+	defer p.persistMu.Unlock()
 	p.mu.Lock()
 	cp := persistedPresenceCheckpoint{
 		ActiveWorkspaceID:    p.activeWorkspaceID,
@@ -230,6 +235,7 @@ type unreadConversationEntry struct {
 }
 
 type conversationPresenceState struct {
+	persistMu            sync.Mutex
 	mu                   sync.Mutex
 	activeWorkspaceID    string
 	activeConversationID string
@@ -384,6 +390,41 @@ func (p *conversationPresenceState) RecordUnread(workspaceID string, conv Conver
 	if p.firstDirtyAt.IsZero() {
 		p.firstDirtyAt = now
 	}
+}
+
+// ReconcileUnread drops revoked sources before composing another digest. Leaving
+// one revoked conversation in the buffer would reject every other source in it.
+func (p *conversationPresenceState) ReconcileUnread(conversations []Conversation) bool {
+	allowed := make(map[string]string, len(conversations))
+	for _, c := range conversations {
+		allowed[c.ID] = c.WorkspaceID
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	changed, dirty := false, false
+	for id, entry := range p.unread {
+		if ws, ok := allowed[id]; !ok || ws != entry.workspaceID {
+			delete(p.unread, id)
+			changed = true
+			continue
+		}
+		dirty = dirty || entry.dirty && entry.unreadCount > 0
+	}
+	if changed {
+		// An already queued digest may contain the removed source and fail its
+		// later ACL check. Re-announce surviving unread conversations separately.
+		for _, entry := range p.unread {
+			entry.dirty = entry.unreadCount > 0
+			dirty = dirty || entry.dirty
+		}
+		if dirty && p.firstDirtyAt.IsZero() {
+			p.firstDirtyAt = time.Now().UTC()
+		}
+	}
+	if !dirty {
+		p.firstDirtyAt = time.Time{}
+	}
+	return changed
 }
 
 func (p *conversationPresenceState) EnrichConversation(c Conversation) Conversation {
@@ -648,9 +689,7 @@ func (t *Tools) checkSendPresence(run *Run, conversationID string) *Observation 
 func (t *Tools) applyEnterConversation(ctx context.Context, run *Run, workspaceID, conversationID, convType string) {
 	if run != nil {
 		run.setActiveConversation(workspaceID, conversationID, convType)
-		if convType != "group" {
-			run.setMCPTools(nil)
-		}
+		run.setMCPTools(nil)
 	}
 	if t != nil && t.Presence != nil {
 		t.Presence.Enter(workspaceID, conversationID, convType)
@@ -1018,11 +1057,11 @@ func (t *Tools) HandleUnknownMCPTool(ctx context.Context, name, input string) (s
 		return "", err
 	}
 	if strings.HasPrefix(name, "mcp__") {
-		if wrapper := run.getMCPTool(name); wrapper != nil {
-			return wrapper.InvokableRun(ctx, input)
-		}
 		wsID, convID, convType := t.activeConversation(run)
 		if convID != "" && convType == "group" {
+			if wrapper := run.getMCPTool(name); wrapper != nil && wrapper.spec.ConversationID == convID && wrapper.spec.WorkspaceID == wsID {
+				return wrapper.InvokableRun(ctx, input)
+			}
 			wrappers, discoverErr := t.discoverOrRestoreConversationMCPTools(ctx, run, wsID, convID)
 			if discoverErr == nil {
 				toolMap := make(map[string]*mcpToolWrapper, len(wrappers))
@@ -1432,8 +1471,15 @@ type mcpActiveSubscription struct {
 	app         imMarketplaceApp
 	expiresAt   time.Time
 	cli         *client.Client
+	ctx         context.Context
 	cancel      context.CancelFunc
 	lost        atomic.Bool
+}
+
+type mcpSubscriptionRetry struct {
+	url   string
+	after time.Time
+	delay time.Duration
 }
 
 type mcpNotificationWatcher struct {
@@ -1443,9 +1489,17 @@ type mcpNotificationWatcher struct {
 	flagsFile string
 	presence  *conversationPresenceState
 	wakeCh    chan struct{}
+	syncCh    chan struct{}
+	now       func() time.Time
 
-	mu   sync.Mutex
-	subs map[mcpWatchKey]*mcpActiveSubscription
+	scopeMu     sync.Mutex
+	scope       presenceInitSnapshot
+	scopeCtx    context.Context
+	scopeCancel context.CancelFunc
+
+	mu      sync.Mutex
+	subs    map[mcpWatchKey]*mcpActiveSubscription
+	retries map[mcpWatchKey]mcpSubscriptionRetry
 }
 
 func newMCPNotificationWatcher(store *Store, lease *Lease, im *IM, flagsFile string) *mcpNotificationWatcher {
@@ -1455,8 +1509,78 @@ func newMCPNotificationWatcher(store *Store, lease *Lease, im *IM, flagsFile str
 		im:        im,
 		flagsFile: flagsFile,
 		wakeCh:    make(chan struct{}, 1),
+		syncCh:    make(chan struct{}, 1),
+		now:       time.Now,
 		subs:      map[mcpWatchKey]*mcpActiveSubscription{},
+		retries:   map[mcpWatchKey]mcpSubscriptionRetry{},
 	}
+}
+
+// start coordinates external subscriptions independently of inbox ingestion and
+// TurnLoop delivery. This goroutine only manages transports; notifications still
+// enter through the fenced inbox and never mutate the Agent Session directly.
+func (w *mcpNotificationWatcher) start(ctx context.Context) func() {
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer w.closeAll()
+		defer func() {
+			w.scopeMu.Lock()
+			defer w.scopeMu.Unlock()
+			if w.scopeCancel != nil {
+				w.scopeCancel()
+			}
+		}()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-w.syncCh:
+				w.sync(w.contextForScope(ctx))
+			}
+		}
+	}()
+	w.requestSync()
+	return func() { cancel(); <-done }
+}
+
+func (w *mcpNotificationWatcher) currentScope() presenceInitSnapshot {
+	ws, conv, typ := w.presence.Active()
+	return presenceInitSnapshot{WorkspaceID: ws, ConversationID: conv, ConvType: typ}
+}
+
+func (w *mcpNotificationWatcher) contextForScope(ctx context.Context) context.Context {
+	w.scopeMu.Lock()
+	defer w.scopeMu.Unlock()
+	scope := w.currentScope()
+	if w.scopeCtx == nil || w.scopeCtx.Err() != nil || w.scope != scope {
+		if w.scopeCancel != nil {
+			w.scopeCancel()
+		}
+		w.scope = scope
+		w.scopeCtx, w.scopeCancel = context.WithCancel(ctx)
+	}
+	return w.scopeCtx
+}
+
+func (w *mcpNotificationWatcher) requestSync() {
+	// A switch cancels even an in-flight Initialize immediately. Reconciliation
+	// requests for the same scope coalesce without restarting healthy streams.
+	w.scopeMu.Lock()
+	if w.scopeCancel != nil && w.scope != w.currentScope() {
+		w.scopeCancel()
+	}
+	w.scopeMu.Unlock()
+	select {
+	case w.syncCh <- struct{}{}:
+	default:
+	}
+}
+
+func (w *mcpNotificationWatcher) presenceChanged() {
+	w.requestSync()
+	w.triggerWake()
 }
 
 func (w *mcpNotificationWatcher) setPresence(p *conversationPresenceState) {
@@ -1502,6 +1626,7 @@ func (w *mcpNotificationWatcher) closeAll() {
 		subs = append(subs, sub)
 		delete(w.subs, k)
 	}
+	clear(w.retries)
 	w.mu.Unlock()
 	for _, sub := range subs {
 		sub.cancel()
@@ -1594,12 +1719,17 @@ func (w *mcpNotificationWatcher) sync(ctx context.Context) {
 		}
 	}
 
-	now := time.Now().UTC()
+	now := w.now().UTC()
 	var toClose []*mcpActiveSubscription
 	w.mu.Lock()
+	for key, retry := range w.retries {
+		if target, ok := desired[key]; !ok || target.app.MCPURL != retry.url {
+			delete(w.retries, key)
+		}
+	}
 	for key, sub := range w.subs {
 		target, ok := desired[key]
-		if !ok || sub.lost.Load() || sub.app.MCPURL != target.app.MCPURL || (!sub.expiresAt.IsZero() && now.Add(time.Minute).After(sub.expiresAt)) {
+		if !ok || sub.lost.Load() || sub.ctx.Err() != nil || sub.app.MCPURL != target.app.MCPURL || (!sub.expiresAt.IsZero() && now.Add(time.Minute).After(sub.expiresAt)) {
 			toClose = append(toClose, sub)
 			delete(w.subs, key)
 		}
@@ -1613,18 +1743,30 @@ func (w *mcpNotificationWatcher) sync(ctx context.Context) {
 	for key, target := range desired {
 		w.mu.Lock()
 		_, exists := w.subs[key]
+		retry := w.retries[key]
 		w.mu.Unlock()
-		if exists {
+		if exists || now.Before(retry.after) {
 			continue
 		}
-		w.startSubscription(ctx, key, target.workspaceID, target.convID, target.app)
+		started := w.startSubscription(ctx, key, target.workspaceID, target.convID, target.app)
+		if ctx.Err() != nil {
+			return
+		}
+		w.mu.Lock()
+		if started {
+			delete(w.retries, key)
+		} else {
+			delay := min(max(time.Second, retry.delay*2), 30*time.Second)
+			w.retries[key] = mcpSubscriptionRetry{url: target.app.MCPURL, after: w.now().Add(delay), delay: delay}
+		}
+		w.mu.Unlock()
 	}
 }
 
-func (w *mcpNotificationWatcher) startSubscription(ctx context.Context, key mcpWatchKey, workspaceID, convID string, app imMarketplaceApp) {
+func (w *mcpNotificationWatcher) startSubscription(ctx context.Context, key mcpWatchKey, workspaceID, convID string, app imMarketplaceApp) bool {
 	var sessOut imConversationAppSession
 	if err := w.im.Call(ctx, http.MethodPost, "/api/v1/conversations/"+url.PathEscape(convID)+"/apps/"+url.PathEscape(app.ID)+"/session", map[string]any{}, &sessOut); err != nil {
-		return
+		return false
 	}
 	expiresAt, _ := time.Parse(time.RFC3339, sessOut.ExpiresAt)
 	headers := map[string]string{
@@ -1640,6 +1782,7 @@ func (w *mcpNotificationWatcher) startSubscription(ctx context.Context, key mcpW
 		workspaceID: workspaceID,
 		app:         app,
 		expiresAt:   expiresAt,
+		ctx:         subCtx,
 		cancel:      cancel,
 	}
 	cli, err := newMCPHTTPClientWithInvalidate(
@@ -1648,6 +1791,7 @@ func (w *mcpNotificationWatcher) startSubscription(ctx context.Context, key mcpW
 		headers,
 		func() {
 			if sub.lost.CompareAndSwap(false, true) {
+				w.requestSync()
 				w.triggerWake()
 			}
 		},
@@ -1655,7 +1799,7 @@ func (w *mcpNotificationWatcher) startSubscription(ctx context.Context, key mcpW
 	)
 	if err != nil {
 		cancel()
-		return
+		return false
 	}
 	sub.cli = cli
 	cli.OnNotification(func(n mcp.JSONRPCNotification) {
@@ -1665,7 +1809,7 @@ func (w *mcpNotificationWatcher) startSubscription(ctx context.Context, key mcpW
 	if err := cli.Start(subCtx); err != nil {
 		cancel()
 		_ = cli.Close()
-		return
+		return false
 	}
 	initCtx, initCancel := context.WithTimeout(subCtx, 10*time.Second)
 	_, initErr := cli.Initialize(initCtx, mcp.InitializeRequest{
@@ -1681,7 +1825,7 @@ func (w *mcpNotificationWatcher) startSubscription(ctx context.Context, key mcpW
 	if initErr != nil {
 		cancel()
 		_ = cli.Close()
-		return
+		return false
 	}
 
 	w.mu.Lock()
@@ -1689,10 +1833,11 @@ func (w *mcpNotificationWatcher) startSubscription(ctx context.Context, key mcpW
 		w.mu.Unlock()
 		cancel()
 		_ = cli.Close()
-		return
+		return false
 	}
 	w.subs[key] = sub
 	w.mu.Unlock()
+	return true
 }
 
 func (w *mcpNotificationWatcher) handleNotification(ctx context.Context, workspaceID, convID string, app imMarketplaceApp, n mcp.JSONRPCNotification) {

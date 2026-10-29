@@ -96,11 +96,16 @@ func targetsFromError(err error) []string {
 func inputMessages(inputs []Input) []*schema.AgenticMessage {
 	return BuildInputMessages(inputs, func(in Input) string { return in.Kind })
 }
-func relevantInput(in Input, tc *adk.TurnContext[Input, *schema.AgenticMessage]) bool {
+func relevantInput(in Input, tc *adk.TurnContext[Input, *schema.AgenticMessage], presence *conversationPresenceState) bool {
 	if tc == nil {
 		return false
 	}
-	return domain.RelevantPreemptInput(toDomainInput(in), toDomainInputs(tc.Consumed))
+	var active *domain.InputSource
+	if presence != nil {
+		ws, conv, _ := presence.Active()
+		active = &domain.InputSource{WorkspaceID: ws, ConversationID: conv}
+	}
+	return domain.RelevantPreemptInput(toDomainInput(in), toDomainInputs(tc.Consumed), active)
 }
 func resumeCompatible(m *checkpointMetadata, revision int64, runID string) bool {
 	return domain.ResumeCompatible(m, revision, runID)
