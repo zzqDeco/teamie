@@ -47,6 +47,37 @@ class _MockTeamieState:
         configured = bool(self.base_url and self.model and self.has_api_key)
         ws_configured = bool(self.has_web_search_key)
         return {
+            "providers": [
+                {
+                    "id": "acceptance-provider",
+                    "displayName": "Acceptance Provider",
+                    "baseUrl": self.base_url,
+                    "hasApiKey": self.has_api_key,
+                    "enabled": self.enabled,
+                    "configured": bool(self.base_url and self.has_api_key),
+                    "modelCount": 1,
+                    "updatedAt": "2026-10-24T06:00:00Z",
+                }
+            ],
+            "models": [
+                {
+                    "id": "acceptance-model",
+                    "providerId": "acceptance-provider",
+                    "providerDisplayName": "Acceptance Provider",
+                    "providerEnabled": self.enabled,
+                    "displayName": self.model,
+                    "description": "",
+                    "baseUrl": self.base_url,
+                    "model": self.model,
+                    "contextWindowTokens": self.context_window,
+                    "hasApiKey": self.has_api_key,
+                    "enabled": self.enabled,
+                    "effectiveEnabled": self.enabled,
+                    "configured": configured,
+                    "isDefault": True,
+                    "updatedAt": "2026-10-24T06:00:00Z",
+                }
+            ],
             "config": {
                 "baseUrl": self.base_url,
                 "model": self.model,
@@ -148,6 +179,30 @@ class _MockHandler(BaseHTTPRequestHandler):
             st.has_web_search_key = bool(body.get("apiKey")) or st.has_web_search_key
             self._send_json(200, st.gateway_resp())
             return
+        if re.match(r"^/api/v1/admin/model-gateway/providers/[^/]+$", self.path):
+            body = self._read_json({"displayName", "baseUrl", "apiKey", "clearApiKey", "enabled"})
+            st.config_write_called = True
+            if "baseUrl" in body:
+                st.base_url = body["baseUrl"]
+            if "enabled" in body:
+                st.enabled = bool(body["enabled"])
+            if body.get("clearApiKey"):
+                st.has_api_key = False
+            elif body.get("apiKey"):
+                st.has_api_key = True
+            self._send_json(200, st.gateway_resp())
+            return
+        if re.match(r"^/api/v1/admin/model-gateway/models/[^/]+$", self.path):
+            body = self._read_json({"providerId", "displayName", "description", "model", "enabled", "contextWindowTokens"})
+            st.config_write_called = True
+            if "model" in body:
+                st.model = body["model"]
+            if "enabled" in body:
+                st.enabled = bool(body["enabled"])
+            if "contextWindowTokens" in body:
+                st.context_window = int(body["contextWindowTokens"])
+            self._send_json(200, st.gateway_resp())
+            return
         self._send_json(404, {"error":{"code":"not_found"}})
 
     def do_DELETE(self) -> None:
@@ -162,14 +217,21 @@ class _MockHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         st = self.state
-        if self.path == "/api/v1/admin/model-gateway/models":
-            body = self._read_json({"id","baseUrl","model","apiKey","enabled","contextWindowTokens"})
+        if self.path == "/api/v1/admin/model-gateway/providers":
+            body = self._read_json({"id", "displayName", "baseUrl", "apiKey", "enabled"})
             st.config_write_called = True
             st.base_url = body["baseUrl"]
-            st.model = body["model"]
             st.enabled = bool(body["enabled"])
             st.has_api_key = bool(body.get("apiKey")) or st.has_api_key
-            st.context_window = int(body.get("contextWindowTokens",st.context_window))
+            self._send_json(201, st.gateway_resp())
+            return
+        if self.path == "/api/v1/admin/model-gateway/models":
+            body = self._read_json({"id", "providerId", "displayName", "description", "model", "enabled", "contextWindowTokens"})
+            assert body.get("providerId") == "acceptance-provider"
+            st.config_write_called = True
+            st.model = body["model"]
+            st.enabled = bool(body["enabled"])
+            st.context_window = int(body.get("contextWindowTokens", st.context_window))
             self._send_json(201, st.gateway_resp())
             return
         if self.path == "/api/v1/auth/login":

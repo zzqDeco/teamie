@@ -455,15 +455,21 @@ def main() -> int:
     gw_res = admin.call("GET", "/api/v1/admin/model-gateway", status=200)
     config = gw_res.get("config", {})
     if all(provider_fields):
-        model_id = "acceptance-provider"
-        gw_payload = {"baseUrl": provider_base_url, "apiKey": provider_api_key, "model": provider_model, "enabled": True}
+        provider_id = "acceptance-provider"
+        model_id = "acceptance-model"
+        prov_payload = {"displayName": "Acceptance Provider", "baseUrl": provider_base_url, "apiKey": provider_api_key, "enabled": True}
+        if any(prov.get("id") == provider_id for prov in gw_res.get("providers", [])):
+            admin.call("PATCH", f"/api/v1/admin/model-gateway/providers/{provider_id}", prov_payload, status=200)
+        else:
+            admin.call("POST", "/api/v1/admin/model-gateway/providers", {**prov_payload, "id": provider_id}, status=201)
+        gw_payload: dict[str, object] = {"providerId": provider_id, "model": provider_model, "enabled": True}
         if config.get("contextWindowTokens"):
             gw_payload["contextWindowTokens"] = config["contextWindowTokens"]
         if any(model.get("id") == model_id for model in gw_res.get("models", [])):
             admin.call("PATCH", f"/api/v1/admin/model-gateway/models/{model_id}", gw_payload, status=200)
         else:
-            admin.call("POST", "/api/v1/admin/model-gateway/models", {**gw_payload, "id":model_id}, status=201)
-        admin.call("PUT", "/api/v1/admin/model-gateway/routing", {"defaultModelId":model_id}, status=200)
+            admin.call("POST", "/api/v1/admin/model-gateway/models", {**gw_payload, "id": model_id}, status=201)
+        admin.call("PUT", "/api/v1/admin/model-gateway/routing", {"defaultModelId": model_id}, status=200)
     if web_search_key:
         admin.call("PATCH", "/api/v1/admin/model-gateway/web-search", {"enabled":True,"apiKey":web_search_key}, status=200)
     if all(provider_fields) or web_search_key:

@@ -19,16 +19,13 @@ func (a *Adapter) GetModelCatalog(ctx context.Context, _ *gatewaygen.GetModelCat
 	effDefault := c.EffectiveDefaultModelID()
 	items := make([]*gatewaygen.PublicModelOptionDTO, 0)
 	for _, m := range c.Models {
-		if !m.Configured() || !m.Enabled {
+		rm := c.ResolveModelProfile(m)
+		if !rm.Available() {
 			continue
-		}
-		displayName := m.DisplayName
-		if displayName == "" {
-			displayName = m.Model
 		}
 		items = append(items, &gatewaygen.PublicModelOptionDTO{
 			ID:                  m.ID,
-			DisplayName:         displayName,
+			DisplayName:         rm.DisplayName,
 			Description:         m.Description,
 			ContextWindowTokens: m.ContextWindow(),
 			IsDefault:           m.ID == effDefault,
@@ -52,7 +49,7 @@ func (a *Adapter) GetAdminModelConfig(ctx context.Context, _ *gatewaygen.GetAdmi
 }
 
 func (a *Adapter) UpdateAdminModelConfig(context.Context, *gatewaygen.UpdateAdminModelConfigReq) (*gatewaygen.AdminModelConfigResp, error) {
-	return nil, domain.Err(409, "config_api_changed", "Refresh this page to update model, routing or web search settings separately")
+	return nil, domain.Err(409, "config_api_changed", "Refresh this page to update provider, model, routing or web search settings separately")
 }
 
 func (a *Adapter) UpdateAdminWebSearchConfig(ctx context.Context, req *gatewaygen.UpdateAdminWebSearchConfigReq) (*gatewaygen.AdminModelConfigResp, error) {
@@ -77,17 +74,62 @@ func (a *Adapter) UpdateAdminModelRouting(ctx context.Context, req *gatewaygen.U
 	return toAdminModelConfigResp(c), nil
 }
 
+func (a *Adapter) CreateAdminModelProvider(ctx context.Context, req *gatewaygen.CreateAdminModelProviderReq) (*gatewaygen.AdminModelConfigResp, error) {
+	if req == nil {
+		return nil, domain.Err(400, "invalid_request", "Invalid provider configuration")
+	}
+	c, err := a.App.CreateModelProvider(ctx, app.CreateModelProviderInput{
+		ID:          req.GetID(),
+		DisplayName: req.GetDisplayName(),
+		BaseURL:     req.BaseUrl,
+		APIKey:      req.ApiKey,
+		Enabled:     req.Enabled,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return toAdminModelConfigResp(c), nil
+}
+
+func (a *Adapter) UpdateAdminModelProvider(ctx context.Context, req *gatewaygen.UpdateAdminModelProviderReq) (*gatewaygen.AdminModelConfigResp, error) {
+	if req == nil {
+		return nil, domain.Err(400, "invalid_request", "Invalid provider configuration")
+	}
+	c, err := a.App.UpdateModelProvider(ctx, app.UpdateModelProviderInput{
+		ID:          req.ID,
+		DisplayName: req.DisplayName,
+		BaseURL:     req.BaseUrl,
+		APIKey:      req.ApiKey,
+		ClearAPIKey: req.GetClearApiKey(),
+		Enabled:     req.Enabled,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return toAdminModelConfigResp(c), nil
+}
+
+func (a *Adapter) DeleteAdminModelProvider(ctx context.Context, req *gatewaygen.DeleteAdminModelProviderReq) (*gatewaygen.AdminModelConfigResp, error) {
+	if req == nil {
+		return nil, domain.Err(400, "invalid_request", "Invalid provider configuration")
+	}
+	c, err := a.App.DeleteModelProvider(ctx, req.ID)
+	if err != nil {
+		return nil, err
+	}
+	return toAdminModelConfigResp(c), nil
+}
+
 func (a *Adapter) CreateAdminModelProfile(ctx context.Context, req *gatewaygen.CreateAdminModelProfileReq) (*gatewaygen.AdminModelConfigResp, error) {
 	if req == nil {
 		return nil, domain.Err(400, "invalid_request", "Invalid model configuration")
 	}
 	c, err := a.App.CreateModelProfile(ctx, app.CreateModelProfileInput{
 		ID:                  req.GetID(),
+		ProviderID:          req.ProviderId,
 		DisplayName:         req.GetDisplayName(),
 		Description:         req.GetDescription(),
-		BaseURL:             req.BaseUrl,
 		Model:               req.Model,
-		APIKey:              req.ApiKey,
 		Enabled:             req.Enabled,
 		ContextWindowTokens: req.ContextWindowTokens,
 	})
@@ -103,12 +145,10 @@ func (a *Adapter) UpdateAdminModelProfile(ctx context.Context, req *gatewaygen.U
 	}
 	c, err := a.App.UpdateModelProfile(ctx, app.UpdateModelProfileInput{
 		ID:                  req.ID,
+		ProviderID:          req.ProviderId,
 		DisplayName:         req.DisplayName,
 		Description:         req.Description,
-		BaseURL:             req.BaseUrl,
 		Model:               req.Model,
-		APIKey:              req.ApiKey,
-		ClearAPIKey:         req.GetClearApiKey(),
 		Enabled:             req.Enabled,
 		ContextWindowTokens: req.ContextWindowTokens,
 	})
@@ -148,9 +188,16 @@ func (a *Adapter) testAdminModelConfigWithOwner(ctx context.Context, owner, mode
 	if err != nil {
 		return nil, err
 	}
-	resolved := c.ResolveModel(modelID)
+	var resolved domain.ResolvedModel
 	if modelID != "" {
-		ctx = app.WithRequestedModelID(ctx, modelID)
+		exact, ok := c.ResolveExactModel(modelID)
+		if !ok {
+			return nil, domain.Err(404, "not_found", "Model profile not found")
+		}
+		resolved = exact
+		ctx = app.WithStrictRequestedModelID(ctx, modelID)
+	} else {
+		resolved = c.ResolveModel("")
 	}
 	start := time.Now()
 	raw, _ := json.Marshal(modeltransport.Request{

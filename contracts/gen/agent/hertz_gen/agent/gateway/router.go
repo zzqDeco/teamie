@@ -52,6 +52,9 @@ const (
 	PatternUpdateAdminModelRouting = "PUT /api/v1/admin/model-gateway/routing"
 	PatternUpdateAdminModelConfig = "PUT /api/v1/admin/model-gateway"
 	PatternTestAdminModelConfig = "POST /api/v1/admin/model-gateway/test"
+	PatternCreateAdminModelProvider = "POST /api/v1/admin/model-gateway/providers"
+	PatternUpdateAdminModelProvider = "PATCH /api/v1/admin/model-gateway/providers/{id}"
+	PatternDeleteAdminModelProvider = "DELETE /api/v1/admin/model-gateway/providers/{id}"
 	PatternCreateAdminModelProfile = "POST /api/v1/admin/model-gateway/models"
 	PatternUpdateAdminModelProfile = "PATCH /api/v1/admin/model-gateway/models/{id}"
 	PatternDeleteAdminModelProfile = "DELETE /api/v1/admin/model-gateway/models/{id}"
@@ -62,7 +65,7 @@ const (
 	PatternWebExtract = "POST /internal/v1/web/extract"
 )
 
-// ModelGatewayHTTPServiceRoutes lists all 14 route specifications declared on ModelGatewayHTTPService.
+// ModelGatewayHTTPServiceRoutes lists all 17 route specifications declared on ModelGatewayHTTPService.
 var ModelGatewayHTTPServiceRoutes = []RouteSpec{
 	{Name: "GetModelCatalog", Method: "GET", Path: "/api/v1/model-gateway/catalog", MuxPattern: PatternGetModelCatalog, RequestType: "GetModelCatalogReq", ResponseType: "ModelCatalogResp"},
 	{Name: "GetAdminModelConfig", Method: "GET", Path: "/api/v1/admin/model-gateway", MuxPattern: PatternGetAdminModelConfig, RequestType: "GetAdminModelConfigReq", ResponseType: "AdminModelConfigResp"},
@@ -70,6 +73,9 @@ var ModelGatewayHTTPServiceRoutes = []RouteSpec{
 	{Name: "UpdateAdminModelRouting", Method: "PUT", Path: "/api/v1/admin/model-gateway/routing", MuxPattern: PatternUpdateAdminModelRouting, RequestType: "UpdateAdminModelRoutingReq", ResponseType: "AdminModelConfigResp"},
 	{Name: "UpdateAdminModelConfig", Method: "PUT", Path: "/api/v1/admin/model-gateway", MuxPattern: PatternUpdateAdminModelConfig, RequestType: "UpdateAdminModelConfigReq", ResponseType: "AdminModelConfigResp"},
 	{Name: "TestAdminModelConfig", Method: "POST", Path: "/api/v1/admin/model-gateway/test", MuxPattern: PatternTestAdminModelConfig, RequestType: "TestAdminModelConfigReq", ResponseType: "TestAdminModelConfigResp"},
+	{Name: "CreateAdminModelProvider", Method: "POST", Path: "/api/v1/admin/model-gateway/providers", MuxPattern: PatternCreateAdminModelProvider, RequestType: "CreateAdminModelProviderReq", ResponseType: "AdminModelConfigResp"},
+	{Name: "UpdateAdminModelProvider", Method: "PATCH", Path: "/api/v1/admin/model-gateway/providers/:id", MuxPattern: PatternUpdateAdminModelProvider, RequestType: "UpdateAdminModelProviderReq", ResponseType: "AdminModelConfigResp"},
+	{Name: "DeleteAdminModelProvider", Method: "DELETE", Path: "/api/v1/admin/model-gateway/providers/:id", MuxPattern: PatternDeleteAdminModelProvider, RequestType: "DeleteAdminModelProviderReq", ResponseType: "AdminModelConfigResp"},
 	{Name: "CreateAdminModelProfile", Method: "POST", Path: "/api/v1/admin/model-gateway/models", MuxPattern: PatternCreateAdminModelProfile, RequestType: "CreateAdminModelProfileReq", ResponseType: "AdminModelConfigResp"},
 	{Name: "UpdateAdminModelProfile", Method: "PATCH", Path: "/api/v1/admin/model-gateway/models/:id", MuxPattern: PatternUpdateAdminModelProfile, RequestType: "UpdateAdminModelProfileReq", ResponseType: "AdminModelConfigResp"},
 	{Name: "DeleteAdminModelProfile", Method: "DELETE", Path: "/api/v1/admin/model-gateway/models/:id", MuxPattern: PatternDeleteAdminModelProfile, RequestType: "DeleteAdminModelProfileReq", ResponseType: "AdminModelConfigResp"},
@@ -88,6 +94,9 @@ type ModelGatewayHTTPServiceRouteHandlers struct {
 	UpdateAdminModelRouting http.HandlerFunc
 	UpdateAdminModelConfig http.HandlerFunc
 	TestAdminModelConfig http.HandlerFunc
+	CreateAdminModelProvider http.HandlerFunc
+	UpdateAdminModelProvider http.HandlerFunc
+	DeleteAdminModelProvider http.HandlerFunc
 	CreateAdminModelProfile http.HandlerFunc
 	UpdateAdminModelProfile http.HandlerFunc
 	DeleteAdminModelProfile http.HandlerFunc
@@ -124,6 +133,18 @@ func RegisterModelGatewayHTTPServiceRoutes(mux *http.ServeMux, h ModelGatewayHTT
 		panic("ModelGatewayHTTPServiceRouteHandlers.TestAdminModelConfig (" + PatternTestAdminModelConfig + ") is nil")
 	}
 	mux.HandleFunc(PatternTestAdminModelConfig, h.TestAdminModelConfig)
+	if h.CreateAdminModelProvider == nil {
+		panic("ModelGatewayHTTPServiceRouteHandlers.CreateAdminModelProvider (" + PatternCreateAdminModelProvider + ") is nil")
+	}
+	mux.HandleFunc(PatternCreateAdminModelProvider, h.CreateAdminModelProvider)
+	if h.UpdateAdminModelProvider == nil {
+		panic("ModelGatewayHTTPServiceRouteHandlers.UpdateAdminModelProvider (" + PatternUpdateAdminModelProvider + ") is nil")
+	}
+	mux.HandleFunc(PatternUpdateAdminModelProvider, h.UpdateAdminModelProvider)
+	if h.DeleteAdminModelProvider == nil {
+		panic("ModelGatewayHTTPServiceRouteHandlers.DeleteAdminModelProvider (" + PatternDeleteAdminModelProvider + ") is nil")
+	}
+	mux.HandleFunc(PatternDeleteAdminModelProvider, h.DeleteAdminModelProvider)
 	if h.CreateAdminModelProfile == nil {
 		panic("ModelGatewayHTTPServiceRouteHandlers.CreateAdminModelProfile (" + PatternCreateAdminModelProfile + ") is nil")
 	}
@@ -352,6 +373,117 @@ func RegisterModelGatewayHTTPServiceHertzServer(r *route.RouterGroup, srv ModelG
 				return
 			}
 			resp, err := srv.TestAdminModelConfig(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "CreateAdminModelProvider", Method: "POST", Path: "/api/v1/admin/model-gateway/providers", MuxPattern: PatternCreateAdminModelProvider, RequestType: "CreateAdminModelProviderReq", ResponseType: "AdminModelConfigResp"}); hfn != nil {
+			r.POST("/api/v1/admin/model-gateway/providers", hfn)
+		} else {
+			r.POST("/api/v1/admin/model-gateway/providers", func(ctx context.Context, c *app.RequestContext) {
+				var req CreateAdminModelProviderReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				resp, err := srv.CreateAdminModelProvider(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.POST("/api/v1/admin/model-gateway/providers", func(ctx context.Context, c *app.RequestContext) {
+			var req CreateAdminModelProviderReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			resp, err := srv.CreateAdminModelProvider(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "UpdateAdminModelProvider", Method: "PATCH", Path: "/api/v1/admin/model-gateway/providers/:id", MuxPattern: PatternUpdateAdminModelProvider, RequestType: "UpdateAdminModelProviderReq", ResponseType: "AdminModelConfigResp"}); hfn != nil {
+			r.PATCH("/api/v1/admin/model-gateway/providers/:id", hfn)
+		} else {
+			r.PATCH("/api/v1/admin/model-gateway/providers/:id", func(ctx context.Context, c *app.RequestContext) {
+				var req UpdateAdminModelProviderReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				resp, err := srv.UpdateAdminModelProvider(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.PATCH("/api/v1/admin/model-gateway/providers/:id", func(ctx context.Context, c *app.RequestContext) {
+			var req UpdateAdminModelProviderReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			resp, err := srv.UpdateAdminModelProvider(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "DeleteAdminModelProvider", Method: "DELETE", Path: "/api/v1/admin/model-gateway/providers/:id", MuxPattern: PatternDeleteAdminModelProvider, RequestType: "DeleteAdminModelProviderReq", ResponseType: "AdminModelConfigResp"}); hfn != nil {
+			r.DELETE("/api/v1/admin/model-gateway/providers/:id", hfn)
+		} else {
+			r.DELETE("/api/v1/admin/model-gateway/providers/:id", func(ctx context.Context, c *app.RequestContext) {
+				var req DeleteAdminModelProviderReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				resp, err := srv.DeleteAdminModelProvider(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.DELETE("/api/v1/admin/model-gateway/providers/:id", func(ctx context.Context, c *app.RequestContext) {
+			var req DeleteAdminModelProviderReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			resp, err := srv.DeleteAdminModelProvider(ctx, &req)
 			if err != nil {
 				m.WriteDomainError(ctx, c, err)
 				return
@@ -763,6 +895,61 @@ func RegisterModelGatewayHTTPServer(mux *http.ServeMux, srv ModelGatewayHTTPServ
 			fn = mw.WrapRoute(RouteSpec{Name: "TestAdminModelConfig", Method: "POST", Path: "/api/v1/admin/model-gateway/test", MuxPattern: PatternTestAdminModelConfig, RequestType: "TestAdminModelConfigReq", ResponseType: "TestAdminModelConfigResp"}, fn)
 		}
 		h.TestAdminModelConfig = fn
+	}
+	if h.CreateAdminModelProvider == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req CreateAdminModelProviderReq
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
+			}
+			resp, err := srv.CreateAdminModelProvider(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusCreated, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "CreateAdminModelProvider", Method: "POST", Path: "/api/v1/admin/model-gateway/providers", MuxPattern: PatternCreateAdminModelProvider, RequestType: "CreateAdminModelProviderReq", ResponseType: "AdminModelConfigResp"}, fn)
+		}
+		h.CreateAdminModelProvider = fn
+	}
+	if h.UpdateAdminModelProvider == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req UpdateAdminModelProviderReq
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
+			}
+			req.ID = r.PathValue("id")
+			resp, err := srv.UpdateAdminModelProvider(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "UpdateAdminModelProvider", Method: "PATCH", Path: "/api/v1/admin/model-gateway/providers/:id", MuxPattern: PatternUpdateAdminModelProvider, RequestType: "UpdateAdminModelProviderReq", ResponseType: "AdminModelConfigResp"}, fn)
+		}
+		h.UpdateAdminModelProvider = fn
+	}
+	if h.DeleteAdminModelProvider == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req DeleteAdminModelProviderReq
+			req.ID = r.PathValue("id")
+			resp, err := srv.DeleteAdminModelProvider(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "DeleteAdminModelProvider", Method: "DELETE", Path: "/api/v1/admin/model-gateway/providers/:id", MuxPattern: PatternDeleteAdminModelProvider, RequestType: "DeleteAdminModelProviderReq", ResponseType: "AdminModelConfigResp"}, fn)
+		}
+		h.DeleteAdminModelProvider = fn
 	}
 	if h.CreateAdminModelProfile == nil {
 		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

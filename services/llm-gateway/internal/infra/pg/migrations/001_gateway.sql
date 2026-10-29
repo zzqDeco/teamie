@@ -29,3 +29,38 @@ IF NOT EXISTS (SELECT 1 FROM gateway_schema_migrations WHERE version=5) THEN
     INSERT INTO gateway_schema_migrations(version) VALUES(5);
 END IF;
 END $$;
+
+-- Split provider connections from model catalog once (Schema 6).
+-- Existing models migrate 1-to-1 into gateway_providers without merging by base_url,
+-- preserving exact ciphertexts, model IDs, enabled states and default_model_id.
+CREATE TABLE IF NOT EXISTS gateway_providers(id TEXT PRIMARY KEY,display_name TEXT NOT NULL DEFAULT '',base_url TEXT NOT NULL DEFAULT '',encrypted_key BYTEA,enabled BOOLEAN NOT NULL DEFAULT true,created_at TIMESTAMPTZ NOT NULL DEFAULT now(),updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
+DO $$ BEGIN
+IF NOT EXISTS (SELECT 1 FROM gateway_schema_migrations WHERE version=6) THEN
+    INSERT INTO gateway_providers(id,display_name,base_url,encrypted_key,enabled,created_at,updated_at)
+    SELECT id,
+           CASE WHEN btrim(display_name)<>'' THEN btrim(display_name) ELSE id END,
+           base_url,
+           encrypted_key,
+           true,
+           created_at,
+           updated_at
+    FROM gateway_models
+    ON CONFLICT(id) DO NOTHING;
+
+    ALTER TABLE gateway_models ADD COLUMN IF NOT EXISTS provider_id TEXT;
+    UPDATE gateway_models SET provider_id=id WHERE provider_id IS NULL;
+    ALTER TABLE gateway_models ALTER COLUMN provider_id SET NOT NULL;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname='gateway_models_provider_id_fkey'
+          AND conrelid='gateway_models'::regclass
+    ) THEN
+        ALTER TABLE gateway_models
+            ADD CONSTRAINT gateway_models_provider_id_fkey
+            FOREIGN KEY (provider_id) REFERENCES gateway_providers(id) ON DELETE RESTRICT;
+    END IF;
+    CREATE INDEX IF NOT EXISTS gateway_models_provider_id ON gateway_models(provider_id);
+    ALTER TABLE gateway_models DROP COLUMN IF EXISTS base_url, DROP COLUMN IF EXISTS encrypted_key;
+    INSERT INTO gateway_schema_migrations(version) VALUES(6);
+END IF;
+END $$;

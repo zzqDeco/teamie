@@ -3,6 +3,7 @@ import type {
   CreatedMarketplaceAppResp, RotateMarketplaceAppSecretResp, ConversationAppSessionResp,
   AdminModelConfigResp,
   AdminModelProfileDTO,
+  AdminModelProviderDTO,
   AdminUserPageResp,
   AttachmentDTO,
   AttachmentLimitsDTO,
@@ -11,6 +12,7 @@ import type {
   BootstrapResp,
   ConversationDTO,
   CreateAdminModelProfileReq,
+  CreateAdminModelProviderReq,
   CreatePasswordResetLinkResp,
   EventDTO,
   ListMessagesResp,
@@ -33,6 +35,7 @@ import type {
   SessionResp,
   SyncResp,
   UpdateAdminModelProfileReq,
+  UpdateAdminModelProviderReq,
   UpdateAdminModelRoutingReq,
   UpdateAdminWebSearchConfigReq,
   UserDTO,
@@ -90,9 +93,12 @@ export type AgentProfileInput = {
   modelId?: string;
 };
 export type WebSearchGatewayConfig = WebSearchConfigDTO;
+export type AdminModelProvider = AdminModelProviderDTO;
 export type AdminModelProfile = AdminModelProfileDTO;
 export type PublicModelOption = PublicModelOptionDTO;
 export type ModelCatalog = ModelCatalogResp;
+export type CreateModelProviderInput = CreateAdminModelProviderReq;
+export type UpdateModelProviderInput = Omit<UpdateAdminModelProviderReq, "id">;
 export type CreateModelProfileInput = CreateAdminModelProfileReq;
 export type UpdateModelProfileInput = Omit<UpdateAdminModelProfileReq, "id">;
 export type ModelGatewayConfig = Omit<

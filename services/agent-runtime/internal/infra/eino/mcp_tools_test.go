@@ -1188,19 +1188,23 @@ func TestConversationPresenceUnreadDigestAndProactiveList(t *testing.T) {
 	}
 	_ = s.FinishRun(ctx, lease, listRun, "completed", "", false)
 
-	// Before digestInterval elapses, FlushDueDigest emits nothing.
-	flushedEarly, err := presence.FlushDueDigest(ctx, s, lease, time.Now().UTC())
+	// Exercise the boundary using the buffered event's deadline. The database
+	// and tool checks above may take longer than the 100ms fixture interval.
+	presence.mu.Lock()
+	digestDueAt := presence.firstDirtyAt.Add(digestInterval)
+	presence.mu.Unlock()
+	flushedEarly, err := presence.FlushDueDigest(ctx, s, lease, digestDueAt.Add(-time.Nanosecond))
 	if err != nil || flushedEarly {
 		t.Fatalf("expected FlushDueDigest before interval to emit nothing, got flushed=%v err=%v", flushedEarly, err)
 	}
 
 	// After digestInterval elapses, FlushDueDigest emits exactly 1 coalesced TEAMIE_UNREAD_DIGEST input.
-	flushed, err := presence.FlushDueDigest(ctx, s, lease, time.Now().UTC().Add(2*digestInterval))
+	flushed, err := presence.FlushDueDigest(ctx, s, lease, digestDueAt)
 	if err != nil || !flushed {
 		t.Fatalf("expected FlushDueDigest after interval to emit 1 digest, got flushed=%v err=%v", flushed, err)
 	}
 	// Calling FlushDueDigest again without new messages must NOT emit duplicate digests.
-	flushedDup, err := presence.FlushDueDigest(ctx, s, lease, time.Now().UTC().Add(4*digestInterval))
+	flushedDup, err := presence.FlushDueDigest(ctx, s, lease, digestDueAt.Add(digestInterval))
 	if err != nil || flushedDup {
 		t.Fatalf("expected no duplicate digest without new unread messages, got flushed=%v err=%v", flushedDup, err)
 	}

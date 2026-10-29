@@ -1,6 +1,7 @@
 import type {
   MarketplaceApp,
   AdminModelProfile,
+  AdminModelProvider,
   Agent,
   AgentProfileInput,
   Conversation,
@@ -81,11 +82,29 @@ export function publicAgentProfile(
   };
 }
 
+export function publicAdminModelProvider(
+  provider: AdminModelProvider,
+): AdminModelProvider {
+  return {
+    id: provider.id,
+    displayName: provider.displayName,
+    baseUrl: provider.baseUrl,
+    hasApiKey: provider.hasApiKey,
+    enabled: provider.enabled,
+    configured: provider.configured,
+    modelCount: provider.modelCount,
+    updatedAt: provider.updatedAt,
+  };
+}
+
 export function publicAdminModelProfile(
   model: AdminModelProfile,
 ): AdminModelProfile {
   return {
     id: model.id,
+    providerId: model.providerId,
+    providerDisplayName: model.providerDisplayName,
+    providerEnabled: model.providerEnabled,
     displayName: model.displayName,
     description: model.description,
     baseUrl: model.baseUrl,
@@ -93,6 +112,7 @@ export function publicAdminModelProfile(
     contextWindowTokens: model.contextWindowTokens,
     hasApiKey: model.hasApiKey,
     enabled: model.enabled,
+    effectiveEnabled: model.effectiveEnabled,
     configured: model.configured,
     isDefault: model.isDefault,
     updatedAt: model.updatedAt,
@@ -150,6 +170,9 @@ export function publicModelGateway(value: ModelGateway): ModelGateway {
         : {}),
     },
     status: value.status,
+    ...(value.providers === undefined
+      ? {}
+      : { providers: value.providers.map(publicAdminModelProvider) }),
     ...(value.models === undefined
       ? {}
       : { models: value.models.map(publicAdminModelProfile) }),

@@ -2,9 +2,11 @@ import type {
   Agent,
   AgentProfileInput,
   CreateModelProfileInput,
-  WebSearchInput,
+  CreateModelProviderInput,
   UpdateModelProfileInput,
+  UpdateModelProviderInput,
   User,
+  WebSearchInput,
   Workspace,
 } from "@teamie/api-client";
 import type { WebSearchFormValue } from "./agent-ui";
@@ -146,14 +148,55 @@ export function webSearchInput(value: WebSearchFormValue): WebSearchInput {
     ...(value.clearApiKey ? { clearApiKey: true } : {}),
   };
 }
-export type ModelProfileFormValue = {
+export type ProviderProfileFormValue = {
   id?: string;
   displayName: string;
-  description: string;
   baseUrl: string;
-  model: string;
   apiKey: string;
   clearApiKey?: boolean;
+  enabled: boolean;
+};
+export function providerProfileCreateInput(
+  value: ProviderProfileFormValue,
+): CreateModelProviderInput {
+  const id = (value.id ?? "").trim();
+  if (id && !MODEL_ID_PATTERN.test(id))
+    throw new AgentInputError(
+      "服务商标识需由字母、数字、点、下划线或连字符组成（1-64 位），不能为 . 或 ..。",
+    );
+  const baseUrl = validateProviderBaseUrl(value.baseUrl);
+  const key = value.apiKey.trim();
+  const displayName = value.displayName.trim() || new URL(baseUrl).hostname;
+  return {
+    ...(id ? { id } : {}),
+    displayName,
+    baseUrl,
+    ...(key ? { apiKey: key } : {}),
+    enabled: value.enabled,
+  };
+}
+export function providerProfileUpdateInput(
+  value: ProviderProfileFormValue,
+): UpdateModelProviderInput {
+  const baseUrl = validateProviderBaseUrl(value.baseUrl);
+  const key = value.apiKey.trim();
+  if (value.clearApiKey && key)
+    throw new AgentInputError("清除密钥和填写新密钥不能同时进行。");
+  const displayName = value.displayName.trim() || new URL(baseUrl).hostname;
+  return {
+    displayName,
+    baseUrl,
+    ...(key ? { apiKey: key } : {}),
+    ...(value.clearApiKey ? { clearApiKey: true } : {}),
+    enabled: value.enabled,
+  };
+}
+export type ModelProfileFormValue = {
+  id?: string;
+  providerId: string;
+  displayName: string;
+  description: string;
+  model: string;
   enabled: boolean;
   contextWindowTokens?: number;
 };
@@ -165,20 +208,20 @@ export function modelProfileCreateInput(
     throw new AgentInputError(
       "模型标识需由字母、数字、点、下划线或连字符组成（1-64 位），不能为 . 或 ..。",
     );
-  const baseUrl = validateProviderBaseUrl(value.baseUrl);
+  const providerId = value.providerId.trim();
+  if (!providerId || !MODEL_ID_PATTERN.test(providerId))
+    throw new AgentInputError("请选择所属模型服务商。");
   const model = value.model.trim();
   if (!model) throw new AgentInputError("请填写模型名称。");
-  const key = value.apiKey.trim();
   validateContextWindowTokens(value.contextWindowTokens);
   const displayName = value.displayName.trim() || model;
   const description = value.description.trim();
   return {
     ...(id ? { id } : {}),
+    providerId,
     displayName,
     ...(description ? { description } : {}),
-    baseUrl,
     model,
-    ...(key ? { apiKey: key } : {}),
     enabled: value.enabled,
     ...(value.contextWindowTokens === undefined
       ? {}
@@ -188,20 +231,17 @@ export function modelProfileCreateInput(
 export function modelProfileUpdateInput(
   value: ModelProfileFormValue,
 ): UpdateModelProfileInput {
-  const baseUrl = validateProviderBaseUrl(value.baseUrl);
+  const providerId = value.providerId.trim();
+  if (!providerId || !MODEL_ID_PATTERN.test(providerId))
+    throw new AgentInputError("请选择所属模型服务商。");
   const model = value.model.trim();
   if (!model) throw new AgentInputError("请填写模型名称。");
-  const key = value.apiKey.trim();
-  if (value.clearApiKey && key)
-    throw new AgentInputError("清除密钥和填写新密钥不能同时进行。");
   validateContextWindowTokens(value.contextWindowTokens);
   return {
+    providerId,
     displayName: value.displayName.trim() || model,
     description: value.description.trim(),
-    baseUrl,
     model,
-    ...(key ? { apiKey: key } : {}),
-    ...(value.clearApiKey ? { clearApiKey: true } : {}),
     enabled: value.enabled,
     ...(value.contextWindowTokens === undefined
       ? {}
@@ -212,10 +252,24 @@ export function gatewayFailureText(error: unknown): string {
   if (error instanceof AgentInputError) return error.message;
   const status =
     error && typeof error === "object" && "status" in error ? error.status : 0;
+  const code =
+    error && typeof error === "object" && "code" in error
+      ? String(error.code)
+      : "";
   if (status === 403) return "需要平台管理员权限才能配置模型网关。";
   if (status === 401) return "登录已失效，请重新登录。";
+  if (code === "provider_in_use")
+    return "该服务商下仍有已关联的模型，请先迁移或移除后再删除。";
+  if (code === "provider_exists")
+    return "服务商标识已存在，请更换其他标识后重试。";
+  if (code === "provider_not_found")
+    return "所属服务商不存在或已被删除，请刷新后重试。";
+  if (code === "model_disabled")
+    return "当前模型或所属服务商已停用，请启用后再测试。";
+  if (code === "model_not_configured")
+    return "所属服务商尚未完成地址或密钥配置。";
   if (status === 400) return "配置未通过校验，请检查服务地址、模型名称与密钥。";
   if (status === 409) return "模型标识已存在，请更换其他标识后重试。";
-  if (status === 404) return "目标模型不存在或已被删除，请刷新后重试。";
+  if (status === 404) return "目标配置不存在或已被删除，请刷新后重试。";
   return "模型网关请求未完成，请检查配置或稍后重试。";
 }

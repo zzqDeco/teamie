@@ -282,9 +282,9 @@ func TestGatewayExposesAndRotatesModelConfigIDAcrossUnaryStreamAndPing(t *testin
 	}
 
 	// Rotate model in store while keeping ContextWindowTokens unchanged -> ModelConfigId must change.
-	if _, err := s.Store.UpdateModels(context.Background(), func(models []ModelProfile) ([]ModelProfile, error) {
+	if _, err := s.Store.UpdateCatalog(context.Background(), func(providers []ProviderProfile, models []ModelProfile) ([]ProviderProfile, []ModelProfile, error) {
 		models[0].Model = "rotated-model-b"
-		return models, nil
+		return providers, models, nil
 	}); err != nil {
 		t.Fatal(err)
 	}

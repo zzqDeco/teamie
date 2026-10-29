@@ -230,33 +230,63 @@ describe("model gateway settings page", () => {
     expect(routing).not.toHaveBeenCalled();
   });
 
-  it("renders multi-model catalog profiles and supports creating, setting default, testing, and deleting models", async () => {
+  it("groups multiple models under a single provider, keeps per-model test outcomes independent, and guards non-empty provider deletion", async () => {
     const multiGateway: ModelGateway = {
       ...gateway,
-      defaultModelId: "default",
+      defaultModelId: "gpt-4o",
+      providers: [
+        {
+          id: "openai-main",
+          displayName: "OpenAI 主连接",
+          baseUrl: "https://model.example.test/v1",
+          hasApiKey: true,
+          enabled: true,
+          configured: true,
+          modelCount: 2,
+          updatedAt: "2026-10-16T00:00:00Z",
+        },
+        {
+          id: "empty-backup",
+          displayName: "备用空服务商",
+          baseUrl: "https://backup.example.test/v1",
+          hasApiKey: true,
+          enabled: false,
+          configured: true,
+          modelCount: 0,
+          updatedAt: "2026-10-16T00:00:00Z",
+        },
+      ],
       models: [
         {
-          id: "default",
+          id: "gpt-4o",
+          providerId: "openai-main",
+          providerDisplayName: "OpenAI 主连接",
+          providerEnabled: true,
           displayName: "GPT-4o",
           description: "通用默认模型",
           baseUrl: "https://model.example.test/v1",
           model: "gpt-4o",
-          contextWindowTokens: 16384,
+          contextWindowTokens: 32768,
           hasApiKey: true,
           enabled: true,
+          effectiveEnabled: true,
           configured: true,
           isDefault: true,
           updatedAt: "2026-10-16T00:00:00Z",
         },
         {
-          id: "deepseek-r1",
-          displayName: "DeepSeek R1",
-          description: "深度推理模型",
-          baseUrl: "https://deepseek.example.test/v1",
-          model: "deepseek-reasoner",
-          contextWindowTokens: 65536,
+          id: "gpt-4o-mini",
+          providerId: "openai-main",
+          providerDisplayName: "OpenAI 主连接",
+          providerEnabled: true,
+          displayName: "GPT-4o Mini",
+          description: "轻量快速模型",
+          baseUrl: "https://model.example.test/v1",
+          model: "gpt-4o-mini",
+          contextWindowTokens: 131072,
           hasApiKey: true,
           enabled: true,
+          effectiveEnabled: true,
           configured: true,
           isDefault: false,
           updatedAt: "2026-10-16T00:00:00Z",
@@ -264,36 +294,101 @@ describe("model gateway settings page", () => {
       ],
     };
     vi.spyOn(api, "modelGateway").mockResolvedValue(multiGateway);
-    const updateSpy = vi.spyOn(api, "saveModelRouting").mockResolvedValue({
-      ...multiGateway,
-      defaultModelId: "deepseek-r1",
-    });
+    const updateRoutingSpy = vi
+      .spyOn(api, "saveModelRouting")
+      .mockResolvedValue({
+        ...multiGateway,
+        defaultModelId: "gpt-4o-mini",
+      });
     const testSpy = vi
       .spyOn(api, "testModelProfile")
-      .mockResolvedValue({
+      .mockResolvedValueOnce({
         ok: true,
-        model: "deepseek-reasoner",
-        latencyMs: 45,
+        model: "gpt-4o",
+        latencyMs: 38,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        model: "gpt-4o-mini",
+        latencyMs: 24,
       });
-    const deleteSpy = vi
+    const createModelSpy = vi
+      .spyOn(api, "createModelProfile")
+      .mockResolvedValue(multiGateway);
+    const deleteProviderSpy = vi
+      .spyOn(api, "deleteModelProvider")
+      .mockResolvedValue(multiGateway);
+    const deleteModelSpy = vi
       .spyOn(api, "deleteModelProfile")
       .mockResolvedValue(gateway);
+
     await renderSettings();
-    expect(find(".gateway-models-section").textContent).toContain(
-      "DeepSeek R1",
-    );
-    await click(buttonByText("设为默认"));
-    expect(updateSpy).toHaveBeenCalledWith({ defaultModelId: "deepseek-r1" });
-    const testButtons = [...document.body.querySelectorAll("button")].filter(
-      (b) => b.textContent?.trim() === "测试此模型",
-    );
+    const providerCards = [
+      ...document.body.querySelectorAll<HTMLElement>(".gateway-provider-card"),
+    ];
+    expect(providerCards).toHaveLength(2);
+    expect(providerCards[0]!.textContent).toContain("OpenAI 主连接");
+    expect(providerCards[0]!.textContent).toContain("关联模型：2 个");
+    expect(providerCards[0]!.textContent).toContain("GPT-4o");
+    expect(providerCards[0]!.textContent).toContain("GPT-4o Mini");
+
+    // Non-empty provider delete button is disabled; empty provider delete button is enabled.
+    const deleteProvButtons = [
+      ...document.body.querySelectorAll<HTMLButtonElement>("button"),
+    ].filter((b) => b.textContent?.trim() === "删除服务商");
+    expect(deleteProvButtons).toHaveLength(2);
+    expect(deleteProvButtons[0]!.disabled).toBe(true);
+    expect(deleteProvButtons[1]!.disabled).toBe(false);
+    await click(deleteProvButtons[1]!);
+    expect(deleteProviderSpy).toHaveBeenCalledWith("empty-backup");
+
+    // Test Model A and Model B separately -> both results remain displayed simultaneously!
+    const testButtons = [
+      ...document.body.querySelectorAll<HTMLButtonElement>("button"),
+    ].filter((b) => b.textContent?.trim() === "测试此模型");
+    expect(testButtons).toHaveLength(2);
+    await click(testButtons[0]!);
     await click(testButtons[1]!);
-    expect(testSpy).toHaveBeenCalledWith("deepseek-r1");
-    expect(find(".notice.success").textContent).toContain("deepseek-reasoner");
-    const deleteButtons = [...document.body.querySelectorAll("button")].filter(
-      (b) => b.textContent?.trim() === "移除",
-    );
+    expect(testSpy).toHaveBeenNthCalledWith(1, "gpt-4o");
+    expect(testSpy).toHaveBeenNthCalledWith(2, "gpt-4o-mini");
+    const modelResults = [
+      ...document.body.querySelectorAll(".gateway-model-test-result.ok"),
+    ];
+    expect(modelResults).toHaveLength(2);
+    expect(modelResults[0]!.textContent).toContain("gpt-4o · 38 ms");
+    expect(modelResults[1]!.textContent).toContain("gpt-4o-mini · 24 ms");
+
+    // Adding a third model from the provider card pre-selects openai-main without asking for baseUrl or apiKey.
+    const addModelInCard = [
+      ...providerCards[0]!.querySelectorAll<HTMLButtonElement>("button"),
+    ].find((b) => b.textContent?.trim() === "添加模型")!;
+    await click(addModelInCard);
+    expect(
+      find<HTMLSelectElement>('[name="profileProviderId"]').value,
+    ).toBe("openai-main");
+    expect(document.querySelector('[name="profileBaseUrl"]')).toBeNull();
+    expect(document.querySelector('[name="profileApiKey"]')).toBeNull();
+    await type('[name="profileDisplayName"]', "o3-mini");
+    await type('[name="profileModel"]', "o3-mini");
+    await act(async () => {
+      find<HTMLFormElement>(".gateway-model-profile-form").requestSubmit();
+    });
+    expect(createModelSpy).toHaveBeenCalledWith({
+      providerId: "openai-main",
+      displayName: "o3-mini",
+      model: "o3-mini",
+      enabled: true,
+      contextWindowTokens: 16384,
+    });
+
+    await click(buttonByText("设为默认"));
+    expect(updateRoutingSpy).toHaveBeenCalledWith({
+      defaultModelId: "gpt-4o-mini",
+    });
+    const deleteButtons = [
+      ...document.body.querySelectorAll<HTMLButtonElement>("button"),
+    ].filter((b) => b.textContent?.trim() === "移除");
     await click(deleteButtons[1]!);
-    expect(deleteSpy).toHaveBeenCalledWith("deepseek-r1");
+    expect(deleteModelSpy).toHaveBeenCalledWith("gpt-4o-mini");
   });
 });
