@@ -305,8 +305,14 @@ describe("PR-6 dark mode tokens, head bootstrap & settings switcher", () => {
   it("pairs brand backgrounds with --on-brand and uses --surface on mention popup", () => {
     const shellCss = readFileSync(join(srcDir, "styles", "shell.css"), "utf8");
     const chatCss = readFileSync(join(srcDir, "styles", "chat.css"), "utf8");
-    const attentionCss = readFileSync(join(srcDir, "attention.css"), "utf8");
-    const mentionsCss = readFileSync(join(srcDir, "mentions.css"), "utf8");
+    const attentionCss = readFileSync(
+      join(srcDir, "styles", "attention.css"),
+      "utf8",
+    );
+    const mentionsCss = readFileSync(
+      join(srcDir, "styles", "mentions.css"),
+      "utf8",
+    );
 
     expect(shellCss).toMatch(
       /\.unread-badge\s*\{[^}]*color:\s*var\(--on-brand\);[^}]*background:\s*var\(--brand\);/s,

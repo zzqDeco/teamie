@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import type { MutableRefObject, RefObject } from "react";
 import { api } from "@teamie/api-client";
 import type { Conversation } from "@teamie/api-client";
-import { errorText } from "../chat";
+import { errorText } from "../errors";
 import { chatStore } from "../store";
 import type { LocalMessage } from "../store";
 

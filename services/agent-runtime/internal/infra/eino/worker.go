@@ -2,23 +2,16 @@ package eino
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"go.uber.org/zap"
-	"math"
 	"net/http"
-	"slices"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"teamie/pkg/observability"
 	"time"
 
 	"github.com/cloudwego/eino/adk"
-	"github.com/cloudwego/eino/adk/middlewares/summarization"
-	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
-	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
 	wire "teamie/contracts/gen/agent/kitex_gen/agent"
@@ -201,6 +194,110 @@ func (g *turnGuard) onFinish(run *Run, cleanup func()) {
 	g.mu.Unlock()
 }
 func (g *turnGuard) current() *Run { g.mu.Lock(); defer g.mu.Unlock(); return g.run }
+
+type agentWorker struct {
+	presence         *conversationPresenceState
+	mcpWatcher       *mcpNotificationWatcher
+	engine           *Engine
+	def              *wire.AgentDefinition
+	lease            *Lease
+	contextWindow    atomic.Int64
+	imc              *IM
+	reads            *readReceiptSender
+	gatewayModel     *GatewayModel
+	tools            []tool.BaseTool
+	tasks            *workerTasks
+	session          *SessionStore[*schema.AgenticMessage]
+	guard            *turnGuard
+	loop             *adk.TurnLoop[Input, *schema.AgenticMessage]
+	loopDone         chan *adk.TurnLoopExitState[Input, *schema.AgenticMessage]
+	loopCancel       context.CancelFunc
+	generation       int64
+	queued           map[string]int64
+	qmu              sync.Mutex
+	lastState        string
+	lastReport       time.Time
+	heartbeatEnsured bool
+}
+
+func (w *agentWorker) authorize(ctx context.Context) error {
+	e, def := w.engine, w.def
+	pc, c := context.WithTimeout(ctx, 4*time.Second)
+	defer c()
+	r, err := e.Control.GetAgent(pc, &wire.AgentRequest{ServiceToken: e.Config.ControlToken, AgentId: def.Id})
+	if err != nil {
+		return &ModelError{Code: "control_unavailable", Retry: true}
+	}
+	shouldPreempt := r.Agent == nil
+	if !shouldPreempt {
+		if coord := e.Store.ScheduleCoordinator(nil); coord != nil {
+			shouldPreempt = coord.CheckRevisionPreemption(r.Agent.Enabled, r.Agent.DeletedAt != nil, r.Agent.Revision, def.Revision)
+		} else {
+			shouldPreempt = !r.Agent.Enabled || r.Agent.DeletedAt != nil || r.Agent.Revision != def.Revision
+		}
+	}
+	if shouldPreempt {
+		return &ModelError{Code: "principal_disabled", Retry: true}
+	}
+	if run, runErr := CurrentRun(ctx); runErr == nil && e.Store.runCanceled(ctx, run.ID) {
+		return &ModelError{Code: "run_cancelled", Retry: false}
+	}
+	return nil
+}
+
+func (w *agentWorker) clearQueue() {
+	w.qmu.Lock()
+	w.queued = map[string]int64{}
+	w.qmu.Unlock()
+}
+
+func (w *agentWorker) stop() {
+	if w.loop == nil {
+		return
+	}
+	w.loop.Stop(adk.WithImmediate())
+	if run := w.guard.current(); run != nil {
+		w.engine.cancelRun(w.def.Id, run)
+	}
+	<-w.loopDone
+	w.loopCancel()
+	w.guard.finish()
+	w.loop = nil
+	w.clearQueue()
+}
+
+func (w *agentWorker) start(ctx context.Context) {
+	w.generation++
+	lc, cancel := context.WithCancel(ctx)
+	w.loopCancel = cancel
+	w.loopDone = make(chan *adk.TurnLoopExitState[Input, *schema.AgenticMessage], 1)
+	w.loop = adk.NewTurnLoop(adk.TurnLoopConfig[Input, *schema.AgenticMessage]{
+		GenInput:  w.makeInput,
+		GenResume: w.genResume,
+		PrepareAgent: func(ctx context.Context, _ *adk.TurnLoop[Input, *schema.AgenticMessage], _ []Input) (adk.TypedAgent[*schema.AgenticMessage], error) {
+			return w.makeAgent(ctx)
+		},
+		OnAgentEvents: w.onAgentEvents,
+		Store:         w.session,
+		CheckpointID:  "turnloop:" + w.def.Id,
+		SessionID:     "agent:" + w.def.Id,
+		SessionStore:  w.session,
+	})
+	// Push before Run so restored checkpoints can see newly accepted resume intent.
+	pending, _ := w.engine.Store.Pending(ctx, w.lease)
+	w.qmu.Lock()
+	for _, in := range pending {
+		if ok, _ := w.loop.Push(in); ok {
+			w.queued[in.EventID] = w.generation
+		}
+	}
+	w.qmu.Unlock()
+	w.loop.Run(lc)
+	go func(active *adk.TurnLoop[Input, *schema.AgenticMessage], done chan *adk.TurnLoopExitState[Input, *schema.AgenticMessage]) {
+		done <- active.Wait()
+	}(w.loop, w.loopDone)
+}
+
 func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lease) {
 	ctx, cancelWorker := context.WithCancel(ctx)
 	defer cancelWorker()
@@ -222,690 +319,53 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 			}
 		}
 	}()
-	authorize := func(ctx context.Context) error {
-		pc, c := context.WithTimeout(ctx, 4*time.Second)
-		defer c()
-		r, err := e.Control.GetAgent(pc, &wire.AgentRequest{ServiceToken: e.Config.ControlToken, AgentId: def.Id})
-		if err != nil {
-			return &ModelError{Code: "control_unavailable", Retry: true}
-		}
-		shouldPreempt := r.Agent == nil
-		if !shouldPreempt {
-			if coord := e.Store.ScheduleCoordinator(nil); coord != nil {
-				shouldPreempt = coord.CheckRevisionPreemption(r.Agent.Enabled, r.Agent.DeletedAt != nil, r.Agent.Revision, def.Revision)
-			} else {
-				shouldPreempt = !r.Agent.Enabled || r.Agent.DeletedAt != nil || r.Agent.Revision != def.Revision
-			}
-		}
-		if shouldPreempt {
-			return &ModelError{Code: "principal_disabled", Retry: true}
-		}
-		if run, runErr := CurrentRun(ctx); runErr == nil && e.Store.runCanceled(ctx, run.ID) {
-			return &ModelError{Code: "run_cancelled", Retry: false}
-		}
-		return nil
+	w := &agentWorker{
+		engine: e,
+		def:    def,
+		lease:  lease,
+		guard:  &turnGuard{},
+		queued: map[string]int64{},
 	}
-	var contextWindow atomic.Int64
-	contextWindow.Store(16384)
+	w.contextWindow.Store(16384)
 	// Typing and normal IM calls share credentials: issuance rotates the
 	// principal's single token and must never create competing token caches.
-	imc := &IM{BaseURL: e.Config.IMURL, RealtimeURL: e.Config.IMRealtimeURL, ServiceKey: e.Config.IMToken, AgentID: def.Id, Identity: e.Identity}
-	reads := newReadReceiptSender()
-	gatewayModel := &GatewayModel{Client: e.Gateway, Token: e.Config.GatewayToken, OwnerID: def.OwnerId, AgentID: def.Id, ModelID: def.GetModelId(), Store: e.Store, Lease: lease, Authorize: authorize, StreamURL: e.Config.GatewayStreamURL, ContextWindow: func() int { return int(contextWindow.Load()) }}
-	tools, err := (&Tools{Store: e.Store, Lease: lease, IM: imc, Sandbox: e.Sandbox, SandboxToken: e.Config.SandboxToken, Authorize: authorize}).BuildIM()
+	w.imc = &IM{BaseURL: e.Config.IMURL, RealtimeURL: e.Config.IMRealtimeURL, ServiceKey: e.Config.IMToken, AgentID: def.Id, Identity: e.Identity}
+	w.reads = newReadReceiptSender()
+	w.gatewayModel = &GatewayModel{Client: e.Gateway, Token: e.Config.GatewayToken, OwnerID: def.OwnerId, AgentID: def.Id, ModelID: def.GetModelId(), Store: e.Store, Lease: lease, Authorize: w.authorize, StreamURL: e.Config.GatewayStreamURL, ContextWindow: func() int { return int(w.contextWindow.Load()) }}
+	var err error
+	w.tools, err = (&Tools{Store: e.Store, Lease: lease, IM: w.imc, Sandbox: e.Sandbox, SandboxToken: e.Config.SandboxToken, Authorize: w.authorize}).BuildIM()
 	if err != nil {
 		e.report(ctx, def.Id, "error", "tool_failed", false)
 		return
 	}
-	tasks, err := e.tasks(ctx, def, lease, imc, authorize)
+	w.tasks, err = e.tasks(ctx, def, lease, w.imc, w.authorize)
 	if err != nil {
 		e.report(ctx, def.Id, "error", "tool_failed", false)
 		return
 	}
-	go tasks.dispatch(ctx)
+	go w.tasks.dispatch(ctx)
 	defer func() {
 		pc, c := context.WithTimeout(context.Background(), 12*time.Second)
 		defer c()
-		if authorize(pc) != nil {
+		if w.authorize(pc) != nil {
 			e.cancelAgentTasks(pc, def.Id)
 		}
-		_ = tasks.manager.Close(pc)
+		_ = w.tasks.manager.Close(pc)
 	}()
-	session := &SessionStore[*schema.AgenticMessage]{Store: e.Store, Lease: lease, Revision: def.Revision}
-	guard := &turnGuard{}
-	var loop *adk.TurnLoop[Input, *schema.AgenticMessage]
-	var loopDone chan *adk.TurnLoopExitState[Input, *schema.AgenticMessage]
-	var loopCancel context.CancelFunc
-	generation := int64(0)
-	queued := map[string]int64{}
-	var qmu sync.Mutex
-	clearQueue := func() { qmu.Lock(); queued = map[string]int64{}; qmu.Unlock() }
-	stop := func() {
-		if loop == nil {
-			return
-		}
-		loop.Stop(adk.WithImmediate())
-		if run := guard.current(); run != nil {
-			e.cancelRun(def.Id, run)
-		}
-		<-loopDone
-		loopCancel()
-		guard.finish()
-		loop = nil
-		clearQueue()
-	}
-	defer stop()
-	mcpWatcher := newMCPNotificationWatcher(e.Store, lease, imc, e.Config.FlagsFile)
-	presence := newConversationPresenceState(e.unreadDigestInterval(), mcpWatcher.presenceChanged)
-	_ = presence.Restore(ctx, e.Store, lease)
-	mcpWatcher.setPresence(presence)
-	makeAgent := func(ctx context.Context) (adk.TypedAgent[*schema.AgenticMessage], error) {
-		run, err := CurrentRun(ctx)
-		if err != nil {
-			return nil, err
-		}
-		imToolBuilder := &Tools{
-			Store:            e.Store,
-			Lease:            lease,
-			IM:               imc,
-			Sandbox:          e.Sandbox,
-			SandboxToken:     e.Config.SandboxToken,
-			GatewayStreamURL: e.Config.GatewayStreamURL,
-			GatewayToken:     e.Config.GatewayToken,
-			OwnerID:          def.OwnerId,
-			AgentID:          def.Id,
-			FlagsFile:        e.Config.FlagsFile,
-			Authorize:        authorize,
-		}
-		if e.presenceEnabled() {
-			imToolBuilder.Presence = presence
-		}
-		presenceActive, err := imToolBuilder.initRunPresence(ctx, run)
-		if err != nil {
-			return nil, err
-		}
-		if presenceActive {
-			imToolBuilder.Presence = presence
-		} else {
-			imToolBuilder.Presence = nil
-		}
-
-		availableTools := tools
-		if presenceActive {
-			if mentionsForRun(run) {
-				availableTools, err = imToolBuilder.BuildIMWithMentions(fileDeliveryForRun(run))
-			} else if fileDeliveryForRun(run) {
-				availableTools, err = imToolBuilder.BuildIMWithFiles()
-			} else {
-				availableTools, err = imToolBuilder.BuildIM()
-			}
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			if fileDeliveryForRun(run) {
-				availableTools, err = imToolBuilder.BuildIMWithFiles()
-				if err != nil {
-					return nil, err
-				}
-			}
-			if mentionsForRun(run) {
-				availableTools, err = imToolBuilder.BuildIMWithMentions(fileDeliveryForRun(run))
-				if err != nil {
-					return nil, err
-				}
-			}
-		}
-		activeTools, err := toolsForRun(ctx, availableTools, run)
-		if err != nil {
-			return nil, err
-		}
-		var (
-			mcpTools       []tool.BaseTool
-			presenceTools  []tool.BaseTool
-			unknownHandler func(context.Context, string, string) (string, error)
-		)
-		if presenceActive {
-			presenceTools, err = imToolBuilder.BuildPresenceTools()
-			if err != nil {
-				return nil, err
-			}
-			unknownHandler = imToolBuilder.HandleUnknownMCPTool
-		} else {
-			mcpTools, err = imToolBuilder.BuildMCPTools(ctx, run)
-			if err != nil {
-				return nil, err
-			}
-		}
-		if contextProfile(run) == contextProfileV1 {
-			budget, err := ParseContextBudgetSnapshot(run.ContextBudget)
-			if err != nil {
-				return nil, err
-			}
-			archive := &ContextArchive{Store: e.Store, Lease: lease, IM: imc, Authorize: authorize}
-			contextTools, err := archive.Tools(ctx)
-			if err != nil {
-				return nil, err
-			}
-			pageTool, err := tasks.backend.ReadPageTool()
-			if err != nil {
-				return nil, err
-			}
-			activeTools = append(activeTools, contextTools...)
-			activeTools = append(activeTools, pageTool)
-			if budget.WebSearch {
-				webTools, err := imToolBuilder.BuildWebTools()
-				if err != nil {
-					return nil, err
-				}
-				activeTools = append(activeTools, webTools...)
-			}
-			if budget.ScheduledWakeups {
-				scheduleTools, err := imToolBuilder.BuildScheduleTools(budget.DirectMessages)
-				if err != nil {
-					return nil, err
-				}
-				activeTools = append(activeTools, scheduleTools...)
-			}
-			if budget.DirectMessages {
-				dmTools, err := imToolBuilder.BuildDirectMessageTools()
-				if err != nil {
-					return nil, err
-				}
-				activeTools = append(activeTools, dmTools...)
-			}
-			if presenceActive {
-				activeTools = append(activeTools, presenceTools...)
-			} else {
-				activeTools = append(activeTools, mcpTools...)
-			}
-			pipeline, err := NewContextPipeline(ctx, ContextPipelineConfig{Model: gatewayModel, Budget: budget, Backend: archive, ArchivePath: archive.Path, ArchiveToolPath: archive.ArchiveToolPath, ArchiveTranscript: archive.ArchiveTranscript})
-			if err != nil {
-				return nil, err
-			}
-			handlers := []adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]{}
-			if presenceActive {
-				handlers = append(handlers, imToolBuilder.NewMCPDynamicToolMiddleware())
-			}
-			handlers = append(handlers, pipeline)
-			handlers = append(handlers, tasks.handlers...)
-			instruction := contextInstruction(def, budget)
-			if budget.FileDelivery {
-				instruction += fileDeliveryGuidance
-			}
-			if budget.StructuredMentions {
-				instruction += mentionGuidance
-			}
-			if budget.WebSearch {
-				instruction += webSearchGuidance
-			}
-			if budget.ScheduledWakeups {
-				if budget.DirectMessages {
-					instruction += autonomousScheduleGuidance
-				} else {
-					instruction += scheduleWakeupGuidance
-				}
-			}
-			if budget.DirectMessages {
-				instruction += directMessageGuidance
-			}
-			if presenceActive {
-				instruction += presenceAndMarketplaceGuidance
-			} else if len(mcpTools) > 0 {
-				instruction += marketplaceAppGuidance
-			}
-			return adk.NewTypedChatModelAgent(ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{Name: "teamie_agent", Description: "A user-owned Teamie participant", Instruction: instruction, Model: gatewayModel, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: activeTools, ExecuteSequentially: true, UnknownToolsHandler: unknownHandler}}, MaxIterations: math.MaxInt, Handlers: handlers, ModelRetryConfig: pipeline.RetryConfig()})
-		}
-		if presenceActive {
-			activeTools = append(activeTools, presenceTools...)
-		} else {
-			activeTools = append(activeTools, mcpTools...)
-		}
-		legacyInstruction := instruction(def)
-		if presenceActive {
-			legacyInstruction += presenceAndMarketplaceGuidance
-		} else if len(mcpTools) > 0 {
-			legacyInstruction += marketplaceAppGuidance
-		}
-		trigger := summaryTrigger(int(contextWindow.Load()))
-		finalize := finalizeSummary
-		if run.toolProfile == v034ToolProfile {
-			finalize = finalizeV034Summary
-		}
-		summaryFailovers := 1
-		summary, err := summarization.NewTyped(ctx, &summarization.TypedConfig[*schema.AgenticMessage]{
-			Model:           gatewayModel,
-			ModelOptions:    []model.Option{model.WithAgenticToolChoice(&schema.AgenticToolChoice{Type: schema.ToolChoiceForbidden})},
-			Trigger:         &summarization.TriggerCondition{ContextTokens: trigger, ContextMessages: 32},
-			UserInstruction: summaryInstruction,
-			Finalize:        finalize,
-			Failover: &summarization.TypedFailoverConfig[*schema.AgenticMessage]{
-				MaxRetries:     &summaryFailovers,
-				ShouldFailover: retryEmptyLengthSummary,
-			},
-		})
-		if err != nil {
-			return nil, err
-		}
-		handlers := []adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]{}
-		if presenceActive {
-			handlers = append(handlers, imToolBuilder.NewMCPDynamicToolMiddleware())
-		}
-		handlers = append(handlers, summary)
-		handlers = append(handlers, tasks.handlers...)
-		return adk.NewTypedChatModelAgent(ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{Name: "teamie_agent", Description: "A user-owned Teamie participant", Instruction: legacyInstruction, Model: gatewayModel, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: activeTools, ExecuteSequentially: true, UnknownToolsHandler: unknownHandler}}, MaxIterations: math.MaxInt, Handlers: handlers})
-	}
-	validate := func(ctx context.Context, inputs []Input) ([]Input, error) {
-		valid := []Input{}
-		for _, in := range inputs {
-			if in.Kind == "task.notification" {
-				valid = append(valid, in)
-				continue
-			}
-			if in.Kind == "schedule.wakeup" {
-				if err := e.authorizeScheduleInput(ctx, imc, lease, in); err != nil {
-					if errors.Is(err, errContextUnavailable) {
-						if in.ScheduleID != "" {
-							_ = e.Store.DB.CancelActiveSchedule(ctx, lease.AgentID, in.ScheduleID)
-						}
-						if err = e.Store.Skip(ctx, lease, in.EventID); err != nil {
-							return nil, err
-						}
-						continue
-					}
-					return nil, err
-				}
-				valid = append(valid, in)
-				continue
-			}
-			if in.Kind == "app.notification" {
-				if err := e.authorizeAppNotificationInput(ctx, imc, lease, in); err != nil {
-					if errors.Is(err, errContextUnavailable) {
-						if err = e.Store.Skip(ctx, lease, in.EventID); err != nil {
-							return nil, err
-						}
-						continue
-					}
-					return nil, err
-				}
-				valid = append(valid, in)
-				continue
-			}
-			if in.Kind == "im.unread_digest" {
-				if err := e.authorizeUnreadDigestInput(ctx, imc, lease, in); err != nil {
-					if errors.Is(err, errContextUnavailable) {
-						if err = e.Store.Skip(ctx, lease, in.EventID); err != nil {
-							return nil, err
-						}
-						continue
-					}
-					return nil, err
-				}
-				valid = append(valid, in)
-				continue
-			}
-			message, err := imc.Message(ctx, in.ConversationID, in.MessageID)
-			if err != nil {
-				var api *APIError
-				if errors.As(err, &api) && (api.Status == 403 || api.Status == 404) {
-					if err = e.Store.Skip(ctx, lease, in.EventID); err != nil {
-						return nil, err
-					}
-					continue
-				}
-				return nil, err
-			}
-			if message.RetractedAt != nil || message.Body == "" && len(message.Attachments) == 0 {
-				if err = e.Store.Skip(ctx, lease, in.EventID); err != nil {
-					return nil, err
-				}
-				continue
-			}
-			in.Body = message.Body
-			in.Attachments = message.Attachments
-			in.Mentions = message.Mentions
-			in.ReplyToID = message.ReplyToID
-			valid = append(valid, in)
-		}
-		return valid, nil
-	}
-	prepare := func(ctx context.Context, items []Input, resume *checkpointMetadata) (*Run, context.Context, []Input, error) {
-		if err := authorize(ctx); err != nil {
-			return nil, nil, nil, err
-		}
-		if !runtimeFlag(e.Config.FlagsFile, "agents.runtime.v3") {
-			return nil, nil, nil, &ModelError{Code: "runtime_disabled", Retry: true}
-		}
-		// Deduplicate checkpoint and fresh delivery copies without changing order.
-		unique := []Input{}
-		seen := map[string]bool{}
-		for _, in := range items {
-			if !seen[in.EventID] {
-				seen[in.EventID] = true
-				unique = append(unique, in)
-			}
-		}
-		if len(unique) == 0 {
-			pending, err := e.Store.Pending(ctx, lease)
-			if err != nil {
-				return nil, nil, nil, err
-			}
-			unique = pending
-		}
-		eligible, err := e.Store.eligibleInputs(ctx, lease, unique)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		batch, extra := boundedInputBatch(eligible)
-		valid, err := validate(ctx, batch)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		if len(valid) == 0 {
-			return nil, nil, nil, errors.New("no_pending_inputs")
-		}
-		profile := contextProfileLegacy
-		budget := json.RawMessage(`{}`)
-		// An explicit enabled flag admits the new policy. Existing Runs restore
-		// their persisted selection even when the flag or gateway changes.
-		if e.Config.FlagsFile != "" && runtimeFlag(e.Config.FlagsFile, "agents.context.v1") {
-			profile = contextProfileV1
-			budget, err = newRunContextBudget(int(contextWindow.Load()), runtimeFlag(e.Config.FlagsFile, "agents.files.deliver.v1"), runtimeFlag(e.Config.FlagsFile, "agents.mentions.v1"), runtimeFlag(e.Config.FlagsFile, "agents.web.v1"), runtimeFlag(e.Config.FlagsFile, "agents.schedule.v1"), runtimeFlag(e.Config.FlagsFile, "im.dm.create"))
-			if err != nil {
-				return nil, nil, nil, err
-			}
-		}
-		run, err := e.Store.StartRunWithContextPolicy(ctx, lease, valid, profile, budget)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		invalid := []string{}
-		for _, in := range run.Inputs {
-			if in.Kind == "task.notification" {
-				continue
-			}
-			if in.Kind == "schedule.wakeup" {
-				if readErr := e.authorizeScheduleInput(ctx, imc, lease, in); readErr != nil {
-					if errors.Is(readErr, errContextUnavailable) {
-						if in.ScheduleID != "" {
-							_ = e.Store.DB.CancelActiveSchedule(ctx, lease.AgentID, in.ScheduleID)
-						}
-						invalid = append(invalid, in.EventID)
-						continue
-					}
-					_ = e.Store.FinishRun(ctx, lease, run, "retry", "im_unavailable", true)
-					return nil, nil, nil, &ModelError{Code: "im_unavailable", Retry: true}
-				}
-				continue
-			}
-			if in.Kind == "app.notification" {
-				if readErr := e.authorizeAppNotificationInput(ctx, imc, lease, in); readErr != nil {
-					if errors.Is(readErr, errContextUnavailable) {
-						invalid = append(invalid, in.EventID)
-						continue
-					}
-					_ = e.Store.FinishRun(ctx, lease, run, "retry", "im_unavailable", true)
-					return nil, nil, nil, &ModelError{Code: "im_unavailable", Retry: true}
-				}
-				continue
-			}
-			if in.Kind == "im.unread_digest" {
-				if readErr := e.authorizeUnreadDigestInput(ctx, imc, lease, in); readErr != nil {
-					if errors.Is(readErr, errContextUnavailable) {
-						invalid = append(invalid, in.EventID)
-						continue
-					}
-					_ = e.Store.FinishRun(ctx, lease, run, "retry", "im_unavailable", true)
-					return nil, nil, nil, &ModelError{Code: "im_unavailable", Retry: true}
-				}
-				continue
-			}
-			m, readErr := imc.Message(ctx, in.ConversationID, in.MessageID)
-			if readErr != nil {
-				var api *APIError
-				if errors.As(readErr, &api) && (api.Status == 403 || api.Status == 404) {
-					invalid = append(invalid, in.EventID)
-					continue
-				}
-				_ = e.Store.FinishRun(ctx, lease, run, "retry", "im_unavailable", true)
-				return nil, nil, nil, &ModelError{Code: "im_unavailable", Retry: true}
-			}
-			if m.RetractedAt != nil || m.Body != in.Body || !slices.Equal(m.Attachments, in.Attachments) {
-				invalid = append(invalid, in.EventID)
-			}
-		}
-		if len(invalid) > 0 {
-			if err = e.Store.InvalidateRun(ctx, lease, run, invalid); err != nil {
-				return nil, nil, nil, err
-			}
-			return nil, nil, nil, errors.New("source_unavailable")
-		}
-		run.toolProfile, err = e.Store.runToolProfile(ctx, run.ID)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		if resume != nil && !resumeCompatibleForRun(resume, def.Revision, run) {
-			resume = nil
-		}
-		if err = e.Store.configureRun(ctx, lease, run, def.Revision, generation, resume); err != nil {
-			return nil, nil, nil, err
-		}
-		run.Front = &frontSlot{slots: e.slots}
-		runctx, diagnostic := observability.Begin(WithRun(ctx, run), "agent-run", zap.Int("custom.runtime.input_count", len(run.Inputs)), zap.Int64("custom.runtime.generation", generation))
-		run.diagnostic = diagnostic
-		inputIDs := []string{}
-		parentRuns := []string{}
-		for _, in := range run.Inputs {
-			if len(inputIDs) < 32 {
-				inputIDs = append(inputIDs, in.EventID)
-			}
-			if in.ParentRunID != "" && len(parentRuns) < 32 {
-				parentRuns = append(parentRuns, in.ParentRunID)
-			}
-		}
-		observability.L(runctx).Info("Agent run started", zap.String("event.action", "agent-run-started"), zap.Strings("custom.input.event_ids", inputIDs), zap.Strings("custom.runtime.parent_run_ids", parentRuns))
-		runctx, cancel := context.WithCancel(runctx)
-		guard.set(run, cancel, run.releaseFront)
-		guard.onFinish(run, func() { diagnostic.End(runctx.Err(), zap.String("custom.runtime.state", "scope-closed")) })
-		qmu.Lock()
-		for _, in := range run.Inputs {
-			queued[in.EventID] = generation
-		}
-		qmu.Unlock()
-		session.bind(run, nil)
-		if err = run.Front.acquire(runctx); err != nil {
-			guard.finish()
-			return nil, nil, nil, err
-		}
-		if e.Config.IMRealtimeURL != "" {
-			guard.onFinish(run, beginTyping(runctx, run.Inputs, imc.Typing, func(ctx context.Context) error {
-				if !runtimeFlag(e.Config.FlagsFile, "agents.runtime.v3") {
-					return &ModelError{Code: "runtime_disabled", Retry: true}
-				}
-				if err := authorize(ctx); err != nil {
-					return err
-				}
-				return e.Store.CheckLease(ctx, lease)
-			}, nil))
-		}
-		consumed := map[string]bool{}
-		for _, in := range run.Inputs {
-			consumed[in.EventID] = true
-		}
-		remaining := append([]Input{}, extra...)
-		for _, in := range batch {
-			if !consumed[in.EventID] {
-				remaining = append(remaining, in)
-			}
-		}
-		e.report(runctx, def.Id, "running", "", true)
-		return run, runctx, remaining, nil
-	}
-	makeInput := func(ctx context.Context, _ *adk.TurnLoop[Input, *schema.AgenticMessage], items []Input) (*adk.GenInputResult[Input, *schema.AgenticMessage], error) {
-		run, runctx, remaining, err := prepare(ctx, items, nil)
-		if err != nil {
-			return nil, err
-		}
-		return &adk.GenInputResult[Input, *schema.AgenticMessage]{RunCtx: runctx, Input: &adk.TypedAgentInput[*schema.AgenticMessage]{Messages: inputMessages(run.Inputs), EnableStreaming: e.Config.GatewayStreamURL != ""}, Consumed: run.Inputs, Remaining: remaining}, nil
-	}
-	start := func() {
-		generation++
-		lc, cancel := context.WithCancel(ctx)
-		loopCancel = cancel
-		loopDone = make(chan *adk.TurnLoopExitState[Input, *schema.AgenticMessage], 1)
-		loop = adk.NewTurnLoop(adk.TurnLoopConfig[Input, *schema.AgenticMessage]{GenInput: makeInput, GenResume: func(ctx context.Context, active *adk.TurnLoop[Input, *schema.AgenticMessage], interrupted, unhandled, newItems []Input) (*adk.GenResumeResult[Input, *schema.AgenticMessage], error) {
-			metadata, _ := e.Store.ResumeMetadata(ctx, "turnloop:"+def.Id)
-			all := append(append(append([]Input{}, interrupted...), unhandled...), newItems...)
-			run, runctx, remaining, err := prepare(ctx, all, metadata)
-			if err != nil {
-				return nil, err
-			}
-			if resumeCompatibleForRun(metadata, def.Revision, run) {
-				targets := map[string]any{}
-				for _, id := range metadata.Targets {
-					targets[id] = nil
-				}
-				return &adk.GenResumeResult[Input, *schema.AgenticMessage]{RunCtx: runctx, Decision: adk.TurnLoopResumeDecisionResume, ResumeParams: &adk.ResumeParams{Targets: targets}, Consumed: run.Inputs, Remaining: remaining}, nil
-			}
-			return &adk.GenResumeResult[Input, *schema.AgenticMessage]{RunCtx: runctx, Decision: adk.TurnLoopResumeDecisionStartNewTurn, Input: &adk.TypedAgentInput[*schema.AgenticMessage]{Messages: inputMessages(run.Inputs), EnableStreaming: e.Config.GatewayStreamURL != ""}, Consumed: run.Inputs, Remaining: remaining}, nil
-		}, PrepareAgent: func(ctx context.Context, _ *adk.TurnLoop[Input, *schema.AgenticMessage], _ []Input) (adk.TypedAgent[*schema.AgenticMessage], error) {
-			return makeAgent(ctx)
-		}, OnAgentEvents: func(ctx context.Context, tc *adk.TurnContext[Input, *schema.AgenticMessage], events *adk.AsyncIterator[*adk.TypedAgentEvent[*schema.AgenticMessage]]) (eventFailure error) {
-			defer guard.finish()
-			var failure error
-			diagnosticState, preempted := "aborted", false
-			currentRun, _ := CurrentRun(ctx)
-			defer func() {
-				if currentRun != nil && currentRun.diagnostic != nil {
-					logFailure := failure
-					if eventFailure != nil {
-						logFailure = eventFailure
-					}
-					var cancelError *adk.CancelError
-					if preempted && errors.As(logFailure, &cancelError) {
-						logFailure = nil
-					}
-					currentRun.diagnostic.End(logFailure, zap.String("custom.runtime.state", diagnosticState), zap.Bool("custom.runtime.preempted", preempted), zap.String("custom.runtime.failure_code", failureCode(failure)))
-				}
-			}()
-			var businessTargets []string
-			for {
-				event, ok := events.Next()
-				if !ok {
-					break
-				}
-				if event == nil {
-					continue
-				}
-				if event.Err != nil && failure == nil && !modelRetryObservation(event.Err) {
-					failure = event.Err
-				}
-				if event.Output != nil && event.Output.MessageOutput != nil && event.Output.MessageOutput.IsStreaming {
-					_, err := event.Output.MessageOutput.GetMessage()
-					if err != nil && failure == nil && !modelRetryObservation(err) {
-						failure = err
-					}
-				}
-				if event.Action != nil && event.Action.Interrupted != nil {
-					for _, v := range event.Action.Interrupted.InterruptContexts {
-						if v != nil {
-							businessTargets = append(businessTargets, v.ID)
-						}
-					}
-				}
-			}
-			run, err := CurrentRun(ctx)
-			if err != nil {
-				return err
-			}
-			if failure == nil && ctx.Err() != nil {
-				failure = ctx.Err()
-			}
-			commit, done := detachedPersistence(ctx)
-			defer done()
-			targets := targetsFromError(failure)
-			if len(businessTargets) > 0 {
-				targets = businessTargets
-			}
-			session.bind(run, targets)
-			select {
-			case <-tc.Preempted:
-				preempted, diagnosticState = true, "interrupted"
-				if err = e.Store.preemptRun(commit, lease, run); err != nil {
-					return err
-				}
-				qmu.Lock()
-				for _, in := range run.Inputs {
-					delete(queued, in.EventID)
-				}
-				qmu.Unlock()
-				return nil
-			default:
-			}
-			if len(businessTargets) > 0 {
-				diagnosticState = "waiting_input"
-				if err = e.Store.FinishRun(commit, lease, run, "waiting_input", "", true); err != nil {
-					return err
-				}
-				e.report(commit, def.Id, "idle", "", true)
-				return nil
-			}
-			if failure != nil {
-				e.cancelRun(def.Id, run)
-				state := "failed"
-				retry := retryError(failure)
-				if retry {
-					state = "retry"
-				}
-				if e.Store.runCanceled(commit, run.ID) {
-					state = "canceled"
-					retry = false
-				}
-				diagnosticState = state
-				if err = e.Store.FinishRun(commit, lease, run, state, SafeError(failure), retry); err != nil {
-					return err
-				}
-				e.report(commit, def.Id, "error", SafeError(failure), true)
-				var canceled *adk.CancelError
-				if errors.As(failure, &canceled) {
-					return nil
-				}
-				return failure
-			}
-			diagnosticState = "completed"
-			if err = e.Store.FinishRun(commit, lease, run, "completed", "", false); err != nil {
-				return err
-			}
-			qmu.Lock()
-			for _, in := range run.Inputs {
-				delete(queued, in.EventID)
-			}
-			qmu.Unlock()
-			e.report(commit, def.Id, "idle", "", true)
-			return nil
-		}, Store: session, CheckpointID: "turnloop:" + def.Id, SessionID: "agent:" + def.Id, SessionStore: session})
-		// Push before Run so restored checkpoints can see newly accepted resume intent.
-		pending, _ := e.Store.Pending(ctx, lease)
-		qmu.Lock()
-		for _, in := range pending {
-			if ok, _ := loop.Push(in); ok {
-				queued[in.EventID] = generation
-			}
-		}
-		qmu.Unlock()
-		loop.Run(lc)
-		go func(active *adk.TurnLoop[Input, *schema.AgenticMessage], done chan *adk.TurnLoopExitState[Input, *schema.AgenticMessage]) {
-			done <- active.Wait()
-		}(loop, loopDone)
-	}
-	stopReads := reads.start(ctx, e.Store, lease, func(rc context.Context) error {
+	w.session = &SessionStore[*schema.AgenticMessage]{Store: e.Store, Lease: lease, Revision: def.Revision}
+	defer w.stop()
+	w.mcpWatcher = newMCPNotificationWatcher(e.Store, lease, w.imc, e.Config.FlagsFile)
+	w.presence = newConversationPresenceState(e.unreadDigestInterval(), w.mcpWatcher.presenceChanged)
+	_ = w.presence.Restore(ctx, e.Store, lease)
+	w.mcpWatcher.setPresence(w.presence)
+	stopReads := w.reads.start(ctx, e.Store, lease, func(rc context.Context) error {
 		if !runtimeFlag(e.Config.FlagsFile, "agents.runtime.v3") {
 			return &ModelError{Code: "runtime_disabled"}
 		}
-		return authorize(rc)
-	}, imc.MarkRead)
+		return w.authorize(rc)
+	}, w.imc.MarkRead)
 	defer stopReads()
-	stopMCPWatcher := mcpWatcher.start(ctx)
+	stopMCPWatcher := w.mcpWatcher.start(ctx)
 	defer stopMCPWatcher()
 	pollInterval := time.Second
 	if d := e.unreadDigestInterval(); d > 0 && d < pollInterval {
@@ -913,163 +373,162 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 	}
 	poll := time.NewTicker(pollInterval)
 	defer poll.Stop()
-	lastState := ""
-	lastReport := time.Time{}
-	heartbeatEnsured := false
-	tick := func() bool {
-		var activePresence *conversationPresenceState
-		if e.presenceEnabled() {
-			activePresence = presence
-		}
-		inputs, err := e.ingestWithPresence(ctx, imc, lease, activePresence)
-		if err != nil {
-			if errors.Is(err, ErrLeaseLost) {
-				return false
-			}
-			e.report(ctx, def.Id, "error", "im_unavailable", false)
-			return true
-		}
-		reads.recordInputs(inputs)
-		if activePresence != nil {
-			if _, digestErr := activePresence.FlushDueDigest(ctx, e.Store, lease, time.Now().UTC()); errors.Is(digestErr, ErrLeaseLost) {
-				return false
-			}
-		}
-		if err := tasks.notifications(ctx, lease); errors.Is(err, ErrLeaseLost) {
-			return false
-		}
-		if !heartbeatEnsured {
-			ensured, hbErr := e.ensureDefaultHeartbeatSchedule(ctx, def, imc, lease)
-			if errors.Is(hbErr, ErrLeaseLost) {
-				return false
-			}
-			if hbErr == nil && ensured {
-				heartbeatEnsured = true
-			}
-		}
-		if err := e.drainSchedules(ctx, lease); errors.Is(err, ErrLeaseLost) {
-			return false
-		}
-		mcpWatcher.requestSync()
-		if loop != nil {
-			select {
-			case exit := <-loopDone:
-				guard.finish()
-				loopCancel()
-				loop = nil
-				clearQueue()
-				if exit.ExitReason != nil {
-					observability.L(ctx).Info("Agent turn stopped", zap.String("event.action", "agent-turn-stopped"), zap.String("custom.agent.id", def.Id), zap.String("custom.error.code", SafeError(exit.ExitReason)))
-				}
-			default:
-			}
-		}
-		if run := guard.current(); run != nil && e.Store.runCanceled(ctx, run.ID) {
-			pc, c := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-			e.cancelRunTasks(pc, def.Id, run.ID)
-			c()
-			stop()
-		}
-		if !runtimeFlag(e.Config.FlagsFile, "agents.runtime.v3") {
-			stop()
-			e.report(ctx, def.Id, "idle", "runtime_disabled", false)
-			return true
-		}
-		pc, c := context.WithTimeout(ctx, 3*time.Second)
-		ping, err := e.Gateway.Ping(pc, &wire.PingRequest{ServiceToken: &e.Config.GatewayToken, ModelId: def.ModelId})
-		c()
-		ready := err == nil && ping.Ready && ping.GetConfigured() && ping.GetEnabled()
-		if ready && ping.ContextWindowTokens != nil && ping.GetContextWindowTokens() >= 4096 {
-			contextWindow.Store(ping.GetContextWindowTokens())
-		}
-		if !ready {
-			stop()
-			state, code := "waiting_configuration", "model_unconfigured"
-			if err != nil {
-				state, code = "error", "gateway_unavailable"
-			}
-			if state != lastState || time.Since(lastReport) > 10*time.Second {
-				e.report(ctx, def.Id, state, code, false)
-				lastState = state
-				lastReport = time.Now()
-			}
-			return true
-		}
-		if lastState != "idle" {
-			e.report(ctx, def.Id, "idle", "", false)
-			lastState = "idle"
-		}
-		pending, err := e.Store.FreshPending(ctx, lease)
-		if err != nil {
-			return true
-		}
-		if loop == nil {
-			recoverable, err := e.Store.Pending(ctx, lease)
-			if err != nil {
-				return true
-			}
-			if len(recoverable) > 0 || len(pending) > 0 {
-				start()
-			}
-		}
-
-		if loop != nil {
-			qmu.Lock()
-			for _, in := range pending {
-				if queued[in.EventID] == generation {
-					continue
-				}
-				ok, _ := loop.Push(in, adk.WithPushStrategy(func(_ context.Context, tc *adk.TurnContext[Input, *schema.AgenticMessage]) []adk.PushOption[Input, *schema.AgenticMessage] {
-					if relevantInput(in, tc, activePresence) {
-						// Complete the model's tool round and durable receipts before
-						// handing new input to the next serial turn.
-						return []adk.PushOption[Input, *schema.AgenticMessage]{adk.WithPreempt[Input, *schema.AgenticMessage](adk.AfterToolCalls)}
-					}
-					return nil
-				}))
-				if ok {
-					queued[in.EventID] = generation
-				}
-			}
-			qmu.Unlock()
-		}
-		if loop != nil {
-			// A live loop may be idle while an older run's backoff expires or an
-			// owner requests retry. Processing inputs need their own delivery path.
-			due, dueErr := e.Store.Pending(ctx, lease)
-			if dueErr == nil {
-				qmu.Lock()
-				for _, in := range due {
-					if queued[in.EventID] == generation {
-						continue
-					}
-					if ok, _ := loop.Push(in); ok {
-						queued[in.EventID] = generation
-					}
-				}
-				qmu.Unlock()
-			}
-		}
-		return true
-	}
-	if !tick() {
+	if !w.tick(ctx) {
 		return
 	}
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-mcpWatcher.wake():
-			if !tick() {
+		case <-w.mcpWatcher.wake():
+			if !w.tick(ctx) {
 				return
 			}
 		case <-poll.C:
-			if !tick() {
+			if !w.tick(ctx) {
 				return
 			}
 		}
 	}
 }
+
+func (w *agentWorker) tick(ctx context.Context) bool {
+	var activePresence *conversationPresenceState
+	if w.engine.presenceEnabled() {
+		activePresence = w.presence
+	}
+	inputs, err := w.engine.ingestWithPresence(ctx, w.imc, w.lease, activePresence)
+	if err != nil {
+		if errors.Is(err, ErrLeaseLost) {
+			return false
+		}
+		w.engine.report(ctx, w.def.Id, "error", "im_unavailable", false)
+		return true
+	}
+	w.reads.recordInputs(inputs)
+	if activePresence != nil {
+		if _, digestErr := activePresence.FlushDueDigest(ctx, w.engine.Store, w.lease, time.Now().UTC()); errors.Is(digestErr, ErrLeaseLost) {
+			return false
+		}
+	}
+	if err := w.tasks.notifications(ctx, w.lease); errors.Is(err, ErrLeaseLost) {
+		return false
+	}
+	if !w.heartbeatEnsured {
+		ensured, hbErr := w.engine.ensureDefaultHeartbeatSchedule(ctx, w.def, w.imc, w.lease)
+		if errors.Is(hbErr, ErrLeaseLost) {
+			return false
+		}
+		if hbErr == nil && ensured {
+			w.heartbeatEnsured = true
+		}
+	}
+	if err := w.engine.drainSchedules(ctx, w.lease); errors.Is(err, ErrLeaseLost) {
+		return false
+	}
+	w.mcpWatcher.requestSync()
+	if w.loop != nil {
+		select {
+		case exit := <-w.loopDone:
+			w.guard.finish()
+			w.loopCancel()
+			w.loop = nil
+			w.clearQueue()
+			if exit.ExitReason != nil {
+				observability.L(ctx).Info("Agent turn stopped", zap.String("event.action", "agent-turn-stopped"), zap.String("custom.agent.id", w.def.Id), zap.String("custom.error.code", SafeError(exit.ExitReason)))
+			}
+		default:
+		}
+	}
+	if run := w.guard.current(); run != nil && w.engine.Store.runCanceled(ctx, run.ID) {
+		pc, c := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		w.engine.cancelRunTasks(pc, w.def.Id, run.ID)
+		c()
+		w.stop()
+	}
+	if !runtimeFlag(w.engine.Config.FlagsFile, "agents.runtime.v3") {
+		w.stop()
+		w.engine.report(ctx, w.def.Id, "idle", "runtime_disabled", false)
+		return true
+	}
+	pc, c := context.WithTimeout(ctx, 3*time.Second)
+	ping, err := w.engine.Gateway.Ping(pc, &wire.PingRequest{ServiceToken: &w.engine.Config.GatewayToken, ModelId: w.def.ModelId})
+	c()
+	ready := err == nil && ping.Ready && ping.GetConfigured() && ping.GetEnabled()
+	if ready && ping.ContextWindowTokens != nil && ping.GetContextWindowTokens() >= 4096 {
+		w.contextWindow.Store(ping.GetContextWindowTokens())
+	}
+	if !ready {
+		w.stop()
+		state, code := "waiting_configuration", "model_unconfigured"
+		if err != nil {
+			state, code = "error", "gateway_unavailable"
+		}
+		if state != w.lastState || time.Since(w.lastReport) > 10*time.Second {
+			w.engine.report(ctx, w.def.Id, state, code, false)
+			w.lastState = state
+			w.lastReport = time.Now()
+		}
+		return true
+	}
+	if w.lastState != "idle" {
+		w.engine.report(ctx, w.def.Id, "idle", "", false)
+		w.lastState = "idle"
+	}
+	pending, err := w.engine.Store.FreshPending(ctx, w.lease)
+	if err != nil {
+		return true
+	}
+	if w.loop == nil {
+		recoverable, err := w.engine.Store.Pending(ctx, w.lease)
+		if err != nil {
+			return true
+		}
+		if len(recoverable) > 0 || len(pending) > 0 {
+			w.start(ctx)
+		}
+	}
+
+	if w.loop != nil {
+		w.qmu.Lock()
+		for _, in := range pending {
+			if w.queued[in.EventID] == w.generation {
+				continue
+			}
+			ok, _ := w.loop.Push(in, adk.WithPushStrategy(func(_ context.Context, tc *adk.TurnContext[Input, *schema.AgenticMessage]) []adk.PushOption[Input, *schema.AgenticMessage] {
+				if relevantInput(in, tc, activePresence) {
+					// Complete the model's tool round and durable receipts before
+					// handing new input to the next serial turn.
+					return []adk.PushOption[Input, *schema.AgenticMessage]{adk.WithPreempt[Input, *schema.AgenticMessage](adk.AfterToolCalls)}
+				}
+				return nil
+			}))
+			if ok {
+				w.queued[in.EventID] = w.generation
+			}
+		}
+		w.qmu.Unlock()
+	}
+	if w.loop != nil {
+		// A live loop may be idle while an older run's backoff expires or an
+		// owner requests retry. Processing inputs need their own delivery path.
+		due, dueErr := w.engine.Store.Pending(ctx, w.lease)
+		if dueErr == nil {
+			w.qmu.Lock()
+			for _, in := range due {
+				if w.queued[in.EventID] == w.generation {
+					continue
+				}
+				if ok, _ := w.loop.Push(in); ok {
+					w.queued[in.EventID] = w.generation
+				}
+			}
+			w.qmu.Unlock()
+		}
+	}
+	return true
+}
+
 func (e *Engine) ingest(ctx context.Context, imc *IM, l *Lease) (committed []Input, failure error) {
 	return e.ingestWithPresence(ctx, imc, leaseOrNil(l), nil)
 }
@@ -1175,141 +634,4 @@ func (e *Engine) ingestWithPresence(ctx context.Context, imc *IM, l *Lease, pres
 		observability.L(ctx).Info("Agent input persisted", zap.String("event.action", "agent-input-persisted"), zap.String("custom.agent.id", l.AgentID), zap.String("custom.input.event_id", input.EventID), zap.String("custom.im.message_id", input.MessageID), zap.String("custom.im.conversation_id", input.ConversationID))
 	}
 	return inputs, nil
-}
-func finalizeSummary(ctx context.Context, original []*schema.AgenticMessage, summary *schema.AgenticMessage) ([]*schema.AgenticMessage, error) {
-	return finalizeSummaryWithSourceFormat(ctx, original, summary, false)
-}
-
-// Only runs pinned to the v0.3.4 tool profile use the pre-attachment source
-// representation. Native-only runs must keep their v0.3.5 request bytes.
-func finalizeV034Summary(ctx context.Context, original []*schema.AgenticMessage, summary *schema.AgenticMessage) ([]*schema.AgenticMessage, error) {
-	return finalizeSummaryWithSourceFormat(ctx, original, summary, true)
-}
-
-func finalizeSummaryWithSourceFormat(_ context.Context, original []*schema.AgenticMessage, summary *schema.AgenticMessage, omitEmptyAttachmentIDs bool) ([]*schema.AgenticMessage, error) {
-	if summary == nil || agenticText(summary) == "" || len(agenticText(summary)) > 32768 || hasToolCalls(summary) {
-		return nil, errors.New("invalid_context_summary")
-	}
-	sources := []map[string]any{}
-	seen := map[string]bool{}
-	appendSource := func(source map[string]any) {
-		id, _ := source["eventId"].(string)
-		if id == "" || seen[id] {
-			return
-		}
-		seen[id] = true
-		clean := map[string]any{}
-		for _, key := range []string{"eventId", "workspaceId", "conversationId", "messageId", "replyToId", "senderId", "senderKind"} {
-			if value, ok := source[key].(string); ok {
-				clean[key] = value
-			}
-		}
-		// Retain bounded attachment references through repeated compaction;
-		// metadata/content can be retrieved explicitly from the source message.
-		retained := []string{}
-		switch ids := source["attachmentIds"].(type) {
-		case []string:
-			if !omitEmptyAttachmentIDs {
-				// Preserve native-only v0.3.5 receipts, including their empty
-				// arrays and original fresh-source representation.
-				if len(ids) <= 8 {
-					clean["attachmentIds"] = ids
-				}
-				break
-			}
-			for _, id := range ids {
-				if validUUID(id) && len(retained) < 8 {
-					retained = append(retained, id)
-				}
-			}
-		case []any:
-			for _, value := range ids {
-				if id, ok := value.(string); ok && validUUID(id) && len(retained) < 8 {
-					retained = append(retained, id)
-				}
-			}
-		}
-		// The v0.3.4 format and parsed previous summaries omit empty references.
-		if len(retained) > 0 {
-			clean["attachmentIds"] = retained
-		}
-		sources = append(sources, clean)
-	}
-	for _, message := range original {
-		if message == nil {
-			continue
-		}
-		if strings.HasPrefix(agenticText(message), "TEAMIE_SESSION_SUMMARY ") {
-			if index := strings.LastIndex(agenticText(message), "\nTEAMIE_SOURCE_REFERENCES "); index >= 0 {
-				var previous []map[string]any
-				if json.Unmarshal([]byte(agenticText(message)[index+len("\nTEAMIE_SOURCE_REFERENCES "):]), &previous) == nil {
-					for _, source := range previous {
-						appendSource(source)
-					}
-				}
-			}
-		}
-		if !strings.HasPrefix(agenticText(message), "TEAMIE_NEW_MESSAGE ") {
-			continue
-		}
-		var in Input
-		if json.Unmarshal([]byte(strings.TrimPrefix(agenticText(message), "TEAMIE_NEW_MESSAGE ")), &in) == nil {
-			source := map[string]any{"eventId": in.EventID, "workspaceId": in.WorkspaceID, "conversationId": in.ConversationID, "messageId": in.MessageID, "replyToId": in.ReplyToID, "senderId": in.SenderID, "senderKind": in.SenderKind}
-			attachmentIDs := []string{}
-			for _, a := range in.Attachments {
-				attachmentIDs = append(attachmentIDs, a.ID)
-			}
-			if !omitEmptyAttachmentIDs || len(attachmentIDs) > 0 {
-				source["attachmentIds"] = attachmentIDs
-			}
-			appendSource(source)
-		}
-	}
-	// Full provenance remains in durable inbox/session audit; the working
-	// context keeps a bounded recent reference index through repeated compaction.
-	if len(sources) > 32 {
-		sources = sources[len(sources)-32:]
-	}
-	provenance, _ := json.Marshal(sources)
-	// Native summarization replaces the complete in-flight model state. Retain
-	// the actual leading platform policy; only transcript data is compacted.
-	// Summary content remains a user message regardless of the model's role.
-	out := make([]*schema.AgenticMessage, 0, len(original)+1)
-	for _, message := range original {
-		if message == nil || message.Role != schema.AgenticRoleTypeSystem {
-			break
-		}
-		out = append(out, message)
-	}
-	out = append(out, schema.UserAgenticMessage("TEAMIE_SESSION_SUMMARY (source-scoped memory; verify current access using tools):\n"+agenticText(summary)+"\nTEAMIE_SOURCE_REFERENCES "+string(provenance)))
-	start := len(original)
-	for i := len(original) - 1; i >= 0; i-- {
-		if original[i] != nil && original[i].Role == schema.AgenticRoleTypeUser && !hasToolResults(original[i]) && len(original)-i <= 12 {
-			start = i
-			break
-		}
-	}
-	if start < len(original) {
-		out = append(out, original[start:]...)
-	}
-	return out, nil
-}
-
-// The transport byte ceiling and configured model window are independent.
-// Large-context providers retain a conservative platform trigger so a single
-// summary request still fits the gateway's bounded transport.
-func summaryTrigger(window int) int {
-	return domain.SummaryTrigger(window)
-}
-func boundedInputBatch(inputs []Input) ([]Input, []Input) {
-	n, total := 0, 0
-	for _, in := range inputs {
-		b, _ := json.Marshal(in)
-		if n > 0 && (total+len(b) > 48<<10 || n >= 32) {
-			break
-		}
-		total += len(b)
-		n++
-	}
-	return inputs[:n], inputs[n:]
 }

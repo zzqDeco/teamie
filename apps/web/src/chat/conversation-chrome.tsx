@@ -23,7 +23,7 @@ import type {
   Message,
   NotificationLevel,
 } from "@teamie/api-client";
-import { errorText } from "../chat";
+import { errorText } from "../errors";
 import { chatStore, effectiveNotificationLevel } from "../store";
 import type { LocalMessage } from "../store";
 import {

@@ -161,6 +161,7 @@ type SessionState struct {
 
 // CheckpointMetadata tracks the runtime version, revision, and context policy of a TurnLoop checkpoint.
 type CheckpointMetadata struct {
+	Presence          *CheckpointPresence `json:"presence,omitempty"`
 	ToolProfile       string
 	ContextProfile    string `json:",omitempty"`
 	ContextBudgetHash string `json:",omitempty"`
@@ -169,6 +170,16 @@ type CheckpointMetadata struct {
 	RunID, Attempt    string
 	ModelStep         int64
 	Targets           []string
+}
+
+// CheckpointPresence is the conversation scope at the native execution boundary.
+// A nil value denotes a legacy checkpoint; an enabled, empty scope means "left".
+type CheckpointPresence struct {
+	Version        int    `json:"version"`
+	Enabled        bool   `json:"enabled"`
+	WorkspaceID    string `json:"workspaceId,omitempty"`
+	ConversationID string `json:"conversationId,omitempty"`
+	ConvType       string `json:"convType,omitempty"`
 }
 
 // ShouldPreemptWorker reports whether an active worker must be canceled due to

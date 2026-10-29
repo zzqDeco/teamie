@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"go.uber.org/zap"
-	"slices"
 	"strings"
 	"teamie/pkg/observability"
 	"time"
@@ -449,83 +448,6 @@ func (p *ContextPipeline) partition(messages []*schema.AgenticMessage, force boo
 		}
 	}
 	return
-}
-
-func (p *ContextPipeline) commitCompaction(ctx context.Context, original, compacted []*schema.AgenticMessage) {
-	if !slices.Equal(compacted, original) {
-		p.invalidateAnchor(ctx, original)
-		p.usageState(ctx).pruneAfterCompaction(compacted)
-	}
-}
-
-func (p *ContextPipeline) compact(ctx context.Context, messages []*schema.AgenticMessage, tools []*schema.ToolInfo, force bool, deferred ...[]*schema.ToolInfo) ([]*schema.AgenticMessage, error) {
-	result, err := p.compactStage(ctx, messages, tools, force, deferred...)
-	if err == nil {
-		p.commitCompaction(ctx, messages, result)
-	}
-	return result, err
-}
-
-func (p *ContextPipeline) compactStage(ctx context.Context, messages []*schema.AgenticMessage, tools []*schema.ToolInfo, force bool, deferred ...[]*schema.ToolInfo) (result []*schema.AgenticMessage, failure error) {
-	allDeferred := flattenToolInfos(deferred)
-	initial, err := p.measureMainContext(ctx, messages, tools, allDeferred)
-	if err != nil {
-		return nil, err
-	}
-	compactionFields := append([]zap.Field{zap.Int("custom.context.messages_before", len(messages)), zap.Bool("custom.context.forced", force)}, p.cfg.Budget.measurementLogFields(initial, p.cfg.Budget.compactionReason(initial, force))...)
-	ctx, operation := observability.Begin(ctx, "context-compaction", compactionFields...)
-	observability.L(ctx).Info("Context compaction started", zap.String("event.action", "context-compaction-started"))
-	defer func() {
-		if failure == nil && !slices.Equal(result, messages) {
-			result = stripRetainedUsageAnchors(result)
-		}
-		operation.End(failure, zap.Int("custom.context.messages_after", len(result)))
-	}()
-	target := p.cfg.Budget.InputTokenLimit
-	shrinkLocal := force || (p.cfg.Budget.Version >= 7 && initial.CounterMode == "usage_delta" && initial.EstimatedTokens > initial.LocalTokens)
-	if shrinkLocal {
-		measurement, err := p.cfg.Budget.measureContext(messages, tools, p.cfg.Budget.OutputReserveTokens, false, allDeferred)
-		if err != nil {
-			return nil, err
-		}
-		target = min(target, measurement.EstimatedTokens*3/4)
-	}
-	systems, prefix, tail := p.partition(messages, shrinkLocal)
-	if p.cfg.Budget.Version >= 3 {
-		pinned, err := p.currentInputSet(ctx, messages)
-		if err != nil {
-			return nil, err
-		}
-		kept, older := []*schema.AgenticMessage{}, []*schema.AgenticMessage{}
-		for _, message := range prefix {
-			if pinned[message] {
-				kept = append(kept, message)
-			} else {
-				older = append(older, message)
-			}
-		}
-		prefix, tail = older, append(kept, tail...)
-	}
-	if len(prefix) == 0 {
-		return p.fitTailTo(ctx, systems, tail, tools, target, allDeferred)
-	}
-	ref, err := p.cfg.ArchiveTranscript(ctx, prefix)
-	if err != nil {
-		return nil, err
-	}
-	text, err := p.summarizePrefix(ctx, prefix)
-	if err != nil {
-		return nil, err
-	}
-	sources := contextSources(prefix)
-	sourceJSON, _ := json.Marshal(sources)
-	summaryText := "TEAMIE_SESSION_SUMMARY (source-scoped memory; verify current access using tools):\n" + text + "\n" + contextReadNotice(ref)
-	if p.cfg.Budget.Version < 3 {
-		summaryText += "\nTEAMIE_SOURCE_REFERENCES " + string(sourceJSON)
-	}
-	summary := schema.UserAgenticMessage(summaryText)
-	summary.Extra = map[string]any{"teamie_context_summary": contextProfileV1, "teamie_context_sources": contextSourceValue(sources), "teamie_context_archive_ref": ref}
-	return p.fitTailTo(ctx, append(append([]*schema.AgenticMessage{}, systems...), summary), tail, tools, target, allDeferred)
 }
 
 func contextSourceValue(sources []InputSource) any {

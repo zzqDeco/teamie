@@ -13,7 +13,8 @@ import { api } from "@teamie/api-client";
 import type { Agent, Workspace } from "@teamie/api-client";
 import { useAuth } from "./auth";
 import { canManageAgent } from "./agent-management";
-import { errorText, useChat } from "./chat";
+import { useChat } from "./chat";
+import { errorText } from "./errors";
 import { WorkspaceDialog } from "./dialogs";
 import { WorkspaceMarketplaceModal } from "./marketplace";
 import {

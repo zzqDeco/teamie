@@ -618,6 +618,9 @@ func (t *Tools) initRunPresence(ctx context.Context, run *Run) (bool, error) {
 	if t == nil || t.Store == nil || t.Store.DB == nil || run == nil {
 		return false, nil
 	}
+	if run.resume != nil {
+		return t.restoreCheckpointPresence(ctx, run)
+	}
 	rawSnap, found, err := t.Store.DB.ReadObservation(ctx, run.ID, presenceInitObservationCallID, presenceInitObservationKind)
 	if err != nil {
 		return false, err

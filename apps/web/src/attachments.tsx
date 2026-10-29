@@ -9,11 +9,11 @@ import {
 } from "lucide-react";
 import { api } from "@teamie/api-client";
 import type { Attachment, AttachmentLimits } from "@teamie/api-client";
-import { errorText } from "./chat";
+import { errorText } from "./errors";
 import { subscribeAttachmentPreview } from "./attachment-previews";
 import { ICON } from "./icons";
 import { Button, Modal } from "./ui";
-import "./attachments.css";
+import "./styles/attachments.css";
 
 const SAFE_IMAGE_MEDIA_TYPES = new Set([
   "image/png",

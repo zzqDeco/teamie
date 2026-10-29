@@ -62,6 +62,7 @@ type Run struct {
 	ContextHead, AcceptanceHead int64
 	Front                       *frontSlot
 	usageState                  usageAnchorState
+	resume                      *checkpointMetadata
 
 	presenceMu           sync.Mutex
 	presenceEnabled      bool

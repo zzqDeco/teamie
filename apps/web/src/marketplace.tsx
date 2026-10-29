@@ -23,8 +23,8 @@ import type {
   Workspace,
 } from "@teamie/api-client";
 import { useAuth } from "./auth";
-import { errorText } from "./chat";
-import { BadgePill, Button, IconButton, Modal, Notice, SwitchField } from "./ui";
+import { errorText } from "./errors";
+import { BadgePill, Button, IconButton, Modal, Notice, OverlayFocusBoundary, SwitchField } from "./ui";
 import { ICON } from "./icons";
 
 function AdminRequired() {
@@ -497,6 +497,7 @@ export function ConversationAppsPane(props: {
         tabIndex={-1}
         inert={mobile && sidebar}
       >
+        {overlayMembers && !sidebar && <OverlayFocusBoundary edge="start" />}
         <header>
           <span>
             群聊应用 <b>{apps.length}</b>
@@ -559,6 +560,7 @@ export function ConversationAppsPane(props: {
             )}
           </div>
         )}
+        {overlayMembers && !sidebar && <OverlayFocusBoundary edge="end" />}
       </aside>
     </>
   );
@@ -666,6 +668,7 @@ function ConversationAppFrame({ app, conversation, user }: {
       {session && (
         <iframe
           ref={iframeRef}
+          tabIndex={0}
           title={`群聊应用：${app.name}`}
           src={session.app.webUrl}
           sandbox="allow-scripts allow-forms allow-same-origin"

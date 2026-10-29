@@ -4,7 +4,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@teamie/api-client";
 import type { Member, Workspace } from "@teamie/api-client";
 import { useAuth } from "./auth";
-import { errorText, useChat, useChatState } from "./chat";
+import { useChat, useChatState } from "./chat";
+import { errorText } from "./errors";
 import { WorkspaceDialog } from "./dialogs";
 import { ConnectionBanner } from "./connection-banner";
 import { GroupMembersDialog } from "./group-members";
@@ -229,11 +230,6 @@ export function Shell() {
   }, []);
   const hasOverlayModal =
     !!dialog || quickSwitcherOpen || shortcutsOpen || managingGroup || managingWorkspaceApps || !!removing;
-  useShellViewportAndFocus({
-    navigationRef, membersRef, mobile, overlayMembers, sidebar, details: details || appsOpen,
-    hasOverlayModal, hasConversation: !!conversation, pathname: location.pathname,
-    closeSidebar, closeDetails,
-  });
   const pathname = location.pathname.replace(/\/+$/, "") || "/app";
   const caps = chat.data?.capabilities || {};
   const marketplaceEnabled = caps["im.marketplace.enabled"] !== false;
@@ -274,6 +270,21 @@ export function Shell() {
     setViewKey({ conversation: viewConversationId, target: initialMessageId });
   const isManagement =
     isSettings || isAdminPage || isGatewayPage || isUsersPage || isMarketplacePage || isAgentsPage || isDirectoryPage;
+  const appsAvailable = marketplaceEnabled && !isManagement && !!workspace && conversation?.type === "group";
+  const appsVisible = appsOpen && !details && appsAvailable;
+  const membersVisible = details && !isManagement && !!workspace && !!conversation;
+  const rightPaneVisible = appsVisible || membersVisible;
+  useEffect(() => {
+    if (!appsAvailable) {
+      setAppsOpen(false);
+      setManagingWorkspaceApps(false);
+    }
+  }, [appsAvailable]);
+  useShellViewportAndFocus({
+    navigationRef, membersRef, mobile, overlayMembers, sidebar, details: rightPaneVisible,
+    hasOverlayModal, hasConversation: !!conversation, pathname: location.pathname,
+    closeSidebar, closeDetails,
+  });
   const backChatRoute = Object.values(snapshot.conversations).some((c) => route(c) === lastChatPath)
     ? lastChatPath
     : "/app";
@@ -408,7 +419,7 @@ export function Shell() {
   )
     return <Navigate to="/app" replace />;
   return (
-    <div className={`app-shell ${sidebar ? "sidebar-open" : ""} ${details || appsOpen ? "details-open" : ""}`}>
+    <div className={`app-shell ${sidebar ? "sidebar-open" : ""} ${rightPaneVisible ? "details-open" : ""}`}>
       <ShellSidebar
         navigationRef={navigationRef} mobile={mobile} sidebar={sidebar}
         hasOverlayModal={hasOverlayModal} user={user!} busy={busy}
@@ -430,7 +441,7 @@ export function Shell() {
       )}
       <main
         className="app-main"
-        inert={(mobile && sidebar) || (overlayMembers && (details || appsOpen) && !isManagement && !!conversation)}
+        inert={(mobile && sidebar) || (overlayMembers && rightPaneVisible)}
       >
         <ConnectionBanner
           connection={chat.connection} syncError={chat.syncError}
@@ -473,7 +484,7 @@ export function Shell() {
               setDetails(!details);
             }}
             membersOpen={details}
-            appsOpen={appsOpen}
+                appsOpen={appsVisible}
             onApps={
               conversation.type === "group" && marketplaceEnabled
                 ? () => {
@@ -503,7 +514,7 @@ export function Shell() {
           />
         )}
       </main>
-      {details && !isManagement && workspace && conversation && (
+      {membersVisible && workspace && conversation && (
         <ShellMembersPane
           membersRef={membersRef} overlayMembers={overlayMembers} mobile={mobile}
           sidebar={sidebar} workspace={workspace} conversation={conversation}
@@ -521,7 +532,7 @@ export function Shell() {
           onInvite={() => setDialog("invite")}
         />
       )}
-      {appsOpen && !details && !isManagement && workspace && conversation && conversation.type === "group" && marketplaceEnabled && (
+      {appsVisible && workspace && conversation && (
         <ConversationAppsPane
           paneRef={membersRef}
           overlayMembers={overlayMembers}
@@ -535,7 +546,7 @@ export function Shell() {
           onOpenWorkspaceApps={() => setManagingWorkspaceApps(true)}
         />
       )}
-      {managingWorkspaceApps && workspace && (
+      {managingWorkspaceApps && appsAvailable && workspace && (
         <WorkspaceMarketplaceModal
           workspace={workspace}
           isOwner={owner}

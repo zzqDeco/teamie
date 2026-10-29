@@ -17,7 +17,8 @@ import type {
   Member,
   Workspace,
 } from "@teamie/api-client";
-import { errorText, useChatState } from "./chat";
+import { useChatState } from "./chat";
+import { errorText } from "./errors";
 import { ICON } from "./icons";
 import { isComposingKey } from "./mentions";
 import { conversationName } from "./messages";

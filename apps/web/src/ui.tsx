@@ -249,22 +249,31 @@ function isTopOverlay(entry: OverlayEntry) {
 }
 function focusFirst(candidates: Iterable<HTMLElement | null | undefined>) {
   for (const candidate of candidates) {
-    if (!candidate) continue;
+    if (!candidate?.isConnected || candidate.closest("[inert]")) continue;
     candidate.focus({ preventScroll: true });
     if (document.activeElement === candidate) return true;
   }
   return false;
 }
+export function OverlayFocusBoundary({ edge }: { edge: "start" | "end" }) {
+  return <span data-overlay-focus-boundary={edge} tabIndex={0}
+    style={{ position: "fixed", width: 1, height: 1, opacity: 0, pointerEvents: "none" }} />;
+}
 export function useOverlayFocus(
   ref: RefObject<HTMLElement | null>,
   active: boolean,
   onClose: () => void,
-  { preferFormField = false }: { preferFormField?: boolean } = {},
+  { preferFormField = false, fallbackFocus }: {
+    preferFormField?: boolean;
+    fallbackFocus?: () => HTMLElement | null | undefined;
+  } = {},
 ) {
   const onCloseRef = useRef(onClose);
+  const fallbackFocusRef = useRef(fallbackFocus);
   useEffect(() => {
     onCloseRef.current = onClose;
-  }, [onClose]);
+    fallbackFocusRef.current = fallbackFocus;
+  }, [onClose, fallbackFocus]);
   useEffect(() => {
     if (!active) return;
     const previous = document.activeElement as HTMLElement | null;
@@ -274,7 +283,9 @@ export function useOverlayFocus(
     overlayStack.push(entry);
     const focusables = () =>
       Array.from(node.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
-        (element) => element.getClientRects().length > 0,
+        (element) => element.getClientRects().length > 0 &&
+          !element.hasAttribute("data-overlay-focus-boundary") &&
+          !element.closest("[inert]"),
       );
     const autoFocusTarget = node.querySelector<HTMLElement>(
       "[data-autofocus]:not(:disabled)",
@@ -308,12 +319,24 @@ export function useOverlayFocus(
         first.focus();
       }
     }
+    // Keyboard events inside a cross-origin frame stay in its document. The
+    // browser reaches these parent-document boundaries when tabbing out of it.
+    function contain(event: FocusEvent) {
+      if (!isTopOverlay(entry) || !(event.target instanceof HTMLElement)) return;
+      if (!node?.contains(event.target)) return;
+      const edge = event.target.dataset.overlayFocusBoundary;
+      if (!edge) return;
+      const elements = focusables();
+      focusFirst([edge === "end" ? elements[0] : elements.at(-1), node]);
+    }
     document.addEventListener("keydown", handle);
+    document.addEventListener("focusin", contain);
     return () => {
       document.removeEventListener("keydown", handle);
+      document.removeEventListener("focusin", contain);
       const index = overlayStack.indexOf(entry);
       if (index >= 0) overlayStack.splice(index, 1);
-      if (previous?.isConnected) previous.focus({ preventScroll: true });
+      if (!focusFirst([previous])) focusFirst([fallbackFocusRef.current?.()]);
     };
   }, [active, preferFormField, ref]);
 }

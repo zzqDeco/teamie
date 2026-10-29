@@ -353,6 +353,9 @@ export function useShellViewportAndFocus({
       !hasOverlayModal &&
       hasConversation,
     closeDetails,
+    { fallbackFocus: () =>
+      navigationRef.current?.parentElement?.querySelector<HTMLElement>(".app-main textarea:not(:disabled)") ||
+      navigationRef.current?.parentElement?.querySelector<HTMLElement>(".app-main .mobile-menu") },
   );
   useEffect(() => {
     const viewport = window.visualViewport;
