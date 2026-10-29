@@ -37,6 +37,7 @@ func (s *SessionStore[M]) metadata() []byte {
 	defer s.mu.Unlock()
 	m := checkpointMetadata{Version: nativeRuntimeVersion, Revision: s.Revision, Targets: append([]string{}, s.targets...)}
 	if s.run != nil {
+		m.Presence = s.run.checkpointPresence()
 		m.ToolProfile = s.run.toolProfile
 		if contextProfile(s.run) == contextProfileV1 {
 			m.ContextProfile = s.run.ContextProfile
@@ -53,6 +54,7 @@ func (s *SessionStore[M]) metadata() []byte {
 	return b
 }
 func (s *Store) configureRun(ctx context.Context, l *Lease, r *Run, revision, generation int64, resume *checkpointMetadata) error {
+	r.resume = resume
 	r.Revision = revision
 	r.Generation = generation
 	resumeAttempt := ""
@@ -96,11 +98,16 @@ func targetsFromError(err error) []string {
 func inputMessages(inputs []Input) []*schema.AgenticMessage {
 	return BuildInputMessages(inputs, func(in Input) string { return in.Kind })
 }
-func relevantInput(in Input, tc *adk.TurnContext[Input, *schema.AgenticMessage]) bool {
+func relevantInput(in Input, tc *adk.TurnContext[Input, *schema.AgenticMessage], presence *conversationPresenceState) bool {
 	if tc == nil {
 		return false
 	}
-	return domain.RelevantPreemptInput(toDomainInput(in), toDomainInputs(tc.Consumed))
+	var active *domain.InputSource
+	if presence != nil {
+		ws, conv, _ := presence.Active()
+		active = &domain.InputSource{WorkspaceID: ws, ConversationID: conv}
+	}
+	return domain.RelevantPreemptInput(toDomainInput(in), toDomainInputs(tc.Consumed), active)
 }
 func resumeCompatible(m *checkpointMetadata, revision int64, runID string) bool {
 	return domain.ResumeCompatible(m, revision, runID)

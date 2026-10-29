@@ -150,6 +150,29 @@ Successful retries return current conversation metadata under the same read/mana
 
 The machine-readable routes and DTOs are in [`contracts/im/http_chat.thrift`](../../contracts/im/http_chat.thrift) and [`contracts/im/model.thrift`](../../contracts/im/model.thrift).
 
+## Marketplace apps (Web + MCP)
+
+- Marketplace App DTO: `{id,slug,name,description,webUrl,mcpUrl,enabled,createdAt,updatedAt}`. `slug` is 1–64 lowercase ASCII letters, digits, underscores or hyphens, starting with a letter or digit (`^[a-z0-9][a-z0-9_-]{0,63}$`), unique across the catalog; `webUrl` and `mcpUrl` must be valid `http://` or `https://` URLs. Each app has a private HMAC-SHA256 `signing_secret` stored in Chat schema 8 (`marketplace_apps`); the secret is returned only once on app creation or explicit secret rotation and is never exposed in list/read DTOs.
+- Three-tier permission model:
+  1. **Platform administrator (`platformRole == "admin"`)** manages the global catalog:
+     - `GET /api/v1/admin/marketplace/apps` -> `{apps:[MarketplaceApp]}` (all registered apps, enabled and disabled).
+     - `POST /api/v1/admin/marketplace/apps` body `{slug,name,description?,webUrl,mcpUrl,enabled?}` -> 201 `{app,signingSecret}`.
+     - `PATCH /api/v1/admin/marketplace/apps/:id` body `{slug?,name?,description?,webUrl?,mcpUrl?,enabled?}` -> `{app}`.
+     - `POST /api/v1/admin/marketplace/apps/:id/rotate-secret` body `{}` -> `{app,signingSecret}`.
+     - `DELETE /api/v1/admin/marketplace/apps/:id` -> 204 `{}` (cascades workspace installations).
+  2. **Workspace owner (`workspace_members.role == "owner"`)** selects from the enabled platform catalog and installs/uninstalls apps for that workspace (`workspace_marketplace_apps`):
+     - `GET /api/v1/marketplace/catalog` -> `{apps:[MarketplaceApp]}` (enabled catalog apps for authenticated human callers).
+     - `GET /api/v1/workspaces/:id/apps` -> `{apps:[MarketplaceApp]}` (enabled apps installed in workspace `:id`; requires current workspace membership).
+     - `POST /api/v1/workspaces/:id/apps` body `{appId}` -> 201 `{app}` (owner only; app must exist and be enabled in the platform catalog; idempotent).
+     - `DELETE /api/v1/workspaces/:id/apps/:appId` -> 204 `{}` (owner only; idempotent).
+  3. **Group conversations only (`conversation.type == "group"`)**:
+     - Installed workspace apps are available automatically in all `group` conversations of that workspace, and never in `channel` or `direct` conversations (`403 marketplace_group_only`).
+     - `GET /api/v1/conversations/:id/apps` -> `{apps:[MarketplaceApp]}` for any current member (human or Agent principal) of group conversation `:id`.
+     - `POST /api/v1/conversations/:id/apps/:appId/session` body `{}` -> `{app,token,expiresAt}` for any current member (human or Agent principal) of group conversation `:id` when `:appId` is enabled and installed in the group's workspace.
+- Symmetric Context Token (`token`): a one-hour HS256 JWT signed with the app's `signing_secret` and claims `{iss:"teamie",aud:appId,sub:userId,appId,slug,workspaceId,conversationId,userId,displayName,iat,exp}`. No participant kind (`human` vs `agent`) is included; humans and Agents authenticate to the third-party MCP server with identical token structure.
+- Browser group chats expose a right-hand apps pane (`ConversationAppsPane`) that renders the active app's `webUrl` in a sandboxed `<iframe>` (`allow-scripts allow-forms allow-same-origin`) and delivers `{type:"teamie:mcp-app:init",payload:{appId,slug,name,webUrl,mcpUrl,token,expiresAt,workspaceId,conversationId,user:{id,displayName}}}` via `postMessage` upon receiving `{type:"teamie:mcp-app:ready"}` or `{type:"teamie:mcp-app:refresh-token"}` from the app origin and the active iframe window. The iframe and pending session requests are scoped to the current user, conversation and app configuration; switching scope discards late responses, and token refresh publishes only the newest response to the existing iframe.
+- `im.marketplace.enabled` gates Marketplace writes and new app sessions (`403 feature_disabled` when off); existing catalog and installation reads remain available under their ordinary ACLs. Chat schema 8 adds `marketplace_apps` and `workspace_marketplace_apps`.
+
 ## Durable sync and WebSocket
 
 - `GET /api/v1/sync?cursor=<opaque-or-decimal>&limit=100` -> `{events,cursor,hasMore}`. Empty/0 cursor starts the user's durable event stream. Stream is per-user; membership is rechecked before returning protected payloads. Cursor must advance past filtered events as well. Invalid/future cursor returns a defined error rather than silently skipping data.
@@ -162,7 +185,7 @@ The machine-readable routes and DTOs are in [`contracts/im/http_chat.thrift`](..
 
 ## Feature capabilities
 
-`capabilities` is a map of booleans: `auth.public_signup`, `auth.password_reset`, `im.dm.create`, `im.group.create`, `im.channel.create`, `im.message.edit`, `im.message.retract`, `im.typing.publish`, `im.presence.publish`, `im.attachments.upload`, `im.reactions.create`, `im.threads.create`, `im.read_receipts.view`, `im.notifications.configure`. Capability=true requires both implemented functionality and an enabled backend flag plus user permission. Persisted data is still returned if its write flag is turned off. `im.threads.create` remains false.
+`capabilities` is a map of booleans: `auth.public_signup`, `auth.password_reset`, `im.dm.create`, `im.group.create`, `im.channel.create`, `im.message.edit`, `im.message.retract`, `im.typing.publish`, `im.presence.publish`, `im.attachments.upload`, `im.reactions.create`, `im.threads.create`, `im.read_receipts.view`, `im.notifications.configure`, `im.marketplace.enabled`. Capability=true requires both implemented functionality and an enabled backend flag plus user permission. Persisted data is still returned if its write flag is turned off. `im.threads.create` remains false.
 
 ## Operational contract
 

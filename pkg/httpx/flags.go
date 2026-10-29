@@ -25,7 +25,7 @@ var Implemented = map[string]bool{
 	"auth.public_signup": false, "auth.password_reset": true, "im.dm.create": true, "im.group.create": true, "im.channel.create": true,
 	"im.message.edit": true, "im.message.retract": true, "im.message.mentions": true, "im.typing.publish": true,
 	"im.presence.publish": true, "im.attachments.upload": true, "im.reactions.create": true, "im.threads.create": false,
-	"im.read_receipts.view": true, "im.notifications.configure": true,
+	"im.read_receipts.view": true, "im.notifications.configure": true, "im.marketplace.enabled": true,
 }
 
 // Load reads and intersects the feature-flag file with Implemented capabilities, failing closed on error.

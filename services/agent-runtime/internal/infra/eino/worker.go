@@ -25,14 +25,26 @@ import (
 
 type Config struct{ ControlAddr, GatewayAddr, SandboxAddr, IdentityAddr, IMURL, IMRealtimeURL, ControlToken, GatewayToken, SandboxToken, IMToken, FlagsFile, GatewayStreamURL string }
 type Engine struct {
-	Store    *Store
-	Config   Config
-	Control  agentcontrolservice.Client
-	Gateway  modelgatewayservice.Client
-	Sandbox  sandboxservice.Client
-	Identity identityservice.Client
-	slots    chan struct{}
-	owner    string
+	Store                *Store
+	Config               Config
+	Control              agentcontrolservice.Client
+	Gateway              modelgatewayservice.Client
+	Sandbox              sandboxservice.Client
+	Identity             identityservice.Client
+	UnreadDigestInterval time.Duration
+	slots                chan struct{}
+	owner                string
+}
+
+func (e *Engine) unreadDigestInterval() time.Duration {
+	if e != nil && e.UnreadDigestInterval > 0 {
+		return e.UnreadDigestInterval
+	}
+	return defaultUnreadDigestInterval
+}
+
+func (e *Engine) presenceEnabled() bool {
+	return e != nil && e.Config.FlagsFile != "" && runtimeFlag(e.Config.FlagsFile, "im.marketplace.enabled")
 }
 
 func New(store *Store, c Config) (*Engine, error) {
@@ -184,6 +196,8 @@ func (g *turnGuard) onFinish(run *Run, cleanup func()) {
 func (g *turnGuard) current() *Run { g.mu.Lock(); defer g.mu.Unlock(); return g.run }
 
 type agentWorker struct {
+	presence         *conversationPresenceState
+	mcpWatcher       *mcpNotificationWatcher
 	engine           *Engine
 	def              *wire.AgentDefinition
 	lease            *Lease
@@ -340,6 +354,10 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 	}()
 	w.session = &SessionStore[*schema.AgenticMessage]{Store: e.Store, Lease: lease, Revision: def.Revision}
 	defer w.stop()
+	w.mcpWatcher = newMCPNotificationWatcher(e.Store, lease, w.imc, e.Config.FlagsFile)
+	w.presence = newConversationPresenceState(e.unreadDigestInterval(), w.mcpWatcher.presenceChanged)
+	_ = w.presence.Restore(ctx, e.Store, lease)
+	w.mcpWatcher.setPresence(w.presence)
 	stopReads := w.reads.start(ctx, e.Store, lease, func(rc context.Context) error {
 		if !runtimeFlag(e.Config.FlagsFile, "agents.runtime.v3") {
 			return &ModelError{Code: "runtime_disabled"}
@@ -347,7 +365,13 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		return w.authorize(rc)
 	}, w.imc.MarkRead)
 	defer stopReads()
-	poll := time.NewTicker(time.Second)
+	stopMCPWatcher := w.mcpWatcher.start(ctx)
+	defer stopMCPWatcher()
+	pollInterval := time.Second
+	if d := e.unreadDigestInterval(); d > 0 && d < pollInterval {
+		pollInterval = d
+	}
+	poll := time.NewTicker(pollInterval)
 	defer poll.Stop()
 	if !w.tick(ctx) {
 		return
@@ -356,6 +380,10 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 		select {
 		case <-ctx.Done():
 			return
+		case <-w.mcpWatcher.wake():
+			if !w.tick(ctx) {
+				return
+			}
 		case <-poll.C:
 			if !w.tick(ctx) {
 				return
@@ -365,21 +393,29 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 }
 
 func (w *agentWorker) tick(ctx context.Context) bool {
-	e, def, lease, imc := w.engine, w.def, w.lease, w.imc
-	inputs, err := e.ingest(ctx, imc, lease)
+	var activePresence *conversationPresenceState
+	if w.engine.presenceEnabled() {
+		activePresence = w.presence
+	}
+	inputs, err := w.engine.ingestWithPresence(ctx, w.imc, w.lease, activePresence)
 	if err != nil {
 		if errors.Is(err, ErrLeaseLost) {
 			return false
 		}
-		e.report(ctx, def.Id, "error", "im_unavailable", false)
+		w.engine.report(ctx, w.def.Id, "error", "im_unavailable", false)
 		return true
 	}
 	w.reads.recordInputs(inputs)
-	if err := w.tasks.notifications(ctx, lease); errors.Is(err, ErrLeaseLost) {
+	if activePresence != nil {
+		if _, digestErr := activePresence.FlushDueDigest(ctx, w.engine.Store, w.lease, time.Now().UTC()); errors.Is(digestErr, ErrLeaseLost) {
+			return false
+		}
+	}
+	if err := w.tasks.notifications(ctx, w.lease); errors.Is(err, ErrLeaseLost) {
 		return false
 	}
 	if !w.heartbeatEnsured {
-		ensured, hbErr := e.ensureDefaultHeartbeatSchedule(ctx, def, imc, lease)
+		ensured, hbErr := w.engine.ensureDefaultHeartbeatSchedule(ctx, w.def, w.imc, w.lease)
 		if errors.Is(hbErr, ErrLeaseLost) {
 			return false
 		}
@@ -387,9 +423,10 @@ func (w *agentWorker) tick(ctx context.Context) bool {
 			w.heartbeatEnsured = true
 		}
 	}
-	if err := e.drainSchedules(ctx, lease); errors.Is(err, ErrLeaseLost) {
+	if err := w.engine.drainSchedules(ctx, w.lease); errors.Is(err, ErrLeaseLost) {
 		return false
 	}
+	w.mcpWatcher.requestSync()
 	if w.loop != nil {
 		select {
 		case exit := <-w.loopDone:
@@ -398,24 +435,24 @@ func (w *agentWorker) tick(ctx context.Context) bool {
 			w.loop = nil
 			w.clearQueue()
 			if exit.ExitReason != nil {
-				observability.L(ctx).Info("Agent turn stopped", zap.String("event.action", "agent-turn-stopped"), zap.String("custom.agent.id", def.Id), zap.String("custom.error.code", SafeError(exit.ExitReason)))
+				observability.L(ctx).Info("Agent turn stopped", zap.String("event.action", "agent-turn-stopped"), zap.String("custom.agent.id", w.def.Id), zap.String("custom.error.code", SafeError(exit.ExitReason)))
 			}
 		default:
 		}
 	}
-	if run := w.guard.current(); run != nil && e.Store.runCanceled(ctx, run.ID) {
+	if run := w.guard.current(); run != nil && w.engine.Store.runCanceled(ctx, run.ID) {
 		pc, c := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-		e.cancelRunTasks(pc, def.Id, run.ID)
+		w.engine.cancelRunTasks(pc, w.def.Id, run.ID)
 		c()
 		w.stop()
 	}
-	if !runtimeFlag(e.Config.FlagsFile, "agents.runtime.v3") {
+	if !runtimeFlag(w.engine.Config.FlagsFile, "agents.runtime.v3") {
 		w.stop()
-		e.report(ctx, def.Id, "idle", "runtime_disabled", false)
+		w.engine.report(ctx, w.def.Id, "idle", "runtime_disabled", false)
 		return true
 	}
 	pc, c := context.WithTimeout(ctx, 3*time.Second)
-	ping, err := e.Gateway.Ping(pc, &wire.PingRequest{ServiceToken: &e.Config.GatewayToken, ModelId: def.ModelId})
+	ping, err := w.engine.Gateway.Ping(pc, &wire.PingRequest{ServiceToken: &w.engine.Config.GatewayToken, ModelId: w.def.ModelId})
 	c()
 	ready := err == nil && ping.Ready && ping.GetConfigured() && ping.GetEnabled()
 	if ready && ping.ContextWindowTokens != nil && ping.GetContextWindowTokens() >= 4096 {
@@ -428,22 +465,22 @@ func (w *agentWorker) tick(ctx context.Context) bool {
 			state, code = "error", "gateway_unavailable"
 		}
 		if state != w.lastState || time.Since(w.lastReport) > 10*time.Second {
-			e.report(ctx, def.Id, state, code, false)
+			w.engine.report(ctx, w.def.Id, state, code, false)
 			w.lastState = state
 			w.lastReport = time.Now()
 		}
 		return true
 	}
 	if w.lastState != "idle" {
-		e.report(ctx, def.Id, "idle", "", false)
+		w.engine.report(ctx, w.def.Id, "idle", "", false)
 		w.lastState = "idle"
 	}
-	pending, err := e.Store.FreshPending(ctx, lease)
+	pending, err := w.engine.Store.FreshPending(ctx, w.lease)
 	if err != nil {
 		return true
 	}
 	if w.loop == nil {
-		recoverable, err := e.Store.Pending(ctx, lease)
+		recoverable, err := w.engine.Store.Pending(ctx, w.lease)
 		if err != nil {
 			return true
 		}
@@ -459,7 +496,7 @@ func (w *agentWorker) tick(ctx context.Context) bool {
 				continue
 			}
 			ok, _ := w.loop.Push(in, adk.WithPushStrategy(func(_ context.Context, tc *adk.TurnContext[Input, *schema.AgenticMessage]) []adk.PushOption[Input, *schema.AgenticMessage] {
-				if relevantInput(in, tc) {
+				if relevantInput(in, tc, activePresence) {
 					// Complete the model's tool round and durable receipts before
 					// handing new input to the next serial turn.
 					return []adk.PushOption[Input, *schema.AgenticMessage]{adk.WithPreempt[Input, *schema.AgenticMessage](adk.AfterToolCalls)}
@@ -475,7 +512,7 @@ func (w *agentWorker) tick(ctx context.Context) bool {
 	if w.loop != nil {
 		// A live loop may be idle while an older run's backoff expires or an
 		// owner requests retry. Processing inputs need their own delivery path.
-		due, dueErr := e.Store.Pending(ctx, lease)
+		due, dueErr := w.engine.Store.Pending(ctx, w.lease)
 		if dueErr == nil {
 			w.qmu.Lock()
 			for _, in := range due {
@@ -493,6 +530,12 @@ func (w *agentWorker) tick(ctx context.Context) bool {
 }
 
 func (e *Engine) ingest(ctx context.Context, imc *IM, l *Lease) (committed []Input, failure error) {
+	return e.ingestWithPresence(ctx, imc, leaseOrNil(l), nil)
+}
+
+func leaseOrNil(l *Lease) *Lease { return l }
+
+func (e *Engine) ingestWithPresence(ctx context.Context, imc *IM, l *Lease, presence *conversationPresenceState) (committed []Input, failure error) {
 	ctx, operation := observability.Begin(ctx, "agent-input-ingest", zap.String("custom.agent.id", l.AgentID))
 	defer func() { operation.EndQuiet(failure) }()
 	cursor, err := e.Store.Cursor(ctx, l)
@@ -515,20 +558,62 @@ func (e *Engine) ingest(ctx context.Context, imc *IM, l *Lease) (committed []Inp
 	}
 	inputs := []Input{}
 	var bootstrap *Bootstrap
+	ensureBootstrap := func() (*Bootstrap, error) {
+		if bootstrap != nil {
+			return bootstrap, nil
+		}
+		b, bErr := imc.Bootstrap(ctx)
+		if bErr != nil {
+			return nil, bErr
+		}
+		bootstrap = b
+		return bootstrap, nil
+	}
+	now := time.Now().UTC()
+	unreadUpdated := false
+	activeConvID := ""
+	if presence != nil {
+		b, bErr := ensureBootstrap()
+		if bErr != nil {
+			return nil, bErr
+		}
+		unreadUpdated = presence.ReconcileUnread(b.Conversations)
+		activeConvID = presence.ActiveConversationID()
+	}
 	for _, event := range page.Events {
 		m := event.Message
 		if event.Type != "message.created" || m == nil || m.SenderID == l.AgentID || m.RetractedAt != nil || m.Body == "" && len(m.Attachments) == 0 {
 			continue
 		}
-		ws := event.WorkspaceID
-		if ws == "" {
-			if bootstrap == nil {
-				bootstrap, err = imc.Bootstrap(ctx)
-				if err != nil {
-					return nil, err
+		if presence != nil && event.ConversationID != activeConvID {
+			b, bErr := ensureBootstrap()
+			if bErr != nil {
+				return nil, bErr
+			}
+			var convMeta *Conversation
+			for i := range b.Conversations {
+				if b.Conversations[i].ID == event.ConversationID {
+					convMeta = &b.Conversations[i]
+					break
 				}
 			}
-			for _, c := range bootstrap.Conversations {
+			ws := event.WorkspaceID
+			if convMeta != nil && ws == "" {
+				ws = convMeta.WorkspaceID
+			}
+			if convMeta != nil && ws != "" {
+				presence.RecordUnread(ws, *convMeta, m, l.AgentID, now)
+				unreadUpdated = true
+			}
+			continue
+		}
+		ws := event.WorkspaceID
+		if ws == "" {
+			b, bErr := ensureBootstrap()
+			if bErr != nil {
+				return nil, bErr
+			}
+			for _, c := range b.Conversations {
 				if c.ID == event.ConversationID {
 					ws = c.WorkspaceID
 					break
@@ -536,6 +621,11 @@ func (e *Engine) ingest(ctx context.Context, imc *IM, l *Lease) (committed []Inp
 			}
 		}
 		inputs = append(inputs, Input{EventID: event.ID, WorkspaceID: ws, ConversationID: event.ConversationID, MessageID: m.ID, SenderID: m.SenderID, SenderName: m.SenderName, SenderKind: m.SenderKind, Body: m.Body, Attachments: m.Attachments, Mentions: m.Mentions, ReplyToID: m.ReplyToID, Seq: m.Seq, CreatedAt: m.CreatedAt})
+	}
+	if unreadUpdated {
+		if err = presence.Persist(ctx, e.Store, l); err != nil {
+			return nil, err
+		}
 	}
 	if err = e.Store.Ingest(ctx, l, page.Cursor, inputs); err != nil {
 		return nil, err

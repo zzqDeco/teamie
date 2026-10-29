@@ -32,6 +32,10 @@ jobs:
         working-directory: apps/web
       - run: npm run build
         working-directory: apps/web
+      - run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+      - run: npm run test:browser
+        working-directory: apps/web
 
   backend:
     runs-on: ubuntu-latest

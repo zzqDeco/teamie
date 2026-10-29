@@ -6,6 +6,7 @@ import {
   AtSign,
   Bell,
   BellOff,
+  Blocks,
   Check,
   CheckCheck,
   Hash,
@@ -192,9 +193,11 @@ export function ConversationHeader({
   conversation,
   name,
   membersOpen,
+  appsOpen = false,
   onMenu,
   onSearchOpen,
   onMembers,
+  onApps,
   members,
   userId,
   canConfigureNotifications = false,
@@ -203,9 +206,11 @@ export function ConversationHeader({
   conversation: Conversation;
   name: string;
   membersOpen: boolean;
+  appsOpen?: boolean;
   onMenu: () => void;
   onSearchOpen: () => void;
   onMembers: () => void;
+  onApps?: () => void;
   members?: Member[];
   userId?: string;
   canConfigureNotifications?: boolean;
@@ -390,6 +395,15 @@ export function ConversationHeader({
         >
           <Search size={ICON.lg} />
         </IconButton>
+        {conversation.type === "group" && onApps && (
+          <IconButton
+            label="群聊应用"
+            onClick={onApps}
+            aria-expanded={appsOpen}
+          >
+            <Blocks size={ICON.lg} />
+          </IconButton>
+        )}
         <IconButton
           label="查看会话成员"
           onClick={onMembers}

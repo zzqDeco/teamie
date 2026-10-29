@@ -17,6 +17,7 @@ type Service struct {
 	Memberships    domain.MembershipRepository
 	Messages       domain.MessageRepository
 	Attachments    domain.AttachmentRepository
+	Marketplace    domain.MarketplaceRepository
 	Outbox         domain.OutboxRepository
 	Identity       domain.IdentityDirectory
 	Flags          domain.FeatureFlags

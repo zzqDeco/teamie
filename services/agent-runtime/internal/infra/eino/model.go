@@ -14,9 +14,9 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
+	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
 	wire "teamie/contracts/gen/agent/kitex_gen/agent"
 	"teamie/contracts/gen/agent/kitex_gen/agent/modelgatewayservice"
-	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
 	"teamie/pkg/postgres"
 )
 

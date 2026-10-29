@@ -202,6 +202,7 @@ services:
     image: ${AGENT_RUNTIME_IMAGE:?manifest image required}
     mem_limit: 256m
     memswap_limit: 256m
+    networks: [private, egress]
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       HTTP_ADDR: :8085

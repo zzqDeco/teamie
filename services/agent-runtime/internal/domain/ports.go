@@ -437,6 +437,9 @@ type RuntimeRepository interface {
 	GetModelStepAndRecovery(ctx context.Context, runID string, step int) ([]byte, []byte, error)
 	SaveModelCall(ctx context.Context, l *Lease, runID string, step int, hash string, b []byte) error
 	RecordToolIntent(ctx context.Context, l *Lease, runID, id, name, hash string) ([]byte, error)
+	// RecordExternalToolIntent also reports whether this call was first claimed.
+	// An existing intent without a result has an unknown external outcome.
+	RecordExternalToolIntent(ctx context.Context, l *Lease, runID, id, name, hash string) (result []byte, created bool, err error)
 	RecordToolResult(ctx context.Context, l *Lease, runID, id string, b []byte) error
 	ListModelCallResponses(ctx context.Context, runID string) ([][]byte, error)
 	ListIMToolCallResults(ctx context.Context, runID string) ([]ToolCallResultRecord, error)

@@ -238,6 +238,57 @@ afterEach(async () => {
 });
 
 describe("member and account navigation", () => {
+  it("closes an unavailable apps pane, clears inert, and does not reopen it on enable", async () => {
+    vi.spyOn(api, "conversationApps").mockResolvedValue({ apps: [] });
+    bootstrap.capabilities["im.marketplace.enabled"] = true;
+    await mount("/app/w/team/c/group");
+    await click('[aria-label="群聊应用"]');
+    expect(find("main.app-main").hasAttribute("inert")).toBe(true);
+    bootstrap = { ...bootstrap, capabilities: { ...bootstrap.capabilities, "im.marketplace.enabled": false } };
+    await mount("/app/w/team/c/group");
+    expect(container.querySelector('aside[aria-label="群聊应用"]')).toBeNull();
+    expect(find("main.app-main").hasAttribute("inert")).toBe(false);
+    expect(find(".app-shell").classList.contains("details-open")).toBe(false);
+    bootstrap = { ...bootstrap, capabilities: { ...bootstrap.capabilities, "im.marketplace.enabled": true } };
+    await mount("/app/w/team/c/group");
+    expect(container.querySelector('aside[aria-label="群聊应用"]')).toBeNull();
+    await click('[aria-label="群聊应用"]');
+    expect(container.querySelector('aside[aria-label="群聊应用"]')).not.toBeNull();
+    await click('aside [aria-label="关闭群聊应用面板"]');
+    expect(find("main.app-main").hasAttribute("inert")).toBe(false);
+  });
+
+  it("dismisses workspace app management when capability is revoked without closing members", async () => {
+    vi.spyOn(api, "conversationApps").mockResolvedValue({ apps: [] });
+    vi.spyOn(api, "marketplaceCatalog").mockResolvedValue({ apps: [] });
+    vi.spyOn(api, "workspaceApps").mockResolvedValue({ apps: [] });
+    bootstrap.capabilities["im.marketplace.enabled"] = true;
+    await mount("/app/w/team/c/group");
+    await click('[aria-label="群聊应用"]');
+    await click('aside [aria-label="管理工作区应用"]');
+    expect(container.querySelector(".modal")).not.toBeNull();
+    bootstrap = { ...bootstrap, capabilities: { ...bootstrap.capabilities, "im.marketplace.enabled": false } };
+    await mount("/app/w/team/c/group");
+    expect(container.querySelector(".modal")).toBeNull();
+    expect(find("main.app-main").hasAttribute("inert")).toBe(false);
+    await click('[aria-label="查看会话成员"]');
+    expect(find("main.app-main").hasAttribute("inert")).toBe(true);
+    expect(container.querySelector('aside[aria-label="群聊应用"]')).toBeNull();
+    await escape();
+    expect(find("main.app-main").hasAttribute("inert")).toBe(false);
+  });
+
+  it("discards the apps pane when leaving its conversation", async () => {
+    vi.spyOn(api, "conversationApps").mockResolvedValue({ apps: [] });
+    await mount("/app/w/team/c/group");
+    await click('[aria-label="群聊应用"]');
+    await click('.navigation-sidebar a[href="/app/w/team/c/general"]');
+    expect(container.querySelector('aside[aria-label="群聊应用"]')).toBeNull();
+    expect(find("main.app-main").hasAttribute("inert")).toBe(false);
+    await click('.navigation-sidebar a[href="/app/w/team/c/group"]');
+    expect(container.querySelector('aside[aria-label="群聊应用"]')).toBeNull();
+  });
+
   it("keeps independent Agent discovery, edits and deletion usable with runtime admission disabled", async () => {
     bootstrap.capabilities["agents.enabled"] = false;
     vi.mocked(api.agent).mockResolvedValue({ agent: { ...agent, enabled: false } });

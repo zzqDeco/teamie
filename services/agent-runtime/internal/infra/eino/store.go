@@ -62,6 +62,73 @@ type Run struct {
 	ContextHead, AcceptanceHead int64
 	Front                       *frontSlot
 	usageState                  usageAnchorState
+	resume                      *checkpointMetadata
+
+	presenceMu           sync.Mutex
+	presenceEnabled      bool
+	activeWorkspaceID    string
+	activeConversationID string
+	activeConvType       string
+	mcpTools             map[string]*mcpToolWrapper
+}
+
+func (r *Run) setPresenceEnabled(enabled bool) {
+	if r == nil {
+		return
+	}
+	r.presenceMu.Lock()
+	r.presenceEnabled = enabled
+	r.presenceMu.Unlock()
+}
+
+func (r *Run) isPresenceEnabled() bool {
+	if r == nil {
+		return false
+	}
+	r.presenceMu.Lock()
+	defer r.presenceMu.Unlock()
+	return r.presenceEnabled
+}
+
+func (r *Run) setActiveConversation(workspaceID, conversationID, convType string) {
+	if r == nil {
+		return
+	}
+	r.presenceMu.Lock()
+	r.activeWorkspaceID = workspaceID
+	r.activeConversationID = conversationID
+	r.activeConvType = convType
+	r.presenceMu.Unlock()
+}
+
+func (r *Run) activeConversation() (string, string, string) {
+	if r == nil {
+		return "", "", ""
+	}
+	r.presenceMu.Lock()
+	defer r.presenceMu.Unlock()
+	return r.activeWorkspaceID, r.activeConversationID, r.activeConvType
+}
+
+func (r *Run) setMCPTools(tools map[string]*mcpToolWrapper) {
+	if r == nil {
+		return
+	}
+	r.presenceMu.Lock()
+	r.mcpTools = tools
+	r.presenceMu.Unlock()
+}
+
+func (r *Run) getMCPTool(name string) *mcpToolWrapper {
+	if r == nil {
+		return nil
+	}
+	r.presenceMu.Lock()
+	defer r.presenceMu.Unlock()
+	if r.mcpTools == nil {
+		return nil
+	}
+	return r.mcpTools[name]
 }
 
 func (r *Run) getUsageAnchor() *contextUsageAnchor {

@@ -925,6 +925,3 @@ func TestReview59ScheduleListRechecksRevokedSources(t *testing.T) {
 		t.Fatalf("expected ContextArchive.Read on archived schedule_list from revoked sourceA to fail with errContextUnavailable, got %v", err)
 	}
 }
-
-
-

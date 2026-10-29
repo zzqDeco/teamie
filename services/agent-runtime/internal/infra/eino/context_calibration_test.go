@@ -19,8 +19,8 @@ import (
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 	"go.uber.org/zap"
-	wire "teamie/contracts/gen/agent/kitex_gen/agent"
 	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
+	wire "teamie/contracts/gen/agent/kitex_gen/agent"
 	"teamie/pkg/observability"
 )
 
@@ -55,7 +55,7 @@ func anchoredAssistantTextWithUsage(t *testing.T, prefix []*schema.AgenticMessag
 }
 
 func TestVisibleBytesDiv4CounterAlignsChineseAndEnglishDensity(t *testing.T) {
-	chinese := strings.Repeat("中文长会话上下文容量校准测试", 1000) // 14,000 Chinese chars = 42,000 UTF-8 bytes
+	chinese := strings.Repeat("中文长会话上下文容量校准测试", 1000)                       // 14,000 Chinese chars = 42,000 UTF-8 bytes
 	english := strings.Repeat("long context token calibration test ", 1000) // 36,000 ASCII bytes
 
 	zhMsg := schema.UserAgenticMessage(chinese)
@@ -92,7 +92,7 @@ func TestVisibleBytesDiv4CounterAlignsChineseAndEnglishDensity(t *testing.T) {
 	// Verify internal Extra, ResponseMeta, StreamingMeta and tool result Extra are excluded from LocalTokens.
 	withMeta := schema.UserAgenticMessage(chinese)
 	withMeta.Extra = map[string]any{
-		"_eino_msg_id":              "ephemeral-id",
+		"_eino_msg_id":               "ephemeral-id",
 		"teamie_context_archive_ref": strings.Repeat("context:v1:archive", 2000),
 		"teamie_context_sources":     strings.Repeat("source-metadata", 2000),
 	}

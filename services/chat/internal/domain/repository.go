@@ -132,3 +132,17 @@ type MutationRepository interface {
 	LockMutation(context.Context, string, string) (ConversationMutation, bool, error)
 	SaveMutation(context.Context, string, string, ConversationMutation) error
 }
+
+// MarketplaceRepository defines persistence operations for platform marketplace apps and workspace installations.
+type MarketplaceRepository interface {
+	ListAllMarketplaceApps(ctx context.Context) ([]MarketplaceApp, error)
+	ListEnabledMarketplaceApps(ctx context.Context) ([]MarketplaceApp, error)
+	GetMarketplaceAppByID(ctx context.Context, id string, forUpdate bool) (MarketplaceApp, error)
+	InsertMarketplaceApp(ctx context.Context, app MarketplaceApp) (MarketplaceApp, error)
+	UpdateMarketplaceApp(ctx context.Context, app MarketplaceApp) (MarketplaceApp, error)
+	DeleteMarketplaceApp(ctx context.Context, id string) (bool, error)
+	ListWorkspaceMarketplaceApps(ctx context.Context, workspaceID string) ([]MarketplaceApp, error)
+	InstallWorkspaceMarketplaceApp(ctx context.Context, workspaceID, appID, installedBy string) error
+	UninstallWorkspaceMarketplaceApp(ctx context.Context, workspaceID, appID string) error
+	GetInstalledWorkspaceMarketplaceApp(ctx context.Context, workspaceID, appID string) (MarketplaceApp, error)
+}

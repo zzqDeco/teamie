@@ -1,3 +1,4 @@
+import { createMarketplaceClient } from "./marketplace";
 import {
   IDL_ROUTES, type AgentListResp, type AgentResp, type AttachmentResp,
   type ChangePasswordReq, type CreateAgentReq, type CreateWorkspaceReq,
@@ -467,6 +468,18 @@ export class TeamieClient {
     >(routePath(IDL_ROUTES.GetWorkspacePresence, { id: workspaceId }), {
       signal,
     });
+  #marketplace = createMarketplaceClient(this);
+  adminMarketplaceApps = this.#marketplace.adminMarketplaceApps;
+  createAdminMarketplaceApp = this.#marketplace.createAdminMarketplaceApp;
+  updateAdminMarketplaceApp = this.#marketplace.updateAdminMarketplaceApp;
+  rotateAdminMarketplaceAppSecret = this.#marketplace.rotateAdminMarketplaceAppSecret;
+  deleteAdminMarketplaceApp = this.#marketplace.deleteAdminMarketplaceApp;
+  marketplaceCatalog = this.#marketplace.marketplaceCatalog;
+  workspaceApps = this.#marketplace.workspaceApps;
+  installWorkspaceApp = this.#marketplace.installWorkspaceApp;
+  uninstallWorkspaceApp = this.#marketplace.uninstallWorkspaceApp;
+  conversationApps = this.#marketplace.conversationApps;
+  createConversationAppSession = this.#marketplace.createConversationAppSession;
   sync = (cursor: string) =>
     this.#request<SyncPage>(
       `${IDL_ROUTES.Sync.clientPath}?cursor=${part(cursor)}&limit=100`,

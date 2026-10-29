@@ -11,7 +11,8 @@
     "lint": "tsc --noEmit && eslint .",
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview --host 0.0.0.0",
+    "test:browser": "playwright test"
   },
   "dependencies": {
     "@fontsource-variable/dm-sans": "^5.3.0",
@@ -24,6 +25,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",
+    "@playwright/test": "1.62.1",
     "@types/katex": "^0.16.8",
     "@types/node": "^24.0.0",
     "@types/react": "^19.2.0",
