@@ -18,9 +18,9 @@ func (w *agentWorker) genResume(ctx context.Context, _ *adk.TurnLoop[Input, *sch
 	if err != nil {
 		return nil, err
 	}
-	if resumeCompatibleForRun(metadata, w.def.Revision, run) {
+	if accepted := run.resume; accepted != nil {
 		targets := map[string]any{}
-		for _, id := range metadata.Targets {
+		for _, id := range accepted.Targets {
 			targets[id] = nil
 		}
 		return &adk.GenResumeResult[Input, *schema.AgenticMessage]{RunCtx: runctx, Decision: adk.TurnLoopResumeDecisionResume, ResumeParams: &adk.ResumeParams{Targets: targets}, Consumed: run.Inputs, Remaining: remaining}, nil

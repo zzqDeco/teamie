@@ -141,6 +141,13 @@ func (t *Tools) BuildDirectMessageTools() ([]tool.BaseTool, error) {
 			if !validUUID(out.Conversation.ID) || !validUUID(out.Conversation.WorkspaceID) {
 				return nil, errors.New("invalid_conversation_response")
 			}
+			if t.presenceEnforced(run) {
+				convType := out.Conversation.Type
+				if convType == "" {
+					convType = "direct"
+				}
+				t.applyEnterConversation(ctx, run, out.Conversation.WorkspaceID, out.Conversation.ID, convType)
+			}
 			return &Observation{OK: true, Data: out.Conversation}, nil
 		})
 	}, utils.WithMarshalOutput(marshalObservation))
@@ -198,6 +205,13 @@ func (t *Tools) BuildDirectMessageTools() ([]tool.BaseTool, error) {
 			}
 			if !validUUID(out.Conversation.ID) || !validUUID(out.Conversation.WorkspaceID) {
 				return nil, errors.New("invalid_conversation_response")
+			}
+			if t.presenceEnforced(run) {
+				convType := out.Conversation.Type
+				if convType == "" {
+					convType = "group"
+				}
+				t.applyEnterConversation(ctx, run, out.Conversation.WorkspaceID, out.Conversation.ID, convType)
 			}
 			return &Observation{OK: true, Data: out.Conversation}, nil
 		})

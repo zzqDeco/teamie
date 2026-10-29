@@ -539,6 +539,80 @@ export interface DownloadAttachmentResp {
   content: Uint8Array;
 }
 
+export interface MarketplaceAppDTO {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  webUrl: string;
+  mcpUrl: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MarketplaceAppResp {
+  app: MarketplaceAppDTO;
+}
+
+export interface CreatedMarketplaceAppResp {
+  app: MarketplaceAppDTO;
+  signingSecret: string;
+}
+
+export interface RotateMarketplaceAppSecretResp {
+  app: MarketplaceAppDTO;
+  signingSecret: string;
+}
+
+export interface MarketplaceAppListResp {
+  apps: MarketplaceAppDTO[];
+}
+
+export interface CreateMarketplaceAppReq {
+  slug: string;
+  name: string;
+  description?: string;
+  webUrl: string;
+  mcpUrl: string;
+  enabled?: boolean;
+}
+
+export interface UpdateMarketplaceAppReq {
+  id: string;
+  slug?: string;
+  name?: string;
+  description?: string;
+  webUrl?: string;
+  mcpUrl?: string;
+  enabled?: boolean;
+}
+
+export interface MarketplaceAppIDReq {
+  id: string;
+}
+
+export interface InstallWorkspaceAppReq {
+  id: string;
+  appId: string;
+}
+
+export interface UninstallWorkspaceAppReq {
+  id: string;
+  appId: string;
+}
+
+export interface CreateConversationAppSessionReq {
+  id: string;
+  appId: string;
+}
+
+export interface ConversationAppSessionResp {
+  app: MarketplaceAppDTO;
+  token: string;
+  expiresAt: string;
+}
+
 // ============================================================================
 // Source: contracts/im/ws_realtime.thrift (namespace im.realtime)
 // ============================================================================
@@ -1184,6 +1258,105 @@ export const IDL_ROUTES = {
     clientPath: "/conversations/:id/attachments/:attachmentId/content",
     requestType: "DownloadAttachmentReq",
     responseType: "DownloadAttachmentResp",
+  },
+  ListAdminMarketplaceApps: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "GET",
+    path: "/api/v1/admin/marketplace/apps",
+    clientPath: "/admin/marketplace/apps",
+    requestType: "GetBootstrapReq",
+    responseType: "MarketplaceAppListResp",
+  },
+  CreateAdminMarketplaceApp: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "POST",
+    path: "/api/v1/admin/marketplace/apps",
+    clientPath: "/admin/marketplace/apps",
+    requestType: "CreateMarketplaceAppReq",
+    responseType: "CreatedMarketplaceAppResp",
+  },
+  UpdateAdminMarketplaceApp: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "PATCH",
+    path: "/api/v1/admin/marketplace/apps/:id",
+    clientPath: "/admin/marketplace/apps/:id",
+    requestType: "UpdateMarketplaceAppReq",
+    responseType: "MarketplaceAppResp",
+  },
+  RotateAdminMarketplaceAppSecret: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "POST",
+    path: "/api/v1/admin/marketplace/apps/:id/rotate-secret",
+    clientPath: "/admin/marketplace/apps/:id/rotate-secret",
+    requestType: "MarketplaceAppIDReq",
+    responseType: "RotateMarketplaceAppSecretResp",
+  },
+  DeleteAdminMarketplaceApp: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "DELETE",
+    path: "/api/v1/admin/marketplace/apps/:id",
+    clientPath: "/admin/marketplace/apps/:id",
+    requestType: "MarketplaceAppIDReq",
+    responseType: "EmptyResp",
+  },
+  ListMarketplaceCatalog: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "GET",
+    path: "/api/v1/marketplace/catalog",
+    clientPath: "/marketplace/catalog",
+    requestType: "GetBootstrapReq",
+    responseType: "MarketplaceAppListResp",
+  },
+  ListWorkspaceApps: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "GET",
+    path: "/api/v1/workspaces/:id/apps",
+    clientPath: "/workspaces/:id/apps",
+    requestType: "ListWorkspaceMembersReq",
+    responseType: "MarketplaceAppListResp",
+  },
+  InstallWorkspaceApp: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "POST",
+    path: "/api/v1/workspaces/:id/apps",
+    clientPath: "/workspaces/:id/apps",
+    requestType: "InstallWorkspaceAppReq",
+    responseType: "MarketplaceAppResp",
+  },
+  UninstallWorkspaceApp: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "DELETE",
+    path: "/api/v1/workspaces/:id/apps/:appId",
+    clientPath: "/workspaces/:id/apps/:appId",
+    requestType: "UninstallWorkspaceAppReq",
+    responseType: "EmptyResp",
+  },
+  ListConversationApps: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "GET",
+    path: "/api/v1/conversations/:id/apps",
+    clientPath: "/conversations/:id/apps",
+    requestType: "GetReadReceiptsReq",
+    responseType: "MarketplaceAppListResp",
+  },
+  CreateConversationAppSession: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "POST",
+    path: "/api/v1/conversations/:id/apps/:appId/session",
+    clientPath: "/conversations/:id/apps/:appId/session",
+    requestType: "CreateConversationAppSessionReq",
+    responseType: "ConversationAppSessionResp",
   },
   ConnectWS: {
     service: "RealtimeWSService",

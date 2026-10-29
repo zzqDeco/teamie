@@ -11,8 +11,9 @@ import (
 )
 
 type modelCallProbe struct {
-	id  string
-	ctx context.Context
+	id         string
+	providerID string
+	ctx        context.Context
 }
 
 type blockingModels struct{ started chan modelCallProbe }
@@ -30,7 +31,7 @@ func (c admissionCipher) Decrypt(data []byte) (string, error) {
 }
 
 func (p *blockingModels) wait(ctx context.Context, c ResolvedModel) error {
-	p.started <- modelCallProbe{id: c.ID, ctx: ctx}
+	p.started <- modelCallProbe{id: c.ID, providerID: c.ProviderID, ctx: ctx}
 	<-ctx.Done()
 	return domain.StreamError(ctx, "")
 }

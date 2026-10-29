@@ -120,7 +120,7 @@ func TestWebSearchAdminConfigRedactionAndPreservation(t *testing.T) {
 		t.Fatal("explicit search key clear failed")
 	}
 	// Search cancellation is independent even when there are no usable models.
-	modelCtx, done := service.App.RegisterRunCancel(context.Background(), "a", "run", "default")
+	modelCtx, done := service.App.RegisterRunCancel(context.Background(), "a", "run", "default", "default")
 	defer done()
 	webCtx, webDone := service.App.RegisterWebCancel(context.Background(), "a", "run")
 	defer webDone()

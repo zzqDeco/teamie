@@ -1,4 +1,6 @@
 import type {
+  MarketplaceAppDTO, CreateMarketplaceAppReq, UpdateMarketplaceAppReq,
+  CreatedMarketplaceAppResp, RotateMarketplaceAppSecretResp, ConversationAppSessionResp,
   AdminModelConfigResp,
   AdminModelProfileDTO,
   AdminModelProviderDTO,
@@ -187,3 +189,10 @@ export type WorkspaceSearchItem = Omit<
 export type WorkspaceSearchPage = Omit<WorkspaceSearchPageResp, "items"> & {
   items: WorkspaceSearchItem[];
 };
+
+export type MarketplaceApp = MarketplaceAppDTO;
+export type CreateMarketplaceAppInput = CreateMarketplaceAppReq;
+export type UpdateMarketplaceAppInput = Omit<UpdateMarketplaceAppReq, "id">;
+export type CreatedMarketplaceApp = CreatedMarketplaceAppResp;
+export type RotatedMarketplaceAppSecret = RotateMarketplaceAppSecretResp;
+export type ConversationAppSession = ConversationAppSessionResp;

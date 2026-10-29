@@ -42,7 +42,16 @@ func (r *Repository) ResolveRunSources(ctx context.Context, agentID, runID strin
 			return domain.ErrContextUnavailable
 		}
 		for _, in := range inputs {
-			if in.Kind != "task.notification" && in.Kind != "schedule.wakeup" && in.ConversationID != "" && in.MessageID != "" {
+			if in.Kind == "app.notification" {
+				if !domain.ValidUUID(in.ConversationID) || !domain.ValidUUID(in.WorkspaceID) {
+					return domain.ErrContextUnavailable
+				}
+				refs = append(refs, domain.InputSource{WorkspaceID: in.WorkspaceID, ConversationID: in.ConversationID})
+			} else if in.Kind == "im.unread_digest" {
+				if len(in.SourceRefs) == 0 {
+					return domain.ErrContextUnavailable
+				}
+			} else if in.Kind != "task.notification" && in.Kind != "schedule.wakeup" && in.ConversationID != "" && in.MessageID != "" {
 				ref := domain.InputSource{
 					EventID:        in.EventID,
 					WorkspaceID:    in.WorkspaceID,

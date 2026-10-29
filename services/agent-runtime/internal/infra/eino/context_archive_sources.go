@@ -45,6 +45,10 @@ func contextArgumentHashes(name, argument string) []string {
 		parsers = []any{&addConversationMembersArgs{}}
 	case "im_retract_message":
 		parsers = []any{&retractMessageArgs{}}
+	case "im_enter_conversation":
+		parsers = []any{&enterConversationArgs{}}
+	case "im_leave_conversation":
+		parsers = []any{&leaveConversationArgs{}}
 	case "web_search":
 		parsers = []any{&webSearchArgs{}}
 	case "web_fetch":
@@ -63,6 +67,15 @@ func contextArgumentHashes(name, argument string) []string {
 	for _, parsed := range parsers {
 		if json.Unmarshal([]byte(argument), parsed) == nil {
 			canonical, _ := json.Marshal(parsed)
+			hashes = append(hashes, digest(canonical))
+		}
+	}
+	if strings.HasPrefix(name, "mcp__") {
+		trimmed := strings.TrimSpace(argument)
+		if trimmed == "" {
+			trimmed = "{}"
+		}
+		if canonical, err := json.Marshal(json.RawMessage(trimmed)); err == nil {
 			hashes = append(hashes, digest(canonical))
 		}
 	}
@@ -156,6 +169,15 @@ func (a *ContextArchive) toolSources(ctx context.Context, r *Run, detail *reduct
 				return nil, err
 			}
 			refs = append(refs, actual...)
+		} else if strings.HasPrefix(name, "mcp__") {
+			if match.Name != name {
+				return nil, errContextUnavailable
+			}
+			actual, err := mcpReceiptSources(match.Raw)
+			if err != nil {
+				return nil, err
+			}
+			refs = append(refs, actual...)
 		} else if workspaceTool(name) {
 			actual, err := a.workspaceToolSources(ctx, r, match.RunID, call, match.Name, []byte(detail.ToolArgument.Text))
 			if err != nil {
@@ -229,6 +251,10 @@ func (a *ContextArchive) inputMessageSources(ctx context.Context, r *Run, messag
 		prefix = "TEAMIE_TASK_NOTIFICATION "
 	} else if strings.HasPrefix(text, "TEAMIE_SCHEDULE_WAKEUP ") {
 		prefix = "TEAMIE_SCHEDULE_WAKEUP "
+	} else if strings.HasPrefix(text, "TEAMIE_APP_NOTIFICATION ") {
+		prefix = "TEAMIE_APP_NOTIFICATION "
+	} else if strings.HasPrefix(text, "TEAMIE_UNREAD_DIGEST ") {
+		prefix = "TEAMIE_UNREAD_DIGEST "
 	}
 	if !strings.HasPrefix(text, prefix) {
 		return nil, false, nil
@@ -259,7 +285,7 @@ func (a *ContextArchive) inputMessageSources(ctx context.Context, r *Run, messag
 		return nil, false, nil
 	}
 	refs, overflow := inputSources([]Input{actual})
-	if overflow || actual.Kind == "task.notification" || actual.Kind == "schedule.wakeup" {
+	if overflow || actual.Kind == "task.notification" || actual.Kind == "schedule.wakeup" || actual.Kind == "app.notification" || actual.Kind == "im.unread_digest" {
 		refs, err = a.runSources(ctx, runID)
 	} else {
 		refs, err = canonicalContextSources(refs)

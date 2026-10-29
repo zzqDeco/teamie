@@ -184,11 +184,15 @@ func (imc *IM) request(ctx context.Context, baseURL, method, path string, body i
 }
 
 type Conversation struct {
-	ID          string   `json:"id"`
-	WorkspaceID string   `json:"workspaceId"`
-	Type        string   `json:"type"`
-	Name        string   `json:"name"`
-	MemberIDs   []string `json:"memberIds"`
+	ID           string   `json:"id"`
+	WorkspaceID  string   `json:"workspaceId"`
+	Type         string   `json:"type"`
+	Name         string   `json:"name"`
+	MemberIDs    []string `json:"memberIds"`
+	Active       bool     `json:"active,omitempty"`
+	UnreadCount  int      `json:"unreadCount,omitempty"`
+	MentionCount int      `json:"mentionCount,omitempty"`
+	LastSeq      int64    `json:"lastSeq,omitempty"`
 }
 type Message struct {
 	ID             string           `json:"id"`
@@ -251,6 +255,7 @@ type Tools struct {
 	AgentID          string
 	FlagsFile        string
 	Authorize        func(context.Context) error
+	Presence         *conversationPresenceState
 }
 type Observation struct {
 	OK    bool   `json:"ok"`
@@ -306,11 +311,22 @@ func (t *Tools) execute(ctx context.Context, name string, args any, fn func(cont
 		return nil, e
 	}
 	callID := compose.GetToolCallID(ctx)
+	if callID == "" {
+		return nil, errors.New("tool call has no identity")
+	}
 	payload, e := json.Marshal(args)
 	if e != nil {
 		return nil, e
 	}
-	cached, e := t.Store.ToolIntent(ctx, t.Lease, run, callID, name, payload)
+	var cached []byte
+	ambiguousExternal := false
+	if strings.HasPrefix(name, "mcp__") {
+		var created bool
+		cached, created, e = t.Store.DB.RecordExternalToolIntent(ctx, t.Lease, run.ID, callID, name, digest(payload))
+		ambiguousExternal = !created && cached == nil
+	} else {
+		cached, e = t.Store.ToolIntent(ctx, t.Lease, run, callID, name, payload)
+	}
 	if e != nil {
 		return nil, e
 	}
@@ -334,7 +350,7 @@ func (t *Tools) execute(ctx context.Context, name string, args any, fn func(cont
 		if e = json.Unmarshal(cached, &out); e != nil {
 			return nil, e
 		}
-		if (name == "im_get_message" || name == "im_list_messages" || name == "im_list_conversations") && out.OK {
+		if (name == "im_get_message" || name == "im_list_messages" || name == "im_list_conversations" || name == "im_enter_conversation") && out.OK {
 			archive := &ContextArchive{Store: t.Store, Lease: t.Lease, IM: t.IM, Authorize: t.Authorize}
 			refs, srcErr := archive.imReceiptSourcesWithArgs(ctx, run.ID, callID, name, cached, payload)
 			if srcErr != nil {
@@ -450,13 +466,55 @@ func (t *Tools) execute(ctx context.Context, name string, args any, fn func(cont
 				return nil, e
 			}
 		}
+		if strings.HasPrefix(name, "mcp__") && out.OK {
+			var receipt struct {
+				Data struct {
+					AppID          string `json:"appId"`
+					WorkspaceID    string `json:"workspaceId"`
+					ConversationID string `json:"conversationId"`
+				} `json:"data"`
+			}
+			if e = json.Unmarshal(cached, &receipt); e != nil || !validUUID(receipt.Data.ConversationID) || !validUUID(receipt.Data.AppID) {
+				return nil, ErrReplayConflict
+			}
+			var appsOut struct {
+				Apps []imMarketplaceApp `json:"apps"`
+			}
+			if e = t.IM.Call(ctx, http.MethodGet, "/api/v1/conversations/"+url.PathEscape(receipt.Data.ConversationID)+"/apps", nil, &appsOut); e != nil {
+				var api *APIError
+				if errors.As(e, &api) && (api.Status == 400 || api.Status == 403 || api.Status == 404) {
+					return nil, errContextUnavailable
+				}
+				return nil, e
+			}
+			installed := false
+			for _, app := range appsOut.Apps {
+				if app.ID == receipt.Data.AppID && app.Enabled {
+					installed = true
+					break
+				}
+			}
+			if !installed {
+				return nil, errContextUnavailable
+			}
+		}
+		if out.OK {
+			t.applyReplayPresence(ctx, run, name, cached)
+		}
 		out.raw, e = t.Store.replayToolWire(ctx, run, callID, name, cached)
 		if e != nil {
 			return nil, e
 		}
 		return &out, nil
 	}
-	out, e := fn(ctx, toolRequestID(run, callID))
+	var out *Observation
+	if ambiguousExternal {
+		// MCP does not guarantee application-level idempotency. A durable intent
+		// without a receipt may already have changed remote state; never resend it.
+		out = &Observation{Error: "mcp_result_unknown"}
+	} else {
+		out, e = fn(ctx, toolRequestID(run, callID))
+	}
 	if e != nil {
 		return nil, e
 	}
@@ -516,6 +574,9 @@ func (t *Tools) buildIM(files bool) ([]tool.BaseTool, error) {
 			out := []Conversation{}
 			for _, c := range b.Conversations {
 				if args.WorkspaceID == "" || c.WorkspaceID == args.WorkspaceID {
+					if t.Presence != nil {
+						c = t.Presence.EnrichConversation(c)
+					}
 					out = append(out, c)
 				}
 			}
@@ -570,9 +631,16 @@ func (t *Tools) buildIM(files bool) ([]tool.BaseTool, error) {
 		return nil, e
 	}
 	d, e := utils.InferTool("im_send_message", "The ONLY way to speak or reply in IM. Bind conversationId and replyToId to the intended source request, verify uncertain destinations first, and respect that conversation's audience. Never forward unrelated private context or repeat a confirmed send. Ordinary final text is private runtime output and is never sent to chat; silence requires no call.", func(ctx context.Context, args *sendArgs) (*Observation, error) {
+		run, err := CurrentRun(ctx)
+		if err != nil {
+			return nil, err
+		}
 		return t.execute(ctx, "im_send_message", args, func(ctx context.Context, id string) (*Observation, error) {
 			if !validUUID(args.ConversationID) || (args.ReplyToID != "" && !validUUID(args.ReplyToID)) || strings.TrimSpace(args.Body) == "" || len([]rune(args.Body)) > 8000 {
 				return &Observation{Error: "invalid_arguments"}, nil
+			}
+			if obs := t.checkSendPresence(run, args.ConversationID); obs != nil {
+				return obs, nil
 			}
 			body := map[string]any{"clientMessageId": id, "body": args.Body}
 			if args.ReplyToID != "" {

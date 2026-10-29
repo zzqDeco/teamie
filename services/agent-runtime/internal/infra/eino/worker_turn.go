@@ -10,6 +10,7 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/middlewares/summarization"
 	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 	"go.uber.org/zap"
@@ -17,34 +18,89 @@ import (
 )
 
 func (w *agentWorker) makeAgent(ctx context.Context) (adk.TypedAgent[*schema.AgenticMessage], error) {
-	e, def, lease, imc := w.engine, w.def, w.lease, w.imc
 	run, err := CurrentRun(ctx)
 	if err != nil {
 		return nil, err
 	}
+	imToolBuilder := &Tools{
+		Store:            w.engine.Store,
+		Lease:            w.lease,
+		IM:               w.imc,
+		Sandbox:          w.engine.Sandbox,
+		SandboxToken:     w.engine.Config.SandboxToken,
+		GatewayStreamURL: w.engine.Config.GatewayStreamURL,
+		GatewayToken:     w.engine.Config.GatewayToken,
+		OwnerID:          w.def.OwnerId,
+		AgentID:          w.def.Id,
+		FlagsFile:        w.engine.Config.FlagsFile,
+		Authorize:        w.authorize,
+	}
+	if w.engine.presenceEnabled() || run.resume != nil && run.resume.Presence != nil && run.resume.Presence.Enabled {
+		imToolBuilder.Presence = w.presence
+	}
+	presenceActive, err := imToolBuilder.initRunPresence(ctx, run)
+	if err != nil {
+		return nil, err
+	}
+	if presenceActive {
+		imToolBuilder.Presence = w.presence
+	} else {
+		imToolBuilder.Presence = nil
+	}
+
 	availableTools := w.tools
-	if fileDeliveryForRun(run) {
-		availableTools, err = (&Tools{Store: e.Store, Lease: lease, IM: imc, Sandbox: e.Sandbox, SandboxToken: e.Config.SandboxToken, Authorize: w.authorize}).BuildIMWithFiles()
+	if presenceActive {
+		if mentionsForRun(run) {
+			availableTools, err = imToolBuilder.BuildIMWithMentions(fileDeliveryForRun(run))
+		} else if fileDeliveryForRun(run) {
+			availableTools, err = imToolBuilder.BuildIMWithFiles()
+		} else {
+			availableTools, err = imToolBuilder.BuildIM()
+		}
 		if err != nil {
 			return nil, err
 		}
-	}
-	if mentionsForRun(run) {
-		availableTools, err = (&Tools{Store: e.Store, Lease: lease, IM: imc, Sandbox: e.Sandbox, SandboxToken: e.Config.SandboxToken, Authorize: w.authorize}).BuildIMWithMentions(fileDeliveryForRun(run))
-		if err != nil {
-			return nil, err
+	} else {
+		if fileDeliveryForRun(run) {
+			availableTools, err = imToolBuilder.BuildIMWithFiles()
+			if err != nil {
+				return nil, err
+			}
+		}
+		if mentionsForRun(run) {
+			availableTools, err = imToolBuilder.BuildIMWithMentions(fileDeliveryForRun(run))
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 	activeTools, err := toolsForRun(ctx, availableTools, run)
 	if err != nil {
 		return nil, err
 	}
+	var (
+		mcpTools       []tool.BaseTool
+		presenceTools  []tool.BaseTool
+		unknownHandler func(context.Context, string, string) (string, error)
+	)
+	if presenceActive {
+		presenceTools, err = imToolBuilder.BuildPresenceTools()
+		if err != nil {
+			return nil, err
+		}
+		unknownHandler = imToolBuilder.HandleUnknownMCPTool
+	} else {
+		mcpTools, err = imToolBuilder.BuildMCPTools(ctx, run)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if contextProfile(run) == contextProfileV1 {
 		budget, err := ParseContextBudgetSnapshot(run.ContextBudget)
 		if err != nil {
 			return nil, err
 		}
-		archive := &ContextArchive{Store: e.Store, Lease: lease, IM: imc, Authorize: w.authorize}
+		archive := &ContextArchive{Store: w.engine.Store, Lease: w.lease, IM: w.imc, Authorize: w.authorize}
 		contextTools, err := archive.Tools(ctx)
 		if err != nil {
 			return nil, err
@@ -56,32 +112,42 @@ func (w *agentWorker) makeAgent(ctx context.Context) (adk.TypedAgent[*schema.Age
 		activeTools = append(activeTools, contextTools...)
 		activeTools = append(activeTools, pageTool)
 		if budget.WebSearch {
-			webTools, err := (&Tools{Store: e.Store, Lease: lease, IM: imc, Sandbox: e.Sandbox, SandboxToken: e.Config.SandboxToken, GatewayStreamURL: e.Config.GatewayStreamURL, GatewayToken: e.Config.GatewayToken, OwnerID: def.OwnerId, AgentID: def.Id, Authorize: w.authorize}).BuildWebTools()
+			webTools, err := imToolBuilder.BuildWebTools()
 			if err != nil {
 				return nil, err
 			}
 			activeTools = append(activeTools, webTools...)
 		}
 		if budget.ScheduledWakeups {
-			scheduleTools, err := (&Tools{Store: e.Store, Lease: lease, IM: imc, OwnerID: def.OwnerId, AgentID: def.Id, FlagsFile: e.Config.FlagsFile, Authorize: w.authorize}).BuildScheduleTools(budget.DirectMessages)
+			scheduleTools, err := imToolBuilder.BuildScheduleTools(budget.DirectMessages)
 			if err != nil {
 				return nil, err
 			}
 			activeTools = append(activeTools, scheduleTools...)
 		}
 		if budget.DirectMessages {
-			dmTools, err := (&Tools{Store: e.Store, Lease: lease, IM: imc, OwnerID: def.OwnerId, AgentID: def.Id, FlagsFile: e.Config.FlagsFile, Authorize: w.authorize}).BuildDirectMessageTools()
+			dmTools, err := imToolBuilder.BuildDirectMessageTools()
 			if err != nil {
 				return nil, err
 			}
 			activeTools = append(activeTools, dmTools...)
 		}
+		if presenceActive {
+			activeTools = append(activeTools, presenceTools...)
+		} else {
+			activeTools = append(activeTools, mcpTools...)
+		}
 		pipeline, err := NewContextPipeline(ctx, ContextPipelineConfig{Model: w.gatewayModel, Budget: budget, Backend: archive, ArchivePath: archive.Path, ArchiveToolPath: archive.ArchiveToolPath, ArchiveTranscript: archive.ArchiveTranscript})
 		if err != nil {
 			return nil, err
 		}
-		handlers := append([]adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]{pipeline}, w.tasks.handlers...)
-		instruction := contextInstruction(def, budget)
+		handlers := []adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]{}
+		if presenceActive {
+			handlers = append(handlers, imToolBuilder.NewMCPDynamicToolMiddleware())
+		}
+		handlers = append(handlers, pipeline)
+		handlers = append(handlers, w.tasks.handlers...)
+		instruction := contextInstruction(w.def, budget)
 		if budget.FileDelivery {
 			instruction += fileDeliveryGuidance
 		}
@@ -101,7 +167,23 @@ func (w *agentWorker) makeAgent(ctx context.Context) (adk.TypedAgent[*schema.Age
 		if budget.DirectMessages {
 			instruction += directMessageGuidance
 		}
-		return adk.NewTypedChatModelAgent(ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{Name: "teamie_agent", Description: "A user-owned Teamie participant", Instruction: instruction, Model: w.gatewayModel, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: activeTools, ExecuteSequentially: true}}, MaxIterations: math.MaxInt, Handlers: handlers, ModelRetryConfig: pipeline.RetryConfig()})
+		if presenceActive {
+			instruction += presenceAndMarketplaceGuidance
+		} else if len(mcpTools) > 0 {
+			instruction += marketplaceAppGuidance
+		}
+		return adk.NewTypedChatModelAgent(ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{Name: "teamie_agent", Description: "A user-owned Teamie participant", Instruction: instruction, Model: w.gatewayModel, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: activeTools, ExecuteSequentially: true, UnknownToolsHandler: unknownHandler}}, MaxIterations: math.MaxInt, Handlers: handlers, ModelRetryConfig: pipeline.RetryConfig()})
+	}
+	if presenceActive {
+		activeTools = append(activeTools, presenceTools...)
+	} else {
+		activeTools = append(activeTools, mcpTools...)
+	}
+	legacyInstruction := instruction(w.def)
+	if presenceActive {
+		legacyInstruction += presenceAndMarketplaceGuidance
+	} else if len(mcpTools) > 0 {
+		legacyInstruction += marketplaceAppGuidance
 	}
 	trigger := summaryTrigger(int(w.contextWindow.Load()))
 	finalize := finalizeSummary
@@ -123,12 +205,16 @@ func (w *agentWorker) makeAgent(ctx context.Context) (adk.TypedAgent[*schema.Age
 	if err != nil {
 		return nil, err
 	}
-	handlers := append([]adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]{summary}, w.tasks.handlers...)
-	return adk.NewTypedChatModelAgent(ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{Name: "teamie_agent", Description: "A user-owned Teamie participant", Instruction: instruction(def), Model: w.gatewayModel, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: activeTools, ExecuteSequentially: true}}, MaxIterations: math.MaxInt, Handlers: handlers})
+	handlers := []adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]{}
+	if presenceActive {
+		handlers = append(handlers, imToolBuilder.NewMCPDynamicToolMiddleware())
+	}
+	handlers = append(handlers, summary)
+	handlers = append(handlers, w.tasks.handlers...)
+	return adk.NewTypedChatModelAgent(ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{Name: "teamie_agent", Description: "A user-owned Teamie participant", Instruction: legacyInstruction, Model: w.gatewayModel, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: activeTools, ExecuteSequentially: true, UnknownToolsHandler: unknownHandler}}, MaxIterations: math.MaxInt, Handlers: handlers})
 }
 
 func (w *agentWorker) validate(ctx context.Context, inputs []Input) ([]Input, error) {
-	e, lease, imc := w.engine, w.lease, w.imc
 	valid := []Input{}
 	for _, in := range inputs {
 		if in.Kind == "task.notification" {
@@ -136,12 +222,12 @@ func (w *agentWorker) validate(ctx context.Context, inputs []Input) ([]Input, er
 			continue
 		}
 		if in.Kind == "schedule.wakeup" {
-			if err := e.authorizeScheduleInput(ctx, imc, lease, in); err != nil {
+			if err := w.engine.authorizeScheduleInput(ctx, w.imc, w.lease, in); err != nil {
 				if errors.Is(err, errContextUnavailable) {
 					if in.ScheduleID != "" {
-						_ = e.Store.DB.CancelActiveSchedule(ctx, lease.AgentID, in.ScheduleID)
+						_ = w.engine.Store.DB.CancelActiveSchedule(ctx, w.lease.AgentID, in.ScheduleID)
 					}
-					if err = e.Store.Skip(ctx, lease, in.EventID); err != nil {
+					if err = w.engine.Store.Skip(ctx, w.lease, in.EventID); err != nil {
 						return nil, err
 					}
 					continue
@@ -151,11 +237,37 @@ func (w *agentWorker) validate(ctx context.Context, inputs []Input) ([]Input, er
 			valid = append(valid, in)
 			continue
 		}
-		message, err := imc.Message(ctx, in.ConversationID, in.MessageID)
+		if in.Kind == "app.notification" {
+			if err := w.engine.authorizeAppNotificationInput(ctx, w.imc, w.lease, in); err != nil {
+				if errors.Is(err, errContextUnavailable) {
+					if err = w.engine.Store.Skip(ctx, w.lease, in.EventID); err != nil {
+						return nil, err
+					}
+					continue
+				}
+				return nil, err
+			}
+			valid = append(valid, in)
+			continue
+		}
+		if in.Kind == "im.unread_digest" {
+			if err := w.engine.authorizeUnreadDigestInput(ctx, w.imc, w.lease, in); err != nil {
+				if errors.Is(err, errContextUnavailable) {
+					if err = w.engine.Store.Skip(ctx, w.lease, in.EventID); err != nil {
+						return nil, err
+					}
+					continue
+				}
+				return nil, err
+			}
+			valid = append(valid, in)
+			continue
+		}
+		message, err := w.imc.Message(ctx, in.ConversationID, in.MessageID)
 		if err != nil {
 			var api *APIError
 			if errors.As(err, &api) && (api.Status == 403 || api.Status == 404) {
-				if err = e.Store.Skip(ctx, lease, in.EventID); err != nil {
+				if err = w.engine.Store.Skip(ctx, w.lease, in.EventID); err != nil {
 					return nil, err
 				}
 				continue
@@ -163,7 +275,7 @@ func (w *agentWorker) validate(ctx context.Context, inputs []Input) ([]Input, er
 			return nil, err
 		}
 		if message.RetractedAt != nil || message.Body == "" && len(message.Attachments) == 0 {
-			if err = e.Store.Skip(ctx, lease, in.EventID); err != nil {
+			if err = w.engine.Store.Skip(ctx, w.lease, in.EventID); err != nil {
 				return nil, err
 			}
 			continue
@@ -178,11 +290,10 @@ func (w *agentWorker) validate(ctx context.Context, inputs []Input) ([]Input, er
 }
 
 func (w *agentWorker) prepare(ctx context.Context, items []Input, resume *checkpointMetadata) (*Run, context.Context, []Input, error) {
-	e, def, lease, imc := w.engine, w.def, w.lease, w.imc
 	if err := w.authorize(ctx); err != nil {
 		return nil, nil, nil, err
 	}
-	if !runtimeFlag(e.Config.FlagsFile, "agents.runtime.v3") {
+	if !runtimeFlag(w.engine.Config.FlagsFile, "agents.runtime.v3") {
 		return nil, nil, nil, &ModelError{Code: "runtime_disabled", Retry: true}
 	}
 	// Deduplicate checkpoint and fresh delivery copies without changing order.
@@ -195,13 +306,13 @@ func (w *agentWorker) prepare(ctx context.Context, items []Input, resume *checkp
 		}
 	}
 	if len(unique) == 0 {
-		pending, err := e.Store.Pending(ctx, lease)
+		pending, err := w.engine.Store.Pending(ctx, w.lease)
 		if err != nil {
 			return nil, nil, nil, err
 		}
 		unique = pending
 	}
-	eligible, err := e.Store.eligibleInputs(ctx, lease, unique)
+	eligible, err := w.engine.Store.eligibleInputs(ctx, w.lease, unique)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -217,14 +328,14 @@ func (w *agentWorker) prepare(ctx context.Context, items []Input, resume *checkp
 	budget := json.RawMessage(`{}`)
 	// An explicit enabled flag admits the new policy. Existing Runs restore
 	// their persisted selection even when the flag or gateway changes.
-	if e.Config.FlagsFile != "" && runtimeFlag(e.Config.FlagsFile, "agents.context.v1") {
+	if w.engine.Config.FlagsFile != "" && runtimeFlag(w.engine.Config.FlagsFile, "agents.context.v1") {
 		profile = contextProfileV1
-		budget, err = newRunContextBudget(int(w.contextWindow.Load()), runtimeFlag(e.Config.FlagsFile, "agents.files.deliver.v1"), runtimeFlag(e.Config.FlagsFile, "agents.mentions.v1"), runtimeFlag(e.Config.FlagsFile, "agents.web.v1"), runtimeFlag(e.Config.FlagsFile, "agents.schedule.v1"), runtimeFlag(e.Config.FlagsFile, "im.dm.create"))
+		budget, err = newRunContextBudget(int(w.contextWindow.Load()), runtimeFlag(w.engine.Config.FlagsFile, "agents.files.deliver.v1"), runtimeFlag(w.engine.Config.FlagsFile, "agents.mentions.v1"), runtimeFlag(w.engine.Config.FlagsFile, "agents.web.v1"), runtimeFlag(w.engine.Config.FlagsFile, "agents.schedule.v1"), runtimeFlag(w.engine.Config.FlagsFile, "im.dm.create"))
 		if err != nil {
 			return nil, nil, nil, err
 		}
 	}
-	run, err := e.Store.StartRunWithContextPolicy(ctx, lease, valid, profile, budget)
+	run, err := w.engine.Store.StartRunWithContextPolicy(ctx, w.lease, valid, profile, budget)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -234,27 +345,49 @@ func (w *agentWorker) prepare(ctx context.Context, items []Input, resume *checkp
 			continue
 		}
 		if in.Kind == "schedule.wakeup" {
-			if readErr := e.authorizeScheduleInput(ctx, imc, lease, in); readErr != nil {
+			if readErr := w.engine.authorizeScheduleInput(ctx, w.imc, w.lease, in); readErr != nil {
 				if errors.Is(readErr, errContextUnavailable) {
 					if in.ScheduleID != "" {
-						_ = e.Store.DB.CancelActiveSchedule(ctx, lease.AgentID, in.ScheduleID)
+						_ = w.engine.Store.DB.CancelActiveSchedule(ctx, w.lease.AgentID, in.ScheduleID)
 					}
 					invalid = append(invalid, in.EventID)
 					continue
 				}
-				_ = e.Store.FinishRun(ctx, lease, run, "retry", "im_unavailable", true)
+				_ = w.engine.Store.FinishRun(ctx, w.lease, run, "retry", "im_unavailable", true)
 				return nil, nil, nil, &ModelError{Code: "im_unavailable", Retry: true}
 			}
 			continue
 		}
-		m, readErr := imc.Message(ctx, in.ConversationID, in.MessageID)
+		if in.Kind == "app.notification" {
+			if readErr := w.engine.authorizeAppNotificationInput(ctx, w.imc, w.lease, in); readErr != nil {
+				if errors.Is(readErr, errContextUnavailable) {
+					invalid = append(invalid, in.EventID)
+					continue
+				}
+				_ = w.engine.Store.FinishRun(ctx, w.lease, run, "retry", "im_unavailable", true)
+				return nil, nil, nil, &ModelError{Code: "im_unavailable", Retry: true}
+			}
+			continue
+		}
+		if in.Kind == "im.unread_digest" {
+			if readErr := w.engine.authorizeUnreadDigestInput(ctx, w.imc, w.lease, in); readErr != nil {
+				if errors.Is(readErr, errContextUnavailable) {
+					invalid = append(invalid, in.EventID)
+					continue
+				}
+				_ = w.engine.Store.FinishRun(ctx, w.lease, run, "retry", "im_unavailable", true)
+				return nil, nil, nil, &ModelError{Code: "im_unavailable", Retry: true}
+			}
+			continue
+		}
+		m, readErr := w.imc.Message(ctx, in.ConversationID, in.MessageID)
 		if readErr != nil {
 			var api *APIError
 			if errors.As(readErr, &api) && (api.Status == 403 || api.Status == 404) {
 				invalid = append(invalid, in.EventID)
 				continue
 			}
-			_ = e.Store.FinishRun(ctx, lease, run, "retry", "im_unavailable", true)
+			_ = w.engine.Store.FinishRun(ctx, w.lease, run, "retry", "im_unavailable", true)
 			return nil, nil, nil, &ModelError{Code: "im_unavailable", Retry: true}
 		}
 		if m.RetractedAt != nil || m.Body != in.Body || !slices.Equal(m.Attachments, in.Attachments) {
@@ -262,22 +395,23 @@ func (w *agentWorker) prepare(ctx context.Context, items []Input, resume *checkp
 		}
 	}
 	if len(invalid) > 0 {
-		if err = e.Store.InvalidateRun(ctx, lease, run, invalid); err != nil {
+		if err = w.engine.Store.InvalidateRun(ctx, w.lease, run, invalid); err != nil {
 			return nil, nil, nil, err
 		}
 		return nil, nil, nil, errors.New("source_unavailable")
 	}
-	run.toolProfile, err = e.Store.runToolProfile(ctx, run.ID)
+	run.toolProfile, err = w.engine.Store.runToolProfile(ctx, run.ID)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if resume != nil && !resumeCompatibleForRun(resume, def.Revision, run) {
-		resume = nil
-	}
-	if err = e.Store.configureRun(ctx, lease, run, def.Revision, w.generation, resume); err != nil {
+	resume, err = w.engine.Store.selectRunResume(ctx, resume, w.def.Revision, run)
+	if err != nil {
 		return nil, nil, nil, err
 	}
-	run.Front = &frontSlot{slots: e.slots}
+	if err = w.engine.Store.configureRun(ctx, w.lease, run, w.def.Revision, w.generation, resume); err != nil {
+		return nil, nil, nil, err
+	}
+	run.Front = &frontSlot{slots: w.engine.slots}
 	runctx, diagnostic := observability.Begin(WithRun(ctx, run), "agent-run", zap.Int("custom.runtime.input_count", len(run.Inputs)), zap.Int64("custom.runtime.generation", w.generation))
 	run.diagnostic = diagnostic
 	inputIDs := []string{}
@@ -304,15 +438,15 @@ func (w *agentWorker) prepare(ctx context.Context, items []Input, resume *checkp
 		w.guard.finish()
 		return nil, nil, nil, err
 	}
-	if e.Config.IMRealtimeURL != "" {
-		w.guard.onFinish(run, beginTyping(runctx, run.Inputs, imc.Typing, func(ctx context.Context) error {
-			if !runtimeFlag(e.Config.FlagsFile, "agents.runtime.v3") {
+	if w.engine.Config.IMRealtimeURL != "" {
+		w.guard.onFinish(run, beginTyping(runctx, run.Inputs, w.imc.Typing, func(ctx context.Context) error {
+			if !runtimeFlag(w.engine.Config.FlagsFile, "agents.runtime.v3") {
 				return &ModelError{Code: "runtime_disabled", Retry: true}
 			}
 			if err := w.authorize(ctx); err != nil {
 				return err
 			}
-			return e.Store.CheckLease(ctx, lease)
+			return w.engine.Store.CheckLease(ctx, w.lease)
 		}, nil))
 	}
 	consumed := map[string]bool{}
@@ -325,7 +459,7 @@ func (w *agentWorker) prepare(ctx context.Context, items []Input, resume *checkp
 			remaining = append(remaining, in)
 		}
 	}
-	e.report(runctx, def.Id, "running", "", true)
+	w.engine.report(runctx, w.def.Id, "running", "", true)
 	return run, runctx, remaining, nil
 }
 

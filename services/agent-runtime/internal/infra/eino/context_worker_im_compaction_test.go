@@ -15,8 +15,8 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/cloudwego/kitex/client/callopt"
 	"github.com/google/uuid"
-	wire "teamie/contracts/gen/agent/kitex_gen/agent"
 	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
+	wire "teamie/contracts/gen/agent/kitex_gen/agent"
 )
 
 const compactionIMReadCall = "compaction-read-historical-B"

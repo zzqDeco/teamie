@@ -15,8 +15,8 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
 	wire "teamie/contracts/gen/agent/kitex_gen/agent"
-	"teamie/services/agent-runtime/internal/domain"
 	"teamie/pkg/imlimits"
+	"teamie/services/agent-runtime/internal/domain"
 )
 
 type Attachment = domain.Attachment

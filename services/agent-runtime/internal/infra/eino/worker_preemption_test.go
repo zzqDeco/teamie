@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -54,19 +55,26 @@ func (s *preemptionSandbox) Workspace(ctx context.Context, r *wire.SandboxWorksp
 }
 
 func TestRelevantInputPreemptionCompletesFileToolsBeforeNextTurn(t *testing.T) {
-	for _, arrival := range []string{"during_model", "during_write"} {
+	for _, arrival := range []string{"during_model", "during_write", "digest_during_write"} {
 		t.Run(arrival, func(t *testing.T) {
 			s := testStore(t)
 			e, f, base, _ := fixtureEngine(t, s)
 			enableContextFixture(t, e)
-			behaviorSource(t, f, "Save the initial note to /workspace/note.md.", "", "")
+			presenceEnabled := arrival == "digest_during_write"
+			if presenceEnabled {
+				if err := os.WriteFile(e.Config.FlagsFile, []byte(`{"flags":{"agents.runtime.v3":true,"agents.tasks.execute":true,"agents.context.v1":true,"im.marketplace.enabled":true}}`), 0600); err != nil {
+					t.Fatal(err)
+				}
+				e.UnreadDigestInterval = 10 * time.Millisecond
+			}
+			initial := behaviorSource(t, f, "Save the initial note to /workspace/note.md.", "", "")
 			stage := make(chan struct{})
 			release := make(chan struct{})
 			var releaseOnce sync.Once
 			unblock := func() { releaseOnce.Do(func() { close(release) }) }
 			defer unblock()
 			sandbox := &preemptionSandbox{}
-			if arrival == "during_write" {
+			if arrival != "during_model" {
 				sandbox.beforeWrite = func(ctx context.Context) error {
 					close(stage)
 					select {
@@ -85,6 +93,14 @@ func TestRelevantInputPreemptionCompletesFileToolsBeforeNextTurn(t *testing.T) {
 			nextPoll := make(chan struct{})
 			var pollOnce sync.Once
 			im := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if presenceEnabled && r.URL.Path == "/api/v1/bootstrap" {
+					_ = json.NewEncoder(w).Encode(Bootstrap{Conversations: []Conversation{{ID: f.conversation, WorkspaceID: f.workspace, Type: "channel"}}})
+					return
+				}
+				if presenceEnabled && r.Method == http.MethodGet && r.URL.Path == "/api/v1/conversations/"+f.conversation+"/messages" {
+					_ = json.NewEncoder(w).Encode(map[string]any{"messages": []Message{initial}, "hasMore": false})
+					return
+				}
 				if r.URL.Path == "/api/v1/sync" && r.URL.Query().Get("cursor") == "2" {
 					pollOnce.Do(func() { close(nextPoll) })
 				}
@@ -101,7 +117,15 @@ func TestRelevantInputPreemptionCompletesFileToolsBeforeNextTurn(t *testing.T) {
 						close(stage)
 						<-release
 					}
-					return toolPathCall("write_file", "save-initial-note", map[string]any{"file_path": "/workspace/note.md", "content": "initial note"})
+					write, err := toolPathCall("write_file", "save-initial-note", map[string]any{"file_path": "/workspace/note.md", "content": "initial note"})
+					if presenceEnabled && err == nil {
+						enter, enterErr := toolPathCall("im_enter_conversation", "enter-before-write", map[string]any{"conversationId": f.conversation})
+						if enterErr != nil {
+							return chatMessage{}, enterErr
+						}
+						write.ToolCalls = append(enter.ToolCalls, write.ToolCalls...)
+					}
+					return write, err
 				case 1:
 					var receipts int
 					if err := s.DB.QueryRow(context.Background(), `SELECT count(*) FROM runtime_tool_calls WHERE name='native:write_file' AND result IS NOT NULL`).Scan(&receipts); err != nil {

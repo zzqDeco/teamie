@@ -74,9 +74,10 @@ type Service struct {
 }
 
 type activeCall struct {
-	modelID string
-	web     bool
-	cancel  context.CancelFunc
+	modelID    string
+	providerID string
+	web        bool
+	cancel     context.CancelFunc
 }
 
 // New constructs a new gateway application Service.
@@ -208,15 +209,16 @@ func (s *Service) lockModelAdmission() func() {
 	return sync.OnceFunc(s.modelConfigMu.RUnlock)
 }
 
-// RegisterRunCancel tracks the resolved profile, which can differ from the Agent's selection.
-func (s *Service) RegisterRunCancel(ctx context.Context, agentID, runID, modelID string) (context.Context, func()) {
+// RegisterRunCancel tracks the admitted model and provider. A later catalog move
+// must not change which provider can revoke this already running call.
+func (s *Service) RegisterRunCancel(ctx context.Context, agentID, runID, modelID, providerID string) (context.Context, func()) {
 	s.ensureInit()
 	ctx, cancel := context.WithCancel(ctx)
 	index := agentID + "/" + runID
 	s.mu.Lock()
 	s.modelSeq++
 	modelKey := index + "/model/" + strconv.FormatUint(s.modelSeq, 10)
-	s.active[modelKey] = activeCall{modelID: modelID, cancel: cancel}
+	s.active[modelKey] = activeCall{modelID: modelID, providerID: providerID, cancel: cancel}
 	if at, ok := s.canceled[index]; ok && time.Since(at) < 2*time.Minute {
 		cancel()
 	}

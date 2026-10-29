@@ -1,7 +1,6 @@
 package eino
 
 import (
-	"teamie/pkg/observability"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -10,11 +9,12 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"teamie/pkg/observability"
 
 	"github.com/cloudwego/kitex/client/callopt"
+	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
 	wire "teamie/contracts/gen/agent/kitex_gen/agent"
 	"teamie/contracts/gen/agent/kitex_gen/agent/modelgatewayservice"
-	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
 )
 
 // Only Ping/Cancel use the embedded RPC client. Generation uses the same

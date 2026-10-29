@@ -1,25 +1,26 @@
+import { createModelGatewayClient } from "./model-gateway";
+import { createMarketplaceClient } from "./marketplace";
 import {
   IDL_ROUTES, type AgentListResp, type AgentResp, type AttachmentResp,
   type ChangePasswordReq, type CreateAgentReq, type CreateWorkspaceReq,
   type GetInviteResp, type InspectPasswordResetReq, type ListInvitesResp,
   type LoginReq, type MarkReadResp, type NotificationLevelResp,
   type ReactionsResp, type RegisterReq, type ResetPasswordReq,
-  type SendMessageReq, type TestAdminModelConfigResp, type UpdateProfileReq,
+  type SendMessageReq, type UpdateProfileReq,
   type WorkspacePresenceResp,
 } from "./generated";
 import {
   normalizePlatformUsersPage, publicAgent, publicAgentProfile,
-  publicModelCatalog, publicModelGateway,
 } from "./normalizers";
 import { executeTransportRequest, part, routePath } from "./transport";
 import type {
   AgentProfileInput, AttentionPage, Bootstrap, Conversation,
-  CreatedPasswordResetLink, CreatedRegistrationInvite, CreateModelProfileInput,
-  CreateModelProviderInput, Member, Mention, Message, MessagePage, ModelCatalog,
-  ModelGateway, ModelRoutingInput, NotificationLevel, PasswordResetInspection,
+  CreatedPasswordResetLink, CreatedRegistrationInvite,
+  Member, Mention, Message, MessagePage,
+  NotificationLevel, PasswordResetInspection,
   PlatformUsersPage, PresenceItem, ReadReceipts, RegistrationPolicy, Session,
-  SyncPage, UpdateModelProfileInput, UpdateModelProviderInput, User,
-  WebSearchInput, Workspace, WorkspaceSearchPage,
+  SyncPage, User,
+  Workspace, WorkspaceSearchPage,
 } from "./types";
 
 export * from "./generated";
@@ -132,80 +133,19 @@ export class TeamieClient {
       await this.#request<AgentListResp>(routePath(IDL_ROUTES.ListWorkspaceAgents, { id }))
     ).agents.map((agent) => publicAgent(agent, id)),
   });
-  modelCatalog = async () =>
-    publicModelCatalog(
-      await this.#request<ModelCatalog>(IDL_ROUTES.GetModelCatalog.clientPath),
-    );
-  modelGateway = async () =>
-    publicModelGateway(
-      await this.#request<ModelGateway>(IDL_ROUTES.GetAdminModelConfig.clientPath),
-    );
-  saveWebSearch = async (input: WebSearchInput) =>
-    publicModelGateway(
-      await this.#request<ModelGateway>(IDL_ROUTES.UpdateAdminWebSearchConfig.clientPath, {
-        method: IDL_ROUTES.UpdateAdminWebSearchConfig.method,
-        body: JSON.stringify(input),
-      }),
-    );
-  saveModelRouting = async (input: ModelRoutingInput) =>
-    publicModelGateway(
-      await this.#request<ModelGateway>(IDL_ROUTES.UpdateAdminModelRouting.clientPath, {
-        method: IDL_ROUTES.UpdateAdminModelRouting.method,
-        body: JSON.stringify(input),
-      }),
-    );
-  testModelGateway = () =>
-    this.#request<TestAdminModelConfigResp>(IDL_ROUTES.TestAdminModelConfig.clientPath, {
-      method: IDL_ROUTES.TestAdminModelConfig.method,
-      body: JSON.stringify({}),
-    });
-  createModelProvider = async (input: CreateModelProviderInput) =>
-    publicModelGateway(
-      await this.#request<ModelGateway>(IDL_ROUTES.CreateAdminModelProvider.clientPath, {
-        method: IDL_ROUTES.CreateAdminModelProvider.method,
-        body: JSON.stringify(input),
-      }),
-    );
-  updateModelProvider = async (id: string, input: UpdateModelProviderInput) =>
-    publicModelGateway(
-      await this.#request<ModelGateway>(
-        routePath(IDL_ROUTES.UpdateAdminModelProvider, { id }),
-        { method: IDL_ROUTES.UpdateAdminModelProvider.method, body: JSON.stringify(input) },
-      ),
-    );
-  deleteModelProvider = async (id: string) =>
-    publicModelGateway(
-      await this.#request<ModelGateway>(
-        routePath(IDL_ROUTES.DeleteAdminModelProvider, { id }),
-        { method: IDL_ROUTES.DeleteAdminModelProvider.method },
-      ),
-    );
-  createModelProfile = async (input: CreateModelProfileInput) =>
-    publicModelGateway(
-      await this.#request<ModelGateway>(IDL_ROUTES.CreateAdminModelProfile.clientPath, {
-        method: IDL_ROUTES.CreateAdminModelProfile.method,
-        body: JSON.stringify(input),
-      }),
-    );
-  updateModelProfile = async (id: string, input: UpdateModelProfileInput) =>
-    publicModelGateway(
-      await this.#request<ModelGateway>(
-        routePath(IDL_ROUTES.UpdateAdminModelProfile, { id }),
-        { method: IDL_ROUTES.UpdateAdminModelProfile.method, body: JSON.stringify(input) },
-      ),
-    );
-  deleteModelProfile = async (id: string) =>
-    publicModelGateway(
-      await this.#request<ModelGateway>(
-        routePath(IDL_ROUTES.DeleteAdminModelProfile, { id }),
-        { method: IDL_ROUTES.DeleteAdminModelProfile.method },
-      ),
-    );
-  testModelProfile = (id: string) =>
-    this.#request<TestAdminModelConfigResp>(
-      routePath(IDL_ROUTES.TestAdminModelProfile, { id }),
-      { method: IDL_ROUTES.TestAdminModelProfile.method, body: JSON.stringify({}) },
-    );
+  #gateway = createModelGatewayClient(this);
+  modelCatalog = this.#gateway.modelCatalog;
+  modelGateway = this.#gateway.modelGateway;
+  saveWebSearch = this.#gateway.saveWebSearch;
+  saveModelRouting = this.#gateway.saveModelRouting;
+  testModelGateway = this.#gateway.testModelGateway;
+  createModelProvider = this.#gateway.createModelProvider;
+  updateModelProvider = this.#gateway.updateModelProvider;
+  deleteModelProvider = this.#gateway.deleteModelProvider;
+  createModelProfile = this.#gateway.createModelProfile;
+  updateModelProfile = this.#gateway.updateModelProfile;
+  deleteModelProfile = this.#gateway.deleteModelProfile;
+  testModelProfile = this.#gateway.testModelProfile;
   login = (email: string, password: string) =>
     this.#request<Session>(IDL_ROUTES.Login.clientPath, {
       method: IDL_ROUTES.Login.method,
@@ -488,6 +428,18 @@ export class TeamieClient {
     >(routePath(IDL_ROUTES.GetWorkspacePresence, { id: workspaceId }), {
       signal,
     });
+  #marketplace = createMarketplaceClient(this);
+  adminMarketplaceApps = this.#marketplace.adminMarketplaceApps;
+  createAdminMarketplaceApp = this.#marketplace.createAdminMarketplaceApp;
+  updateAdminMarketplaceApp = this.#marketplace.updateAdminMarketplaceApp;
+  rotateAdminMarketplaceAppSecret = this.#marketplace.rotateAdminMarketplaceAppSecret;
+  deleteAdminMarketplaceApp = this.#marketplace.deleteAdminMarketplaceApp;
+  marketplaceCatalog = this.#marketplace.marketplaceCatalog;
+  workspaceApps = this.#marketplace.workspaceApps;
+  installWorkspaceApp = this.#marketplace.installWorkspaceApp;
+  uninstallWorkspaceApp = this.#marketplace.uninstallWorkspaceApp;
+  conversationApps = this.#marketplace.conversationApps;
+  createConversationAppSession = this.#marketplace.createConversationAppSession;
   sync = (cursor: string) =>
     this.#request<SyncPage>(
       `${IDL_ROUTES.Sync.clientPath}?cursor=${part(cursor)}&limit=100`,

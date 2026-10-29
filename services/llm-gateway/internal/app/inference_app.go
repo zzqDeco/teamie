@@ -83,7 +83,7 @@ func (s *Service) CallChat(ctx context.Context, owner, agentID, sessionID, runID
 	if err != nil {
 		return fail(domain.ErrWithCause(503, "credential_unavailable", "Saved model credential could not be decrypted", err), configID)
 	}
-	callCtx, cleanup := s.RegisterRunCancel(ctx, agentID, runID, c.ID)
+	callCtx, cleanup := s.RegisterRunCancel(ctx, agentID, runID, c.ID, c.ProviderID)
 	defer cleanup()
 	unlockAdmission()
 
@@ -194,7 +194,7 @@ func (s *Service) StreamChat(ctx context.Context, owner, agentID, sessionID, run
 	if err != nil {
 		return terminal(domain.ErrWithCause(503, "credential_unavailable", "Saved model credential could not be decrypted", err))
 	}
-	callCtx, cleanup := s.RegisterRunCancel(ctx, agentID, runID, c.ID)
+	callCtx, cleanup := s.RegisterRunCancel(ctx, agentID, runID, c.ID, c.ProviderID)
 	defer cleanup()
 	unlockAdmission()
 

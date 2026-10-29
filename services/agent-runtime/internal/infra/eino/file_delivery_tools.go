@@ -186,6 +186,9 @@ func (t *Tools) fileMessageTool() (tool.InvokableTool, error) {
 			if !validUUID(args.ConversationID) || args.ReplyToID != "" && !validUUID(args.ReplyToID) || len([]rune(args.Body)) > 8000 || len(args.AttachmentIDs) > imlimits.AttachmentsPerMessage || strings.TrimSpace(args.Body) == "" && len(args.AttachmentIDs) == 0 {
 				return &Observation{Error: "invalid_arguments"}, nil
 			}
+			if obs := t.checkSendPresence(run, args.ConversationID); obs != nil {
+				return obs, nil
+			}
 			seen := map[string]bool{}
 			for _, attachment := range args.AttachmentIDs {
 				if !validUUID(attachment) || seen[attachment] {

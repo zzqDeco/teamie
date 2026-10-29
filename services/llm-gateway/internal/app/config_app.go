@@ -383,14 +383,18 @@ func (s *Service) UpdateWebSearch(ctx context.Context, in UpdateWebSearchInput) 
 }
 
 func (s *Service) cancelUnavailableModels(c domain.Config) {
-	available := make(map[string]bool, len(c.Models))
+	models := make(map[string]bool, len(c.Models))
 	for _, m := range c.Models {
-		available[m.ID] = c.ResolveModelProfile(m).Available()
+		models[m.ID] = m.Enabled
+	}
+	providers := make(map[string]bool, len(c.Providers))
+	for _, p := range c.Providers {
+		providers[p.ID] = p.Enabled && p.Configured()
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, call := range s.active {
-		if !call.web && !available[call.modelID] {
+		if !call.web && (!models[call.modelID] || !providers[call.providerID]) {
 			call.cancel()
 		}
 	}

@@ -1,4 +1,5 @@
 import type {
+  MarketplaceApp,
   AdminModelProfile,
   AdminModelProvider,
   Agent,
@@ -181,3 +182,17 @@ export function publicModelGateway(value: ModelGateway): ModelGateway {
   };
 }
 export const normalizeModelGateway = publicModelGateway;
+
+export function publicMarketplaceApp(app: MarketplaceApp): MarketplaceApp {
+  return {
+    id: app.id,
+    slug: app.slug,
+    name: app.name,
+    description: app.description,
+    webUrl: app.webUrl,
+    mcpUrl: app.mcpUrl,
+    enabled: app.enabled,
+    createdAt: app.createdAt,
+    updatedAt: app.updatedAt,
+  };
+}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -64,6 +64,8 @@ export function ModelGatewaySettings() {
     [editingModel, setEditingModel] = useState<AdminModelProfile | null>(null),
     [error, setError] = useState(""),
     [saved, setSaved] = useState(false);
+  const testVersions = useRef(new Map<string, number>());
+  const defaultTestVersion = useRef(0);
   const [test, setTest] = useState<ModelTestOutcome | null>(null);
   const [modelTests, setModelTests] = useState<
     Record<string, ModelTestOutcome>
@@ -81,6 +83,18 @@ export function ModelGatewaySettings() {
   });
   const forbidden =
     denied || (query.error instanceof ApiError && query.error.status === 403);
+  function invalidateTests(ids: string[]) {
+    defaultTestVersion.current++;
+    setTest(null);
+    setTesting(false);
+    for (const id of ids)
+      testVersions.current.set(id, (testVersions.current.get(id) || 0) + 1);
+    const unaffected = <T,>(prev: Record<string, T>) => Object.fromEntries(
+      Object.entries(prev).filter(([id]) => !ids.includes(id)),
+    );
+    setModelTests(unaffected);
+    setTestingModels(unaffected);
+  }
   async function syncGatewayResponse(
     response: Awaited<ReturnType<typeof api.modelGateway>>,
   ) {
@@ -113,24 +127,27 @@ export function ModelGatewaySettings() {
   }
   async function testConnection() {
     const sessionToken = api.csrfToken;
+    const version = ++defaultTestVersion.current;
+    const current = () => sessionToken === api.csrfToken &&
+      defaultTestVersion.current === version;
     setTesting(true);
     setError("");
     setTest(null);
     try {
       const result = await api.testModelGateway();
-      if (sessionToken === api.csrfToken)
+      if (current())
         setTest({
           ok: result.ok,
           model: result.model,
           latencyMs: result.latencyMs,
         });
     } catch (e) {
-      if (sessionToken === api.csrfToken) {
+      if (current()) {
         if (e instanceof ApiError && e.status === 403) setDenied(true);
         setError(gatewayFailureText(e));
       }
     } finally {
-      setTesting(false);
+      if (current()) setTesting(false);
     }
   }
   async function handleCreateProvider(
@@ -140,6 +157,7 @@ export function ModelGatewaySettings() {
     const input = providerProfileCreateInput(value);
     const response = await api.createModelProvider(input);
     if (sessionToken !== api.csrfToken) return false;
+    invalidateTests([]);
     await syncGatewayResponse(response);
     setSaved(true);
     return true;
@@ -152,13 +170,8 @@ export function ModelGatewaySettings() {
     const input = providerProfileUpdateInput(value);
     const response = await api.updateModelProvider(providerId, input);
     if (sessionToken !== api.csrfToken) return false;
-    setModelTests((prev) => {
-      const next = { ...prev };
-      for (const m of query.data?.models || []) {
-        if ((m.providerId || m.id) === providerId) delete next[m.id];
-      }
-      return next;
-    });
+    invalidateTests((query.data?.models || [])
+      .filter((m) => (m.providerId || m.id) === providerId).map((m) => m.id));
     await syncGatewayResponse(response);
     setSaved(true);
     return true;
@@ -170,6 +183,7 @@ export function ModelGatewaySettings() {
     try {
       const response = await api.deleteModelProvider(providerId);
       if (sessionToken === api.csrfToken) {
+        invalidateTests([]);
         await syncGatewayResponse(response);
         setSaved(true);
       }
@@ -186,6 +200,7 @@ export function ModelGatewaySettings() {
     const input = modelProfileCreateInput(value);
     const response = await api.createModelProfile(input);
     if (sessionToken !== api.csrfToken) return false;
+    invalidateTests([]);
     await syncGatewayResponse(response);
     setSaved(true);
     return true;
@@ -198,11 +213,7 @@ export function ModelGatewaySettings() {
     const input = modelProfileUpdateInput(value);
     const response = await api.updateModelProfile(profileId, input);
     if (sessionToken !== api.csrfToken) return false;
-    setModelTests((prev) => {
-      const next = { ...prev };
-      delete next[profileId];
-      return next;
-    });
+    invalidateTests([profileId]);
     await syncGatewayResponse(response);
     setSaved(true);
     return true;
@@ -216,6 +227,7 @@ export function ModelGatewaySettings() {
         defaultModelId: profileId,
       });
       if (sessionToken === api.csrfToken) {
+        invalidateTests([]);
         await syncGatewayResponse(response);
         setSaved(true);
       }
@@ -232,11 +244,7 @@ export function ModelGatewaySettings() {
     try {
       const response = await api.deleteModelProfile(profileId);
       if (sessionToken === api.csrfToken) {
-        setModelTests((prev) => {
-          const next = { ...prev };
-          delete next[profileId];
-          return next;
-        });
+        invalidateTests([profileId]);
         await syncGatewayResponse(response);
         setSaved(true);
       }
@@ -248,12 +256,16 @@ export function ModelGatewaySettings() {
   }
   async function handleTestModel(profileId: string) {
     const sessionToken = api.csrfToken;
+    const version = (testVersions.current.get(profileId) || 0) + 1;
+    testVersions.current.set(profileId, version);
+    const current = () => sessionToken === api.csrfToken &&
+      testVersions.current.get(profileId) === version;
     setTestingModels((prev) => ({ ...prev, [profileId]: true }));
     setError("");
     setSaved(false);
     try {
       const result = await api.testModelProfile(profileId);
-      if (sessionToken === api.csrfToken)
+      if (current())
         setModelTests((prev) => ({
           ...prev,
           [profileId]: {
@@ -263,7 +275,7 @@ export function ModelGatewaySettings() {
           },
         }));
     } catch (e) {
-      if (sessionToken === api.csrfToken) {
+      if (current()) {
         const message = gatewayFailureText(e);
         setModelTests((prev) => ({
           ...prev,
@@ -271,11 +283,13 @@ export function ModelGatewaySettings() {
         }));
       }
     } finally {
-      setTestingModels((prev) => {
-        const next = { ...prev };
-        delete next[profileId];
-        return next;
-      });
+      if (current()) {
+        setTestingModels((prev) => {
+          const next = { ...prev };
+          delete next[profileId];
+          return next;
+        });
+      }
     }
   }
   if (!admin || forbidden)

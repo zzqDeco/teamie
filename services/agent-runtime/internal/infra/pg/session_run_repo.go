@@ -216,7 +216,15 @@ func (r *Repository) SaveModelCall(ctx context.Context, l *domain.Lease, runID s
 
 // RecordToolIntent records a tool call intent and returns any previously committed result.
 func (r *Repository) RecordToolIntent(ctx context.Context, l *domain.Lease, runID, id, name, hash string) ([]byte, error) {
+	b, _, err := r.RecordExternalToolIntent(ctx, l, runID, id, name, hash)
+	return b, err
+}
+
+// RecordExternalToolIntent atomically distinguishes a fresh claim from an
+// unfinished external operation. The claim survives attempts and worker leases.
+func (r *Repository) RecordExternalToolIntent(ctx context.Context, l *domain.Lease, runID, id, name, hash string) ([]byte, bool, error) {
 	var b []byte
+	var created bool
 	err := r.WithinTx(ctx, func(txCtx context.Context) error {
 		if e := r.CheckLeaseForUpdate(txCtx, l); e != nil {
 			return e
@@ -226,7 +234,8 @@ func (r *Repository) RecordToolIntent(ctx context.Context, l *domain.Lease, runI
 		if e != nil {
 			return e
 		}
-		if tag.RowsAffected() == 1 {
+		created = tag.RowsAffected() == 1
+		if created {
 			if _, e = conn.Exec(txCtx, `INSERT INTO runtime_public_events(agent_id,type,run_id,tool_name,status) VALUES($1,'tool.status',$2,$3,'running')`, l.AgentID, runID, strings.TrimPrefix(name, "native:")); e != nil {
 				return e
 			}
@@ -241,9 +250,9 @@ func (r *Repository) RecordToolIntent(ctx context.Context, l *domain.Lease, runI
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return b, nil
+	return b, created, nil
 }
 
 // RecordToolResult commits the result of a tool call under the active worker lease fence.

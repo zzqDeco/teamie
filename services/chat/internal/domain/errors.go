@@ -241,3 +241,35 @@ func ErrReactionLimit() error {
 func ErrInvalidNotificationLevel() error {
 	return Err(400, "invalid_notification_level", "Notification level must be all, mentions or none")
 }
+
+func ErrPlatformAdminRequired() error {
+	return Err(403, "forbidden", "Platform administrator permission is required")
+}
+
+func ErrInvalidMarketplaceSlug() error {
+	return Err(400, "invalid_slug", "App slug must be 1 to 64 lowercase letters, digits, hyphens or underscores")
+}
+
+func ErrDuplicateMarketplaceSlug() error {
+	return Err(409, "duplicate_slug", "An app with this slug already exists")
+}
+
+func ErrInvalidMarketplaceName() error {
+	return Err(400, "invalid_name", "App name must contain 1 to 80 characters")
+}
+
+func ErrInvalidMarketplaceDescription() error {
+	return Err(400, "invalid_description", "App description must contain at most 500 characters")
+}
+
+func ErrInvalidMarketplaceURL() error {
+	return Err(400, "invalid_url", "Provide valid http:// or https:// URLs for webUrl and mcpUrl")
+}
+
+func ErrMarketplaceGroupOnly() error {
+	return Err(403, "marketplace_group_only", "Marketplace apps are only available in group conversations")
+}
+
+func ErrMarketplaceAppUnavailable() error {
+	return Err(404, "not_found", "Marketplace app is unavailable")
+}
