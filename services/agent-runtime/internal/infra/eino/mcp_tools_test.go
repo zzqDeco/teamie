@@ -218,17 +218,22 @@ func (r *mcpInMemoryRepo) ListOtherAttemptMessageEvents(_ context.Context, _, _ 
 }
 
 func (r *mcpInMemoryRepo) RecordToolIntent(_ context.Context, _ *Lease, runID, id, name, hash string) ([]byte, error) {
+	b, _, err := r.RecordExternalToolIntent(context.Background(), nil, runID, id, name, hash)
+	return b, err
+}
+
+func (r *mcpInMemoryRepo) RecordExternalToolIntent(_ context.Context, _ *Lease, runID, id, name, hash string) ([]byte, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	k := runID + "/" + id
 	if existing, ok := r.toolCalls[k]; ok {
 		if existing.name != name || existing.hash != hash {
-			return nil, ErrReplayConflict
+			return nil, false, ErrReplayConflict
 		}
-		return append([]byte(nil), existing.result...), nil
+		return append([]byte(nil), existing.result...), false, nil
 	}
 	r.toolCalls[k] = &mcpFakeToolReceipt{name: name, hash: hash}
-	return nil, nil
+	return nil, true, nil
 }
 
 func (r *mcpInMemoryRepo) RecordToolResult(_ context.Context, _ *Lease, runID, id string, b []byte) error {
@@ -726,8 +731,8 @@ func TestMarketplaceMCPToolsDiscoveryExecutionReplayAndNotificationWakeup(t *tes
 	}
 	archive := &ContextArchive{Store: s, Lease: lease, IM: imc}
 	sources, matched, err := archive.inputMessageSources(notifCtx, notifRun, msgs[0])
-	if err != nil || !matched || len(sources) != 1 || sources[0].WorkspaceID != wsID {
-		t.Fatalf("expected TEAMIE_APP_NOTIFICATION provenance to resolve to workspace source, got matched=%v sources=%+v err=%v", matched, sources, err)
+	if err != nil || !matched || len(sources) != 1 || sources[0].WorkspaceID != wsID || sources[0].ConversationID != groupConvID {
+		t.Fatalf("expected TEAMIE_APP_NOTIFICATION provenance to retain group scope, got matched=%v sources=%+v err=%v", matched, sources, err)
 	}
 	if err := s.FinishRun(ctx, lease, notifRun, "completed", "", false); err != nil {
 		t.Fatal(err)

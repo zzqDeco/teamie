@@ -459,11 +459,7 @@ export function ConversationAppsPane(props: {
     onClose,
     onOpenWorkspaceApps,
   } = props;
-  const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const [selectedAppId, setSelectedAppId] = useState("");
-  const [session, setSession] = useState<ConversationAppSessionResp | null>(null);
-  const [sessionLoading, setSessionLoading] = useState(false);
-  const [sessionError, setSessionError] = useState("");
 
   const appsQuery = useQuery({
     queryKey: ["conversationApps", conversation.id],
@@ -482,105 +478,6 @@ export function ConversationAppsPane(props: {
       setSelectedAppId(activeApp.id);
     }
   }, [activeApp, selectedAppId]);
-
-  const fetchSession = useCallback(
-    async (targetApp: MarketplaceApp) => {
-      setSessionLoading(true);
-      setSessionError("");
-      try {
-        const nextSession = await api.createConversationAppSession(
-          conversation.id,
-          targetApp.id,
-        );
-        setSession(nextSession);
-        return nextSession;
-      } catch (e) {
-        setSession(null);
-        setSessionError(errorText(e));
-        return null;
-      } finally {
-        setSessionLoading(false);
-      }
-    },
-    [conversation.id],
-  );
-
-  useEffect(() => {
-    if (!activeApp) {
-      setSession(null);
-      return;
-    }
-    void fetchSession(activeApp);
-  }, [activeApp, fetchSession]);
-
-  const postContextToIframe = useCallback(
-    (activeSession: ConversationAppSessionResp | null) => {
-      const win = iframeRef.current?.contentWindow;
-      if (!win || !activeSession) return;
-      let targetOrigin = "*";
-      try {
-        targetOrigin = new URL(activeSession.app.webUrl).origin;
-      } catch {
-        return;
-      }
-      win.postMessage(
-        {
-          type: "teamie:mcp-app:init",
-          payload: {
-            appId: activeSession.app.id,
-            slug: activeSession.app.slug,
-            name: activeSession.app.name,
-            webUrl: activeSession.app.webUrl,
-            mcpUrl: activeSession.app.mcpUrl,
-            token: activeSession.token,
-            expiresAt: activeSession.expiresAt,
-            workspaceId: conversation.workspaceId,
-            conversationId: conversation.id,
-            user: {
-              id: user.id,
-              displayName: user.displayName,
-            },
-          },
-        },
-        targetOrigin,
-      );
-    },
-    [conversation.id, conversation.workspaceId, user.displayName, user.id],
-  );
-
-  useEffect(() => {
-    if (!activeApp) return;
-    let expectedOrigin = "";
-    try {
-      expectedOrigin = new URL(activeApp.webUrl).origin;
-    } catch {
-      return;
-    }
-    const onMessage = (event: MessageEvent) => {
-      if (
-        event.origin !== expectedOrigin ||
-        event.source !== iframeRef.current?.contentWindow
-      ) {
-        return;
-      }
-      const msgType = (event.data as { type?: string } | null)?.type;
-      if (msgType === "teamie:mcp-app:ready") {
-        if (session && session.app.id === activeApp.id) {
-          postContextToIframe(session);
-        } else {
-          void fetchSession(activeApp).then((next) => {
-            if (next) postContextToIframe(next);
-          });
-        }
-      } else if (msgType === "teamie:mcp-app:refresh-token") {
-        void fetchSession(activeApp).then((next) => {
-          if (next) postContextToIframe(next);
-        });
-      }
-    };
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, [activeApp, fetchSession, postContextToIframe, session]);
 
   return (
     <>
@@ -652,35 +549,130 @@ export function ConversationAppsPane(props: {
                 ))}
               </div>
             )}
-            <Notice>{sessionError}</Notice>
             {activeApp && (
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 12px", fontSize: "12px" }}>
-                <span>
-                  <b>{activeApp.name}</b> · <small>{activeApp.slug}</small>
-                </span>
-                <IconButton
-                  label="刷新应用会话"
-                  disabled={sessionLoading}
-                  onClick={() => void fetchSession(activeApp)}
-                >
-                  <RefreshCw size={ICON.xs} />
-                </IconButton>
-              </div>
-            )}
-            {activeApp && session && (
-              <iframe
-                ref={iframeRef}
-                key={`${conversation.id}:${activeApp.id}`}
-                title={`群聊应用：${activeApp.name}`}
-                src={activeApp.webUrl}
-                sandbox="allow-scripts allow-forms allow-same-origin"
-                onLoad={() => postContextToIframe(session)}
-                style={{ width: "100%", flex: 1, border: "0", minHeight: "360px" }}
+              <ConversationAppFrame
+                key={JSON.stringify([user.id, conversation.workspaceId, conversation.id, activeApp.id, activeApp.webUrl, activeApp.mcpUrl])}
+                app={activeApp}
+                conversation={conversation}
+                user={user}
               />
             )}
           </div>
         )}
       </aside>
+    </>
+  );
+}
+
+// A different user, conversation or app mounts a new instance. Pending requests
+// and iframe refs therefore cannot cross the credential's scope, even on one origin.
+function ConversationAppFrame({ app, conversation, user }: {
+  app: MarketplaceApp;
+  conversation: Conversation;
+  user: User;
+}) {
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const requests = useRef({ generation: 0 });
+  const [session, setSession] = useState<ConversationAppSessionResp | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const fetchSession = useCallback(async () => {
+    const pending = requests.current;
+    const generation = ++pending.generation;
+    setLoading(true);
+    setError("");
+    try {
+      const next = await api.createConversationAppSession(conversation.id, app.id);
+      if (generation !== pending.generation) return;
+      if (next.app.id !== app.id || next.app.webUrl !== app.webUrl) {
+        throw new Error("应用信息已更新，请重新打开应用。");
+      }
+      setSession(next);
+    } catch (e) {
+      if (generation !== pending.generation) return;
+      setSession(null);
+      setError(errorText(e));
+    } finally {
+      if (generation === pending.generation) setLoading(false);
+    }
+  }, [app.id, app.webUrl, conversation.id]);
+
+  useEffect(() => {
+    const pending = requests.current;
+    void fetchSession();
+    return () => { pending.generation++; };
+  }, [fetchSession]);
+
+  const postContext = useCallback(() => {
+    const win = iframeRef.current?.contentWindow;
+    if (!win || !session || session.app.id !== app.id || session.app.webUrl !== app.webUrl) return;
+    let origin: string;
+    try {
+      origin = new URL(app.webUrl).origin;
+    } catch {
+      return;
+    }
+    win.postMessage({
+      type: "teamie:mcp-app:init",
+      payload: {
+        appId: session.app.id,
+        slug: session.app.slug,
+        name: session.app.name,
+        webUrl: session.app.webUrl,
+        mcpUrl: session.app.mcpUrl,
+        token: session.token,
+        expiresAt: session.expiresAt,
+        workspaceId: conversation.workspaceId,
+        conversationId: conversation.id,
+        user: { id: user.id, displayName: user.displayName },
+      },
+    }, origin);
+  }, [app.id, app.webUrl, conversation.id, conversation.workspaceId, session, user.displayName, user.id]);
+
+  // A refreshed credential must reach the existing frame without reloading it.
+  useEffect(() => { postContext(); }, [postContext]);
+
+  useEffect(() => {
+    let origin: string;
+    try {
+      origin = new URL(app.webUrl).origin;
+    } catch {
+      return;
+    }
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== origin || event.source !== iframeRef.current?.contentWindow) return;
+      const type = (event.data as { type?: string } | null)?.type;
+      if (type === "teamie:mcp-app:ready") {
+        if (session) postContext();
+        else void fetchSession();
+      } else if (type === "teamie:mcp-app:refresh-token") {
+        void fetchSession();
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [app.webUrl, fetchSession, postContext, session]);
+
+  return (
+    <>
+      <Notice>{error}</Notice>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 12px", fontSize: "12px" }}>
+        <span><b>{app.name}</b> · <small>{app.slug}</small></span>
+        <IconButton label="刷新应用会话" disabled={loading} onClick={() => void fetchSession()}>
+          <RefreshCw size={ICON.xs} />
+        </IconButton>
+      </div>
+      {session && (
+        <iframe
+          ref={iframeRef}
+          title={`群聊应用：${app.name}`}
+          src={session.app.webUrl}
+          sandbox="allow-scripts allow-forms allow-same-origin"
+          onLoad={postContext}
+          style={{ width: "100%", flex: 1, border: "0", minHeight: "360px" }}
+        />
+      )}
     </>
   );
 }

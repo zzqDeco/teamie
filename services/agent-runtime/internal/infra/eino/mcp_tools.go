@@ -35,6 +35,7 @@ const marketplaceAppGuidance = `
 Marketplace Group Apps (MCP Tools & TEAMIE_APP_NOTIFICATION):
 - In group conversations with installed Marketplace apps, external MCP tools are exposed as mcp__<slug>__<tool>.
 - Each MCP tool is pre-bound to its group conversation and authenticates with a short-lived symmetric Context Token (carrying your userId, displayName, workspaceId, conversationId, and appId).
+- If a tool returns mcp_result_unknown, its action may already have completed. Inspect current app state with a read tool before deciding what remains to do; do not repeat the action or claim success without evidence.
 - When an installed Marketplace app's MCP server pushes a notification, Runtime delivers a TEAMIE_APP_NOTIFICATION input envelope with body containing appId, slug, appName, method, and params.
 - Upon receiving TEAMIE_APP_NOTIFICATION or a group message about an app, inspect the state or invoke the appropriate mcp__<slug>__<tool> tools, and call im_send_message only when you want to speak in the group conversation.`
 
@@ -227,7 +228,7 @@ func discoverMCPAppTools(ctx context.Context, sess imConversationAppSession) ([]
 	headers := map[string]string{
 		"Authorization": "Bearer " + sess.Token,
 	}
-	cli, err := client.NewStreamableHttpClient(sess.App.MCPURL, transport.WithHTTPHeaders(headers))
+	cli, err := newMCPHTTPClient(discoverCtx, sess.App.MCPURL, headers)
 	if err != nil {
 		return nil, err
 	}
@@ -292,17 +293,21 @@ func sanitizeMCPToolSegment(s string) string {
 
 func formatMCPToolName(slug, remoteName string, used map[string]struct{}, convID string) string {
 	base := "mcp__" + sanitizeMCPToolSegment(slug) + "__" + sanitizeMCPToolSegment(remoteName)
-	if _, exists := used[base]; !exists {
+	if _, exists := used[base]; !exists && len(base) <= 64 {
 		used[base] = struct{}{}
 		return base
 	}
-	shortConv := sanitizeMCPToolSegment(convID)
-	if len(shortConv) > 8 {
-		shortConv = shortConv[:8]
+	// Include the original identity, not its lossy normalized spelling or a
+	// conversation prefix. Check every candidate, including hash collisions.
+	identity, _ := json.Marshal([]string{slug, remoteName, convID})
+	for attempt := 0; ; attempt++ {
+		suffix := "__" + digest([]byte(fmt.Sprintf("%s/%d", identity, attempt)))[:16]
+		candidate := base[:min(len(base), 64-len(suffix))] + suffix
+		if _, exists := used[candidate]; !exists {
+			used[candidate] = struct{}{}
+			return candidate
+		}
 	}
-	candidate := base + "__" + shortConv
-	used[candidate] = struct{}{}
-	return candidate
 }
 
 type mcpToolWrapper struct {
@@ -329,7 +334,7 @@ func (w *mcpToolWrapper) InvokableRun(ctx context.Context, argumentsInJSON strin
 		return marshalObservation(ctx, obs)
 	}
 
-	obs, err := w.tools.execute(ctx, w.spec.ExposedName, json.RawMessage(trimmed), func(execCtx context.Context, _ string) (*Observation, error) {
+	obs, err := w.tools.execute(ctx, w.spec.ExposedName, json.RawMessage(trimmed), func(execCtx context.Context, requestID string) (*Observation, error) {
 		if w.tools.FlagsFile != "" && !runtimeFlag(w.tools.FlagsFile, "im.marketplace.enabled") {
 			return &Observation{Error: "feature_disabled"}, nil
 		}
@@ -347,7 +352,7 @@ func (w *mcpToolWrapper) InvokableRun(ctx context.Context, argumentsInJSON strin
 		if mcpURL == "" {
 			mcpURL = w.spec.MCPURL
 		}
-		cli, err := client.NewStreamableHttpClient(mcpURL, transport.WithHTTPHeaders(headers))
+		cli, err := newMCPHTTPClient(callCtx, mcpURL, headers)
 		if err != nil {
 			return &Observation{Error: "mcp_unavailable"}, nil
 		}
@@ -368,10 +373,15 @@ func (w *mcpToolWrapper) InvokableRun(ctx context.Context, argumentsInJSON strin
 			return &Observation{Error: "mcp_unavailable"}, nil
 		}
 
+		receivedResult := false
 		einoTools, err := einomcp.GetTools(callCtx, &einomcp.Config{
 			Cli:           cli,
 			ToolNameList:  []string{w.spec.RemoteName},
 			CustomHeaders: headers,
+			ToolCallResultHandler: func(_ context.Context, _ string, result *mcp.CallToolResult) (*mcp.CallToolResult, error) {
+				receivedResult = true
+				return result, nil
+			},
 		})
 		if err != nil || len(einoTools) == 0 {
 			return &Observation{Error: "mcp_tool_not_found"}, nil
@@ -380,11 +390,19 @@ func (w *mcpToolWrapper) InvokableRun(ctx context.Context, argumentsInJSON strin
 		if !ok {
 			return &Observation{Error: "mcp_tool_not_found"}, nil
 		}
-		rawOut, err := invokable.InvokableRun(callCtx, trimmed, opts...)
+		callOpts := append(append([]tool.Option{}, opts...), einomcp.WithCustomHeaders(map[string]string{
+			"Authorization":   headers["Authorization"],
+			"Idempotency-Key": requestID,
+		}))
+		rawOut, err := invokable.InvokableRun(callCtx, trimmed, callOpts...)
 		if err != nil {
+			code := "mcp_tool_error"
+			if !receivedResult {
+				code = "mcp_result_unknown"
+			}
 			return &Observation{
 				OK:    false,
-				Error: "mcp_tool_error",
+				Error: code,
 				Data: map[string]any{
 					"appId":          w.spec.AppID,
 					"slug":           w.spec.AppSlug,
@@ -596,26 +614,36 @@ func (w *mcpNotificationWatcher) startSubscription(ctx context.Context, key mcpW
 	if mcpURL == "" {
 		mcpURL = app.MCPURL
 	}
-	cli, err := client.NewStreamableHttpClient(
-		mcpURL,
-		transport.WithHTTPHeaders(headers),
-		transport.WithContinuousListening(),
-	)
-	if err != nil {
-		return
-	}
 	subCtx, cancel := context.WithCancel(ctx)
 	sub := &mcpActiveSubscription{
 		key:         key,
 		workspaceID: workspaceID,
 		app:         app,
 		expiresAt:   expiresAt,
-		cli:         cli,
 		cancel:      cancel,
 	}
-	cli.OnConnectionLost(func(error) {
-		sub.lost.Store(true)
-	})
+	cli, err := newMCPHTTPClient(
+		subCtx,
+		mcpURL,
+		headers,
+		transport.WithContinuousListening(),
+		transport.WithHTTPBasicClient(&http.Client{Transport: &mcpHTTPTransport{
+			base: http.DefaultTransport,
+			invalidate: func() {
+				if sub.lost.CompareAndSwap(false, true) {
+					select {
+					case w.wakeCh <- struct{}{}:
+					default:
+					}
+				}
+			},
+		}}),
+	)
+	if err != nil {
+		cancel()
+		return
+	}
+	sub.cli = cli
 	cli.OnNotification(func(n mcp.JSONRPCNotification) {
 		w.handleNotification(subCtx, workspaceID, convID, app, n)
 	})
@@ -705,7 +733,7 @@ func (w *mcpNotificationWatcher) handleNotification(ctx context.Context, workspa
 			NotificationID: notifID,
 			Body:           bodyStr,
 			CreatedAt:      time.Now().UTC().Format(time.RFC3339Nano),
-			SourceRefs:     []InputSource{{WorkspaceID: workspaceID}},
+			SourceRefs:     []InputSource{{WorkspaceID: workspaceID, ConversationID: convID}},
 		}
 		raw, err := json.Marshal(in)
 		if err != nil {

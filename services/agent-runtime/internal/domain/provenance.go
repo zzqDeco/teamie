@@ -38,8 +38,9 @@ func ExtractInputSources(inputs []Input) ([]InputSource, bool) {
 	overflow := false
 	appendRef := func(ref InputSource) {
 		msgSource := ref.ConversationID != "" && ref.MessageID != ""
+		convOnlySource := ref.ConversationID != "" && ref.MessageID == "" && ref.EventID == ""
 		wsOnlySource := ref.WorkspaceID != "" && ref.ConversationID == "" && ref.MessageID == "" && ref.EventID == ""
-		if !msgSource && !wsOnlySource {
+		if !msgSource && !convOnlySource && !wsOnlySource {
 			return
 		}
 		key := ref.WorkspaceID + "/" + ref.ConversationID + "/" + ref.MessageID + "/" + ref.EventID
@@ -58,7 +59,11 @@ func ExtractInputSources(inputs []Input) ([]InputSource, bool) {
 		if in.SourceOverflow {
 			overflow = true
 		}
-		if in.Kind != "task.notification" && in.Kind != "schedule.wakeup" && in.Kind != "app.notification" {
+		if in.Kind == "app.notification" {
+			// Derive scope from the durable envelope too, so notifications written
+			// before conversation-scoped SourceRefs cannot lose their group ACL.
+			appendRef(InputSource{WorkspaceID: in.WorkspaceID, ConversationID: in.ConversationID})
+		} else if in.Kind != "task.notification" && in.Kind != "schedule.wakeup" {
 			if in.ConversationID != "" && in.MessageID != "" {
 				ref := InputSource{
 					EventID:        in.EventID,

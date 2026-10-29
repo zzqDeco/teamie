@@ -306,11 +306,22 @@ func (t *Tools) execute(ctx context.Context, name string, args any, fn func(cont
 		return nil, e
 	}
 	callID := compose.GetToolCallID(ctx)
+	if callID == "" {
+		return nil, errors.New("tool call has no identity")
+	}
 	payload, e := json.Marshal(args)
 	if e != nil {
 		return nil, e
 	}
-	cached, e := t.Store.ToolIntent(ctx, t.Lease, run, callID, name, payload)
+	var cached []byte
+	ambiguousExternal := false
+	if strings.HasPrefix(name, "mcp__") {
+		var created bool
+		cached, created, e = t.Store.DB.RecordExternalToolIntent(ctx, t.Lease, run.ID, callID, name, digest(payload))
+		ambiguousExternal = !created && cached == nil
+	} else {
+		cached, e = t.Store.ToolIntent(ctx, t.Lease, run, callID, name, payload)
+	}
 	if e != nil {
 		return nil, e
 	}
@@ -488,7 +499,14 @@ func (t *Tools) execute(ctx context.Context, name string, args any, fn func(cont
 		}
 		return &out, nil
 	}
-	out, e := fn(ctx, toolRequestID(run, callID))
+	var out *Observation
+	if ambiguousExternal {
+		// MCP does not guarantee application-level idempotency. A durable intent
+		// without a receipt may already have changed remote state; never resend it.
+		out = &Observation{Error: "mcp_result_unknown"}
+	} else {
+		out, e = fn(ctx, toolRequestID(run, callID))
+	}
 	if e != nil {
 		return nil, e
 	}

@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/cloudwego/eino/schema"
+	"teamie/services/agent-runtime/internal/domain"
 )
 
 // Match actual Run inputs, not an archive preview or a model-authored source
@@ -25,18 +26,20 @@ func (p *ContextPipeline) currentInputSet(ctx context.Context, messages []*schem
 	wanted := map[string]bool{}
 	required := map[string]bool{}
 	for index, message := range inputMessages(run.Inputs) {
-		// Managed task notifications and scheduled wakeups are durable machine
+		// Task, schedule and app notifications are durable machine
 		// observations, not new IM bodies. A completed batch can fill the
 		// entire window if every repeated source envelope is pinned. Keep its
 		// complete archive and provenance, while allowing normal history
 		// reduction to shrink it.
-		if p.cfg.Budget.Version >= 5 && (run.Inputs[index].Kind == "task.notification" || run.Inputs[index].Kind == "schedule.wakeup") {
+		if !domain.ShouldPinCurrentInput(p.cfg.Budget.Version, run.Inputs[index].Kind) {
 			continue
 		}
 		text := agenticText(message)
 		wanted[text] = false
 		// A native managed-task checkpoint can consume its notification by
 		// resuming the suspended tool instead of appending another user block.
+		// Keep this legacy required-input rule for frozen budgets before v5;
+		// current budgets excluded every machine notification above.
 		required[text] = run.Inputs[index].Kind != "task.notification" && run.Inputs[index].Kind != "schedule.wakeup"
 	}
 	for _, message := range messages {
