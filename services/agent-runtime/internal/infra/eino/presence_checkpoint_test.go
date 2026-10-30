@@ -166,6 +166,7 @@ func TestReceiptReplayPreservesNewlyBufferedUnreadMessages(t *testing.T) {
 	s, lease, run := nativeModelRun(t)
 	ctx := WithRun(context.Background(), run)
 	ws, a, b := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	msgB := Message{ID: uuid.NewString(), ConversationID: b, SenderID: uuid.NewString(), Body: "old", Seq: 5, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	im := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
@@ -176,9 +177,11 @@ func TestReceiptReplayPreservesNewlyBufferedUnreadMessages(t *testing.T) {
 			}})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/conversations/"+b+"/messages":
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"messages": []Message{{ID: uuid.NewString(), ConversationID: b, SenderID: uuid.NewString(), Body: "old", Seq: 5, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}},
+				"messages": []Message{msgB},
 				"hasMore":  false,
 			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/conversations/"+b+"/messages/"+msgB.ID:
+			_ = json.NewEncoder(w).Encode(map[string]any{"message": msgB})
 		case strings.HasSuffix(r.URL.Path, "/read"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 		default:

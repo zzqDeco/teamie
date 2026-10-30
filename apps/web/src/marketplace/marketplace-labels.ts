@@ -1,3 +1,12 @@
+export function sanitizeMcpToolSegment(raw: string): string {
+  const out = raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return out || "tool";
+}
+
 export function reviewStatusMeta(
   status?: string,
   adminSuspended?: boolean,

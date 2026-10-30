@@ -33,6 +33,7 @@ type fakeLiveMarketplaceAppServer struct {
 	skipAuthCheck     bool
 	skipSigVerify     bool
 	useSSE            bool
+	keepSSEOpen       bool
 	exposeTools       []map[string]any
 	deletedSessionIDs []string
 	initCalls         atomic.Int32
@@ -67,6 +68,7 @@ func newFakeLiveMarketplaceAppServer(t *testing.T, cfg *fakeLiveMarketplaceAppSe
 		skipAuth := cfg.skipAuthCheck
 		skipSig := cfg.skipSigVerify
 		useSSE := cfg.useSSE
+		keepSSEOpen := cfg.keepSSEOpen
 		tools := append([]map[string]any(nil), cfg.exposeTools...)
 		cfg.mu.Unlock()
 
@@ -138,6 +140,12 @@ func newFakeLiveMarketplaceAppServer(t *testing.T, cfg *fakeLiveMarketplaceAppSe
 					w.Header().Set("Content-Type", "text/event-stream")
 					w.WriteHeader(http.StatusOK)
 					_, _ = fmt.Fprintf(w, "event: message\ndata: %s\n\n", string(payload))
+					if flusher, ok := w.(http.Flusher); ok {
+						flusher.Flush()
+					}
+					if keepSSEOpen {
+						<-r.Context().Done()
+					}
 					return
 				}
 				w.Header().Set("Content-Type", "application/json")
@@ -173,13 +181,22 @@ func TestProtocolVerifierFailureMatrixAndSSESessionCleanup(t *testing.T) {
 	secret := domain.NewMarketplaceSigningSecret()
 	appID := "app-verify-1"
 
-	// 1. Valid SSE MCP Server + Mcp-Session-Id DELETE cleanup
-	sseCfg := &fakeLiveMarketplaceAppServer{secret: secret, appID: appID, useSSE: true}
+	// 1. Valid open-stream SSE MCP Server + runtime-matching tool normalization + Mcp-Session-Id DELETE cleanup
+	sseCfg := &fakeLiveMarketplaceAppServer{
+		secret:      secret,
+		appID:       appID,
+		useSSE:      true,
+		keepSSEOpen: true,
+		exposeTools: []map[string]any{
+			{"name": "JoinRoom", "description": "Join room"},
+			{"name": "night-action", "description": "Night action"},
+		},
+	}
 	sseSrv := newFakeLiveMarketplaceAppServer(t, sseCfg)
 	verifier := probe.New("https://teamie.example.com", false)
 	rep, err := verifier.VerifyEndpoints(ctx, domain.VerifyEndpointsInput{
 		AppID:         appID,
-		Slug:          "werewolf",
+		Slug:          "werewolf-arena",
 		WebURL:        sseSrv.URL + "/ui",
 		MCPURL:        sseSrv.URL + "/mcp",
 		SigningSecret: secret,
@@ -187,14 +204,48 @@ func TestProtocolVerifierFailureMatrixAndSSESessionCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("VerifyEndpoints returned unexpected error: %v", err)
 	}
-	if !rep.OK || len(rep.Tools) != 2 || rep.Tools[0].ExposedName != "mcp__werewolf__join_room" {
-		t.Fatalf("expected valid SSE verification with 2 exposed tools, got: %+v", rep)
+	if !rep.OK || len(rep.Tools) != 2 ||
+		rep.Tools[0].ExposedName != "mcp__werewolf_arena__joinroom" ||
+		rep.Tools[1].ExposedName != "mcp__werewolf_arena__night_action" {
+		t.Fatalf("expected valid SSE verification with runtime-normalized tool names, got: %+v", rep)
 	}
 	sseCfg.mu.Lock()
 	deletedCount := len(sseCfg.deletedSessionIDs)
 	sseCfg.mu.Unlock()
 	if deletedCount != 1 {
 		t.Fatalf("expected verifier to clean up Mcp-Session-Id via DELETE once, got %d", deletedCount)
+	}
+
+	// 1b. Overlong (>64 byte) or normalized-duplicate tool names are rejected
+	for _, tc := range []struct {
+		name     string
+		tools    []map[string]any
+		wantCode string
+	}{
+		{
+			name:     "overlong_tool_name",
+			tools:    []map[string]any{{"name": strings.Repeat("x", 60)}},
+			wantCode: "mcp_tool_name_too_long",
+		},
+		{
+			name:     "normalized_collision",
+			tools:    []map[string]any{{"name": "join-room"}, {"name": "join_room"}},
+			wantCode: "mcp_duplicate_tool_name",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newFakeLiveMarketplaceAppServer(t, &fakeLiveMarketplaceAppServer{
+				secret:      secret,
+				appID:       appID,
+				exposeTools: tc.tools,
+			})
+			r, _ := verifier.VerifyEndpoints(ctx, domain.VerifyEndpointsInput{
+				AppID: appID, Slug: "werewolf-arena", WebURL: s.URL + "/ui", MCPURL: s.URL + "/mcp", SigningSecret: secret,
+			})
+			if r.OK || r.Checks[len(r.Checks)-1].Code != tc.wantCode {
+				t.Fatalf("expected %s to fail with %s, got: %+v", tc.name, tc.wantCode, r)
+			}
+		})
 	}
 
 	// 2. Same-origin webUrl must fail url_security

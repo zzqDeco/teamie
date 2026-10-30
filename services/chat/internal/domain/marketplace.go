@@ -324,25 +324,30 @@ func ValidateMarketplaceEndpointURL(raw string, isMCP bool, appOrigin string, re
 	return nil
 }
 
-// SanitizeMCPToolSegment matches agent-runtime's tool segment normalization.
+// SanitizeMCPToolSegment matches agent-runtime's sanitizeMCPToolSegment:
+// lowercase ASCII letters and digits are preserved, all other runes become '_',
+// and leading/trailing underscores are trimmed.
 func SanitizeMCPToolSegment(s string) string {
 	var b strings.Builder
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' {
-			b.WriteByte(c)
-		} else {
+	for _, r := range strings.ToLower(strings.TrimSpace(s)) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		default:
 			b.WriteByte('_')
 		}
 	}
-	out := strings.Trim(b.String(), "_")
-	if out == "" {
+	res := strings.Trim(b.String(), "_")
+	if res == "" {
 		return "tool"
 	}
-	return out
+	return res
 }
 
-// ExposedMCPToolName formats mcp__<slug>__<tool>.
+// ExposedMCPToolName formats mcp__<slug>__<tool> using agent-runtime's base normalization.
+// Note: agent-runtime appends a conversation-scoped SHA-256 suffix when base exceeds 64 bytes
+// or collides with another normalized tool name; the endpoint verifier rejects >64-byte and
+// colliding normalized names so published tools always match this exact string across conversations.
 func ExposedMCPToolName(slug, remoteName string) string {
 	return "mcp__" + SanitizeMCPToolSegment(slug) + "__" + SanitizeMCPToolSegment(remoteName)
 }

@@ -21,7 +21,12 @@ import type {
 } from "@teamie/api-client";
 import { useAuth } from "../auth";
 import { errorText } from "../errors";
-import { probeStageLabel, reviewActionLabel, reviewStatusMeta } from "../marketplace";
+import {
+  probeStageLabel,
+  reviewActionLabel,
+  reviewStatusMeta,
+  sanitizeMcpToolSegment,
+} from "../marketplace";
 import { BadgePill, Button, Notice, SwitchField } from "../ui";
 import { ICON } from "../icons";
 
@@ -183,7 +188,7 @@ export function DeveloperAppDetail({
           <h1>{app.draftName || app.name}</h1>
           <p>
             Slug：<code>{app.slug}</code> · Agent 工具前缀：{" "}
-            <code>mcp__{app.slug}__*</code>
+            <code>mcp__{sanitizeMcpToolSegment(app.slug)}__*</code>
           </p>
         </div>
       </div>

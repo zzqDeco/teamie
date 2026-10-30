@@ -517,6 +517,13 @@ func (v *Verifier) probeMCPHandshake(
 			continue
 		}
 		exposed := domain.ExposedMCPToolName(in.Slug, name)
+		if len(exposed) > 64 {
+			return domain.EndpointProbeCheck{
+				Stage:   "mcp_handshake",
+				Code:    "mcp_tool_name_too_long",
+				Summary: fmt.Sprintf("MCP 工具名称规范化后超过 64 字符上限（%d 字符），请缩短工具名或应用 Slug", len(exposed)),
+			}, initResp.Result.ServerInfo.Name, initResp.Result.ServerInfo.Version, initResp.Result.ProtocolVersion, nil
+		}
 		if _, dup := seenExposed[exposed]; dup {
 			return domain.EndpointProbeCheck{
 				Stage:   "mcp_handshake",
@@ -612,26 +619,26 @@ func doMCPPost(
 	if nextSessionID == "" {
 		nextSessionID = sessionID
 	}
+	if !parseRPCMessage || resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return resp.StatusCode, nextSessionID, nil, nil
+	}
+	ct := strings.ToLower(resp.Header.Get("Content-Type"))
+	if strings.Contains(ct, "text/event-stream") {
+		msg, err := readFirstJSONRPCResponseFromSSEStream(io.LimitReader(resp.Body, maxMCPReadBytes))
+		if err != nil {
+			return resp.StatusCode, nextSessionID, nil, err
+		}
+		return resp.StatusCode, nextSessionID, msg, nil
+	}
 	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxMCPReadBytes))
 	if err != nil {
 		return resp.StatusCode, nextSessionID, nil, err
 	}
-	if !parseRPCMessage || resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return resp.StatusCode, nextSessionID, bodyBytes, nil
-	}
-	ct := strings.ToLower(resp.Header.Get("Content-Type"))
-	if strings.Contains(ct, "text/event-stream") {
-		msg, ok := extractFirstJSONRPCResponseFromSSE(bodyBytes)
-		if !ok {
-			return resp.StatusCode, nextSessionID, nil, errors.New("empty_sse_jsonrpc")
-		}
-		return resp.StatusCode, nextSessionID, msg, nil
-	}
 	return resp.StatusCode, nextSessionID, bodyBytes, nil
 }
 
-func extractFirstJSONRPCResponseFromSSE(raw []byte) ([]byte, bool) {
-	scanner := bufio.NewScanner(bytes.NewReader(raw))
+func readFirstJSONRPCResponseFromSSEStream(r io.Reader) ([]byte, error) {
+	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 16*1024), maxMCPReadBytes)
 	var dataBuf bytes.Buffer
 	flushEvent := func() ([]byte, bool) {
@@ -655,7 +662,7 @@ func extractFirstJSONRPCResponseFromSSE(raw []byte) ([]byte, bool) {
 		line := scanner.Text()
 		if strings.TrimSpace(line) == "" {
 			if msg, ok := flushEvent(); ok {
-				return msg, true
+				return msg, nil
 			}
 			continue
 		}
@@ -666,7 +673,13 @@ func extractFirstJSONRPCResponseFromSSE(raw []byte) ([]byte, bool) {
 			dataBuf.WriteString(strings.TrimSpace(after))
 		}
 	}
-	return flushEvent()
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	if msg, ok := flushEvent(); ok {
+		return msg, nil
+	}
+	return nil, errors.New("empty_sse_jsonrpc")
 }
 
 func closeMCPSession(ctx context.Context, client *http.Client, mcpURL, bearerToken, sessionID string) {

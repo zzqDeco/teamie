@@ -74,13 +74,13 @@ const sampleVerification: MarketplaceEndpointVerification = {
   tools: [
     {
       name: "get_my_view",
-      exposedName: "mcp__werewolf-arena__get_my_view",
+      exposedName: "mcp__werewolf_arena__get_my_view",
       description: "获取当前玩家专属迷雾视角",
       inputSchemaJson: '{"type":"object"}',
     },
     {
       name: "cast_night_action",
-      exposedName: "mcp__werewolf-arena__cast_night_action",
+      exposedName: "mcp__werewolf_arena__cast_night_action",
       description: "提交夜间秘密行动",
     },
   ],
@@ -300,8 +300,8 @@ describe("Developer Platform & Submission Workflow", () => {
     await flush();
 
     expect(verifySpy).toHaveBeenCalledWith("app-ww");
-    expect(host.textContent).toContain("mcp__werewolf-arena__get_my_view");
-    expect(host.textContent).toContain("mcp__werewolf-arena__cast_night_action");
+    expect(host.textContent).toContain("mcp__werewolf_arena__get_my_view");
+    expect(host.textContent).toContain("mcp__werewolf_arena__cast_night_action");
 
     // 1-click install draft into owned workspace
     const sandboxBtn = [...host.querySelectorAll("button")].find((b) =>
@@ -476,7 +476,7 @@ describe("Developer Platform & Submission Workflow", () => {
     await flush();
 
     expect(document.body.textContent).toContain("新增女巫解药毒药工具");
-    expect(document.body.textContent).toContain("mcp__werewolf-arena__get_my_view");
+    expect(document.body.textContent).toContain("mcp__werewolf_arena__get_my_view");
 
     const approveBtn = [...document.body.querySelectorAll("button")].find((b) =>
       b.textContent?.includes("审批通过并上架"),
