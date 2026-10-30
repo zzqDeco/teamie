@@ -95,10 +95,17 @@ func TestMarketplaceDomainValidationAndSymmetricContextToken(t *testing.T) {
 	}
 }
 
+type memInstalledApp struct {
+	installed     bool
+	reviewPreview bool
+}
+
 type memMarketplaceHarness struct {
 	mu          sync.Mutex
 	apps        map[string]domain.MarketplaceApp
-	installed   map[string]map[string]bool
+	secrets     map[string]string
+	reviews     map[string][]domain.MarketplaceAppReview
+	installed   map[string]map[string]memInstalledApp
 	wsRoles     map[string]map[string]string
 	convs       map[string]domain.Conversation
 	convMembers map[string]map[string]bool
@@ -107,7 +114,9 @@ type memMarketplaceHarness struct {
 func newMemMarketplaceHarness() *memMarketplaceHarness {
 	return &memMarketplaceHarness{
 		apps:        map[string]domain.MarketplaceApp{},
-		installed:   map[string]map[string]bool{},
+		secrets:     map[string]string{},
+		reviews:     map[string][]domain.MarketplaceAppReview{},
+		installed:   map[string]map[string]memInstalledApp{},
 		wsRoles:     map[string]map[string]string{},
 		convs:       map[string]domain.Conversation{},
 		convMembers: map[string]map[string]bool{},
@@ -261,25 +270,62 @@ func (m *memMarketplaceHarness) QuerySyncEvents(context.Context, string, int64, 
 	return nil, 0, nil
 }
 
+func (m *memMarketplaceHarness) workspaceOwnerLocked(workspaceID string) string {
+	for uid, role := range m.wsRoles[workspaceID] {
+		if role == "owner" {
+			return uid
+		}
+	}
+	return ""
+}
+
 func (m *memMarketplaceHarness) ListAllMarketplaceApps(context.Context) ([]domain.MarketplaceApp, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := make([]domain.MarketplaceApp, 0, len(m.apps))
 	for _, a := range m.apps {
-		out = append(out, a)
+		cp := a
+		cp.SigningSecret = ""
+		out = append(out, cp)
 	}
 	return out, nil
 }
-func (m *memMarketplaceHarness) ListEnabledMarketplaceApps(context.Context) ([]domain.MarketplaceApp, error) {
+func (m *memMarketplaceHarness) ListPublishedCatalogApps(context.Context) ([]domain.MarketplaceApp, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := []domain.MarketplaceApp{}
 	for _, a := range m.apps {
-		if a.Enabled {
-			out = append(out, a)
+		if a.IsPublished && a.Enabled && !a.AdminSuspended {
+			cp := a
+			cp.SigningSecret = ""
+			out = append(out, cp)
 		}
 	}
 	return out, nil
+}
+func (m *memMarketplaceHarness) ListDeveloperMarketplaceApps(_ context.Context, ownerID string) ([]domain.MarketplaceApp, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []domain.MarketplaceApp{}
+	for _, a := range m.apps {
+		if a.OwnerID != nil && *a.OwnerID == ownerID {
+			cp := a
+			cp.SigningSecret = ""
+			out = append(out, cp)
+		}
+	}
+	return out, nil
+}
+func (m *memMarketplaceHarness) CountDeveloperMarketplaceApps(_ context.Context, ownerID string) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for _, a := range m.apps {
+		if a.OwnerID != nil && *a.OwnerID == ownerID {
+			n++
+		}
+	}
+	return n, nil
 }
 func (m *memMarketplaceHarness) GetMarketplaceAppByID(_ context.Context, id string, _ bool) (domain.MarketplaceApp, error) {
 	m.mu.Lock()
@@ -288,7 +334,17 @@ func (m *memMarketplaceHarness) GetMarketplaceAppByID(_ context.Context, id stri
 	if !ok {
 		return domain.MarketplaceApp{}, domain.ErrMarketplaceAppUnavailable()
 	}
+	a.SigningSecret = ""
 	return a, nil
+}
+func (m *memMarketplaceHarness) GetMarketplaceAppSigningSecret(_ context.Context, id string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	sec, ok := m.secrets[id]
+	if !ok {
+		return "", domain.ErrMarketplaceAppUnavailable()
+	}
+	return sec, nil
 }
 func (m *memMarketplaceHarness) InsertMarketplaceApp(_ context.Context, a domain.MarketplaceApp) (domain.MarketplaceApp, error) {
 	m.mu.Lock()
@@ -301,6 +357,8 @@ func (m *memMarketplaceHarness) InsertMarketplaceApp(_ context.Context, a domain
 	now := time.Now().UTC()
 	a.CreatedAt = now
 	a.UpdatedAt = now
+	m.secrets[a.ID] = a.SigningSecret
+	a.SigningSecret = ""
 	m.apps[a.ID] = a
 	return a, nil
 }
@@ -316,7 +374,34 @@ func (m *memMarketplaceHarness) UpdateMarketplaceApp(_ context.Context, a domain
 		}
 	}
 	a.UpdatedAt = time.Now().UTC()
+	a.SigningSecret = ""
 	m.apps[a.ID] = a
+	return a, nil
+}
+func (m *memMarketplaceHarness) UpdateMarketplaceSigningSecret(_ context.Context, id, secret string) (domain.MarketplaceApp, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a, ok := m.apps[id]
+	if !ok {
+		return domain.MarketplaceApp{}, domain.ErrMarketplaceAppUnavailable()
+	}
+	m.secrets[id] = secret
+	a.UpdatedAt = time.Now().UTC()
+	m.apps[id] = a
+	return a, nil
+}
+func (m *memMarketplaceHarness) SaveMarketplaceVerificationReport(_ context.Context, id string, verifiedAt time.Time, report domain.MarketplaceEndpointVerification) (domain.MarketplaceApp, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a, ok := m.apps[id]
+	if !ok {
+		return domain.MarketplaceApp{}, domain.ErrMarketplaceAppUnavailable()
+	}
+	cp := report
+	a.LastVerifiedAt = &verifiedAt
+	a.VerificationReport = &cp
+	a.UpdatedAt = time.Now().UTC()
+	m.apps[id] = a
 	return a, nil
 }
 func (m *memMarketplaceHarness) DeleteMarketplaceApp(_ context.Context, id string) (bool, error) {
@@ -326,29 +411,51 @@ func (m *memMarketplaceHarness) DeleteMarketplaceApp(_ context.Context, id strin
 		return false, nil
 	}
 	delete(m.apps, id)
+	delete(m.secrets, id)
+	delete(m.reviews, id)
 	for wsID := range m.installed {
 		delete(m.installed[wsID], id)
 	}
 	return true, nil
 }
-func (m *memMarketplaceHarness) ListWorkspaceMarketplaceApps(_ context.Context, workspaceID string) ([]domain.MarketplaceApp, error) {
+func (m *memMarketplaceHarness) InsertMarketplaceAppReview(_ context.Context, rev domain.MarketplaceAppReview, _ any) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out := []domain.MarketplaceApp{}
-	for appID := range m.installed[workspaceID] {
-		if a, ok := m.apps[appID]; ok && a.Enabled {
-			out = append(out, a)
+	rev.CreatedAt = time.Now().UTC()
+	m.reviews[rev.AppID] = append([]domain.MarketplaceAppReview{rev}, m.reviews[rev.AppID]...)
+	return nil
+}
+func (m *memMarketplaceHarness) ListMarketplaceAppReviews(_ context.Context, appID string) ([]domain.MarketplaceAppReview, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]domain.MarketplaceAppReview(nil), m.reviews[appID]...), nil
+}
+func (m *memMarketplaceHarness) ListWorkspaceMarketplaceApps(_ context.Context, workspaceID string) ([]domain.InstalledWorkspaceMarketplaceApp, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ownerID := m.workspaceOwnerLocked(workspaceID)
+	out := []domain.InstalledWorkspaceMarketplaceApp{}
+	for appID, inst := range m.installed[workspaceID] {
+		if !inst.installed {
+			continue
+		}
+		if a, ok := m.apps[appID]; ok && a.Enabled && !a.AdminSuspended {
+			out = append(out, domain.InstalledWorkspaceMarketplaceApp{
+				App:              a,
+				WorkspaceOwnerID: ownerID,
+				ReviewPreview:    inst.reviewPreview,
+			})
 		}
 	}
 	return out, nil
 }
-func (m *memMarketplaceHarness) InstallWorkspaceMarketplaceApp(_ context.Context, workspaceID, appID, _ string) error {
+func (m *memMarketplaceHarness) InstallWorkspaceMarketplaceApp(_ context.Context, workspaceID, appID, _ string, reviewPreview bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.installed[workspaceID] == nil {
-		m.installed[workspaceID] = map[string]bool{}
+		m.installed[workspaceID] = map[string]memInstalledApp{}
 	}
-	m.installed[workspaceID][appID] = true
+	m.installed[workspaceID][appID] = memInstalledApp{installed: true, reviewPreview: reviewPreview}
 	return nil
 }
 func (m *memMarketplaceHarness) UninstallWorkspaceMarketplaceApp(_ context.Context, workspaceID, appID string) error {
@@ -357,17 +464,23 @@ func (m *memMarketplaceHarness) UninstallWorkspaceMarketplaceApp(_ context.Conte
 	delete(m.installed[workspaceID], appID)
 	return nil
 }
-func (m *memMarketplaceHarness) GetInstalledWorkspaceMarketplaceApp(_ context.Context, workspaceID, appID string) (domain.MarketplaceApp, error) {
+func (m *memMarketplaceHarness) GetInstalledWorkspaceMarketplaceAppForSession(_ context.Context, workspaceID, appID string) (domain.InstalledWorkspaceMarketplaceApp, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if !m.installed[workspaceID][appID] {
-		return domain.MarketplaceApp{}, domain.ErrMarketplaceAppUnavailable()
+	inst, has := m.installed[workspaceID][appID]
+	if !has || !inst.installed {
+		return domain.InstalledWorkspaceMarketplaceApp{}, domain.ErrMarketplaceAppUnavailable()
 	}
 	a, ok := m.apps[appID]
-	if !ok || !a.Enabled {
-		return domain.MarketplaceApp{}, domain.ErrMarketplaceAppUnavailable()
+	if !ok || !a.Enabled || a.AdminSuspended {
+		return domain.InstalledWorkspaceMarketplaceApp{}, domain.ErrMarketplaceAppUnavailable()
 	}
-	return a, nil
+	a.SigningSecret = m.secrets[appID]
+	return domain.InstalledWorkspaceMarketplaceApp{
+		App:              a,
+		WorkspaceOwnerID: m.workspaceOwnerLocked(workspaceID),
+		ReviewPreview:    inst.reviewPreview,
+	}, nil
 }
 
 func TestMarketplaceUseCasesThreeTierPermissionsAndGroupIsolation(t *testing.T) {

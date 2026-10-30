@@ -56,6 +56,7 @@ export function Shell() {
     directoryMatch = useMatch("/app/w/:workspaceId/members"),
     legacyDirectoryMatch = useMatch("/app/w/:workspaceId/agents"),
     agentMatch = useMatch("/app/agents/:agentId"),
+    developerAppMatch = useMatch("/app/developers/apps/:appId"),
     workspaceRootMatch = useMatch("/app/w/:workspaceId"),
     location = useLocation(),
     navigate = useNavigate();
@@ -238,6 +239,9 @@ export function Shell() {
   const isGatewayPage = pathname === "/app/admin/gateway";
   const isUsersPage = pathname === "/app/admin/users";
   const isMarketplacePage = pathname === "/app/admin/marketplace";
+  const isDeveloperDocsPage = pathname === "/app/developers/docs";
+  const isDevelopersPage =
+    pathname === "/app/developers" || isDeveloperDocsPage || !!developerAppMatch;
   const isAgentsPage = pathname === "/app/agents" || !!agentMatch;
   const isDirectoryPage = !!directoryMatch;
   const isAttentionPage = pathname === "/app/attention";
@@ -249,7 +253,7 @@ export function Shell() {
       attentionData: attentionCount.data,
     });
   const pageTitle = computePageTitle({
-    isAttentionPage, isGatewayPage, isUsersPage, isMarketplacePage, isAdminPage, isAgentsPage,
+    isAttentionPage, isGatewayPage, isUsersPage, isMarketplacePage, isDevelopersPage, isAdminPage, isAgentsPage,
     isDirectoryPage, isSettings, workspace, conversation, userId: user!.id, members,
   });
   useDocumentTitle(pageTitle, urgentCount, hasChannelUnread);
@@ -269,7 +273,7 @@ export function Shell() {
   )
     setViewKey({ conversation: viewConversationId, target: initialMessageId });
   const isManagement =
-    isSettings || isAdminPage || isGatewayPage || isUsersPage || isMarketplacePage || isAgentsPage || isDirectoryPage;
+    isSettings || isAdminPage || isGatewayPage || isUsersPage || isMarketplacePage || isDevelopersPage || isAgentsPage || isDirectoryPage;
   const appsAvailable = marketplaceEnabled && !isManagement && !!workspace && conversation?.type === "group";
   const appsVisible = appsOpen && !details && appsAvailable;
   const membersVisible = details && !isManagement && !!workspace && !!conversation;
@@ -411,9 +415,9 @@ export function Shell() {
     return <Navigate to={first ? route(first) : `/app/w/${id}/members`} replace />;
   }
   if (
-    chat.data && !match && !directoryMatch && !legacyDirectoryMatch && !agentMatch &&
+    chat.data && !match && !directoryMatch && !legacyDirectoryMatch && !agentMatch && !developerAppMatch &&
     ![
-      "/app", "/app/agents", "/app/settings", "/app/profile",
+      "/app", "/app/agents", "/app/developers", "/app/developers/docs", "/app/settings", "/app/profile",
       "/app/admin", "/app/admin/gateway", "/app/admin/users", "/app/admin/marketplace", "/app/attention",
     ].includes(pathname)
   )
@@ -455,6 +459,10 @@ export function Shell() {
           <ShellManagementView
             user={user!} isGatewayPage={isGatewayPage} isUsersPage={isUsersPage}
             isMarketplacePage={isMarketplacePage}
+            isDevelopersPage={isDevelopersPage}
+            isDeveloperDocsPage={isDeveloperDocsPage}
+            developerAppId={developerAppMatch?.params.appId}
+            workspaces={chat.data?.workspaces || []}
             isAdminPage={isAdminPage} isAgentsPage={isAgentsPage}
             isDirectoryPage={isDirectoryPage} agentId={agentMatch?.params.agentId}
             backChatRoute={backChatRoute} workspace={workspace} members={members}

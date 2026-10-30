@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   Blocks,
   Bot,
+  Code2,
   KeyRound,
   Menu,
   Settings,
@@ -24,6 +25,7 @@ import { PlatformInvitations } from "../admin";
 import { PlatformUsers } from "../platform-users";
 import { ModelGatewaySettings } from "../model-gateway";
 import { PlatformMarketplace } from "../marketplace";
+import { DeveloperPortal } from "../developers";
 import { AgentDetail, MyAgents } from "../agents";
 import { WorkspaceMembers } from "../members";
 import type { Participant } from "../participants";
@@ -41,6 +43,10 @@ export function ShellManagementView({
   isGatewayPage,
   isUsersPage,
   isMarketplacePage = false,
+  isDevelopersPage = false,
+  isDeveloperDocsPage = false,
+  developerAppId,
+  workspaces,
   isAdminPage,
   isAgentsPage,
   isDirectoryPage,
@@ -58,6 +64,10 @@ export function ShellManagementView({
   isGatewayPage: boolean;
   isUsersPage: boolean;
   isMarketplacePage?: boolean;
+  isDevelopersPage?: boolean;
+  isDeveloperDocsPage?: boolean;
+  developerAppId?: string;
+  workspaces?: Workspace[];
   isAdminPage: boolean;
   isAgentsPage: boolean;
   isDirectoryPage: boolean;
@@ -85,6 +95,8 @@ export function ShellManagementView({
           <KeyRound size={ICON.md} />
         ) : isMarketplacePage ? (
           <Blocks size={ICON.md} />
+        ) : isDevelopersPage ? (
+          <Code2 size={ICON.md} />
         ) : isDirectoryPage || isUsersPage ? (
           <Users size={ICON.md} />
         ) : isAgentsPage ? (
@@ -99,15 +111,17 @@ export function ShellManagementView({
             ? "模型网关"
             : isMarketplacePage
               ? "应用市场"
-              : isUsersPage
-                ? "用户管理"
-                : isAdminPage
-                  ? "注册邀请"
-                  : isAgentsPage
-                    ? "个人 Agent"
-                    : isDirectoryPage
-                      ? "成员"
-                      : "账号设置"}
+              : isDevelopersPage
+                ? "开发者平台"
+                : isUsersPage
+                  ? "用户管理"
+                  : isAdminPage
+                    ? "注册邀请"
+                    : isAgentsPage
+                      ? "个人 Agent"
+                      : isDirectoryPage
+                        ? "成员"
+                        : "账号设置"}
         </span>
         <Link to={backChatRoute}>
           <ArrowLeft size={ICON.sm} />
@@ -148,6 +162,13 @@ export function ShellManagementView({
         <PlatformUsers />
       ) : isMarketplacePage ? (
         <PlatformMarketplace />
+      ) : isDevelopersPage ? (
+        <DeveloperPortal
+          key={`${user.id}:${developerAppId || ""}:${isDeveloperDocsPage ? "docs" : "apps"}`}
+          appId={developerAppId}
+          isDocsPage={isDeveloperDocsPage}
+          workspaces={workspaces}
+        />
       ) : isGatewayPage ? (
         <ModelGatewaySettings key={user.id} />
       ) : isAdminPage ? (
@@ -248,6 +269,7 @@ export function computePageTitle({
   isGatewayPage,
   isUsersPage,
   isMarketplacePage = false,
+  isDevelopersPage = false,
   isAdminPage,
   isAgentsPage,
   isDirectoryPage,
@@ -261,6 +283,7 @@ export function computePageTitle({
   isGatewayPage: boolean;
   isUsersPage: boolean;
   isMarketplacePage?: boolean;
+  isDevelopersPage?: boolean;
   isAdminPage: boolean;
   isAgentsPage: boolean;
   isDirectoryPage: boolean;
@@ -276,7 +299,9 @@ export function computePageTitle({
       ? "模型网关"
       : isMarketplacePage
         ? "应用市场"
-        : isUsersPage
+        : isDevelopersPage
+          ? "开发者平台"
+          : isUsersPage
         ? "用户管理"
         : isAdminPage
           ? "注册邀请"

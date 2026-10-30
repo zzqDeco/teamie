@@ -4,6 +4,7 @@ package app
 
 import (
 	"context"
+	"time"
 
 	"teamie/services/chat/internal/domain"
 )
@@ -19,10 +20,14 @@ type Service struct {
 	Attachments    domain.AttachmentRepository
 	Marketplace    domain.MarketplaceRepository
 	Outbox         domain.OutboxRepository
-	Identity       domain.IdentityDirectory
-	Flags          domain.FeatureFlags
-	SniffMediaType func([]byte) string
-	ControlToken   string
+	Identity           domain.IdentityDirectory
+	Flags              domain.FeatureFlags
+	Verifier           domain.MarketplaceEndpointVerifier
+	SniffMediaType     func([]byte) string
+	ControlToken       string
+	AppOrigin          string
+	RequirePublicHTTPS bool
+	VerifyCooldown     time.Duration
 }
 
 // MessageApp is an alias for Service focusing on message send/edit/retract/locate use cases.

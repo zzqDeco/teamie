@@ -1,6 +1,10 @@
 import type {
-  MarketplaceAppDTO, CreateMarketplaceAppReq, UpdateMarketplaceAppReq,
-  CreatedMarketplaceAppResp, RotateMarketplaceAppSecretResp, ConversationAppSessionResp,
+  MarketplaceAppDTO, DeveloperMarketplaceAppDTO, MarketplaceEndpointVerificationDTO,
+  DiscoveredMCPToolDTO, EndpointProbeCheckDTO, MarketplaceAppReviewDTO,
+  CreateMarketplaceAppReq, CreateDeveloperMarketplaceAppReq, UpdateMarketplaceAppReq,
+  CreatedMarketplaceAppResp, CreatedDeveloperMarketplaceAppResp,
+  RotateMarketplaceAppSecretResp, RotateDeveloperMarketplaceAppSecretResp,
+  DeveloperMarketplaceAppDetailResp, VerifyMarketplaceAppResp, ConversationAppSessionResp,
   AdminModelConfigResp,
   AdminModelProfileDTO,
   AdminModelProviderDTO,
@@ -191,8 +195,18 @@ export type WorkspaceSearchPage = Omit<WorkspaceSearchPageResp, "items"> & {
 };
 
 export type MarketplaceApp = MarketplaceAppDTO;
+export type DeveloperMarketplaceApp = DeveloperMarketplaceAppDTO;
+export type MarketplaceEndpointVerification = MarketplaceEndpointVerificationDTO;
+export type DiscoveredMCPTool = DiscoveredMCPToolDTO;
+export type EndpointProbeCheck = EndpointProbeCheckDTO;
+export type MarketplaceAppReview = MarketplaceAppReviewDTO;
 export type CreateMarketplaceAppInput = CreateMarketplaceAppReq;
+export type CreateDeveloperMarketplaceAppInput = CreateDeveloperMarketplaceAppReq;
 export type UpdateMarketplaceAppInput = Omit<UpdateMarketplaceAppReq, "id">;
 export type CreatedMarketplaceApp = CreatedMarketplaceAppResp;
+export type CreatedDeveloperMarketplaceApp = CreatedDeveloperMarketplaceAppResp;
 export type RotatedMarketplaceAppSecret = RotateMarketplaceAppSecretResp;
+export type RotatedDeveloperMarketplaceAppSecret = RotateDeveloperMarketplaceAppSecretResp;
+export type DeveloperMarketplaceAppDetail = DeveloperMarketplaceAppDetailResp;
+export type VerifiedMarketplaceApp = VerifyMarketplaceAppResp;
 export type ConversationAppSession = ConversationAppSessionResp;

@@ -711,6 +711,17 @@ func (t *Tools) applyLeaveConversation(ctx context.Context, run *Run) {
 	}
 }
 
+func (t *Tools) restoreReplayConversation(ctx context.Context, run *Run, workspaceID, conversationID, convType string) {
+	if run != nil {
+		run.setActiveConversation(workspaceID, conversationID, convType)
+		run.setMCPTools(nil)
+	}
+	if t != nil && t.Presence != nil {
+		t.Presence.restoreActive(workspaceID, conversationID, convType)
+		_ = t.Presence.Persist(ctx, t.Store, t.Lease)
+	}
+}
+
 func (t *Tools) applyReplayPresence(ctx context.Context, run *Run, name string, cached []byte) {
 	if !t.presenceEnforced(run) {
 		return
@@ -721,10 +732,10 @@ func (t *Tools) applyReplayPresence(ctx context.Context, run *Run, name string, 
 			Data enterConversationResult `json:"data"`
 		}
 		if json.Unmarshal(cached, &receipt) == nil && validUUID(receipt.Data.ActiveConversationID) {
-			t.applyEnterConversation(ctx, run, receipt.Data.WorkspaceID, receipt.Data.ActiveConversationID, receipt.Data.Type)
+			t.restoreReplayConversation(ctx, run, receipt.Data.WorkspaceID, receipt.Data.ActiveConversationID, receipt.Data.Type)
 		}
 	case "im_leave_conversation":
-		t.applyLeaveConversation(ctx, run)
+		t.restoreReplayConversation(ctx, run, "", "", "")
 	case "im_open_direct_conversation", "im_create_group_conversation":
 		var receipt struct {
 			Data Conversation `json:"data"`
@@ -738,7 +749,7 @@ func (t *Tools) applyReplayPresence(ctx context.Context, run *Run, name string, 
 					convType = "group"
 				}
 			}
-			t.applyEnterConversation(ctx, run, receipt.Data.WorkspaceID, receipt.Data.ID, convType)
+			t.restoreReplayConversation(ctx, run, receipt.Data.WorkspaceID, receipt.Data.ID, convType)
 		}
 	}
 }

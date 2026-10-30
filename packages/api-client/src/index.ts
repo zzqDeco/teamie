@@ -429,9 +429,24 @@ export class TeamieClient {
       signal,
     });
   #marketplace = createMarketplaceClient(this);
+  developerMarketplaceApps = this.#marketplace.developerMarketplaceApps;
+  createDeveloperMarketplaceApp = this.#marketplace.createDeveloperMarketplaceApp;
+  developerMarketplaceApp = this.#marketplace.developerMarketplaceApp;
+  updateDeveloperMarketplaceApp = this.#marketplace.updateDeveloperMarketplaceApp;
+  verifyDeveloperMarketplaceApp = this.#marketplace.verifyDeveloperMarketplaceApp;
+  submitDeveloperMarketplaceApp = this.#marketplace.submitDeveloperMarketplaceApp;
+  withdrawDeveloperMarketplaceApp = this.#marketplace.withdrawDeveloperMarketplaceApp;
+  rotateDeveloperMarketplaceAppSecret = this.#marketplace.rotateDeveloperMarketplaceAppSecret;
+  deleteDeveloperMarketplaceApp = this.#marketplace.deleteDeveloperMarketplaceApp;
   adminMarketplaceApps = this.#marketplace.adminMarketplaceApps;
+  adminMarketplaceApp = this.#marketplace.adminMarketplaceApp;
   createAdminMarketplaceApp = this.#marketplace.createAdminMarketplaceApp;
   updateAdminMarketplaceApp = this.#marketplace.updateAdminMarketplaceApp;
+  verifyAdminMarketplaceApp = this.#marketplace.verifyAdminMarketplaceApp;
+  approveAdminMarketplaceApp = this.#marketplace.approveAdminMarketplaceApp;
+  rejectAdminMarketplaceApp = this.#marketplace.rejectAdminMarketplaceApp;
+  suspendAdminMarketplaceApp = this.#marketplace.suspendAdminMarketplaceApp;
+  unsuspendAdminMarketplaceApp = this.#marketplace.unsuspendAdminMarketplaceApp;
   rotateAdminMarketplaceAppSecret = this.#marketplace.rotateAdminMarketplaceAppSecret;
   deleteAdminMarketplaceApp = this.#marketplace.deleteAdminMarketplaceApp;
   marketplaceCatalog = this.#marketplace.marketplaceCatalog;

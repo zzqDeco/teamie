@@ -53,7 +53,7 @@ FROM messages m JOIN attachments a ON a.message_id=m.id JOIN attachment_uploads 
 		t.Fatalf("upgrade changed existing message, binary, receipt or cursor: body=%q client=%q seq=%d version=%d content=%x", body, clientID, seq, version, content)
 	}
 	var head int
-	if err = pool.QueryRow(ctx, "SELECT max(version) FROM chat_schema_migrations").Scan(&head); err != nil || head != 8 {
+	if err = pool.QueryRow(ctx, "SELECT max(version) FROM chat_schema_migrations").Scan(&head); err != nil || head != 9 {
 		t.Fatalf("schema ledger=%d err=%v", head, err)
 	}
 	if err = Migrate(ctx, pool); err != nil {
