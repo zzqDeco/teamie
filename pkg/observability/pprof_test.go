@@ -277,17 +277,42 @@ func TestPprofSingleFlightConcurrencyAndDynamicMutexReset(t *testing.T) {
 }
 
 func TestHTTPAndRPCLowCardinalityPprofLabels(t *testing.T) {
-	_ = testLogging(t)
+	out := testLogging(t)
 
 	var gotHTTPComponent, gotHTTPMethod string
-	srv := httptest.NewServer(HTTP(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /items/{id}", func(w http.ResponseWriter, r *http.Request) {
 		gotHTTPComponent, _ = rpprof.Label(r.Context(), "component")
 		gotHTTPMethod, _ = rpprof.Label(r.Context(), "http.method")
 		w.WriteHeader(http.StatusNoContent)
-	})))
+	})
+	mux.HandleFunc("GET /api/v1/sync", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/untrusted", func(w http.ResponseWriter, r *http.Request) {
+		gotHTTPComponent, _ = rpprof.Label(r.Context(), "component")
+		gotHTTPMethod, _ = rpprof.Label(r.Context(), "http.method")
+		w.WriteHeader(http.StatusNoContent)
+	})
+	srv := httptest.NewServer(HTTP(mux))
 	defer srv.Close()
 
-	req, err := http.NewRequest("CUSTOM_UNTRUSTED_METHOD", srv.URL+"/items/secret-path-id", nil)
+	matchedResp, err := http.Get(srv.URL + "/items/secret-path-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = matchedResp.Body.Close()
+	if gotHTTPComponent != "http-server" || gotHTTPMethod != "GET" {
+		t.Fatalf("unexpected matched HTTP pprof labels: component=%q method=%q", gotHTTPComponent, gotHTTPMethod)
+	}
+
+	syncResp, err := http.Get(srv.URL + "/api/v1/sync")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = syncResp.Body.Close()
+
+	req, err := http.NewRequest("CUSTOM_UNTRUSTED_METHOD", srv.URL+"/untrusted", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,6 +323,28 @@ func TestHTTPAndRPCLowCardinalityPprofLabels(t *testing.T) {
 	_ = resp.Body.Close()
 	if gotHTTPComponent != "http-server" || gotHTTPMethod != "OTHER" {
 		t.Fatalf("unexpected HTTP pprof labels: component=%q method=%q", gotHTTPComponent, gotHTTPMethod)
+	}
+
+	var sawItemsRoute, sawSyncDebug bool
+	for _, ev := range logLines(t, out) {
+		if ev["event.action"] != "http-request" {
+			continue
+		}
+		switch ev["custom.http.route"] {
+		case "GET /items/{id}":
+			if ev["log.level"] != "info" {
+				t.Fatalf("expected info level for GET /items/{id}, got %v", ev)
+			}
+			sawItemsRoute = true
+		case "GET /api/v1/sync":
+			if ev["log.level"] != "debug" {
+				t.Fatalf("expected debug level suppression for GET /api/v1/sync, got %v", ev)
+			}
+			sawSyncDebug = true
+		}
+	}
+	if !sawItemsRoute || !sawSyncDebug {
+		t.Fatalf("ServeMux route pattern did not propagate to completion logging: sawItems=%t sawSync=%t logs=%s", sawItemsRoute, sawSyncDebug, out.String())
 	}
 
 	var gotRPCComponent, gotRPCService, gotRPCMethod string

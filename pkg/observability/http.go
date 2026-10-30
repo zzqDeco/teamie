@@ -162,7 +162,8 @@ func HTTP(next http.Handler) http.Handler {
 			} // Recovery remains owned by Hertz/net/http.
 		}()
 		rpprof.Do(ctx, rpprof.Labels("component", "http-server", "http.method", safeHTTPMethod(r.Method)), func(pctx context.Context) {
-			next.ServeHTTP(state, r.WithContext(pctx))
+			r = r.WithContext(pctx)
+			next.ServeHTTP(state, r)
 		})
 	})
 }
