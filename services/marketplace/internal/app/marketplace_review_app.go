@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strings"
 
 	"teamie/services/marketplace/internal/domain"
 )
@@ -23,7 +24,7 @@ func (s *Service) GetAdminMarketplaceApp(ctx context.Context, actor domain.User,
 	if err := requirePlatformAdmin(actor); err != nil {
 		return domain.MarketplaceApp{}, nil, err
 	}
-	app, err := s.Marketplace.GetMarketplaceAppByID(ctx, appID, false)
+	app, err := s.Marketplace.GetMarketplaceAppByID(ctx, strings.TrimSpace(appID), false)
 	if err != nil {
 		return domain.MarketplaceApp{}, nil, err
 	}
@@ -50,7 +51,7 @@ func (s *Service) VerifyAdminMarketplaceApp(ctx context.Context, actor domain.Us
 	if err := s.requireMarketplaceEnabled(); err != nil {
 		return domain.MarketplaceApp{}, domain.MarketplaceEndpointVerification{}, err
 	}
-	app, err := s.Marketplace.GetMarketplaceAppByID(ctx, appID, false)
+	app, err := s.Marketplace.GetMarketplaceAppByID(ctx, strings.TrimSpace(appID), false)
 	if err != nil {
 		return domain.MarketplaceApp{}, domain.MarketplaceEndpointVerification{}, err
 	}
@@ -66,33 +67,19 @@ func (s *Service) VerifyAdminMarketplaceApp(ctx context.Context, actor domain.Us
 	if err != nil {
 		return domain.MarketplaceApp{}, domain.MarketplaceEndpointVerification{}, err
 	}
-	if err := s.acquireVerifySlot(app.ID); err != nil {
-		return domain.MarketplaceApp{}, domain.MarketplaceEndpointVerification{}, err
-	}
-	secret := app.SigningSecret
-	if secret == "" {
-		secret, err = s.Marketplace.GetMarketplaceAppSigningSecret(ctx, app.ID)
-		if err != nil {
-			return domain.MarketplaceApp{}, domain.MarketplaceEndpointVerification{}, err
-		}
-	}
-	if s.Verifier == nil {
-		return domain.MarketplaceApp{}, domain.MarketplaceEndpointVerification{}, domain.Err(503, "verifier_unavailable", "Marketplace endpoint verifier is unavailable")
-	}
-	report, err := s.Verifier.VerifyEndpoints(ctx, domain.VerifyEndpointsInput{
-		AppID:         app.ID,
-		Slug:          app.Slug,
-		WebURL:        webURL,
-		MCPURL:        mcpURL,
-		SigningSecret: secret,
-	})
+	report, secret, err := s.probeAppSnapshot(ctx, app, webURL, mcpURL, false)
 	if err != nil {
 		return domain.MarketplaceApp{}, domain.MarketplaceEndpointVerification{}, err
 	}
-	if report.VerifiedAt.IsZero() {
-		report.VerifiedAt = s.nowUTC()
-	}
-	saved, err := s.Marketplace.SaveMarketplaceVerificationReport(ctx, app.ID, report.VerifiedAt, report)
+	saved, err := s.Marketplace.SaveMarketplaceVerificationReport(ctx, app.ID, report.VerifiedAt, report, domain.VerificationSaveFence{
+		Slug:            app.Slug,
+		DraftWebURL:     app.DraftWebURL,
+		DraftMCPURL:     app.DraftMCPURL,
+		WebURL:          app.WebURL,
+		MCPURL:          app.MCPURL,
+		SigningSecret:   secret,
+		IgnoreSuspended: true,
+	})
 	if err != nil {
 		return domain.MarketplaceApp{}, domain.MarketplaceEndpointVerification{}, err
 	}
@@ -115,8 +102,10 @@ func (s *Service) ApproveAdminMarketplaceApp(ctx context.Context, actor domain.U
 	if err != nil {
 		return domain.MarketplaceApp{}, nil, err
 	}
+	appID = strings.TrimSpace(appID)
 
 	var updated domain.MarketplaceApp
+	var reviews []domain.MarketplaceAppReview
 	err = s.Tx.WithinTx(ctx, func(txCtx context.Context) error {
 		cur, err := s.Marketplace.GetMarketplaceAppByID(txCtx, appID, true)
 		if err != nil {
@@ -167,13 +156,14 @@ func (s *Service) ApproveAdminMarketplaceApp(ctx context.Context, actor domain.U
 		}, reviewSnapshot(res)); err != nil {
 			return err
 		}
+		revs, err := s.Marketplace.ListMarketplaceAppReviews(txCtx, res.ID)
+		if err != nil {
+			return err
+		}
 		updated = res
+		reviews = revs
 		return nil
 	})
-	if err != nil {
-		return domain.MarketplaceApp{}, nil, err
-	}
-	reviews, err := s.Marketplace.ListMarketplaceAppReviews(ctx, updated.ID)
 	if err != nil {
 		return domain.MarketplaceApp{}, nil, err
 	}
@@ -200,8 +190,10 @@ func (s *Service) RejectAdminMarketplaceApp(ctx context.Context, actor domain.Us
 	if err != nil {
 		return domain.MarketplaceApp{}, nil, err
 	}
+	appID = strings.TrimSpace(appID)
 
 	var updated domain.MarketplaceApp
+	var reviews []domain.MarketplaceAppReview
 	err = s.Tx.WithinTx(ctx, func(txCtx context.Context) error {
 		cur, err := s.Marketplace.GetMarketplaceAppByID(txCtx, appID, true)
 		if err != nil {
@@ -239,13 +231,14 @@ func (s *Service) RejectAdminMarketplaceApp(ctx context.Context, actor domain.Us
 		}, reviewSnapshot(res)); err != nil {
 			return err
 		}
+		revs, err := s.Marketplace.ListMarketplaceAppReviews(txCtx, res.ID)
+		if err != nil {
+			return err
+		}
 		updated = res
+		reviews = revs
 		return nil
 	})
-	if err != nil {
-		return domain.MarketplaceApp{}, nil, err
-	}
-	reviews, err := s.Marketplace.ListMarketplaceAppReviews(ctx, updated.ID)
 	if err != nil {
 		return domain.MarketplaceApp{}, nil, err
 	}
@@ -272,7 +265,9 @@ func (s *Service) SuspendAdminMarketplaceApp(ctx context.Context, actor domain.U
 	if err != nil {
 		return domain.MarketplaceApp{}, nil, err
 	}
+	appID = strings.TrimSpace(appID)
 	var updated domain.MarketplaceApp
+	var reviews []domain.MarketplaceAppReview
 	err = s.Tx.WithinTx(ctx, func(txCtx context.Context) error {
 		cur, err := s.Marketplace.GetMarketplaceAppByID(txCtx, appID, true)
 		if err != nil {
@@ -282,13 +277,6 @@ func (s *Service) SuspendAdminMarketplaceApp(ctx context.Context, actor domain.U
 		cur.AdminSuspended = true
 		cur.SuspendedReason = reason
 		cur.SuspendedAt = &now
-		if cur.ReviewStatus == domain.ReviewStatusPending {
-			if cur.IsPublished {
-				cur.ReviewStatus = domain.ReviewStatusApproved
-			} else {
-				cur.ReviewStatus = domain.ReviewStatusRejected
-			}
-		}
 		cur.HasDraftChanges = computeHasDraftChanges(cur)
 		cur.UpdatedAt = now
 		res, err := s.Marketplace.UpdateMarketplaceApp(txCtx, cur)
@@ -308,13 +296,14 @@ func (s *Service) SuspendAdminMarketplaceApp(ctx context.Context, actor domain.U
 		}, reviewSnapshot(res)); err != nil {
 			return err
 		}
+		revs, err := s.Marketplace.ListMarketplaceAppReviews(txCtx, res.ID)
+		if err != nil {
+			return err
+		}
 		updated = res
+		reviews = revs
 		return nil
 	})
-	if err != nil {
-		return domain.MarketplaceApp{}, nil, err
-	}
-	reviews, err := s.Marketplace.ListMarketplaceAppReviews(ctx, updated.ID)
 	if err != nil {
 		return domain.MarketplaceApp{}, nil, err
 	}
@@ -337,7 +326,9 @@ func (s *Service) UnsuspendAdminMarketplaceApp(ctx context.Context, actor domain
 	if err := s.requireMarketplaceEnabled(); err != nil {
 		return domain.MarketplaceApp{}, nil, err
 	}
+	appID = strings.TrimSpace(appID)
 	var updated domain.MarketplaceApp
+	var reviews []domain.MarketplaceAppReview
 	err := s.Tx.WithinTx(ctx, func(txCtx context.Context) error {
 		cur, err := s.Marketplace.GetMarketplaceAppByID(txCtx, appID, true)
 		if err != nil {
@@ -366,13 +357,14 @@ func (s *Service) UnsuspendAdminMarketplaceApp(ctx context.Context, actor domain
 		}, reviewSnapshot(res)); err != nil {
 			return err
 		}
+		revs, err := s.Marketplace.ListMarketplaceAppReviews(txCtx, res.ID)
+		if err != nil {
+			return err
+		}
 		updated = res
+		reviews = revs
 		return nil
 	})
-	if err != nil {
-		return domain.MarketplaceApp{}, nil, err
-	}
-	reviews, err := s.Marketplace.ListMarketplaceAppReviews(ctx, updated.ID)
 	if err != nil {
 		return domain.MarketplaceApp{}, nil, err
 	}

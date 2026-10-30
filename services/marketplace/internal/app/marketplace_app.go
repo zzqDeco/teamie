@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"teamie/services/marketplace/internal/domain"
 )
@@ -44,26 +45,34 @@ func (s *Service) CreateAdminMarketplaceApp(ctx context.Context, actor domain.Us
 	}
 	secret := domain.NewMarketplaceSigningSecret()
 	now := s.nowUTC()
-	created, err := s.Marketplace.InsertMarketplaceApp(ctx, domain.MarketplaceApp{
-		ID:               domain.NewID(),
-		Slug:             slug,
-		Name:             name,
-		Description:      desc,
-		WebURL:           webURL,
-		MCPURL:           mcpURL,
-		SigningSecret:    secret,
-		Enabled:          enabled,
-		CreatedAt:        now,
-		UpdatedAt:        now,
-		OwnerID:          nil,
-		IsPublished:      true,
-		PublishedVersion: 1,
-		ReviewStatus:     domain.ReviewStatusApproved,
-		DraftName:        name,
-		DraftDescription: desc,
-		DraftWebURL:      webURL,
-		DraftMCPURL:      mcpURL,
-		HasDraftChanges:  false,
+	var created domain.MarketplaceApp
+	err = s.Tx.WithinTx(ctx, func(txCtx context.Context) error {
+		res, insErr := s.Marketplace.InsertMarketplaceApp(txCtx, domain.MarketplaceApp{
+			ID:               domain.NewID(),
+			Slug:             slug,
+			Name:             name,
+			Description:      desc,
+			WebURL:           webURL,
+			MCPURL:           mcpURL,
+			SigningSecret:    secret,
+			Enabled:          enabled,
+			CreatedAt:        now,
+			UpdatedAt:        now,
+			OwnerID:          nil,
+			IsPublished:      true,
+			PublishedVersion: 1,
+			ReviewStatus:     domain.ReviewStatusApproved,
+			DraftName:        name,
+			DraftDescription: desc,
+			DraftWebURL:      webURL,
+			DraftMCPURL:      mcpURL,
+			HasDraftChanges:  false,
+		})
+		if insErr != nil {
+			return insErr
+		}
+		created = res
+		return nil
 	})
 	if err != nil {
 		return domain.MarketplaceApp{}, "", err
@@ -75,7 +84,7 @@ func (s *Service) CreateAdminMarketplaceApp(ctx context.Context, actor domain.Us
 	return enriched, secret, nil
 }
 
-// UpdateAdminMarketplaceApp updates an official app or toggles enabled state on a marketplace app.
+// UpdateAdminMarketplaceApp updates an existing marketplace app for platform admins.
 func (s *Service) UpdateAdminMarketplaceApp(ctx context.Context, actor domain.User, appID string, in domain.UpdateMarketplaceAppInput) (domain.MarketplaceApp, error) {
 	if err := requirePlatformAdmin(actor); err != nil {
 		return domain.MarketplaceApp{}, err
@@ -83,19 +92,20 @@ func (s *Service) UpdateAdminMarketplaceApp(ctx context.Context, actor domain.Us
 	if err := s.requireMarketplaceEnabled(); err != nil {
 		return domain.MarketplaceApp{}, err
 	}
+	appID = strings.TrimSpace(appID)
 	var updated domain.MarketplaceApp
 	err := s.Tx.WithinTx(ctx, func(txCtx context.Context) error {
 		cur, err := s.Marketplace.GetMarketplaceAppByID(txCtx, appID, true)
 		if err != nil {
 			return err
 		}
+		origSlug := cur.Slug
+		origDraftWeb := cur.DraftWebURL
+		origDraftMCP := cur.DraftMCPURL
 		if in.Slug != nil {
 			slug, err := normalizeSlug(*in.Slug)
 			if err != nil {
 				return err
-			}
-			if slug != cur.Slug && !cur.IsOfficial() && (cur.IsPublished || cur.SubmissionRevision > 0 || cur.ReviewStatus != domain.ReviewStatusDraft) {
-				return domain.ErrMarketplaceSlugImmutable()
 			}
 			cur.Slug = slug
 		}
@@ -104,9 +114,9 @@ func (s *Service) UpdateAdminMarketplaceApp(ctx context.Context, actor domain.Us
 			if err != nil {
 				return err
 			}
-			cur.DraftName = name
+			cur.Name = name
 			if cur.IsOfficial() {
-				cur.Name = name
+				cur.DraftName = name
 			}
 		}
 		if in.Description != nil {
@@ -114,39 +124,37 @@ func (s *Service) UpdateAdminMarketplaceApp(ctx context.Context, actor domain.Us
 			if err != nil {
 				return err
 			}
-			cur.DraftDescription = desc
+			cur.Description = desc
 			if cur.IsOfficial() {
-				cur.Description = desc
+				cur.DraftDescription = desc
 			}
 		}
-		if in.WebURL != nil || in.MCPURL != nil {
-			nextWeb := cur.DraftWebURL
-			if cur.IsOfficial() {
-				nextWeb = cur.WebURL
-			}
-			if in.WebURL != nil {
-				nextWeb = *in.WebURL
-			}
-			nextMCP := cur.DraftMCPURL
-			if cur.IsOfficial() {
-				nextMCP = cur.MCPURL
-			}
-			if in.MCPURL != nil {
-				nextMCP = *in.MCPURL
-			}
-			validWeb, validMCP, err := s.validateEndpoints(nextWeb, nextMCP, !cur.IsOfficial() && !cur.IsPublished)
+		if in.WebURL != nil {
+			webURL, _, err := s.validateEndpoints(*in.WebURL, cur.MCPURL, cur.MCPURL == "")
 			if err != nil {
 				return err
 			}
-			cur.DraftWebURL = validWeb
-			cur.DraftMCPURL = validMCP
+			cur.WebURL = webURL
 			if cur.IsOfficial() {
-				cur.WebURL = validWeb
-				cur.MCPURL = validMCP
+				cur.DraftWebURL = webURL
+			}
+		}
+		if in.MCPURL != nil {
+			_, mcpURL, err := s.validateEndpoints(cur.WebURL, *in.MCPURL, cur.WebURL == "")
+			if err != nil {
+				return err
+			}
+			cur.MCPURL = mcpURL
+			if cur.IsOfficial() {
+				cur.DraftMCPURL = mcpURL
 			}
 		}
 		if in.Enabled != nil {
 			cur.Enabled = *in.Enabled
+		}
+		if cur.Slug != origSlug || cur.DraftWebURL != origDraftWeb || cur.DraftMCPURL != origDraftMCP {
+			cur.LastVerifiedAt = nil
+			cur.VerificationReport = nil
 		}
 		cur.HasDraftChanges = computeHasDraftChanges(cur)
 		cur.UpdatedAt = s.nowUTC()
@@ -171,8 +179,17 @@ func (s *Service) RotateAdminMarketplaceAppSecret(ctx context.Context, actor dom
 	if err := s.requireMarketplaceEnabled(); err != nil {
 		return domain.MarketplaceApp{}, "", err
 	}
+	appID = strings.TrimSpace(appID)
 	secret := domain.NewMarketplaceSigningSecret()
-	updated, err := s.Marketplace.UpdateMarketplaceSigningSecret(ctx, appID, secret)
+	var updated domain.MarketplaceApp
+	err := s.Tx.WithinTx(ctx, func(txCtx context.Context) error {
+		res, updErr := s.Marketplace.UpdateMarketplaceSigningSecret(txCtx, appID, secret)
+		if updErr != nil {
+			return updErr
+		}
+		updated = res
+		return nil
+	})
 	if err != nil {
 		return domain.MarketplaceApp{}, "", err
 	}
@@ -191,18 +208,27 @@ func (s *Service) DeleteAdminMarketplaceApp(ctx context.Context, actor domain.Us
 	if err := s.requireMarketplaceEnabled(); err != nil {
 		return err
 	}
-	deleted, err := s.Marketplace.DeleteMarketplaceApp(ctx, appID)
+	appID = strings.TrimSpace(appID)
+	var deleted bool
+	err := s.Tx.WithinTx(ctx, func(txCtx context.Context) error {
+		var delErr error
+		deleted, delErr = s.Marketplace.DeleteMarketplaceApp(txCtx, appID)
+		return delErr
+	})
 	if err != nil {
 		return err
 	}
 	if !deleted {
-		return domain.ErrNotFound()
+		return domain.ErrMarketplaceAppUnavailable()
 	}
 	return nil
 }
 
-// ListMarketplaceCatalog returns all enabled, published, non-suspended catalog apps.
-func (s *Service) ListMarketplaceCatalog(ctx context.Context) ([]domain.MarketplaceApp, error) {
+// ListMarketplaceCatalog returns all enabled, published, non-suspended catalog apps to authenticated human users.
+func (s *Service) ListMarketplaceCatalog(ctx context.Context, actor domain.User) ([]domain.MarketplaceApp, error) {
+	if actor.Kind != "human" {
+		return nil, domain.ErrHumanWorkspaceManagementRequired()
+	}
 	apps, err := s.Marketplace.ListPublishedCatalogApps(ctx)
 	if err != nil {
 		return nil, err
@@ -234,11 +260,11 @@ func (s *Service) ListWorkspaceApps(ctx context.Context, workspaceID, actorID st
 
 // InstallWorkspaceApp installs a catalog, own-draft, or admin-review-preview app into workspaceID.
 func (s *Service) InstallWorkspaceApp(ctx context.Context, workspaceID, appID string, actor domain.User) (domain.MarketplaceApp, error) {
-	if err := s.requireMarketplaceEnabled(); err != nil {
-		return domain.MarketplaceApp{}, err
-	}
 	if actor.Kind != "human" {
 		return domain.MarketplaceApp{}, domain.ErrHumanWorkspaceManagementRequired()
+	}
+	if err := s.requireMarketplaceEnabled(); err != nil {
+		return domain.MarketplaceApp{}, err
 	}
 	scope, err := s.Chat.WorkspaceRole(ctx, workspaceID, actor.ID)
 	if err != nil {
@@ -250,7 +276,7 @@ func (s *Service) InstallWorkspaceApp(ctx context.Context, workspaceID, appID st
 	if scope.Role != "owner" && scope.OwnerID != actor.ID {
 		return domain.MarketplaceApp{}, domain.ErrWorkspaceOwnerRequired()
 	}
-	app, err := s.Marketplace.GetMarketplaceAppByID(ctx, appID, false)
+	app, err := s.Marketplace.GetMarketplaceAppByID(ctx, strings.TrimSpace(appID), false)
 	if err != nil {
 		var derr *domain.Error
 		if errors.As(err, &derr) && derr.Status == 404 {
@@ -262,7 +288,7 @@ func (s *Service) InstallWorkspaceApp(ctx context.Context, workspaceID, appID st
 		return domain.MarketplaceApp{}, domain.ErrMarketplaceSuspended()
 	}
 	isDeveloperOwnWorkspace := app.OwnerID != nil && *app.OwnerID != "" && *app.OwnerID == scope.OwnerID
-	reviewPreview := actor.PlatformRole == "admin" && !isDeveloperOwnWorkspace && app.ReviewStatus == domain.ReviewStatusPending
+	reviewPreview := actor.PlatformRole == "admin" && !app.IsOfficial() && !isDeveloperOwnWorkspace && app.ReviewStatus == domain.ReviewStatusPending
 	resolved, ok := app.ResolveForWorkspace(scope.OwnerID, reviewPreview)
 	if !ok {
 		return domain.MarketplaceApp{}, domain.ErrMarketplaceAppUnavailable()
@@ -275,11 +301,11 @@ func (s *Service) InstallWorkspaceApp(ctx context.Context, workspaceID, appID st
 
 // UninstallWorkspaceApp removes an app installation from workspaceID.
 func (s *Service) UninstallWorkspaceApp(ctx context.Context, workspaceID, appID string, actor domain.User) error {
-	if err := s.requireMarketplaceEnabled(); err != nil {
-		return err
-	}
 	if actor.Kind != "human" {
 		return domain.ErrHumanWorkspaceManagementRequired()
+	}
+	if err := s.requireMarketplaceEnabled(); err != nil {
+		return err
 	}
 	scope, err := s.Chat.WorkspaceRole(ctx, workspaceID, actor.ID)
 	if err != nil {
@@ -291,7 +317,7 @@ func (s *Service) UninstallWorkspaceApp(ctx context.Context, workspaceID, appID 
 	if scope.Role != "owner" && scope.OwnerID != actor.ID {
 		return domain.ErrWorkspaceOwnerRequired()
 	}
-	return s.Marketplace.UninstallWorkspaceMarketplaceApp(ctx, workspaceID, appID)
+	return s.Marketplace.UninstallWorkspaceMarketplaceApp(ctx, workspaceID, strings.TrimSpace(appID))
 }
 
 // ListConversationApps returns runnable workspace apps for a group conversation member.
@@ -324,6 +350,7 @@ func (s *Service) CreateConversationAppSession(ctx context.Context, conversation
 	if err := s.requireMarketplaceEnabled(); err != nil {
 		return domain.ConversationAppSession{}, err
 	}
+	appID = strings.TrimSpace(appID)
 	scope, err := s.Chat.ConversationScope(ctx, conversationID, actor.ID)
 	if err != nil {
 		return domain.ConversationAppSession{}, err
@@ -356,6 +383,7 @@ func (s *Service) CreateConversationAppSession(ctx context.Context, conversation
 			return domain.ConversationAppSession{}, err
 		}
 	}
+	resolved.SigningSecret = ""
 	enriched, err := s.enrichApp(ctx, resolved)
 	if err != nil {
 		return domain.ConversationAppSession{}, err

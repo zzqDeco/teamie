@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -448,7 +449,7 @@ func TestMarketplaceEndToEndLifecycleAndIsolation(t *testing.T) {
 	// 2. Developer creates draft app without URLs first, receives signingSecret.
 	var activeSecret atomic.Value
 	status, created := doHuman(devTok, "csrf-dev", http.MethodPost, "/api/v1/developer/apps", map[string]any{
-		"slug":        "werewolf",
+		"slug":        "Werewolf",
 		"name":        "Werewolf Referee",
 		"description": "Group deduction game",
 	})
@@ -456,11 +457,14 @@ func TestMarketplaceEndToEndLifecycleAndIsolation(t *testing.T) {
 		t.Fatalf("create draft failed: %d %+v", status, created)
 	}
 	signingSecret := created["signingSecret"].(string)
-	activeSecret.Store(signingSecret)
+	activeSecret.Store("misconfigured-secret")
 	appObj := created["app"].(map[string]any)
+	if appObj["slug"] != "werewolf" || appObj["hasDraftChanges"] != true {
+		t.Fatalf("expected normalized lowercase slug and hasDraftChanges=true on new draft, got %+v", appObj)
+	}
 	appID := appObj["id"].(string)
 
-	// 3. Deploy external Web + MCP server using the issued signingSecret, update draft URLs.
+	// 3. Deploy external Web + MCP server, update draft URLs.
 	extSrv, _ := startMockExternalApp(t, func() string { return activeSecret.Load().(string) }, false)
 	status, _ = doHuman(devTok, "csrf-dev", http.MethodPatch, "/api/v1/developer/apps/"+appID, map[string]any{
 		"webUrl": extSrv.URL + "/ui",
@@ -480,11 +484,12 @@ func TestMarketplaceEndToEndLifecycleAndIsolation(t *testing.T) {
 		t.Fatalf("expected unpublished draft to be unavailable to Bob's workspace (404), got %d", status)
 	}
 
-	// 5. Submit before verification fails with 422; live /verify succeeds; /submit transitions to pending_review.
+	// 5. Submit when live endpoint fails protocol verification returns 422; after fixing secret, live /verify + immediate /submit succeed.
 	status, _ = doHuman(devTok, "csrf-dev", http.MethodPost, "/api/v1/developer/apps/"+appID+"/submit", map[string]any{"note": "Initial release"})
 	if status != http.StatusUnprocessableEntity {
-		t.Fatalf("expected 422 submitting unverified draft, got %d", status)
+		t.Fatalf("expected 422 submitting broken live draft, got %d", status)
 	}
+	activeSecret.Store(signingSecret)
 	status, verOut := doHuman(devTok, "csrf-dev", http.MethodPost, "/api/v1/developer/apps/"+appID+"/verify", map[string]any{})
 	if status != http.StatusOK || verOut["verification"].(map[string]any)["ok"] != true {
 		t.Fatalf("expected 200 ok verification, got %d %+v", status, verOut)
@@ -514,7 +519,11 @@ func TestMarketplaceEndToEndLifecycleAndIsolation(t *testing.T) {
 		t.Fatalf("expected Bob to install published v1 app, got %d", status)
 	}
 
-	// Channel conversation must return 403 marketplace_group_only.
+	// Channel conversation must return 403 marketplace_group_only; Agent principal cannot browse public catalog.
+	status, agentCatOut := doAgent(http.MethodGet, "/api/v1/marketplace/catalog", nil)
+	if status != http.StatusForbidden {
+		t.Fatalf("expected 403 when Agent principal browses human catalog, got %d %+v", status, agentCatOut)
+	}
 	status, chanOut := doHuman(bobTok, "csrf-bob", http.MethodGet, "/api/v1/conversations/"+bobChannel+"/apps", nil)
 	if status != http.StatusForbidden || chanOut["error"].(map[string]any)["code"] != "marketplace_group_only" {
 		t.Fatalf("expected 403 marketplace_group_only on channel, got %d %+v", status, chanOut)
@@ -662,9 +671,495 @@ func TestProbeVerifierCSPFrameAncestorsHostSourceMatching(t *testing.T) {
 			if rep.OK != tc.wantOK {
 				t.Fatalf("csp=%q appOrigin=%q: got OK=%v (checks=%+v), want OK=%v", tc.csp, tc.appOrigin, rep.OK, rep.Checks, tc.wantOK)
 			}
-			if !tc.wantOK && (len(rep.Checks) < 2 || rep.Checks[1].Code != "web_csp_blocked") {
-				t.Fatalf("csp=%q appOrigin=%q: expected web_csp_blocked, got checks=%+v", tc.csp, tc.appOrigin, rep.Checks)
+			if !tc.wantOK && (len(rep.Checks) < 2 || rep.Checks[1].Code != "web_ui_csp_frame_blocked") {
+				t.Fatalf("csp=%q appOrigin=%q: expected web_ui_csp_frame_blocked, got checks=%+v", tc.csp, tc.appOrigin, rep.Checks)
 			}
 		})
+	}
+}
+
+func TestWebEndpointHTMLValidationRegression(t *testing.T) {
+	ctx := context.Background()
+	secret := domain.NewMarketplaceSigningSecret()
+
+	type webResp struct {
+		status      int
+		contentType string
+		disposition string
+		body        string
+	}
+	var current atomic.Value
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ui", func(w http.ResponseWriter, _ *http.Request) {
+		cfg := current.Load().(webResp)
+		if cfg.contentType != "" {
+			w.Header().Set("Content-Type", cfg.contentType)
+		} else {
+			w.Header()["Content-Type"] = nil
+		}
+		if cfg.disposition != "" {
+			w.Header().Set("Content-Disposition", cfg.disposition)
+		}
+		w.WriteHeader(cfg.status)
+		if cfg.body != "" {
+			_, _ = w.Write([]byte(cfg.body))
+		}
+	})
+	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
+		auth := strings.TrimSpace(r.Header.Get("Authorization"))
+		if !strings.HasPrefix(auth, "Bearer ") {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		tok := strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
+		if _, err := domain.VerifyMarketplaceContextToken(secret, tok, time.Now().UTC()); err != nil {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		var rpcReq struct {
+			Method string `json:"method"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&rpcReq)
+		w.Header().Set("Content-Type", "application/json")
+		switch rpcReq.Method {
+		case "initialize":
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-03-26","capabilities":{"tools":{}},"serverInfo":{"name":"html-check","version":"1.0.0"}}}`))
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+		case "tools/list":
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"ping","description":"Ping"}]}}`))
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	v := &probe.Verifier{
+		AppOrigin:          "https://chat.example.com",
+		RequirePublicHTTPS: false,
+		Timeout:            5 * time.Second,
+	}
+
+	cases := []struct {
+		name     string
+		resp     webResp
+		wantOK   bool
+		wantCode string
+	}{
+		{
+			name:     "json 200 rejected",
+			resp:     webResp{status: http.StatusOK, contentType: "application/json", body: `{"status":"ok"}`},
+			wantOK:   false,
+			wantCode: "web_ui_not_html",
+		},
+		{
+			name:     "plain text 200 rejected",
+			resp:     webResp{status: http.StatusOK, contentType: "text/plain; charset=utf-8", body: "hello world"},
+			wantOK:   false,
+			wantCode: "web_ui_not_html",
+		},
+		{
+			name:     "attachment download rejected",
+			resp:     webResp{status: http.StatusOK, contentType: "text/html", disposition: `attachment; filename="ui.html"`, body: "<!doctype html><html><body>hi</body></html>"},
+			wantOK:   false,
+			wantCode: "web_ui_not_html",
+		},
+		{
+			name:     "204 no content rejected",
+			resp:     webResp{status: http.StatusNoContent, contentType: "text/html"},
+			wantOK:   false,
+			wantCode: "web_ui_not_html",
+		},
+		{
+			name:     "empty html body rejected",
+			resp:     webResp{status: http.StatusOK, contentType: "text/html; charset=utf-8", body: "   "},
+			wantOK:   false,
+			wantCode: "web_ui_not_html",
+		},
+		{
+			name:     "missing content-type non-html body rejected",
+			resp:     webResp{status: http.StatusOK, contentType: "", body: `{"not":"html"}`},
+			wantOK:   false,
+			wantCode: "web_ui_not_html",
+		},
+		{
+			name:     "missing content-type doctype html body accepted",
+			resp:     webResp{status: http.StatusOK, contentType: "", body: "<!DOCTYPE html><html><body>Panel</body></html>"},
+			wantOK:   true,
+			wantCode: "ok",
+		},
+		{
+			name:     "xhtml content-type accepted",
+			resp:     webResp{status: http.StatusOK, contentType: "application/xhtml+xml", body: "<html><body>Panel</body></html>"},
+			wantOK:   true,
+			wantCode: "ok",
+		},
+		{
+			name:     "standard text/html accepted",
+			resp:     webResp{status: http.StatusOK, contentType: "text/html; charset=utf-8", body: "<!doctype html><html><body>Panel</body></html>"},
+			wantOK:   true,
+			wantCode: "ok",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			current.Store(tc.resp)
+			rep, err := v.VerifyEndpoints(ctx, domain.VerifyEndpointsInput{
+				AppID:         "app-html",
+				Slug:          "html-check",
+				WebURL:        srv.URL + "/ui",
+				MCPURL:        srv.URL + "/mcp",
+				SigningSecret: secret,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rep.OK != tc.wantOK {
+				t.Fatalf("got OK=%v (checks=%+v), want OK=%v", rep.OK, rep.Checks, tc.wantOK)
+			}
+			if len(rep.Checks) < 2 || rep.Checks[1].Code != tc.wantCode {
+				t.Fatalf("got stage 2 check=%+v, want code=%q", rep.Checks, tc.wantCode)
+			}
+		})
+	}
+}
+
+type gatedVerifier struct {
+	inner   domain.MarketplaceEndpointVerifier
+	calls   atomic.Int32
+	gateFn  func(input domain.VerifyEndpointsInput)
+}
+
+func (g *gatedVerifier) VerifyEndpoints(ctx context.Context, input domain.VerifyEndpointsInput) (domain.MarketplaceEndpointVerification, error) {
+	g.calls.Add(1)
+	if g.gateFn != nil {
+		g.gateFn(input)
+	}
+	return g.inner.VerifyEndpoints(ctx, input)
+}
+
+func TestSubmitRechecksLiveEndpointAndFencesConcurrentMutations(t *testing.T) {
+	ctx := context.Background()
+	pool, err := postgres.Open(ctx, testdb.URL(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	if err := pg.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+
+	dev := domain.User{ID: domain.NewID(), Email: "dev@example.com", DisplayName: "Dev", Kind: "human", PlatformRole: "member", CreatedAt: time.Now().UTC()}
+	idMock := &fakeIdentity{
+		users: map[string]httpx.User{
+			dev.ID: {ID: dev.ID, Email: dev.Email, DisplayName: dev.DisplayName, Kind: dev.Kind, PlatformRole: dev.PlatformRole, CreatedAt: dev.CreatedAt},
+		},
+	}
+
+	var activeSecret atomic.Value
+	activeSecret.Store("initial")
+	extSrv, _ := startMockExternalApp(t, func() string { return activeSecret.Load().(string) }, false)
+
+	var gateHook atomic.Value
+	verifier := &gatedVerifier{
+		inner: &probe.Verifier{
+			AppOrigin:          "http://teamie.local:8080",
+			RequirePublicHTTPS: false,
+			Timeout:            5 * time.Second,
+		},
+		gateFn: func(in domain.VerifyEndpointsInput) {
+			if fn, _ := gateHook.Load().(func(domain.VerifyEndpointsInput)); fn != nil {
+				fn(in)
+			}
+		},
+	}
+
+	repo := pg.New(postgres.New(pool))
+	origin := "http://teamie.local:8080"
+	reqHTTPS := false
+	newSvc := func() *app.Service {
+		return &app.Service{
+			Tx:                 repo,
+			Marketplace:        repo,
+			Identity:           domainIdentityFromFake{id: idMock},
+			Chat:               &fakeChatScope{},
+			AppOrigin:          origin,
+			RequirePublicHTTPS: &reqHTTPS,
+			Verifier:           verifier,
+		}
+	}
+	svc := newSvc()
+
+	created, secret1, err := svc.CreateDeveloperMarketplaceApp(ctx, dev, domain.CreateMarketplaceAppInput{
+		Slug:   "fenced-app",
+		Name:   "Fenced App",
+		WebURL: extSrv.URL + "/ui",
+		MCPURL: extSrv.URL + "/mcp",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activeSecret.Store(secret1)
+
+	// Part A: /verify passes (calls=1), then live server breaks WITHOUT changing draft URLs -> immediate /submit re-verifies (calls=2) and fails with 422!
+	verifiedApp, rep1, err := svc.VerifyDeveloperMarketplaceApp(ctx, dev, created.ID)
+	if err != nil || !rep1.OK || verifiedApp.VerificationReport == nil || !verifiedApp.VerificationReport.OK {
+		t.Fatalf("expected initial verify to pass: app=%+v rep=%+v err=%v", verifiedApp, rep1, err)
+	}
+	if verifier.calls.Load() != 1 {
+		t.Fatalf("expected 1 verifier call, got %d", verifier.calls.Load())
+	}
+
+	// Break the live server's auth secret while keeping identical URLs.
+	activeSecret.Store("broken-remote-secret")
+	_, _, err = svc.SubmitDeveloperMarketplaceApp(ctx, dev, created.ID, "ship broken server")
+	var derr *domain.Error
+	if !errors.As(err, &derr) || derr.Status != http.StatusUnprocessableEntity || derr.Code != "endpoint_verification_failed" || derr.Error() != "Deployed Web UI and MCP Server endpoints failed platform protocol verification" {
+		t.Fatalf("expected 422 endpoint_verification_failed when live endpoint broke after /verify, got %v (%+v)", err, derr)
+	}
+	if verifier.calls.Load() != 2 {
+		t.Fatalf("expected /submit to invoke live verifier (calls=2), got %d", verifier.calls.Load())
+	}
+	afterBrokenSubmit, _, err := svc.GetDeveloperMarketplaceApp(ctx, dev, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterBrokenSubmit.ReviewStatus != domain.ReviewStatusDraft || afterBrokenSubmit.VerificationReport == nil || afterBrokenSubmit.VerificationReport.OK {
+		t.Fatalf("expected app to remain in draft with persisted failed report, got %+v", afterBrokenSubmit)
+	}
+
+	// Part B: Concurrent secret rotation while /verify is in flight must fence SaveMarketplaceVerificationReport (409) and keep VerificationReport nil!
+	activeSecret.Store(secret1)
+	// Wait past verifyCooldown or clear LastVerifiedAt via secret rotation first; let's test rotation during an in-flight probe!
+	// Clear LastVerifiedAt first by updating description so /verify does not hit 3s cooldown.
+	desc := "Cleared for concurrency test"
+	if _, err := svc.UpdateDeveloperMarketplaceApp(ctx, dev, created.ID, domain.UpdateMarketplaceAppInput{Description: &desc}); err != nil {
+		t.Fatal(err)
+	}
+	// Reset in-memory cooldown by creating a fresh Service sharing the same PostgreSQL repo.
+	svc = newSvc()
+
+	enteredVerify := make(chan struct{})
+	releaseVerify := make(chan struct{})
+	var onceVerify atomic.Bool
+	gateHook.Store(func(domain.VerifyEndpointsInput) {
+		if onceVerify.CompareAndSwap(false, true) {
+			close(enteredVerify)
+			<-releaseVerify
+		}
+	})
+
+	verifyErrCh := make(chan error, 1)
+	go func() {
+		_, _, vErr := svc.VerifyDeveloperMarketplaceApp(ctx, dev, created.ID)
+		verifyErrCh <- vErr
+	}()
+
+	<-enteredVerify
+	// Rotate signing secret S1 -> S2 while probe against S1 is still in flight!
+	rotatedApp, secret2, err := svc.RotateDeveloperMarketplaceAppSecret(ctx, dev, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rotatedApp.VerificationReport != nil || rotatedApp.LastVerifiedAt != nil {
+		t.Fatalf("expected secret rotation to clear verification state, got %+v", rotatedApp)
+	}
+	// Keep activeSecret = secret1 just until probe finishes so the stale probe computes OK=true!
+	close(releaseVerify)
+
+	vErr := <-verifyErrCh
+	if !errors.As(vErr, &derr) || derr.Status != http.StatusConflict || derr.Code != "revision_conflict" {
+		t.Fatalf("expected 409 revision_conflict from stale in-flight /verify after secret rotation, got %v", vErr)
+	}
+	afterStaleVerify, _, err := svc.GetDeveloperMarketplaceApp(ctx, dev, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterStaleVerify.VerificationReport != nil || afterStaleVerify.LastVerifiedAt != nil {
+		t.Fatalf("stale in-flight /verify must NOT repopulate cleared VerificationReport after secret rotation: %+v", afterStaleVerify)
+	}
+
+	// Part C: Concurrent draft URL change while /submit is in flight must fence (409) and NOT enter pending_review!
+	activeSecret.Store(secret2)
+	enteredSubmit := make(chan struct{})
+	releaseSubmit := make(chan struct{})
+	var onceSubmit atomic.Bool
+	gateHook.Store(func(domain.VerifyEndpointsInput) {
+		if onceSubmit.CompareAndSwap(false, true) {
+			close(enteredSubmit)
+			<-releaseSubmit
+		}
+	})
+
+	submitErrCh := make(chan error, 1)
+	go func() {
+		_, _, sErr := svc.SubmitDeveloperMarketplaceApp(ctx, dev, created.ID, "race submit")
+		submitErrCh <- sErr
+	}()
+
+	<-enteredSubmit
+	newWebURL := extSrv.URL + "/ui?mutated=1"
+	if _, err := svc.UpdateDeveloperMarketplaceApp(ctx, dev, created.ID, domain.UpdateMarketplaceAppInput{WebURL: &newWebURL}); err != nil {
+		t.Fatal(err)
+	}
+	close(releaseSubmit)
+
+	sErr := <-submitErrCh
+	if !errors.As(sErr, &derr) || derr.Status != http.StatusConflict || derr.Code != "revision_conflict" {
+		t.Fatalf("expected 409 revision_conflict when draft URL mutated during /submit, got %v", sErr)
+	}
+	afterStaleSubmit, _, err := svc.GetDeveloperMarketplaceApp(ctx, dev, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterStaleSubmit.ReviewStatus != domain.ReviewStatusDraft || afterStaleSubmit.VerificationReport != nil {
+		t.Fatalf("expected app to remain unverified draft after fenced concurrent /submit, got %+v", afterStaleSubmit)
+	}
+}
+
+func TestDisablePendingAppAndAdminSuspensionInvariants(t *testing.T) {
+	ctx := context.Background()
+	pool, err := postgres.Open(ctx, testdb.URL(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	if err := pg.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+
+	admin := domain.User{ID: domain.NewID(), Email: "admin@example.com", DisplayName: "Admin", Kind: "human", PlatformRole: "admin", CreatedAt: time.Now().UTC()}
+	dev := domain.User{ID: domain.NewID(), Email: "dev@example.com", DisplayName: "Dev", Kind: "human", PlatformRole: "member", CreatedAt: time.Now().UTC()}
+	bob := domain.User{ID: domain.NewID(), Email: "bob@example.com", DisplayName: "Bob", Kind: "human", PlatformRole: "member", CreatedAt: time.Now().UTC()}
+	idMock := &fakeIdentity{
+		users: map[string]httpx.User{
+			admin.ID: {ID: admin.ID, Email: admin.Email, DisplayName: admin.DisplayName, Kind: admin.Kind, PlatformRole: admin.PlatformRole, CreatedAt: admin.CreatedAt},
+			dev.ID:   {ID: dev.ID, Email: dev.Email, DisplayName: dev.DisplayName, Kind: dev.Kind, PlatformRole: dev.PlatformRole, CreatedAt: dev.CreatedAt},
+			bob.ID:   {ID: bob.ID, Email: bob.Email, DisplayName: bob.DisplayName, Kind: bob.Kind, PlatformRole: bob.PlatformRole, CreatedAt: bob.CreatedAt},
+		},
+	}
+
+	bobWS := domain.NewID()
+	bobGroup := domain.NewID()
+	chatMock := &fakeChatScope{
+		workspaces: map[string]map[string]domain.WorkspaceScope{
+			bobWS: {bob.ID: {Allowed: true, Role: "owner", OwnerID: bob.ID}},
+		},
+		conversations: map[string]map[string]domain.ConversationScope{
+			bobGroup: {bob.ID: {Allowed: true, WorkspaceID: bobWS, ConversationType: "group", WorkspaceOwnerID: bob.ID}},
+		},
+	}
+
+	var activeSecret atomic.Value
+	activeSecret.Store("init")
+	extSrv, _ := startMockExternalApp(t, func() string { return activeSecret.Load().(string) }, false)
+
+	origin := "http://teamie.local:8080"
+	reqHTTPS := false
+	repo := pg.New(postgres.New(pool))
+	svc := &app.Service{
+		Tx:                 repo,
+		Marketplace:        repo,
+		Identity:           domainIdentityFromFake{id: idMock},
+		Chat:               chatMock,
+		AppOrigin:          origin,
+		RequirePublicHTTPS: &reqHTTPS,
+		Verifier: &probe.Verifier{
+			AppOrigin:          origin,
+			RequirePublicHTTPS: false,
+			Timeout:            5 * time.Second,
+		},
+	}
+
+	created, secret, err := svc.CreateDeveloperMarketplaceApp(ctx, dev, domain.CreateMarketplaceAppInput{
+		Slug:   "pending-toggle",
+		Name:   "Pending Toggle App",
+		WebURL: extSrv.URL + "/ui",
+		MCPURL: extSrv.URL + "/mcp",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activeSecret.Store(secret)
+
+	submitted, _, err := svc.SubmitDeveloperMarketplaceApp(ctx, dev, created.ID, "ready")
+	if err != nil || submitted.ReviewStatus != domain.ReviewStatusPending {
+		t.Fatalf("expected pending_review, got %+v (%v)", submitted, err)
+	}
+
+	// 1. Owner can toggle Enabled=false and Enabled=true while pending_review!
+	f := false
+	disabledPending, err := svc.UpdateDeveloperMarketplaceApp(ctx, dev, created.ID, domain.UpdateMarketplaceAppInput{Enabled: &f})
+	if err != nil || disabledPending.Enabled || disabledPending.ReviewStatus != domain.ReviewStatusPending {
+		t.Fatalf("expected owner to disable pending_review app without leaving pending_review: %+v (%v)", disabledPending, err)
+	}
+	tr := true
+	reenabledPending, err := svc.UpdateDeveloperMarketplaceApp(ctx, dev, created.ID, domain.UpdateMarketplaceAppInput{Enabled: &tr})
+	if err != nil || !reenabledPending.Enabled || reenabledPending.ReviewStatus != domain.ReviewStatusPending {
+		t.Fatalf("expected owner to re-enable pending_review app: %+v (%v)", reenabledPending, err)
+	}
+
+	// 2. Draft field edits alongside Enabled toggle are still rejected with 409 during pending_review!
+	mutName := "Sneaky Edit"
+	_, err = svc.UpdateDeveloperMarketplaceApp(ctx, dev, created.ID, domain.UpdateMarketplaceAppInput{Enabled: &f, Name: &mutName})
+	var derr *domain.Error
+	if !errors.As(err, &derr) || derr.Status != http.StatusConflict || derr.Code != "marketplace_app_review_pending" {
+		t.Fatalf("expected 409 marketplace_app_review_pending when mutating draft fields during pending_review, got %v", err)
+	}
+
+	// 3. Approve -> install in Bob's workspace -> Admin suspends -> Owner Enabled toggle MUST NOT clear or bypass AdminSuspended!
+	approved, _, err := svc.ApproveAdminMarketplaceApp(ctx, admin, created.ID, submitted.SubmissionRevision, "approved")
+	if err != nil || !approved.IsPublished {
+		t.Fatalf("expected approved app, got %+v (%v)", approved, err)
+	}
+	if _, err := svc.InstallWorkspaceApp(ctx, bobWS, created.ID, bob); err != nil {
+		t.Fatalf("expected Bob install to succeed before suspension: %v", err)
+	}
+
+	suspended, _, err := svc.SuspendAdminMarketplaceApp(ctx, admin, created.ID, "security incident")
+	if err != nil || !suspended.AdminSuspended || suspended.ReviewStatus != domain.ReviewStatusApproved {
+		t.Fatalf("expected suspended app, got %+v (%v)", suspended, err)
+	}
+
+	// Draft edits on a suspended app are rejected with 403 marketplace_app_suspended.
+	if _, err := svc.UpdateDeveloperMarketplaceApp(ctx, dev, created.ID, domain.UpdateMarketplaceAppInput{Name: &mutName}); !errors.As(err, &derr) || derr.Status != http.StatusForbidden || derr.Code != "marketplace_app_suspended" {
+		t.Fatalf("expected 403 marketplace_app_suspended when owner attempts draft edit on suspended app, got %v", err)
+	}
+	// Toggling Enabled=false or Enabled=true must NEVER clear or bypass AdminSuspended!
+	if toggledFalse, err := svc.UpdateDeveloperMarketplaceApp(ctx, dev, created.ID, domain.UpdateMarketplaceAppInput{Enabled: &f}); err != nil || !toggledFalse.AdminSuspended {
+		t.Fatalf("expected AdminSuspended to remain true after Enabled=false, got %+v (%v)", toggledFalse, err)
+	}
+	if toggledTrue, err := svc.UpdateDeveloperMarketplaceApp(ctx, dev, created.ID, domain.UpdateMarketplaceAppInput{Enabled: &tr}); err != nil || !toggledTrue.AdminSuspended {
+		t.Fatalf("expected AdminSuspended to remain true after Enabled=true, got %+v (%v)", toggledTrue, err)
+	}
+	afterOwnerAttempt, _, err := svc.GetDeveloperMarketplaceApp(ctx, dev, created.ID)
+	if err != nil || !afterOwnerAttempt.AdminSuspended {
+		t.Fatalf("expected AdminSuspended to remain true in DB, got %+v (%v)", afterOwnerAttempt, err)
+	}
+
+	cat, err := svc.ListMarketplaceCatalog(ctx, bob)
+	if err != nil || len(cat) != 0 {
+		t.Fatalf("expected suspended app hidden from catalog despite Enabled=true, got %+v (%v)", cat, err)
+	}
+	if _, err := svc.InstallWorkspaceApp(ctx, bobWS, created.ID, bob); !errors.As(err, &derr) || derr.Status != http.StatusForbidden || derr.Code != "marketplace_app_suspended" {
+		t.Fatalf("expected 403 marketplace_app_suspended installing suspended app despite Enabled=true, got %v", err)
+	}
+	wsApps, err := svc.ListWorkspaceApps(ctx, bobWS, bob.ID)
+	if err != nil || len(wsApps) != 0 {
+		t.Fatalf("expected suspended app hidden from workspace apps, got %+v (%v)", wsApps, err)
+	}
+	convApps, err := svc.ListConversationApps(ctx, bobGroup, bob.ID)
+	if err != nil || len(convApps) != 0 {
+		t.Fatalf("expected suspended app hidden from conversation apps, got %+v (%v)", convApps, err)
+	}
+	if _, err := svc.CreateConversationAppSession(ctx, bobGroup, created.ID, bob); !errors.As(err, &derr) || derr.Status != http.StatusForbidden || derr.Code != "marketplace_app_suspended" {
+		t.Fatalf("expected 403 marketplace_app_suspended minting session for suspended app, got %v", err)
 	}
 }

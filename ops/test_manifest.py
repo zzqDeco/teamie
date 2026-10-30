@@ -165,20 +165,24 @@ if [[ $* == 'config --services' ]]; then printf 'chat\\nmarketplace\\nllm-gatewa
                 if legacy_state == "f":
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertNotIn("stop --timeout 30 chat", operations)
+                    self.assertNotIn("stop --timeout 30 marketplace", operations)
                     self.assertNotIn("transfer_marketplace_data", operations)
                     self.assertLess(operations.index(chat_up), operations.index(marketplace_up))
                 elif transfer_fails:
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn("stop --timeout 30 chat", operations)
+                    self.assertIn("stop --timeout 30 marketplace", operations)
                     self.assertIn("transfer_marketplace_data", operations)
                     self.assertNotIn(chat_up, operations)
                 else:
                     self.assertEqual(result.returncode, 0, result.stderr)
                     stop_idx = operations.index("stop --timeout 30 chat")
+                    stop_mkt_idx = operations.index("stop --timeout 30 marketplace")
                     transfer_idx = operations.index("transfer_marketplace_data")
                     chat_idx = operations.index(chat_up)
                     mkt_idx = operations.index(marketplace_up)
                     self.assertLess(stop_idx, transfer_idx)
+                    self.assertLess(stop_mkt_idx, transfer_idx)
                     self.assertLess(transfer_idx, chat_idx)
                     self.assertLess(chat_idx, mkt_idx)
 

@@ -46,6 +46,19 @@ type VerifyEndpointsInput struct {
 	SigningSecret string
 }
 
+// VerificationSaveFence binds a verification report write to the exact draft/live
+// configuration and signing secret that were probed so concurrent secret rotation,
+// draft edits, or administrative suspension cannot be overwritten by stale probes.
+type VerificationSaveFence struct {
+	Slug            string
+	DraftWebURL     string
+	DraftMCPURL     string
+	WebURL          string
+	MCPURL          string
+	SigningSecret   string
+	IgnoreSuspended bool
+}
+
 // MarketplaceEndpointVerifier probes a developer's deployed Web UI and MCP Server against the platform protocol.
 type MarketplaceEndpointVerifier interface {
 	VerifyEndpoints(ctx context.Context, input VerifyEndpointsInput) (MarketplaceEndpointVerification, error)
@@ -62,7 +75,7 @@ type MarketplaceRepository interface {
 	InsertMarketplaceApp(ctx context.Context, app MarketplaceApp) (MarketplaceApp, error)
 	UpdateMarketplaceApp(ctx context.Context, app MarketplaceApp) (MarketplaceApp, error)
 	UpdateMarketplaceSigningSecret(ctx context.Context, id, secret string) (MarketplaceApp, error)
-	SaveMarketplaceVerificationReport(ctx context.Context, id string, verifiedAt time.Time, report MarketplaceEndpointVerification) (MarketplaceApp, error)
+	SaveMarketplaceVerificationReport(ctx context.Context, id string, verifiedAt time.Time, report MarketplaceEndpointVerification, fence VerificationSaveFence) (MarketplaceApp, error)
 	DeleteMarketplaceApp(ctx context.Context, id string) (bool, error)
 	InsertMarketplaceAppReview(ctx context.Context, review MarketplaceAppReview, snapshot any) error
 	ListMarketplaceAppReviews(ctx context.Context, appID string) ([]MarketplaceAppReview, error)

@@ -40,7 +40,8 @@ func (r *Repository) ListMarketplaceAppReviews(ctx context.Context, appID string
 		`SELECT id, app_id, revision, action, actor_id, note, web_url, mcp_url, created_at
 		 FROM marketplace_app_reviews
 		 WHERE app_id=$1
-		 ORDER BY created_at DESC, id DESC`,
+		 ORDER BY created_at DESC, id DESC
+		 LIMIT 50`,
 		appID,
 	)
 	if err != nil {

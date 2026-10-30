@@ -5,16 +5,21 @@ import (
 	"encoding/json"
 	"time"
 
+	"teamie/pkg/postgres"
 	"teamie/services/marketplace/internal/domain"
 )
 
-const marketplaceAppColumns = `id,slug,name,description,web_url,mcp_url,signing_secret,enabled,owner_id,is_published,published_version,review_status,draft_name,draft_description,draft_web_url,draft_mcp_url,has_draft_changes,submission_revision,submission_note,submitted_at,reviewed_by,reviewed_at,review_note,admin_suspended,suspended_reason,suspended_at,last_verified_at,verification_report,created_at,updated_at`
+// marketplaceAppSafeColumns deliberately omits signing_secret so list and detail
+// queries never load symmetric secrets into memory.
+const marketplaceAppSafeColumns = `id,slug,name,description,web_url,mcp_url,enabled,owner_id,is_published,published_version,review_status,draft_name,draft_description,draft_web_url,draft_mcp_url,has_draft_changes,submission_revision,submission_note,submitted_at,reviewed_by,reviewed_at,review_note,admin_suspended,suspended_reason,suspended_at,last_verified_at,verification_report,created_at,updated_at`
+
+const marketplaceAppPrefixedSafeColumns = `a.id,a.slug,a.name,a.description,a.web_url,a.mcp_url,a.enabled,a.owner_id,a.is_published,a.published_version,a.review_status,a.draft_name,a.draft_description,a.draft_web_url,a.draft_mcp_url,a.has_draft_changes,a.submission_revision,a.submission_note,a.submitted_at,a.reviewed_by,a.reviewed_at,a.review_note,a.admin_suspended,a.suspended_reason,a.suspended_at,a.last_verified_at,a.verification_report,a.created_at,a.updated_at`
 
 type rowScanner interface {
 	Scan(dest ...any) error
 }
 
-func scanMarketplaceApp(row rowScanner) (domain.MarketplaceApp, error) {
+func scanMarketplaceAppSafe(row rowScanner) (domain.MarketplaceApp, error) {
 	var a domain.MarketplaceApp
 	var rawReport []byte
 	err := row.Scan(
@@ -24,7 +29,6 @@ func scanMarketplaceApp(row rowScanner) (domain.MarketplaceApp, error) {
 		&a.Description,
 		&a.WebURL,
 		&a.MCPURL,
-		&a.SigningSecret,
 		&a.Enabled,
 		&a.OwnerID,
 		&a.IsPublished,
@@ -71,7 +75,7 @@ func marshalReport(rep *domain.MarketplaceEndpointVerification) ([]byte, error) 
 func (r *Repository) ListAllMarketplaceApps(ctx context.Context) ([]domain.MarketplaceApp, error) {
 	rows, err := r.DB.Conn(ctx).Query(
 		ctx,
-		`SELECT `+marketplaceAppColumns+` FROM marketplace_apps ORDER BY CASE WHEN review_status='pending_review' THEN 0 ELSE 1 END, COALESCE(submitted_at, created_at) DESC, id ASC`,
+		`SELECT `+marketplaceAppSafeColumns+` FROM marketplace_apps ORDER BY CASE WHEN review_status='pending_review' THEN 0 ELSE 1 END, COALESCE(submitted_at, created_at) DESC, id ASC`,
 	)
 	if err != nil {
 		return nil, err
@@ -79,7 +83,7 @@ func (r *Repository) ListAllMarketplaceApps(ctx context.Context) ([]domain.Marke
 	defer rows.Close()
 	out := []domain.MarketplaceApp{}
 	for rows.Next() {
-		app, scanErr := scanMarketplaceApp(rows)
+		app, scanErr := scanMarketplaceAppSafe(rows)
 		if scanErr != nil {
 			return nil, scanErr
 		}
@@ -91,7 +95,7 @@ func (r *Repository) ListAllMarketplaceApps(ctx context.Context) ([]domain.Marke
 func (r *Repository) ListPublishedCatalogApps(ctx context.Context) ([]domain.MarketplaceApp, error) {
 	rows, err := r.DB.Conn(ctx).Query(
 		ctx,
-		`SELECT `+marketplaceAppColumns+` FROM marketplace_apps WHERE enabled=true AND is_published=true AND admin_suspended=false ORDER BY CASE WHEN owner_id IS NULL THEN 0 ELSE 1 END, created_at ASC, id ASC`,
+		`SELECT `+marketplaceAppSafeColumns+` FROM marketplace_apps WHERE enabled=true AND is_published=true AND admin_suspended=false ORDER BY CASE WHEN owner_id IS NULL THEN 0 ELSE 1 END, created_at ASC, id ASC`,
 	)
 	if err != nil {
 		return nil, err
@@ -99,7 +103,7 @@ func (r *Repository) ListPublishedCatalogApps(ctx context.Context) ([]domain.Mar
 	defer rows.Close()
 	out := []domain.MarketplaceApp{}
 	for rows.Next() {
-		app, scanErr := scanMarketplaceApp(rows)
+		app, scanErr := scanMarketplaceAppSafe(rows)
 		if scanErr != nil {
 			return nil, scanErr
 		}
@@ -111,7 +115,7 @@ func (r *Repository) ListPublishedCatalogApps(ctx context.Context) ([]domain.Mar
 func (r *Repository) ListDeveloperMarketplaceApps(ctx context.Context, ownerID string) ([]domain.MarketplaceApp, error) {
 	rows, err := r.DB.Conn(ctx).Query(
 		ctx,
-		`SELECT `+marketplaceAppColumns+` FROM marketplace_apps WHERE owner_id=$1 ORDER BY created_at DESC, id ASC`,
+		`SELECT `+marketplaceAppSafeColumns+` FROM marketplace_apps WHERE owner_id=$1 ORDER BY created_at DESC, id DESC`,
 		ownerID,
 	)
 	if err != nil {
@@ -120,7 +124,7 @@ func (r *Repository) ListDeveloperMarketplaceApps(ctx context.Context, ownerID s
 	defer rows.Close()
 	out := []domain.MarketplaceApp{}
 	for rows.Next() {
-		app, scanErr := scanMarketplaceApp(rows)
+		app, scanErr := scanMarketplaceAppSafe(rows)
 		if scanErr != nil {
 			return nil, scanErr
 		}
@@ -136,11 +140,11 @@ func (r *Repository) CountDeveloperMarketplaceApps(ctx context.Context, ownerID 
 }
 
 func (r *Repository) GetMarketplaceAppByID(ctx context.Context, id string, forUpdate bool) (domain.MarketplaceApp, error) {
-	query := `SELECT ` + marketplaceAppColumns + ` FROM marketplace_apps WHERE id=$1`
+	query := `SELECT ` + marketplaceAppSafeColumns + ` FROM marketplace_apps WHERE id=$1`
 	if forUpdate {
 		query += ` FOR UPDATE`
 	}
-	app, err := scanMarketplaceApp(r.DB.Conn(ctx).QueryRow(ctx, query, id))
+	app, err := scanMarketplaceAppSafe(r.DB.Conn(ctx).QueryRow(ctx, query, id))
 	if err != nil {
 		return domain.MarketplaceApp{}, notFound(err)
 	}
@@ -173,13 +177,13 @@ func (r *Repository) InsertMarketplaceApp(ctx context.Context, app domain.Market
 			$10,$11,$12,$13,$14,$15,$16,
 			$17,$18,$19,$20,$21,$22,$23,
 			$24,$25,$26,$27,$28,$29,$30
-		) RETURNING `+marketplaceAppColumns,
+		) RETURNING `+marketplaceAppSafeColumns,
 		app.ID, app.Slug, app.Name, app.Description, app.WebURL, app.MCPURL, app.SigningSecret, app.Enabled, app.OwnerID,
 		app.IsPublished, app.PublishedVersion, app.ReviewStatus, app.DraftName, app.DraftDescription, app.DraftWebURL, app.DraftMCPURL,
 		app.HasDraftChanges, app.SubmissionRevision, app.SubmissionNote, app.SubmittedAt, app.ReviewedBy, app.ReviewedAt, app.ReviewNote,
 		app.AdminSuspended, app.SuspendedReason, app.SuspendedAt, app.LastVerifiedAt, reportJSON, app.CreatedAt, app.UpdatedAt,
 	)
-	created, scanErr := scanMarketplaceApp(row)
+	created, scanErr := scanMarketplaceAppSafe(row)
 	if scanErr != nil {
 		return domain.MarketplaceApp{}, mapWriteError(scanErr)
 	}
@@ -221,13 +225,13 @@ func (r *Repository) UpdateMarketplaceApp(ctx context.Context, app domain.Market
 			verification_report=$26,
 			updated_at=$27
 		WHERE id=$1
-		RETURNING `+marketplaceAppColumns,
+		RETURNING `+marketplaceAppSafeColumns,
 		app.ID, app.Slug, app.Name, app.Description, app.WebURL, app.MCPURL, app.Enabled,
 		app.IsPublished, app.PublishedVersion, app.ReviewStatus, app.DraftName, app.DraftDescription, app.DraftWebURL, app.DraftMCPURL,
 		app.HasDraftChanges, app.SubmissionRevision, app.SubmissionNote, app.SubmittedAt, app.ReviewedBy, app.ReviewedAt, app.ReviewNote,
 		app.AdminSuspended, app.SuspendedReason, app.SuspendedAt, app.LastVerifiedAt, reportJSON, app.UpdatedAt,
 	)
-	updated, scanErr := scanMarketplaceApp(row)
+	updated, scanErr := scanMarketplaceAppSafe(row)
 	if scanErr != nil {
 		return domain.MarketplaceApp{}, mapWriteError(scanErr)
 	}
@@ -240,18 +244,24 @@ func (r *Repository) UpdateMarketplaceSigningSecret(ctx context.Context, id, sec
 		`UPDATE marketplace_apps
 		 SET signing_secret=$2, last_verified_at=NULL, verification_report=NULL, updated_at=now()
 		 WHERE id=$1
-		 RETURNING `+marketplaceAppColumns,
+		 RETURNING `+marketplaceAppSafeColumns,
 		id,
 		secret,
 	)
-	updated, err := scanMarketplaceApp(row)
+	updated, err := scanMarketplaceAppSafe(row)
 	if err != nil {
 		return domain.MarketplaceApp{}, notFound(err)
 	}
 	return updated, nil
 }
 
-func (r *Repository) SaveMarketplaceVerificationReport(ctx context.Context, id string, verifiedAt time.Time, report domain.MarketplaceEndpointVerification) (domain.MarketplaceApp, error) {
+func (r *Repository) SaveMarketplaceVerificationReport(
+	ctx context.Context,
+	id string,
+	verifiedAt time.Time,
+	report domain.MarketplaceEndpointVerification,
+	fence domain.VerificationSaveFence,
+) (domain.MarketplaceApp, error) {
 	reportJSON, err := marshalReport(&report)
 	if err != nil {
 		return domain.MarketplaceApp{}, err
@@ -261,16 +271,44 @@ func (r *Repository) SaveMarketplaceVerificationReport(ctx context.Context, id s
 		`UPDATE marketplace_apps
 		 SET last_verified_at=$2, verification_report=$3, updated_at=now()
 		 WHERE id=$1
-		 RETURNING `+marketplaceAppColumns,
+		   AND slug=$4
+		   AND draft_web_url=$5
+		   AND draft_mcp_url=$6
+		   AND web_url=$7
+		   AND mcp_url=$8
+		   AND signing_secret=$9
+		   AND ($10::boolean OR admin_suspended=false)
+		 RETURNING `+marketplaceAppSafeColumns,
 		id,
 		verifiedAt,
 		reportJSON,
+		fence.Slug,
+		fence.DraftWebURL,
+		fence.DraftMCPURL,
+		fence.WebURL,
+		fence.MCPURL,
+		fence.SigningSecret,
+		fence.IgnoreSuspended,
 	)
-	updated, scanErr := scanMarketplaceApp(row)
-	if scanErr != nil {
-		return domain.MarketplaceApp{}, notFound(scanErr)
+	updated, scanErr := scanMarketplaceAppSafe(row)
+	if scanErr == nil {
+		return updated, nil
 	}
-	return updated, nil
+	if !postgres.IsNoRows(scanErr) {
+		return domain.MarketplaceApp{}, scanErr
+	}
+	var adminSuspended bool
+	chkErr := r.DB.Conn(ctx).QueryRow(ctx, `SELECT admin_suspended FROM marketplace_apps WHERE id=$1`, id).Scan(&adminSuspended)
+	if postgres.IsNoRows(chkErr) {
+		return domain.MarketplaceApp{}, domain.ErrMarketplaceAppUnavailable()
+	}
+	if chkErr != nil {
+		return domain.MarketplaceApp{}, chkErr
+	}
+	if !fence.IgnoreSuspended && adminSuspended {
+		return domain.MarketplaceApp{}, domain.ErrMarketplaceSuspended()
+	}
+	return domain.MarketplaceApp{}, domain.ErrMarketplaceRevisionConflict()
 }
 
 func (r *Repository) DeleteMarketplaceApp(ctx context.Context, id string) (bool, error) {
@@ -284,11 +322,7 @@ func (r *Repository) DeleteMarketplaceApp(ctx context.Context, id string) (bool,
 func (r *Repository) ListWorkspaceMarketplaceApps(ctx context.Context, workspaceID string) ([]domain.InstalledWorkspaceMarketplaceApp, error) {
 	rows, err := r.DB.Conn(ctx).Query(
 		ctx,
-		`SELECT a.id,a.slug,a.name,a.description,a.web_url,a.mcp_url,a.signing_secret,a.enabled,a.owner_id,
-			a.is_published,a.published_version,a.review_status,a.draft_name,a.draft_description,a.draft_web_url,a.draft_mcp_url,
-			a.has_draft_changes,a.submission_revision,a.submission_note,a.submitted_at,a.reviewed_by,a.reviewed_at,a.review_note,
-			a.admin_suspended,a.suspended_reason,a.suspended_at,a.last_verified_at,a.verification_report,a.created_at,a.updated_at,
-			w.review_preview
+		`SELECT `+marketplaceAppPrefixedSafeColumns+`, w.review_preview
 		 FROM workspace_marketplace_apps w
 		 JOIN marketplace_apps a ON a.id=w.app_id
 		 WHERE w.workspace_id=$1
@@ -310,7 +344,6 @@ func (r *Repository) ListWorkspaceMarketplaceApps(ctx context.Context, workspace
 			&item.App.Description,
 			&item.App.WebURL,
 			&item.App.MCPURL,
-			&item.App.SigningSecret,
 			&item.App.Enabled,
 			&item.App.OwnerID,
 			&item.App.IsPublished,
@@ -378,11 +411,7 @@ func (r *Repository) GetInstalledWorkspaceMarketplaceAppForSession(ctx context.C
 	var rawReport []byte
 	err := r.DB.Conn(ctx).QueryRow(
 		ctx,
-		`SELECT a.id,a.slug,a.name,a.description,a.web_url,a.mcp_url,a.signing_secret,a.enabled,a.owner_id,
-			a.is_published,a.published_version,a.review_status,a.draft_name,a.draft_description,a.draft_web_url,a.draft_mcp_url,
-			a.has_draft_changes,a.submission_revision,a.submission_note,a.submitted_at,a.reviewed_by,a.reviewed_at,a.review_note,
-			a.admin_suspended,a.suspended_reason,a.suspended_at,a.last_verified_at,a.verification_report,a.created_at,a.updated_at,
-			w.review_preview
+		`SELECT `+marketplaceAppPrefixedSafeColumns+`, a.signing_secret, w.review_preview
 		 FROM workspace_marketplace_apps w
 		 JOIN marketplace_apps a ON a.id=w.app_id
 		 WHERE w.workspace_id=$1 AND w.app_id=$2`,
@@ -395,7 +424,6 @@ func (r *Repository) GetInstalledWorkspaceMarketplaceAppForSession(ctx context.C
 		&item.App.Description,
 		&item.App.WebURL,
 		&item.App.MCPURL,
-		&item.App.SigningSecret,
 		&item.App.Enabled,
 		&item.App.OwnerID,
 		&item.App.IsPublished,
@@ -419,6 +447,7 @@ func (r *Repository) GetInstalledWorkspaceMarketplaceAppForSession(ctx context.C
 		&rawReport,
 		&item.App.CreatedAt,
 		&item.App.UpdatedAt,
+		&item.App.SigningSecret,
 		&item.ReviewPreview,
 	)
 	if err != nil {

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strings"
 
 	"teamie/services/marketplace/internal/domain"
 )
@@ -14,8 +15,8 @@ func requireHumanDeveloper(actor domain.User) error {
 }
 
 func ensureDeveloperOwner(app domain.MarketplaceApp, actorID string) error {
-	if app.OwnerID == nil || *app.OwnerID == "" || *app.OwnerID != actorID {
-		return domain.ErrNotFound()
+	if app.OwnerID == nil || strings.TrimSpace(*app.OwnerID) != actorID {
+		return domain.ErrMarketplaceAppUnavailable()
 	}
 	return nil
 }
@@ -91,7 +92,7 @@ func (s *Service) CreateDeveloperMarketplaceApp(ctx context.Context, actor domai
 			DraftDescription: desc,
 			DraftWebURL:      webURL,
 			DraftMCPURL:      mcpURL,
-			HasDraftChanges:  false,
+			HasDraftChanges:  true,
 		})
 		if err != nil {
 			return err
@@ -114,7 +115,7 @@ func (s *Service) GetDeveloperMarketplaceApp(ctx context.Context, actor domain.U
 	if err := requireHumanDeveloper(actor); err != nil {
 		return domain.MarketplaceApp{}, nil, err
 	}
-	app, err := s.Marketplace.GetMarketplaceAppByID(ctx, appID, false)
+	app, err := s.Marketplace.GetMarketplaceAppByID(ctx, strings.TrimSpace(appID), false)
 	if err != nil {
 		return domain.MarketplaceApp{}, nil, err
 	}
@@ -137,6 +138,8 @@ func (s *Service) GetDeveloperMarketplaceApp(ctx context.Context, actor domain.U
 }
 
 // UpdateDeveloperMarketplaceApp updates draft fields or enabled toggle on a developer's app.
+// Toggling only Enabled remains permitted while a draft submission is pending_review; it never
+// clears or bypasses AdminSuspended.
 func (s *Service) UpdateDeveloperMarketplaceApp(ctx context.Context, actor domain.User, appID string, in domain.UpdateMarketplaceAppInput) (domain.MarketplaceApp, error) {
 	if err := requireHumanDeveloper(actor); err != nil {
 		return domain.MarketplaceApp{}, err
@@ -144,6 +147,9 @@ func (s *Service) UpdateDeveloperMarketplaceApp(ctx context.Context, actor domai
 	if err := s.requireMarketplaceEnabled(); err != nil {
 		return domain.MarketplaceApp{}, err
 	}
+	appID = strings.TrimSpace(appID)
+	onlyToggleEnabled := in.Enabled != nil && in.Slug == nil && in.Name == nil && in.Description == nil && in.WebURL == nil && in.MCPURL == nil
+
 	var updated domain.MarketplaceApp
 	err := s.Tx.WithinTx(ctx, func(txCtx context.Context) error {
 		cur, err := s.Marketplace.GetMarketplaceAppByID(txCtx, appID, true)
@@ -152,6 +158,16 @@ func (s *Service) UpdateDeveloperMarketplaceApp(ctx context.Context, actor domai
 		}
 		if err := ensureDeveloperOwner(cur, actor.ID); err != nil {
 			return err
+		}
+		if onlyToggleEnabled {
+			cur.Enabled = *in.Enabled
+			cur.UpdatedAt = s.nowUTC()
+			res, updErr := s.Marketplace.UpdateMarketplaceApp(txCtx, cur)
+			if updErr != nil {
+				return updErr
+			}
+			updated = res
+			return nil
 		}
 		if cur.AdminSuspended {
 			return domain.ErrMarketplaceSuspended()
@@ -169,7 +185,7 @@ func (s *Service) UpdateDeveloperMarketplaceApp(ctx context.Context, actor domai
 			if err != nil {
 				return err
 			}
-			if slug != cur.Slug && (cur.IsPublished || cur.SubmissionRevision > 0 || cur.ReviewStatus != domain.ReviewStatusDraft) {
+			if slug != cur.Slug && (cur.IsPublished || cur.SubmissionRevision > 0) {
 				return domain.ErrMarketplaceSlugImmutable()
 			}
 			cur.Slug = slug
@@ -218,6 +234,11 @@ func (s *Service) UpdateDeveloperMarketplaceApp(ctx context.Context, actor domai
 			cur.VerificationReport = nil
 		}
 		cur.HasDraftChanges = computeHasDraftChanges(cur)
+		if cur.HasDraftChanges {
+			cur.ReviewStatus = domain.ReviewStatusDraft
+		} else if cur.IsPublished {
+			cur.ReviewStatus = domain.ReviewStatusApproved
+		}
 		cur.UpdatedAt = s.nowUTC()
 		res, err := s.Marketplace.UpdateMarketplaceApp(txCtx, cur)
 		if err != nil {
@@ -232,6 +253,44 @@ func (s *Service) UpdateDeveloperMarketplaceApp(ctx context.Context, actor domai
 	return s.enrichApp(ctx, updated)
 }
 
+func (s *Service) probeAppSnapshot(
+	ctx context.Context,
+	app domain.MarketplaceApp,
+	webURL, mcpURL string,
+	enforceCooldown bool,
+) (domain.MarketplaceEndpointVerification, string, error) {
+	if s.Verifier == nil {
+		return domain.MarketplaceEndpointVerification{}, "", domain.ErrMarketplaceVerificationFailed("Endpoint verifier is not configured")
+	}
+	if enforceCooldown {
+		if err := s.acquireVerifySlot(app); err != nil {
+			return domain.MarketplaceEndpointVerification{}, "", err
+		}
+	}
+	secret := app.SigningSecret
+	if secret == "" {
+		var err error
+		secret, err = s.Marketplace.GetMarketplaceAppSigningSecret(ctx, app.ID)
+		if err != nil {
+			return domain.MarketplaceEndpointVerification{}, "", err
+		}
+	}
+	report, err := s.Verifier.VerifyEndpoints(ctx, domain.VerifyEndpointsInput{
+		AppID:         app.ID,
+		Slug:          app.Slug,
+		WebURL:        webURL,
+		MCPURL:        mcpURL,
+		SigningSecret: secret,
+	})
+	if err != nil {
+		return domain.MarketplaceEndpointVerification{}, "", err
+	}
+	if report.VerifiedAt.IsZero() {
+		report.VerifiedAt = s.nowUTC()
+	}
+	return report, secret, nil
+}
+
 // VerifyDeveloperMarketplaceApp executes the live 4-stage protocol probe against the developer's draft endpoints.
 func (s *Service) VerifyDeveloperMarketplaceApp(ctx context.Context, actor domain.User, appID string) (domain.MarketplaceApp, domain.MarketplaceEndpointVerification, error) {
 	if err := requireHumanDeveloper(actor); err != nil {
@@ -240,7 +299,7 @@ func (s *Service) VerifyDeveloperMarketplaceApp(ctx context.Context, actor domai
 	if err := s.requireMarketplaceEnabled(); err != nil {
 		return domain.MarketplaceApp{}, domain.MarketplaceEndpointVerification{}, err
 	}
-	app, err := s.Marketplace.GetMarketplaceAppByID(ctx, appID, false)
+	app, err := s.Marketplace.GetMarketplaceAppByID(ctx, strings.TrimSpace(appID), false)
 	if err != nil {
 		return domain.MarketplaceApp{}, domain.MarketplaceEndpointVerification{}, err
 	}
@@ -254,33 +313,19 @@ func (s *Service) VerifyDeveloperMarketplaceApp(ctx context.Context, actor domai
 	if err != nil {
 		return domain.MarketplaceApp{}, domain.MarketplaceEndpointVerification{}, err
 	}
-	if err := s.acquireVerifySlot(app.ID); err != nil {
-		return domain.MarketplaceApp{}, domain.MarketplaceEndpointVerification{}, err
-	}
-	secret := app.SigningSecret
-	if secret == "" {
-		secret, err = s.Marketplace.GetMarketplaceAppSigningSecret(ctx, app.ID)
-		if err != nil {
-			return domain.MarketplaceApp{}, domain.MarketplaceEndpointVerification{}, err
-		}
-	}
-	if s.Verifier == nil {
-		return domain.MarketplaceApp{}, domain.MarketplaceEndpointVerification{}, domain.Err(503, "verifier_unavailable", "Marketplace endpoint verifier is unavailable")
-	}
-	report, err := s.Verifier.VerifyEndpoints(ctx, domain.VerifyEndpointsInput{
-		AppID:         app.ID,
-		Slug:          app.Slug,
-		WebURL:        webURL,
-		MCPURL:        mcpURL,
-		SigningSecret: secret,
-	})
+	report, secret, err := s.probeAppSnapshot(ctx, app, webURL, mcpURL, true)
 	if err != nil {
 		return domain.MarketplaceApp{}, domain.MarketplaceEndpointVerification{}, err
 	}
-	if report.VerifiedAt.IsZero() {
-		report.VerifiedAt = s.nowUTC()
-	}
-	saved, err := s.Marketplace.SaveMarketplaceVerificationReport(ctx, app.ID, report.VerifiedAt, report)
+	saved, err := s.Marketplace.SaveMarketplaceVerificationReport(ctx, app.ID, report.VerifiedAt, report, domain.VerificationSaveFence{
+		Slug:            app.Slug,
+		DraftWebURL:     app.DraftWebURL,
+		DraftMCPURL:     app.DraftMCPURL,
+		WebURL:          app.WebURL,
+		MCPURL:          app.MCPURL,
+		SigningSecret:   secret,
+		IgnoreSuspended: false,
+	})
 	if err != nil {
 		return domain.MarketplaceApp{}, domain.MarketplaceEndpointVerification{}, err
 	}
@@ -291,7 +336,9 @@ func (s *Service) VerifyDeveloperMarketplaceApp(ctx context.Context, actor domai
 	return enriched, report, nil
 }
 
-// SubmitDeveloperMarketplaceApp transitions a verified draft into pending_review.
+// SubmitDeveloperMarketplaceApp runs a fresh live protocol probe against the current draft endpoints
+// outside the write transaction, then locks the app row to fence against concurrent draft/secret/status
+// changes before transitioning into pending_review.
 func (s *Service) SubmitDeveloperMarketplaceApp(ctx context.Context, actor domain.User, appID, rawNote string) (domain.MarketplaceApp, []domain.MarketplaceAppReview, error) {
 	if err := requireHumanDeveloper(actor); err != nil {
 		return domain.MarketplaceApp{}, nil, err
@@ -304,9 +351,50 @@ func (s *Service) SubmitDeveloperMarketplaceApp(ctx context.Context, actor domai
 		return domain.MarketplaceApp{}, nil, err
 	}
 
+	snapshotApp, err := s.Marketplace.GetMarketplaceAppByID(ctx, strings.TrimSpace(appID), false)
+	if err != nil {
+		return domain.MarketplaceApp{}, nil, err
+	}
+	if err := ensureDeveloperOwner(snapshotApp, actor.ID); err != nil {
+		return domain.MarketplaceApp{}, nil, err
+	}
+	if snapshotApp.AdminSuspended {
+		return domain.MarketplaceApp{}, nil, domain.ErrMarketplaceSuspended()
+	}
+	if snapshotApp.ReviewStatus == domain.ReviewStatusPending {
+		return domain.MarketplaceApp{}, nil, domain.ErrMarketplaceInvalidState("Application is already pending review")
+	}
+	webURL, mcpURL, err := s.validateEndpoints(snapshotApp.DraftWebURL, snapshotApp.DraftMCPURL, false)
+	if err != nil {
+		return domain.MarketplaceApp{}, nil, err
+	}
+	if snapshotApp.IsPublished && !computeHasDraftChanges(snapshotApp) {
+		return domain.MarketplaceApp{}, nil, domain.ErrMarketplaceInvalidState("No unpublished draft changes to submit")
+	}
+
+	report, snapshotSecret, err := s.probeAppSnapshot(ctx, snapshotApp, webURL, mcpURL, false)
+	if err != nil {
+		return domain.MarketplaceApp{}, nil, err
+	}
+	if !report.OK {
+		if _, saveErr := s.Marketplace.SaveMarketplaceVerificationReport(ctx, snapshotApp.ID, report.VerifiedAt, report, domain.VerificationSaveFence{
+			Slug:            snapshotApp.Slug,
+			DraftWebURL:     snapshotApp.DraftWebURL,
+			DraftMCPURL:     snapshotApp.DraftMCPURL,
+			WebURL:          snapshotApp.WebURL,
+			MCPURL:          snapshotApp.MCPURL,
+			SigningSecret:   snapshotSecret,
+			IgnoreSuspended: false,
+		}); saveErr != nil {
+			return domain.MarketplaceApp{}, nil, saveErr
+		}
+		return domain.MarketplaceApp{}, nil, domain.ErrMarketplaceVerificationFailed("")
+	}
+
 	var updated domain.MarketplaceApp
+	var reviews []domain.MarketplaceAppReview
 	err = s.Tx.WithinTx(ctx, func(txCtx context.Context) error {
-		cur, err := s.Marketplace.GetMarketplaceAppByID(txCtx, appID, true)
+		cur, err := s.Marketplace.GetMarketplaceAppByID(txCtx, snapshotApp.ID, true)
 		if err != nil {
 			return err
 		}
@@ -317,22 +405,23 @@ func (s *Service) SubmitDeveloperMarketplaceApp(ctx context.Context, actor domai
 			return domain.ErrMarketplaceSuspended()
 		}
 		if cur.ReviewStatus == domain.ReviewStatusPending {
-			return domain.ErrMarketplaceReviewPending()
+			return domain.ErrMarketplaceInvalidState("Application is already pending review")
 		}
-		webURL, mcpURL, err := s.validateEndpoints(cur.DraftWebURL, cur.DraftMCPURL, false)
+		if cur.IsPublished && !computeHasDraftChanges(cur) {
+			return domain.ErrMarketplaceInvalidState("No unpublished draft changes to submit")
+		}
+		curSecret, err := s.Marketplace.GetMarketplaceAppSigningSecret(txCtx, cur.ID)
 		if err != nil {
 			return err
 		}
-		if cur.IsPublished && !computeHasDraftChanges(cur) {
-			return domain.ErrMarketplaceInvalidState("No draft changes to submit for review")
-		}
-		if cur.LastVerifiedAt == nil || cur.VerificationReport == nil || !cur.VerificationReport.OK ||
-			cur.VerificationReport.WebURL != webURL || cur.VerificationReport.MCPURL != mcpURL {
-			summary := ""
-			if cur.VerificationReport != nil {
-				summary = cur.VerificationReport.FirstFailureSummary()
-			}
-			return domain.ErrMarketplaceVerificationFailed(summary)
+		if cur.Slug != snapshotApp.Slug ||
+			cur.DraftName != snapshotApp.DraftName ||
+			cur.DraftDescription != snapshotApp.DraftDescription ||
+			cur.DraftWebURL != webURL ||
+			cur.DraftMCPURL != mcpURL ||
+			curSecret != snapshotSecret ||
+			cur.SubmissionRevision != snapshotApp.SubmissionRevision {
+			return domain.ErrMarketplaceRevisionConflict()
 		}
 
 		now := s.nowUTC()
@@ -340,6 +429,8 @@ func (s *Service) SubmitDeveloperMarketplaceApp(ctx context.Context, actor domai
 		cur.ReviewStatus = domain.ReviewStatusPending
 		cur.SubmissionNote = note
 		cur.SubmittedAt = &now
+		cur.LastVerifiedAt = &report.VerifiedAt
+		cur.VerificationReport = &report
 		cur.HasDraftChanges = computeHasDraftChanges(cur)
 		cur.UpdatedAt = now
 
@@ -360,13 +451,14 @@ func (s *Service) SubmitDeveloperMarketplaceApp(ctx context.Context, actor domai
 		}, reviewSnapshot(res)); err != nil {
 			return err
 		}
+		revs, err := s.Marketplace.ListMarketplaceAppReviews(txCtx, res.ID)
+		if err != nil {
+			return err
+		}
 		updated = res
+		reviews = revs
 		return nil
 	})
-	if err != nil {
-		return domain.MarketplaceApp{}, nil, err
-	}
-	reviews, err := s.Marketplace.ListMarketplaceAppReviews(ctx, updated.ID)
 	if err != nil {
 		return domain.MarketplaceApp{}, nil, err
 	}
@@ -381,7 +473,7 @@ func (s *Service) SubmitDeveloperMarketplaceApp(ctx context.Context, actor domai
 	return enrichedApp, enrichedReviews, nil
 }
 
-// WithdrawDeveloperMarketplaceApp returns a pending_review app back to draft (or approved if already published).
+// WithdrawDeveloperMarketplaceApp returns a pending_review submission back to draft so the developer can edit it.
 func (s *Service) WithdrawDeveloperMarketplaceApp(ctx context.Context, actor domain.User, appID string) (domain.MarketplaceApp, []domain.MarketplaceAppReview, error) {
 	if err := requireHumanDeveloper(actor); err != nil {
 		return domain.MarketplaceApp{}, nil, err
@@ -389,7 +481,9 @@ func (s *Service) WithdrawDeveloperMarketplaceApp(ctx context.Context, actor dom
 	if err := s.requireMarketplaceEnabled(); err != nil {
 		return domain.MarketplaceApp{}, nil, err
 	}
+	appID = strings.TrimSpace(appID)
 	var updated domain.MarketplaceApp
+	var reviews []domain.MarketplaceAppReview
 	err := s.Tx.WithinTx(ctx, func(txCtx context.Context) error {
 		cur, err := s.Marketplace.GetMarketplaceAppByID(txCtx, appID, true)
 		if err != nil {
@@ -402,14 +496,10 @@ func (s *Service) WithdrawDeveloperMarketplaceApp(ctx context.Context, actor dom
 			return domain.ErrMarketplaceSuspended()
 		}
 		if cur.ReviewStatus != domain.ReviewStatusPending {
-			return domain.ErrMarketplaceInvalidState("Application is not currently pending review")
+			return domain.ErrMarketplaceInvalidState("Only pending review submissions can be withdrawn")
 		}
 		now := s.nowUTC()
-		if cur.IsPublished {
-			cur.ReviewStatus = domain.ReviewStatusApproved
-		} else {
-			cur.ReviewStatus = domain.ReviewStatusDraft
-		}
+		cur.ReviewStatus = domain.ReviewStatusDraft
 		cur.HasDraftChanges = computeHasDraftChanges(cur)
 		cur.UpdatedAt = now
 		res, err := s.Marketplace.UpdateMarketplaceApp(txCtx, cur)
@@ -429,13 +519,14 @@ func (s *Service) WithdrawDeveloperMarketplaceApp(ctx context.Context, actor dom
 		}, reviewSnapshot(res)); err != nil {
 			return err
 		}
+		revs, err := s.Marketplace.ListMarketplaceAppReviews(txCtx, res.ID)
+		if err != nil {
+			return err
+		}
 		updated = res
+		reviews = revs
 		return nil
 	})
-	if err != nil {
-		return domain.MarketplaceApp{}, nil, err
-	}
-	reviews, err := s.Marketplace.ListMarketplaceAppReviews(ctx, updated.ID)
 	if err != nil {
 		return domain.MarketplaceApp{}, nil, err
 	}
@@ -458,6 +549,7 @@ func (s *Service) RotateDeveloperMarketplaceAppSecret(ctx context.Context, actor
 	if err := s.requireMarketplaceEnabled(); err != nil {
 		return domain.MarketplaceApp{}, "", err
 	}
+	appID = strings.TrimSpace(appID)
 	secret := domain.NewMarketplaceSigningSecret()
 	var updated domain.MarketplaceApp
 	err := s.Tx.WithinTx(ctx, func(txCtx context.Context) error {
@@ -474,7 +566,7 @@ func (s *Service) RotateDeveloperMarketplaceAppSecret(ctx context.Context, actor
 		if cur.ReviewStatus == domain.ReviewStatusPending {
 			return domain.ErrMarketplaceReviewPending()
 		}
-		res, err := s.Marketplace.UpdateMarketplaceSigningSecret(txCtx, appID, secret)
+		res, err := s.Marketplace.UpdateMarketplaceSigningSecret(txCtx, cur.ID, secret)
 		if err != nil {
 			return err
 		}
@@ -499,6 +591,7 @@ func (s *Service) DeleteDeveloperMarketplaceApp(ctx context.Context, actor domai
 	if err := s.requireMarketplaceEnabled(); err != nil {
 		return err
 	}
+	appID = strings.TrimSpace(appID)
 	return s.Tx.WithinTx(ctx, func(txCtx context.Context) error {
 		cur, err := s.Marketplace.GetMarketplaceAppByID(txCtx, appID, true)
 		if err != nil {
@@ -513,15 +606,15 @@ func (s *Service) DeleteDeveloperMarketplaceApp(ctx context.Context, actor domai
 		if cur.ReviewStatus == domain.ReviewStatusPending {
 			return domain.ErrMarketplaceReviewPending()
 		}
-		if cur.IsPublished {
-			return domain.ErrMarketplaceInvalidState("Published marketplace applications cannot be deleted by the developer")
+		if cur.IsPublished || cur.PublishedVersion > 0 {
+			return domain.ErrMarketplaceInvalidState("Published applications cannot be deleted by the developer; disable the app or request platform removal")
 		}
-		deleted, err := s.Marketplace.DeleteMarketplaceApp(txCtx, appID)
+		deleted, err := s.Marketplace.DeleteMarketplaceApp(txCtx, cur.ID)
 		if err != nil {
 			return err
 		}
 		if !deleted {
-			return domain.ErrNotFound()
+			return domain.ErrMarketplaceAppUnavailable()
 		}
 		return nil
 	})

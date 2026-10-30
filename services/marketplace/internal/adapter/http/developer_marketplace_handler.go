@@ -3,7 +3,9 @@ package http
 import (
 	"context"
 
+	"go.uber.org/zap"
 	marketplacegen "teamie/contracts/gen/im/hertz_gen/im/marketplace"
+	"teamie/pkg/observability"
 	"teamie/services/marketplace/internal/domain"
 )
 
@@ -38,6 +40,12 @@ func (a *Adapter) CreateDeveloperMarketplaceApp(ctx context.Context, req *market
 	if err != nil {
 		return nil, err
 	}
+	observability.L(ctx).Info(
+		"Developer marketplace app created",
+		zap.String("event.action", "developer-marketplace-app-created"),
+		zap.String("event.outcome", "success"),
+		zap.String("custom.marketplace.app_id", app.ID),
+	)
 	return &marketplacegen.CreatedDeveloperMarketplaceAppResp{
 		App:           toDeveloperMarketplaceAppDTO(app),
 		SigningSecret: secret,
@@ -102,6 +110,13 @@ func (a *Adapter) SubmitDeveloperMarketplaceApp(ctx context.Context, req *market
 	if err != nil {
 		return nil, err
 	}
+	observability.L(ctx).Info(
+		"Developer marketplace app submitted",
+		zap.String("event.action", "developer-marketplace-app-submitted"),
+		zap.String("event.outcome", "success"),
+		zap.String("custom.marketplace.app_id", app.ID),
+		zap.Int("custom.marketplace.revision", app.SubmissionRevision),
+	)
 	return &marketplacegen.DeveloperMarketplaceAppDetailResp{
 		App:     toDeveloperMarketplaceAppDTO(app),
 		Reviews: toReviewDTOs(reviews),
@@ -117,6 +132,13 @@ func (a *Adapter) WithdrawDeveloperMarketplaceApp(ctx context.Context, req *mark
 	if err != nil {
 		return nil, err
 	}
+	observability.L(ctx).Info(
+		"Developer marketplace app withdrawn",
+		zap.String("event.action", "developer-marketplace-app-withdrawn"),
+		zap.String("event.outcome", "success"),
+		zap.String("custom.marketplace.app_id", app.ID),
+		zap.Int("custom.marketplace.revision", app.SubmissionRevision),
+	)
 	return &marketplacegen.DeveloperMarketplaceAppDetailResp{
 		App:     toDeveloperMarketplaceAppDTO(app),
 		Reviews: toReviewDTOs(reviews),
@@ -132,6 +154,12 @@ func (a *Adapter) RotateDeveloperMarketplaceAppSecret(ctx context.Context, req *
 	if err != nil {
 		return nil, err
 	}
+	observability.L(ctx).Info(
+		"Developer marketplace app secret rotated",
+		zap.String("event.action", "developer-marketplace-app-secret-rotated"),
+		zap.String("event.outcome", "success"),
+		zap.String("custom.marketplace.app_id", app.ID),
+	)
 	return &marketplacegen.RotateDeveloperMarketplaceAppSecretResp{
 		App:           toDeveloperMarketplaceAppDTO(app),
 		SigningSecret: secret,
@@ -245,6 +273,14 @@ func (a *Adapter) ApproveAdminMarketplaceApp(ctx context.Context, req *marketpla
 	if err != nil {
 		return nil, err
 	}
+	observability.L(ctx).Info(
+		"Admin marketplace app approved",
+		zap.String("event.action", "admin-marketplace-app-approved"),
+		zap.String("event.outcome", "success"),
+		zap.String("custom.marketplace.app_id", app.ID),
+		zap.Int("custom.marketplace.revision", app.SubmissionRevision),
+		zap.Int("custom.marketplace.published_version", app.PublishedVersion),
+	)
 	return &marketplacegen.DeveloperMarketplaceAppDetailResp{
 		App:     toDeveloperMarketplaceAppDTO(app),
 		Reviews: toReviewDTOs(reviews),
@@ -260,6 +296,13 @@ func (a *Adapter) RejectAdminMarketplaceApp(ctx context.Context, req *marketplac
 	if err != nil {
 		return nil, err
 	}
+	observability.L(ctx).Info(
+		"Admin marketplace app rejected",
+		zap.String("event.action", "admin-marketplace-app-rejected"),
+		zap.String("event.outcome", "success"),
+		zap.String("custom.marketplace.app_id", app.ID),
+		zap.Int("custom.marketplace.revision", app.SubmissionRevision),
+	)
 	return &marketplacegen.DeveloperMarketplaceAppDetailResp{
 		App:     toDeveloperMarketplaceAppDTO(app),
 		Reviews: toReviewDTOs(reviews),
@@ -275,6 +318,12 @@ func (a *Adapter) SuspendAdminMarketplaceApp(ctx context.Context, req *marketpla
 	if err != nil {
 		return nil, err
 	}
+	observability.L(ctx).Info(
+		"Admin marketplace app suspended",
+		zap.String("event.action", "admin-marketplace-app-suspended"),
+		zap.String("event.outcome", "success"),
+		zap.String("custom.marketplace.app_id", app.ID),
+	)
 	return &marketplacegen.DeveloperMarketplaceAppDetailResp{
 		App:     toDeveloperMarketplaceAppDTO(app),
 		Reviews: toReviewDTOs(reviews),
@@ -290,6 +339,12 @@ func (a *Adapter) UnsuspendAdminMarketplaceApp(ctx context.Context, req *marketp
 	if err != nil {
 		return nil, err
 	}
+	observability.L(ctx).Info(
+		"Admin marketplace app unsuspended",
+		zap.String("event.action", "admin-marketplace-app-unsuspended"),
+		zap.String("event.outcome", "success"),
+		zap.String("custom.marketplace.app_id", app.ID),
+	)
 	return &marketplacegen.DeveloperMarketplaceAppDetailResp{
 		App:     toDeveloperMarketplaceAppDTO(app),
 		Reviews: toReviewDTOs(reviews),

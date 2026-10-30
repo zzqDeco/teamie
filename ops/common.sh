@@ -32,9 +32,10 @@ rollout() {
     has_legacy_marketplace=$("${COMPOSE[@]}" exec -T postgres sh -ec \
       'PGPASSWORD="$POSTGRES_PASSWORD" exec psql --username postgres --dbname teamie_chat --tuples-only --no-align --set ON_ERROR_STOP=1 --command "SELECT to_regclass('\''public.marketplace_apps'\'') IS NOT NULL"') || return
     if [[ $has_legacy_marketplace == t ]]; then
-      # Quiesce legacy Chat writes and copy embedded Marketplace state into
-      # teamie_marketplace before Chat migration 010 retires those tables.
+      # Quiesce both legacy Chat and standalone Marketplace writes before copying
+      # and reconciling embedded Marketplace state into teamie_marketplace.
       "${COMPOSE[@]}" stop --timeout 30 chat || return
+      "${COMPOSE[@]}" stop --timeout 30 marketplace || return
       "${COMPOSE[@]}" exec -T postgres bash -s < "${COMPOSE_RECIPE}/deploy/postgres/02-migrate-chat-marketplace.sh" || return
     fi
   fi

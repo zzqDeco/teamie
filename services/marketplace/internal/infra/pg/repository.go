@@ -52,7 +52,7 @@ func (r *Repository) Ping(ctx context.Context) error {
 
 func notFound(err error) error {
 	if postgres.IsNoRows(err) {
-		return domain.ErrNotFound()
+		return domain.ErrMarketplaceAppUnavailable()
 	}
 	return err
 }

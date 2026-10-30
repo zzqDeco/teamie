@@ -17,10 +17,11 @@ func requireActor(ctx context.Context) (domain.User, error) {
 }
 
 func (a *Adapter) ListMarketplaceCatalog(ctx context.Context, _ *marketplacegen.EmptyMarketplaceReq) (*marketplacegen.MarketplaceAppListResp, error) {
-	if _, err := requireActor(ctx); err != nil {
+	user, err := requireActor(ctx)
+	if err != nil {
 		return nil, err
 	}
-	apps, err := a.App.ListMarketplaceCatalog(ctx)
+	apps, err := a.App.ListMarketplaceCatalog(ctx, user)
 	if err != nil {
 		return nil, err
 	}
@@ -98,6 +99,6 @@ func (a *Adapter) CreateConversationAppSession(ctx context.Context, req *marketp
 	return &marketplacegen.ConversationAppSessionResp{
 		App:       toMarketplaceAppDTO(sess.App),
 		Token:     sess.Token,
-		ExpiresAt: sess.ExpiresAt.UTC().Format(time.RFC3339),
+		ExpiresAt: sess.ExpiresAt.UTC().Format(time.RFC3339Nano),
 	}, nil
 }

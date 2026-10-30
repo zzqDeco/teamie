@@ -21,6 +21,10 @@ if [[ $has_legacy_apps != t ]]; then
   exit 0
 fi
 
+# Clear any prior transfer marker before inspecting or copying so an interrupted
+# retry after source mutations can never leave a stale stamp behind.
+"${psql_super[@]}" --dbname "$chat_db" --command "COMMENT ON TABLE public.marketplace_apps IS NULL;" >/dev/null
+
 scratch=$(mktemp -d)
 trap 'rm -rf -- "$scratch"' EXIT
 
@@ -163,7 +167,7 @@ else
         0 AS submission_revision,
         ''::text AS submission_note,
         NULL::timestamptz AS submitted_at,
-        NULL::timestamptz AS reviewed_by,
+        NULL::text AS reviewed_by,
         NULL::timestamptz AS reviewed_at,
         ''::text AS review_note,
         false AS admin_suspended,
@@ -232,22 +236,95 @@ CREATE TEMP TABLE stage_reviews (LIKE public.marketplace_app_reviews INCLUDING D
 \copy stage_installs (workspace_id, app_id, installed_by, review_preview, created_at) FROM 'installs.bin' WITH (FORMAT binary)
 \copy stage_reviews (id, app_id, revision, action, actor_id, note, web_url, mcp_url, snapshot, created_at) FROM 'reviews.bin' WITH (FORMAT binary)
 
-INSERT INTO public.marketplace_apps
-SELECT * FROM stage_apps
-ON CONFLICT (id) DO NOTHING;
+INSERT INTO public.marketplace_apps (
+  id, slug, name, description, web_url, mcp_url, signing_secret, enabled,
+  owner_id, is_published, published_version, review_status,
+  draft_name, draft_description, draft_web_url, draft_mcp_url,
+  has_draft_changes, submission_revision, submission_note, submitted_at,
+  reviewed_by, reviewed_at, review_note,
+  admin_suspended, suspended_reason, suspended_at,
+  last_verified_at, verification_report, created_at, updated_at
+)
+SELECT
+  id, slug, name, description, web_url, mcp_url, signing_secret, enabled,
+  owner_id, is_published, published_version, review_status,
+  draft_name, draft_description, draft_web_url, draft_mcp_url,
+  has_draft_changes, submission_revision, submission_note, submitted_at,
+  reviewed_by, reviewed_at, review_note,
+  admin_suspended, suspended_reason, suspended_at,
+  last_verified_at, verification_report, created_at, updated_at
+FROM stage_apps
+ON CONFLICT (id) DO UPDATE SET
+  slug = EXCLUDED.slug,
+  name = EXCLUDED.name,
+  description = EXCLUDED.description,
+  web_url = EXCLUDED.web_url,
+  mcp_url = EXCLUDED.mcp_url,
+  signing_secret = EXCLUDED.signing_secret,
+  enabled = EXCLUDED.enabled,
+  owner_id = EXCLUDED.owner_id,
+  is_published = EXCLUDED.is_published,
+  published_version = EXCLUDED.published_version,
+  review_status = EXCLUDED.review_status,
+  draft_name = EXCLUDED.draft_name,
+  draft_description = EXCLUDED.draft_description,
+  draft_web_url = EXCLUDED.draft_web_url,
+  draft_mcp_url = EXCLUDED.draft_mcp_url,
+  has_draft_changes = EXCLUDED.has_draft_changes,
+  submission_revision = EXCLUDED.submission_revision,
+  submission_note = EXCLUDED.submission_note,
+  submitted_at = EXCLUDED.submitted_at,
+  reviewed_by = EXCLUDED.reviewed_by,
+  reviewed_at = EXCLUDED.reviewed_at,
+  review_note = EXCLUDED.review_note,
+  admin_suspended = EXCLUDED.admin_suspended,
+  suspended_reason = EXCLUDED.suspended_reason,
+  suspended_at = EXCLUDED.suspended_at,
+  last_verified_at = EXCLUDED.last_verified_at,
+  verification_report = EXCLUDED.verification_report,
+  created_at = EXCLUDED.created_at,
+  updated_at = EXCLUDED.updated_at
+WHERE public.marketplace_apps.updated_at <= EXCLUDED.updated_at;
 
-INSERT INTO public.workspace_marketplace_apps
-SELECT * FROM stage_installs
-ON CONFLICT (workspace_id, app_id) DO NOTHING;
+DELETE FROM public.workspace_marketplace_apps w
+USING stage_apps sa, public.marketplace_apps m
+WHERE w.app_id = sa.id
+  AND m.id = sa.id
+  AND m.updated_at <= sa.updated_at
+  AND NOT EXISTS (
+    SELECT 1 FROM stage_installs s
+    WHERE s.workspace_id = w.workspace_id
+      AND s.app_id = w.app_id
+  );
 
-INSERT INTO public.marketplace_app_reviews
-SELECT * FROM stage_reviews
+INSERT INTO public.workspace_marketplace_apps (
+  workspace_id, app_id, installed_by, review_preview, created_at
+)
+SELECT workspace_id, app_id, installed_by, review_preview, created_at
+FROM stage_installs
+ON CONFLICT (workspace_id, app_id) DO UPDATE SET
+  installed_by = EXCLUDED.installed_by,
+  review_preview = EXCLUDED.review_preview,
+  created_at = EXCLUDED.created_at
+WHERE NOT EXISTS (
+  SELECT 1 FROM public.marketplace_apps m
+  JOIN stage_apps sa ON sa.id = m.id
+  WHERE m.id = EXCLUDED.app_id
+    AND m.updated_at > sa.updated_at
+);
+
+INSERT INTO public.marketplace_app_reviews (
+  id, app_id, revision, action, actor_id, note, web_url, mcp_url, snapshot, created_at
+)
+SELECT id, app_id, revision, action, actor_id, note, web_url, mcp_url, snapshot, created_at
+FROM stage_reviews
 ON CONFLICT (id) DO NOTHING;
 
 DO $$
 DECLARE
   missing_apps bigint;
   missing_installs bigint;
+  extra_installs bigint;
   missing_reviews bigint;
 BEGIN
   SELECT count(*) INTO missing_apps
@@ -256,13 +333,37 @@ BEGIN
     SELECT 1 FROM public.marketplace_apps m
     WHERE m.id = s.id
       AND m.slug = s.slug
+      AND m.name = s.name
+      AND m.description = s.description
+      AND m.web_url = s.web_url
+      AND m.mcp_url = s.mcp_url
       AND m.signing_secret = s.signing_secret
+      AND m.enabled = s.enabled
+      AND m.owner_id IS NOT DISTINCT FROM s.owner_id
       AND m.is_published = s.is_published
       AND m.published_version = s.published_version
       AND m.review_status = s.review_status
+      AND m.draft_name = s.draft_name
+      AND m.draft_description = s.draft_description
+      AND m.draft_web_url = s.draft_web_url
+      AND m.draft_mcp_url = s.draft_mcp_url
+      AND m.has_draft_changes = s.has_draft_changes
+      AND m.submission_revision = s.submission_revision
+      AND m.submission_note = s.submission_note
+      AND m.submitted_at IS NOT DISTINCT FROM s.submitted_at
+      AND m.reviewed_by IS NOT DISTINCT FROM s.reviewed_by
+      AND m.reviewed_at IS NOT DISTINCT FROM s.reviewed_at
+      AND m.review_note = s.review_note
+      AND m.admin_suspended = s.admin_suspended
+      AND m.suspended_reason = s.suspended_reason
+      AND m.suspended_at IS NOT DISTINCT FROM s.suspended_at
+      AND m.last_verified_at IS NOT DISTINCT FROM s.last_verified_at
+      AND m.verification_report IS NOT DISTINCT FROM s.verification_report
+      AND m.created_at = s.created_at
+      AND m.updated_at = s.updated_at
   );
   IF missing_apps > 0 THEN
-    RAISE EXCEPTION 'marketplace_apps transfer verification failed: % row(s) missing or mismatched', missing_apps;
+    RAISE EXCEPTION 'marketplace_apps transfer verification failed: % row(s) missing or diverged', missing_apps;
   END IF;
 
   SELECT count(*) INTO missing_installs
@@ -271,10 +372,20 @@ BEGIN
     SELECT 1 FROM public.workspace_marketplace_apps w
     WHERE w.workspace_id = s.workspace_id
       AND w.app_id = s.app_id
+      AND w.installed_by = s.installed_by
       AND w.review_preview = s.review_preview
+      AND w.created_at = s.created_at
   );
-  IF missing_installs > 0 THEN
-    RAISE EXCEPTION 'workspace_marketplace_apps transfer verification failed: % row(s) missing', missing_installs;
+  SELECT count(*) INTO extra_installs
+  FROM public.workspace_marketplace_apps w
+  JOIN stage_apps sa ON sa.id = w.app_id
+  WHERE NOT EXISTS (
+    SELECT 1 FROM stage_installs s
+    WHERE s.workspace_id = w.workspace_id
+      AND s.app_id = w.app_id
+  );
+  IF missing_installs > 0 OR extra_installs > 0 THEN
+    RAISE EXCEPTION 'workspace_marketplace_apps transfer verification failed: % missing, % extra', missing_installs, extra_installs;
   END IF;
 
   SELECT count(*) INTO missing_reviews
@@ -283,10 +394,17 @@ BEGIN
     SELECT 1 FROM public.marketplace_app_reviews r
     WHERE r.id = s.id
       AND r.app_id = s.app_id
+      AND r.revision = s.revision
       AND r.action = s.action
+      AND r.actor_id = s.actor_id
+      AND r.note = s.note
+      AND r.web_url = s.web_url
+      AND r.mcp_url = s.mcp_url
+      AND r.snapshot IS NOT DISTINCT FROM s.snapshot
+      AND r.created_at = s.created_at
   );
   IF missing_reviews > 0 THEN
-    RAISE EXCEPTION 'marketplace_app_reviews transfer verification failed: % row(s) missing', missing_reviews;
+    RAISE EXCEPTION 'marketplace_app_reviews transfer verification failed: % row(s) missing or diverged', missing_reviews;
   END IF;
 END
 $$;

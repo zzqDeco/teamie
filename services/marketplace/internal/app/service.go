@@ -83,25 +83,28 @@ func (s *Service) CheckDependencies(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) acquireVerifySlot(appID string) error {
-	if s == nil || s.VerifyCooldown <= 0 || appID == "" {
+func (s *Service) acquireVerifySlot(app domain.MarketplaceApp) error {
+	if s == nil || s.VerifyCooldown <= 0 || app.ID == "" {
 		return nil
 	}
 	now := s.nowUTC()
+	if app.LastVerifiedAt != nil && now.Sub(*app.LastVerifiedAt) < s.VerifyCooldown {
+		return domain.ErrMarketplaceVerifyRateLimited()
+	}
 	s.cooldownMu.Lock()
 	defer s.cooldownMu.Unlock()
 	if s.lastVerify == nil {
 		s.lastVerify = make(map[string]time.Time)
 	}
-	if prev, ok := s.lastVerify[appID]; ok && now.Sub(prev) < s.VerifyCooldown {
+	if prev, ok := s.lastVerify[app.ID]; ok && now.Sub(prev) < s.VerifyCooldown {
 		return domain.ErrMarketplaceVerifyRateLimited()
 	}
-	s.lastVerify[appID] = now
+	s.lastVerify[app.ID] = now
 	return nil
 }
 
 func normalizeSlug(raw string) (string, error) {
-	slug := strings.TrimSpace(raw)
+	slug := strings.ToLower(strings.TrimSpace(raw))
 	if !domain.ValidMarketplaceSlug(slug) {
 		return "", domain.ErrInvalidMarketplaceSlug()
 	}
@@ -165,10 +168,8 @@ func (s *Service) validateEndpoints(webURL, mcpURL string, allowEmpty bool) (str
 }
 
 func computeHasDraftChanges(app domain.MarketplaceApp) bool {
-	if !app.IsPublished {
-		return false
-	}
-	return app.DraftName != app.Name ||
+	return !app.IsPublished ||
+		app.DraftName != app.Name ||
 		app.DraftDescription != app.Description ||
 		app.DraftWebURL != app.WebURL ||
 		app.DraftMCPURL != app.MCPURL
@@ -181,10 +182,11 @@ func (s *Service) enrichApps(ctx context.Context, apps []domain.MarketplaceApp) 
 	var ownerIDs []string
 	seen := make(map[string]struct{})
 	for _, a := range apps {
-		if a.OwnerID != nil && *a.OwnerID != "" {
-			if _, ok := seen[*a.OwnerID]; !ok {
-				seen[*a.OwnerID] = struct{}{}
-				ownerIDs = append(ownerIDs, *a.OwnerID)
+		if a.OwnerID != nil && strings.TrimSpace(*a.OwnerID) != "" {
+			id := strings.TrimSpace(*a.OwnerID)
+			if _, ok := seen[id]; !ok {
+				seen[id] = struct{}{}
+				ownerIDs = append(ownerIDs, id)
 			}
 		}
 	}
@@ -195,21 +197,24 @@ func (s *Service) enrichApps(ctx context.Context, apps []domain.MarketplaceApp) 
 			return nil, err
 		}
 		for _, u := range users {
-			names[u.ID] = u.DisplayName
+			if strings.TrimSpace(u.DisplayName) != "" {
+				names[u.ID] = u.DisplayName
+			}
 		}
 	}
 	out := make([]domain.MarketplaceApp, len(apps))
 	for i, a := range apps {
 		if a.IsOfficial() {
 			a.PublisherName = domain.OfficialPublisherLabel
-		} else if a.OwnerID != nil {
-			disp := names[*a.OwnerID]
-			a.OwnerDisplayName = disp
-			if disp != "" {
-				a.PublisherName = disp
-			} else {
-				a.PublisherName = "社区开发者"
+			a.OwnerDisplayName = domain.OfficialPublisherLabel
+		} else {
+			ownerID := strings.TrimSpace(*a.OwnerID)
+			disp := names[ownerID]
+			if disp == "" {
+				disp = "Teamie 开发者"
 			}
+			a.OwnerDisplayName = disp
+			a.PublisherName = disp
 		}
 		out[i] = a
 	}
@@ -257,7 +262,7 @@ func (s *Service) enrichReviews(ctx context.Context, reviews []domain.Marketplac
 }
 
 func reviewSnapshot(app domain.MarketplaceApp) map[string]any {
-	return map[string]any{
+	snap := map[string]any{
 		"slug":               app.Slug,
 		"name":               app.Name,
 		"description":        app.Description,
@@ -274,4 +279,8 @@ func reviewSnapshot(app domain.MarketplaceApp) map[string]any {
 		"adminSuspended":     app.AdminSuspended,
 		"suspendedReason":    app.SuspendedReason,
 	}
+	if app.VerificationReport != nil {
+		snap["verification"] = *app.VerificationReport
+	}
+	return snap
 }

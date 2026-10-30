@@ -16,7 +16,10 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
+	"go.uber.org/zap"
+	"teamie/pkg/observability"
 	"teamie/services/marketplace/internal/domain"
 )
 
@@ -25,8 +28,11 @@ const (
 	probeUserID          = "00000000-0000-4000-8000-000000000001"
 	probeWorkspaceID     = "00000000-0000-4000-8000-000000000002"
 	probeConversationID  = "00000000-0000-4000-8000-000000000003"
+	maxWebHTMLReadBytes  = 8 * 1024
 	maxWebBodyBytes      = 256 * 1024
 	maxMCPBodyBytes      = 512 * 1024
+	maxSchemaBytes       = 4 * 1024
+	maxRecordedTools     = 64
 )
 
 // Verifier implements domain.MarketplaceEndpointVerifier with DNS-pinned SSRF protection.
@@ -96,18 +102,34 @@ func (v *Verifier) buildTransport() *http.Transport {
 
 // VerifyEndpoints runs the 4-stage live protocol inspection (url_security, web_ui, mcp_auth, mcp_handshake).
 func (v *Verifier) VerifyEndpoints(ctx context.Context, input domain.VerifyEndpointsInput) (domain.MarketplaceEndpointVerification, error) {
+	started := time.Now().UTC()
 	probeCtx, cancel := context.WithTimeout(ctx, v.timeout())
 	defer cancel()
 
-	now := time.Now().UTC()
 	report := domain.MarketplaceEndpointVerification{
 		OK:         false,
-		VerifiedAt: now,
+		VerifiedAt: started,
 		WebURL:     strings.TrimSpace(input.WebURL),
 		MCPURL:     strings.TrimSpace(input.MCPURL),
 		Checks:     []domain.EndpointProbeCheck{},
 		Tools:      []domain.DiscoveredMCPTool{},
 	}
+
+	defer func() {
+		outcome := "failure"
+		if report.OK {
+			outcome = "success"
+		}
+		observability.L(ctx).Info(
+			"Marketplace endpoint verification completed",
+			zap.String("event.action", "marketplace-endpoint-verify"),
+			zap.String("event.outcome", outcome),
+			zap.Int64("event.duration", time.Since(started).Nanoseconds()),
+			zap.String("custom.marketplace.app_id", input.AppID),
+			zap.Bool("custom.marketplace.verified", report.OK),
+			zap.Int("custom.marketplace.tool_count", len(report.Tools)),
+		)
+	}()
 
 	// Stage 1: url_security
 	if err := domain.ValidateMarketplaceEndpointURL(report.WebURL, false, v.AppOrigin, v.RequirePublicHTTPS); err != nil {
@@ -163,14 +185,14 @@ func (v *Verifier) VerifyEndpoints(ctx context.Context, input domain.VerifyEndpo
 			return http.ErrUseLastResponse
 		},
 	}
-	authCheck := v.probeMCPAuth(probeCtx, mcpClient, input, now)
+	authCheck := v.probeMCPAuth(probeCtx, mcpClient, input, started)
 	report.Checks = append(report.Checks, authCheck)
 	if !authCheck.OK {
 		return report, nil
 	}
 
 	// Stage 4: mcp_handshake (valid HS256 token -> initialize -> notifications/initialized -> tools/list -> DELETE)
-	handshakeCheck, tools, srvName, srvVer, protoVer := v.probeMCPHandshake(probeCtx, mcpClient, input, now)
+	handshakeCheck, tools, srvName, srvVer, protoVer := v.probeMCPHandshake(probeCtx, mcpClient, input, started)
 	report.Checks = append(report.Checks, handshakeCheck)
 	report.MCPServerName = srvName
 	report.MCPServerVersion = srvVer
@@ -195,24 +217,25 @@ func (v *Verifier) probeWebUI(ctx context.Context, tr *http.Transport, webURL st
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, webURL, nil)
 	if err != nil {
-		return domain.EndpointProbeCheck{Stage: "web_ui", OK: false, Code: "web_request_invalid", Summary: "Failed to construct Web UI GET request"}
+		return domain.EndpointProbeCheck{Stage: "web_ui", OK: false, Code: "web_ui_invalid_request", Summary: "Failed to construct Web UI GET request"}
 	}
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,*/*;q=0.8")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml")
 	req.Header.Set("User-Agent", "Teamie-Marketplace-Verifier/1.0")
 
 	resp, err := webClient.Do(req)
 	if err != nil {
-		return domain.EndpointProbeCheck{Stage: "web_ui", OK: false, Code: "web_unreachable", Summary: "Web UI endpoint could not be reached over HTTP(S)"}
+		return domain.EndpointProbeCheck{Stage: "web_ui", OK: false, Code: "web_ui_unreachable", Summary: "Web UI endpoint could not be reached over HTTP(S)"}
 	}
 	defer func() { _ = resp.Body.Close() }()
+	snippet, _ := io.ReadAll(io.LimitReader(resp.Body, maxWebHTMLReadBytes))
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxWebBodyBytes))
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return domain.EndpointProbeCheck{
 			Stage:   "web_ui",
 			OK:      false,
-			Code:    "web_bad_status",
-			Summary: fmt.Sprintf("Web UI returned HTTP %d (expected 2xx HTML page)", resp.StatusCode),
+			Code:    "web_ui_bad_status",
+			Summary: fmt.Sprintf("Web UI returned HTTP %d (expected 200 OK HTML page)", resp.StatusCode),
 		}
 	}
 
@@ -221,7 +244,7 @@ func (v *Verifier) probeWebUI(ctx context.Context, tr *http.Transport, webURL st
 		return domain.EndpointProbeCheck{
 			Stage:   "web_ui",
 			OK:      false,
-			Code:    "web_frame_blocked",
+			Code:    "web_ui_frame_blocked",
 			Summary: fmt.Sprintf("Web UI blocks cross-origin iframe embedding via X-Frame-Options: %s", xfo),
 		}
 	}
@@ -234,8 +257,40 @@ func (v *Verifier) probeWebUI(ctx context.Context, tr *http.Transport, webURL st
 		return domain.EndpointProbeCheck{
 			Stage:   "web_ui",
 			OK:      false,
-			Code:    "web_csp_blocked",
+			Code:    "web_ui_csp_frame_blocked",
 			Summary: reason,
+		}
+	}
+
+	if resp.StatusCode == http.StatusNoContent || resp.StatusCode == http.StatusResetContent {
+		return domain.EndpointProbeCheck{
+			Stage:   "web_ui",
+			OK:      false,
+			Code:    "web_ui_not_html",
+			Summary: fmt.Sprintf("Web UI returned HTTP %d without an HTML document (expected Content-Type: text/html)", resp.StatusCode),
+		}
+	}
+
+	cd := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Disposition")))
+	if strings.HasPrefix(cd, "attachment") {
+		return domain.EndpointProbeCheck{
+			Stage:   "web_ui",
+			OK:      false,
+			Code:    "web_ui_not_html",
+			Summary: "Web UI returned Content-Disposition: attachment download instead of an embeddable HTML page",
+		}
+	}
+
+	ct := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Type")))
+	trimmedBody := strings.ToLower(strings.TrimSpace(string(snippet)))
+	isHTMLContentType := strings.Contains(ct, "text/html") || strings.Contains(ct, "application/xhtml+xml")
+	hasHTMLPrefix := strings.HasPrefix(trimmedBody, "<!doctype html") || strings.HasPrefix(trimmedBody, "<html")
+	if len(trimmedBody) == 0 || (!isHTMLContentType && !(ct == "" && hasHTMLPrefix)) {
+		return domain.EndpointProbeCheck{
+			Stage:   "web_ui",
+			OK:      false,
+			Code:    "web_ui_not_html",
+			Summary: "Web UI endpoint did not return an HTML page (expected Content-Type: text/html)",
 		}
 	}
 
@@ -425,6 +480,7 @@ func (v *Verifier) probeMCPAuth(ctx context.Context, client *http.Client, input 
 	}
 	reqNoAuth.Header.Set("Content-Type", "application/json")
 	reqNoAuth.Header.Set("Accept", "application/json, text/event-stream")
+	reqNoAuth.Header.Set("User-Agent", "Teamie-Marketplace-Verifier/1.0")
 	respNoAuth, err := client.Do(reqNoAuth)
 	if err != nil {
 		return domain.EndpointProbeCheck{Stage: "mcp_auth", OK: false, Code: "mcp_unreachable", Summary: "MCP Server endpoint could not be reached"}
@@ -463,6 +519,7 @@ func (v *Verifier) probeMCPAuth(ctx context.Context, client *http.Client, input 
 	}
 	reqForged.Header.Set("Content-Type", "application/json")
 	reqForged.Header.Set("Accept", "application/json, text/event-stream")
+	reqForged.Header.Set("User-Agent", "Teamie-Marketplace-Verifier/1.0")
 	reqForged.Header.Set("Authorization", "Bearer "+forgedToken)
 	respForged, err := client.Do(reqForged)
 	if err != nil {
@@ -474,7 +531,7 @@ func (v *Verifier) probeMCPAuth(ctx context.Context, client *http.Client, input 
 		return domain.EndpointProbeCheck{
 			Stage:   "mcp_auth",
 			OK:      false,
-			Code:    "mcp_forged_token_accepted",
+			Code:    "mcp_forged_token_allowed",
 			Summary: fmt.Sprintf("MCP Server returned HTTP %d for a forged HS256 token (must verify Signing Secret and return HTTP 401 or 403)", respForged.StatusCode),
 		}
 	}
@@ -519,7 +576,7 @@ func decodeMCPResponse(resp *http.Response) (jsonRPCEnvelope, error) {
 		}
 		for scanner.Scan() {
 			line := scanner.Text()
-			if line == "" {
+			if strings.TrimSpace(line) == "" {
 				if got, ok := tryFlush(); ok {
 					return got, nil
 				}
@@ -528,6 +585,9 @@ func decodeMCPResponse(resp *http.Response) (jsonRPCEnvelope, error) {
 			if after, ok := strings.CutPrefix(line, "data:"); ok {
 				dataLines = append(dataLines, strings.TrimSpace(after))
 			}
+		}
+		if err := scanner.Err(); err != nil {
+			return env, err
 		}
 		if got, ok := tryFlush(); ok {
 			return got, nil
@@ -565,7 +625,7 @@ func (v *Verifier) probeMCPHandshake(
 		ExpiresAt:      now.Add(5 * time.Minute).Unix(),
 	})
 	if err != nil {
-		return domain.EndpointProbeCheck{Stage: "mcp_handshake", OK: false, Code: "probe_token_error", Summary: "Failed to sign valid probe token"}, nil, "", "", ""
+		return domain.EndpointProbeCheck{Stage: "mcp_handshake", OK: false, Code: "token_sign_error", Summary: "Failed to sign valid probe token"}, nil, "", "", ""
 	}
 
 	mcpURL := strings.TrimSpace(input.MCPURL)
@@ -578,6 +638,7 @@ func (v *Verifier) probeMCPHandshake(
 			req.Header.Set("Content-Type", "application/json")
 		}
 		req.Header.Set("Accept", "application/json, text/event-stream")
+		req.Header.Set("User-Agent", "Teamie-Marketplace-Verifier/1.0")
 		req.Header.Set("Authorization", "Bearer "+validToken)
 		if sessionID != "" {
 			req.Header.Set("Mcp-Session-Id", sessionID)
@@ -609,7 +670,7 @@ func (v *Verifier) probeMCPHandshake(
 		return domain.EndpointProbeCheck{
 			Stage:   "mcp_handshake",
 			OK:      false,
-			Code:    "mcp_init_bad_status",
+			Code:    "mcp_init_rejected",
 			Summary: fmt.Sprintf("MCP initialize with valid Signing Secret returned HTTP %d", initResp.StatusCode),
 		}, nil, "", "", ""
 	}
@@ -632,6 +693,9 @@ func (v *Verifier) probeMCPHandshake(
 		} `json:"serverInfo"`
 	}
 	_ = json.Unmarshal(initEnv.Result, &initResult)
+	srvName := truncateRunes(initResult.ServerInfo.Name, 80)
+	srvVer := truncateRunes(initResult.ServerInfo.Version, 40)
+	protoVer := truncateRunes(initResult.ProtocolVersion, 40)
 
 	// 2. notifications/initialized
 	notifResp, err := doRPC(http.MethodPost, []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`), sessionID)
@@ -643,16 +707,16 @@ func (v *Verifier) probeMCPHandshake(
 	// 3. tools/list
 	toolsResp, err := doRPC(http.MethodPost, []byte(`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`), sessionID)
 	if err != nil {
-		return domain.EndpointProbeCheck{Stage: "mcp_handshake", OK: false, Code: "mcp_tools_failed", Summary: "MCP tools/list request failed"}, nil, initResult.ServerInfo.Name, initResult.ServerInfo.Version, initResult.ProtocolVersion
+		return domain.EndpointProbeCheck{Stage: "mcp_handshake", OK: false, Code: "mcp_tools_list_failed", Summary: "MCP tools/list request failed"}, nil, srvName, srvVer, protoVer
 	}
 	if toolsResp.StatusCode < 200 || toolsResp.StatusCode >= 300 {
 		_ = toolsResp.Body.Close()
 		return domain.EndpointProbeCheck{
 			Stage:   "mcp_handshake",
 			OK:      false,
-			Code:    "mcp_tools_bad_status",
+			Code:    "mcp_tools_list_failed",
 			Summary: fmt.Sprintf("MCP tools/list returned HTTP %d", toolsResp.StatusCode),
-		}, nil, initResult.ServerInfo.Name, initResult.ServerInfo.Version, initResult.ProtocolVersion
+		}, nil, srvName, srvVer, protoVer
 	}
 	toolsEnv, err := decodeMCPResponse(toolsResp)
 	_ = toolsResp.Body.Close()
@@ -662,7 +726,7 @@ func (v *Verifier) probeMCPHandshake(
 			OK:      false,
 			Code:    "mcp_tools_invalid_jsonrpc",
 			Summary: "MCP tools/list did not return a valid JSON-RPC 2.0 result",
-		}, nil, initResult.ServerInfo.Name, initResult.ServerInfo.Version, initResult.ProtocolVersion
+		}, nil, srvName, srvVer, protoVer
 	}
 
 	var toolsResult struct {
@@ -676,30 +740,17 @@ func (v *Verifier) probeMCPHandshake(
 		return domain.EndpointProbeCheck{
 			Stage:   "mcp_handshake",
 			OK:      false,
-			Code:    "mcp_tools_schema_invalid",
+			Code:    "mcp_tools_invalid_jsonrpc",
 			Summary: "MCP tools/list result could not be decoded",
-		}, nil, initResult.ServerInfo.Name, initResult.ServerInfo.Version, initResult.ProtocolVersion
-	}
-	if len(toolsResult.Tools) == 0 {
-		return domain.EndpointProbeCheck{
-			Stage:   "mcp_handshake",
-			OK:      false,
-			Code:    "mcp_no_tools",
-			Summary: "MCP Server returned 0 tools; expose at least 1 tool for Agent participants",
-		}, nil, initResult.ServerInfo.Name, initResult.ServerInfo.Version, initResult.ProtocolVersion
+		}, nil, srvName, srvVer, protoVer
 	}
 
 	seenExposed := make(map[string]string, len(toolsResult.Tools))
-	discovered := make([]domain.DiscoveredMCPTool, 0, len(toolsResult.Tools))
+	discovered := make([]domain.DiscoveredMCPTool, 0, min(len(toolsResult.Tools), maxRecordedTools))
 	for _, t := range toolsResult.Tools {
 		rawName := strings.TrimSpace(t.Name)
 		if rawName == "" {
-			return domain.EndpointProbeCheck{
-				Stage:   "mcp_handshake",
-				OK:      false,
-				Code:    "mcp_invalid_tool_name",
-				Summary: "MCP Server returned a tool with an empty name",
-			}, nil, initResult.ServerInfo.Name, initResult.ServerInfo.Version, initResult.ProtocolVersion
+			continue
 		}
 		exposed := domain.ExposedMCPToolName(input.Slug, rawName)
 		if len(exposed) > 64 {
@@ -708,28 +759,42 @@ func (v *Verifier) probeMCPHandshake(
 				OK:      false,
 				Code:    "mcp_tool_name_too_long",
 				Summary: fmt.Sprintf("Exposed tool name %q exceeds the 64-character limit (%d chars)", exposed, len(exposed)),
-			}, nil, initResult.ServerInfo.Name, initResult.ServerInfo.Version, initResult.ProtocolVersion
+			}, nil, srvName, srvVer, protoVer
 		}
 		if prev, dup := seenExposed[exposed]; dup {
 			return domain.EndpointProbeCheck{
 				Stage:   "mcp_handshake",
 				OK:      false,
-				Code:    "mcp_tool_name_collision",
+				Code:    "mcp_duplicate_tool_name",
 				Summary: fmt.Sprintf("Tools %q and %q collide on normalized name %q", prev, rawName, exposed),
-			}, nil, initResult.ServerInfo.Name, initResult.ServerInfo.Version, initResult.ProtocolVersion
+			}, nil, srvName, srvVer, protoVer
 		}
 		seenExposed[exposed] = rawName
+		if len(discovered) >= maxRecordedTools {
+			continue
+		}
 
 		schemaStr := ""
-		if len(t.InputSchema) > 0 && json.Valid(t.InputSchema) && string(t.InputSchema) != "null" {
-			schemaStr = string(t.InputSchema)
+		if len(t.InputSchema) > 0 && len(t.InputSchema) <= maxSchemaBytes && json.Valid(t.InputSchema) && string(t.InputSchema) != "null" {
+			var compact bytes.Buffer
+			if json.Compact(&compact, t.InputSchema) == nil {
+				schemaStr = compact.String()
+			}
 		}
 		discovered = append(discovered, domain.DiscoveredMCPTool{
-			Name:            rawName,
+			Name:            truncateRunes(rawName, 80),
 			ExposedName:     exposed,
-			Description:     strings.TrimSpace(t.Description),
+			Description:     truncateRunes(strings.TrimSpace(t.Description), 500),
 			InputSchemaJSON: schemaStr,
 		})
+	}
+	if len(discovered) == 0 {
+		return domain.EndpointProbeCheck{
+			Stage:   "mcp_handshake",
+			OK:      false,
+			Code:    "mcp_no_tools",
+			Summary: "MCP Server returned 0 tools; expose at least 1 tool for Agent participants",
+		}, nil, srvName, srvVer, protoVer
 	}
 
 	return domain.EndpointProbeCheck{
@@ -737,5 +802,13 @@ func (v *Verifier) probeMCPHandshake(
 		OK:      true,
 		Code:    "ok",
 		Summary: fmt.Sprintf("MCP handshake succeeded and discovered %d valid tool(s)", len(discovered)),
-	}, discovered, initResult.ServerInfo.Name, initResult.ServerInfo.Version, initResult.ProtocolVersion
+	}, discovered, srvName, srvVer, protoVer
+}
+
+func truncateRunes(s string, max int) string {
+	if utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	r := []rune(s)
+	return string(r[:max])
 }
