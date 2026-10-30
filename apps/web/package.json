@@ -2,6 +2,7 @@
   "name": "teamie-web",
   "private": true,
   "version": "0.3.0",
+  "license": "FSL-1.1-MIT",
   "type": "module",
   "engines": {
     "node": ">=22.12.0"

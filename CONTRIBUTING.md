@@ -132,3 +132,9 @@ bash ops/check-compose.sh
 2. **Pull Requests**: Develop in focused `feat/*`, `fix/*`, or `refactor/*` branches and open a pull request targeting `main`. Ensure all CI checks and automated code review pass before squash-merging.
 3. **Forward-Only Migrations**: Database migrations must be forward-compatible and protected by advisory locks. Update `SCHEMA_V2` in [`ops/manifest.py`](ops/manifest.py) and [`ops/ci-restore.sh`](ops/ci-restore.sh) when introducing a new schema version. Never pair an image rollback with an automatic database restore over user data.
 4. **Immutable Releases**: Cut releases by pushing a new `release/vMAJOR.MINOR.PATCH` branch from the exact verified `main` commit (`git push origin main:refs/heads/release/vX.Y.Z`). Published `release/v*` branches and tags are permanent archives—never delete, force-push, or append commits to them. Any fix requires merging to `main` and cutting a new version.
+
+---
+
+## 8. License
+
+Teamie is licensed under the [Functional Source License, Version 1.1, MIT Future License (`FSL-1.1-MIT`)](LICENSE) (Copyright (c) 2026 Ziqian Zhao). By submitting a contribution, you agree that your contribution is provided under the terms of [`LICENSE`](LICENSE).
