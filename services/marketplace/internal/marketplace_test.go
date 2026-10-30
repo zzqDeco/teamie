@@ -1163,3 +1163,137 @@ func TestDisablePendingAppAndAdminSuspensionInvariants(t *testing.T) {
 		t.Fatalf("expected 403 marketplace_app_suspended minting session for suspended app, got %v", err)
 	}
 }
+
+type failingUsersIdentity struct {
+	pingErr error
+}
+
+func (f failingUsersIdentity) Users(context.Context, []string) ([]domain.User, error) {
+	return nil, errors.New("fixture identity lookup failed")
+}
+
+func (f failingUsersIdentity) Ping(context.Context) error {
+	return f.pingErr
+}
+
+func TestIdentityLookupFailureDoesNotLoseSecretsOrCommittedWrites(t *testing.T) {
+	ctx := context.Background()
+	pool, err := postgres.Open(ctx, testdb.URL(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	if err := pg.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+
+	admin := domain.User{ID: domain.NewID(), Email: "admin@example.com", DisplayName: "Admin", Kind: "human", PlatformRole: "admin", CreatedAt: time.Now().UTC()}
+	dev := domain.User{ID: domain.NewID(), Email: "dev@example.com", DisplayName: "Dev", Kind: "human", PlatformRole: "member", CreatedAt: time.Now().UTC()}
+	bob := domain.User{ID: domain.NewID(), Email: "bob@example.com", DisplayName: "Bob", Kind: "human", PlatformRole: "member", CreatedAt: time.Now().UTC()}
+
+	bobWS := domain.NewID()
+	bobGroup := domain.NewID()
+	chatMock := &fakeChatScope{
+		workspaces: map[string]map[string]domain.WorkspaceScope{
+			bobWS: {bob.ID: {Allowed: true, Role: "owner", OwnerID: bob.ID}},
+		},
+		conversations: map[string]map[string]domain.ConversationScope{
+			bobGroup: {bob.ID: {Allowed: true, WorkspaceID: bobWS, ConversationType: "group", WorkspaceOwnerID: bob.ID}},
+		},
+	}
+
+	var activeSecret atomic.Value
+	activeSecret.Store("init")
+	extSrv, _ := startMockExternalApp(t, func() string { return activeSecret.Load().(string) }, false)
+
+	origin := "http://teamie.local:8080"
+	reqHTTPS := false
+	repo := pg.New(postgres.New(pool))
+	svc := &app.Service{
+		Tx:                 repo,
+		Marketplace:        repo,
+		Identity:           failingUsersIdentity{},
+		Chat:               chatMock,
+		AppOrigin:          origin,
+		RequirePublicHTTPS: &reqHTTPS,
+		Verifier: &probe.Verifier{
+			AppOrigin:          origin,
+			RequirePublicHTTPS: false,
+			Timeout:            5 * time.Second,
+		},
+	}
+
+	// 1. Developer Create must return both the persisted app (with fallback display name) and initial signingSecret!
+	created, secret1, err := svc.CreateDeveloperMarketplaceApp(ctx, dev, domain.CreateMarketplaceAppInput{
+		Slug:   "resilient-secret",
+		Name:   "Resilient Secret App",
+		WebURL: extSrv.URL + "/ui",
+		MCPURL: extSrv.URL + "/mcp",
+	})
+	if err != nil {
+		t.Fatalf("CreateDeveloperMarketplaceApp failed when Identity.Users errored: %v", err)
+	}
+	if created.ID == "" || secret1 == "" || created.OwnerDisplayName != "Teamie 开发者" {
+		t.Fatalf("unexpected created app or empty secret (hasSecret=%v): id=%q ownerDisplay=%q", secret1 != "", created.ID, created.OwnerDisplayName)
+	}
+	dbSecret1, err := repo.GetMarketplaceAppSigningSecret(ctx, created.ID)
+	if err != nil || dbSecret1 != secret1 {
+		t.Fatalf("created response secret did not match persisted DB secret (err=%v, match=%v)", err, dbSecret1 == secret1)
+	}
+
+	// 2. Developer RotateSecret must return the replacement secret matching PostgreSQL!
+	rotated, secret2, err := svc.RotateDeveloperMarketplaceAppSecret(ctx, dev, created.ID)
+	if err != nil {
+		t.Fatalf("RotateDeveloperMarketplaceAppSecret failed when Identity.Users errored: %v", err)
+	}
+	if rotated.ID != created.ID || secret2 == "" || secret2 == secret1 {
+		t.Fatalf("expected non-empty rotated secret distinct from previous (hasSecret=%v, changed=%v)", secret2 != "", secret2 != secret1)
+	}
+	dbSecret2, err := repo.GetMarketplaceAppSigningSecret(ctx, created.ID)
+	if err != nil || dbSecret2 != secret2 {
+		t.Fatalf("rotated response secret did not match persisted DB secret (err=%v, match=%v)", err, dbSecret2 == secret2)
+	}
+
+	// 3. Submit, Approve, Detail (with reviews), Admin Create/Rotate, Install, and Session mint all degrade gracefully!
+	activeSecret.Store(secret2)
+	submitted, subReviews, err := svc.SubmitDeveloperMarketplaceApp(ctx, dev, created.ID, "ready")
+	if err != nil || submitted.ReviewStatus != domain.ReviewStatusPending || len(subReviews) != 1 {
+		t.Fatalf("SubmitDeveloperMarketplaceApp failed under Identity.Users outage: status=%q reviews=%d err=%v", submitted.ReviewStatus, len(subReviews), err)
+	}
+	approved, appReviews, err := svc.ApproveAdminMarketplaceApp(ctx, admin, created.ID, submitted.SubmissionRevision, "LGTM")
+	if err != nil || !approved.IsPublished || len(appReviews) != 2 {
+		t.Fatalf("ApproveAdminMarketplaceApp failed under Identity.Users outage: published=%v reviews=%d err=%v", approved.IsPublished, len(appReviews), err)
+	}
+	if _, err := svc.InstallWorkspaceApp(ctx, bobWS, created.ID, bob); err != nil {
+		t.Fatalf("InstallWorkspaceApp failed under Identity.Users outage: %v", err)
+	}
+	sess, err := svc.CreateConversationAppSession(ctx, bobGroup, created.ID, bob)
+	if err != nil || sess.Token == "" {
+		t.Fatalf("CreateConversationAppSession failed under Identity.Users outage: hasToken=%v err=%v", sess.Token != "", err)
+	}
+
+	adminCreated, adminSec1, err := svc.CreateAdminMarketplaceApp(ctx, admin, domain.CreateMarketplaceAppInput{
+		Slug:   "official-resilient",
+		Name:   "Official App",
+		WebURL: extSrv.URL + "/ui",
+		MCPURL: extSrv.URL + "/mcp",
+	})
+	if err != nil || adminCreated.ID == "" || adminSec1 == "" {
+		t.Fatalf("CreateAdminMarketplaceApp failed under Identity.Users outage: id=%q hasSecret=%v err=%v", adminCreated.ID, adminSec1 != "", err)
+	}
+	_, adminSec2, err := svc.RotateAdminMarketplaceAppSecret(ctx, admin, adminCreated.ID)
+	if err != nil || adminSec2 == "" || adminSec2 == adminSec1 {
+		t.Fatalf("RotateAdminMarketplaceAppSecret failed under Identity.Users outage: hasSecret=%v changed=%v err=%v", adminSec2 != "", adminSec2 != adminSec1, err)
+	}
+
+	// 4. Readiness check still fails closed when Identity.Ping fails!
+	svcDown := &app.Service{
+		Tx:          repo,
+		Marketplace: repo,
+		Identity:    failingUsersIdentity{pingErr: errors.New("identity unreachable")},
+		Chat:        chatMock,
+	}
+	if err := svcDown.CheckDependencies(ctx); err == nil {
+		t.Fatal("expected CheckDependencies to fail closed when Identity.Ping fails")
+	}
+}

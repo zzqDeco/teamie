@@ -192,13 +192,11 @@ func (s *Service) enrichApps(ctx context.Context, apps []domain.MarketplaceApp) 
 	}
 	names := make(map[string]string, len(ownerIDs))
 	if len(ownerIDs) > 0 && s.Identity != nil {
-		users, err := s.Identity.Users(ctx, ownerIDs)
-		if err != nil {
-			return nil, err
-		}
-		for _, u := range users {
-			if strings.TrimSpace(u.DisplayName) != "" {
-				names[u.ID] = u.DisplayName
+		if users, err := s.Identity.Users(ctx, ownerIDs); err == nil {
+			for _, u := range users {
+				if strings.TrimSpace(u.DisplayName) != "" {
+					names[u.ID] = u.DisplayName
+				}
 			}
 		}
 	}
@@ -245,12 +243,10 @@ func (s *Service) enrichReviews(ctx context.Context, reviews []domain.Marketplac
 	}
 	names := make(map[string]string, len(actorIDs))
 	if len(actorIDs) > 0 && s.Identity != nil {
-		users, err := s.Identity.Users(ctx, actorIDs)
-		if err != nil {
-			return nil, err
-		}
-		for _, u := range users {
-			names[u.ID] = u.DisplayName
+		if users, err := s.Identity.Users(ctx, actorIDs); err == nil {
+			for _, u := range users {
+				names[u.ID] = u.DisplayName
+			}
 		}
 	}
 	out := make([]domain.MarketplaceAppReview, len(reviews))

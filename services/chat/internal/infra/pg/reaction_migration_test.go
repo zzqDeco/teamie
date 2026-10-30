@@ -337,3 +337,227 @@ WHERE id = 'app-1'
 		t.Fatalf("expected migration 010 to retire stamped tables cleanly: %v", err)
 	}
 }
+
+func TestTransferScriptSyncsDeletedSourceAppsSchema8AndSchema9(t *testing.T) {
+	if _, err := exec.LookPath("psql"); err != nil {
+		t.Skip("psql CLI not installed; skipping shell transfer script integration test")
+	}
+	baseDSN := os.Getenv("DATABASE_URL_TEST")
+	if baseDSN == "" {
+		t.Skip("DATABASE_URL_TEST is required")
+	}
+	parsed, err := url.Parse(baseDSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	adminPool, err := pgxpool.New(ctx, baseDSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(adminPool.Close)
+
+	var superUser string
+	var isSuper bool
+	if err := adminPool.QueryRow(ctx, "SELECT current_user, rolsuper FROM pg_roles WHERE rolname = current_user").Scan(&superUser, &isSuper); err != nil {
+		t.Fatal(err)
+	}
+	if !isSuper {
+		t.Skip("test database user is not superuser; skipping cross-database transfer script test")
+	}
+
+	scriptPath := filepath.Clean(filepath.Join("..", "..", "..", "..", "..", "deploy", "postgres", "02-migrate-chat-marketplace.sh"))
+	pw, _ := parsed.User.Password()
+	if pw == "" {
+		pw = "local-trust"
+	}
+	host := parsed.Hostname()
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	port := parsed.Port()
+	if port == "" {
+		port = "5432"
+	}
+
+	for _, schemaVer := range []int{8, 9} {
+		t.Run(fmt.Sprintf("schema_%d", schemaVer), func(t *testing.T) {
+			var rnd [4]byte
+			if _, err := rand.Read(rnd[:]); err != nil {
+				t.Fatal(err)
+			}
+			suffix := hex.EncodeToString(rnd[:])
+			chatDB := fmt.Sprintf("teamie_chat_del_%d_%s", schemaVer, suffix)
+			mktDB := fmt.Sprintf("teamie_mkt_del_%d_%s", schemaVer, suffix)
+			mktRole := fmt.Sprintf("teamie_mkt_del_%d_%s", schemaVer, suffix)
+
+			if _, err := adminPool.Exec(ctx, fmt.Sprintf("CREATE ROLE %s LOGIN PASSWORD 'mig-pass'", mktRole)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := adminPool.Exec(ctx, fmt.Sprintf("CREATE DATABASE %s", chatDB)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := adminPool.Exec(ctx, fmt.Sprintf("CREATE DATABASE %s OWNER %s", mktDB, mktRole)); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				_, _ = adminPool.Exec(context.Background(), fmt.Sprintf("DROP DATABASE IF EXISTS %s WITH (FORCE)", chatDB))
+				_, _ = adminPool.Exec(context.Background(), fmt.Sprintf("DROP DATABASE IF EXISTS %s WITH (FORCE)", mktDB))
+				_, _ = adminPool.Exec(context.Background(), fmt.Sprintf("DROP ROLE IF EXISTS %s", mktRole))
+			})
+
+			dbURL := func(dbName string) string {
+				u := *parsed
+				u.Path = "/" + dbName
+				q := u.Query()
+				q.Del("search_path")
+				u.RawQuery = q.Encode()
+				return u.String()
+			}
+
+			chatPool, err := pgxpool.New(ctx, dbURL(chatDB))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(chatPool.Close)
+
+			mktPool, err := pgxpool.New(ctx, dbURL(mktDB))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(mktPool.Close)
+
+			migs := []postgres.Migration{
+				{Version: 1, SQL: SchemaV1}, {Version: 2, SQL: SchemaV2},
+				{Version: 3, SQL: SchemaV3}, {Version: 4, SQL: SchemaV4},
+				{Version: 5, SQL: SchemaV5}, {Version: 6, SQL: SchemaV6},
+				{Version: 7, SQL: SchemaV7}, {Version: 8, SQL: SchemaV8},
+			}
+			if schemaVer == 9 {
+				migs = append(migs, postgres.Migration{Version: 9, SQL: SchemaV9})
+			}
+			if err := postgres.Migrate(ctx, chatPool, 704102, "chat_schema_migrations", migs); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := chatPool.Exec(ctx, `INSERT INTO workspaces(id, name, created_by) VALUES ('ws-1', 'WS 1', 'owner')`); err != nil {
+				t.Fatal(err)
+			}
+			if schemaVer == 8 {
+				_, err = chatPool.Exec(ctx, `
+INSERT INTO marketplace_apps(id, slug, name, description, web_url, mcp_url, signing_secret, enabled) VALUES
+  ('app-1', 'first-app', 'First App', 'Desc 1', 'https://first.example/ui', 'https://first.example/mcp', repeat('a', 64), true),
+  ('app-2', 'second-app', 'Second App', 'Desc 2', 'https://second.example/ui', 'https://second.example/mcp', repeat('b', 64), true);
+INSERT INTO workspace_marketplace_apps(workspace_id, app_id, installed_by) VALUES
+  ('ws-1', 'app-1', 'owner'),
+  ('ws-1', 'app-2', 'owner');
+`)
+			} else {
+				_, err = chatPool.Exec(ctx, `
+INSERT INTO marketplace_apps(
+  id, slug, name, description, web_url, mcp_url, signing_secret, enabled,
+  owner_id, is_published, published_version, review_status,
+  draft_name, draft_description, draft_web_url, draft_mcp_url
+) VALUES
+  ('app-1', 'first-app', 'First App', 'Desc 1', 'https://first.example/ui', 'https://first.example/mcp', repeat('a', 64), true, NULL, true, 1, 'approved', 'First App', 'Desc 1', 'https://first.example/ui', 'https://first.example/mcp'),
+  ('app-2', 'second-app', 'Second App', 'Desc 2', 'https://second.example/ui', 'https://second.example/mcp', repeat('b', 64), true, NULL, true, 1, 'approved', 'Second App', 'Desc 2', 'https://second.example/ui', 'https://second.example/mcp');
+INSERT INTO workspace_marketplace_apps(workspace_id, app_id, installed_by) VALUES
+  ('ws-1', 'app-1', 'owner'),
+  ('ws-1', 'app-2', 'owner');
+INSERT INTO marketplace_app_reviews(id, app_id, revision, action, actor_id, note, web_url, mcp_url) VALUES
+  ('rev-1', 'app-1', 1, 'approve', 'admin', 'ok', 'https://first.example/ui', 'https://first.example/mcp'),
+  ('rev-2', 'app-2', 1, 'approve', 'admin', 'ok', 'https://second.example/ui', 'https://second.example/mcp');
+`)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			runTransfer := func() (string, error) {
+				cmd := exec.Command("bash", scriptPath)
+				cmd.Env = append(os.Environ(),
+					"PGHOST="+host,
+					"PGPORT="+port,
+					"POSTGRES_SUPERUSER="+superUser,
+					"POSTGRES_PASSWORD="+pw,
+					"TEAMIE_CHAT_DB="+chatDB,
+					"TEAMIE_MARKETPLACE_DB="+mktDB,
+					"TEAMIE_MARKETPLACE_ROLE="+mktRole,
+				)
+				out, runErr := cmd.CombinedOutput()
+				return string(out), runErr
+			}
+
+			// 1. Initial transfer copies both apps and installs.
+			if out, err := runTransfer(); err != nil {
+				t.Fatalf("initial transfer failed: %v\n%s", err, out)
+			}
+
+			// 2. Delete app-2 while app-1 remains -> retry removes app-2 and its installs/reviews from target!
+			if _, err := chatPool.Exec(ctx, `DELETE FROM marketplace_apps WHERE id = 'app-2'`); err != nil {
+				t.Fatal(err)
+			}
+			if out, err := runTransfer(); err != nil {
+				t.Fatalf("partial deletion retry failed: %v\n%s", err, out)
+			}
+			var targetApps, targetInstalls int
+			if err := mktPool.QueryRow(ctx, `SELECT count(*) FROM marketplace_apps`).Scan(&targetApps); err != nil || targetApps != 1 {
+				t.Fatalf("expected 1 remaining target app after deleting app-2, got %d (%v)", targetApps, err)
+			}
+			if err := mktPool.QueryRow(ctx, `SELECT count(*) FROM workspace_marketplace_apps`).Scan(&targetInstalls); err != nil || targetInstalls != 1 {
+				t.Fatalf("expected 1 remaining target install after deleting app-2, got %d (%v)", targetInstalls, err)
+			}
+
+			// 3. Delete the LAST source app (app-1, leaving source_apps=0) -> retry removes app-1 and its installs/reviews!
+			if _, err := chatPool.Exec(ctx, `DELETE FROM marketplace_apps WHERE id = 'app-1'`); err != nil {
+				t.Fatal(err)
+			}
+			if out, err := runTransfer(); err != nil {
+				t.Fatalf("last-app deletion retry failed: %v\n%s", err, out)
+			}
+			if err := mktPool.QueryRow(ctx, `SELECT count(*) FROM marketplace_apps`).Scan(&targetApps); err != nil || targetApps != 0 {
+				t.Fatalf("expected 0 target apps after deleting last source app, got %d (%v)", targetApps, err)
+			}
+			if err := mktPool.QueryRow(ctx, `SELECT count(*) FROM workspace_marketplace_apps`).Scan(&targetInstalls); err != nil || targetInstalls != 0 {
+				t.Fatalf("expected 0 target installs after deleting last source app, got %d (%v)", targetInstalls, err)
+			}
+
+			// 4. Unexplained extra target app (not created by migration ledger) must NOT be deleted AND must fail transfer & block migration 010 even with 0 source apps!
+			if _, err := mktPool.Exec(ctx, `
+INSERT INTO marketplace_apps(
+  id, slug, name, description, web_url, mcp_url, signing_secret, enabled,
+  is_published, published_version, review_status,
+  draft_name, draft_description, draft_web_url, draft_mcp_url
+) VALUES (
+  'indep-1', 'indep-app', 'Independent', '', 'https://indep.example/ui', 'https://indep.example/mcp', repeat('z', 64), true,
+  true, 1, 'approved', 'Independent', '', 'https://indep.example/ui', 'https://indep.example/mcp'
+)`); err != nil {
+				t.Fatal(err)
+			}
+			if out, err := runTransfer(); err == nil {
+				t.Fatalf("expected transfer to fail when unexplained extra target app exists, but succeeded:\n%s", out)
+			}
+			if err := mktPool.QueryRow(ctx, `SELECT count(*) FROM marketplace_apps WHERE id = 'indep-1'`).Scan(&targetApps); err != nil || targetApps != 1 {
+				t.Fatalf("expected unexplained independent target app to be preserved, got %d (%v)", targetApps, err)
+			}
+			if err := Migrate(ctx, chatPool); err == nil {
+				t.Fatal("expected migration 010 to refuse retirement after failed transfer even when source_apps=0")
+			}
+
+			// Remove unexplained row, re-run transfer, and verify clean retirement with 0 target apps.
+			if _, err := mktPool.Exec(ctx, `DELETE FROM marketplace_apps WHERE id = 'indep-1'`); err != nil {
+				t.Fatal(err)
+			}
+			if out, err := runTransfer(); err != nil {
+				t.Fatalf("clean transfer after removing unexplained target app failed: %v\n%s", err, out)
+			}
+			if err := Migrate(ctx, chatPool); err != nil {
+				t.Fatalf("expected migration 010 to retire empty verified source tables cleanly: %v", err)
+			}
+			if err := mktPool.QueryRow(ctx, `SELECT count(*) FROM marketplace_apps`).Scan(&targetApps); err != nil || targetApps != 0 {
+				t.Fatalf("expected 0 target apps after retirement, got %d (%v)", targetApps, err)
+			}
+		})
+	}
+}

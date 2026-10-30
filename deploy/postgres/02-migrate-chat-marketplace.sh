@@ -21,9 +21,10 @@ if [[ $has_legacy_apps != t ]]; then
   exit 0
 fi
 
-# Clear any prior transfer marker before inspecting or copying so an interrupted
-# retry after source mutations can never leave a stale stamp behind.
-"${psql_super[@]}" --dbname "$chat_db" --command "COMMENT ON TABLE public.marketplace_apps IS NULL;" >/dev/null
+# Mark transfer as in-progress before inspecting or copying so an interrupted
+# or failed retry after source mutations (including deleting the last source app)
+# can never leave a stale verified stamp behind.
+"${psql_super[@]}" --dbname "$chat_db" --command "COMMENT ON TABLE public.marketplace_apps IS 'teamie.transfer_in_progress_v1';" >/dev/null
 
 scratch=$(mktemp -d)
 trap 'rm -rf -- "$scratch"' EXIT
@@ -236,6 +237,24 @@ CREATE TEMP TABLE stage_reviews (LIKE public.marketplace_app_reviews INCLUDING D
 \copy stage_installs (workspace_id, app_id, installed_by, review_preview, created_at) FROM 'installs.bin' WITH (FORMAT binary)
 \copy stage_reviews (id, app_id, revision, action, actor_id, note, web_url, mcp_url, snapshot, created_at) FROM 'reviews.bin' WITH (FORMAT binary)
 
+CREATE TABLE IF NOT EXISTS public.marketplace_legacy_transfer_ledger (
+  app_id text PRIMARY KEY,
+  source_updated_at timestamptz NOT NULL
+);
+
+DELETE FROM public.marketplace_apps m
+USING public.marketplace_legacy_transfer_ledger lt
+WHERE m.id = lt.app_id
+  AND m.updated_at <= lt.source_updated_at
+  AND NOT EXISTS (
+    SELECT 1 FROM stage_apps s WHERE s.id = m.id
+  );
+
+DELETE FROM public.marketplace_legacy_transfer_ledger lt
+WHERE NOT EXISTS (
+  SELECT 1 FROM public.marketplace_apps m WHERE m.id = lt.app_id
+);
+
 INSERT INTO public.marketplace_apps (
   id, slug, name, description, web_url, mcp_url, signing_secret, enabled,
   owner_id, is_published, published_version, review_status,
@@ -286,6 +305,13 @@ ON CONFLICT (id) DO UPDATE SET
   updated_at = EXCLUDED.updated_at
 WHERE public.marketplace_apps.updated_at <= EXCLUDED.updated_at;
 
+INSERT INTO public.marketplace_legacy_transfer_ledger (app_id, source_updated_at)
+SELECT s.id, s.updated_at
+FROM stage_apps s
+JOIN public.marketplace_apps m ON m.id = s.id AND m.updated_at = s.updated_at
+ON CONFLICT (app_id) DO UPDATE SET
+  source_updated_at = EXCLUDED.source_updated_at;
+
 DELETE FROM public.workspace_marketplace_apps w
 USING stage_apps sa, public.marketplace_apps m
 WHERE w.app_id = sa.id
@@ -323,9 +349,11 @@ ON CONFLICT (id) DO NOTHING;
 DO $$
 DECLARE
   missing_apps bigint;
+  extra_apps bigint;
   missing_installs bigint;
   extra_installs bigint;
   missing_reviews bigint;
+  extra_reviews bigint;
 BEGIN
   SELECT count(*) INTO missing_apps
   FROM stage_apps s
@@ -362,8 +390,13 @@ BEGIN
       AND m.created_at = s.created_at
       AND m.updated_at = s.updated_at
   );
-  IF missing_apps > 0 THEN
-    RAISE EXCEPTION 'marketplace_apps transfer verification failed: % row(s) missing or diverged', missing_apps;
+  SELECT count(*) INTO extra_apps
+  FROM public.marketplace_apps m
+  WHERE NOT EXISTS (
+    SELECT 1 FROM stage_apps s WHERE s.id = m.id
+  );
+  IF missing_apps > 0 OR extra_apps > 0 THEN
+    RAISE EXCEPTION 'marketplace_apps transfer verification failed: % missing/diverged, % extra target row(s)', missing_apps, extra_apps;
   END IF;
 
   SELECT count(*) INTO missing_installs
@@ -378,7 +411,6 @@ BEGIN
   );
   SELECT count(*) INTO extra_installs
   FROM public.workspace_marketplace_apps w
-  JOIN stage_apps sa ON sa.id = w.app_id
   WHERE NOT EXISTS (
     SELECT 1 FROM stage_installs s
     WHERE s.workspace_id = w.workspace_id
@@ -403,8 +435,14 @@ BEGIN
       AND r.snapshot IS NOT DISTINCT FROM s.snapshot
       AND r.created_at = s.created_at
   );
-  IF missing_reviews > 0 THEN
-    RAISE EXCEPTION 'marketplace_app_reviews transfer verification failed: % row(s) missing or diverged', missing_reviews;
+  SELECT count(*) INTO extra_reviews
+  FROM public.marketplace_app_reviews r
+  WHERE NOT EXISTS (
+    SELECT 1 FROM stage_reviews s
+    WHERE s.id = r.id
+  );
+  IF missing_reviews > 0 OR extra_reviews > 0 THEN
+    RAISE EXCEPTION 'marketplace_app_reviews transfer verification failed: % missing/diverged, % extra', missing_reviews, extra_reviews;
   END IF;
 END
 $$;
