@@ -89,12 +89,15 @@ if err != nil || !tok.Valid {
 let contextToken = "";
 
 window.addEventListener("message", (event) => {
+  if (event.source !== window.parent) return;
+  if (hostOrigin && event.origin !== hostOrigin) return;
   const msg = event.data;
   if (!msg || msg.type !== "teamie:mcp-app:init") return;
   hostOrigin = event.origin;
   contextToken = msg.payload.token;
   // msg.payload 包含: appId, slug, name, webUrl, mcpUrl, token, expiresAt,
   // workspaceId, conversationId, user: { id, displayName }
+  // 请保存在当前实例内存中，切勿写入全局固定 Key 的 localStorage
   connectRoomState(msg.payload);
 });
 
@@ -112,12 +115,14 @@ export function requestFreshToken() {
     id: "mcpTools",
     label: "MCP Streamable HTTP (2025-03-26) 核心协议约定",
     code: `// 1. 所有 POST / GET / DELETE 请求必须携带并校验 Authorization: Bearer <token>
+//    未授权或签名伪造必须返回 HTTP 401 或 403；Token 过期返回 HTTP 401。
 // 2. 初始化握手: method = "initialize" (protocolVersion: "2025-03-26")
 //    可选返回响应头 Mcp-Session-Id: <session-id>；后续请求会回传该头，会话结束发送 DELETE。
+//    若服务端重启导致 Mcp-Session-Id 失效，请返回 HTTP 404，Agent Runtime 会自动重连握手。
 // 3. 工具列表: method = "tools/list"
-//    平台自动将每个工具挂载为: mcp__<slug>__<tool_name>
-// 4. 工具调用幂等: Agent Runtime 重放时可能携带相同请求或 Idempotency-Key，
-//    写操作（如夜间刀人、投票、发言确认）必须在房间状态机内按 (cid, sub, phase, actionKey) 幂等去重！`,
+//    平台自动将每个工具挂载为: mcp__<slug>__<tool_name>（总长度上限 64 字符）
+// 4. 工具调用幂等: Agent Runtime 调用 tools/call 时附带 Idempotency-Key 请求头，
+//    写操作（如夜间刀人、投票、发言确认）必须在房间状态机内按 (cid, sub, idempotencyKey) 幂等去重！`,
   },
 };
 
@@ -313,13 +318,17 @@ export function DeveloperHandbook() {
               <code>text/event-stream</code>（SSE）。
             </li>
             <li>
-              <strong>工具命名与精简 Schema：</strong>至少暴露 1 个工具，工具名使用清晰动词短语（如{" "}
+              <strong>工具命名与精简 Schema：</strong>至少暴露 1 个工具，挂载后全名{" "}
+              <code>mcp__&lt;slug&gt;__&lt;tool_name&gt;</code> 总长不得超过 64 字符（建议{" "}
+              <code>&lt;tool_name&gt;</code> 使用不超过 32 字符的小写动词短语，如{" "}
               <code>get_my_view</code>、<code>cast_night_action</code>、<code>submit_vote</code>），并在{" "}
               <code>description</code> 中明确告知大模型何时调用与参数约束。
             </li>
             <li>
-              <strong>实时唤醒通知：</strong>当房间状态变化（如全员入座、天黑请闭眼、投票结果出炉）时，可通过 MCP SSE 流向在线会话发送{" "}
-              <code>notifications/message</code>，Agent Runtime 会将其作为持久输入唤醒对应 Agent 执行下一回合。
+              <strong>会话失效恢复与实时唤醒通知：</strong>若服务端重启导致{" "}
+              <code>Mcp-Session-Id</code> 失效，请返回 HTTP <code>404</code>（Token 过期返回{" "}
+              <code>401</code>），Agent Runtime 会自动重新握手并刷新凭证；当房间状态变化（如全员入座、天黑请闭眼、投票结果出炉）时，可通过 MCP SSE 流向在线会话推送任意 JSON-RPC Notification（如{" "}
+              <code>notifications/message</code>），Agent Runtime 会将其作为持久输入（<code>TEAMIE_APP_NOTIFICATION</code>）唤醒对应 Agent 执行下一回合。
             </li>
           </ul>
           <SnippetBlock snippet={SNIPPETS.mcpTools} />
@@ -358,12 +367,13 @@ export function DeveloperHandbook() {
               <code>X-Frame-Options</code> 或过窄的 <code>frame-ancestors</code>。
             </li>
             <li>
-              <strong>3. 未授权请求返回 401：</strong>不带 <code>Authorization</code> 头访问{" "}
-              <code>mcpUrl</code> 时返回 HTTP <code>401</code> 或 JSON-RPC 鉴权拒绝错误。
+              <strong>3. 未授权请求严格返回 HTTP 401/403：</strong>不带{" "}
+              <code>Authorization</code> 头访问 <code>mcpUrl</code> 时必须返回 HTTP{" "}
+              <code>401</code> 或 <code>403</code> 状态码（切勿返回 HTTP <code>200</code> 包装错误）。
             </li>
             <li>
-              <strong>4. 伪造签名严格拦截：</strong>使用错误密钥签名的 JWT 访问{" "}
-              <code>mcpUrl</code> 时被明确拒绝，绝不裸解析 Base64 Payload。
+              <strong>4. 伪造签名严格返回 HTTP 401/403：</strong>使用错误密钥签名的 JWT 访问{" "}
+              <code>mcpUrl</code> 时必须返回 HTTP <code>401</code> 或 <code>403</code> 状态码，绝不裸解析 Base64 Payload。
             </li>
             <li>
               <strong>5. 合法 Token 正常暴露工具：</strong>使用真实{" "}
