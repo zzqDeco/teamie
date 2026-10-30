@@ -147,6 +147,7 @@ services:
     networks: [private, egress]
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      PPROF_ADDR: ${PPROF_ADDR:-127.0.0.1:6060}
       HTTP_ADDR: :8088
       IDENTITY_RPC_ADDR: identity:8881
       CHAT_RPC_ADDR: chat:8882

@@ -7,8 +7,10 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import subprocess
 import sys
+import tempfile
 from urllib.parse import unquote, urlsplit
 
 LEGACY_SERVICES = ("identity", "chat", "realtime", "web", "caddy", "postgres", "redis")
@@ -262,6 +264,51 @@ def validate_config(config, host_env, release_manifest=None):
     return origin
 
 
+def ensure_host_env(host_env, release_manifest):
+    validate(release_manifest)
+    env_path = Path(host_env)
+    require((env_path.stat().st_mode & 0o777) == 0o600, "production.env must have mode 0600")
+    if "marketplace" not in release_manifest["images"]:
+        return False
+    raw_text = env_path.read_text(encoding="utf-8")
+    entries = {}
+    for line in raw_text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("export ") and "=" in stripped[7:]:
+            stripped = stripped[7:].lstrip()
+        if "=" in stripped:
+            key, val = stripped.split("=", 1)
+            entries[key.strip()] = val.strip().strip("'\"")
+    if entries.get("POSTGRES_MARKETPLACE_PASSWORD") or entries.get("MARKETPLACE_DATABASE_URL"):
+        return False
+    existing_values = {v for v in entries.values() if v}
+    password = secrets.token_hex(32)
+    while password in existing_values:
+        password = secrets.token_hex(32)
+    addition = (
+        f"POSTGRES_MARKETPLACE_PASSWORD={password}\n"
+        f"MARKETPLACE_DATABASE_URL=postgres://teamie_marketplace:{password}@postgres:5432/teamie_marketplace?sslmode=disable\n"
+    )
+    updated = raw_text + ("" if not raw_text or raw_text.endswith("\n") else "\n") + addition
+    fd, tmp_name = tempfile.mkstemp(prefix=".production.env.", dir=str(env_path.parent))
+    try:
+        os.chmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(updated)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_name, str(env_path))
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -283,6 +330,9 @@ def main():
     check.add_argument("--rollback", action="store_true")
     env = sub.add_parser("env")
     env.add_argument("manifest")
+    ensure_env = sub.add_parser("ensure-host-env")
+    ensure_env.add_argument("host_env")
+    ensure_env.add_argument("manifest")
     config = sub.add_parser("config")
     config.add_argument("config")
     config.add_argument("host_env")
@@ -326,6 +376,9 @@ def main():
                              read(args.highwater) if args.highwater else None, args.rollback)
         elif args.command == "env":
             print(image_env(read(args.manifest)), end="")
+        elif args.command == "ensure-host-env":
+            if ensure_host_env(args.host_env, read(args.manifest)):
+                print("Provisioned missing teamie_marketplace role credentials in host environment.", file=sys.stderr)
         else:
             print(validate_config(read(args.config), args.host_env, read(args.manifest) if args.manifest else None))
     except (ValueError, KeyError, TypeError, OSError) as error:
