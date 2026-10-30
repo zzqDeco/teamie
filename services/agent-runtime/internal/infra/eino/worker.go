@@ -298,6 +298,38 @@ func (w *agentWorker) start(ctx context.Context) {
 	}(w.loop, w.loopDone)
 }
 
+func (w *agentWorker) restorePresence(ctx context.Context) bool {
+	backoff := 50 * time.Millisecond
+	for {
+		err := w.presence.Restore(ctx, w.engine.Store, w.lease)
+		if err == nil {
+			return true
+		}
+		if ctx.Err() != nil || w.engine.Store.CheckLease(ctx, w.lease) != nil {
+			return false
+		}
+		observability.L(ctx).Warn(
+			"Agent presence checkpoint restore failed, retrying before ingestion",
+			zap.String("event.action", "agent-presence-restore-retry"),
+			zap.String("custom.agent.id", w.lease.AgentID),
+			zap.Error(observability.Diagnostic("presence_restore_failed", err)),
+		)
+		timer := time.NewTimer(backoff)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return false
+		case <-timer.C:
+		}
+		if backoff < time.Second {
+			backoff *= 2
+			if backoff > time.Second {
+				backoff = time.Second
+			}
+		}
+	}
+}
+
 func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lease) {
 	ctx, cancelWorker := context.WithCancel(ctx)
 	defer cancelWorker()
@@ -356,7 +388,9 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 	defer w.stop()
 	w.mcpWatcher = newMCPNotificationWatcher(e.Store, lease, w.imc, e.Config.FlagsFile)
 	w.presence = newConversationPresenceState(e.unreadDigestInterval(), w.mcpWatcher.presenceChanged)
-	_ = w.presence.Restore(ctx, e.Store, lease)
+	if !w.restorePresence(ctx) {
+		return
+	}
 	w.mcpWatcher.setPresence(w.presence)
 	stopReads := w.reads.start(ctx, e.Store, lease, func(rc context.Context) error {
 		if !runtimeFlag(e.Config.FlagsFile, "agents.runtime.v3") {
