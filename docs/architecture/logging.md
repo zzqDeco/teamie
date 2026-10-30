@@ -96,6 +96,7 @@ Trace context is not inserted into durable input JSON or rewritten receipts.
 | `sandbox-workspace`, `sandbox-execution`, `sandbox-task` | Workspace operation, foreground execution or independent task supervision; state/result and output length, never command/file/output content. Observer cancellation does not claim that a durable child terminated. |
 | `context-compaction-started`, `context-compaction` | Actual reduction attempt, before/after message counts, frozen input limit and forced/proactive selection; never summary content. |
 | `agent-reconciliation`, `outbox-cleanup`, `outbox-publish` | Recoverable failures, with safe type/cause metadata. |
+| `pprof-listening`, `pprof-stopped`, `pprof-capture`, `pprof-rejected` | Optional container-loopback Go runtime profiling lifecycle and audited profile captures (`custom.pprof.profile`, `custom.pprof.seconds`, `http.response.body.bytes`); never raw query strings or headers. |
 
 Known successful sync/typing, Docker polling, authorization-validation and runtime poll RPCs use debug
 verbosity. Their failures remain visible. Successful health-path access logs
@@ -136,6 +137,31 @@ event. If the Run says `interrupted`, inspect its separate `preempted` and
 `failure_code` fields. Use `--event EVENT_ID` to join a Run's input list to its ingestion
 trace, and `--attempt ATTEMPT_UUID` to isolate retries. Failed responses from older releases cannot be recovered
 retroactively by installing this logging.
+
+## Loopback runtime profiling (`pprof`)
+
+Each Go service starts an isolated standard-library `pprof` listener through
+`pkg/observability` only when `PPROF_ADDR` resolves to a loopback IP (`127.0.0.1:6060`
+in production containers; unset or `off` disables it). Non-loopback bind addresses
+are rejected without terminating the service, and `/debug/pprof/*` is never mounted
+on business Hertz servers or published on host ports.
+
+- `/debug/pprof/cmdline` emits only the executable basename.
+- `debug>=2` is rejected to avoid multi-MiB raw stack-slot dumps inside tight containers.
+- Time-windowed captures (`profile` up to 60s, `trace` up to 10s, delta windows up to 30s)
+  are serialized by a process-wide single-flight guard (`409 Conflict` when busy).
+- `block` and `mutex` rates stay `0` at rest and activate (`10µs` / `1/5`) only during
+  explicit `?seconds=N` delta captures, resetting to `0` on completion.
+- Inbound HTTP and Kitex RPC handlers attach bounded low-cardinality `runtime/pprof`
+  labels (`component`, `http.method`, `rpc.service`, `rpc.method`), never user/Agent/trace IDs.
+
+Capture profiles from a running container without host port forwarding:
+
+```sh
+python3 ops/pprof.py --service agent-runtime --profile profile --seconds 30 --output - > runtime-cpu.pb.gz
+python3 ops/pprof.py --service chat --profile heap --gc
+python3 ops/pprof.py --service realtime --profile mutex --seconds 10
+```
 
 ## Verification boundaries
 

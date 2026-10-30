@@ -158,6 +158,17 @@ unchanged; there is no new long-term log store or browser diagnostics endpoint.
 See [logging and trace correlation](../docs/architecture/logging.md) for fields,
 privacy, timing scopes, durable-boundary joins and acceptance limits.
 
+For live CPU, heap, goroutine, contention or trace inspection without container
+restarts or SSH port forwarding, stream loopback `pprof` captures through the
+read-only helper (`PPROF_ADDR=off` in `/srv/teamie/config/production.env` disables the listener):
+
+```sh
+ssh teamie-deploy@PRODUCTION_HOST \
+  'python3 /srv/teamie/current/recipe/ops/pprof.py --service agent-runtime --profile profile --seconds 30 --output -' \
+  > runtime-cpu.pb.gz
+go tool pprof -http=:9090 -source_path=. runtime-cpu.pb.gz
+```
+
 ## Opt-in real model provider acceptance
 
 CI and disposable acceptance never call a live external model provider automatically. Once a platform administrator has authorized a real OpenAI-compatible provider (and optional Tavily web search key), run `ops/acceptance-real-model.py` explicitly to verify live gateway connectivity, foreground `@Agent` turns, Sandbox file export, optional `web_search`/`web_fetch`, and `schedule_create` self-wakeup:

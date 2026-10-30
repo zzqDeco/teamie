@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	rpprof "runtime/pprof"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -160,7 +161,9 @@ func HTTP(next http.Handler) http.Handler {
 				panic(panicValue)
 			} // Recovery remains owned by Hertz/net/http.
 		}()
-		next.ServeHTTP(state, r)
+		rpprof.Do(ctx, rpprof.Labels("component", "http-server", "http.method", safeHTTPMethod(r.Method)), func(pctx context.Context) {
+			next.ServeHTTP(state, r.WithContext(pctx))
+		})
 	})
 }
 
