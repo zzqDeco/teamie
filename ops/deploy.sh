@@ -34,6 +34,9 @@ else
 fi
 python3 "$manifest_tool" check "$manifest" "${checks[@]}"
 [[ $(stat -c '%u' "$HOST_ENV") == "$(id -u)" ]] || { echo 'production.env must belong to the delivery user.' >&2; exit 1; }
+if [[ $mode == apply ]]; then
+  python3 "$manifest_tool" ensure-host-env "$HOST_ENV" "$manifest"
+fi
 scratch=$(mktemp -d "$TEAMIE_ROOT/state/deploy-XXXXXX")
 trap 'rm -rf -- "$scratch"' EXIT
 python3 "$manifest_tool" env "$manifest" > "$scratch/images.env"

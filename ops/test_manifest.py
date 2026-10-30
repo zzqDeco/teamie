@@ -567,5 +567,64 @@ class ProductionConfigTest(unittest.TestCase):
         self.env.chmod(0o644)
         with self.assertRaises(ValueError): manifest.validate_config(self.config, self.env)
 
+    def test_ensure_host_env_provisions_missing_marketplace_role_once_on_same_postgres_instance(self):
+        v3 = {
+            "manifestVersion": 3,
+            "version": "v0.4.2",
+            "source": {"repository": "zzqDeco/teamie", "sha": "a" * 40, "mainSha": "a" * 40,
+                       "ref": "refs/heads/release/v0.4.2"},
+            "createdAt": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "schema": dict(manifest.SCHEMA_V3),
+            "storage": {"postgresMajor": 17},
+            "featureFlags": {"revision": "context-engineering-v1", "sha256": "f" * 64},
+            "images": {service: "ghcr.io/zzqdeco/teamie-" + service + "@sha256:" + "0" * 64
+                       for service in manifest.SERVICES_V3},
+        }
+        v2 = copy.deepcopy(v3)
+        v2["manifestVersion"] = 2
+        v2["schema"] = dict(manifest.SCHEMA_V2)
+        v2["images"] = {k: v for k, v in v3["images"].items() if k in manifest.SERVICES}
+
+        initial = (
+            "POSTGRES_ADMIN_PASSWORD=" + "a" * 64 + "\n"
+            "POSTGRES_IDENTITY_PASSWORD=" + "i" * 64 + "\n"
+            "POSTGRES_CHAT_PASSWORD=" + "c" * 64
+        )
+        self.env.write_text(initial, encoding="utf-8")
+
+        # v2 manifests without marketplace never touch production.env.
+        self.assertFalse(manifest.ensure_host_env(self.env, v2))
+        self.assertEqual(self.env.read_text(encoding="utf-8"), initial)
+
+        # First v3 rollout atomically populates independent marketplace role credentials on the same postgres host.
+        self.assertTrue(manifest.ensure_host_env(self.env, v3))
+        self.assertEqual(self.env.stat().st_mode & 0o777, 0o600)
+        after_first = self.env.read_text(encoding="utf-8")
+        self.assertTrue(after_first.startswith(initial + "\n"))
+        parsed = dict(line.split("=", 1) for line in after_first.splitlines() if "=" in line)
+        pw = parsed["POSTGRES_MARKETPLACE_PASSWORD"]
+        self.assertEqual(len(pw), 64)
+        self.assertNotIn(pw, {"a" * 64, "i" * 64, "c" * 64})
+        self.assertEqual(
+            parsed["MARKETPLACE_DATABASE_URL"],
+            f"postgres://teamie_marketplace:{pw}@postgres:5432/teamie_marketplace?sslmode=disable",
+        )
+
+        # Subsequent rollouts preserve existing credentials untouched.
+        self.assertFalse(manifest.ensure_host_env(self.env, v3))
+        self.assertEqual(self.env.read_text(encoding="utf-8"), after_first)
+
+        # Partial pre-existing configuration is never overwritten silently.
+        partial = initial + "\nPOSTGRES_MARKETPLACE_PASSWORD=" + "m" * 64 + "\n"
+        self.env.write_text(partial, encoding="utf-8")
+        self.assertFalse(manifest.ensure_host_env(self.env, v3))
+        self.assertEqual(self.env.read_text(encoding="utf-8"), partial)
+
+        # Insecure file permissions are rejected before writing.
+        self.env.write_text(initial, encoding="utf-8")
+        self.env.chmod(0o644)
+        with self.assertRaises(ValueError):
+            manifest.ensure_host_env(self.env, v3)
+
 
 if __name__ == "__main__": unittest.main()
