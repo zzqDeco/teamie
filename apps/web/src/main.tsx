@@ -61,6 +61,8 @@ function App() {
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/join/:inviteCode" element={<Join />} />
+      <Route path="/developers" element={<Navigate to="/app/developers" replace />} />
+      <Route path="/developers/docs" element={<Navigate to="/app/developers/docs" replace />} />
       <Route
         path="/app/*"
         element={

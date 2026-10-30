@@ -133,16 +133,44 @@ type MutationRepository interface {
 	SaveMutation(context.Context, string, string, ConversationMutation) error
 }
 
+// InstalledWorkspaceMarketplaceApp binds a MarketplaceApp with workspace-level installation flags.
+type InstalledWorkspaceMarketplaceApp struct {
+	App              MarketplaceApp
+	WorkspaceOwnerID string
+	ReviewPreview    bool
+}
+
+// VerifyEndpointsInput holds parameters for actively probing a deployed WebUI + MCP service.
+type VerifyEndpointsInput struct {
+	AppID         string
+	Slug          string
+	WebURL        string
+	MCPURL        string
+	SigningSecret string
+}
+
+// MarketplaceEndpointVerifier probes a developer's deployed Web UI and MCP Server against the platform protocol.
+type MarketplaceEndpointVerifier interface {
+	VerifyEndpoints(ctx context.Context, input VerifyEndpointsInput) (MarketplaceEndpointVerification, error)
+}
+
 // MarketplaceRepository defines persistence operations for platform marketplace apps and workspace installations.
 type MarketplaceRepository interface {
 	ListAllMarketplaceApps(ctx context.Context) ([]MarketplaceApp, error)
-	ListEnabledMarketplaceApps(ctx context.Context) ([]MarketplaceApp, error)
+	ListPublishedCatalogApps(ctx context.Context) ([]MarketplaceApp, error)
+	ListDeveloperMarketplaceApps(ctx context.Context, ownerID string) ([]MarketplaceApp, error)
+	CountDeveloperMarketplaceApps(ctx context.Context, ownerID string) (int, error)
 	GetMarketplaceAppByID(ctx context.Context, id string, forUpdate bool) (MarketplaceApp, error)
+	GetMarketplaceAppSigningSecret(ctx context.Context, id string) (string, error)
 	InsertMarketplaceApp(ctx context.Context, app MarketplaceApp) (MarketplaceApp, error)
 	UpdateMarketplaceApp(ctx context.Context, app MarketplaceApp) (MarketplaceApp, error)
+	UpdateMarketplaceSigningSecret(ctx context.Context, id, secret string) (MarketplaceApp, error)
+	SaveMarketplaceVerificationReport(ctx context.Context, id string, verifiedAt time.Time, report MarketplaceEndpointVerification) (MarketplaceApp, error)
 	DeleteMarketplaceApp(ctx context.Context, id string) (bool, error)
-	ListWorkspaceMarketplaceApps(ctx context.Context, workspaceID string) ([]MarketplaceApp, error)
-	InstallWorkspaceMarketplaceApp(ctx context.Context, workspaceID, appID, installedBy string) error
+	InsertMarketplaceAppReview(ctx context.Context, review MarketplaceAppReview, snapshot any) error
+	ListMarketplaceAppReviews(ctx context.Context, appID string) ([]MarketplaceAppReview, error)
+	ListWorkspaceMarketplaceApps(ctx context.Context, workspaceID string) ([]InstalledWorkspaceMarketplaceApp, error)
+	InstallWorkspaceMarketplaceApp(ctx context.Context, workspaceID, appID, installedBy string, reviewPreview bool) error
 	UninstallWorkspaceMarketplaceApp(ctx context.Context, workspaceID, appID string) error
-	GetInstalledWorkspaceMarketplaceApp(ctx context.Context, workspaceID, appID string) (MarketplaceApp, error)
+	GetInstalledWorkspaceMarketplaceAppForSession(ctx context.Context, workspaceID, appID string) (InstalledWorkspaceMarketplaceApp, error)
 }

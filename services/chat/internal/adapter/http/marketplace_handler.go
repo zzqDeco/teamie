@@ -2,22 +2,30 @@ package http
 
 import (
 	"context"
+	"time"
+
 	chatgen "teamie/contracts/gen/im/hertz_gen/im/chat"
 	"teamie/services/chat/internal/domain"
-	"time"
 )
 
 func toMarketplaceAppDTO(app domain.MarketplaceApp) *chatgen.MarketplaceAppDTO {
+	isOfficial := app.IsOfficial()
+	servingDraft := app.ServingDraft
+	pubVer := int32(app.PublishedVersion)
 	return &chatgen.MarketplaceAppDTO{
-		ID:          app.ID,
-		Slug:        app.Slug,
-		Name:        app.Name,
-		Description: app.Description,
-		WebUrl:      app.WebURL,
-		McpUrl:      app.MCPURL,
-		Enabled:     app.Enabled,
-		CreatedAt:   app.CreatedAt.UTC().Format(time.RFC3339Nano),
-		UpdatedAt:   app.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		ID:               app.ID,
+		Slug:             app.Slug,
+		Name:             app.Name,
+		Description:      app.Description,
+		WebUrl:           app.WebURL,
+		McpUrl:           app.MCPURL,
+		Enabled:          app.Enabled,
+		CreatedAt:        app.CreatedAt.UTC().Format(time.RFC3339Nano),
+		UpdatedAt:        app.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		PublisherName:    optString(app.PublisherName),
+		IsOfficial:       &isOfficial,
+		ServingDraft:     &servingDraft,
+		PublishedVersion: &pubVer,
 	}
 }
 
@@ -29,7 +37,108 @@ func toMarketplaceAppDTOs(apps []domain.MarketplaceApp) []*chatgen.MarketplaceAp
 	return out
 }
 
-func (a *Adapter) ListAdminMarketplaceApps(ctx context.Context, _ *chatgen.GetBootstrapReq) (*chatgen.MarketplaceAppListResp, error) {
+func toVerificationDTO(v *domain.MarketplaceEndpointVerification) *chatgen.MarketplaceEndpointVerificationDTO {
+	if v == nil {
+		return nil
+	}
+	checks := make([]*chatgen.EndpointProbeCheckDTO, 0, len(v.Checks))
+	for _, c := range v.Checks {
+		checks = append(checks, &chatgen.EndpointProbeCheckDTO{
+			Stage:   c.Stage,
+			Ok:      c.OK,
+			Code:    c.Code,
+			Summary: c.Summary,
+		})
+	}
+	tools := make([]*chatgen.DiscoveredMCPToolDTO, 0, len(v.Tools))
+	for _, t := range v.Tools {
+		tools = append(tools, &chatgen.DiscoveredMCPToolDTO{
+			Name:            t.Name,
+			ExposedName:     t.ExposedName,
+			Description:     t.Description,
+			InputSchemaJson: optString(t.InputSchemaJSON),
+		})
+	}
+	return &chatgen.MarketplaceEndpointVerificationDTO{
+		Ok:                 v.OK,
+		VerifiedAt:         v.VerifiedAt.UTC().Format(time.RFC3339Nano),
+		WebUrl:             v.WebURL,
+		McpUrl:             v.MCPURL,
+		McpServerName:      optString(v.MCPServerName),
+		McpServerVersion:   optString(v.MCPServerVersion),
+		McpProtocolVersion: optString(v.MCPProtocolVersion),
+		Checks:             checks,
+		Tools:              tools,
+	}
+}
+
+func toDeveloperMarketplaceAppDTO(app domain.MarketplaceApp) *chatgen.DeveloperMarketplaceAppDTO {
+	var ownerID *string
+	if app.OwnerID != nil && *app.OwnerID != "" {
+		v := *app.OwnerID
+		ownerID = &v
+	}
+	return &chatgen.DeveloperMarketplaceAppDTO{
+		ID:                 app.ID,
+		Slug:               app.Slug,
+		Name:               app.Name,
+		Description:        app.Description,
+		WebUrl:             app.WebURL,
+		McpUrl:             app.MCPURL,
+		Enabled:            app.Enabled,
+		CreatedAt:          app.CreatedAt.UTC().Format(time.RFC3339Nano),
+		UpdatedAt:          app.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		OwnerId:            ownerID,
+		OwnerDisplayName:   optString(app.OwnerDisplayName),
+		IsOfficial:         app.IsOfficial(),
+		IsPublished:        app.IsPublished,
+		PublishedVersion:   int32(app.PublishedVersion),
+		ReviewStatus:       app.ReviewStatus,
+		DraftName:          app.DraftName,
+		DraftDescription:   app.DraftDescription,
+		DraftWebUrl:        app.DraftWebURL,
+		DraftMcpUrl:        app.DraftMCPURL,
+		HasDraftChanges:    app.HasDraftChanges,
+		SubmissionRevision: int32(app.SubmissionRevision),
+		SubmissionNote:     app.SubmissionNote,
+		SubmittedAt:        formatOptTime(app.SubmittedAt),
+		ReviewedAt:         formatOptTime(app.ReviewedAt),
+		ReviewNote:         app.ReviewNote,
+		AdminSuspended:     app.AdminSuspended,
+		SuspendedReason:    app.SuspendedReason,
+		LastVerifiedAt:     formatOptTime(app.LastVerifiedAt),
+		VerificationReport: toVerificationDTO(app.VerificationReport),
+	}
+}
+
+func toDeveloperMarketplaceAppDTOs(apps []domain.MarketplaceApp) []*chatgen.DeveloperMarketplaceAppDTO {
+	out := make([]*chatgen.DeveloperMarketplaceAppDTO, 0, len(apps))
+	for _, app := range apps {
+		out = append(out, toDeveloperMarketplaceAppDTO(app))
+	}
+	return out
+}
+
+func toMarketplaceAppReviewDTOs(reviews []domain.MarketplaceAppReview) []*chatgen.MarketplaceAppReviewDTO {
+	out := make([]*chatgen.MarketplaceAppReviewDTO, 0, len(reviews))
+	for _, r := range reviews {
+		out = append(out, &chatgen.MarketplaceAppReviewDTO{
+			ID:        r.ID,
+			AppId:     r.AppID,
+			Revision:  int32(r.Revision),
+			Action:    r.Action,
+			ActorId:   r.ActorID,
+			ActorName: optString(r.ActorName),
+			Note:      r.Note,
+			WebUrl:    r.WebURL,
+			McpUrl:    r.MCPURL,
+			CreatedAt: r.CreatedAt.UTC().Format(time.RFC3339Nano),
+		})
+	}
+	return out
+}
+
+func (a *Adapter) ListAdminMarketplaceApps(ctx context.Context, _ *chatgen.GetBootstrapReq) (*chatgen.DeveloperMarketplaceAppListResp, error) {
 	user, ok := actorFromContext(ctx)
 	if !ok {
 		return nil, domain.Err(401, "unauthenticated", "Sign in to continue")
@@ -38,7 +147,7 @@ func (a *Adapter) ListAdminMarketplaceApps(ctx context.Context, _ *chatgen.GetBo
 	if err != nil {
 		return nil, err
 	}
-	return &chatgen.MarketplaceAppListResp{Apps: toMarketplaceAppDTOs(apps)}, nil
+	return &chatgen.DeveloperMarketplaceAppListResp{Apps: toDeveloperMarketplaceAppDTOs(apps)}, nil
 }
 
 func (a *Adapter) CreateAdminMarketplaceApp(ctx context.Context, req *chatgen.CreateMarketplaceAppReq) (*chatgen.CreatedMarketplaceAppResp, error) {

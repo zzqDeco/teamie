@@ -6,7 +6,13 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@teamie/api-client";
-import type { Conversation, MarketplaceApp, User, Workspace } from "@teamie/api-client";
+import type {
+  Conversation,
+  DeveloperMarketplaceApp,
+  MarketplaceApp,
+  User,
+  Workspace,
+} from "@teamie/api-client";
 import { ConversationHeader } from "./chat/conversation-chrome";
 import {
   ConversationAppsPane,
@@ -37,6 +43,24 @@ const sampleApp: MarketplaceApp = {
   enabled: true,
   createdAt: "2026-10-16T00:00:00Z",
   updatedAt: "2026-10-16T00:00:00Z",
+};
+
+const sampleAdminApp: DeveloperMarketplaceApp = {
+  ...sampleApp,
+  isOfficial: true,
+  isPublished: true,
+  publishedVersion: 1,
+  reviewStatus: "approved",
+  draftName: sampleApp.name,
+  draftDescription: sampleApp.description,
+  draftWebUrl: sampleApp.webUrl,
+  draftMcpUrl: sampleApp.mcpUrl,
+  hasDraftChanges: false,
+  submissionRevision: 1,
+  submissionNote: "",
+  reviewNote: "",
+  adminSuspended: false,
+  suspendedReason: "",
 };
 
 const sampleWorkspace: Workspace = {
@@ -113,7 +137,7 @@ describe("Marketplace platform admin catalog", () => {
   it("lets platform admins register, rotate secret, toggle enabled, and delete marketplace apps", async () => {
     const listSpy = vi
       .spyOn(api, "adminMarketplaceApps")
-      .mockResolvedValue({ apps: [sampleApp] });
+      .mockResolvedValue({ apps: [sampleAdminApp] });
     const createSpy = vi
       .spyOn(api, "createAdminMarketplaceApp")
       .mockResolvedValue({

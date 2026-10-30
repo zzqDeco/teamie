@@ -6,6 +6,7 @@ import {
   Check,
   CheckCheck,
   ChevronRight,
+  Code2,
   Copy,
   Hash,
   Link as LinkIcon,
@@ -470,6 +471,14 @@ export function ProfileSettings() {
         />
       </section>
       <PasswordSettings />
+      <Link to="/app/developers" className="platform-management-link">
+        <Code2 size={ICON.lg} aria-hidden="true" />
+        <span>
+          <b>开发者平台</b>
+          <small>自部署 Web + MCP 应用、线上协议拨测与提审手册</small>
+        </span>
+        <ChevronRight size={ICON.md} aria-hidden="true" />
+      </Link>
       {canConfigureModelGateway(user) && (
         <Link to="/app/admin" className="platform-management-link">
           <ShieldCheck size={ICON.lg} aria-hidden="true" />

@@ -394,7 +394,17 @@ class AgentManifestTest(unittest.TestCase):
         previous = self.modern()
         previous["schema"]["chat"] = 7
         current = self.modern()
+        current["schema"]["chat"] = 8
         self.assertEqual(current["schema"]["chat"], 8)
+        with self.assertRaisesRegex(ValueError, "identical schema versions"):
+            manifest.compatible(current, previous)
+        manifest.compatible(current, copy.deepcopy(current))
+
+    def test_developer_marketplace_schema_rejects_image_only_rollback(self):
+        previous = self.modern()
+        previous["schema"]["chat"] = 8
+        current = self.modern()
+        self.assertEqual(current["schema"]["chat"], 9)
         with self.assertRaisesRegex(ValueError, "identical schema versions"):
             manifest.compatible(current, previous)
         manifest.compatible(current, copy.deepcopy(current))

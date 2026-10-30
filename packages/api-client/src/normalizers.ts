@@ -1,5 +1,8 @@
 import type {
+  DeveloperMarketplaceApp,
   MarketplaceApp,
+  MarketplaceAppReview,
+  MarketplaceEndpointVerification,
   AdminModelProfile,
   AdminModelProvider,
   Agent,
@@ -194,5 +197,90 @@ export function publicMarketplaceApp(app: MarketplaceApp): MarketplaceApp {
     enabled: app.enabled,
     createdAt: app.createdAt,
     updatedAt: app.updatedAt,
+    ...(app.publisherName === undefined ? {} : { publisherName: app.publisherName }),
+    ...(app.isOfficial === undefined ? {} : { isOfficial: app.isOfficial }),
+    ...(app.servingDraft === undefined ? {} : { servingDraft: app.servingDraft }),
+    ...(app.publishedVersion === undefined ? {} : { publishedVersion: app.publishedVersion }),
+  };
+}
+
+export function publicMarketplaceVerification(
+  v: MarketplaceEndpointVerification,
+): MarketplaceEndpointVerification {
+  return {
+    ok: v.ok,
+    verifiedAt: v.verifiedAt,
+    webUrl: v.webUrl,
+    mcpUrl: v.mcpUrl,
+    ...(v.mcpServerName === undefined ? {} : { mcpServerName: v.mcpServerName }),
+    ...(v.mcpServerVersion === undefined ? {} : { mcpServerVersion: v.mcpServerVersion }),
+    ...(v.mcpProtocolVersion === undefined ? {} : { mcpProtocolVersion: v.mcpProtocolVersion }),
+    checks: (v.checks || []).map((c) => ({
+      stage: c.stage,
+      ok: c.ok,
+      code: c.code,
+      summary: c.summary,
+    })),
+    tools: (v.tools || []).map((t) => ({
+      name: t.name,
+      exposedName: t.exposedName,
+      description: t.description,
+      ...(t.inputSchemaJson === undefined ? {} : { inputSchemaJson: t.inputSchemaJson }),
+    })),
+  };
+}
+
+export function publicDeveloperMarketplaceApp(
+  app: DeveloperMarketplaceApp,
+): DeveloperMarketplaceApp {
+  return {
+    id: app.id,
+    slug: app.slug,
+    name: app.name,
+    description: app.description,
+    webUrl: app.webUrl,
+    mcpUrl: app.mcpUrl,
+    enabled: app.enabled,
+    createdAt: app.createdAt,
+    updatedAt: app.updatedAt,
+    ...(app.ownerId === undefined ? {} : { ownerId: app.ownerId }),
+    ...(app.ownerDisplayName === undefined ? {} : { ownerDisplayName: app.ownerDisplayName }),
+    isOfficial: app.isOfficial,
+    isPublished: app.isPublished,
+    publishedVersion: app.publishedVersion,
+    reviewStatus: app.reviewStatus,
+    draftName: app.draftName,
+    draftDescription: app.draftDescription,
+    draftWebUrl: app.draftWebUrl,
+    draftMcpUrl: app.draftMcpUrl,
+    hasDraftChanges: app.hasDraftChanges,
+    submissionRevision: app.submissionRevision,
+    submissionNote: app.submissionNote,
+    ...(app.submittedAt === undefined ? {} : { submittedAt: app.submittedAt }),
+    ...(app.reviewedAt === undefined ? {} : { reviewedAt: app.reviewedAt }),
+    reviewNote: app.reviewNote,
+    adminSuspended: app.adminSuspended,
+    suspendedReason: app.suspendedReason,
+    ...(app.lastVerifiedAt === undefined ? {} : { lastVerifiedAt: app.lastVerifiedAt }),
+    ...(app.verificationReport === undefined
+      ? {}
+      : { verificationReport: publicMarketplaceVerification(app.verificationReport) }),
+  };
+}
+
+export function publicMarketplaceReview(
+  rev: MarketplaceAppReview,
+): MarketplaceAppReview {
+  return {
+    id: rev.id,
+    appId: rev.appId,
+    revision: rev.revision,
+    action: rev.action,
+    actorId: rev.actorId,
+    ...(rev.actorName === undefined ? {} : { actorName: rev.actorName }),
+    note: rev.note,
+    webUrl: rev.webUrl,
+    mcpUrl: rev.mcpUrl,
+    createdAt: rev.createdAt,
   };
 }

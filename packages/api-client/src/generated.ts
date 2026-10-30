@@ -549,6 +549,81 @@ export interface MarketplaceAppDTO {
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
+  publisherName?: string;
+  isOfficial?: boolean;
+  servingDraft?: boolean;
+  publishedVersion?: number;
+}
+
+export interface DiscoveredMCPToolDTO {
+  name: string;
+  exposedName: string;
+  description: string;
+  inputSchemaJson?: string;
+}
+
+export interface EndpointProbeCheckDTO {
+  stage: string;
+  ok: boolean;
+  code: string;
+  summary: string;
+}
+
+export interface MarketplaceEndpointVerificationDTO {
+  ok: boolean;
+  verifiedAt: string;
+  webUrl: string;
+  mcpUrl: string;
+  mcpServerName?: string;
+  mcpServerVersion?: string;
+  mcpProtocolVersion?: string;
+  checks: EndpointProbeCheckDTO[];
+  tools: DiscoveredMCPToolDTO[];
+}
+
+export interface MarketplaceAppReviewDTO {
+  id: string;
+  appId: string;
+  revision: number;
+  action: string;
+  actorId: string;
+  actorName?: string;
+  note: string;
+  webUrl: string;
+  mcpUrl: string;
+  createdAt: string;
+}
+
+export interface DeveloperMarketplaceAppDTO {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  webUrl: string;
+  mcpUrl: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+  ownerId?: string;
+  ownerDisplayName?: string;
+  isOfficial: boolean;
+  isPublished: boolean;
+  publishedVersion: number;
+  reviewStatus: string;
+  draftName: string;
+  draftDescription: string;
+  draftWebUrl: string;
+  draftMcpUrl: string;
+  hasDraftChanges: boolean;
+  submissionRevision: number;
+  submissionNote: string;
+  submittedAt?: string;
+  reviewedAt?: string;
+  reviewNote: string;
+  adminSuspended: boolean;
+  suspendedReason: string;
+  lastVerifiedAt?: string;
+  verificationReport?: MarketplaceEndpointVerificationDTO;
 }
 
 export interface MarketplaceAppResp {
@@ -569,6 +644,34 @@ export interface MarketplaceAppListResp {
   apps: MarketplaceAppDTO[];
 }
 
+export interface DeveloperMarketplaceAppResp {
+  app: DeveloperMarketplaceAppDTO;
+}
+
+export interface DeveloperMarketplaceAppDetailResp {
+  app: DeveloperMarketplaceAppDTO;
+  reviews: MarketplaceAppReviewDTO[];
+}
+
+export interface DeveloperMarketplaceAppListResp {
+  apps: DeveloperMarketplaceAppDTO[];
+}
+
+export interface CreatedDeveloperMarketplaceAppResp {
+  app: DeveloperMarketplaceAppDTO;
+  signingSecret: string;
+}
+
+export interface RotateDeveloperMarketplaceAppSecretResp {
+  app: DeveloperMarketplaceAppDTO;
+  signingSecret: string;
+}
+
+export interface VerifyMarketplaceAppResp {
+  app: DeveloperMarketplaceAppDTO;
+  verification: MarketplaceEndpointVerificationDTO;
+}
+
 export interface CreateMarketplaceAppReq {
   slug: string;
   name: string;
@@ -576,6 +679,14 @@ export interface CreateMarketplaceAppReq {
   webUrl: string;
   mcpUrl: string;
   enabled?: boolean;
+}
+
+export interface CreateDeveloperMarketplaceAppReq {
+  slug: string;
+  name: string;
+  description?: string;
+  webUrl?: string;
+  mcpUrl?: string;
 }
 
 export interface UpdateMarketplaceAppReq {
@@ -586,6 +697,28 @@ export interface UpdateMarketplaceAppReq {
   webUrl?: string;
   mcpUrl?: string;
   enabled?: boolean;
+}
+
+export interface SubmitDeveloperMarketplaceAppReq {
+  id: string;
+  note?: string;
+}
+
+export interface ReviewAdminMarketplaceAppReq {
+  id: string;
+  expectedRevision: number;
+  note?: string;
+}
+
+export interface RejectAdminMarketplaceAppReq {
+  id: string;
+  expectedRevision: number;
+  note: string;
+}
+
+export interface SuspendAdminMarketplaceAppReq {
+  id: string;
+  reason: string;
 }
 
 export interface MarketplaceAppIDReq {
@@ -1259,6 +1392,87 @@ export const IDL_ROUTES = {
     requestType: "DownloadAttachmentReq",
     responseType: "DownloadAttachmentResp",
   },
+  ListDeveloperMarketplaceApps: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "GET",
+    path: "/api/v1/developer/apps",
+    clientPath: "/developer/apps",
+    requestType: "GetBootstrapReq",
+    responseType: "DeveloperMarketplaceAppListResp",
+  },
+  CreateDeveloperMarketplaceApp: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "POST",
+    path: "/api/v1/developer/apps",
+    clientPath: "/developer/apps",
+    requestType: "CreateDeveloperMarketplaceAppReq",
+    responseType: "CreatedDeveloperMarketplaceAppResp",
+  },
+  GetDeveloperMarketplaceApp: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "GET",
+    path: "/api/v1/developer/apps/:id",
+    clientPath: "/developer/apps/:id",
+    requestType: "MarketplaceAppIDReq",
+    responseType: "DeveloperMarketplaceAppDetailResp",
+  },
+  UpdateDeveloperMarketplaceApp: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "PATCH",
+    path: "/api/v1/developer/apps/:id",
+    clientPath: "/developer/apps/:id",
+    requestType: "UpdateMarketplaceAppReq",
+    responseType: "DeveloperMarketplaceAppResp",
+  },
+  VerifyDeveloperMarketplaceApp: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "POST",
+    path: "/api/v1/developer/apps/:id/verify",
+    clientPath: "/developer/apps/:id/verify",
+    requestType: "MarketplaceAppIDReq",
+    responseType: "VerifyMarketplaceAppResp",
+  },
+  SubmitDeveloperMarketplaceApp: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "POST",
+    path: "/api/v1/developer/apps/:id/submit",
+    clientPath: "/developer/apps/:id/submit",
+    requestType: "SubmitDeveloperMarketplaceAppReq",
+    responseType: "DeveloperMarketplaceAppDetailResp",
+  },
+  WithdrawDeveloperMarketplaceApp: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "POST",
+    path: "/api/v1/developer/apps/:id/withdraw",
+    clientPath: "/developer/apps/:id/withdraw",
+    requestType: "MarketplaceAppIDReq",
+    responseType: "DeveloperMarketplaceAppDetailResp",
+  },
+  RotateDeveloperMarketplaceAppSecret: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "POST",
+    path: "/api/v1/developer/apps/:id/rotate-secret",
+    clientPath: "/developer/apps/:id/rotate-secret",
+    requestType: "MarketplaceAppIDReq",
+    responseType: "RotateDeveloperMarketplaceAppSecretResp",
+  },
+  DeleteDeveloperMarketplaceApp: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "DELETE",
+    path: "/api/v1/developer/apps/:id",
+    clientPath: "/developer/apps/:id",
+    requestType: "MarketplaceAppIDReq",
+    responseType: "EmptyResp",
+  },
   ListAdminMarketplaceApps: {
     service: "ChatHTTPService",
     namespace: "im.chat",
@@ -1266,7 +1480,16 @@ export const IDL_ROUTES = {
     path: "/api/v1/admin/marketplace/apps",
     clientPath: "/admin/marketplace/apps",
     requestType: "GetBootstrapReq",
-    responseType: "MarketplaceAppListResp",
+    responseType: "DeveloperMarketplaceAppListResp",
+  },
+  GetAdminMarketplaceApp: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "GET",
+    path: "/api/v1/admin/marketplace/apps/:id",
+    clientPath: "/admin/marketplace/apps/:id",
+    requestType: "MarketplaceAppIDReq",
+    responseType: "DeveloperMarketplaceAppDetailResp",
   },
   CreateAdminMarketplaceApp: {
     service: "ChatHTTPService",
@@ -1285,6 +1508,51 @@ export const IDL_ROUTES = {
     clientPath: "/admin/marketplace/apps/:id",
     requestType: "UpdateMarketplaceAppReq",
     responseType: "MarketplaceAppResp",
+  },
+  VerifyAdminMarketplaceApp: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "POST",
+    path: "/api/v1/admin/marketplace/apps/:id/verify",
+    clientPath: "/admin/marketplace/apps/:id/verify",
+    requestType: "MarketplaceAppIDReq",
+    responseType: "VerifyMarketplaceAppResp",
+  },
+  ApproveAdminMarketplaceApp: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "POST",
+    path: "/api/v1/admin/marketplace/apps/:id/approve",
+    clientPath: "/admin/marketplace/apps/:id/approve",
+    requestType: "ReviewAdminMarketplaceAppReq",
+    responseType: "DeveloperMarketplaceAppDetailResp",
+  },
+  RejectAdminMarketplaceApp: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "POST",
+    path: "/api/v1/admin/marketplace/apps/:id/reject",
+    clientPath: "/admin/marketplace/apps/:id/reject",
+    requestType: "RejectAdminMarketplaceAppReq",
+    responseType: "DeveloperMarketplaceAppDetailResp",
+  },
+  SuspendAdminMarketplaceApp: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "POST",
+    path: "/api/v1/admin/marketplace/apps/:id/suspend",
+    clientPath: "/admin/marketplace/apps/:id/suspend",
+    requestType: "SuspendAdminMarketplaceAppReq",
+    responseType: "DeveloperMarketplaceAppDetailResp",
+  },
+  UnsuspendAdminMarketplaceApp: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "POST",
+    path: "/api/v1/admin/marketplace/apps/:id/unsuspend",
+    clientPath: "/admin/marketplace/apps/:id/unsuspend",
+    requestType: "MarketplaceAppIDReq",
+    responseType: "DeveloperMarketplaceAppDetailResp",
   },
   RotateAdminMarketplaceAppSecret: {
     service: "ChatHTTPService",

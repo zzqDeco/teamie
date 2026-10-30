@@ -150,28 +150,44 @@ Successful retries return current conversation metadata under the same read/mana
 
 The machine-readable routes and DTOs are in [`contracts/im/http_chat.thrift`](../../contracts/im/http_chat.thrift) and [`contracts/im/model.thrift`](../../contracts/im/model.thrift).
 
-## Marketplace apps (Web + MCP)
+## Marketplace apps & Developer Platform (Web + MCP)
 
-- Marketplace App DTO: `{id,slug,name,description,webUrl,mcpUrl,enabled,createdAt,updatedAt}`. `slug` is 1–64 lowercase ASCII letters, digits, underscores or hyphens, starting with a letter or digit (`^[a-z0-9][a-z0-9_-]{0,63}$`), unique across the catalog; `webUrl` and `mcpUrl` must be valid `http://` or `https://` URLs. Each app has a private HMAC-SHA256 `signing_secret` stored in Chat schema 8 (`marketplace_apps`); the secret is returned only once on app creation or explicit secret rotation and is never exposed in list/read DTOs.
-- Three-tier permission model:
-  1. **Platform administrator (`platformRole == "admin"`)** manages the global catalog:
-     - `GET /api/v1/admin/marketplace/apps` -> `{apps:[MarketplaceApp]}` (all registered apps, enabled and disabled).
-     - `POST /api/v1/admin/marketplace/apps` body `{slug,name,description?,webUrl,mcpUrl,enabled?}` -> 201 `{app,signingSecret}`.
+- Public Marketplace App DTO: `{id,slug,name,description,webUrl,mcpUrl,enabled,publisherName?,isOfficial?,servingDraft?,publishedVersion?,createdAt,updatedAt}`. `slug` is 1–64 lowercase ASCII letters, digits, underscores or hyphens, starting with a letter or digit (`^[a-z0-9][a-z0-9_-]{0,63}$`), unique across the catalog. `webUrl` must never share the same origin as `APP_ORIGIN` (`400 same_origin_marketplace_url`); in production (`COOKIE_SECURE=true`) both `webUrl` and `mcpUrl` require `https://` and non-internal/public unicast targets (`400 marketplace_https_required` / `400 forbidden_marketplace_target`). Each app has a private HMAC-SHA256 `signing_secret` stored in Chat schema 8/9 (`marketplace_apps`); the secret is returned only once on app creation or explicit secret rotation and is never exposed in list/read DTOs.
+- Developer Marketplace App DTO (`DeveloperMarketplaceAppDTO`, visible only to the app's human owner or a platform administrator): extends the public fields with `{ownerId?,ownerDisplayName?,isOfficial,isPublished,publishedVersion,reviewStatus:"draft"|"pending_review"|"approved"|"rejected"|"suspended",draftName,draftDescription,draftWebUrl,draftMcpUrl,hasDraftChanges,submissionRevision,submissionNote,submittedAt?,reviewedAt?,reviewNote,adminSuspended,suspendedReason,lastVerifiedAt?,verificationReport?}`.
+- Four-tier lifecycle & permission model (Chat schema 9 adds draft/published dual-snapshot columns, verification report storage, and `marketplace_app_reviews` audit rows):
+  1. **Authenticated human developer (`/app/developers`)** self-serves external Web + MCP apps (up to 20 apps per developer):
+     - `GET /api/v1/developers/marketplace/apps` -> `{apps:[DeveloperMarketplaceAppDTO]}` (caller's own apps).
+     - `POST /api/v1/developers/marketplace/apps` body `{slug,name,description?,webUrl?,mcpUrl?}` -> 201 `{app,signingSecret}` (two-stage onboarding: `webUrl`/`mcpUrl` may be omitted initially while deploying with `signingSecret`).
+     - `GET /api/v1/developers/marketplace/apps/:id` -> `{app,reviews:[MarketplaceAppReviewDTO]}` (owner only).
+     - `PATCH /api/v1/developers/marketplace/apps/:id` body `{slug?,name?,description?,webUrl?,mcpUrl?,enabled?}` -> `{app}` (owner only; rejected with `409 app_review_locked` while `pending_review` or `adminSuspended`; changing draft endpoints invalidates `lastVerifiedAt` and preserves any already-published live snapshot for other workspaces).
+     - `POST /api/v1/developers/marketplace/apps/:id/verify` body `{}` -> `{app,verification}` (runs the 4-stage live protocol verifier against `draftWebUrl` + `draftMcpUrl`: `url_security`, `web_ui` HTML/framing headers, `mcp_auth` 401/403 rejection of unauthenticated & forged-signature tokens, and `mcp_handshake` Streamable HTTP `2025-03-26` `initialize` + `tools/list` + `DELETE` cleanup).
+     - `POST /api/v1/developers/marketplace/apps/:id/submit` body `{note?}` -> `{app,reviews}` (requires passing `verificationReport` on the current draft; transitions to `pending_review` and increments `submissionRevision`).
+     - `POST /api/v1/developers/marketplace/apps/:id/withdraw` body `{}` -> `{app,reviews}` (returns `pending_review` to `draft`).
+     - `POST /api/v1/developers/marketplace/apps/:id/rotate-secret` body `{}` -> `{app,signingSecret}`.
+     - `DELETE /api/v1/developers/marketplace/apps/:id` -> 204 `{}` (owner only when `isPublished == false` and not `pending_review`).
+  2. **Platform administrator (`platformRole == "admin"`, `/app/admin/marketplace`)** manages official apps and reviews/governs developer submissions:
+     - `GET /api/v1/admin/marketplace/apps` -> `{apps:[DeveloperMarketplaceAppDTO]}` (all official and developer apps).
+     - `GET /api/v1/admin/marketplace/apps/:id` -> `{app,reviews:[MarketplaceAppReviewDTO]}`.
+     - `POST /api/v1/admin/marketplace/apps` body `{slug,name,description?,webUrl,mcpUrl,enabled?}` -> 201 `{app,signingSecret}` (creates an immediately published official app).
      - `PATCH /api/v1/admin/marketplace/apps/:id` body `{slug?,name?,description?,webUrl?,mcpUrl?,enabled?}` -> `{app}`.
+     - `POST /api/v1/admin/marketplace/apps/:id/verify` body `{}` -> `{app,verification}` (live re-verification during review).
+     - `POST /api/v1/admin/marketplace/apps/:id/approve` body `{expectedRevision,note?}` -> `{app,reviews}` (fenced by `expectedRevision`; copies draft snapshot into live published fields, increments `publishedVersion`, sets `reviewStatus="approved"`).
+     - `POST /api/v1/admin/marketplace/apps/:id/reject` body `{expectedRevision,note}` -> `{app,reviews}` (fenced by `expectedRevision`; requires non-empty `note`; sets `reviewStatus="rejected"` while keeping any prior `publishedVersion` live).
+     - `POST /api/v1/admin/marketplace/apps/:id/suspend` body `{reason}` -> `{app,reviews}` and `POST /api/v1/admin/marketplace/apps/:id/unsuspend` body `{}` -> `{app,reviews}` (immediately cuts off or restores catalog visibility, sessions and runtime tool resolution).
      - `POST /api/v1/admin/marketplace/apps/:id/rotate-secret` body `{}` -> `{app,signingSecret}`.
      - `DELETE /api/v1/admin/marketplace/apps/:id` -> 204 `{}` (cascades workspace installations).
-  2. **Workspace owner (`workspace_members.role == "owner"`)** selects from the enabled platform catalog and installs/uninstalls apps for that workspace (`workspace_marketplace_apps`):
-     - `GET /api/v1/marketplace/catalog` -> `{apps:[MarketplaceApp]}` (enabled catalog apps for authenticated human callers).
-     - `GET /api/v1/workspaces/:id/apps` -> `{apps:[MarketplaceApp]}` (enabled apps installed in workspace `:id`; requires current workspace membership).
-     - `POST /api/v1/workspaces/:id/apps` body `{appId}` -> 201 `{app}` (owner only; app must exist and be enabled in the platform catalog; idempotent).
+  3. **Workspace owner (`workspace_members.role == "owner"`)** installs published catalog apps — plus their own unpublished/staged developer draft apps in workspaces they created (`servingDraft=true`) and pending-review apps in an admin's own workspace for review preview:
+     - `GET /api/v1/marketplace/catalog` -> `{apps:[MarketplaceApp]}` (enabled, published, non-suspended catalog apps).
+     - `GET /api/v1/workspaces/:id/apps` -> `{apps:[MarketplaceApp]}` (resolved snapshot for workspace `:id`; requires current workspace membership).
+     - `POST /api/v1/workspaces/:id/apps` body `{appId}` -> 201 `{app}` (owner only; idempotent).
      - `DELETE /api/v1/workspaces/:id/apps/:appId` -> 204 `{}` (owner only; idempotent).
-  3. **Group conversations only (`conversation.type == "group"`)**:
+  4. **Group conversations only (`conversation.type == "group"`)**:
      - Installed workspace apps are available automatically in all `group` conversations of that workspace, and never in `channel` or `direct` conversations (`403 marketplace_group_only`).
      - `GET /api/v1/conversations/:id/apps` -> `{apps:[MarketplaceApp]}` for any current member (human or Agent principal) of group conversation `:id`.
-     - `POST /api/v1/conversations/:id/apps/:appId/session` body `{}` -> `{app,token,expiresAt}` for any current member (human or Agent principal) of group conversation `:id` when `:appId` is enabled and installed in the group's workspace.
+     - `POST /api/v1/conversations/:id/apps/:appId/session` body `{}` -> `{app,token,expiresAt}` for any current member (human or Agent principal) of group conversation `:id` when `:appId` resolves as runnable in the group's workspace.
 - Symmetric Context Token (`token`): a one-hour HS256 JWT signed with the app's `signing_secret` and claims `{iss:"teamie",aud:appId,sub:userId,appId,slug,workspaceId,conversationId,userId,displayName,iat,exp}`. No participant kind (`human` vs `agent`) is included; humans and Agents authenticate to the third-party MCP server with identical token structure.
-- Browser group chats expose a right-hand apps pane (`ConversationAppsPane`) that renders the active app's `webUrl` in a sandboxed `<iframe>` (`allow-scripts allow-forms allow-same-origin`) and delivers `{type:"teamie:mcp-app:init",payload:{appId,slug,name,webUrl,mcpUrl,token,expiresAt,workspaceId,conversationId,user:{id,displayName}}}` via `postMessage` upon receiving `{type:"teamie:mcp-app:ready"}` or `{type:"teamie:mcp-app:refresh-token"}` from the app origin and the active iframe window. The iframe and pending session requests are scoped to the current user, conversation and app configuration; switching scope discards late responses, and token refresh publishes only the newest response to the existing iframe.
-- `im.marketplace.enabled` gates Marketplace writes and new app sessions (`403 feature_disabled` when off); existing catalog and installation reads remain available under their ordinary ACLs. Chat schema 8 adds `marketplace_apps` and `workspace_marketplace_apps`.
+- Browser group chats expose a right-hand apps pane (`ConversationAppsPane`) that enforces cross-origin isolation (`new URL(app.webUrl).origin !== window.location.origin`), renders the active app's `webUrl` in a sandboxed `<iframe>` (`allow-scripts allow-forms allow-same-origin`) and delivers `{type:"teamie:mcp-app:init",payload:{appId,slug,name,webUrl,mcpUrl,token,expiresAt,workspaceId,conversationId,user:{id,displayName}}}` via `postMessage` upon receiving `{type:"teamie:mcp-app:ready"}` or `{type:"teamie:mcp-app:refresh-token"}` from the app origin and the active iframe window. The iframe and pending session requests are scoped to the current user, conversation and app configuration; switching scope discards late responses, and token refresh publishes only the newest response to the existing iframe.
+- `im.marketplace.enabled` gates Marketplace writes, verifications, submissions and new app sessions (`403 feature_disabled` when off); existing catalog, developer and installation reads remain available under their ordinary ACLs. See [`docs/integrations/marketplace-developer-guide.md`](../integrations/marketplace-developer-guide.md) and `/app/developers/docs` for the developer protocol handbook.
 
 ## Durable sync and WebSocket
 

@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { Keyboard, LogOut, Settings } from "lucide-react";
+import { Code2, Keyboard, LogOut, Settings } from "lucide-react";
 import type { User } from "@teamie/api-client";
 import type { Connection } from "./chat";
 import { Avatar } from "./ui";
@@ -64,6 +64,10 @@ export function AccountMenu({
           <Link to="/app/settings" onClick={navigate}>
             <Settings size={ICON.md} aria-hidden="true" />
             账号设置
+          </Link>
+          <Link to="/app/developers" onClick={navigate}>
+            <Code2 size={ICON.md} aria-hidden="true" />
+            开发者平台
           </Link>
           {onShortcuts && (
             <button

@@ -18,6 +18,7 @@ const modularStyleFiles = [
   "styles/admin.css",
   "styles/agents.css",
   "styles/gateway.css",
+  "styles/marketplace.css",
   "styles/utilities.css",
 ];
 const modularLayoutFiles = [
