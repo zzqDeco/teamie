@@ -40,6 +40,48 @@ class PprofOperatorTests(unittest.TestCase):
             pprof.default_output_name("realtime", "goroutine", 1, now=fixed),
             "teamie-realtime-goroutine-20261030T081500Z.txt",
         )
+        self.assertEqual(
+            pprof.default_output_name("marketplace", "heap", 0, now=fixed),
+            "teamie-marketplace-heap-20261030T081500Z.pb.gz",
+        )
+
+    def test_production_compose_wires_pprof_addr_to_all_supported_go_services(self):
+        compose_path = Path(__file__).resolve().parents[1] / "deploy" / "compose.production.yaml"
+        in_services = False
+        current_service = None
+        in_env = False
+        service_envs = {}
+        for raw_line in compose_path.read_text().splitlines():
+            stripped = raw_line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            indent = len(raw_line) - len(raw_line.lstrip(" "))
+            if indent == 0:
+                in_services = stripped == "services:"
+                current_service = None
+                in_env = False
+                continue
+            if not in_services:
+                continue
+            if indent == 2 and stripped.endswith(":"):
+                current_service = stripped[:-1]
+                service_envs.setdefault(current_service, {})
+                in_env = False
+            elif indent == 4 and current_service is not None:
+                in_env = stripped == "environment:"
+            elif indent == 6 and current_service is not None and in_env and ":" in stripped:
+                key, value = stripped.split(":", 1)
+                service_envs[current_service][key.strip()] = value.strip()
+
+        for svc in pprof.SERVICES:
+            self.assertIn(svc, service_envs, f"missing compose service {svc}")
+            self.assertEqual(
+                service_envs[svc].get("PPROF_ADDR"),
+                "${PPROF_ADDR:-127.0.0.1:6060}",
+                f"{svc} must wire loopback PPROF_ADDR in deploy/compose.production.yaml",
+            )
+        for non_go in ("caddy", "web", "postgres", "redis"):
+            self.assertNotIn("PPROF_ADDR", service_envs.get(non_go, {}))
 
     def test_cli_streams_stdout_and_writes_0600_file_without_shell(self):
         with tempfile.TemporaryDirectory() as root:

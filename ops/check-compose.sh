@@ -34,7 +34,22 @@ for name,service in config['services'].items():
 assert config['services']['caddy']['environment']['TLS_SERVER_NAME']=='YOUR_PUBLIC_IP'
 assert config['services']['identity']['environment']['BOOTSTRAP_INVITE_CODE']
 assert 'REGISTRATION_CODE' not in config['services']['identity']['environment']
+for svc in ('identity','chat','realtime','marketplace','agent-control','agent-runtime','llm-gateway','sandbox'):
+    assert config['services'][svc]['environment']['PPROF_ADDR']=='127.0.0.1:6060', f'{svc} missing default loopback PPROF_ADDR'
 PY
+# Verify both default (empty) and explicit disable (off) propagate to every Go service.
+for pprof_val in '' off; do
+  printf 'PPROF_ADDR=%s\n' "$pprof_val" > "$scratch/pprof.env"
+  env -u PPROF_ADDR docker compose --file deploy/compose.production.yaml \
+    --env-file deploy/production.env.example --env-file "$scratch/images.env" \
+    --env-file "$scratch/pprof.env" config --format json > "$scratch/pprof.json"
+  python3 - "$scratch/pprof.json" "${pprof_val:-127.0.0.1:6060}" <<'PY_PPROF'
+import json,sys
+services=json.load(open(sys.argv[1]))['services']
+for svc in ('identity','chat','realtime','marketplace','agent-control','agent-runtime','llm-gateway','sandbox'):
+    assert services[svc]['environment']['PPROF_ADDR']==sys.argv[2], f'{svc} PPROF_ADDR mismatch'
+PY_PPROF
+done
 # An empty optional host value must select the explicit first-user default.
 BOOTSTRAP_INVITE_CODE='' docker compose --file deploy/compose.production.yaml \
   --env-file deploy/production.env.example --env-file "$scratch/images.env" \
