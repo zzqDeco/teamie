@@ -86,12 +86,24 @@ type UpdateModelProfileInput struct {
 	ContextWindowTokens *int64
 }
 
+type pingConfigLoader interface {
+	LoadForPing(ctx context.Context) (domain.Config, error)
+}
+
 // Ping checks service token and returns current gateway configuration readiness for the requested model (or default fallback).
 func (s *Service) Ping(ctx context.Context, serviceToken string, modelIDs ...string) PingStatus {
 	if !domain.EqualSecret(serviceToken, s.Token) {
 		return PingStatus{Ready: false}
 	}
-	c, err := s.Store.Load(ctx)
+	var (
+		c   domain.Config
+		err error
+	)
+	if loader, ok := s.Store.(pingConfigLoader); ok {
+		c, err = loader.LoadForPing(ctx)
+	} else {
+		c, err = s.Store.Load(ctx)
+	}
 	var requestedModelID string
 	if len(modelIDs) > 0 {
 		requestedModelID = modelIDs[0]
