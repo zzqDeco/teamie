@@ -27,6 +27,20 @@ var serviceMethods = map[string]kitex.MethodInfo{
 		false,
 		kitex.WithStreamingMode(kitex.StreamingNone),
 	),
+	"GetWorkspaceRole": kitex.NewMethodInfo(
+		getWorkspaceRoleHandler,
+		newChatServiceGetWorkspaceRoleArgs,
+		newChatServiceGetWorkspaceRoleResult,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
+	"GetConversationScope": kitex.NewMethodInfo(
+		getConversationScopeHandler,
+		newChatServiceGetConversationScopeArgs,
+		newChatServiceGetConversationScopeResult,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
 	"GetSharedWorkspaceMembers": kitex.NewMethodInfo(
 		getSharedWorkspaceMembersHandler,
 		newChatServiceGetSharedWorkspaceMembersArgs,
@@ -164,6 +178,42 @@ func newChatServiceCheckWorkspaceAccessResult() interface{} {
 	return im.NewChatServiceCheckWorkspaceAccessResult()
 }
 
+func getWorkspaceRoleHandler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*im.ChatServiceGetWorkspaceRoleArgs)
+	realResult := result.(*im.ChatServiceGetWorkspaceRoleResult)
+	success, err := handler.(im.ChatService).GetWorkspaceRole(ctx, realArg.Request)
+	if err != nil {
+		return err
+	}
+	realResult.Success = success
+	return nil
+}
+func newChatServiceGetWorkspaceRoleArgs() interface{} {
+	return im.NewChatServiceGetWorkspaceRoleArgs()
+}
+
+func newChatServiceGetWorkspaceRoleResult() interface{} {
+	return im.NewChatServiceGetWorkspaceRoleResult()
+}
+
+func getConversationScopeHandler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*im.ChatServiceGetConversationScopeArgs)
+	realResult := result.(*im.ChatServiceGetConversationScopeResult)
+	success, err := handler.(im.ChatService).GetConversationScope(ctx, realArg.Request)
+	if err != nil {
+		return err
+	}
+	realResult.Success = success
+	return nil
+}
+func newChatServiceGetConversationScopeArgs() interface{} {
+	return im.NewChatServiceGetConversationScopeArgs()
+}
+
+func newChatServiceGetConversationScopeResult() interface{} {
+	return im.NewChatServiceGetConversationScopeResult()
+}
+
 func getSharedWorkspaceMembersHandler(ctx context.Context, handler interface{}, arg, result interface{}) error {
 	realArg := arg.(*im.ChatServiceGetSharedWorkspaceMembersArgs)
 	realResult := result.(*im.ChatServiceGetSharedWorkspaceMembersResult)
@@ -279,6 +329,26 @@ func (p *kClient) CheckWorkspaceAccess(ctx context.Context, request *im.Workspac
 	_args.Request = request
 	var _result im.ChatServiceCheckWorkspaceAccessResult
 	if err = p.c.Call(ctx, "CheckWorkspaceAccess", &_args, &_result); err != nil {
+		return
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) GetWorkspaceRole(ctx context.Context, request *im.WorkspaceAccessRequest) (r *im.WorkspaceRoleResponse, err error) {
+	var _args im.ChatServiceGetWorkspaceRoleArgs
+	_args.Request = request
+	var _result im.ChatServiceGetWorkspaceRoleResult
+	if err = p.c.Call(ctx, "GetWorkspaceRole", &_args, &_result); err != nil {
+		return
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) GetConversationScope(ctx context.Context, request *im.AccessRequest) (r *im.ConversationScopeResponse, err error) {
+	var _args im.ChatServiceGetConversationScopeArgs
+	_args.Request = request
+	var _result im.ChatServiceGetConversationScopeResult
+	if err = p.c.Call(ctx, "GetConversationScope", &_args, &_result); err != nil {
 		return
 	}
 	return _result.GetSuccess(), nil

@@ -6,7 +6,7 @@ import re
 import subprocess
 import sys
 
-SERVICES = ("identity", "chat", "realtime", "agent-control", "agent-runtime", "llm-gateway", "sandbox")
+SERVICES = ("identity", "chat", "realtime", "marketplace", "agent-control", "agent-runtime", "llm-gateway", "sandbox")
 FIELDS = {"trace": "trace.id", "run": "custom.runtime.run_id", "agent": "custom.agent.id", "task": "custom.task.id", "attempt": "custom.runtime.attempt_id", "event": "custom.input.event_id", "step": "custom.model.step"}
 
 

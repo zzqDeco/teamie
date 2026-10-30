@@ -13,7 +13,9 @@ from urllib.parse import unquote, urlsplit
 
 LEGACY_SERVICES = ("identity", "chat", "realtime", "web", "caddy", "postgres", "redis")
 SERVICES = LEGACY_SERVICES + ("agent-control", "agent-runtime", "llm-gateway", "sandbox", "sandbox-runner")
+SERVICES_V3 = SERVICES + ("marketplace",)
 SCHEMA_V2 = {"identity": 3, "chat": 9, "agent_control": 3, "agent_runtime": 13, "gateway": 6}
+SCHEMA_V3 = {"identity": 3, "chat": 10, "marketplace": 1, "agent_control": 3, "agent_runtime": 13, "gateway": 6}
 VERSION = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 SHA = re.compile(r"[0-9a-f]{40}$")
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}$")
@@ -51,7 +53,7 @@ def validate_registry(registry):
 def release_registry(data):
     if "registry" not in data:
         return {"provider": "ghcr", "pullHost": "ghcr.io"}
-    require(data["manifestVersion"] == 2, "registry metadata requires manifest version 2")
+    require(data["manifestVersion"] in (2, 3), "registry metadata requires manifest version 2 or 3")
     return validate_registry(data["registry"])
 
 
@@ -108,9 +110,25 @@ def version(value):
     return tuple(map(int, match.groups()))
 
 
+def services_for_manifest_version(manifest_version):
+    if manifest_version == 1:
+        return LEGACY_SERVICES
+    if manifest_version == 2:
+        return SERVICES
+    return SERVICES_V3
+
+
+def schema_for_manifest_version(manifest_version):
+    if manifest_version == 1:
+        return {"identity": 1, "chat": 1}
+    if manifest_version == 2:
+        return dict(SCHEMA_V2)
+    return dict(SCHEMA_V3)
+
+
 def validate(data):
-    require(type(data.get("manifestVersion")) is int and data["manifestVersion"] in (1, 2), "unsupported manifest version")
-    services = LEGACY_SERVICES if data["manifestVersion"] == 1 else SERVICES
+    require(type(data.get("manifestVersion")) is int and data["manifestVersion"] in (1, 2, 3), "unsupported manifest version")
+    services = services_for_manifest_version(data["manifestVersion"])
     version(data["version"])
     source = data["source"]
     require(source["repository"].lower() == "zzqdeco/teamie", "unexpected source repository")
@@ -122,7 +140,7 @@ def validate(data):
     for service, image in data["images"].items():
         require(isinstance(image, str) and image.startswith(prefix + service + "@"), f"unexpected {service} image repository")
         require(DIGEST.fullmatch(image.split("@", 1)[1]), f"{service} must use an immutable digest")
-    schema_keys = {"identity", "chat"} if data["manifestVersion"] == 1 else set(SCHEMA_V2)
+    schema_keys = set(schema_for_manifest_version(data["manifestVersion"]))
     require(set(data["schema"]) == schema_keys, "unknown database schema")
     require(all(type(x) is int and x >= 1 for x in data["schema"].values()), "invalid schema version")
     require(data["storage"]["postgresMajor"] == 17, "unreviewed PostgreSQL storage major")
@@ -188,13 +206,15 @@ def validate_config(config, host_env, release_manifest=None):
     require(services["caddy"]["environment"].get("TLS_SERVER_NAME") == parsed.hostname,
             "TLS_SERVER_NAME must equal the APP_ORIGIN hostname without scheme or port")
     pg_env = services["postgres"]["environment"]
-    for name in ("identity", "chat", "realtime", "agent-control", "llm-gateway"):
+    for name in ("identity", "chat", "realtime", "marketplace", "agent-control", "llm-gateway"):
         if name not in services:
             continue
         env = services[name]["environment"]
         require(str(env["COOKIE_SECURE"]).lower() == "true", "production cookies must be Secure")
         require(env["APP_ORIGIN"] == origin, "all service origins must match")
     db_services = {"identity": "identity", "chat": "chat"}
+    if "marketplace" in services:
+        db_services["marketplace"] = "marketplace"
     if "agent-control" in services:
         db_services.update({"agent-control": "agent_control", "agent-runtime": "agent_runtime", "llm-gateway": "gateway"})
     for name, suffix in db_services.items():
@@ -206,6 +226,10 @@ def validate_config(config, host_env, release_manifest=None):
     credentials = [pg_env["POSTGRES_PASSWORD"]] + [pg_env["POSTGRES_" + suffix.upper() + "_PASSWORD"] for suffix in db_services.values()]
     require(all(len(value) >= 24 and "REPLACE" not in value for value in credentials), "replace every database credential with a random value of at least 24 characters")
     require(len(set(credentials)) == len(credentials), "database credentials must be independent")
+    if "marketplace" in services:
+        require("egress" in services["marketplace"].get("networks", ()), "marketplace requires endpoint egress")
+        chat_nets = services["chat"].get("networks")
+        require(not chat_nets or set(chat_nets) == {"private"}, "chat must stay on private network without egress")
     if "llm-gateway" in services:
         gateway = services["llm-gateway"]["environment"]
         runtime = services["agent-runtime"]["environment"]
@@ -244,7 +268,7 @@ def main():
     create = sub.add_parser("create")
     for arg in ("repository", "version", "sha", "main-sha", "digests", "flags"):
         create.add_argument("--" + arg, required=True)
-    create.add_argument("--manifest-version", type=int, choices=(1, 2), default=2)
+    create.add_argument("--manifest-version", type=int, choices=(1, 2, 3), default=3)
     registry_check = sub.add_parser("registry-check")
     for command in (create, registry_check):
         for arg in ("registry-public-host", "registry-pull-host", "registry-namespace"):
@@ -269,14 +293,14 @@ def main():
             flags_path = Path(args.flags)
             flags = read(flags_path)
             images = {}
-            for service in (LEGACY_SERVICES if args.manifest_version == 1 else SERVICES):
+            for service in services_for_manifest_version(args.manifest_version):
                 artifact = read(Path(args.digests) / (service + ".json"))
                 require(artifact["service"] == service, "digest artifact service mismatch")
                 images[service] = artifact["image"]
             data = dict(manifestVersion=args.manifest_version, version=args.version,
                         source=dict(repository=args.repository, sha=args.sha, mainSha=args.main_sha, ref="refs/heads/release/" + args.version),
                         createdAt=dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
-                        schema=({"identity": 1, "chat": 1} if args.manifest_version == 1 else SCHEMA_V2), storage=dict(postgresMajor=17),
+                        schema=schema_for_manifest_version(args.manifest_version), storage=dict(postgresMajor=17),
                         featureFlags=dict(revision=flags["revision"], sha256=hashlib.sha256(flags_path.read_bytes()).hexdigest()),
                         images=images)
             supplied = (args.registry_public_host, args.registry_pull_host, args.registry_namespace)

@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"net"
-	"strings"
-	"time"
 
 	goredis "github.com/redis/go-redis/v9"
 	"teamie/contracts/gen/im/kitex_gen/im/chatservice"
@@ -18,7 +16,6 @@ import (
 	"teamie/services/chat/internal/infra/flags"
 	"teamie/services/chat/internal/infra/fs"
 	"teamie/services/chat/internal/infra/pg"
-	"teamie/services/chat/internal/infra/probe"
 	redisinfra "teamie/services/chat/internal/infra/redis"
 	"teamie/services/chat/internal/infra/rpcclient"
 )
@@ -58,26 +55,20 @@ func main() {
 		observability.Fatal("Service initialization failed", err)
 	}
 
-	requirePublicHTTPS := strings.EqualFold(httpx.Env("COOKIE_SECURE", "false"), "true")
 	repo := pg.New(postgres.New(pool))
 	appSvc := &app.Service{
-		Tx:                 repo,
-		Mutations:          repo,
-		Workspaces:         repo,
-		Conversations:      repo,
-		Memberships:        repo,
-		Messages:           repo,
-		Attachments:        repo,
-		Marketplace:        repo,
-		Outbox:             repo,
-		Identity:           rpcclient.NewIdentity(identityClient),
-		Flags:              flags.New(cfgFlags),
-		Verifier:           probe.New(origin, requirePublicHTTPS),
-		SniffMediaType:     fs.SniffMediaType,
-		ControlToken:       httpx.Env("IM_PRINCIPAL_CONTROL_TOKEN", ""),
-		AppOrigin:          origin,
-		RequirePublicHTTPS: requirePublicHTTPS,
-		VerifyCooldown:     2 * time.Second,
+		Tx:             repo,
+		Mutations:      repo,
+		Workspaces:     repo,
+		Conversations:  repo,
+		Memberships:    repo,
+		Messages:       repo,
+		Attachments:    repo,
+		Outbox:         repo,
+		Identity:       rpcclient.NewIdentity(identityClient),
+		Flags:          flags.New(cfgFlags),
+		SniffMediaType: fs.SniffMediaType,
+		ControlToken:   httpx.Env("IM_PRINCIPAL_CONTROL_TOKEN", ""),
 	}
 
 	rdb := goredis.NewClient(&goredis.Options{Addr: httpx.Env("REDIS_ADDR", "redis:6379")})

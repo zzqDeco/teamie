@@ -539,6 +539,12 @@ export interface DownloadAttachmentResp {
   content: Uint8Array;
 }
 
+// ============================================================================
+// Source: contracts/im/http_marketplace.thrift (namespace im.marketplace)
+// ============================================================================
+
+export type EmptyMarketplaceReq = Record<string, never>;
+
 export interface MarketplaceAppDTO {
   id: string;
   slug: string;
@@ -722,6 +728,14 @@ export interface SuspendAdminMarketplaceAppReq {
 }
 
 export interface MarketplaceAppIDReq {
+  id: string;
+}
+
+export interface MarketplaceWorkspaceIDReq {
+  id: string;
+}
+
+export interface MarketplaceConversationIDReq {
   id: string;
 }
 
@@ -1393,17 +1407,17 @@ export const IDL_ROUTES = {
     responseType: "DownloadAttachmentResp",
   },
   ListDeveloperMarketplaceApps: {
-    service: "ChatHTTPService",
-    namespace: "im.chat",
+    service: "MarketplaceHTTPService",
+    namespace: "im.marketplace",
     method: "GET",
     path: "/api/v1/developer/apps",
     clientPath: "/developer/apps",
-    requestType: "GetBootstrapReq",
+    requestType: "EmptyMarketplaceReq",
     responseType: "DeveloperMarketplaceAppListResp",
   },
   CreateDeveloperMarketplaceApp: {
-    service: "ChatHTTPService",
-    namespace: "im.chat",
+    service: "MarketplaceHTTPService",
+    namespace: "im.marketplace",
     method: "POST",
     path: "/api/v1/developer/apps",
     clientPath: "/developer/apps",
@@ -1411,8 +1425,8 @@ export const IDL_ROUTES = {
     responseType: "CreatedDeveloperMarketplaceAppResp",
   },
   GetDeveloperMarketplaceApp: {
-    service: "ChatHTTPService",
-    namespace: "im.chat",
+    service: "MarketplaceHTTPService",
+    namespace: "im.marketplace",
     method: "GET",
     path: "/api/v1/developer/apps/:id",
     clientPath: "/developer/apps/:id",
@@ -1420,8 +1434,8 @@ export const IDL_ROUTES = {
     responseType: "DeveloperMarketplaceAppDetailResp",
   },
   UpdateDeveloperMarketplaceApp: {
-    service: "ChatHTTPService",
-    namespace: "im.chat",
+    service: "MarketplaceHTTPService",
+    namespace: "im.marketplace",
     method: "PATCH",
     path: "/api/v1/developer/apps/:id",
     clientPath: "/developer/apps/:id",
@@ -1429,8 +1443,8 @@ export const IDL_ROUTES = {
     responseType: "DeveloperMarketplaceAppResp",
   },
   VerifyDeveloperMarketplaceApp: {
-    service: "ChatHTTPService",
-    namespace: "im.chat",
+    service: "MarketplaceHTTPService",
+    namespace: "im.marketplace",
     method: "POST",
     path: "/api/v1/developer/apps/:id/verify",
     clientPath: "/developer/apps/:id/verify",
@@ -1438,8 +1452,8 @@ export const IDL_ROUTES = {
     responseType: "VerifyMarketplaceAppResp",
   },
   SubmitDeveloperMarketplaceApp: {
-    service: "ChatHTTPService",
-    namespace: "im.chat",
+    service: "MarketplaceHTTPService",
+    namespace: "im.marketplace",
     method: "POST",
     path: "/api/v1/developer/apps/:id/submit",
     clientPath: "/developer/apps/:id/submit",
@@ -1447,8 +1461,8 @@ export const IDL_ROUTES = {
     responseType: "DeveloperMarketplaceAppDetailResp",
   },
   WithdrawDeveloperMarketplaceApp: {
-    service: "ChatHTTPService",
-    namespace: "im.chat",
+    service: "MarketplaceHTTPService",
+    namespace: "im.marketplace",
     method: "POST",
     path: "/api/v1/developer/apps/:id/withdraw",
     clientPath: "/developer/apps/:id/withdraw",
@@ -1456,8 +1470,8 @@ export const IDL_ROUTES = {
     responseType: "DeveloperMarketplaceAppDetailResp",
   },
   RotateDeveloperMarketplaceAppSecret: {
-    service: "ChatHTTPService",
-    namespace: "im.chat",
+    service: "MarketplaceHTTPService",
+    namespace: "im.marketplace",
     method: "POST",
     path: "/api/v1/developer/apps/:id/rotate-secret",
     clientPath: "/developer/apps/:id/rotate-secret",
@@ -1465,8 +1479,8 @@ export const IDL_ROUTES = {
     responseType: "RotateDeveloperMarketplaceAppSecretResp",
   },
   DeleteDeveloperMarketplaceApp: {
-    service: "ChatHTTPService",
-    namespace: "im.chat",
+    service: "MarketplaceHTTPService",
+    namespace: "im.marketplace",
     method: "DELETE",
     path: "/api/v1/developer/apps/:id",
     clientPath: "/developer/apps/:id",
@@ -1474,17 +1488,17 @@ export const IDL_ROUTES = {
     responseType: "EmptyResp",
   },
   ListAdminMarketplaceApps: {
-    service: "ChatHTTPService",
-    namespace: "im.chat",
+    service: "MarketplaceHTTPService",
+    namespace: "im.marketplace",
     method: "GET",
     path: "/api/v1/admin/marketplace/apps",
     clientPath: "/admin/marketplace/apps",
-    requestType: "GetBootstrapReq",
+    requestType: "EmptyMarketplaceReq",
     responseType: "DeveloperMarketplaceAppListResp",
   },
   GetAdminMarketplaceApp: {
-    service: "ChatHTTPService",
-    namespace: "im.chat",
+    service: "MarketplaceHTTPService",
+    namespace: "im.marketplace",
     method: "GET",
     path: "/api/v1/admin/marketplace/apps/:id",
     clientPath: "/admin/marketplace/apps/:id",
@@ -1492,8 +1506,8 @@ export const IDL_ROUTES = {
     responseType: "DeveloperMarketplaceAppDetailResp",
   },
   CreateAdminMarketplaceApp: {
-    service: "ChatHTTPService",
-    namespace: "im.chat",
+    service: "MarketplaceHTTPService",
+    namespace: "im.marketplace",
     method: "POST",
     path: "/api/v1/admin/marketplace/apps",
     clientPath: "/admin/marketplace/apps",
@@ -1501,8 +1515,8 @@ export const IDL_ROUTES = {
     responseType: "CreatedMarketplaceAppResp",
   },
   UpdateAdminMarketplaceApp: {
-    service: "ChatHTTPService",
-    namespace: "im.chat",
+    service: "MarketplaceHTTPService",
+    namespace: "im.marketplace",
     method: "PATCH",
     path: "/api/v1/admin/marketplace/apps/:id",
     clientPath: "/admin/marketplace/apps/:id",
@@ -1510,8 +1524,8 @@ export const IDL_ROUTES = {
     responseType: "MarketplaceAppResp",
   },
   VerifyAdminMarketplaceApp: {
-    service: "ChatHTTPService",
-    namespace: "im.chat",
+    service: "MarketplaceHTTPService",
+    namespace: "im.marketplace",
     method: "POST",
     path: "/api/v1/admin/marketplace/apps/:id/verify",
     clientPath: "/admin/marketplace/apps/:id/verify",
@@ -1519,8 +1533,8 @@ export const IDL_ROUTES = {
     responseType: "VerifyMarketplaceAppResp",
   },
   ApproveAdminMarketplaceApp: {
-    service: "ChatHTTPService",
-    namespace: "im.chat",
+    service: "MarketplaceHTTPService",
+    namespace: "im.marketplace",
     method: "POST",
     path: "/api/v1/admin/marketplace/apps/:id/approve",
     clientPath: "/admin/marketplace/apps/:id/approve",
@@ -1528,8 +1542,8 @@ export const IDL_ROUTES = {
     responseType: "DeveloperMarketplaceAppDetailResp",
   },
   RejectAdminMarketplaceApp: {
-    service: "ChatHTTPService",
-    namespace: "im.chat",
+    service: "MarketplaceHTTPService",
+    namespace: "im.marketplace",
     method: "POST",
     path: "/api/v1/admin/marketplace/apps/:id/reject",
     clientPath: "/admin/marketplace/apps/:id/reject",
@@ -1537,8 +1551,8 @@ export const IDL_ROUTES = {
     responseType: "DeveloperMarketplaceAppDetailResp",
   },
   SuspendAdminMarketplaceApp: {
-    service: "ChatHTTPService",
-    namespace: "im.chat",
+    service: "MarketplaceHTTPService",
+    namespace: "im.marketplace",
     method: "POST",
     path: "/api/v1/admin/marketplace/apps/:id/suspend",
     clientPath: "/admin/marketplace/apps/:id/suspend",
@@ -1546,8 +1560,8 @@ export const IDL_ROUTES = {
     responseType: "DeveloperMarketplaceAppDetailResp",
   },
   UnsuspendAdminMarketplaceApp: {
-    service: "ChatHTTPService",
-    namespace: "im.chat",
+    service: "MarketplaceHTTPService",
+    namespace: "im.marketplace",
     method: "POST",
     path: "/api/v1/admin/marketplace/apps/:id/unsuspend",
     clientPath: "/admin/marketplace/apps/:id/unsuspend",
@@ -1555,8 +1569,8 @@ export const IDL_ROUTES = {
     responseType: "DeveloperMarketplaceAppDetailResp",
   },
   RotateAdminMarketplaceAppSecret: {
-    service: "ChatHTTPService",
-    namespace: "im.chat",
+    service: "MarketplaceHTTPService",
+    namespace: "im.marketplace",
     method: "POST",
     path: "/api/v1/admin/marketplace/apps/:id/rotate-secret",
     clientPath: "/admin/marketplace/apps/:id/rotate-secret",
@@ -1564,8 +1578,8 @@ export const IDL_ROUTES = {
     responseType: "RotateMarketplaceAppSecretResp",
   },
   DeleteAdminMarketplaceApp: {
-    service: "ChatHTTPService",
-    namespace: "im.chat",
+    service: "MarketplaceHTTPService",
+    namespace: "im.marketplace",
     method: "DELETE",
     path: "/api/v1/admin/marketplace/apps/:id",
     clientPath: "/admin/marketplace/apps/:id",
@@ -1573,26 +1587,26 @@ export const IDL_ROUTES = {
     responseType: "EmptyResp",
   },
   ListMarketplaceCatalog: {
-    service: "ChatHTTPService",
-    namespace: "im.chat",
+    service: "MarketplaceHTTPService",
+    namespace: "im.marketplace",
     method: "GET",
     path: "/api/v1/marketplace/catalog",
     clientPath: "/marketplace/catalog",
-    requestType: "GetBootstrapReq",
+    requestType: "EmptyMarketplaceReq",
     responseType: "MarketplaceAppListResp",
   },
   ListWorkspaceApps: {
-    service: "ChatHTTPService",
-    namespace: "im.chat",
+    service: "MarketplaceHTTPService",
+    namespace: "im.marketplace",
     method: "GET",
     path: "/api/v1/workspaces/:id/apps",
     clientPath: "/workspaces/:id/apps",
-    requestType: "ListWorkspaceMembersReq",
+    requestType: "MarketplaceWorkspaceIDReq",
     responseType: "MarketplaceAppListResp",
   },
   InstallWorkspaceApp: {
-    service: "ChatHTTPService",
-    namespace: "im.chat",
+    service: "MarketplaceHTTPService",
+    namespace: "im.marketplace",
     method: "POST",
     path: "/api/v1/workspaces/:id/apps",
     clientPath: "/workspaces/:id/apps",
@@ -1600,8 +1614,8 @@ export const IDL_ROUTES = {
     responseType: "MarketplaceAppResp",
   },
   UninstallWorkspaceApp: {
-    service: "ChatHTTPService",
-    namespace: "im.chat",
+    service: "MarketplaceHTTPService",
+    namespace: "im.marketplace",
     method: "DELETE",
     path: "/api/v1/workspaces/:id/apps/:appId",
     clientPath: "/workspaces/:id/apps/:appId",
@@ -1609,17 +1623,17 @@ export const IDL_ROUTES = {
     responseType: "EmptyResp",
   },
   ListConversationApps: {
-    service: "ChatHTTPService",
-    namespace: "im.chat",
+    service: "MarketplaceHTTPService",
+    namespace: "im.marketplace",
     method: "GET",
     path: "/api/v1/conversations/:id/apps",
     clientPath: "/conversations/:id/apps",
-    requestType: "GetReadReceiptsReq",
+    requestType: "MarketplaceConversationIDReq",
     responseType: "MarketplaceAppListResp",
   },
   CreateConversationAppSession: {
-    service: "ChatHTTPService",
-    namespace: "im.chat",
+    service: "MarketplaceHTTPService",
+    namespace: "im.marketplace",
     method: "POST",
     path: "/api/v1/conversations/:id/apps/:appId/session",
     clientPath: "/conversations/:id/apps/:appId/session",

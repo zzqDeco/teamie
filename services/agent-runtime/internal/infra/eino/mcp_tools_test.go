@@ -1947,3 +1947,58 @@ func TestMCPTransportSSRFProtection(t *testing.T) {
 		t.Fatalf("expected https://93.184.216.34/mcp to pass URL validation, got %v", err)
 	}
 }
+
+func TestIMCallMarketplaceUsesDedicatedServiceURLWithBaseFallback(t *testing.T) {
+	var chatHits, marketplaceHits atomic.Int32
+	chatSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		chatHits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"apps":[]}`))
+	}))
+	defer chatSrv.Close()
+
+	mpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		marketplaceHits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"apps":[{"id":"app-1","slug":"werewolf","name":"Werewolf","enabled":true}]}`))
+	}))
+	defer mpSrv.Close()
+
+	// 1. Dedicated MarketplaceURL routes CallMarketplace to mpSrv and Call to chatSrv.
+	imc := &IM{
+		BaseURL:        chatSrv.URL,
+		MarketplaceURL: mpSrv.URL,
+		ServiceKey:     "svc",
+		token:          strings.Repeat("a", 64),
+		expiry:         time.Now().Add(time.Hour),
+	}
+	var out struct {
+		Apps []imMarketplaceApp `json:"apps"`
+	}
+	if err := imc.CallMarketplace(context.Background(), http.MethodGet, "/api/v1/conversations/c1/apps", nil, &out); err != nil {
+		t.Fatal(err)
+	}
+	if marketplaceHits.Load() != 1 || chatHits.Load() != 0 || len(out.Apps) != 1 {
+		t.Fatalf("expected CallMarketplace to hit marketplace service only, got mp=%d chat=%d apps=%d", marketplaceHits.Load(), chatHits.Load(), len(out.Apps))
+	}
+	if err := imc.Call(context.Background(), http.MethodGet, "/api/v1/bootstrap", nil, &map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	if chatHits.Load() != 1 {
+		t.Fatalf("expected Call to hit chat service, got %d", chatHits.Load())
+	}
+
+	// 2. Empty MarketplaceURL falls back cleanly to BaseURL for single-server test fixtures.
+	fallbackIMC := &IM{
+		BaseURL:    chatSrv.URL,
+		ServiceKey: "svc",
+		token:      strings.Repeat("a", 64),
+		expiry:     time.Now().Add(time.Hour),
+	}
+	if err := fallbackIMC.CallMarketplace(context.Background(), http.MethodGet, "/api/v1/conversations/c1/apps", nil, &out); err != nil {
+		t.Fatal(err)
+	}
+	if chatHits.Load() != 2 {
+		t.Fatalf("expected empty MarketplaceURL to fall back to BaseURL, got chat=%d", chatHits.Load())
+	}
+}

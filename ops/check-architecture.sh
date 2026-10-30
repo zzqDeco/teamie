@@ -18,11 +18,20 @@ while IFS= read -r -d '' f; do
   fi
 done < <(find contracts/gen -type f -name '*.go' -print0)
 
-# 3. IM independence gate: services/{identity,chat,realtime} and pkg must never depend on eino, contracts/gen/agent, or services/agent-*
-for svc in pkg services/identity services/chat services/realtime; do
+# 3. IM & Marketplace independence gate:
+# - services/{identity,chat,realtime,marketplace} and pkg must never depend on eino, contracts/gen/agent, or services/agent-*
+# - Core IM services/{identity,chat,realtime} and pkg must never depend on services/marketplace or marketplace HTTP bindings
+for svc in pkg services/identity services/chat services/realtime services/marketplace; do
   deps="$(cd "${svc}" && go list -deps ./...)"
   if printf '%s\n' "${deps}" | grep -E '(github\.com/cloudwego/eino|teamie/contracts/gen/agent|teamie/services/agent-)' >/dev/null; then
     echo "IM independence violation in ${svc}" >&2
+    exit 1
+  fi
+done
+for svc in pkg services/identity services/chat services/realtime; do
+  deps="$(cd "${svc}" && go list -deps ./...)"
+  if printf '%s\n' "${deps}" | grep -E '(teamie/services/marketplace|teamie/contracts/gen/im/hertz_gen/im/marketplace)' >/dev/null; then
+    echo "Core IM marketplace-decoupling violation in ${svc}" >&2
     exit 1
   fi
 done

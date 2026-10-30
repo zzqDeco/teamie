@@ -870,7 +870,7 @@ type mcpPinnedToolSpec struct {
 }
 
 func (t *Tools) discoverConversationSpecs(ctx context.Context, wsID, convID string, usedNames map[string]struct{}) ([]mcpPinnedToolSpec, error) {
-	if !domain.ValidUUID(convID) || t == nil || t.IM == nil || strings.TrimSpace(t.IM.BaseURL) == "" {
+	if !domain.ValidUUID(convID) || t == nil || t.IM == nil || strings.TrimSpace(t.IM.marketplaceBaseURL()) == "" {
 		return nil, nil
 	}
 	if !domain.ValidUUID(wsID) {
@@ -886,7 +886,7 @@ func (t *Tools) discoverConversationSpecs(ctx context.Context, wsID, convID stri
 	var appsOut struct {
 		Apps []imMarketplaceApp `json:"apps"`
 	}
-	if err := t.IM.Call(ctx, http.MethodGet, "/api/v1/conversations/"+url.PathEscape(convID)+"/apps", nil, &appsOut); err != nil {
+	if err := t.IM.CallMarketplace(ctx, http.MethodGet, "/api/v1/conversations/"+url.PathEscape(convID)+"/apps", nil, &appsOut); err != nil {
 		var api *APIError
 		if errors.As(err, &api) && (api.Status == 400 || api.Status == 403 || api.Status == 404) {
 			return nil, nil
@@ -908,7 +908,7 @@ func (t *Tools) discoverConversationSpecs(ctx context.Context, wsID, convID stri
 			continue
 		}
 		var sessOut imConversationAppSession
-		if err := t.IM.Call(ctx, http.MethodPost, "/api/v1/conversations/"+url.PathEscape(convID)+"/apps/"+url.PathEscape(app.ID)+"/session", map[string]any{}, &sessOut); err != nil {
+		if err := t.IM.CallMarketplace(ctx, http.MethodPost, "/api/v1/conversations/"+url.PathEscape(convID)+"/apps/"+url.PathEscape(app.ID)+"/session", map[string]any{}, &sessOut); err != nil {
 			var api *APIError
 			if errors.As(err, &api) && (api.Status == 400 || api.Status == 403 || api.Status == 404) {
 				continue
@@ -976,7 +976,7 @@ func (t *Tools) discoverOrRestoreConversationMCPTools(ctx context.Context, run *
 	}
 
 	specs := []mcpPinnedToolSpec{}
-	if (t.FlagsFile == "" || runtimeFlag(t.FlagsFile, "im.marketplace.enabled")) && t.IM != nil && strings.TrimSpace(t.IM.BaseURL) != "" {
+	if (t.FlagsFile == "" || runtimeFlag(t.FlagsFile, "im.marketplace.enabled")) && t.IM != nil && strings.TrimSpace(t.IM.marketplaceBaseURL()) != "" {
 		discovered, err := t.discoverConversationSpecs(ctx, wsID, convID, map[string]struct{}{})
 		if err != nil {
 			return nil, err
@@ -1148,7 +1148,7 @@ func (t *Tools) BuildMCPTools(ctx context.Context, run *Run) ([]tool.BaseTool, e
 	if t.FlagsFile != "" && !runtimeFlag(t.FlagsFile, "im.marketplace.enabled") {
 		return nil, nil
 	}
-	if t.IM == nil || strings.TrimSpace(t.IM.BaseURL) == "" {
+	if t.IM == nil || strings.TrimSpace(t.IM.marketplaceBaseURL()) == "" {
 		return nil, nil
 	}
 
@@ -1313,7 +1313,7 @@ func (w *mcpToolWrapper) InvokableRun(ctx context.Context, argumentsInJSON strin
 			return &Observation{Error: "feature_disabled"}, nil
 		}
 		var sessOut imConversationAppSession
-		if err := w.tools.IM.Call(execCtx, http.MethodPost, "/api/v1/conversations/"+url.PathEscape(w.spec.ConversationID)+"/apps/"+url.PathEscape(w.spec.AppID)+"/session", map[string]any{}, &sessOut); err != nil {
+		if err := w.tools.IM.CallMarketplace(execCtx, http.MethodPost, "/api/v1/conversations/"+url.PathEscape(w.spec.ConversationID)+"/apps/"+url.PathEscape(w.spec.AppID)+"/session", map[string]any{}, &sessOut); err != nil {
 			return observeError(err), nil
 		}
 		callCtx, cancel := context.WithTimeout(execCtx, 15*time.Second)
@@ -1424,7 +1424,7 @@ func (e *Engine) authorizeAppNotificationInput(ctx context.Context, imc *IM, _ *
 	var out struct {
 		Apps []imMarketplaceApp `json:"apps"`
 	}
-	if err := imc.Call(ctx, http.MethodGet, "/api/v1/conversations/"+url.PathEscape(in.ConversationID)+"/apps", nil, &out); err != nil {
+	if err := imc.CallMarketplace(ctx, http.MethodGet, "/api/v1/conversations/"+url.PathEscape(in.ConversationID)+"/apps", nil, &out); err != nil {
 		var api *APIError
 		if errors.As(err, &api) && (api.Status == 400 || api.Status == 403 || api.Status == 404) {
 			return errContextUnavailable
@@ -1711,7 +1711,7 @@ func (w *mcpNotificationWatcher) sync(ctx context.Context) {
 		var appsOut struct {
 			Apps []imMarketplaceApp `json:"apps"`
 		}
-		if err := w.im.Call(ctx, http.MethodGet, "/api/v1/conversations/"+url.PathEscape(c.ID)+"/apps", nil, &appsOut); err != nil {
+		if err := w.im.CallMarketplace(ctx, http.MethodGet, "/api/v1/conversations/"+url.PathEscape(c.ID)+"/apps", nil, &appsOut); err != nil {
 			var api *APIError
 			if errors.As(err, &api) && (api.Status == 400 || api.Status == 403 || api.Status == 404) {
 				continue
@@ -1779,7 +1779,7 @@ func (w *mcpNotificationWatcher) sync(ctx context.Context) {
 
 func (w *mcpNotificationWatcher) startSubscription(ctx context.Context, key mcpWatchKey, workspaceID, convID string, app imMarketplaceApp) bool {
 	var sessOut imConversationAppSession
-	if err := w.im.Call(ctx, http.MethodPost, "/api/v1/conversations/"+url.PathEscape(convID)+"/apps/"+url.PathEscape(app.ID)+"/session", map[string]any{}, &sessOut); err != nil {
+	if err := w.im.CallMarketplace(ctx, http.MethodPost, "/api/v1/conversations/"+url.PathEscape(convID)+"/apps/"+url.PathEscape(app.ID)+"/session", map[string]any{}, &sessOut); err != nil {
 		return false
 	}
 	expiresAt, _ := time.Parse(time.RFC3339, sessOut.ExpiresAt)

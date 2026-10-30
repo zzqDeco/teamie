@@ -116,6 +116,76 @@ if [[ $* == 'stop --timeout 30 agent-runtime' && $STOP_FAILS == 1 ]]; then exit 
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertLess(stop, operations.index(identity))
 
+    def test_marketplace_rollout_transfers_legacy_chat_tables_before_chat_upgrade(self):
+        repo_root = Path(__file__).resolve().parent.parent
+        script_text = (repo_root / "deploy/postgres/02-migrate-chat-marketplace.sh").read_text()
+        start_marker = "-- BEGIN_MARKETPLACE_SCHEMA_V1\n"
+        end_marker = "\n-- END_MARKETPLACE_SCHEMA_V1"
+        self.assertIn(start_marker, script_text)
+        self.assertIn(end_marker, script_text)
+        embedded_sql = script_text.split(start_marker, 1)[1].split(end_marker, 1)[0].strip()
+        canonical_sql = (repo_root / "services/marketplace/internal/infra/pg/migrations/001_marketplace.sql").read_text().strip()
+        self.assertEqual(embedded_sql, canonical_sql)
+
+        for legacy_state, transfer_fails in (("t", False), ("t", True), ("f", False)):
+            with self.subTest(legacy=legacy_state, transfer_fails=transfer_fails), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / "deploy/postgres").mkdir(parents=True)
+                (root / "deploy/postgres/01-databases.sh").write_text("#!/usr/bin/env bash\n")
+                (root / "deploy/postgres/02-migrate-chat-marketplace.sh").write_text("#!/usr/bin/env bash\nTRANSFER_MARKER\n")
+                probe = root / "probe.sh"
+                probe.write_text('''#!/usr/bin/env bash
+if [[ $1 == exec && $* == *"to_regclass"* ]]; then
+  echo "check_legacy_marketplace" >> "$CALLS"
+  echo "$LEGACY"
+  exit 0
+fi
+if [[ $* == "exec -T postgres bash -s" ]]; then
+  body=$(cat)
+  if [[ $body == *TRANSFER_MARKER* ]]; then
+    echo "transfer_marketplace_data" >> "$CALLS"
+    [[ $TRANSFER_FAILS == 1 ]] && exit 1
+    exit 0
+  fi
+fi
+printf '%s\\n' "$*" >> "$CALLS"
+if [[ $* == 'config --services' ]]; then printf 'chat\\nmarketplace\\nllm-gateway\\n'; fi
+''')
+                calls = root / "calls"
+                result = subprocess.run(
+                    ["bash", "-c", 'source "$COMMON"; COMPOSE=(bash "$PROBE"); COMPOSE_RECIPE=$RECIPE; rollout'],
+                    env={**os.environ, "COMMON": str(Path(__file__).with_name("common.sh")),
+                         "PROBE": str(probe), "RECIPE": str(root), "CALLS": str(calls),
+                         "LEGACY": legacy_state, "TRANSFER_FAILS": str(int(transfer_fails))},
+                    capture_output=True, text=True,
+                )
+                operations = calls.read_text().splitlines()
+                chat_up = "up -d --no-deps --wait --wait-timeout 180 chat"
+                marketplace_up = "up -d --no-deps --wait --wait-timeout 180 marketplace"
+                if legacy_state == "f":
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertNotIn("stop --timeout 30 chat", operations)
+                    self.assertNotIn("stop --timeout 30 marketplace", operations)
+                    self.assertNotIn("transfer_marketplace_data", operations)
+                    self.assertLess(operations.index(chat_up), operations.index(marketplace_up))
+                elif transfer_fails:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("stop --timeout 30 chat", operations)
+                    self.assertIn("stop --timeout 30 marketplace", operations)
+                    self.assertIn("transfer_marketplace_data", operations)
+                    self.assertNotIn(chat_up, operations)
+                else:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    stop_idx = operations.index("stop --timeout 30 chat")
+                    stop_mkt_idx = operations.index("stop --timeout 30 marketplace")
+                    transfer_idx = operations.index("transfer_marketplace_data")
+                    chat_idx = operations.index(chat_up)
+                    mkt_idx = operations.index(marketplace_up)
+                    self.assertLess(stop_idx, transfer_idx)
+                    self.assertLess(stop_mkt_idx, transfer_idx)
+                    self.assertLess(transfer_idx, chat_idx)
+                    self.assertLess(chat_idx, mkt_idx)
+
 
 class AgentManifestTest(unittest.TestCase):
     def modern(self):
@@ -408,6 +478,26 @@ class AgentManifestTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "identical schema versions"):
             manifest.compatible(current, previous)
         manifest.compatible(current, copy.deepcopy(current))
+
+    def test_v3_marketplace_service_forward_upgrade_and_rollback_guard(self):
+        v2 = self.modern()
+        v2["version"] = "v0.4.9"
+        v2["source"]["ref"] = "refs/heads/release/v0.4.9"
+        v3 = copy.deepcopy(v2)
+        v3["manifestVersion"] = 3
+        v3["version"] = "v0.5.0"
+        v3["source"]["ref"] = "refs/heads/release/v0.5.0"
+        v3["schema"] = dict(manifest.SCHEMA_V3)
+        v3["images"]["marketplace"] = "ghcr.io/zzqdeco/teamie-marketplace@sha256:" + "2" * 64
+        manifest.validate(v2)
+        manifest.validate(v3)
+        self.assertEqual(len(manifest.image_env(v3).splitlines()), 13)
+        self.assertIn("MARKETPLACE_IMAGE=", manifest.image_env(v3))
+        manifest.check_transition(v3, v2, v2)
+        with self.assertRaisesRegex(ValueError, "identical schema versions"):
+            manifest.check_transition(v2, v3, rollback=True)
+        with self.assertRaisesRegex(ValueError, "lower database schema"):
+            manifest.check_transition(v2, v3)
 
 
 class ProductionConfigTest(unittest.TestCase):

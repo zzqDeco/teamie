@@ -30,6 +30,10 @@
 	handle @realtime {
 		reverse_proxy realtime:8083
 	}
+	@marketplace path /api/v1/marketplace/* /api/v1/developer/* /api/v1/admin/marketplace/* /api/v1/workspaces/*/apps /api/v1/workspaces/*/apps/* /api/v1/conversations/*/apps /api/v1/conversations/*/apps/*
+	handle @marketplace {
+		reverse_proxy marketplace:8088
+	}
 	handle /api/* {
 		reverse_proxy chat:8082
 	}

@@ -74,6 +74,7 @@ jobs:
           - {service: identity, dockerfile: services/identity/Dockerfile, upstream: ""}
           - {service: chat, dockerfile: services/chat/Dockerfile, upstream: ""}
           - {service: realtime, dockerfile: services/realtime/Dockerfile, upstream: ""}
+          - {service: marketplace, dockerfile: services/marketplace/Dockerfile, upstream: ""}
           - {service: web, dockerfile: apps/web/Dockerfile, upstream: ""}
           - {service: agent-control, dockerfile: services/agent-control/Dockerfile, upstream: ""}
           - {service: agent-runtime, dockerfile: services/agent-runtime/Dockerfile, upstream: ""}

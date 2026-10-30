@@ -23,7 +23,7 @@ import (
 	"teamie/services/agent-runtime/internal/domain"
 )
 
-type Config struct{ ControlAddr, GatewayAddr, SandboxAddr, IdentityAddr, IMURL, IMRealtimeURL, ControlToken, GatewayToken, SandboxToken, IMToken, FlagsFile, GatewayStreamURL string }
+type Config struct{ ControlAddr, GatewayAddr, SandboxAddr, IdentityAddr, IMURL, IMRealtimeURL, MarketplaceURL, ControlToken, GatewayToken, SandboxToken, IMToken, FlagsFile, GatewayStreamURL string }
 type Engine struct {
 	Store                *Store
 	Config               Config
@@ -361,7 +361,7 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 	w.contextWindow.Store(16384)
 	// Typing and normal IM calls share credentials: issuance rotates the
 	// principal's single token and must never create competing token caches.
-	w.imc = &IM{BaseURL: e.Config.IMURL, RealtimeURL: e.Config.IMRealtimeURL, ServiceKey: e.Config.IMToken, AgentID: def.Id, Identity: e.Identity}
+	w.imc = &IM{BaseURL: e.Config.IMURL, RealtimeURL: e.Config.IMRealtimeURL, MarketplaceURL: e.Config.MarketplaceURL, ServiceKey: e.Config.IMToken, AgentID: def.Id, Identity: e.Identity}
 	w.reads = newReadReceiptSender()
 	w.gatewayModel = &GatewayModel{Client: e.Gateway, Token: e.Config.GatewayToken, OwnerID: def.OwnerId, AgentID: def.Id, ModelID: def.GetModelId(), Store: e.Store, Lease: lease, Authorize: w.authorize, StreamURL: e.Config.GatewayStreamURL, ContextWindow: func() int { return int(w.contextWindow.Load()) }}
 	var err error

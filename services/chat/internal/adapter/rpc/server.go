@@ -61,6 +61,33 @@ func (s *Server) CheckWorkspaceAccess(ctx context.Context, r *im.WorkspaceAccess
 	return &im.WorkspaceAccessResponse{Allowed: true, MemberIds: ids, PresenceEnabled: presenceEnabled}, nil
 }
 
+func (s *Server) GetWorkspaceRole(ctx context.Context, r *im.WorkspaceAccessRequest) (*im.WorkspaceRoleResponse, error) {
+	ownerID, role, allowed, err := s.App.WorkspaceRole(ctx, r.WorkspaceId, r.UserId)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return &im.WorkspaceRoleResponse{Allowed: false, OwnerId: "", Role: ""}, nil
+	}
+	return &im.WorkspaceRoleResponse{Allowed: true, OwnerId: ownerID, Role: role}, nil
+}
+
+func (s *Server) GetConversationScope(ctx context.Context, r *im.AccessRequest) (*im.ConversationScopeResponse, error) {
+	wsID, ownerID, convType, allowed, err := s.App.ConversationScope(ctx, r.ConversationId, r.UserId)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return &im.ConversationScopeResponse{Allowed: false, WorkspaceId: "", WorkspaceOwnerId: "", ConversationType: ""}, nil
+	}
+	return &im.ConversationScopeResponse{
+		Allowed:          true,
+		WorkspaceId:      wsID,
+		WorkspaceOwnerId: ownerID,
+		ConversationType: convType,
+	}, nil
+}
+
 func (s *Server) GetSharedWorkspaceMembers(ctx context.Context, r *im.SharedWorkspaceMembersRequest) (*im.SharedWorkspaceMembersResponse, error) {
 	ids, err := s.App.SharedWorkspaceMembers(ctx, r.UserId)
 	if err != nil {

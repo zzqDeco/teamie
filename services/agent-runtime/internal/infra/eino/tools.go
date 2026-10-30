@@ -33,13 +33,13 @@ type APIError struct {
 func (e *APIError) Error() string { return "im: " + e.Code }
 
 type IM struct {
-	BaseURL, RealtimeURL, ServiceKey, AgentID string
-	Identity                                  identityservice.Client
-	HTTP                                      *http.Client
-	mu                                        sync.Mutex
-	token                                     string
-	expiry                                    time.Time
-	issuing                                   chan struct{}
+	BaseURL, RealtimeURL, MarketplaceURL, ServiceKey, AgentID string
+	Identity                                                  identityservice.Client
+	HTTP                                                      *http.Client
+	mu                                                        sync.Mutex
+	token                                                     string
+	expiry                                                    time.Time
+	issuing                                                   chan struct{}
 }
 
 func (imc *IM) credential(ctx context.Context) (string, error) {
@@ -94,8 +94,22 @@ func (imc *IM) issueCredential(ctx context.Context) (string, time.Time, error) {
 	}
 	return r.Token, expiry, nil
 }
+func (imc *IM) marketplaceBaseURL() string {
+	if imc == nil {
+		return ""
+	}
+	if strings.TrimSpace(imc.MarketplaceURL) != "" {
+		return imc.MarketplaceURL
+	}
+	return imc.BaseURL
+}
+
 func (imc *IM) Call(ctx context.Context, method, path string, body any, out any) error {
 	return imc.callAt(ctx, imc.BaseURL, method, path, body, out)
+}
+
+func (imc *IM) CallMarketplace(ctx context.Context, method, path string, body any, out any) error {
+	return imc.callAt(ctx, imc.marketplaceBaseURL(), method, path, body, out)
 }
 
 // CallIdempotent binds retries to one Chat-owned mutation receipt.
@@ -480,7 +494,7 @@ func (t *Tools) execute(ctx context.Context, name string, args any, fn func(cont
 			var appsOut struct {
 				Apps []imMarketplaceApp `json:"apps"`
 			}
-			if e = t.IM.Call(ctx, http.MethodGet, "/api/v1/conversations/"+url.PathEscape(receipt.Data.ConversationID)+"/apps", nil, &appsOut); e != nil {
+			if e = t.IM.CallMarketplace(ctx, http.MethodGet, "/api/v1/conversations/"+url.PathEscape(receipt.Data.ConversationID)+"/apps", nil, &appsOut); e != nil {
 				var api *APIError
 				if errors.As(e, &api) && (api.Status == 400 || api.Status == 403 || api.Status == 404) {
 					return nil, errContextUnavailable
