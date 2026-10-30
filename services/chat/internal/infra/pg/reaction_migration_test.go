@@ -57,10 +57,61 @@ FROM messages m JOIN attachments a ON a.message_id=m.id JOIN attachment_uploads 
 		t.Fatalf("schema ledger=%d err=%v", head, err)
 	}
 	var retired bool
-	if err = pool.QueryRow(ctx, "SELECT to_regclass('public.marketplace_apps') IS NULL").Scan(&retired); err != nil || !retired {
+	if err = pool.QueryRow(ctx, "SELECT to_regclass('marketplace_apps') IS NULL").Scan(&retired); err != nil || !retired {
 		t.Fatalf("expected embedded marketplace tables to be retired at schema 10, retired=%v err=%v", retired, err)
 	}
 	if err = Migrate(ctx, pool); err != nil {
 		t.Fatalf("repeating the migration was not idempotent: %v", err)
+	}
+}
+
+func TestRetireEmbeddedMarketplaceRefusesUnmigratedDataUntilStamped(t *testing.T) {
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, testdb.URL(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	err = postgres.Migrate(ctx, pool, 704102, "chat_schema_migrations", []postgres.Migration{
+		{Version: 1, SQL: SchemaV1}, {Version: 2, SQL: SchemaV2},
+		{Version: 3, SQL: SchemaV3}, {Version: 4, SQL: SchemaV4},
+		{Version: 5, SQL: SchemaV5}, {Version: 6, SQL: SchemaV6},
+		{Version: 7, SQL: SchemaV7}, {Version: 8, SQL: SchemaV8},
+		{Version: 9, SQL: SchemaV9},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = pool.Exec(ctx, `
+INSERT INTO workspaces(id, name, created_by) VALUES ('ws-1', 'Workspace', 'owner');
+INSERT INTO marketplace_apps(id, slug, name, description, web_url, mcp_url, signing_secret, enabled, owner_id, is_published, published_version, review_status, draft_name, draft_description, draft_web_url, draft_mcp_url)
+VALUES ('app-1', 'legacy-app', 'Legacy App', 'Desc', 'https://legacy.example/ui', 'https://legacy.example/mcp', repeat('k', 64), true, 'owner', true, 1, 'approved', 'Legacy App', 'Desc', 'https://legacy.example/ui', 'https://legacy.example/mcp');
+INSERT INTO workspace_marketplace_apps(workspace_id, app_id, installed_by) VALUES ('ws-1', 'app-1', 'owner');
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Without the verified transfer stamp, migration 010 must fail closed and preserve data.
+	if err = Migrate(ctx, pool); err == nil {
+		t.Fatal("expected migration 010 to refuse dropping non-empty unstamped marketplace tables")
+	}
+	var count int
+	if err = pool.QueryRow(ctx, "SELECT count(*) FROM marketplace_apps WHERE id = 'app-1'").Scan(&count); err != nil || count != 1 {
+		t.Fatalf("expected legacy marketplace row to remain intact after refused migration, count=%d err=%v", count, err)
+	}
+
+	// Once deploy/postgres/02-migrate-chat-marketplace.sh stamps verified transfer, migration 010 retires the tables cleanly.
+	if _, err = pool.Exec(ctx, "COMMENT ON TABLE marketplace_apps IS 'teamie.transferred_to_marketplace_v1'"); err != nil {
+		t.Fatal(err)
+	}
+	if err = Migrate(ctx, pool); err != nil {
+		t.Fatalf("expected stamped migration 010 to succeed, got: %v", err)
+	}
+	var retired bool
+	if err = pool.QueryRow(ctx, "SELECT to_regclass('marketplace_apps') IS NULL").Scan(&retired); err != nil || !retired {
+		t.Fatalf("expected embedded marketplace tables to be dropped after stamped migration, retired=%v err=%v", retired, err)
 	}
 }

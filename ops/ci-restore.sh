@@ -38,18 +38,29 @@ SQL
   fi
   if [[ $suffix == chat ]]; then
     # Restore an actual linked binary attachment through Chat's real schema,
-    # including bytes that cannot survive a UTF-8/text-file transport.
+    # including bytes that cannot survive a UTF-8/text-file transport, and
+    # verify embedded-to-standalone Marketplace data transfer before 010 retires tables.
     cat services/chat/internal/infra/pg/migrations/001_chat.sql services/chat/internal/infra/pg/migrations/002_membership_management.sql \
       services/chat/internal/infra/pg/migrations/003_attachments.sql services/chat/internal/infra/pg/migrations/004_attachment_uploads.sql \
       services/chat/internal/infra/pg/migrations/005_mentions.sql \
       services/chat/internal/infra/pg/migrations/006_conversation_mutations.sql \
       services/chat/internal/infra/pg/migrations/007_reactions_and_notification_levels.sql \
       services/chat/internal/infra/pg/migrations/008_marketplace.sql \
-      services/chat/internal/infra/pg/migrations/009_developer_marketplace.sql \
-      services/chat/internal/infra/pg/migrations/010_retire_embedded_marketplace.sql | "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 >/dev/null
+      services/chat/internal/infra/pg/migrations/009_developer_marketplace.sql | "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 >/dev/null
     "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 <<'SQL'
 INSERT INTO workspaces(id,name,created_by) VALUES('restore-workspace','Restore','owner');
-INSERT INTO chat_schema_migrations(version) VALUES(2),(3),(4),(5),(6),(7),(8),(9),(10) ON CONFLICT DO NOTHING;
+INSERT INTO chat_schema_migrations(version) VALUES(2),(3),(4),(5),(6),(7),(8),(9) ON CONFLICT DO NOTHING;
+INSERT INTO marketplace_apps(id,slug,name,description,web_url,mcp_url,signing_secret,enabled,owner_id,is_published,published_version,review_status,draft_name,draft_description,draft_web_url,draft_mcp_url,has_draft_changes,submission_revision)
+VALUES('legacy-migrated-app','legacy-board','Legacy Board','Migrated from Chat','https://legacy.example.test/ui','https://legacy.example.test/mcp',repeat('m',64),true,'owner',true,2,'approved','Legacy Board','Migrated from Chat','https://legacy.example.test/ui','https://legacy.example.test/mcp',false,2);
+INSERT INTO workspace_marketplace_apps(workspace_id,app_id,installed_by,review_preview)
+VALUES('restore-workspace','legacy-migrated-app','owner',true);
+INSERT INTO marketplace_app_reviews(id,app_id,revision,action,actor_id,note,web_url,mcp_url,snapshot)
+VALUES('legacy-migrated-review','legacy-migrated-app',2,'approve','admin','Transferred history','https://legacy.example.test/ui','https://legacy.example.test/mcp','{"migrated":true}'::jsonb);
+SQL
+    "${pg[@]}" bash -s < deploy/postgres/02-migrate-chat-marketplace.sh
+    "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 < services/chat/internal/infra/pg/migrations/010_retire_embedded_marketplace.sql >/dev/null
+    "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 <<'SQL'
+INSERT INTO chat_schema_migrations(version) VALUES(10) ON CONFLICT DO NOTHING;
 INSERT INTO conversations(id,workspace_id,type,name) VALUES('restore-conversation','restore-workspace','channel','general');
 INSERT INTO conversation_mutations(actor_id,request_key,request_hash,conversation_id) VALUES('owner','restore-group','fixture-hash','restore-conversation');
 INSERT INTO messages(id,conversation_id,sender_id,sender_name,sender_kind,client_message_id,seq,body,original_body_hash,attachments,original_attachment_ids)
@@ -72,10 +83,8 @@ VALUES('restore-conversation','owner','mentions'),('restore-conversation','reade
 SQL
   fi
   if [[ $suffix == marketplace ]]; then
-    "${pg[@]}" psql -U postgres -d teamie_marketplace -v ON_ERROR_STOP=1 < services/marketplace/internal/infra/pg/migrations/001_marketplace.sql >/dev/null
     "${pg[@]}" psql -U postgres -d teamie_marketplace -v ON_ERROR_STOP=1 <<'SQL'
-CREATE TABLE marketplace_schema_migrations(version INTEGER PRIMARY KEY,applied_at timestamptz NOT NULL DEFAULT now());
-INSERT INTO marketplace_schema_migrations(version) VALUES(1);
+SET ROLE teamie_marketplace;
 INSERT INTO marketplace_apps(id,slug,name,description,web_url,mcp_url,signing_secret,enabled,owner_id,is_published,published_version,review_status,draft_name,draft_description,draft_web_url,draft_mcp_url,has_draft_changes,submission_revision)
 VALUES('restore-app','restore-game','Restore Game','Game desc','https://game.example.test/ui','https://game.example.test/mcp',repeat('s',64),true,'owner',true,1,'approved','Restore Game v2','Game desc v2','https://game.example.test/ui-v2','https://game.example.test/mcp-v2',true,2);
 INSERT INTO workspace_marketplace_apps(workspace_id,app_id,installed_by)
@@ -217,6 +226,12 @@ SQL
     actual=$("${pg[@]}" psql -U postgres -d restore_marketplace -At -v ON_ERROR_STOP=1 -c \
       "SELECT (SELECT string_agg(version::text,',' ORDER BY version) FROM marketplace_schema_migrations)||':'||m.slug||':'||m.published_version||':'||m.has_draft_changes::text||':'||w.workspace_id||':'||r.action FROM marketplace_apps m JOIN workspace_marketplace_apps w ON w.app_id=m.id JOIN marketplace_app_reviews r ON r.app_id=m.id WHERE m.id='restore-app';")
     [[ $actual == '1:restore-game:1:true:restore-workspace:approve' ]] || { echo 'Marketplace app catalog, installations and review ledger restore failed.' >&2; exit 1; }
+    actual=$("${pg[@]}" psql -U postgres -d restore_marketplace -At -v ON_ERROR_STOP=1 -c \
+      "SELECT m.slug||':'||(m.signing_secret=repeat('m',64))::text||':'||w.review_preview::text||':'||(r.snapshot->>'migrated') FROM marketplace_apps m JOIN workspace_marketplace_apps w ON w.app_id=m.id JOIN marketplace_app_reviews r ON r.app_id=m.id WHERE m.id='legacy-migrated-app';")
+    [[ $actual == 'legacy-board:true:true:true' ]] || { echo 'Transferred Chat-to-Marketplace catalog, secret, installation and review history verification failed.' >&2; exit 1; }
+    actual=$("${pg[@]}" psql -U postgres -d teamie_marketplace -At -v ON_ERROR_STOP=1 -c \
+      "SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename IN ('marketplace_schema_migrations','marketplace_apps','workspace_marketplace_apps','marketplace_app_reviews') AND tableowner='teamie_marketplace';")
+    [[ $actual == '4' ]] || { echo 'Marketplace migrated table ownership verification failed.' >&2; exit 1; }
   fi
   if [[ $suffix == agent_runtime ]]; then
     actual=$("${pg[@]}" psql -U postgres -d restore_agent_runtime -At -v ON_ERROR_STOP=1 -v frozen_budget="$runtime_context_budget" <<'SQL'

@@ -570,3 +570,101 @@ func (d domainIdentityFromFake) Users(ctx context.Context, ids []string) ([]doma
 }
 
 func (d domainIdentityFromFake) Ping(ctx context.Context) error { return d.id.Ping(ctx) }
+
+func TestProbeVerifierCSPFrameAncestorsHostSourceMatching(t *testing.T) {
+	ctx := context.Background()
+	secret := domain.NewMarketplaceSigningSecret()
+
+	var currentCSP atomic.Value
+	currentCSP.Store("")
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ui", func(w http.ResponseWriter, _ *http.Request) {
+		if csp, _ := currentCSP.Load().(string); csp != "" {
+			w.Header().Set("Content-Security-Policy", csp)
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte("<!doctype html><html><body>CSP Test</body></html>"))
+	})
+	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
+		auth := strings.TrimSpace(r.Header.Get("Authorization"))
+		if !strings.HasPrefix(auth, "Bearer ") {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		tok := strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
+		if _, err := domain.VerifyMarketplaceContextToken(secret, tok, time.Now().UTC()); err != nil {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		var rpcReq struct {
+			Method string `json:"method"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&rpcReq)
+		w.Header().Set("Content-Type", "application/json")
+		switch rpcReq.Method {
+		case "initialize":
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-03-26","capabilities":{"tools":{}},"serverInfo":{"name":"csp-mcp","version":"1.0.0"}}}`))
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+		case "tools/list":
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"ping","description":"Ping"}]}}`))
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	cases := []struct {
+		name      string
+		appOrigin string
+		csp       string
+		wantOK    bool
+	}{
+		{name: "exact https origin", appOrigin: "https://chat.example.com", csp: "frame-ancestors 'self' https://chat.example.com", wantOK: true},
+		{name: "wildcard subdomain with scheme", appOrigin: "https://chat.example.com", csp: "frame-ancestors https://*.example.com", wantOK: true},
+		{name: "scheme-less wildcard subdomain", appOrigin: "https://chat.example.com", csp: "frame-ancestors *.example.com", wantOK: true},
+		{name: "scheme-less exact host", appOrigin: "https://chat.example.com", csp: "frame-ancestors chat.example.com", wantOK: true},
+		{name: "wildcard port on non-default port", appOrigin: "https://chat.example.com:8443", csp: "frame-ancestors https://*.example.com:*", wantOK: true},
+		{name: "explicit port match", appOrigin: "https://chat.example.com:8443", csp: "frame-ancestors https://chat.example.com:8443", wantOK: true},
+		{name: "http source upgrades to https origin", appOrigin: "https://chat.example.com", csp: "frame-ancestors http://*.example.com", wantOK: true},
+		{name: "wildcard subdomain rejects apex domain", appOrigin: "https://example.com", csp: "frame-ancestors https://*.example.com", wantOK: false},
+		{name: "default port rejects custom port", appOrigin: "https://chat.example.com:8443", csp: "frame-ancestors https://*.example.com", wantOK: false},
+		{name: "https scheme rejects http origin", appOrigin: "http://chat.example.com", csp: "frame-ancestors https://*.example.com", wantOK: false},
+		{name: "self only blocks cross-origin", appOrigin: "https://chat.example.com", csp: "frame-ancestors 'self'", wantOK: false},
+		{name: "none blocks all", appOrigin: "https://chat.example.com", csp: "frame-ancestors 'none'", wantOK: false},
+		{name: "empty frame-ancestors blocks all", appOrigin: "https://chat.example.com", csp: "default-src 'self'; frame-ancestors", wantOK: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			currentCSP.Store(tc.csp)
+			v := &probe.Verifier{
+				AppOrigin:          tc.appOrigin,
+				RequirePublicHTTPS: false,
+				Timeout:            5 * time.Second,
+			}
+			rep, err := v.VerifyEndpoints(ctx, domain.VerifyEndpointsInput{
+				AppID:         "app-csp",
+				Slug:          "csp-app",
+				WebURL:        srv.URL + "/ui",
+				MCPURL:        srv.URL + "/mcp",
+				SigningSecret: secret,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rep.OK != tc.wantOK {
+				t.Fatalf("csp=%q appOrigin=%q: got OK=%v (checks=%+v), want OK=%v", tc.csp, tc.appOrigin, rep.OK, rep.Checks, tc.wantOK)
+			}
+			if !tc.wantOK && (len(rep.Checks) < 2 || rep.Checks[1].Code != "web_csp_blocked") {
+				t.Fatalf("csp=%q appOrigin=%q: expected web_csp_blocked, got checks=%+v", tc.csp, tc.appOrigin, rep.Checks)
+			}
+		})
+	}
+}

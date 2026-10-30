@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"strings"
 	"time"
 
@@ -225,14 +226,16 @@ func (v *Verifier) probeWebUI(ctx context.Context, tr *http.Transport, webURL st
 		}
 	}
 
-	for _, csp := range resp.Header.Values("Content-Security-Policy") {
-		if blocked, reason := blocksFrameAncestors(csp, v.AppOrigin); blocked {
-			return domain.EndpointProbeCheck{
-				Stage:   "web_ui",
-				OK:      false,
-				Code:    "web_csp_blocked",
-				Summary: reason,
-			}
+	pageURL := webURL
+	if resp.Request != nil && resp.Request.URL != nil {
+		pageURL = resp.Request.URL.String()
+	}
+	if blocked, reason := blocksFrameAncestors(resp.Header.Values("Content-Security-Policy"), v.AppOrigin, pageURL); blocked {
+		return domain.EndpointProbeCheck{
+			Stage:   "web_ui",
+			OK:      false,
+			Code:    "web_csp_blocked",
+			Summary: reason,
 		}
 	}
 
@@ -244,39 +247,168 @@ func (v *Verifier) probeWebUI(ctx context.Context, tr *http.Transport, webURL st
 	}
 }
 
-func blocksFrameAncestors(csp, appOrigin string) (bool, string) {
-	for _, directive := range strings.Split(csp, ";") {
-		fields := strings.Fields(strings.TrimSpace(directive))
-		if len(fields) == 0 || !strings.EqualFold(fields[0], "frame-ancestors") {
-			continue
-		}
-		sources := fields[1:]
-		if len(sources) == 0 {
-			return true, "Content-Security-Policy frame-ancestors is empty and blocks embedding"
-		}
-		hostOrig, hasHost := domain.CanonicalOrigin(appOrigin)
-		for _, src := range sources {
-			s := strings.ToLower(strings.TrimSpace(src))
-			if s == "*" || s == "https:" || s == "http:" {
-				return false, ""
+func blocksFrameAncestors(policies []string, appOrigin string, pageURL string) (bool, string) {
+	appScheme, appHost, appPort, appValid := parseCSPTargetOrigin(appOrigin)
+	pageScheme := ""
+	if pu, err := url.Parse(strings.TrimSpace(pageURL)); err == nil {
+		pageScheme = strings.ToLower(pu.Scheme)
+	}
+	for _, policy := range policies {
+		for _, directive := range strings.Split(policy, ";") {
+			fields := strings.Fields(strings.TrimSpace(directive))
+			if len(fields) == 0 || !strings.EqualFold(fields[0], "frame-ancestors") {
+				continue
 			}
-			if hasHost {
-				if cand, ok := domain.CanonicalOrigin(src); ok && cand == hostOrig {
-					return false, ""
+			sources := fields[1:]
+			if len(sources) == 0 {
+				return true, "Content-Security-Policy frame-ancestors is empty and blocks embedding"
+			}
+			allowed := false
+			for _, src := range sources {
+				if cspFrameSourceAllows(src, appScheme, appHost, appPort, appValid, pageScheme) {
+					allowed = true
+					break
 				}
 			}
-		}
-		for _, src := range sources {
-			s := strings.ToLower(strings.TrimSpace(src))
-			if s == "'none'" || s == "'self'" {
-				return true, fmt.Sprintf("Content-Security-Policy frame-ancestors (%s) blocks Teamie iframe embedding", src)
+			if !allowed {
+				for _, src := range sources {
+					s := strings.ToLower(strings.TrimSpace(src))
+					if s == "'none'" || s == "'self'" {
+						return true, fmt.Sprintf("Content-Security-Policy frame-ancestors (%s) blocks Teamie iframe embedding", src)
+					}
+				}
+				return true, "Content-Security-Policy frame-ancestors does not include Teamie APP_ORIGIN"
 			}
-		}
-		if hasHost {
-			return true, "Content-Security-Policy frame-ancestors does not include Teamie APP_ORIGIN"
 		}
 	}
 	return false, ""
+}
+
+func defaultSchemePort(scheme string) string {
+	switch scheme {
+	case "https":
+		return "443"
+	case "http":
+		return "80"
+	default:
+		return ""
+	}
+}
+
+func parseCSPTargetOrigin(raw string) (scheme, host, port string, ok bool) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return "", "", "", false
+	}
+	scheme = strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return "", "", "", false
+	}
+	host = strings.ToLower(u.Hostname())
+	if host == "" {
+		return "", "", "", false
+	}
+	port = u.Port()
+	if port == "" {
+		port = defaultSchemePort(scheme)
+	}
+	return scheme, host, port, true
+}
+
+func cspSchemeMatches(srcScheme, appScheme, pageScheme string) bool {
+	if srcScheme == "" {
+		if pageScheme == "https" {
+			return appScheme == "https"
+		}
+		return appScheme == "http" || appScheme == "https"
+	}
+	if srcScheme == appScheme {
+		return true
+	}
+	return srcScheme == "http" && appScheme == "https"
+}
+
+func cspFrameSourceAllows(rawSrc, appScheme, appHost, appPort string, appValid bool, pageScheme string) bool {
+	s := strings.ToLower(strings.TrimSpace(rawSrc))
+	if s == "" || strings.HasPrefix(s, "'") {
+		return false
+	}
+	if s == "*" {
+		return true
+	}
+	if !appValid {
+		return false
+	}
+	if strings.HasSuffix(s, ":") && !strings.Contains(s, "/") {
+		return cspSchemeMatches(strings.TrimSuffix(s, ":"), appScheme, pageScheme)
+	}
+	srcScheme := ""
+	rest := s
+	if schemePart, after, hasScheme := strings.Cut(s, "://"); hasScheme {
+		if schemePart != "http" && schemePart != "https" {
+			return false
+		}
+		srcScheme = schemePart
+		rest = after
+	}
+	if !cspSchemeMatches(srcScheme, appScheme, pageScheme) {
+		return false
+	}
+	hostPort := rest
+	if slash := strings.IndexByte(rest, '/'); slash >= 0 {
+		if rest[slash:] != "/" {
+			return false
+		}
+		hostPort = rest[:slash]
+	}
+	if hostPort == "" {
+		return false
+	}
+	srcHost, srcPort := splitCSPHostPort(hostPort)
+	if srcHost == "" {
+		return false
+	}
+	if srcHost != "*" {
+		if strings.HasPrefix(srcHost, "*.") {
+			base := strings.TrimPrefix(srcHost, "*.")
+			if base == "" || !strings.HasSuffix(appHost, "."+base) || len(appHost) <= len(base)+1 {
+				return false
+			}
+		} else if srcHost != appHost {
+			return false
+		}
+	}
+	if srcPort == "*" {
+		return true
+	}
+	if srcPort == "" {
+		return appPort == defaultSchemePort(appScheme)
+	}
+	return appPort == srcPort
+}
+
+func splitCSPHostPort(hostPort string) (string, string) {
+	if strings.HasPrefix(hostPort, "[") {
+		if strings.HasSuffix(hostPort, "]") {
+			return strings.Trim(hostPort, "[]"), ""
+		}
+		h, p, err := net.SplitHostPort(hostPort)
+		if err != nil {
+			return "", ""
+		}
+		return h, p
+	}
+	if strings.Count(hostPort, ":") == 1 {
+		h, p, ok := strings.Cut(hostPort, ":")
+		if !ok || p == "" {
+			return "", ""
+		}
+		return h, p
+	}
+	if strings.Contains(hostPort, ":") {
+		return "", ""
+	}
+	return hostPort, ""
 }
 
 func initializePayload() []byte {
