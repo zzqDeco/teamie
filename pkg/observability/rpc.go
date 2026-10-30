@@ -3,6 +3,7 @@ package observability
 import (
 	"context"
 	"reflect"
+	rpprof "runtime/pprof"
 	"strconv"
 
 	"github.com/bytedance/gopkg/cloud/metainfo"
@@ -108,6 +109,13 @@ func rpcMiddleware(inbound bool) endpoint.Middleware {
 				}
 				op.end(failure, zapcore.ErrorLevel, successLevel, "", zap.String("custom.rpc.error_code", code), zap.String("custom.duration_scope", "single-rpc-invocation"))
 			}()
+			if inbound {
+				var callErr error
+				rpprof.Do(ctx, rpprof.Labels("component", "rpc-server", "rpc.service", ID(service), "rpc.method", ID(method)), func(pctx context.Context) {
+					callErr = next(pctx, request, response)
+				})
+				return callErr
+			}
 			return next(ctx, request, response)
 		}
 	}

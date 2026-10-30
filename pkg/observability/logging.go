@@ -62,8 +62,14 @@ func Configure(service, version, sha string) func() {
 	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(Propagator())
 	installFrameworkLoggers(config)
+	stopPprof := configurePprof(os.Getenv("PPROF_ADDR"))
 	logger.Info("Service process initializing", zap.String("event.action", "service-initializing"), zap.String("event.outcome", "success"))
 	return func() {
+		if stopPprof != nil {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_ = stopPprof(shutdownCtx)
+			cancel()
+		}
 		logger.Info("Service stopped", zap.String("event.action", "service-stopped"), zap.String("event.outcome", "success"))
 		_ = tp.Shutdown(context.Background())
 		_ = logger.Sync()
