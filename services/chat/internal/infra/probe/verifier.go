@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -186,7 +187,7 @@ func (v *Verifier) probeWebUI(ctx context.Context, client *http.Client, webURL s
 			Summary: fmt.Sprintf("Web UI 响应头包含 X-Frame-Options: %s，会阻止嵌入 Teamie 群聊侧边栏 iframe", xfo),
 		}
 	}
-	if cspBlocksFrame(resp.Header.Values("Content-Security-Policy"), v.AppOrigin) {
+	if cspBlocksFrame(resp.Header.Values("Content-Security-Policy"), v.AppOrigin, webURL) {
 		return domain.EndpointProbeCheck{
 			Stage:   "web_ui",
 			Code:    "web_ui_csp_frame_blocked",
@@ -211,23 +212,21 @@ func (v *Verifier) probeWebUI(ctx context.Context, client *http.Client, webURL s
 	}
 }
 
-func cspBlocksFrame(policies []string, appOrigin string) bool {
-	canonApp, _ := domain.CanonicalOrigin(appOrigin)
+func cspBlocksFrame(policies []string, appOrigin string, pageURL string) bool {
+	appScheme, appHost, appPort, appValid := parseCSPTargetOrigin(appOrigin)
+	pageScheme := ""
+	if pu, err := url.Parse(strings.TrimSpace(pageURL)); err == nil {
+		pageScheme = strings.ToLower(pu.Scheme)
+	}
 	for _, policy := range policies {
 		for _, directive := range strings.Split(policy, ";") {
 			fields := strings.Fields(strings.TrimSpace(directive))
 			if len(fields) < 2 || !strings.EqualFold(fields[0], "frame-ancestors") {
 				continue
 			}
-			sources := fields[1:]
 			allowed := false
-			for _, src := range sources {
-				s := strings.ToLower(strings.TrimSpace(src))
-				if s == "*" || s == "https:" || s == "http:" {
-					allowed = true
-					break
-				}
-				if orig, ok := domain.CanonicalOrigin(src); ok && canonApp != "" && orig == canonApp {
+			for _, src := range fields[1:] {
+				if cspFrameSourceAllows(src, appScheme, appHost, appPort, appValid, pageScheme) {
 					allowed = true
 					break
 				}
@@ -238,6 +237,133 @@ func cspBlocksFrame(policies []string, appOrigin string) bool {
 		}
 	}
 	return false
+}
+
+func defaultSchemePort(scheme string) string {
+	switch scheme {
+	case "https":
+		return "443"
+	case "http":
+		return "80"
+	default:
+		return ""
+	}
+}
+
+func parseCSPTargetOrigin(raw string) (scheme, host, port string, ok bool) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return "", "", "", false
+	}
+	scheme = strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return "", "", "", false
+	}
+	host = strings.ToLower(u.Hostname())
+	if host == "" {
+		return "", "", "", false
+	}
+	port = u.Port()
+	if port == "" {
+		port = defaultSchemePort(scheme)
+	}
+	return scheme, host, port, true
+}
+
+func cspSchemeMatches(srcScheme, appScheme, pageScheme string) bool {
+	if srcScheme == "" {
+		if pageScheme == "https" {
+			return appScheme == "https"
+		}
+		return appScheme == "http" || appScheme == "https"
+	}
+	if srcScheme == appScheme {
+		return true
+	}
+	return srcScheme == "http" && appScheme == "https"
+}
+
+func cspFrameSourceAllows(rawSrc, appScheme, appHost, appPort string, appValid bool, pageScheme string) bool {
+	s := strings.ToLower(strings.TrimSpace(rawSrc))
+	if s == "" || strings.HasPrefix(s, "'") {
+		return false
+	}
+	if s == "*" {
+		return true
+	}
+	if !appValid {
+		return false
+	}
+	if strings.HasSuffix(s, ":") && !strings.Contains(s, "/") {
+		return cspSchemeMatches(strings.TrimSuffix(s, ":"), appScheme, pageScheme)
+	}
+	srcScheme := ""
+	rest := s
+	if schemePart, after, hasScheme := strings.Cut(s, "://"); hasScheme {
+		if schemePart != "http" && schemePart != "https" {
+			return false
+		}
+		srcScheme = schemePart
+		rest = after
+	}
+	if !cspSchemeMatches(srcScheme, appScheme, pageScheme) {
+		return false
+	}
+	hostPort := rest
+	if slash := strings.IndexByte(rest, '/'); slash >= 0 {
+		if rest[slash:] != "/" {
+			return false
+		}
+		hostPort = rest[:slash]
+	}
+	if hostPort == "" {
+		return false
+	}
+	srcHost, srcPort := splitCSPHostPort(hostPort)
+	if srcHost == "" {
+		return false
+	}
+	if srcHost != "*" {
+		if strings.HasPrefix(srcHost, "*.") {
+			base := strings.TrimPrefix(srcHost, "*.")
+			if base == "" || !strings.HasSuffix(appHost, "."+base) || len(appHost) <= len(base)+1 {
+				return false
+			}
+		} else if srcHost != appHost {
+			return false
+		}
+	}
+	if srcPort == "*" {
+		return true
+	}
+	if srcPort == "" {
+		return appPort == defaultSchemePort(appScheme)
+	}
+	return appPort == srcPort
+}
+
+func splitCSPHostPort(hostPort string) (string, string) {
+	if strings.HasPrefix(hostPort, "[") {
+		if strings.HasSuffix(hostPort, "]") {
+			return strings.Trim(hostPort, "[]"), ""
+		}
+		h, p, err := net.SplitHostPort(hostPort)
+		if err != nil {
+			return "", ""
+		}
+		return h, p
+	}
+	if strings.Count(hostPort, ":") == 1 {
+		h, p, ok := strings.Cut(hostPort, ":")
+		if !ok || p == "" {
+			return "", ""
+		}
+		return h, p
+	}
+	if strings.Contains(hostPort, ":") {
+		return "", ""
+	}
+	return hostPort, ""
 }
 
 func (v *Verifier) probeMCPAuthGate(

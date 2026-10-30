@@ -445,7 +445,7 @@ func (s *Service) RotateDeveloperMarketplaceAppSecret(ctx context.Context, actor
 	return s.enrichMarketplaceApps(ctx, []domain.MarketplaceApp{updated})[0], secret, nil
 }
 
-// DeleteDeveloperMarketplaceApp deletes an app owned by the developer.
+// DeleteDeveloperMarketplaceApp deletes an unpublished, non-pending draft app owned by the developer.
 func (s *Service) DeleteDeveloperMarketplaceApp(ctx context.Context, actor domain.User, appID string) error {
 	if err := requireHumanDeveloper(actor); err != nil {
 		return err
@@ -460,6 +460,15 @@ func (s *Service) DeleteDeveloperMarketplaceApp(ctx context.Context, actor domai
 		}
 		if err := assertDeveloperOwner(cur, actor.ID); err != nil {
 			return err
+		}
+		if cur.AdminSuspended {
+			return domain.ErrMarketplaceSuspended()
+		}
+		if cur.ReviewStatus == domain.ReviewStatusPending {
+			return domain.ErrMarketplaceReviewPending()
+		}
+		if cur.IsPublished || cur.PublishedVersion > 0 {
+			return domain.ErrMarketplaceInvalidState("Published applications cannot be deleted by the developer; disable the app or request platform removal")
 		}
 		_, delErr := s.Marketplace.DeleteMarketplaceApp(txCtx, cur.ID)
 		return delErr

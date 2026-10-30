@@ -156,15 +156,15 @@ The machine-readable routes and DTOs are in [`contracts/im/http_chat.thrift`](..
 - Developer Marketplace App DTO (`DeveloperMarketplaceAppDTO`, visible only to the app's human owner or a platform administrator): extends the public fields with `{ownerId?,ownerDisplayName?,isOfficial,isPublished,publishedVersion,reviewStatus:"draft"|"pending_review"|"approved"|"rejected"|"suspended",draftName,draftDescription,draftWebUrl,draftMcpUrl,hasDraftChanges,submissionRevision,submissionNote,submittedAt?,reviewedAt?,reviewNote,adminSuspended,suspendedReason,lastVerifiedAt?,verificationReport?}`.
 - Four-tier lifecycle & permission model (Chat schema 9 adds draft/published dual-snapshot columns, verification report storage, and `marketplace_app_reviews` audit rows):
   1. **Authenticated human developer (`/app/developers`)** self-serves external Web + MCP apps (up to 20 apps per developer):
-     - `GET /api/v1/developers/marketplace/apps` -> `{apps:[DeveloperMarketplaceAppDTO]}` (caller's own apps).
-     - `POST /api/v1/developers/marketplace/apps` body `{slug,name,description?,webUrl?,mcpUrl?}` -> 201 `{app,signingSecret}` (two-stage onboarding: `webUrl`/`mcpUrl` may be omitted initially while deploying with `signingSecret`).
-     - `GET /api/v1/developers/marketplace/apps/:id` -> `{app,reviews:[MarketplaceAppReviewDTO]}` (owner only).
-     - `PATCH /api/v1/developers/marketplace/apps/:id` body `{slug?,name?,description?,webUrl?,mcpUrl?,enabled?}` -> `{app}` (owner only; rejected with `409 app_review_locked` while `pending_review` or `adminSuspended`; changing draft endpoints invalidates `lastVerifiedAt` and preserves any already-published live snapshot for other workspaces).
-     - `POST /api/v1/developers/marketplace/apps/:id/verify` body `{}` -> `{app,verification}` (runs the 4-stage live protocol verifier against `draftWebUrl` + `draftMcpUrl`: `url_security`, `web_ui` HTML/framing headers, `mcp_auth` 401/403 rejection of unauthenticated & forged-signature tokens, and `mcp_handshake` Streamable HTTP `2025-03-26` `initialize` + `tools/list` + `DELETE` cleanup).
-     - `POST /api/v1/developers/marketplace/apps/:id/submit` body `{note?}` -> `{app,reviews}` (requires passing `verificationReport` on the current draft; transitions to `pending_review` and increments `submissionRevision`).
-     - `POST /api/v1/developers/marketplace/apps/:id/withdraw` body `{}` -> `{app,reviews}` (returns `pending_review` to `draft`).
-     - `POST /api/v1/developers/marketplace/apps/:id/rotate-secret` body `{}` -> `{app,signingSecret}`.
-     - `DELETE /api/v1/developers/marketplace/apps/:id` -> 204 `{}` (owner only when `isPublished == false` and not `pending_review`).
+     - `GET /api/v1/developer/apps` -> `{apps:[DeveloperMarketplaceAppDTO]}` (caller's own apps).
+     - `POST /api/v1/developer/apps` body `{slug,name,description?,webUrl?,mcpUrl?}` -> 201 `{app,signingSecret}` (two-stage onboarding: `webUrl`/`mcpUrl` may be omitted initially while deploying with `signingSecret`).
+     - `GET /api/v1/developer/apps/:id` -> `{app,reviews:[MarketplaceAppReviewDTO]}` (owner only).
+     - `PATCH /api/v1/developer/apps/:id` body `{slug?,name?,description?,webUrl?,mcpUrl?,enabled?}` -> `{app}` (owner only; rejected with `409 marketplace_app_review_pending` while `pending_review` or `403 marketplace_app_suspended` while `adminSuspended`; changing draft endpoints invalidates `lastVerifiedAt` and preserves any already-published live snapshot for other workspaces).
+     - `POST /api/v1/developer/apps/:id/verify` body `{}` -> `{app,verification}` (runs the 4-stage live protocol verifier against `draftWebUrl` + `draftMcpUrl`: `url_security`, `web_ui` HTML/framing headers, `mcp_auth` 401/403 rejection of unauthenticated & forged-signature tokens, and `mcp_handshake` Streamable HTTP `2025-03-26` `initialize` + `tools/list` + `DELETE` cleanup).
+     - `POST /api/v1/developer/apps/:id/submit` body `{note?}` -> `{app,reviews}` (requires passing `verificationReport` on the current draft; transitions to `pending_review` and increments `submissionRevision`).
+     - `POST /api/v1/developer/apps/:id/withdraw` body `{}` -> `{app,reviews}` (returns `pending_review` to `draft`).
+     - `POST /api/v1/developer/apps/:id/rotate-secret` body `{}` -> `{app,signingSecret}`.
+     - `DELETE /api/v1/developer/apps/:id` -> 204 `{}` (owner only when `isPublished == false`, not `pending_review`, and not `adminSuspended`).
   2. **Platform administrator (`platformRole == "admin"`, `/app/admin/marketplace`)** manages official apps and reviews/governs developer submissions:
      - `GET /api/v1/admin/marketplace/apps` -> `{apps:[DeveloperMarketplaceAppDTO]}` (all official and developer apps).
      - `GET /api/v1/admin/marketplace/apps/:id` -> `{app,reviews:[MarketplaceAppReviewDTO]}`.

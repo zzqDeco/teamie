@@ -198,11 +198,18 @@ func TestReceiptReplayPreservesNewlyBufferedUnreadMessages(t *testing.T) {
 	if enabled, err := builder.initRunPresence(ctx, run); err != nil || !enabled {
 		t.Fatalf("initRunPresence: enabled=%v err=%v", enabled, err)
 	}
-	tools, err := builder.BuildIM()
+	imTools, err := builder.BuildIM()
 	if err != nil {
 		t.Fatal(err)
 	}
-	node, err := compose.NewToolNode(ctx, &compose.ToolsNodeConfig{Tools: tools, ExecuteSequentially: true})
+	presenceTools, err := builder.BuildPresenceTools()
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := compose.NewToolNode(ctx, &compose.ToolsNodeConfig{
+		Tools:               append(imTools, presenceTools...),
+		ExecuteSequentially: true,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

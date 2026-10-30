@@ -76,11 +76,11 @@ export function DeveloperAppDetail({
 
   useEffect(() => {
     if (app && hydratedId !== `${app.id}:${app.updatedAt}`) {
-      setName(app.draftName || app.name);
+      setName(app.draftName);
       setSlug(app.slug);
-      setDescription(app.draftDescription || app.description);
-      setWebUrl(app.draftWebUrl || app.webUrl);
-      setMcpUrl(app.draftMcpUrl || app.mcpUrl);
+      setDescription(app.draftDescription);
+      setWebUrl(app.draftWebUrl);
+      setMcpUrl(app.draftMcpUrl);
       setEnabled(app.enabled);
       setSubmissionNote(app.submissionNote || "");
       setHydratedId(`${app.id}:${app.updatedAt}`);
@@ -159,9 +159,7 @@ export function DeveloperAppDetail({
   const isLocked = app.reviewStatus === "pending_review" || isSuspended;
   const status = reviewStatusMeta(app.reviewStatus, app.adminSuspended);
   const report = liveReport || app.verificationReport;
-  const hasEndpoints = Boolean(
-    (app.draftWebUrl || app.webUrl) && (app.draftMcpUrl || app.mcpUrl),
-  );
+  const hasEndpoints = Boolean(app.draftWebUrl && app.draftMcpUrl);
   const verifiedOk = Boolean(report?.ok);
 
   return (

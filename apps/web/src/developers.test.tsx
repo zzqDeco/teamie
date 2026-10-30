@@ -488,4 +488,46 @@ describe("Developer Platform & Submission Workflow", () => {
 
     expect(approveSpy).toHaveBeenCalledWith("app-ww", 2, undefined);
   });
+
+  it("preserves intentionally cleared draft description and endpoints on a published app", async () => {
+    const publishedWithClearedDraft: DeveloperMarketplaceApp = {
+      ...sampleDraftApp,
+      isPublished: true,
+      publishedVersion: 1,
+      reviewStatus: "draft",
+      hasDraftChanges: true,
+      description: "线上已发布描述",
+      webUrl: "https://werewolf.example.com/ui",
+      mcpUrl: "https://werewolf.example.com/mcp",
+      draftName: "暗夜狼人杀 2.0",
+      draftDescription: "",
+      draftWebUrl: "",
+      draftMcpUrl: "",
+    };
+    vi.spyOn(api, "developerMarketplaceApp").mockResolvedValue({
+      app: publishedWithClearedDraft,
+      reviews: sampleReviews,
+    });
+
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={qc}>
+          <MemoryRouter initialEntries={["/app/developers/apps/app-ww"]}>
+            <DeveloperPortal appId="app-ww" workspaces={[ownedWorkspace]} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+    });
+    await flush();
+
+    const formInputs = host.querySelectorAll<HTMLInputElement>(
+      "form.settings-form input",
+    );
+    expect(formInputs[0]?.value).toBe("暗夜狼人杀 2.0");
+    expect(formInputs[2]?.value).toBe("");
+    const urlInputs = host.querySelectorAll<HTMLInputElement>('input[type="url"]');
+    expect(urlInputs[0]?.value).toBe("");
+    expect(urlInputs[1]?.value).toBe("");
+  });
 });

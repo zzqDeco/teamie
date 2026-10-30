@@ -465,10 +465,10 @@ function AdminReviewModal({ appId, onClose }: { appId: string; onClose: () => vo
               </div>
               <div className="dev-diff-col">
                 <b>本次提审草稿 (修订 #{app.submissionRevision})</b>
-                <p className="field-help">名称：{app.draftName || app.name}</p>
+                <p className="field-help">名称：{app.draftName}</p>
                 <p className="field-help">Slug：{app.slug}</p>
-                <p className="field-help">Web：{app.draftWebUrl || app.webUrl}</p>
-                <p className="field-help">MCP：{app.draftMcpUrl || app.mcpUrl}</p>
+                <p className="field-help">Web：{app.draftWebUrl || "—"}</p>
+                <p className="field-help">MCP：{app.draftMcpUrl || "—"}</p>
                 {app.submissionNote && (
                   <p className="field-help">提审说明：{app.submissionNote}</p>
                 )}

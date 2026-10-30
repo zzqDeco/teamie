@@ -57,9 +57,7 @@ export function WorkspaceMarketplaceModal({
     return (developerAppsQuery.data?.apps || []).filter((app) => {
       if (catalogIdSet.has(app.id)) return false;
       if (app.adminSuspended || app.reviewStatus === "suspended" || !app.enabled) return false;
-      const web = app.draftWebUrl || app.webUrl;
-      const mcp = app.draftMcpUrl || app.mcpUrl;
-      return Boolean(web && mcp);
+      return Boolean(app.draftWebUrl && app.draftMcpUrl);
     });
   }, [catalogIdSet, developerAppsQuery.data, isOwner]);
 

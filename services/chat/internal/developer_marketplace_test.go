@@ -215,14 +215,20 @@ func TestProtocolVerifierFailureMatrixAndSSESessionCleanup(t *testing.T) {
 		t.Fatalf("expected production HTTPS/loopback check to reject local HTTP server, got: %+v", prodRep)
 	}
 
-	// 4. X-Frame-Options: DENY and CSP frame-ancestors 'none'
+	// 4. X-Frame-Options: DENY, CSP frame-ancestors 'none' / wrong wildcard, and valid wildcard frame-ancestors
 	for _, tc := range []struct {
-		name string
-		xfo  string
-		csp  string
+		name   string
+		xfo    string
+		csp    string
+		wantOK bool
 	}{
-		{"xfo_deny", "DENY", ""},
-		{"csp_none", "", "default-src 'self'; frame-ancestors 'none'"},
+		{"xfo_deny", "DENY", "", false},
+		{"csp_none", "", "default-src 'self'; frame-ancestors 'none'", false},
+		{"csp_wrong_wildcard", "", "frame-ancestors https://*.other.example", false},
+		{"csp_apex_only_wildcard", "", "frame-ancestors https://*.teamie.example.com", false},
+		{"csp_valid_wildcard_subdomain", "", "default-src 'self'; frame-ancestors https://*.example.com", true},
+		{"csp_valid_schemeless_wildcard", "", "frame-ancestors *.example.com", true},
+		{"csp_valid_wildcard_port", "", "frame-ancestors https://*.example.com:*", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := &fakeLiveMarketplaceAppServer{secret: secret, appID: appID, xFrameOptions: tc.xfo, csp: tc.csp}
@@ -230,8 +236,8 @@ func TestProtocolVerifierFailureMatrixAndSSESessionCleanup(t *testing.T) {
 			r, _ := verifier.VerifyEndpoints(ctx, domain.VerifyEndpointsInput{
 				AppID: appID, Slug: "werewolf", WebURL: s.URL + "/ui", MCPURL: s.URL + "/mcp", SigningSecret: secret,
 			})
-			if r.OK {
-				t.Fatalf("expected %s to fail web_ui check, got OK", tc.name)
+			if r.OK != tc.wantOK {
+				t.Fatalf("expected %s OK=%v, got OK=%v (%+v)", tc.name, tc.wantOK, r.OK, r.Checks)
 			}
 		})
 	}
@@ -448,10 +454,14 @@ func TestDeveloperPlatformFullLifecycleHTTPAndStagedIsolation(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || submit1["app"].(map[string]any)["reviewStatus"] != "pending_review" {
 		t.Fatalf("submit 1 failed: %d %+v", resp.StatusCode, submit1)
 	}
-	// Editing URLs while pending_review is locked (409).
+	// Editing or deleting while pending_review is locked (409).
 	resp, _ = doHuman("dev-tok", "csrf-dev", "PATCH", "/api/v1/developer/apps/"+appID, map[string]any{"name": "改名"})
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("expected 409 editing pending_review app, got %d", resp.StatusCode)
+	}
+	resp, _ = doHuman("dev-tok", "csrf-dev", "DELETE", "/api/v1/developer/apps/"+appID, nil)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected 409 deleting pending_review app, got %d", resp.StatusCode)
 	}
 	// Withdraw back to draft.
 	resp, withdrawOut := doHuman("dev-tok", "csrf-dev", "POST", "/api/v1/developer/apps/"+appID+"/withdraw", map[string]any{})
@@ -577,13 +587,34 @@ func TestDeveloperPlatformFullLifecycleHTTPAndStagedIsolation(t *testing.T) {
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("suspended app must not mint sessions, got %d", resp.StatusCode)
 	}
+	resp, _ = doHuman("dev-tok", "csrf-dev", "DELETE", "/api/v1/developer/apps/"+appID, nil)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 deleting suspended app, got %d", resp.StatusCode)
+	}
 	resp, _ = doHuman("admin-tok", "csrf-admin", "POST", "/api/v1/admin/marketplace/apps/"+appID+"/unsuspend", map[string]any{})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("unsuspend failed: %d", resp.StatusCode)
 	}
+	resp, _ = doHuman("dev-tok", "csrf-dev", "DELETE", "/api/v1/developer/apps/"+appID, nil)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected 409 deleting published app, got %d", resp.StatusCode)
+	}
 	resp, _ = doHuman("other-tok", "csrf-other", "POST", "/api/v1/conversations/g-other/apps/"+appID+"/session", map[string]any{})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("unsuspended app should resume minting sessions, got %d", resp.StatusCode)
+	}
+
+	// 7. Unpublished draft app can be deleted cleanly by its developer owner.
+	resp, tempOut := doHuman("dev-tok", "csrf-dev", "POST", "/api/v1/developer/apps", map[string]any{
+		"slug": "temp-draft", "name": "Temp Draft",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create temp draft failed: %d", resp.StatusCode)
+	}
+	tempID := tempOut["app"].(map[string]any)["id"].(string)
+	resp, _ = doHuman("dev-tok", "csrf-dev", "DELETE", "/api/v1/developer/apps/"+tempID, nil)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected 204 deleting unpublished draft app, got %d", resp.StatusCode)
 	}
 }
 
@@ -597,11 +628,22 @@ func TestDeveloperMarketplacePostgresSchemaV9EndToEnd(t *testing.T) {
 
 	admin := httpx.User{ID: httpx.ID(), Email: "admin@example.com", DisplayName: "Admin", Kind: "human", PlatformRole: "admin"}
 	dev := httpx.User{ID: httpx.ID(), Email: "dev@example.com", DisplayName: "Dev", Kind: "human", PlatformRole: "user"}
+	p1 := httpx.User{ID: httpx.ID(), Email: "p1@example.com", DisplayName: "Player 1", Kind: "human", PlatformRole: "user"}
+	p2 := httpx.User{ID: httpx.ID(), Email: "p2@example.com", DisplayName: "Player 2", Kind: "human", PlatformRole: "user"}
 	ws, _, err := s.CreateWorkspace(ctx, dev.ID, "Dev Sandbox")
 	if err != nil {
 		t.Fatal(err)
 	}
-	group, err := s.CreateConversation(ctx, dev.ID, ws.ID, "group", "Game Room", nil)
+	for _, memberID := range []string{p1.ID, p2.ID} {
+		invCode, _, invErr := s.CreateInvite(ctx, dev.ID, ws.ID)
+		if invErr != nil {
+			t.Fatal(invErr)
+		}
+		if _, _, invErr = s.AcceptInvite(ctx, memberID, invCode); invErr != nil {
+			t.Fatal(invErr)
+		}
+	}
+	group, err := s.CreateConversation(ctx, dev.ID, ws.ID, "group", "Game Room", []string{p1.ID, p2.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -610,7 +652,7 @@ func TestDeveloperMarketplacePostgresSchemaV9EndToEnd(t *testing.T) {
 			"admin-tok": {User: admin, CSRFToken: "csrf-a"},
 			"dev-tok":   {User: dev, CSRFToken: "csrf-d"},
 		},
-		users: map[string]httpx.User{admin.ID: admin, dev.ID: dev},
+		users: map[string]httpx.User{admin.ID: admin, dev.ID: dev, p1.ID: p1, p2.ID: p2},
 	}
 	srv := httptest.NewServer((&Handler{Store: s, Identity: idAuth, Origin: "https://teamie.example.com"}).Routes())
 	defer srv.Close()

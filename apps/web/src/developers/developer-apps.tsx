@@ -257,10 +257,10 @@ export function DeveloperAppsList() {
           <ul className="member-directory-list" aria-label="开发者应用列表">
             {apps.map((app) => {
               const status = reviewStatusMeta(app.reviewStatus, app.adminSuspended);
-              const displayName = app.draftName || app.name;
-              const displayDesc = app.draftDescription || app.description;
-              const displayWeb = app.draftWebUrl || app.webUrl;
-              const displayMcp = app.draftMcpUrl || app.mcpUrl;
+              const displayName = app.draftName;
+              const displayDesc = app.draftDescription;
+              const displayWeb = app.draftWebUrl;
+              const displayMcp = app.draftMcpUrl;
               return (
                 <li key={app.id} className="member-directory-row">
                   <div className="member-directory-identity">
