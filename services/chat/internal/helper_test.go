@@ -18,7 +18,6 @@ import (
 	"teamie/services/chat/internal/domain"
 	"teamie/services/chat/internal/infra/flags"
 	"teamie/services/chat/internal/infra/pg"
-	"teamie/services/chat/internal/infra/probe"
 	redisinfra "teamie/services/chat/internal/infra/redis"
 	"teamie/services/chat/internal/infra/rpcclient"
 )
@@ -214,14 +213,11 @@ func (s *Store) App(identity httpx.Identity, controlToken string) *app.Service {
 		Memberships:    repo,
 		Messages:       repo,
 		Attachments:    repo,
-		Marketplace:    repo,
 		Outbox:         repo,
 		Identity:       idDir,
 		Flags:          flags.New(s.Flags),
-		Verifier:       probe.New("https://teamie.example", false),
 		SniffMediaType: http.DetectContentType,
 		ControlToken:   controlToken,
-		AppOrigin:      "https://teamie.example",
 	}
 }
 
@@ -483,10 +479,6 @@ type Handler struct {
 
 func (h *Handler) Routes() http.Handler {
 	svc := h.Store.App(h.Identity, "")
-	if h.Origin != "" {
-		svc.AppOrigin = h.Origin
-		svc.Verifier = probe.New(h.Origin, false)
-	}
 	adapter := &httpadapter.Adapter{
 		App:       svc,
 		Auth:      h.Identity,
@@ -513,6 +505,12 @@ func (h *RPC) CheckAccess(ctx context.Context, r *im.AccessRequest) (*im.AccessR
 }
 func (h *RPC) CheckWorkspaceAccess(ctx context.Context, r *im.WorkspaceAccessRequest) (*im.WorkspaceAccessResponse, error) {
 	return h.server().CheckWorkspaceAccess(ctx, r)
+}
+func (h *RPC) GetWorkspaceRole(ctx context.Context, r *im.WorkspaceAccessRequest) (*im.WorkspaceRoleResponse, error) {
+	return h.server().GetWorkspaceRole(ctx, r)
+}
+func (h *RPC) GetConversationScope(ctx context.Context, r *im.AccessRequest) (*im.ConversationScopeResponse, error) {
+	return h.server().GetConversationScope(ctx, r)
 }
 func (h *RPC) GetSharedWorkspaceMembers(ctx context.Context, r *im.SharedWorkspaceMembersRequest) (*im.SharedWorkspaceMembersResponse, error) {
 	return h.server().GetSharedWorkspaceMembers(ctx, r)

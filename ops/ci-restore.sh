@@ -6,13 +6,14 @@ scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT
 pg=(docker exec -i "$POSTGRES_CONTAINER_ID" env PGOPTIONS="-c teamie.runtime_writer_schema=13")
 "${pg[@]}" env TEAMIE_VERIFY_DB_CREDENTIALS=1 POSTGRES_IDENTITY_PASSWORD=ci-identity-disposable-password \
-  POSTGRES_CHAT_PASSWORD=ci-chat-disposable-password POSTGRES_AGENT_CONTROL_PASSWORD=ci-control-disposable-password \
+  POSTGRES_CHAT_PASSWORD=ci-chat-disposable-password POSTGRES_MARKETPLACE_PASSWORD=ci-marketplace-disposable-password \
+  POSTGRES_AGENT_CONTROL_PASSWORD=ci-control-disposable-password \
   POSTGRES_AGENT_RUNTIME_PASSWORD=ci-runtime-disposable-password POSTGRES_GATEWAY_PASSWORD=ci-gateway-disposable-password \
   bash -s < deploy/postgres/01-databases.sh
-for suffix in identity chat agent_control agent_runtime gateway; do
+for suffix in identity chat marketplace agent_control agent_runtime gateway; do
   # Compare the real restored migration ledger with the generated release
   # contract, so updating a migration without its manifest fails before deploy.
-  version=$(python3 -c 'import sys; from ops.manifest import SCHEMA_V2; print(SCHEMA_V2[sys.argv[1]])' "$suffix")
+  version=$(python3 -c 'import sys; from ops.manifest import SCHEMA_V3; print(SCHEMA_V3[sys.argv[1]])' "$suffix")
   # Use a known fixture table so the restore asserts data and binary values.
   "${pg[@]}" psql -U postgres -d "teamie_$suffix" -v ON_ERROR_STOP=1 <<'SQL'
 CREATE TABLE restore_fixture(id INTEGER PRIMARY KEY,payload JSONB NOT NULL,encrypted_value BYTEA NOT NULL);
@@ -44,10 +45,11 @@ SQL
       services/chat/internal/infra/pg/migrations/006_conversation_mutations.sql \
       services/chat/internal/infra/pg/migrations/007_reactions_and_notification_levels.sql \
       services/chat/internal/infra/pg/migrations/008_marketplace.sql \
-      services/chat/internal/infra/pg/migrations/009_developer_marketplace.sql | "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 >/dev/null
+      services/chat/internal/infra/pg/migrations/009_developer_marketplace.sql \
+      services/chat/internal/infra/pg/migrations/010_retire_embedded_marketplace.sql | "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 >/dev/null
     "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 <<'SQL'
 INSERT INTO workspaces(id,name,created_by) VALUES('restore-workspace','Restore','owner');
-INSERT INTO chat_schema_migrations(version) VALUES(2),(3),(4),(5),(6),(7),(8),(9) ON CONFLICT DO NOTHING;
+INSERT INTO chat_schema_migrations(version) VALUES(2),(3),(4),(5),(6),(7),(8),(9),(10) ON CONFLICT DO NOTHING;
 INSERT INTO conversations(id,workspace_id,type,name) VALUES('restore-conversation','restore-workspace','channel','general');
 INSERT INTO conversation_mutations(actor_id,request_key,request_hash,conversation_id) VALUES('owner','restore-group','fixture-hash','restore-conversation');
 INSERT INTO messages(id,conversation_id,sender_id,sender_name,sender_kind,client_message_id,seq,body,original_body_hash,attachments,original_attachment_ids)
@@ -67,8 +69,17 @@ INSERT INTO messages(id,conversation_id,sender_id,sender_name,sender_kind,client
 VALUES('restore-empty-reactions','restore-conversation','owner','Owner','human','restore-empty-send',2,'Persist the empty reaction watermark','fixture',4);
 INSERT INTO conversation_notification_levels(conversation_id,user_id,level)
 VALUES('restore-conversation','owner','mentions'),('restore-conversation','reader','none');
+SQL
+  fi
+  if [[ $suffix == marketplace ]]; then
+    "${pg[@]}" psql -U postgres -d teamie_marketplace -v ON_ERROR_STOP=1 < services/marketplace/internal/infra/pg/migrations/001_marketplace.sql >/dev/null
+    "${pg[@]}" psql -U postgres -d teamie_marketplace -v ON_ERROR_STOP=1 <<'SQL'
+CREATE TABLE marketplace_schema_migrations(version INTEGER PRIMARY KEY,applied_at timestamptz NOT NULL DEFAULT now());
+INSERT INTO marketplace_schema_migrations(version) VALUES(1);
 INSERT INTO marketplace_apps(id,slug,name,description,web_url,mcp_url,signing_secret,enabled,owner_id,is_published,published_version,review_status,draft_name,draft_description,draft_web_url,draft_mcp_url,has_draft_changes,submission_revision)
 VALUES('restore-app','restore-game','Restore Game','Game desc','https://game.example.test/ui','https://game.example.test/mcp',repeat('s',64),true,'owner',true,1,'approved','Restore Game v2','Game desc v2','https://game.example.test/ui-v2','https://game.example.test/mcp-v2',true,2);
+INSERT INTO workspace_marketplace_apps(workspace_id,app_id,installed_by)
+VALUES('restore-workspace','restore-app','owner');
 INSERT INTO marketplace_app_reviews(id,app_id,revision,action,actor_id,note,web_url,mcp_url)
 VALUES('restore-review','restore-app',1,'approve','admin','Initial release','https://game.example.test/ui','https://game.example.test/mcp');
 SQL
@@ -187,11 +198,8 @@ SQL
       "SELECT encode(a.content,'hex')||':'||a.filename||':'||(m.attachments->0->>'id')||':'||m.original_attachment_ids[1] FROM attachments a JOIN messages m ON m.id=a.message_id WHERE a.id='restore-attachment' AND a.size_bytes=7 AND m.body='@Owner' AND m.mentions=m.original_mentions AND m.mentions='[{\"userId\":\"owner\",\"start\":0,\"end\":6}]'::jsonb;")
     [[ $actual == '00fffe80890a0d:binary.restore.bin:restore-attachment:restore-attachment' ]] || { echo 'Chat attachment binary restore verification failed.' >&2; exit 1; }
     actual=$("${pg[@]}" psql -U postgres -d restore_chat -At -v ON_ERROR_STOP=1 -c \
-      "SELECT (SELECT string_agg(version::text,',' ORDER BY version) FROM chat_schema_migrations)||':'||(SELECT attachment_id FROM attachment_uploads WHERE uploader_id='owner' AND upload_key='restore-upload')||':'||(SELECT count(*) FROM attachment_uploads WHERE upload_key='restore-removed' AND attachment_id IS NULL);")
-    [[ $actual == '1,2,3,4,5,6,7,8,9:restore-attachment:1' ]] || { echo 'Chat upload receipts and tombstones restore verification failed.' >&2; exit 1; }
-    actual=$("${pg[@]}" psql -U postgres -d restore_chat -At -v ON_ERROR_STOP=1 -c \
-      "SELECT m.slug||':'||m.published_version||':'||m.has_draft_changes::text||':'||r.action FROM marketplace_apps m JOIN marketplace_app_reviews r ON r.app_id=m.id WHERE m.id='restore-app';")
-    [[ $actual == 'restore-game:1:true:approve' ]] || { echo 'Chat developer marketplace and review ledger restore failed.' >&2; exit 1; }
+      "SELECT (SELECT string_agg(version::text,',' ORDER BY version) FROM chat_schema_migrations)||':'||(SELECT attachment_id FROM attachment_uploads WHERE uploader_id='owner' AND upload_key='restore-upload')||':'||(SELECT count(*) FROM attachment_uploads WHERE upload_key='restore-removed' AND attachment_id IS NULL)||':'||(to_regclass('public.marketplace_apps') IS NULL)::text;")
+    [[ $actual == '1,2,3,4,5,6,7,8,9,10:restore-attachment:1:true' ]] || { echo 'Chat upload receipts, tombstones and retired marketplace cleanup verification failed.' >&2; exit 1; }
     actual=$("${pg[@]}" psql -U postgres -d restore_chat -At -v ON_ERROR_STOP=1 -c \
       "SELECT request_hash||':'||conversation_id FROM conversation_mutations WHERE actor_id='owner' AND request_key='restore-group';")
     [[ $actual == 'fixture-hash:restore-conversation' ]] || { echo 'Chat conversation mutation receipt restore failed.' >&2; exit 1; }
@@ -204,6 +212,11 @@ SQL
     actual=$("${pg[@]}" psql -U postgres -d restore_chat -At -v ON_ERROR_STOP=1 -c \
       "SELECT string_agg(user_id||'='||level,',' ORDER BY user_id) FROM conversation_notification_levels WHERE conversation_id='restore-conversation';")
     [[ $actual == 'owner=mentions,reader=none' ]] || { echo 'Chat notification preference restore failed.' >&2; exit 1; }
+  fi
+  if [[ $suffix == marketplace ]]; then
+    actual=$("${pg[@]}" psql -U postgres -d restore_marketplace -At -v ON_ERROR_STOP=1 -c \
+      "SELECT (SELECT string_agg(version::text,',' ORDER BY version) FROM marketplace_schema_migrations)||':'||m.slug||':'||m.published_version||':'||m.has_draft_changes::text||':'||w.workspace_id||':'||r.action FROM marketplace_apps m JOIN workspace_marketplace_apps w ON w.app_id=m.id JOIN marketplace_app_reviews r ON r.app_id=m.id WHERE m.id='restore-app';")
+    [[ $actual == '1:restore-game:1:true:restore-workspace:approve' ]] || { echo 'Marketplace app catalog, installations and review ledger restore failed.' >&2; exit 1; }
   fi
   if [[ $suffix == agent_runtime ]]; then
     actual=$("${pg[@]}" psql -U postgres -d restore_agent_runtime -At -v ON_ERROR_STOP=1 -v frozen_budget="$runtime_context_budget" <<'SQL'
@@ -278,4 +291,4 @@ SQL
   fi
   "${pg[@]}" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "DROP DATABASE restore_$suffix;"
 done
-echo 'All five disposable database dumps were restored and their rows, schema ledgers and binary data verified.'
+echo 'All six disposable database dumps were restored and their rows, schema ledgers and binary data verified.'

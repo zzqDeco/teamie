@@ -129,12 +129,16 @@ for name,service in c["services"].items():
 PY
 then restore_previous; exit 1; fi
 app_services="identity chat realtime web"
+if [[ -n $(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["images"].get("marketplace",""))' "$manifest") ]]; then
+  app_services+=" marketplace"
+fi
 if [[ -n $runner_image ]]; then app_services+=" agent-control agent-runtime llm-gateway sandbox"; fi
 for service in $app_services; do
   case "$service" in
     identity) version_url=http://127.0.0.1:8081/version;;
     chat) version_url=http://127.0.0.1:8082/version;;
     realtime) version_url=http://127.0.0.1:8083/version;;
+    marketplace) version_url=http://127.0.0.1:8088/version;;
     agent-control) version_url=http://127.0.0.1:8084/version;;
     agent-runtime) version_url=http://127.0.0.1:8085/version;;
     llm-gateway) version_url=http://127.0.0.1:8086/version;;

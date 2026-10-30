@@ -54,7 +54,7 @@ assemble_rpc_idl agent "${ROOT_DIR}/contracts/agent/rpc.thrift" \
   cd "${ROOT_DIR}/contracts/gen/im"
   rm -rf kitex_gen hertz_gen
   kitex -module teamie/contracts/gen/im ../../im/rpc.thrift
-  for idl in http_identity.thrift http_chat.thrift ws_realtime.thrift; do
+  for idl in http_identity.thrift http_chat.thrift http_marketplace.thrift ws_realtime.thrift; do
     thriftgo -g go:template=slim,no_default_serdes=true,no_processor=true -o hertz_gen "../../im/${idl}"
   done
 )

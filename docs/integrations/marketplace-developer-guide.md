@@ -28,7 +28,7 @@
 
 ### 步骤 3：四阶段线上协议拨测与自有空间实测
 1. 在应用详情页填入已部署的 `webUrl` 与 `mcpUrl` 并保存草稿。
-2. 点击 **「立即检测线上服务」**，Teamie `chat` 服务会依次执行四阶段安全拨测：
+2. 点击 **「立即检测线上服务」**，Teamie 独立的 `marketplace` 服务（具备受控出网与 DNS 防重绑定 SSRF 防护，与零出网的核心 `chat` 服务完全物理隔离）会依次执行四阶段安全拨测：
    - **阶段 1（`url_security`）**：校验 URL 语法、跨源隔离策略与公网目标合法性。
    - **阶段 2（`web_ui`）**：请求 `webUrl`，验证 HTTP 2xx HTML 可达且未被 `X-Frame-Options` / `CSP frame-ancestors` 阻断嵌入。
    - **阶段 3（`mcp_auth`）**：向 `mcpUrl` 发送无 Token 请求与错误密钥签名的伪造 JWT 请求，**必须全部返回 HTTP `401` 或 `403`**。

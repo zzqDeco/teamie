@@ -18,6 +18,17 @@ struct WorkspaceAccessResponse {
   2: required list<string> memberIds
   3: required bool presenceEnabled
 }
+struct WorkspaceRoleResponse {
+  1: required bool allowed
+  2: required string ownerId
+  3: required string role
+}
+struct ConversationScopeResponse {
+  1: required bool allowed
+  2: required string workspaceId
+  3: required string workspaceOwnerId
+  4: required string conversationType
+}
 struct SharedWorkspaceMembersRequest {
   1: required string userId
 }
@@ -36,6 +47,8 @@ struct PrincipalWorkspacesRequest {
 service ChatService {
   AccessResponse CheckAccess(1: AccessRequest request)
   WorkspaceAccessResponse CheckWorkspaceAccess(1: WorkspaceAccessRequest request)
+  WorkspaceRoleResponse GetWorkspaceRole(1: WorkspaceAccessRequest request)
+  ConversationScopeResponse GetConversationScope(1: AccessRequest request)
   SharedWorkspaceMembersResponse GetSharedWorkspaceMembers(1: SharedWorkspaceMembersRequest request)
   PingResponse Ping(1: PingRequest request)
   ParticipantWorkspacesResponse GetParticipantWorkspaces(1: ParticipantWorkspacesRequest request)

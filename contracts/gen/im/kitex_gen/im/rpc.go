@@ -722,6 +722,109 @@ var fieldIDToName_WorkspaceAccessResponse = map[int16]string{
 	3: "presenceEnabled",
 }
 
+type WorkspaceRoleResponse struct {
+	Allowed bool   `thrift:"allowed,1,required" frugal:"1,required,bool" json:"allowed"`
+	OwnerId string `thrift:"ownerId,2,required" frugal:"2,required,string" json:"ownerId"`
+	Role    string `thrift:"role,3,required" frugal:"3,required,string" json:"role"`
+}
+
+func NewWorkspaceRoleResponse() *WorkspaceRoleResponse {
+	return &WorkspaceRoleResponse{}
+}
+
+func (p *WorkspaceRoleResponse) InitDefault() {
+}
+
+func (p *WorkspaceRoleResponse) GetAllowed() (v bool) {
+	return p.Allowed
+}
+
+func (p *WorkspaceRoleResponse) GetOwnerId() (v string) {
+	return p.OwnerId
+}
+
+func (p *WorkspaceRoleResponse) GetRole() (v string) {
+	return p.Role
+}
+func (p *WorkspaceRoleResponse) SetAllowed(val bool) {
+	p.Allowed = val
+}
+func (p *WorkspaceRoleResponse) SetOwnerId(val string) {
+	p.OwnerId = val
+}
+func (p *WorkspaceRoleResponse) SetRole(val string) {
+	p.Role = val
+}
+
+func (p *WorkspaceRoleResponse) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("WorkspaceRoleResponse(%+v)", *p)
+}
+
+var fieldIDToName_WorkspaceRoleResponse = map[int16]string{
+	1: "allowed",
+	2: "ownerId",
+	3: "role",
+}
+
+type ConversationScopeResponse struct {
+	Allowed          bool   `thrift:"allowed,1,required" frugal:"1,required,bool" json:"allowed"`
+	WorkspaceId      string `thrift:"workspaceId,2,required" frugal:"2,required,string" json:"workspaceId"`
+	WorkspaceOwnerId string `thrift:"workspaceOwnerId,3,required" frugal:"3,required,string" json:"workspaceOwnerId"`
+	ConversationType string `thrift:"conversationType,4,required" frugal:"4,required,string" json:"conversationType"`
+}
+
+func NewConversationScopeResponse() *ConversationScopeResponse {
+	return &ConversationScopeResponse{}
+}
+
+func (p *ConversationScopeResponse) InitDefault() {
+}
+
+func (p *ConversationScopeResponse) GetAllowed() (v bool) {
+	return p.Allowed
+}
+
+func (p *ConversationScopeResponse) GetWorkspaceId() (v string) {
+	return p.WorkspaceId
+}
+
+func (p *ConversationScopeResponse) GetWorkspaceOwnerId() (v string) {
+	return p.WorkspaceOwnerId
+}
+
+func (p *ConversationScopeResponse) GetConversationType() (v string) {
+	return p.ConversationType
+}
+func (p *ConversationScopeResponse) SetAllowed(val bool) {
+	p.Allowed = val
+}
+func (p *ConversationScopeResponse) SetWorkspaceId(val string) {
+	p.WorkspaceId = val
+}
+func (p *ConversationScopeResponse) SetWorkspaceOwnerId(val string) {
+	p.WorkspaceOwnerId = val
+}
+func (p *ConversationScopeResponse) SetConversationType(val string) {
+	p.ConversationType = val
+}
+
+func (p *ConversationScopeResponse) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ConversationScopeResponse(%+v)", *p)
+}
+
+var fieldIDToName_ConversationScopeResponse = map[int16]string{
+	1: "allowed",
+	2: "workspaceId",
+	3: "workspaceOwnerId",
+	4: "conversationType",
+}
+
 type SharedWorkspaceMembersRequest struct {
 	UserId string `thrift:"userId,1,required" frugal:"1,required,string" json:"userId"`
 }
@@ -1508,6 +1611,10 @@ type ChatService interface {
 
 	CheckWorkspaceAccess(ctx context.Context, request *WorkspaceAccessRequest) (r *WorkspaceAccessResponse, err error)
 
+	GetWorkspaceRole(ctx context.Context, request *WorkspaceAccessRequest) (r *WorkspaceRoleResponse, err error)
+
+	GetConversationScope(ctx context.Context, request *AccessRequest) (r *ConversationScopeResponse, err error)
+
 	GetSharedWorkspaceMembers(ctx context.Context, request *SharedWorkspaceMembersRequest) (r *SharedWorkspaceMembersResponse, err error)
 
 	Ping(ctx context.Context, request *PingRequest) (r *PingResponse, err error)
@@ -1668,6 +1775,158 @@ func (p *ChatServiceCheckWorkspaceAccessResult) String() string {
 }
 
 var fieldIDToName_ChatServiceCheckWorkspaceAccessResult = map[int16]string{
+	0: "success",
+}
+
+type ChatServiceGetWorkspaceRoleArgs struct {
+	Request *WorkspaceAccessRequest `thrift:"request,1" frugal:"1,default,WorkspaceAccessRequest" json:"request"`
+}
+
+func NewChatServiceGetWorkspaceRoleArgs() *ChatServiceGetWorkspaceRoleArgs {
+	return &ChatServiceGetWorkspaceRoleArgs{}
+}
+
+func (p *ChatServiceGetWorkspaceRoleArgs) InitDefault() {
+}
+
+var ChatServiceGetWorkspaceRoleArgs_Request_DEFAULT *WorkspaceAccessRequest
+
+func (p *ChatServiceGetWorkspaceRoleArgs) GetRequest() (v *WorkspaceAccessRequest) {
+	if !p.IsSetRequest() {
+		return ChatServiceGetWorkspaceRoleArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *ChatServiceGetWorkspaceRoleArgs) SetRequest(val *WorkspaceAccessRequest) {
+	p.Request = val
+}
+
+func (p *ChatServiceGetWorkspaceRoleArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *ChatServiceGetWorkspaceRoleArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ChatServiceGetWorkspaceRoleArgs(%+v)", *p)
+}
+
+var fieldIDToName_ChatServiceGetWorkspaceRoleArgs = map[int16]string{
+	1: "request",
+}
+
+type ChatServiceGetWorkspaceRoleResult struct {
+	Success *WorkspaceRoleResponse `thrift:"success,0,optional" frugal:"0,optional,WorkspaceRoleResponse" json:"success,omitempty"`
+}
+
+func NewChatServiceGetWorkspaceRoleResult() *ChatServiceGetWorkspaceRoleResult {
+	return &ChatServiceGetWorkspaceRoleResult{}
+}
+
+func (p *ChatServiceGetWorkspaceRoleResult) InitDefault() {
+}
+
+var ChatServiceGetWorkspaceRoleResult_Success_DEFAULT *WorkspaceRoleResponse
+
+func (p *ChatServiceGetWorkspaceRoleResult) GetSuccess() (v *WorkspaceRoleResponse) {
+	if !p.IsSetSuccess() {
+		return ChatServiceGetWorkspaceRoleResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *ChatServiceGetWorkspaceRoleResult) SetSuccess(x interface{}) {
+	p.Success = x.(*WorkspaceRoleResponse)
+}
+
+func (p *ChatServiceGetWorkspaceRoleResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *ChatServiceGetWorkspaceRoleResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ChatServiceGetWorkspaceRoleResult(%+v)", *p)
+}
+
+var fieldIDToName_ChatServiceGetWorkspaceRoleResult = map[int16]string{
+	0: "success",
+}
+
+type ChatServiceGetConversationScopeArgs struct {
+	Request *AccessRequest `thrift:"request,1" frugal:"1,default,AccessRequest" json:"request"`
+}
+
+func NewChatServiceGetConversationScopeArgs() *ChatServiceGetConversationScopeArgs {
+	return &ChatServiceGetConversationScopeArgs{}
+}
+
+func (p *ChatServiceGetConversationScopeArgs) InitDefault() {
+}
+
+var ChatServiceGetConversationScopeArgs_Request_DEFAULT *AccessRequest
+
+func (p *ChatServiceGetConversationScopeArgs) GetRequest() (v *AccessRequest) {
+	if !p.IsSetRequest() {
+		return ChatServiceGetConversationScopeArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *ChatServiceGetConversationScopeArgs) SetRequest(val *AccessRequest) {
+	p.Request = val
+}
+
+func (p *ChatServiceGetConversationScopeArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *ChatServiceGetConversationScopeArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ChatServiceGetConversationScopeArgs(%+v)", *p)
+}
+
+var fieldIDToName_ChatServiceGetConversationScopeArgs = map[int16]string{
+	1: "request",
+}
+
+type ChatServiceGetConversationScopeResult struct {
+	Success *ConversationScopeResponse `thrift:"success,0,optional" frugal:"0,optional,ConversationScopeResponse" json:"success,omitempty"`
+}
+
+func NewChatServiceGetConversationScopeResult() *ChatServiceGetConversationScopeResult {
+	return &ChatServiceGetConversationScopeResult{}
+}
+
+func (p *ChatServiceGetConversationScopeResult) InitDefault() {
+}
+
+var ChatServiceGetConversationScopeResult_Success_DEFAULT *ConversationScopeResponse
+
+func (p *ChatServiceGetConversationScopeResult) GetSuccess() (v *ConversationScopeResponse) {
+	if !p.IsSetSuccess() {
+		return ChatServiceGetConversationScopeResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *ChatServiceGetConversationScopeResult) SetSuccess(x interface{}) {
+	p.Success = x.(*ConversationScopeResponse)
+}
+
+func (p *ChatServiceGetConversationScopeResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *ChatServiceGetConversationScopeResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ChatServiceGetConversationScopeResult(%+v)", *p)
+}
+
+var fieldIDToName_ChatServiceGetConversationScopeResult = map[int16]string{
 	0: "success",
 }
 

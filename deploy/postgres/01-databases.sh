@@ -3,7 +3,7 @@
 # Never alter existing role passwords or application data. Verify each credential.
 set -euo pipefail
 export PGPASSWORD="$POSTGRES_PASSWORD"
-for suffix in identity chat agent_control agent_runtime gateway; do
+for suffix in identity chat marketplace agent_control agent_runtime gateway; do
   database="teamie_$suffix"
   upper_suffix=$(printf '%s' "$suffix" | tr '[:lower:]' '[:upper:]')
   variable="POSTGRES_${upper_suffix}_PASSWORD"

@@ -409,6 +409,26 @@ class AgentManifestTest(unittest.TestCase):
             manifest.compatible(current, previous)
         manifest.compatible(current, copy.deepcopy(current))
 
+    def test_v3_marketplace_service_forward_upgrade_and_rollback_guard(self):
+        v2 = self.modern()
+        v2["version"] = "v0.4.9"
+        v2["source"]["ref"] = "refs/heads/release/v0.4.9"
+        v3 = copy.deepcopy(v2)
+        v3["manifestVersion"] = 3
+        v3["version"] = "v0.5.0"
+        v3["source"]["ref"] = "refs/heads/release/v0.5.0"
+        v3["schema"] = dict(manifest.SCHEMA_V3)
+        v3["images"]["marketplace"] = "ghcr.io/zzqdeco/teamie-marketplace@sha256:" + "2" * 64
+        manifest.validate(v2)
+        manifest.validate(v3)
+        self.assertEqual(len(manifest.image_env(v3).splitlines()), 13)
+        self.assertIn("MARKETPLACE_IMAGE=", manifest.image_env(v3))
+        manifest.check_transition(v3, v2, v2)
+        with self.assertRaisesRegex(ValueError, "identical schema versions"):
+            manifest.check_transition(v2, v3, rollback=True)
+        with self.assertRaisesRegex(ValueError, "lower database schema"):
+            manifest.check_transition(v2, v3)
+
 
 class ProductionConfigTest(unittest.TestCase):
     def setUp(self):

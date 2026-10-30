@@ -67,11 +67,12 @@ jobs:
             services/identity/go.sum
             services/chat/go.sum
             services/realtime/go.sum
+            services/marketplace/go.sum
       - name: Test authorization, persistence and concurrency
         env:
           DATABASE_URL_TEST: postgres://postgres:ci-only-postgres@127.0.0.1:5432/teamie_test?sslmode=disable
         run: |
-          for module in pkg contracts/gen/im services/identity services/chat services/realtime; do
+          for module in pkg contracts/gen/im services/identity services/chat services/realtime services/marketplace; do
             (cd "$module" && go test -race ./... && go vet ./... && go build ./...)
           done
       - name: Full HTTP and WebSocket acceptance against disposable processes
@@ -105,6 +106,7 @@ jobs:
             pkg/go.sum
             contracts/gen/im/go.sum
             contracts/gen/agent/go.sum
+            services/marketplace/go.sum
             services/agent-control/go.sum
             services/agent-runtime/go.sum
             services/llm-gateway/go.sum
@@ -153,6 +155,7 @@ jobs:
           - {service: identity, dockerfile: services/identity/Dockerfile}
           - {service: chat, dockerfile: services/chat/Dockerfile}
           - {service: realtime, dockerfile: services/realtime/Dockerfile}
+          - {service: marketplace, dockerfile: services/marketplace/Dockerfile}
           - {service: web, dockerfile: apps/web/Dockerfile}
           - {service: agent-control, dockerfile: services/agent-control/Dockerfile}
           - {service: agent-runtime, dockerfile: services/agent-runtime/Dockerfile}

@@ -15,7 +15,9 @@ compose_for() {
 rollout() {
   # Every service migration is forward-only and runs before its /readyz is healthy.
   "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 postgres redis || return
-  if [[ $("${COMPOSE[@]}" config --services) == *llm-gateway* ]]; then
+  local services
+  services=$("${COMPOSE[@]}" config --services) || return
+  if [[ $services == *llm-gateway* ]]; then
     "${COMPOSE[@]}" exec -T postgres env TEAMIE_VERIFY_DB_CREDENTIALS=1 bash -s < "${COMPOSE_RECIPE}/deploy/postgres/01-databases.sh" || return
     # Do not let an old Session writer call newly migrated/replaced dependencies.
     # Async children remain owned by Docker and their Sandbox receipts survive.
@@ -23,8 +25,11 @@ rollout() {
   fi
   "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 identity || return
   "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 chat || return
+  if [[ $services == *marketplace* ]]; then
+    "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 marketplace || return
+  fi
   "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 realtime web || return
-  if [[ $("${COMPOSE[@]}" config --services) == *llm-gateway* ]]; then
+  if [[ $services == *llm-gateway* ]]; then
     "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 agent-control llm-gateway sandbox || return
     "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 agent-runtime || return
   fi

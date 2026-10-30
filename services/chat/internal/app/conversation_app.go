@@ -45,6 +45,11 @@ func (s *Service) ConversationAccess(ctx context.Context, conversationID, userID
 	return s.Conversations.ConversationAccess(ctx, conversationID, userID)
 }
 
+// ConversationScope returns the conversation's workspace ID, workspace owner ID, and conversation type if userID has access.
+func (s *Service) ConversationScope(ctx context.Context, conversationID, userID string) (string, string, string, bool, error) {
+	return s.Conversations.GetConversationScope(ctx, conversationID, userID)
+}
+
 // Head returns the user's current sync stream head cursor.
 func (s *Service) Head(ctx context.Context, userID string) (string, error) {
 	n, err := s.Conversations.SyncHead(ctx, userID)

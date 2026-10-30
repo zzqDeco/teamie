@@ -211,6 +211,11 @@ func (s *Service) SharedWorkspaceMembers(ctx context.Context, userID string) ([]
 	return s.Workspaces.SharedWorkspaceMemberIDs(ctx, userID)
 }
 
+// WorkspaceRole returns the workspace owner ID and the caller's role if userID is a current member.
+func (s *Service) WorkspaceRole(ctx context.Context, workspaceID, userID string) (string, string, bool, error) {
+	return s.Workspaces.GetWorkspaceRoleAndOwner(ctx, workspaceID, userID)
+}
+
 // SetPrincipalWorkspaces reconciles delegated workspace memberships for an agent principal.
 func (s *Service) SetPrincipalWorkspaces(ctx context.Context, principal, grantor domain.User, requested []string, revision int64) ([]string, error) {
 	if principal.Kind != "agent" || grantor.Kind != "human" || principal.ID == grantor.ID || revision < 1 || len(requested) > 100 {

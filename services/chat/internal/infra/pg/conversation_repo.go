@@ -42,6 +42,26 @@ func (r *Repository) ConversationAccess(ctx context.Context, conversationID, use
 	return c, err
 }
 
+func (r *Repository) GetConversationScope(ctx context.Context, conversationID, userID string) (string, string, string, bool, error) {
+	var workspaceID, workspaceOwnerID, convType string
+	err := r.DB.Conn(ctx).QueryRow(
+		ctx,
+		`SELECT c.workspace_id,w.created_by,c.type `+
+			`FROM conversations c `+
+			`JOIN workspaces w ON w.id=c.workspace_id `+
+			`JOIN workspace_members wm ON wm.workspace_id=c.workspace_id AND wm.user_id=$2 `+
+			`WHERE c.id=$1 AND (c.type='channel' OR EXISTS(SELECT 1 FROM conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id=$2))`,
+		conversationID, userID,
+	).Scan(&workspaceID, &workspaceOwnerID, &convType)
+	if postgres.IsNoRows(err) {
+		return "", "", "", false, nil
+	}
+	if err != nil {
+		return "", "", "", false, err
+	}
+	return workspaceID, workspaceOwnerID, convType, true, nil
+}
+
 func (r *Repository) ConversationRecipients(ctx context.Context, c domain.Conversation) ([]string, error) {
 	rows, err := r.DB.Conn(ctx).Query(ctx, `SELECT wm.user_id FROM workspace_members wm WHERE wm.workspace_id=$1 AND ($2='channel' OR EXISTS(SELECT 1 FROM conversation_members cm WHERE cm.conversation_id=$3 AND cm.user_id=wm.user_id)) ORDER BY wm.user_id`, c.WorkspaceID, c.Type, c.ID)
 	if err != nil {

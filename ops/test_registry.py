@@ -31,16 +31,16 @@ def registry(public=PUBLIC, pull=PRIVATE, namespace=NAMESPACE):
     return {"provider": "acr", "pushHost": public, "pullHost": pull, "namespace": namespace}
 
 
-def release(acr=True, release_version="v0.4.0", sha="a" * 40):
+def release(acr=True, release_version="v0.5.0", sha="a" * 40):
     prefix = PRIVATE + "/" + NAMESPACE + "/teamie-" if acr else "ghcr.io/zzqdeco/teamie-"
     value = {
-        "manifestVersion": 2, "version": release_version,
+        "manifestVersion": 3, "version": release_version,
         "source": {"repository": "zzqDeco/teamie", "sha": sha, "mainSha": sha,
                    "ref": "refs/heads/release/" + release_version},
         "createdAt": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "schema": dict(manifest.SCHEMA_V2), "storage": {"postgresMajor": 17},
+        "schema": dict(manifest.SCHEMA_V3), "storage": {"postgresMajor": 17},
         "featureFlags": {"revision": "agents-v2", "sha256": "f" * 64},
-        "images": {name: prefix + name + "@sha256:" + "1" * 64 for name in manifest.SERVICES},
+        "images": {name: prefix + name + "@sha256:" + "1" * 64 for name in manifest.SERVICES_V3},
     }
     if acr:
         value["registry"] = registry()
@@ -56,15 +56,21 @@ def production_config(data):
     services = {name: {"image": image, "environment": {}}
                 for name, image in data["images"].items() if name != "sandbox-runner"}
     origin = "https://teamie.example.com"
-    for name in ("identity", "chat", "realtime", "agent-control", "llm-gateway"):
-        services[name]["environment"].update(APP_ORIGIN=origin, COOKIE_SECURE="true")
+    for name in ("identity", "chat", "realtime", "marketplace", "agent-control", "llm-gateway"):
+        if name in services:
+            services[name]["environment"].update(APP_ORIGIN=origin, COOKIE_SECURE="true")
     services["caddy"]["environment"].update(SITE_ADDRESS=origin, TLS_SERVER_NAME="teamie.example.com")
     pg = services["postgres"]["environment"]
     pg["POSTGRES_PASSWORD"] = "a" * 64
-    for name, suffix, char in (("identity", "identity", "i"), ("chat", "chat", "c"),
-                              ("agent-control", "agent_control", "p"),
-                              ("agent-runtime", "agent_runtime", "r"),
-                              ("llm-gateway", "gateway", "g")):
+    db_specs = [("identity", "identity", "i"), ("chat", "chat", "c"),
+                ("agent-control", "agent_control", "p"),
+                ("agent-runtime", "agent_runtime", "r"),
+                ("llm-gateway", "gateway", "g")]
+    if "marketplace" in services:
+        db_specs.append(("marketplace", "marketplace", "m"))
+        services["marketplace"]["networks"] = ["private", "egress"]
+        services["chat"]["networks"] = ["private"]
+    for name, suffix, char in db_specs:
         password = char * 64
         pg["POSTGRES_" + suffix.upper() + "_PASSWORD"] = password
         services[name]["environment"]["DATABASE_URL"] = (
@@ -143,6 +149,11 @@ class RegistryManifestTest(unittest.TestCase):
                 changed = copy.deepcopy(old)
                 changed["images"]["chat"] = changed["images"]["chat"].replace("ghcr.io", host)
                 manifest.validate(changed)
+        v2 = copy.deepcopy(old)
+        v2["manifestVersion"] = 2
+        v2["schema"] = dict(manifest.SCHEMA_V2)
+        v2["images"] = {key: value for key, value in v2["images"].items() if key in manifest.SERVICES}
+        manifest.validate(v2)
         legacy = copy.deepcopy(old)
         legacy["manifestVersion"] = 1
         legacy["schema"] = {"identity": 1, "chat": 1}

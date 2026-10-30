@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"teamie/contracts/gen/im/kitex_gen/im"
 	"teamie/pkg/httpx"
 	"teamie/pkg/postgres"
 	"teamie/pkg/postgres/testdb"
@@ -166,7 +167,48 @@ func TestChatV1UpgradePreservesMessages(t *testing.T) {
 		t.Fatal("published data lost", e)
 	}
 	var version int
-	if e = s.DB.QueryRow(ctx, "SELECT max(version) FROM chat_schema_migrations").Scan(&version); e != nil || version != 9 {
+	if e = s.DB.QueryRow(ctx, "SELECT max(version) FROM chat_schema_migrations").Scan(&version); e != nil || version != 10 {
 		t.Fatal("ledger", version, e)
+	}
+	var retiredTables int
+	if e = s.DB.QueryRow(ctx, "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('marketplace_apps','marketplace_app_reviews','workspace_marketplace_apps')").Scan(&retiredTables); e != nil || retiredTables != 0 {
+		t.Fatal("embedded marketplace tables were not retired", retiredTables, e)
+	}
+}
+
+func TestWorkspaceRoleAndConversationScopeRPC(t *testing.T) {
+	ctx := context.Background()
+	s, ws, channel, owner, member := setup(t)
+	outsider := httpx.User{ID: httpx.ID(), Kind: "human"}
+	group, err := s.CreateConversation(ctx, owner.ID, ws.ID, "group", "Room", []string{member.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpc := &RPC{Store: s}
+
+	ownerRole, err := rpc.GetWorkspaceRole(ctx, &im.WorkspaceAccessRequest{WorkspaceId: ws.ID, UserId: owner.ID})
+	if err != nil || !ownerRole.Allowed || ownerRole.Role != "owner" || ownerRole.OwnerId != owner.ID {
+		t.Fatalf("unexpected owner role response: %+v (%v)", ownerRole, err)
+	}
+	memberRole, err := rpc.GetWorkspaceRole(ctx, &im.WorkspaceAccessRequest{WorkspaceId: ws.ID, UserId: member.ID})
+	if err != nil || !memberRole.Allowed || memberRole.Role != "member" || memberRole.OwnerId != owner.ID {
+		t.Fatalf("unexpected member role response: %+v (%v)", memberRole, err)
+	}
+	outsiderRole, err := rpc.GetWorkspaceRole(ctx, &im.WorkspaceAccessRequest{WorkspaceId: ws.ID, UserId: outsider.ID})
+	if err != nil || outsiderRole.Allowed {
+		t.Fatalf("expected outsider denied, got: %+v (%v)", outsiderRole, err)
+	}
+
+	groupScope, err := rpc.GetConversationScope(ctx, &im.AccessRequest{ConversationId: group.ID, UserId: member.ID})
+	if err != nil || !groupScope.Allowed || groupScope.WorkspaceId != ws.ID || groupScope.WorkspaceOwnerId != owner.ID || groupScope.ConversationType != "group" {
+		t.Fatalf("unexpected group scope response: %+v (%v)", groupScope, err)
+	}
+	chScope, err := rpc.GetConversationScope(ctx, &im.AccessRequest{ConversationId: channel.ID, UserId: member.ID})
+	if err != nil || !chScope.Allowed || chScope.ConversationType != "channel" {
+		t.Fatalf("unexpected channel scope response: %+v (%v)", chScope, err)
+	}
+	outsiderScope, err := rpc.GetConversationScope(ctx, &im.AccessRequest{ConversationId: group.ID, UserId: outsider.ID})
+	if err != nil || outsiderScope.Allowed {
+		t.Fatalf("expected outsider conversation scope denied, got: %+v (%v)", outsiderScope, err)
 	}
 }

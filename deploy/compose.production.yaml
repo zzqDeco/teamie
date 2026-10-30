@@ -42,6 +42,7 @@ services:
       identity: {condition: service_healthy}
       chat: {condition: service_healthy}
       realtime: {condition: service_healthy}
+      marketplace: {condition: service_healthy}
       web: {condition: service_healthy}
       agent-control: {condition: service_healthy}
       llm-gateway: {condition: service_healthy}
@@ -108,8 +109,8 @@ services:
   chat:
     <<: *app
     image: ${CHAT_IMAGE:?manifest image required}
-    mem_limit: 192m
-    memswap_limit: 192m
+    mem_limit: 128m
+    memswap_limit: 128m
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       HTTP_ADDR: :8082
@@ -121,7 +122,7 @@ services:
       APP_ORIGIN: ${APP_ORIGIN:?HTTPS origin required}
       COOKIE_SECURE: "true"
       FEATURE_FLAGS_FILE: /etc/teamie/feature-flags.json
-      GOMEMLIMIT: 144MiB
+      GOMEMLIMIT: 96MiB
       GOMAXPROCS: "1"
     volumes:
       - ${FEATURE_FLAGS_PATH:-/srv/teamie/config/feature-flags.json}:/etc/teamie/feature-flags.json:ro
@@ -131,6 +132,36 @@ services:
       identity: {condition: service_healthy}
     healthcheck:
       test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8082/readyz]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
+
+  marketplace:
+    <<: *app
+    image: ${MARKETPLACE_IMAGE:?manifest image required}
+    mem_limit: 64m
+    memswap_limit: 64m
+    networks: [private, egress]
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      HTTP_ADDR: :8088
+      IDENTITY_RPC_ADDR: identity:8881
+      CHAT_RPC_ADDR: chat:8882
+      DATABASE_URL: ${MARKETPLACE_DATABASE_URL:?marketplace database required}
+      APP_ORIGIN: ${APP_ORIGIN:?HTTPS origin required}
+      COOKIE_SECURE: "true"
+      FEATURE_FLAGS_FILE: /etc/teamie/feature-flags.json
+      GOMEMLIMIT: 48MiB
+      GOMAXPROCS: "1"
+    volumes:
+      - ${FEATURE_FLAGS_PATH:-/srv/teamie/config/feature-flags.json}:/etc/teamie/feature-flags.json:ro
+    depends_on:
+      postgres: {condition: service_healthy}
+      identity: {condition: service_healthy}
+      chat: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8088/readyz]
       interval: 10s
       timeout: 3s
       retries: 12
@@ -212,6 +243,7 @@ services:
       IDENTITY_RPC_ADDR: identity:8881
       CHAT_RPC_ADDR: chat:8882
       IM_API_URL: http://chat:8082
+      MARKETPLACE_API_URL: http://marketplace:8088
       IM_REALTIME_URL: http://realtime:8083
       APP_ORIGIN: ${APP_ORIGIN:?HTTPS origin required}
       AGENT_RUNTIME_TOKEN: ${AGENT_RUNTIME_TOKEN:?runtime control credential required}
@@ -228,6 +260,7 @@ services:
       - ${FEATURE_FLAGS_PATH:-/srv/teamie/config/feature-flags.json}:/etc/teamie/feature-flags.json:ro
     depends_on:
       postgres: {condition: service_healthy}
+      marketplace: {condition: service_healthy}
       agent-control: {condition: service_healthy}
       llm-gateway: {condition: service_healthy}
       sandbox: {condition: service_healthy}
@@ -308,6 +341,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?database admin password required}
       POSTGRES_IDENTITY_PASSWORD: ${POSTGRES_IDENTITY_PASSWORD:?identity password required}
       POSTGRES_CHAT_PASSWORD: ${POSTGRES_CHAT_PASSWORD:?chat password required}
+      POSTGRES_MARKETPLACE_PASSWORD: ${POSTGRES_MARKETPLACE_PASSWORD:?marketplace password required}
       POSTGRES_AGENT_CONTROL_PASSWORD: ${POSTGRES_AGENT_CONTROL_PASSWORD:?agent control password required}
       POSTGRES_AGENT_RUNTIME_PASSWORD: ${POSTGRES_AGENT_RUNTIME_PASSWORD:?agent runtime password required}
       POSTGRES_GATEWAY_PASSWORD: ${POSTGRES_GATEWAY_PASSWORD:?gateway password required}

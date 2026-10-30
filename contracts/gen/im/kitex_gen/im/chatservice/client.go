@@ -13,6 +13,8 @@ import (
 type Client interface {
 	CheckAccess(ctx context.Context, request *im.AccessRequest, callOptions ...callopt.Option) (r *im.AccessResponse, err error)
 	CheckWorkspaceAccess(ctx context.Context, request *im.WorkspaceAccessRequest, callOptions ...callopt.Option) (r *im.WorkspaceAccessResponse, err error)
+	GetWorkspaceRole(ctx context.Context, request *im.WorkspaceAccessRequest, callOptions ...callopt.Option) (r *im.WorkspaceRoleResponse, err error)
+	GetConversationScope(ctx context.Context, request *im.AccessRequest, callOptions ...callopt.Option) (r *im.ConversationScopeResponse, err error)
 	GetSharedWorkspaceMembers(ctx context.Context, request *im.SharedWorkspaceMembersRequest, callOptions ...callopt.Option) (r *im.SharedWorkspaceMembersResponse, err error)
 	Ping(ctx context.Context, request *im.PingRequest, callOptions ...callopt.Option) (r *im.PingResponse, err error)
 	GetParticipantWorkspaces(ctx context.Context, request *im.ParticipantWorkspacesRequest, callOptions ...callopt.Option) (r *im.ParticipantWorkspacesResponse, err error)
@@ -57,6 +59,16 @@ func (p *kChatServiceClient) CheckAccess(ctx context.Context, request *im.Access
 func (p *kChatServiceClient) CheckWorkspaceAccess(ctx context.Context, request *im.WorkspaceAccessRequest, callOptions ...callopt.Option) (r *im.WorkspaceAccessResponse, err error) {
 	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
 	return p.kClient.CheckWorkspaceAccess(ctx, request)
+}
+
+func (p *kChatServiceClient) GetWorkspaceRole(ctx context.Context, request *im.WorkspaceAccessRequest, callOptions ...callopt.Option) (r *im.WorkspaceRoleResponse, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.GetWorkspaceRole(ctx, request)
+}
+
+func (p *kChatServiceClient) GetConversationScope(ctx context.Context, request *im.AccessRequest, callOptions ...callopt.Option) (r *im.ConversationScopeResponse, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.GetConversationScope(ctx, request)
 }
 
 func (p *kChatServiceClient) GetSharedWorkspaceMembers(ctx context.Context, request *im.SharedWorkspaceMembersRequest, callOptions ...callopt.Option) (r *im.SharedWorkspaceMembersResponse, err error) {

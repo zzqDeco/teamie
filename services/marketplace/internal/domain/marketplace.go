@@ -267,8 +267,8 @@ var (
 	cgnatPrefix       = netip.MustParsePrefix("100.64.0.0/10")
 	internalHostNames = map[string]struct{}{
 		"localhost": {}, "postgres": {}, "redis": {}, "chat": {}, "identity": {},
-		"realtime": {}, "agent-control": {}, "agent-runtime": {}, "llm-gateway": {},
-		"sandbox": {}, "caddy": {}, "web": {},
+		"realtime": {}, "marketplace": {}, "agent-control": {}, "agent-runtime": {},
+		"llm-gateway": {}, "sandbox": {}, "caddy": {}, "web": {},
 	}
 )
 

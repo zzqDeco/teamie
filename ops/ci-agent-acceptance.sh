@@ -29,18 +29,19 @@ export IDENTITY_RPC_ADDR="127.0.0.1:$((rpc_base+1))" CHAT_RPC_ADDR="127.0.0.1:$(
 export AGENT_CONTROL_RPC_ADDR="127.0.0.1:$((rpc_base+4))" GATEWAY_RPC_ADDR="127.0.0.1:$((rpc_base+6))" SANDBOX_RPC_ADDR="127.0.0.1:$((rpc_base+7))"
 export GATEWAY_STREAM_URL="http://127.0.0.1:$((http_base+6))/internal/v1/chat/stream"
 export IM_API_URL="http://127.0.0.1:$((http_base+2))"
+export MARKETPLACE_API_URL="http://127.0.0.1:$((http_base+8))"
 export IM_REALTIME_URL="http://127.0.0.1:$((http_base+3))"
 if [[ ${TEAMIE_AGENT_SKIP_SANDBOX:-0} != 1 ]]; then
   : "${SANDBOX_TEST_RUNNER_IMAGE:?disposable CI runner image ID required}"
   export SANDBOX_RUNNER_IMAGE=$SANDBOX_TEST_RUNNER_IMAGE
 fi
 export SANDBOX_WORKSPACE_ROOT="$scratch/workspaces" SANDBOX_STATE_ROOT="$scratch/receipts"
-for suffix in identity chat agent_control agent_runtime gateway; do
+for suffix in identity chat marketplace agent_control agent_runtime gateway; do
   database="agent_accept_$$_$suffix"
   PGPASSWORD="$pg_password" "${pg[@]}" --command "CREATE DATABASE $database;" >/dev/null
   databases+=("$database")
 done
-for service in identity chat realtime agent-control agent-runtime llm-gateway sandbox; do
+for service in identity chat realtime marketplace agent-control agent-runtime llm-gateway sandbox; do
   (cd "services/$service" && go build -o "$scratch/$service" ./cmd)
 done
 launch() {
@@ -52,9 +53,10 @@ launch() {
 launch identity 1 identity env RPC_ADDR=":$((rpc_base+1))"
 launch chat 2 chat env RPC_ADDR=":$((rpc_base+2))"
 launch realtime 3 unused env
+launch marketplace 8 marketplace env
 launch agent-control 4 agent_control env RPC_ADDR=":$((rpc_base+4))"
 launch llm-gateway 6 gateway env RPC_ADDR=":$((rpc_base+6))"
-offsets=(1 2 3 4 5 6)
+offsets=(1 2 3 4 5 6 8)
 if [[ ${TEAMIE_AGENT_SKIP_SANDBOX:-0} == 1 ]]; then
   echo 'SKIP: local diagnostic has no Docker supervisor; execution isolation is verified separately in required hosted CI.'
 else

@@ -52,6 +52,7 @@ func main() {
 		IdentityAddr:     httpx.Env("IDENTITY_RPC_ADDR", "identity:8881"),
 		IMURL:            httpx.Env("IM_API_URL", "http://chat:8082"),
 		IMRealtimeURL:    httpx.Env("IM_REALTIME_URL", "http://realtime:8083"),
+		MarketplaceURL:   httpx.Env("MARKETPLACE_API_URL", "http://marketplace:8088"),
 		ControlToken:     os.Getenv("AGENT_RUNTIME_TOKEN"),
 		GatewayToken:     os.Getenv("GATEWAY_RUNTIME_TOKEN"),
 		SandboxToken:     os.Getenv("SANDBOX_RUNTIME_TOKEN"),

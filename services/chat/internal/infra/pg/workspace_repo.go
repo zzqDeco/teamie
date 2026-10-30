@@ -125,6 +125,22 @@ func (r *Repository) GetWorkspaceMemberRole(ctx context.Context, workspaceID, us
 	return role, true, nil
 }
 
+func (r *Repository) GetWorkspaceRoleAndOwner(ctx context.Context, workspaceID, userID string) (string, string, bool, error) {
+	var ownerID, role string
+	err := r.DB.Conn(ctx).QueryRow(
+		ctx,
+		"SELECT w.created_by,m.role FROM workspaces w JOIN workspace_members m ON m.workspace_id=w.id WHERE w.id=$1 AND m.user_id=$2",
+		workspaceID, userID,
+	).Scan(&ownerID, &role)
+	if postgres.IsNoRows(err) {
+		return "", "", false, nil
+	}
+	if err != nil {
+		return "", "", false, err
+	}
+	return ownerID, role, true, nil
+}
+
 func (r *Repository) FindMemberAndDelegatedIDs(ctx context.Context, workspaceID, targetUserID string) ([]string, error) {
 	rows, err := r.DB.Conn(ctx).Query(ctx, "SELECT user_id FROM workspace_members WHERE workspace_id=$1 AND(user_id=$2 OR granted_by=$2)", workspaceID, targetUserID)
 	if err != nil {

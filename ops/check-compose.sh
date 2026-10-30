@@ -3,7 +3,7 @@ set -euo pipefail
 umask 077
 scratch=$(mktemp -d)
 trap 'rm -rf -- "$scratch"' EXIT
-for service in identity chat realtime web caddy postgres redis agent-control agent-runtime llm-gateway sandbox sandbox-runner; do
+for service in identity chat realtime marketplace web caddy postgres redis agent-control agent-runtime llm-gateway sandbox sandbox-runner; do
   key=$(printf '%s' "$service" | tr '[:lower:]-' '[:upper:]_')
   printf '%s_IMAGE=ghcr.io/zzqdeco/teamie-%s@sha256:%064d\n' "$key" "$service" 0 >> "$scratch/images.env"
 done
@@ -22,6 +22,11 @@ assert int(config['services']['agent-runtime']['mem_limit'])==256*1024*1024
 assert int(config['services']['llm-gateway']['mem_limit'])==128*1024*1024
 assert config['networks']['private']['internal'] is True
 assert set(config['services']['llm-gateway']['networks'])=={'private','egress'}
+assert set(config['services']['marketplace']['networks'])=={'private','egress'}
+assert set(config['services']['agent-runtime']['networks'])=={'private','egress'}
+assert set(config['services']['identity']['networks'])=={'private'}
+assert set(config['services']['chat']['networks'])=={'private'}
+assert set(config['services']['realtime']['networks'])=={'private'}
 assert set(config['services']['sandbox']['networks'])=={'private'}
 assert config['services']['sandbox']['environment']['SANDBOX_RUNNER_IMAGE'].startswith('ghcr.io/zzqdeco/teamie-sandbox-runner@sha256:')
 for name,service in config['services'].items():
@@ -70,6 +75,9 @@ for mutate in (
     lambda s:s['agent-control']['environment'].update(DATABASE_URL=s['chat']['environment']['DATABASE_URL']),
     lambda s:s['chat'].setdefault('volumes',[]).append({'target':'/var/run/docker.sock'}),
     lambda s:s['llm-gateway'].update(networks={'private':{}}),
+    lambda s:s['marketplace'].update(networks={'private':{}}),
+    lambda s:s['chat'].update(networks={'private':{},'egress':{}}),
+    lambda s:s['marketplace']['environment'].update(DATABASE_URL=s['chat']['environment']['DATABASE_URL']),
 ):
     changed=copy.deepcopy(c);mutate(changed['services'])
     try:m.validate_config(changed,sys.argv[2])
@@ -84,7 +92,7 @@ python3 - "$scratch/acr-digests" "$scratch/acr-images.env" <<'PY'
 import importlib.util,json,pathlib,sys
 spec=importlib.util.spec_from_file_location('manifest','ops/manifest.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 prefix='crpi-teamie-vpc.cn-shenzhen.personal.cr.aliyuncs.com/teamie/teamie-'
-images={name:prefix+name+'@sha256:'+'0'*64 for name in m.SERVICES}
+images={name:prefix+name+'@sha256:'+'0'*64 for name in m.SERVICES_V3}
 for name,image in images.items():
     (pathlib.Path(sys.argv[1])/(name+'.json')).write_text(json.dumps({'service':name,'image':image}))
 pathlib.Path(sys.argv[2]).write_text(''.join(name.upper().replace('-','_')+'_IMAGE='+image+'\n' for name,image in images.items()))
