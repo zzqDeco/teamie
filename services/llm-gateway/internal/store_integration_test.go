@@ -404,3 +404,135 @@ func TestPostgresConfigBoundariesAndRestart(t *testing.T) {
 		t.Fatal(version, count, modelID)
 	}
 }
+
+func TestServicePingBoundedCacheAndModelSwitchRegression(t *testing.T) {
+	dsn := os.Getenv("DATABASE_URL_TEST")
+	if dsn == "" {
+		t.Skip("DATABASE_URL_TEST is unset")
+	}
+	ctx := context.Background()
+	admin, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(ctx)
+	schema := fmt.Sprintf("gateway_ping_svc_%d", time.Now().UnixNano())
+	if _, err := admin.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Exec(ctx, "DROP SCHEMA "+schema+" CASCADE")
+
+	u, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := u.Query()
+	q.Set("search_path", schema)
+	u.RawQuery = q.Encode()
+
+	store, err := Open(ctx, u.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.DB.Close()
+
+	crypto := testCipher(t)
+	service := New(store, crypto, testToken)
+
+	keyA, keyB := "provider-a-secret", "provider-b-secret"
+	cwA, cwB1, cwB2 := int64(32768), int64(65536), int64(131072)
+	if _, err := service.App.CreateModelProvider(ctx, app.CreateModelProviderInput{
+		ID: "prov-a", DisplayName: "Provider A", BaseURL: "https://1.1.1.1/v1", APIKey: &keyA, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.App.CreateModelProvider(ctx, app.CreateModelProviderInput{
+		ID: "prov-b", DisplayName: "Provider B", BaseURL: "https://8.8.8.8/v1", APIKey: &keyB, Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.App.CreateModelProfile(ctx, app.CreateModelProfileInput{
+		ID: "m-a", ProviderID: "prov-a", Model: "gpt-a", Enabled: true, ContextWindowTokens: &cwA,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.App.CreateModelProfile(ctx, app.CreateModelProfileInput{
+		ID: "m-b1", ProviderID: "prov-b", Model: "gpt-b1", Enabled: true, ContextWindowTokens: &cwB1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.App.CreateModelProfile(ctx, app.CreateModelProfileInput{
+		ID: "m-b2", ProviderID: "prov-b", Model: "gpt-b2", Enabled: true, ContextWindowTokens: &cwB2,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.App.UpdateRouting(ctx, "m-a"); err != nil {
+		t.Fatal(err)
+	}
+
+	cfgID := func(baseURL, model string) string {
+		return domain.CountingConfigID(baseURL, model)
+	}
+
+	// Prime the Ping snapshot cache once.
+	p0 := service.App.Ping(ctx, testToken)
+	if !p0.Ready || p0.ModelConfigID == nil || *p0.ModelConfigID != cfgID("https://1.1.1.1/v1", "gpt-a") || *p0.ContextWindowTokens != cwA {
+		t.Fatalf("unexpected initial default Ping: %+v", p0)
+	}
+
+	// Simulate 4 idle Agents with distinct selected modelIDs polling Ping while gateway_models is locked:
+	// all 4 Agents resolve their distinct effective models from the cached snapshot without hitting PostgreSQL.
+	lockConn, err := pgx.Connect(ctx, u.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lockConn.Close(ctx)
+	lockTx, err := lockConn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lockTx.Exec(ctx, `LOCK TABLE gateway_models IN ACCESS EXCLUSIVE MODE`); err != nil {
+		_ = lockTx.Rollback(ctx)
+		t.Fatal(err)
+	}
+
+	pingCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	for _, agentCase := range []struct {
+		modelID string
+		wantCW  int64
+		wantID  string
+	}{
+		{modelID: "", wantCW: cwA, wantID: cfgID("https://1.1.1.1/v1", "gpt-a")},
+		{modelID: "m-b1", wantCW: cwB1, wantID: cfgID("https://8.8.8.8/v1", "gpt-b1")},
+		{modelID: "m-b2", wantCW: cwB2, wantID: cfgID("https://8.8.8.8/v1", "gpt-b2")},
+		{modelID: "deleted-agent-model", wantCW: cwA, wantID: cfgID("https://1.1.1.1/v1", "gpt-a")},
+	} {
+		st := service.App.Ping(pingCtx, testToken, agentCase.modelID)
+		if !st.Ready || !*st.Configured || !*st.Enabled || *st.ContextWindowTokens != agentCase.wantCW || st.ModelConfigID == nil || *st.ModelConfigID != agentCase.wantID {
+			_ = lockTx.Rollback(ctx)
+			t.Fatalf("cached Ping mismatch for agent model %q: %+v", agentCase.modelID, st)
+		}
+	}
+	if err := lockTx.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Disabling m-a and switching default routing must immediately update Ping without waiting for TTL.
+	no := false
+	if _, err := service.App.UpdateModelProfile(ctx, app.UpdateModelProfileInput{ID: "m-a", Enabled: &no}); err != nil {
+		t.Fatal(err)
+	}
+	afterDisable := service.App.Ping(ctx, testToken, "m-a")
+	if !afterDisable.Ready || *afterDisable.ContextWindowTokens != cwB1 || *afterDisable.ModelConfigID != cfgID("https://8.8.8.8/v1", "gpt-b1") {
+		t.Fatalf("expected disabled model Ping to fall back immediately to m-b1, got %+v", afterDisable)
+	}
+
+	if _, err := service.App.UpdateRouting(ctx, "m-b2"); err != nil {
+		t.Fatal(err)
+	}
+	afterRoute := service.App.Ping(ctx, testToken, "m-a")
+	if !afterRoute.Ready || *afterRoute.ContextWindowTokens != cwB2 || *afterRoute.ModelConfigID != cfgID("https://8.8.8.8/v1", "gpt-b2") {
+		t.Fatalf("expected routing switch to update Ping fallback immediately to m-b2, got %+v", afterRoute)
+	}
+}
