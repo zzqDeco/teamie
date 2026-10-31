@@ -484,7 +484,7 @@ export function ProfileSettings() {
           <ShieldCheck size={ICON.lg} aria-hidden="true" />
           <span>
             <b>平台管理</b>
-            <small>注册邀请、用户与模型网关</small>
+            <small>注册邀请、用户、模型网关与应用市场</small>
           </span>
           <ChevronRight size={ICON.md} aria-hidden="true" />
         </Link>

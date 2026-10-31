@@ -530,4 +530,53 @@ describe("Developer Platform & Submission Workflow", () => {
     expect(urlInputs[0]?.value).toBe("");
     expect(urlInputs[1]?.value).toBe("");
   });
+
+  it("exposes marketplace review queue shortcuts only to platform admins", async () => {
+    const pendingApp: DeveloperMarketplaceApp = {
+      ...sampleDraftApp,
+      reviewStatus: "pending_review",
+      submissionRevision: 1,
+      verificationReport: sampleVerification,
+    };
+    vi.spyOn(api, "developerMarketplaceApp").mockResolvedValue({
+      app: pendingApp,
+      reviews: sampleReviews,
+    });
+
+    const memberQc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={memberQc}>
+          <MemoryRouter initialEntries={["/app/developers/apps/app-ww"]}>
+            <DeveloperPortal appId="app-ww" workspaces={[ownedWorkspace]} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+    });
+    await flush();
+    expect(host.querySelector('a[href="/app/admin/marketplace"]')).toBeNull();
+
+    currentUser = {
+      ...currentUser,
+      id: "u-admin",
+      platformRole: "admin",
+      displayName: "平台管理员",
+    };
+    const adminQc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={adminQc}>
+          <MemoryRouter initialEntries={["/app/developers/apps/app-ww"]}>
+            <DeveloperPortal appId="app-ww" workspaces={[ownedWorkspace]} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+    });
+    await flush();
+    const adminLinks = [...host.querySelectorAll<HTMLAnchorElement>('a[href="/app/admin/marketplace"]')];
+    expect(adminLinks.map((el) => el.textContent?.trim())).toEqual([
+      "平台审核队列",
+      "前往平台审核队列",
+    ]);
+  });
 });
