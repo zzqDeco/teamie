@@ -25,6 +25,10 @@ import (
 )
 
 func runtimeFlag(path, key string) bool {
+	return runtimeFlagDefault(path, key, false)
+}
+
+func runtimeFlagDefault(path, key string, defaultVal bool) bool {
 	if path == "" {
 		return true
 	}
@@ -35,7 +39,13 @@ func runtimeFlag(path, key string) bool {
 	var v struct {
 		Flags map[string]bool `json:"flags"`
 	}
-	return json.Unmarshal(b, &v) == nil && v.Flags[key]
+	if json.Unmarshal(b, &v) != nil || v.Flags == nil {
+		return false
+	}
+	if enabled, ok := v.Flags[key]; ok {
+		return enabled
+	}
+	return defaultVal
 }
 func stableTaskID(run *Run, call string) string {
 	return "shell-" + digest([]byte(run.AgentID + "/" + run.ID + "/" + call))[:40]

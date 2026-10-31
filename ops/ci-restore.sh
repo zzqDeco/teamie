@@ -4,7 +4,7 @@ set -euo pipefail
 : "${POSTGRES_CONTAINER_ID:?disposable CI PostgreSQL container ID required}"
 scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT
-pg=(docker exec -i "$POSTGRES_CONTAINER_ID" env PGOPTIONS="-c teamie.runtime_writer_schema=13")
+pg=(docker exec -i "$POSTGRES_CONTAINER_ID" env PGOPTIONS="-c teamie.runtime_writer_schema=14")
 "${pg[@]}" env TEAMIE_VERIFY_DB_CREDENTIALS=1 POSTGRES_IDENTITY_PASSWORD=ci-identity-disposable-password \
   POSTGRES_CHAT_PASSWORD=ci-chat-disposable-password POSTGRES_MARKETPLACE_PASSWORD=ci-marketplace-disposable-password \
   POSTGRES_AGENT_CONTROL_PASSWORD=ci-control-disposable-password \
@@ -108,7 +108,7 @@ SQL
   if [[ $suffix == agent_runtime ]]; then
     # Exercise the actual embedded forward migrations, not a synthetic ledger.
     {
-      echo "SET teamie.runtime_writer_schema='13';"
+      echo "SET teamie.runtime_writer_schema='14';"
       cat services/agent-runtime/internal/infra/pg/migrations/*.sql
     } | "${pg[@]}" psql -U postgres -d teamie_agent_runtime -v ON_ERROR_STOP=1 >/dev/null
     runtime_context_budget=$(cat ops/fixtures/runtime-context-budget-v1.json)
@@ -159,6 +159,9 @@ VALUES('20000000-0000-4000-8000-000000000011','10000000-0000-4000-8000-000000000
 INSERT INTO runtime_runs(id,agent_id,input_key,input_json,attempt_id,context_profile,context_budget,context_head,acceptance_head)
 VALUES('20000000-0000-4000-8000-000000000012','10000000-0000-4000-8000-000000000001','restore-dm-policy','[]',
        '30000000-0000-4000-8000-000000000012','teamie-context-v038',:'schedule_budget'::jsonb||'{"directMessages":true}'::jsonb,0,0);
+INSERT INTO runtime_runs(id,agent_id,input_key,input_json,attempt_id,context_profile,context_budget,context_head,acceptance_head)
+VALUES('20000000-0000-4000-8000-000000000013','10000000-0000-4000-8000-000000000001','restore-conversational-style-policy','[]',
+       '30000000-0000-4000-8000-000000000013','teamie-context-v038',:'schedule_budget'::jsonb||'{"directMessages":true,"conversationalStyle":true}'::jsonb,0,0);
 INSERT INTO runtime_schedules(id,agent_id,created_run_id,kind,interval_seconds,cron_expr,timezone,prompt,status,max_runs,run_count,next_run_at,source_refs,source_overflow)
 VALUES('sched-restore-fixture','10000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000011','interval',60,'','UTC','Heartbeat check','active',3,1,'2026-10-22T12:00:00Z','[{"eventId":"42","conversationId":"40000000-0000-4000-8000-000000000001","messageId":"50000000-0000-4000-8000-000000000001"}]'::jsonb,false);
 INSERT INTO runtime_context_artifacts(agent_id,run_id,attempt_id,artifact_key,kind,content,content_hash,sources,source_event_seq)
@@ -238,7 +241,7 @@ SQL
 SELECT (SELECT string_agg(version::text,',' ORDER BY version) FROM agent_runtime_schema_migrations)||':'||r.context_profile||':'||(r.context_budget=:'frozen_budget'::jsonb)::text||':'||encode(a.content,'hex')||':'||(a.sources->0->>'eventId')||':'||a.source_event_seq||':'||c.model_step||':'||c.error_code||':'||c.streaming::text||':'||(c.decision_json=jsonb_build_object('version',1,'action','compact_prefix','budget',:'frozen_budget'::jsonb))::text FROM runtime_runs r JOIN runtime_context_artifacts a ON a.run_id=r.id JOIN runtime_context_recoveries c ON c.run_id=r.id WHERE r.id='20000000-0000-4000-8000-000000000001';
 SQL
 )
-    [[ $actual == '1,2,3,4,5,6,7,8,9,10,11,12,13:teamie-context-v038:true:00fffe80890a0d:42:42:2:context_overflow:true:true' ]] || { echo 'Runtime frozen policy, context archive, source references and recovery tape restore failed.' >&2; exit 1; }
+    [[ $actual == '1,2,3,4,5,6,7,8,9,10,11,12,13,14:teamie-context-v038:true:00fffe80890a0d:42:42:2:context_overflow:true:true' ]] || { echo 'Runtime frozen policy, context archive, source references and recovery tape restore failed.' >&2; exit 1; }
     actual=$("${pg[@]}" psql -U postgres -d restore_agent_runtime -At -v ON_ERROR_STOP=1 -v frozen_budget="$runtime_context_budget" <<'SQL'
 SELECT context_budget=(:'frozen_budget'::jsonb||'{"fileDelivery":true,"structuredMentions":true}'::jsonb) FROM runtime_runs WHERE input_key='restore-file-policy';
 SQL
@@ -294,6 +297,11 @@ SELECT (SELECT context_budget=(:'schedule_budget'::jsonb||'{"directMessages":tru
 SQL
 )
     [[ $actual == t ]] || { echo 'Runtime direct-message policy restore failed.' >&2; exit 1; }
+    actual=$("${pg[@]}" psql -U postgres -d restore_agent_runtime -At -v ON_ERROR_STOP=1 -v schedule_budget="$runtime_schedule_budget" <<'SQL'
+SELECT context_budget=(:'schedule_budget'::jsonb||'{"directMessages":true,"conversationalStyle":true}'::jsonb) FROM runtime_runs WHERE input_key='restore-conversational-style-policy';
+SQL
+)
+    [[ $actual == t ]] || { echo 'Runtime conversational-style policy restore failed.' >&2; exit 1; }
   fi
   if [[ $suffix == gateway ]]; then
     actual=$("${pg[@]}" psql -U postgres -d restore_gateway -At -v ON_ERROR_STOP=1 -c \
