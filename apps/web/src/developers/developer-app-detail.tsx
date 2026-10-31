@@ -11,6 +11,7 @@ import {
   Play,
   RefreshCw,
   Send,
+  ShieldCheck,
   Undo2,
 } from "lucide-react";
 import { api } from "@teamie/api-client";
@@ -19,6 +20,7 @@ import type {
   MarketplaceEndpointVerification,
   Workspace,
 } from "@teamie/api-client";
+import { canConfigureModelGateway } from "../agent-management";
 import { useAuth } from "../auth";
 import { errorText } from "../errors";
 import {
@@ -512,6 +514,11 @@ export function DeveloperAppDetail({
               你的应用已提交至平台管理员审核队列。若需继续调整代码或地址，可随时撤回提审。
             </p>
             <div className="dev-inline-actions">
+              {canConfigureModelGateway(user) && (
+                <Link to="/app/admin/marketplace" className="button">
+                  <ShieldCheck size={ICON.xs} /> 前往平台审核队列
+                </Link>
+              )}
               <Button
                 type="button"
                 variant="secondary"
