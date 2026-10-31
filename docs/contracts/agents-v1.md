@@ -174,6 +174,8 @@ The private HTTP envelope carries an optional `messageLimit` admission value out
 
 Runtime schema 13 freezes the optional `directMessages` admission flag and workspace-only source references. Its forward migration fences schema-12 writers before new snapshots are written. Existing snapshots, receipt hashes and checkpoints are unchanged; historical Runs do not gain DM tools when the global flag changes. Stop Runtime before migration; schema-12 image rollback is incompatible. Recover through a schema-13-compatible release or the coordinated backup/restore procedure.
 
+Runtime schema 14 freezes the optional `conversationalStyle` admission flag (`teamie-conversational-presence-v1`, enabled by default at new context-v1 Run admission unless `agents.style.conversational.v1:false` is set in `FEATURE_FLAGS_FILE`), selecting emotional, anti-corporate expression and sequential short-bubble `im_send_message` guidance/tool descriptions while preserving byte-exact prompts, tool schemas, checkpoints and model request hashes for all persisted schema-13 and earlier Runs. Schema 14 raises the writer protocol fence and rejects schema-13 image-only rollback.
+
 ### Conversation presence, unread digests, dynamic Marketplace MCP tools and app notifications
 
 When `im.marketplace.enabled` is active, Runtime enforces unified single-conversation presence (`activeConversationId`, initially `""`) across `group`, `channel` and `direct` conversations inside `services/agent-runtime` without modifying IM (`services/identity`, `services/chat`, `services/realtime`) contracts:

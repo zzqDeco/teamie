@@ -40,6 +40,7 @@ type ContextBudgetSnapshot struct {
 	WebSearch            bool   `json:"webSearch,omitempty"`
 	ScheduledWakeups     bool   `json:"scheduledWakeups,omitempty"`
 	DirectMessages       bool   `json:"directMessages,omitempty"`
+	ConversationalStyle  bool   `json:"conversationalStyle,omitempty"`
 }
 
 func makeContextBudgetSnapshot(window int) (ContextBudgetSnapshot, error) {

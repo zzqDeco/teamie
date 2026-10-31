@@ -330,7 +330,7 @@ func (w *agentWorker) prepare(ctx context.Context, items []Input, resume *checkp
 	// their persisted selection even when the flag or gateway changes.
 	if w.engine.Config.FlagsFile != "" && runtimeFlag(w.engine.Config.FlagsFile, "agents.context.v1") {
 		profile = contextProfileV1
-		budget, err = newRunContextBudget(int(w.contextWindow.Load()), runtimeFlag(w.engine.Config.FlagsFile, "agents.files.deliver.v1"), runtimeFlag(w.engine.Config.FlagsFile, "agents.mentions.v1"), runtimeFlag(w.engine.Config.FlagsFile, "agents.web.v1"), runtimeFlag(w.engine.Config.FlagsFile, "agents.schedule.v1"), runtimeFlag(w.engine.Config.FlagsFile, "im.dm.create"))
+		budget, err = newRunContextBudget(int(w.contextWindow.Load()), runtimeFlag(w.engine.Config.FlagsFile, "agents.files.deliver.v1"), runtimeFlag(w.engine.Config.FlagsFile, "agents.mentions.v1"), runtimeFlag(w.engine.Config.FlagsFile, "agents.web.v1"), runtimeFlag(w.engine.Config.FlagsFile, "agents.schedule.v1"), runtimeFlag(w.engine.Config.FlagsFile, "im.dm.create"), runtimeFlagDefault(w.engine.Config.FlagsFile, "agents.style.conversational.v1", true))
 		if err != nil {
 			return nil, nil, nil, err
 		}
