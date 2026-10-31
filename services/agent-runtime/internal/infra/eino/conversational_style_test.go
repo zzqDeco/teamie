@@ -54,9 +54,9 @@ func TestConversationalStyleSelectsGuidanceAndToolDescWithoutBreakingHistoricalR
 		"teamie-conversational-presence-v1",
 		"去班味",
 		"一句一泡",
-		"2–4 sequential im_send_message calls",
-		"Attach replyToId ONLY on the first bubble",
-		"交付代码或正式产物时不切碎",
+		"1–4 sequential im_send_message calls",
+		"ONLY on the first bubble",
+		"formal deliverables intact",
 		"TEAMIE_AGENT_PERSONA",
 	)
 	if got := strings.Count(newInstruction, "TEAMIE_AGENT_PERSONA {"); got != 1 {
