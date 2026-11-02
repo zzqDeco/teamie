@@ -117,7 +117,7 @@ func RunSubscriber(ctx context.Context, rdb *redis.Client, deliverer HintDeliver
 				continue
 			}
 			switch hint.Type {
-			case "sync.required", "typing", "receipts.changed", "presence":
+			case "sync.required", "typing", "receipts.changed", "presence", "announcement.published":
 			default:
 				continue
 			}

@@ -393,6 +393,49 @@ struct DownloadAttachmentResp {
   2: required binary content
 }
 
+struct AnnouncementDTO {
+  1: required string id (api.body="id")
+  2: required i64 seq (api.body="seq")
+  3: required string title (api.body="title")
+  4: required string body (api.body="body")
+  5: required string authorId (api.body="authorId")
+  6: required string authorName (api.body="authorName")
+  7: required string createdAt (api.body="createdAt")
+}
+
+struct ListAnnouncementsReq {
+  1: optional string beforeSeq (api.query="beforeSeq")
+  2: optional string limit (api.query="limit")
+}
+
+struct ListAnnouncementsResp {
+  1: required list<AnnouncementDTO> items (api.body="items")
+  2: required i64 latestSeq (api.body="latestSeq")
+  3: required i64 readSeq (api.body="readSeq")
+  4: required bool hasMore (api.body="hasMore")
+}
+
+struct MarkAnnouncementsReadReq {
+  1: required i64 seq (api.body="seq")
+}
+
+struct MarkAnnouncementsReadResp {
+  1: required i64 readSeq (api.body="readSeq")
+}
+
+struct CreateAnnouncementReq {
+  1: required string title (api.body="title")
+  2: required string body (api.body="body")
+}
+
+struct AnnouncementResp {
+  1: required AnnouncementDTO announcement (api.body="announcement")
+}
+
+struct DeleteAnnouncementReq {
+  1: required string id (api.path="id")
+}
+
 service ChatHTTPService {
   BootstrapResp GetBootstrap(1: GetBootstrapReq req) (api.get="/api/v1/bootstrap")
   CreateWorkspaceResp CreateWorkspace(1: CreateWorkspaceReq req) (api.post="/api/v1/workspaces", api.status="201")
@@ -422,4 +465,8 @@ service ChatHTTPService {
   AttachmentResp GetAttachmentUpload(1: GetAttachmentUploadReq req) (api.get="/api/v1/conversations/:id/attachment-uploads/:uploadKey")
   EmptyResp DeletePendingAttachment(1: DeletePendingAttachmentReq req) (api.delete="/api/v1/conversations/:id/attachments/:attachmentId")
   DownloadAttachmentResp DownloadAttachment(1: DownloadAttachmentReq req) (api.get="/api/v1/conversations/:id/attachments/:attachmentId/content")
+  ListAnnouncementsResp ListAnnouncements(1: ListAnnouncementsReq req) (api.get="/api/v1/announcements")
+  MarkAnnouncementsReadResp MarkAnnouncementsRead(1: MarkAnnouncementsReadReq req) (api.post="/api/v1/announcements/read")
+  AnnouncementResp CreateAnnouncement(1: CreateAnnouncementReq req) (api.post="/api/v1/admin/announcements", api.status="201")
+  EmptyResp DeleteAnnouncement(1: DeleteAnnouncementReq req) (api.delete="/api/v1/admin/announcements/:id")
 }

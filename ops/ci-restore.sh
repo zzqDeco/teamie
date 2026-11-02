@@ -59,8 +59,11 @@ VALUES('legacy-migrated-review','legacy-migrated-app',2,'approve','admin','Trans
 SQL
     "${pg[@]}" bash -s < deploy/postgres/02-migrate-chat-marketplace.sh
     "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 < services/chat/internal/infra/pg/migrations/010_retire_embedded_marketplace.sql >/dev/null
+    "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 < services/chat/internal/infra/pg/migrations/011_platform_announcements.sql >/dev/null
     "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 <<'SQL'
-INSERT INTO chat_schema_migrations(version) VALUES(10) ON CONFLICT DO NOTHING;
+INSERT INTO chat_schema_migrations(version) VALUES(10),(11) ON CONFLICT DO NOTHING;
+INSERT INTO platform_announcements(id,title,body,author_id,author_name) VALUES('restore-announcement','Teamie v0.4.6','### 更新说明\n- 新增平台公告','owner','Owner');
+INSERT INTO platform_announcement_reads(user_id,read_seq) VALUES('owner',1);
 INSERT INTO conversations(id,workspace_id,type,name) VALUES('restore-conversation','restore-workspace','channel','general');
 INSERT INTO conversation_mutations(actor_id,request_key,request_hash,conversation_id) VALUES('owner','restore-group','fixture-hash','restore-conversation');
 INSERT INTO messages(id,conversation_id,sender_id,sender_name,sender_kind,client_message_id,seq,body,original_body_hash,attachments,original_attachment_ids)
@@ -214,7 +217,10 @@ SQL
     [[ $actual == '00fffe80890a0d:binary.restore.bin:restore-attachment:restore-attachment' ]] || { echo 'Chat attachment binary restore verification failed.' >&2; exit 1; }
     actual=$("${pg[@]}" psql -U postgres -d restore_chat -At -v ON_ERROR_STOP=1 -c \
       "SELECT (SELECT string_agg(version::text,',' ORDER BY version) FROM chat_schema_migrations)||':'||(SELECT attachment_id FROM attachment_uploads WHERE uploader_id='owner' AND upload_key='restore-upload')||':'||(SELECT count(*) FROM attachment_uploads WHERE upload_key='restore-removed' AND attachment_id IS NULL)||':'||(to_regclass('public.marketplace_apps') IS NULL)::text;")
-    [[ $actual == '1,2,3,4,5,6,7,8,9,10:restore-attachment:1:true' ]] || { echo 'Chat upload receipts, tombstones and retired marketplace cleanup verification failed.' >&2; exit 1; }
+    [[ $actual == '1,2,3,4,5,6,7,8,9,10,11:restore-attachment:1:true' ]] || { echo 'Chat upload receipts, tombstones and retired marketplace cleanup verification failed.' >&2; exit 1; }
+    actual=$("${pg[@]}" psql -U postgres -d restore_chat -At -v ON_ERROR_STOP=1 -c \
+      "SELECT a.seq||':'||a.title||':'||r.read_seq FROM platform_announcements a JOIN platform_announcement_reads r ON r.user_id=a.author_id WHERE a.id='restore-announcement';")
+    [[ $actual == '1:Teamie v0.4.6:1' ]] || { echo 'Chat platform announcements restore failed.' >&2; exit 1; }
     actual=$("${pg[@]}" psql -U postgres -d restore_chat -At -v ON_ERROR_STOP=1 -c \
       "SELECT request_hash||':'||conversation_id FROM conversation_mutations WHERE actor_id='owner' AND request_key='restore-group';")
     [[ $actual == 'fixture-hash:restore-conversation' ]] || { echo 'Chat conversation mutation receipt restore failed.' >&2; exit 1; }

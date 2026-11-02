@@ -28,6 +28,7 @@ const modularLayoutFiles = [
   "styles/layout-mobile-compact.css",
 ];
 const modularFeatureFiles = [
+  "styles/announcements.css",
   "styles/attention.css",
   "styles/attachments.css",
   "styles/connection-banner.css",

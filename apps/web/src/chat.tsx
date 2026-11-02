@@ -282,6 +282,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         if (capabilities.current["im.read_receipts.view"]) {
           receiptStore.invalidateAll();
         }
+        void client.invalidateQueries({ queryKey: ["announcements", userId] });
         if (document.visibilityState === "hidden") {
           sendPresence("idle", true);
         } else {
@@ -318,6 +319,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             capabilities.current["im.read_receipts.view"]
           ) {
             receiptStore.invalidate(hint.conversationId);
+          }
+          if (hint.type === "announcement.published") {
+            void client.invalidateQueries({ queryKey: ["announcements"] });
           }
           if (
             hint.type === "presence" &&

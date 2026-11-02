@@ -30,6 +30,7 @@ import {
 } from "./shell-sidebar";
 import { RemoveMemberModal, ShellMembersPane } from "./shell-members-pane";
 import { ConversationAppsPane, WorkspaceMarketplaceModal } from "./marketplace";
+import { AnnouncementModals, usePlatformAnnouncements } from "./announcements";
 import { parseInviteCode, Welcome } from "./shell-welcome";
 import {
   clearPersistedShellNav,
@@ -74,6 +75,8 @@ export function Shell() {
   );
   const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [announcementsHistoryOpen, setAnnouncementsHistoryOpen] = useState(false);
+  const announcements = usePlatformAnnouncements(user?.id);
   const [dialog, setDialog] = useState<DialogKind | null>(null),
     [sidebar, setSidebar] = useState(false),
     [details, setDetails] = useState(false),
@@ -113,6 +116,7 @@ export function Shell() {
     setRecentConversationIds(restored.recentConversationIds);
     setQuickSwitcherOpen(false);
     setShortcutsOpen(false);
+    setAnnouncementsHistoryOpen(false);
   }, [user?.id]);
   useEffect(() => {
     if (
@@ -229,16 +233,25 @@ export function Shell() {
     setAppsOpen(false);
     setDirectError("");
   }, []);
-  const hasOverlayModal =
+  const baseOverlayModal =
     !!dialog || quickSwitcherOpen || shortcutsOpen || managingGroup || managingWorkspaceApps || !!removing;
   const pathname = location.pathname.replace(/\/+$/, "") || "/app";
   const caps = chat.data?.capabilities || {};
   const marketplaceEnabled = caps["im.marketplace.enabled"] !== false;
+  const announcementsPublishEnabled = caps["im.announcements.publish"] !== false;
   const isSettings = ["/app/settings", "/app/profile"].includes(pathname);
   const isAdminPage = pathname === "/app/admin";
   const isGatewayPage = pathname === "/app/admin/gateway";
   const isUsersPage = pathname === "/app/admin/users";
   const isMarketplacePage = pathname === "/app/admin/marketplace";
+  const isAnnouncementsAdminPage = pathname === "/app/admin/announcements";
+  const announcementPopupVisible =
+    !announcementsHistoryOpen &&
+    !baseOverlayModal &&
+    !isAnnouncementsAdminPage &&
+    announcements.hasUnread;
+  const hasOverlayModal =
+    baseOverlayModal || announcementsHistoryOpen || announcementPopupVisible;
   const isDeveloperDocsPage = pathname === "/app/developers/docs";
   const isDevelopersPage =
     pathname === "/app/developers" || isDeveloperDocsPage || !!developerAppMatch;
@@ -253,7 +266,7 @@ export function Shell() {
       attentionData: attentionCount.data,
     });
   const pageTitle = computePageTitle({
-    isAttentionPage, isGatewayPage, isUsersPage, isMarketplacePage, isDevelopersPage, isAdminPage, isAgentsPage,
+    isAttentionPage, isGatewayPage, isUsersPage, isMarketplacePage, isAnnouncementsAdminPage, isDevelopersPage, isAdminPage, isAgentsPage,
     isDirectoryPage, isSettings, workspace, conversation, userId: user!.id, members,
   });
   useDocumentTitle(pageTitle, urgentCount, hasChannelUnread);
@@ -273,7 +286,7 @@ export function Shell() {
   )
     setViewKey({ conversation: viewConversationId, target: initialMessageId });
   const isManagement =
-    isSettings || isAdminPage || isGatewayPage || isUsersPage || isMarketplacePage || isDevelopersPage || isAgentsPage || isDirectoryPage;
+    isSettings || isAdminPage || isGatewayPage || isUsersPage || isMarketplacePage || isAnnouncementsAdminPage || isDevelopersPage || isAgentsPage || isDirectoryPage;
   const appsAvailable = marketplaceEnabled && !isManagement && !!workspace && conversation?.type === "group";
   const appsVisible = appsOpen && !details && appsAvailable;
   const membersVisible = details && !isManagement && !!workspace && !!conversation;
@@ -418,7 +431,7 @@ export function Shell() {
     chat.data && !match && !directoryMatch && !legacyDirectoryMatch && !agentMatch && !developerAppMatch &&
     ![
       "/app", "/app/agents", "/app/developers", "/app/developers/docs", "/app/settings", "/app/profile",
-      "/app/admin", "/app/admin/gateway", "/app/admin/users", "/app/admin/marketplace", "/app/attention",
+      "/app/admin", "/app/admin/gateway", "/app/admin/users", "/app/admin/marketplace", "/app/admin/announcements", "/app/attention",
     ].includes(pathname)
   )
     return <Navigate to="/app" replace />;
@@ -439,6 +452,8 @@ export function Shell() {
         members={members} onCloseSidebar={closeSidebar}
         onSelectWorkspace={selectWorkspace} onOpenDialog={openDialog}
         onSignOut={() => void signOut()} onShortcuts={() => setShortcutsOpen(true)}
+        onOpenAnnouncements={() => setAnnouncementsHistoryOpen(true)}
+        hasUnreadAnnouncement={announcements.hasUnread}
       />
       {sidebar && mobile && (
         <button className="sidebar-shade" onClick={() => setSidebar(false)} aria-label="关闭侧栏" />
@@ -459,6 +474,8 @@ export function Shell() {
           <ShellManagementView
             user={user!} isGatewayPage={isGatewayPage} isUsersPage={isUsersPage}
             isMarketplacePage={isMarketplacePage}
+            isAnnouncementsAdminPage={isAnnouncementsAdminPage}
+            announcementsPublishEnabled={announcementsPublishEnabled}
             isDevelopersPage={isDevelopersPage}
             isDeveloperDocsPage={isDeveloperDocsPage}
             developerAppId={developerAppMatch?.params.appId}
@@ -601,6 +618,20 @@ export function Shell() {
           onConfirm={() => void remove()}
         />
       )}
+      <AnnouncementModals
+        user={user!}
+        latest={announcements.latest}
+        latestSeq={announcements.latestSeq}
+        readSeq={announcements.readSeq}
+        hasUnread={announcements.hasUnread}
+        unreadCount={announcements.unreadCount}
+        suppressPopup={baseOverlayModal || isAnnouncementsAdminPage}
+        historyOpen={announcementsHistoryOpen}
+        onOpenHistory={() => setAnnouncementsHistoryOpen(true)}
+        onCloseHistory={() => setAnnouncementsHistoryOpen(false)}
+        onMarkRead={announcements.markRead}
+        onDismissOptimistic={announcements.applyLocalReadSeq}
+      />
     </div>
   );
 }

@@ -26,6 +26,11 @@ var Implemented = map[string]bool{
 	"im.message.edit": true, "im.message.retract": true, "im.message.mentions": true, "im.typing.publish": true,
 	"im.presence.publish": true, "im.attachments.upload": true, "im.reactions.create": true, "im.threads.create": false,
 	"im.read_receipts.view": true, "im.notifications.configure": true, "im.marketplace.enabled": true,
+	"im.announcements.publish": true,
+}
+
+var defaultEnabledWhenOmitted = map[string]bool{
+	"im.announcements.publish": true,
 }
 
 // Load reads and intersects the feature-flag file with Implemented capabilities, failing closed on error.
@@ -48,7 +53,11 @@ func (f Flags) Load() Snapshot {
 	}
 	s.Revision = requested.Revision
 	for k, v := range Implemented {
-		s.Flags[k] = v && requested.Flags[k]
+		flagVal, present := requested.Flags[k]
+		if !present && defaultEnabledWhenOmitted[k] {
+			flagVal = true
+		}
+		s.Flags[k] = v && flagVal
 	}
 	return s
 }

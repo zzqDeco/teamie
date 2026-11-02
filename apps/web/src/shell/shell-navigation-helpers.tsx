@@ -7,6 +7,7 @@ import {
   Bot,
   Code2,
   KeyRound,
+  Megaphone,
   Menu,
   Settings,
   ShieldCheck,
@@ -25,6 +26,7 @@ import { PlatformInvitations } from "../admin";
 import { PlatformUsers } from "../platform-users";
 import { ModelGatewaySettings } from "../model-gateway";
 import { PlatformMarketplace } from "../marketplace";
+import { PlatformAnnouncementsAdmin } from "../announcements-admin";
 import { DeveloperPortal } from "../developers";
 import { AgentDetail, MyAgents } from "../agents";
 import { WorkspaceMembers } from "../members";
@@ -43,6 +45,8 @@ export function ShellManagementView({
   isGatewayPage,
   isUsersPage,
   isMarketplacePage = false,
+  isAnnouncementsAdminPage = false,
+  announcementsPublishEnabled = true,
   isDevelopersPage = false,
   isDeveloperDocsPage = false,
   developerAppId,
@@ -64,6 +68,8 @@ export function ShellManagementView({
   isGatewayPage: boolean;
   isUsersPage: boolean;
   isMarketplacePage?: boolean;
+  isAnnouncementsAdminPage?: boolean;
+  announcementsPublishEnabled?: boolean;
   isDevelopersPage?: boolean;
   isDeveloperDocsPage?: boolean;
   developerAppId?: string;
@@ -95,6 +101,8 @@ export function ShellManagementView({
           <KeyRound size={ICON.md} />
         ) : isMarketplacePage ? (
           <Blocks size={ICON.md} />
+        ) : isAnnouncementsAdminPage ? (
+          <Megaphone size={ICON.md} />
         ) : isDevelopersPage ? (
           <Code2 size={ICON.md} />
         ) : isDirectoryPage || isUsersPage ? (
@@ -111,24 +119,30 @@ export function ShellManagementView({
             ? "模型网关"
             : isMarketplacePage
               ? "应用市场"
-              : isDevelopersPage
-                ? "开发者平台"
-                : isUsersPage
-                  ? "用户管理"
-                  : isAdminPage
-                    ? "注册邀请"
-                    : isAgentsPage
-                      ? "个人 Agent"
-                      : isDirectoryPage
-                        ? "成员"
-                        : "账号设置"}
+              : isAnnouncementsAdminPage
+                ? "平台公告"
+                : isDevelopersPage
+                  ? "开发者平台"
+                  : isUsersPage
+                    ? "用户管理"
+                    : isAdminPage
+                      ? "注册邀请"
+                      : isAgentsPage
+                        ? "个人 Agent"
+                        : isDirectoryPage
+                          ? "成员"
+                          : "账号设置"}
         </span>
         <Link to={backChatRoute}>
           <ArrowLeft size={ICON.sm} />
           <span>对话</span>
         </Link>
       </header>
-      {(isAdminPage || isGatewayPage || isUsersPage || isMarketplacePage) &&
+      {(isAdminPage ||
+        isGatewayPage ||
+        isUsersPage ||
+        isMarketplacePage ||
+        isAnnouncementsAdminPage) &&
         user.platformRole === "admin" && (
           <nav className="admin-section-nav">
             <Link to="/app/admin" className={isAdminPage ? "active" : ""}>
@@ -156,12 +170,23 @@ export function ShellManagementView({
               <Blocks size={ICON.xs} />
               应用市场
             </Link>
+            <Link
+              to="/app/admin/announcements"
+              className={isAnnouncementsAdminPage ? "active" : ""}
+            >
+              <Megaphone size={ICON.xs} />
+              平台公告
+            </Link>
           </nav>
         )}
       {isUsersPage ? (
         <PlatformUsers />
       ) : isMarketplacePage ? (
         <PlatformMarketplace />
+      ) : isAnnouncementsAdminPage ? (
+        <PlatformAnnouncementsAdmin
+          publishEnabled={announcementsPublishEnabled}
+        />
       ) : isDevelopersPage ? (
         <DeveloperPortal
           key={`${user.id}:${developerAppId || ""}:${isDeveloperDocsPage ? "docs" : "apps"}`}
@@ -269,6 +294,7 @@ export function computePageTitle({
   isGatewayPage,
   isUsersPage,
   isMarketplacePage = false,
+  isAnnouncementsAdminPage = false,
   isDevelopersPage = false,
   isAdminPage,
   isAgentsPage,
@@ -283,6 +309,7 @@ export function computePageTitle({
   isGatewayPage: boolean;
   isUsersPage: boolean;
   isMarketplacePage?: boolean;
+  isAnnouncementsAdminPage?: boolean;
   isDevelopersPage?: boolean;
   isAdminPage: boolean;
   isAgentsPage: boolean;
@@ -299,7 +326,9 @@ export function computePageTitle({
       ? "模型网关"
       : isMarketplacePage
         ? "应用市场"
-        : isDevelopersPage
+        : isAnnouncementsAdminPage
+          ? "平台公告"
+          : isDevelopersPage
           ? "开发者平台"
           : isUsersPage
         ? "用户管理"

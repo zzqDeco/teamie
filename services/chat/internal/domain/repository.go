@@ -134,3 +134,11 @@ type MutationRepository interface {
 	LockMutation(context.Context, string, string) (ConversationMutation, bool, error)
 	SaveMutation(context.Context, string, string, ConversationMutation) error
 }
+
+// AnnouncementRepository defines persistence operations for platform announcements and per-user read cursors.
+type AnnouncementRepository interface {
+	InsertAnnouncement(ctx context.Context, a Announcement) (Announcement, error)
+	ListAnnouncements(ctx context.Context, userID string, beforeSeq int64, limit int) (AnnouncementsPage, error)
+	MarkAnnouncementsRead(ctx context.Context, userID string, seq int64) (int64, error)
+	DeleteAnnouncement(ctx context.Context, id string) (bool, error)
+}

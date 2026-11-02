@@ -90,6 +90,12 @@ func (s *StreamApp) deliverReceiptToUser(ctx context.Context, clients []domain.C
 // Deliver verifies sender/recipient membership and broadcasts a realtime hint to matching clients.
 func (s *StreamApp) Deliver(ctx context.Context, clients []domain.Client, hint domain.Event) {
 	switch hint.Type {
+	case "announcement.published":
+		ev := domain.Event{Type: "announcement.published"}
+		for _, c := range clients {
+			c.Send(ev)
+		}
+		return
 	case "typing":
 		if s.Chat == nil || (s.Flags != nil && !s.Flags.TypingPublishEnabled()) {
 			return

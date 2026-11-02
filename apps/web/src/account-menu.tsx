@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { Code2, Keyboard, LogOut, Settings } from "lucide-react";
+import { Code2, Keyboard, LogOut, Megaphone, Settings } from "lucide-react";
 import type { User } from "@teamie/api-client";
 import type { Connection } from "./chat";
 import { Avatar } from "./ui";
@@ -15,6 +15,8 @@ export function AccountMenu({
   onSignOut,
   onNavigate,
   onShortcuts,
+  onAnnouncements,
+  hasUnreadAnnouncement = false,
 }: {
   user: User;
   busy: boolean;
@@ -24,6 +26,8 @@ export function AccountMenu({
   onSignOut: () => void;
   onNavigate: () => void;
   onShortcuts?: () => void;
+  onAnnouncements?: () => void;
+  hasUnreadAnnouncement?: boolean;
 }) {
   const { expanded, setOpen, panel, trigger, popover, id, onBlur } =
     usePopover(active);
@@ -69,6 +73,23 @@ export function AccountMenu({
             <Code2 size={ICON.md} aria-hidden="true" />
             开发者平台
           </Link>
+          {onAnnouncements && (
+            <button
+              type="button"
+              onClick={() => {
+                trigger.current?.focus({ preventScroll: true });
+                setOpen(false);
+                onNavigate();
+                onAnnouncements();
+              }}
+            >
+              <Megaphone size={ICON.md} aria-hidden="true" />
+              平台公告
+              {hasUnreadAnnouncement && (
+                <span className="account-menu-dot" aria-hidden="true" />
+              )}
+            </button>
+          )}
           {onShortcuts && (
             <button
               type="button"

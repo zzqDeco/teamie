@@ -268,6 +268,19 @@ func (w *agentWorker) validate(ctx context.Context, inputs []Input) ([]Input, er
 			valid = append(valid, in)
 			continue
 		}
+		if in.Kind == "platform.announcement" {
+			if err := w.engine.authorizeAnnouncementInput(ctx, w.imc, w.lease, in); err != nil {
+				if errors.Is(err, errContextUnavailable) {
+					if err = w.engine.Store.Skip(ctx, w.lease, in.EventID); err != nil {
+						return nil, err
+					}
+					continue
+				}
+				return nil, err
+			}
+			valid = append(valid, in)
+			continue
+		}
 		message, err := w.imc.Message(ctx, in.ConversationID, in.MessageID)
 		if err != nil {
 			var api *APIError
@@ -377,6 +390,17 @@ func (w *agentWorker) prepare(ctx context.Context, items []Input, resume *checkp
 		}
 		if in.Kind == "im.unread_digest" {
 			if readErr := w.engine.authorizeUnreadDigestInput(ctx, w.imc, w.lease, in); readErr != nil {
+				if errors.Is(readErr, errContextUnavailable) {
+					invalid = append(invalid, in.EventID)
+					continue
+				}
+				_ = w.engine.Store.FinishRun(ctx, w.lease, run, "retry", "im_unavailable", true)
+				return nil, nil, nil, &ModelError{Code: "im_unavailable", Retry: true}
+			}
+			continue
+		}
+		if in.Kind == "platform.announcement" {
+			if readErr := w.engine.authorizeAnnouncementInput(ctx, w.imc, w.lease, in); readErr != nil {
 				if errors.Is(readErr, errContextUnavailable) {
 					invalid = append(invalid, in.EventID)
 					continue

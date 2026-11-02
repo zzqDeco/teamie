@@ -255,6 +255,8 @@ func (a *ContextArchive) inputMessageSources(ctx context.Context, r *Run, messag
 		prefix = "TEAMIE_APP_NOTIFICATION "
 	} else if strings.HasPrefix(text, "TEAMIE_UNREAD_DIGEST ") {
 		prefix = "TEAMIE_UNREAD_DIGEST "
+	} else if strings.HasPrefix(text, "TEAMIE_PLATFORM_ANNOUNCEMENT ") {
+		prefix = "TEAMIE_PLATFORM_ANNOUNCEMENT "
 	}
 	if !strings.HasPrefix(text, prefix) {
 		return nil, false, nil
@@ -285,7 +287,7 @@ func (a *ContextArchive) inputMessageSources(ctx context.Context, r *Run, messag
 		return nil, false, nil
 	}
 	refs, overflow := inputSources([]Input{actual})
-	if overflow || actual.Kind == "task.notification" || actual.Kind == "schedule.wakeup" || actual.Kind == "app.notification" || actual.Kind == "im.unread_digest" {
+	if overflow || actual.Kind == "task.notification" || actual.Kind == "schedule.wakeup" || actual.Kind == "app.notification" || actual.Kind == "im.unread_digest" || actual.Kind == "platform.announcement" {
 		refs, err = a.runSources(ctx, runID)
 	} else {
 		refs, err = canonicalContextSources(refs)

@@ -2619,6 +2619,264 @@ func (p *DownloadAttachmentResp) String() string {
 	return fmt.Sprintf("DownloadAttachmentResp(%+v)", *p)
 }
 
+type AnnouncementDTO struct {
+	ID         string `thrift:"id,1,required" json:"id"`
+	Seq        int64  `thrift:"seq,2,required" json:"seq"`
+	Title      string `thrift:"title,3,required" json:"title"`
+	Body       string `thrift:"body,4,required" json:"body"`
+	AuthorId   string `thrift:"authorId,5,required" json:"authorId"`
+	AuthorName string `thrift:"authorName,6,required" json:"authorName"`
+	CreatedAt  string `thrift:"createdAt,7,required" json:"createdAt"`
+}
+
+func NewAnnouncementDTO() *AnnouncementDTO {
+	return &AnnouncementDTO{}
+}
+
+func (p *AnnouncementDTO) InitDefault() {
+}
+
+func (p *AnnouncementDTO) GetID() (v string) {
+	return p.ID
+}
+
+func (p *AnnouncementDTO) GetSeq() (v int64) {
+	return p.Seq
+}
+
+func (p *AnnouncementDTO) GetTitle() (v string) {
+	return p.Title
+}
+
+func (p *AnnouncementDTO) GetBody() (v string) {
+	return p.Body
+}
+
+func (p *AnnouncementDTO) GetAuthorId() (v string) {
+	return p.AuthorId
+}
+
+func (p *AnnouncementDTO) GetAuthorName() (v string) {
+	return p.AuthorName
+}
+
+func (p *AnnouncementDTO) GetCreatedAt() (v string) {
+	return p.CreatedAt
+}
+
+func (p *AnnouncementDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AnnouncementDTO(%+v)", *p)
+}
+
+type ListAnnouncementsReq struct {
+	BeforeSeq *string `thrift:"beforeSeq,1,optional" json:"beforeSeq,omitempty"`
+	Limit     *string `thrift:"limit,2,optional" json:"limit,omitempty"`
+}
+
+func NewListAnnouncementsReq() *ListAnnouncementsReq {
+	return &ListAnnouncementsReq{}
+}
+
+func (p *ListAnnouncementsReq) InitDefault() {
+}
+
+var ListAnnouncementsReq_BeforeSeq_DEFAULT string
+
+func (p *ListAnnouncementsReq) GetBeforeSeq() (v string) {
+	if !p.IsSetBeforeSeq() {
+		return ListAnnouncementsReq_BeforeSeq_DEFAULT
+	}
+	return *p.BeforeSeq
+}
+
+var ListAnnouncementsReq_Limit_DEFAULT string
+
+func (p *ListAnnouncementsReq) GetLimit() (v string) {
+	if !p.IsSetLimit() {
+		return ListAnnouncementsReq_Limit_DEFAULT
+	}
+	return *p.Limit
+}
+
+func (p *ListAnnouncementsReq) IsSetBeforeSeq() bool {
+	return p.BeforeSeq != nil
+}
+
+func (p *ListAnnouncementsReq) IsSetLimit() bool {
+	return p.Limit != nil
+}
+
+func (p *ListAnnouncementsReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ListAnnouncementsReq(%+v)", *p)
+}
+
+type ListAnnouncementsResp struct {
+	Items     []*AnnouncementDTO `thrift:"items,1,required,list<AnnouncementDTO>" json:"items"`
+	LatestSeq int64              `thrift:"latestSeq,2,required" json:"latestSeq"`
+	ReadSeq   int64              `thrift:"readSeq,3,required" json:"readSeq"`
+	HasMore   bool               `thrift:"hasMore,4,required" json:"hasMore"`
+}
+
+func NewListAnnouncementsResp() *ListAnnouncementsResp {
+	return &ListAnnouncementsResp{}
+}
+
+func (p *ListAnnouncementsResp) InitDefault() {
+}
+
+func (p *ListAnnouncementsResp) GetItems() (v []*AnnouncementDTO) {
+	return p.Items
+}
+
+func (p *ListAnnouncementsResp) GetLatestSeq() (v int64) {
+	return p.LatestSeq
+}
+
+func (p *ListAnnouncementsResp) GetReadSeq() (v int64) {
+	return p.ReadSeq
+}
+
+func (p *ListAnnouncementsResp) GetHasMore() (v bool) {
+	return p.HasMore
+}
+
+func (p *ListAnnouncementsResp) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ListAnnouncementsResp(%+v)", *p)
+}
+
+type MarkAnnouncementsReadReq struct {
+	Seq int64 `thrift:"seq,1,required" json:"seq"`
+}
+
+func NewMarkAnnouncementsReadReq() *MarkAnnouncementsReadReq {
+	return &MarkAnnouncementsReadReq{}
+}
+
+func (p *MarkAnnouncementsReadReq) InitDefault() {
+}
+
+func (p *MarkAnnouncementsReadReq) GetSeq() (v int64) {
+	return p.Seq
+}
+
+func (p *MarkAnnouncementsReadReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("MarkAnnouncementsReadReq(%+v)", *p)
+}
+
+type MarkAnnouncementsReadResp struct {
+	ReadSeq int64 `thrift:"readSeq,1,required" json:"readSeq"`
+}
+
+func NewMarkAnnouncementsReadResp() *MarkAnnouncementsReadResp {
+	return &MarkAnnouncementsReadResp{}
+}
+
+func (p *MarkAnnouncementsReadResp) InitDefault() {
+}
+
+func (p *MarkAnnouncementsReadResp) GetReadSeq() (v int64) {
+	return p.ReadSeq
+}
+
+func (p *MarkAnnouncementsReadResp) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("MarkAnnouncementsReadResp(%+v)", *p)
+}
+
+type CreateAnnouncementReq struct {
+	Title string `thrift:"title,1,required" json:"title"`
+	Body  string `thrift:"body,2,required" json:"body"`
+}
+
+func NewCreateAnnouncementReq() *CreateAnnouncementReq {
+	return &CreateAnnouncementReq{}
+}
+
+func (p *CreateAnnouncementReq) InitDefault() {
+}
+
+func (p *CreateAnnouncementReq) GetTitle() (v string) {
+	return p.Title
+}
+
+func (p *CreateAnnouncementReq) GetBody() (v string) {
+	return p.Body
+}
+
+func (p *CreateAnnouncementReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("CreateAnnouncementReq(%+v)", *p)
+}
+
+type AnnouncementResp struct {
+	Announcement *AnnouncementDTO `thrift:"announcement,1,required" json:"announcement"`
+}
+
+func NewAnnouncementResp() *AnnouncementResp {
+	return &AnnouncementResp{}
+}
+
+func (p *AnnouncementResp) InitDefault() {
+}
+
+var AnnouncementResp_Announcement_DEFAULT *AnnouncementDTO
+
+func (p *AnnouncementResp) GetAnnouncement() (v *AnnouncementDTO) {
+	if !p.IsSetAnnouncement() {
+		return AnnouncementResp_Announcement_DEFAULT
+	}
+	return p.Announcement
+}
+
+func (p *AnnouncementResp) IsSetAnnouncement() bool {
+	return p.Announcement != nil
+}
+
+func (p *AnnouncementResp) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AnnouncementResp(%+v)", *p)
+}
+
+type DeleteAnnouncementReq struct {
+	ID string `thrift:"id,1,required" json:"id"`
+}
+
+func NewDeleteAnnouncementReq() *DeleteAnnouncementReq {
+	return &DeleteAnnouncementReq{}
+}
+
+func (p *DeleteAnnouncementReq) InitDefault() {
+}
+
+func (p *DeleteAnnouncementReq) GetID() (v string) {
+	return p.ID
+}
+
+func (p *DeleteAnnouncementReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("DeleteAnnouncementReq(%+v)", *p)
+}
+
 type ChatHTTPService interface {
 	GetBootstrap(ctx context.Context, req *GetBootstrapReq) (r *BootstrapResp, err error)
 
@@ -2675,4 +2933,12 @@ type ChatHTTPService interface {
 	DeletePendingAttachment(ctx context.Context, req *DeletePendingAttachmentReq) (r *EmptyResp, err error)
 
 	DownloadAttachment(ctx context.Context, req *DownloadAttachmentReq) (r *DownloadAttachmentResp, err error)
+
+	ListAnnouncements(ctx context.Context, req *ListAnnouncementsReq) (r *ListAnnouncementsResp, err error)
+
+	MarkAnnouncementsRead(ctx context.Context, req *MarkAnnouncementsReadReq) (r *MarkAnnouncementsReadResp, err error)
+
+	CreateAnnouncement(ctx context.Context, req *CreateAnnouncementReq) (r *AnnouncementResp, err error)
+
+	DeleteAnnouncement(ctx context.Context, req *DeleteAnnouncementReq) (r *EmptyResp, err error)
 }

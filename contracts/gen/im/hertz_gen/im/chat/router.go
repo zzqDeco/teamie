@@ -75,9 +75,13 @@ const (
 	PatternGetAttachmentUpload = "GET /api/v1/conversations/{id}/attachment-uploads/{uploadKey}"
 	PatternDeletePendingAttachment = "DELETE /api/v1/conversations/{id}/attachments/{attachmentId}"
 	PatternDownloadAttachment = "GET /api/v1/conversations/{id}/attachments/{attachmentId}/content"
+	PatternListAnnouncements = "GET /api/v1/announcements"
+	PatternMarkAnnouncementsRead = "POST /api/v1/announcements/read"
+	PatternCreateAnnouncement = "POST /api/v1/admin/announcements"
+	PatternDeleteAnnouncement = "DELETE /api/v1/admin/announcements/{id}"
 )
 
-// ChatHTTPServiceRoutes lists all 28 route specifications declared on ChatHTTPService.
+// ChatHTTPServiceRoutes lists all 32 route specifications declared on ChatHTTPService.
 var ChatHTTPServiceRoutes = []RouteSpec{
 	{Name: "GetBootstrap", Method: "GET", Path: "/api/v1/bootstrap", MuxPattern: PatternGetBootstrap, RequestType: "GetBootstrapReq", ResponseType: "BootstrapResp"},
 	{Name: "CreateWorkspace", Method: "POST", Path: "/api/v1/workspaces", MuxPattern: PatternCreateWorkspace, RequestType: "CreateWorkspaceReq", ResponseType: "CreateWorkspaceResp"},
@@ -107,6 +111,10 @@ var ChatHTTPServiceRoutes = []RouteSpec{
 	{Name: "GetAttachmentUpload", Method: "GET", Path: "/api/v1/conversations/:id/attachment-uploads/:uploadKey", MuxPattern: PatternGetAttachmentUpload, RequestType: "GetAttachmentUploadReq", ResponseType: "AttachmentResp"},
 	{Name: "DeletePendingAttachment", Method: "DELETE", Path: "/api/v1/conversations/:id/attachments/:attachmentId", MuxPattern: PatternDeletePendingAttachment, RequestType: "DeletePendingAttachmentReq", ResponseType: "EmptyResp"},
 	{Name: "DownloadAttachment", Method: "GET", Path: "/api/v1/conversations/:id/attachments/:attachmentId/content", MuxPattern: PatternDownloadAttachment, RequestType: "DownloadAttachmentReq", ResponseType: "DownloadAttachmentResp"},
+	{Name: "ListAnnouncements", Method: "GET", Path: "/api/v1/announcements", MuxPattern: PatternListAnnouncements, RequestType: "ListAnnouncementsReq", ResponseType: "ListAnnouncementsResp"},
+	{Name: "MarkAnnouncementsRead", Method: "POST", Path: "/api/v1/announcements/read", MuxPattern: PatternMarkAnnouncementsRead, RequestType: "MarkAnnouncementsReadReq", ResponseType: "MarkAnnouncementsReadResp"},
+	{Name: "CreateAnnouncement", Method: "POST", Path: "/api/v1/admin/announcements", MuxPattern: PatternCreateAnnouncement, RequestType: "CreateAnnouncementReq", ResponseType: "AnnouncementResp"},
+	{Name: "DeleteAnnouncement", Method: "DELETE", Path: "/api/v1/admin/announcements/:id", MuxPattern: PatternDeleteAnnouncement, RequestType: "DeleteAnnouncementReq", ResponseType: "EmptyResp"},
 }
 
 // ChatHTTPServiceRouteHandlers binds every endpoint in ChatHTTPService to an http.HandlerFunc.
@@ -139,6 +147,10 @@ type ChatHTTPServiceRouteHandlers struct {
 	GetAttachmentUpload http.HandlerFunc
 	DeletePendingAttachment http.HandlerFunc
 	DownloadAttachment http.HandlerFunc
+	ListAnnouncements http.HandlerFunc
+	MarkAnnouncementsRead http.HandlerFunc
+	CreateAnnouncement http.HandlerFunc
+	DeleteAnnouncement http.HandlerFunc
 }
 
 // RegisterChatHTTPServiceRoutes registers all ChatHTTPService endpoints on mux and panics if any IDL endpoint handler is nil.
@@ -255,6 +267,22 @@ func RegisterChatHTTPServiceRoutes(mux *http.ServeMux, h ChatHTTPServiceRouteHan
 		panic("ChatHTTPServiceRouteHandlers.DownloadAttachment (" + PatternDownloadAttachment + ") is nil")
 	}
 	mux.HandleFunc(PatternDownloadAttachment, h.DownloadAttachment)
+	if h.ListAnnouncements == nil {
+		panic("ChatHTTPServiceRouteHandlers.ListAnnouncements (" + PatternListAnnouncements + ") is nil")
+	}
+	mux.HandleFunc(PatternListAnnouncements, h.ListAnnouncements)
+	if h.MarkAnnouncementsRead == nil {
+		panic("ChatHTTPServiceRouteHandlers.MarkAnnouncementsRead (" + PatternMarkAnnouncementsRead + ") is nil")
+	}
+	mux.HandleFunc(PatternMarkAnnouncementsRead, h.MarkAnnouncementsRead)
+	if h.CreateAnnouncement == nil {
+		panic("ChatHTTPServiceRouteHandlers.CreateAnnouncement (" + PatternCreateAnnouncement + ") is nil")
+	}
+	mux.HandleFunc(PatternCreateAnnouncement, h.CreateAnnouncement)
+	if h.DeleteAnnouncement == nil {
+		panic("ChatHTTPServiceRouteHandlers.DeleteAnnouncement (" + PatternDeleteAnnouncement + ") is nil")
+	}
+	mux.HandleFunc(PatternDeleteAnnouncement, h.DeleteAnnouncement)
 }
 
 // RegisterChatHTTPServiceHertzServer registers ChatHTTPServer endpoints on a native Hertz route.RouterGroup.
@@ -1496,6 +1524,156 @@ func RegisterChatHTTPServiceHertzServer(r *route.RouterGroup, srv ChatHTTPServer
 			m.WriteOK(ctx, c, resp)
 		})
 	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "ListAnnouncements", Method: "GET", Path: "/api/v1/announcements", MuxPattern: PatternListAnnouncements, RequestType: "ListAnnouncementsReq", ResponseType: "ListAnnouncementsResp"}); hfn != nil {
+			r.GET("/api/v1/announcements", hfn)
+		} else {
+			r.GET("/api/v1/announcements", func(ctx context.Context, c *app.RequestContext) {
+				var req ListAnnouncementsReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if v := c.Query("beforeSeq"); v != "" {
+					req.BeforeSeq = &v
+				}
+				if v := c.Query("limit"); v != "" {
+					req.Limit = &v
+				}
+				resp, err := srv.ListAnnouncements(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.GET("/api/v1/announcements", func(ctx context.Context, c *app.RequestContext) {
+			var req ListAnnouncementsReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if v := c.Query("beforeSeq"); v != "" {
+				req.BeforeSeq = &v
+			}
+			if v := c.Query("limit"); v != "" {
+				req.Limit = &v
+			}
+			resp, err := srv.ListAnnouncements(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "MarkAnnouncementsRead", Method: "POST", Path: "/api/v1/announcements/read", MuxPattern: PatternMarkAnnouncementsRead, RequestType: "MarkAnnouncementsReadReq", ResponseType: "MarkAnnouncementsReadResp"}); hfn != nil {
+			r.POST("/api/v1/announcements/read", hfn)
+		} else {
+			r.POST("/api/v1/announcements/read", func(ctx context.Context, c *app.RequestContext) {
+				var req MarkAnnouncementsReadReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				resp, err := srv.MarkAnnouncementsRead(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.POST("/api/v1/announcements/read", func(ctx context.Context, c *app.RequestContext) {
+			var req MarkAnnouncementsReadReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			resp, err := srv.MarkAnnouncementsRead(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "CreateAnnouncement", Method: "POST", Path: "/api/v1/admin/announcements", MuxPattern: PatternCreateAnnouncement, RequestType: "CreateAnnouncementReq", ResponseType: "AnnouncementResp"}); hfn != nil {
+			r.POST("/api/v1/admin/announcements", hfn)
+		} else {
+			r.POST("/api/v1/admin/announcements", func(ctx context.Context, c *app.RequestContext) {
+				var req CreateAnnouncementReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				resp, err := srv.CreateAnnouncement(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.POST("/api/v1/admin/announcements", func(ctx context.Context, c *app.RequestContext) {
+			var req CreateAnnouncementReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			resp, err := srv.CreateAnnouncement(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "DeleteAnnouncement", Method: "DELETE", Path: "/api/v1/admin/announcements/:id", MuxPattern: PatternDeleteAnnouncement, RequestType: "DeleteAnnouncementReq", ResponseType: "EmptyResp"}); hfn != nil {
+			r.DELETE("/api/v1/admin/announcements/:id", hfn)
+		} else {
+			r.DELETE("/api/v1/admin/announcements/:id", func(ctx context.Context, c *app.RequestContext) {
+				var req DeleteAnnouncementReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				resp, err := srv.DeleteAnnouncement(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.DELETE("/api/v1/admin/announcements/:id", func(ctx context.Context, c *app.RequestContext) {
+			var req DeleteAnnouncementReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			resp, err := srv.DeleteAnnouncement(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
 }
 
 // RegisterChatHTTPServer binds ChatHTTPServer methods using HTTPResponder with optional per-route handler overrides.
@@ -2040,6 +2218,82 @@ func RegisterChatHTTPServer(mux *http.ServeMux, srv ChatHTTPServer, m HTTPRespon
 			fn = mw.WrapRoute(RouteSpec{Name: "DownloadAttachment", Method: "GET", Path: "/api/v1/conversations/:id/attachments/:attachmentId/content", MuxPattern: PatternDownloadAttachment, RequestType: "DownloadAttachmentReq", ResponseType: "DownloadAttachmentResp"}, fn)
 		}
 		h.DownloadAttachment = fn
+	}
+	if h.ListAnnouncements == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req ListAnnouncementsReq
+			q := r.URL.Query()
+			if v := q.Get("beforeSeq"); v != "" {
+				req.BeforeSeq = &v
+			}
+			if v := q.Get("limit"); v != "" {
+				req.Limit = &v
+			}
+			resp, err := srv.ListAnnouncements(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "ListAnnouncements", Method: "GET", Path: "/api/v1/announcements", MuxPattern: PatternListAnnouncements, RequestType: "ListAnnouncementsReq", ResponseType: "ListAnnouncementsResp"}, fn)
+		}
+		h.ListAnnouncements = fn
+	}
+	if h.MarkAnnouncementsRead == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req MarkAnnouncementsReadReq
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
+			}
+			resp, err := srv.MarkAnnouncementsRead(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "MarkAnnouncementsRead", Method: "POST", Path: "/api/v1/announcements/read", MuxPattern: PatternMarkAnnouncementsRead, RequestType: "MarkAnnouncementsReadReq", ResponseType: "MarkAnnouncementsReadResp"}, fn)
+		}
+		h.MarkAnnouncementsRead = fn
+	}
+	if h.CreateAnnouncement == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req CreateAnnouncementReq
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
+			}
+			resp, err := srv.CreateAnnouncement(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusCreated, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "CreateAnnouncement", Method: "POST", Path: "/api/v1/admin/announcements", MuxPattern: PatternCreateAnnouncement, RequestType: "CreateAnnouncementReq", ResponseType: "AnnouncementResp"}, fn)
+		}
+		h.CreateAnnouncement = fn
+	}
+	if h.DeleteAnnouncement == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req DeleteAnnouncementReq
+			req.ID = r.PathValue("id")
+			_, err := srv.DeleteAnnouncement(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusNoContent, nil)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "DeleteAnnouncement", Method: "DELETE", Path: "/api/v1/admin/announcements/:id", MuxPattern: PatternDeleteAnnouncement, RequestType: "DeleteAnnouncementReq", ResponseType: "EmptyResp"}, fn)
+		}
+		h.DeleteAnnouncement = fn
 	}
 	RegisterChatHTTPServiceRoutes(mux, h)
 }

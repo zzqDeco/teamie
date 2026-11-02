@@ -9,6 +9,8 @@ import type {
   AdminModelProfileDTO,
   AdminModelProviderDTO,
   AdminUserPageResp,
+  AnnouncementDTO,
+  AnnouncementResp,
   AttachmentDTO,
   AttachmentLimitsDTO,
   AttentionItemDTO,
@@ -17,9 +19,12 @@ import type {
   ConversationDTO,
   CreateAdminModelProfileReq,
   CreateAdminModelProviderReq,
+  CreateAnnouncementReq,
   CreatePasswordResetLinkResp,
   EventDTO,
+  ListAnnouncementsResp,
   ListMessagesResp,
+  MarkAnnouncementsReadResp,
   MemberDTO,
   MemberReadReceiptDTO,
   MentionDTO,
@@ -210,3 +215,9 @@ export type RotatedDeveloperMarketplaceAppSecret = RotateDeveloperMarketplaceApp
 export type DeveloperMarketplaceAppDetail = DeveloperMarketplaceAppDetailResp;
 export type VerifiedMarketplaceApp = VerifyMarketplaceAppResp;
 export type ConversationAppSession = ConversationAppSessionResp;
+
+export type Announcement = AnnouncementDTO;
+export type AnnouncementsPage = ListAnnouncementsResp;
+export type CreateAnnouncementInput = CreateAnnouncementReq;
+export type CreatedAnnouncement = AnnouncementResp;
+export type MarkAnnouncementsReadResult = MarkAnnouncementsReadResp;
