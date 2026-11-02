@@ -52,6 +52,10 @@ func (e *Engine) announcementPollInterval() time.Duration {
 }
 
 func (e *Engine) presenceEnabled() bool {
+	return e != nil && presenceFlagEnabled(e.Config.FlagsFile)
+}
+
+func (e *Engine) marketplaceEnabled() bool {
 	return e != nil && e.Config.FlagsFile != "" && runtimeFlag(e.Config.FlagsFile, "im.marketplace.enabled")
 }
 

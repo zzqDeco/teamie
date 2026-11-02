@@ -67,7 +67,7 @@ const humanPresenceV2SendBaseDescription = "The ONLY tool to speak in IM (assist
 const humanPresenceV2SummaryGuidance = `
 Also preserve social context across compaction: your established rapport, tone, and familiarity with specific participants, recurring inside jokes or banter, recent game alliances/betrayals or disagreements, and your current conversational mood, so later turns continue naturally as the same familiar peer rather than resetting into a polite stranger.`
 
-func humanPresenceV2Instruction(def *wire.AgentDefinition, budget ContextBudgetSnapshot, presenceActive, hasStaticMCP bool) string {
+func humanPresenceV2Instruction(def *wire.AgentDefinition, budget ContextBudgetSnapshot, presenceActive, hasStaticMCP bool, marketplaceDisabled ...bool) string {
 	var agentID, ownerID, name, description string
 	if def != nil {
 		agentID = def.Id
@@ -113,8 +113,11 @@ func humanPresenceV2Instruction(def *wire.AgentDefinition, budget ContextBudgetS
 	b.WriteByte('\n')
 
 	// Presence & dynamic/static Marketplace MCP apps.
-	if presenceActive {
+	mpDisabled := len(marketplaceDisabled) > 0 && marketplaceDisabled[0]
+	if presenceActive && !mpDisabled {
 		b.WriteString("- **在场焦点与动态群应用**：你同一时刻最多驻留一个 activeConversationId（该会话新消息实时送达，其余会话聚合为 1 分钟一次的 TEAMIE_UNREAD_DIGEST，也可主动 im_list_conversations 查看）。发消息前须确保已在目标会话内（否则返回 not_in_conversation，需先调 im_enter_conversation 进入，离开调 im_leave_conversation）。驻留装有应用的群聊时，Runtime 动态挂载 mcp__<slug>__<tool> 工具并推送 TEAMIE_APP_NOTIFICATION；若 MCP 工具返回 mcp_result_unknown，先用只读工具核实状态，切勿盲目重放写操作。\n")
+	} else if presenceActive {
+		b.WriteString("- **在场焦点与未读聚合**：你同一时刻最多驻留一个 activeConversationId（该会话新消息实时送达，其余会话聚合为 1 分钟一次的 TEAMIE_UNREAD_DIGEST，也可主动 im_list_conversations 查看）。发消息前须确保已在目标会话内（否则返回 not_in_conversation，需先调 im_enter_conversation 进入，离开调 im_leave_conversation）。\n")
 	} else if hasStaticMCP {
 		b.WriteString("- **群聊应用（MCP 与 TEAMIE_APP_NOTIFICATION）**：已安装群应用暴露 mcp__<slug>__<tool> 工具并推送 TEAMIE_APP_NOTIFICATION；若返回 mcp_result_unknown，先用只读工具查状态，切勿盲目重复写操作。\n")
 	}

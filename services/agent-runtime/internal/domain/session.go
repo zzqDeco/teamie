@@ -176,11 +176,12 @@ type CheckpointMetadata struct {
 // CheckpointPresence is the conversation scope at the native execution boundary.
 // A nil value denotes a legacy checkpoint; an enabled, empty scope means "left".
 type CheckpointPresence struct {
-	Version        int    `json:"version"`
-	Enabled        bool   `json:"enabled"`
-	WorkspaceID    string `json:"workspaceId,omitempty"`
-	ConversationID string `json:"conversationId,omitempty"`
-	ConvType       string `json:"convType,omitempty"`
+	Version             int    `json:"version"`
+	Enabled             bool   `json:"enabled"`
+	MarketplaceDisabled bool   `json:"marketplaceDisabled,omitempty"`
+	WorkspaceID         string `json:"workspaceId,omitempty"`
+	ConversationID      string `json:"conversationId,omitempty"`
+	ConvType            string `json:"convType,omitempty"`
 }
 
 // ShouldPreemptWorker reports whether an active worker must be canceled due to

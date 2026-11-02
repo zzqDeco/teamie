@@ -45,6 +45,16 @@ Marketplace Group Apps (MCP Tools & TEAMIE_APP_NOTIFICATION):
 - When an installed Marketplace app's MCP server pushes a notification, Runtime delivers a TEAMIE_APP_NOTIFICATION input envelope with body containing appId, slug, appName, method, and params.
 - Upon receiving TEAMIE_APP_NOTIFICATION or a group message about an app, inspect the state or invoke the appropriate mcp__<slug>__<tool> tools, and call im_send_message only when you want to speak in the group conversation.`
 
+const nativePresenceOnlyGuidance = `
+
+Conversation Presence & Unread Digest:
+- You reside in at most ONE active conversation at a time (activeConversationId, across group, channel, and direct conversations).
+- Messages in your current activeConversationId arrive immediately as TEAMIE_NEW_MESSAGE envelopes and advance your IM read cursor.
+- Messages in all other conversations (or while activeConversationId is empty) do NOT interrupt immediately and do NOT mark you as read; instead they coalesce into a 1-minute TEAMIE_UNREAD_DIGEST envelope containing activeConversationId and unreadConversations (workspaceId, conversationId, name, type, unreadCount, mentionCount, lastSeq).
+- You may stay focused on your current active conversation and defer reading other conversations in TEAMIE_UNREAD_DIGEST until ready. Whenever you want to proactively check global unread counts without waiting for the 1-minute digest, call im_list_conversations.
+- To enter or switch to any group, channel, or direct conversation, call im_enter_conversation with conversationId (which loads recent messages, advances your IM read cursor there, and sets activeConversationId). Call im_leave_conversation when you want to leave the active conversation without entering another.
+- im_send_message requires conversationId to match your current activeConversationId (otherwise it returns not_in_conversation); call im_enter_conversation first before speaking in a conversation.`
+
 const presenceAndMarketplaceGuidance = `
 
 Conversation Presence, Unread Digest & Dynamic Group Marketplace Apps:
@@ -100,9 +110,10 @@ type UnreadDigestBody struct {
 }
 
 type presenceInitSnapshot struct {
-	WorkspaceID    string `json:"workspaceId,omitempty"`
-	ConversationID string `json:"conversationId,omitempty"`
-	ConvType       string `json:"convType,omitempty"`
+	WorkspaceID         string `json:"workspaceId,omitempty"`
+	ConversationID      string `json:"conversationId,omitempty"`
+	ConvType            string `json:"convType,omitempty"`
+	MarketplaceDisabled bool   `json:"marketplaceDisabled,omitempty"`
 }
 
 type persistedUnreadEntry struct {
@@ -631,6 +642,7 @@ func (t *Tools) initRunPresence(ctx context.Context, run *Run) (bool, error) {
 			return false, ErrReplayConflict
 		}
 		run.setPresenceEnabled(true)
+		run.setMarketplaceDisabled(snap.MarketplaceDisabled)
 		run.setActiveConversation(snap.WorkspaceID, snap.ConversationID, snap.ConvType)
 		return true, nil
 	}
@@ -641,14 +653,16 @@ func (t *Tools) initRunPresence(ctx context.Context, run *Run) (bool, error) {
 	if len(existingModels) > 0 {
 		return false, nil
 	}
-	if t.Presence == nil || (t.FlagsFile != "" && !runtimeFlag(t.FlagsFile, "im.marketplace.enabled")) {
+	if t.Presence == nil || (t.FlagsFile != "" && !presenceFlagEnabled(t.FlagsFile)) {
 		return false, nil
 	}
+	marketplaceDisabled := t.FlagsFile != "" && !runtimeFlag(t.FlagsFile, "im.marketplace.enabled")
 	wsID, convID, convType := t.Presence.Active()
 	snapBytes, err := json.Marshal(presenceInitSnapshot{
-		WorkspaceID:    wsID,
-		ConversationID: convID,
-		ConvType:       convType,
+		WorkspaceID:         wsID,
+		ConversationID:      convID,
+		ConvType:            convType,
+		MarketplaceDisabled: marketplaceDisabled,
 	})
 	if err != nil {
 		return false, err
@@ -657,6 +671,7 @@ func (t *Tools) initRunPresence(ctx context.Context, run *Run) (bool, error) {
 		return false, err
 	}
 	run.setPresenceEnabled(true)
+	run.setMarketplaceDisabled(marketplaceDisabled)
 	run.setActiveConversation(wsID, convID, convType)
 	return true, nil
 }
@@ -1443,7 +1458,7 @@ func (e *Engine) authorizeUnreadDigestInput(ctx context.Context, imc *IM, _ *Lea
 	if len(in.SourceRefs) == 0 {
 		return errContextUnavailable
 	}
-	if e.Config.FlagsFile != "" && !runtimeFlag(e.Config.FlagsFile, "im.marketplace.enabled") {
+	if e.Config.FlagsFile != "" && !e.presenceEnabled() {
 		return errContextUnavailable
 	}
 	var body UnreadDigestBody

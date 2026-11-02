@@ -13,7 +13,8 @@ func (r *Run) checkpointPresence() *domain.CheckpointPresence {
 	defer r.presenceMu.Unlock()
 	return &domain.CheckpointPresence{
 		Version: checkpointPresenceVersion, Enabled: r.presenceEnabled,
-		WorkspaceID: r.activeWorkspaceID, ConversationID: r.activeConversationID,
+		MarketplaceDisabled: r.marketplaceDisabled,
+		WorkspaceID:         r.activeWorkspaceID, ConversationID: r.activeConversationID,
 		ConvType: r.activeConvType,
 	}
 }
@@ -61,6 +62,7 @@ func (t *Tools) restoreCheckpointPresence(ctx context.Context, run *Run) (bool, 
 	}
 	run.presenceMu.Lock()
 	run.presenceEnabled = true
+	run.marketplaceDisabled = p.MarketplaceDisabled
 	run.activeWorkspaceID, run.activeConversationID, run.activeConvType = p.WorkspaceID, p.ConversationID, p.ConvType
 	run.mcpTools = nil
 	run.presenceMu.Unlock()

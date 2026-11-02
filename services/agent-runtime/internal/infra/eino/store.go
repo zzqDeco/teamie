@@ -67,6 +67,7 @@ type Run struct {
 
 	presenceMu           sync.Mutex
 	presenceEnabled      bool
+	marketplaceDisabled  bool
 	activeWorkspaceID    string
 	activeConversationID string
 	activeConvType       string
@@ -89,6 +90,24 @@ func (r *Run) isPresenceEnabled() bool {
 	r.presenceMu.Lock()
 	defer r.presenceMu.Unlock()
 	return r.presenceEnabled
+}
+
+func (r *Run) setMarketplaceDisabled(disabled bool) {
+	if r == nil {
+		return
+	}
+	r.presenceMu.Lock()
+	r.marketplaceDisabled = disabled
+	r.presenceMu.Unlock()
+}
+
+func (r *Run) isMarketplaceDisabled() bool {
+	if r == nil {
+		return false
+	}
+	r.presenceMu.Lock()
+	defer r.presenceMu.Unlock()
+	return r.marketplaceDisabled
 }
 
 func (r *Run) setActiveConversation(workspaceID, conversationID, convType string) {

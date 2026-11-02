@@ -1,5 +1,5 @@
 {
-  "revision": "mentions-v1",
+  "revision": "presence-v1",
   "flags": {
     "auth.public_signup": false,
     "auth.password_reset": true,
@@ -28,6 +28,7 @@
     "agents.mentions.v1": true,
     "agents.web.v1": true,
     "agents.schedule.v1": true,
+    "agents.presence.v1": true,
     "im.marketplace.enabled": true,
     "im.announcements.publish": true
   }

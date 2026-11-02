@@ -47,6 +47,28 @@ func runtimeFlagDefault(path, key string, defaultVal bool) bool {
 	}
 	return defaultVal
 }
+
+// presenceFlagEnabled checks the dedicated agents.presence.v1 flag, falling back to
+// im.marketplace.enabled only when agents.presence.v1 is omitted from older flag files.
+func presenceFlagEnabled(path string) bool {
+	if path == "" {
+		return false
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var v struct {
+		Flags map[string]bool `json:"flags"`
+	}
+	if json.Unmarshal(b, &v) != nil || v.Flags == nil {
+		return false
+	}
+	if enabled, ok := v.Flags["agents.presence.v1"]; ok {
+		return enabled
+	}
+	return v.Flags["im.marketplace.enabled"]
+}
 func stableTaskID(run *Run, call string) string {
 	return "shell-" + digest([]byte(run.AgentID + "/" + run.ID + "/" + call))[:40]
 }
