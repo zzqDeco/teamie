@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -84,19 +85,36 @@ func (s *Service) CallChat(ctx context.Context, owner, agentID, sessionID, runID
 
 	start := time.Now()
 	outcome.Phase = "provider-generate"
-	paceKey := providerPaceKey(c)
+	providerKey := providerWorkerKey(c)
 	var (
 		body               string
 		prompt, completion int64
 	)
 	for attempt := 0; ; attempt++ {
-		if pErr := s.waitProviderPace(callCtx, paceKey); pErr != nil {
-			err = pErr
-			break
-		}
 		var early *CallOutcome
+		var retryBackoff time.Duration
+		shouldRetry := false
 		done := func() bool {
-			release, ok := s.AcquireSlot()
+			releaseWorker, wErr := s.acquireProviderWorker(callCtx, providerKey)
+			if wErr != nil {
+				var de *domain.Error
+				if attempt == 0 && errors.As(wErr, &de) && de.Code == "gateway_busy" {
+					outcome.Phase = "admission"
+					res := fail(wErr, configID)
+					early = &res
+					return true
+				}
+				err = wErr
+				return true
+			}
+			defer releaseWorker()
+
+			if cErr := s.waitProviderCooldown(callCtx, providerKey); cErr != nil {
+				err = cErr
+				return true
+			}
+
+			releaseSlot, ok := s.AcquireSlot()
 			if !ok {
 				busyErr := domain.Err(429, "gateway_busy", "The model gateway is busy")
 				if attempt == 0 {
@@ -108,23 +126,26 @@ func (s *Service) CallChat(ctx context.Context, owner, agentID, sessionID, runID
 				err = busyErr
 				return true
 			}
-			defer release()
+			defer releaseSlot()
+
 			outcome.Phase = "provider-generate"
 			body, prompt, completion, err = s.Model.Chat(callCtx, c, key, raw, messageLimits...)
+			if err != nil && isRetryableUpstreamRateLimit(err) {
+				if backoff, retry := s.planRateLimitRetry(callCtx, providerKey, attempt); retry {
+					retryBackoff = backoff
+					shouldRetry = true
+				}
+			}
 			return false
 		}()
 		if early != nil {
 			return *early
 		}
-		if done || err == nil || !isRetryableUpstreamRateLimit(err) {
+		if done || !shouldRetry {
 			break
 		}
-		retry, wErr := s.waitRateLimitRetry(callCtx, paceKey, attempt)
-		if wErr != nil {
-			err = wErr
-			break
-		}
-		if !retry {
+		if sErr := sleepWithContext(callCtx, retryBackoff); sErr != nil {
+			err = sErr
 			break
 		}
 	}
@@ -233,16 +254,33 @@ func (s *Service) StreamChat(ctx context.Context, owner, agentID, sessionID, run
 
 	start := time.Now()
 	outcome.Phase = "provider-stream"
-	paceKey := providerPaceKey(c)
+	providerKey := providerWorkerKey(c)
 	var prompt, completion int64
 	for attempt := 0; ; attempt++ {
-		if pErr := s.waitProviderPace(callCtx, paceKey); pErr != nil {
-			err = pErr
-			break
-		}
 		var early *StreamOutcome
+		var retryBackoff time.Duration
+		shouldRetry := false
 		done := func() bool {
-			release, ok := s.AcquireSlot()
+			releaseWorker, wErr := s.acquireProviderWorker(callCtx, providerKey)
+			if wErr != nil {
+				var de *domain.Error
+				if attempt == 0 && errors.As(wErr, &de) && de.Code == "gateway_busy" {
+					outcome.Phase = "admission"
+					res := terminal(wErr)
+					early = &res
+					return true
+				}
+				err = wErr
+				return true
+			}
+			defer releaseWorker()
+
+			if cErr := s.waitProviderCooldown(callCtx, providerKey); cErr != nil {
+				err = cErr
+				return true
+			}
+
+			releaseSlot, ok := s.AcquireSlot()
 			if !ok {
 				busyErr := domain.Err(429, "gateway_busy", "The model gateway is busy")
 				if attempt == 0 {
@@ -254,25 +292,28 @@ func (s *Service) StreamChat(ctx context.Context, owner, agentID, sessionID, run
 				err = busyErr
 				return true
 			}
-			defer release()
+			defer releaseSlot()
+
 			outcome.Phase = "provider-stream"
 			prompt, completion, err = s.Model.Stream(callCtx, c, key, raw, func(chunk string) error {
 				return writeEvent(domain.StreamEvent{Type: "chunk", ResponseJSON: chunk})
 			}, messageLimits...)
+			if err != nil && outcome.ChunkCount == 0 && isRetryableUpstreamRateLimit(err) {
+				if backoff, retry := s.planRateLimitRetry(callCtx, providerKey, attempt); retry {
+					retryBackoff = backoff
+					shouldRetry = true
+				}
+			}
 			return false
 		}()
 		if early != nil {
 			return *early
 		}
-		if done || err == nil || outcome.ChunkCount > 0 || !isRetryableUpstreamRateLimit(err) {
+		if done || !shouldRetry {
 			break
 		}
-		retry, wErr := s.waitRateLimitRetry(callCtx, paceKey, attempt)
-		if wErr != nil {
-			err = wErr
-			break
-		}
-		if !retry {
+		if sErr := sleepWithContext(callCtx, retryBackoff); sErr != nil {
+			err = sErr
 			break
 		}
 	}

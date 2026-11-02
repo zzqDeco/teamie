@@ -71,8 +71,8 @@ type Service struct {
 	webSeq        uint64
 	active        map[string]activeCall
 	canceled      map[string]time.Time
-	pace          paceConfig
-	providerNext  map[string]time.Time
+	pool          providerPoolConfig
+	providers     map[string]*providerGate
 }
 
 type activeCall struct {
