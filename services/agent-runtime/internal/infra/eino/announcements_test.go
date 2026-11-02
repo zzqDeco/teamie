@@ -123,19 +123,24 @@ func (m *mockAnnouncementIM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				latestSeq = it.Seq
 			}
 		}
-		filtered := make([]imAnnouncement, 0, len(m.items))
+		filtered := make([]imAnnouncement, 0, limit+1)
 		for _, it := range m.items {
 			if beforeSeq == 0 || it.Seq < beforeSeq {
 				filtered = append(filtered, it)
-				if len(filtered) == limit {
+				if len(filtered) > limit {
 					break
 				}
 			}
+		}
+		hasMore := len(filtered) > limit
+		if hasMore {
+			filtered = filtered[:limit]
 		}
 		_ = json.NewEncoder(w).Encode(imAnnouncementPage{
 			Items:     filtered,
 			ReadSeq:   m.readSeq,
 			LatestSeq: latestSeq,
+			HasMore:   hasMore,
 		})
 	case r.Method == http.MethodPost && r.URL.Path == "/api/v1/announcements/read":
 		if m.failReadPost {
@@ -225,8 +230,15 @@ func TestPlatformAnnouncementIngestReplayProvenanceAndTurnLoop(t *testing.T) {
 	}
 	archive := &ContextArchive{Store: s, Lease: lease, IM: imc}
 	sources, matched, err := archive.inputMessageSources(WithRun(ctx, annRun), annRun, msgs[0])
-	if err != nil || !matched || len(sources) != 1 || sources[0].WorkspaceID != wsID {
-		t.Fatalf("expected workspace provenance %s, got matched=%v sources=%+v err=%v", wsID, matched, sources, err)
+	if err != nil || !matched || len(sources) != 1 ||
+		sources[0].WorkspaceID != domain.PlatformAnnouncementWorkspace ||
+		sources[0].ConversationID != domain.PlatformAnnouncementConversation ||
+		sources[0].MessageID != latestInit.ID ||
+		sources[0].EventID != "announcement:"+strconv.FormatInt(latestInit.Seq, 10) {
+		t.Fatalf("expected platform announcement provenance for %s, got matched=%v sources=%+v err=%v", latestInit.ID, matched, sources, err)
+	}
+	if err = archive.authorizeSources(ctx, sources); err != nil {
+		t.Fatalf("expected live platform announcement provenance to authorize, got %v", err)
 	}
 	if err = s.FinishRun(ctx, lease, annRun, "completed", "", false); err != nil {
 		t.Fatal(err)
@@ -292,25 +304,78 @@ func TestPlatformAnnouncementIngestReplayProvenanceAndTurnLoop(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Workspace removal also revokes authorization.
-	live := imMock.add("工作区权限复核测试", "仅对仍在工作区内的 Agent 生效")
-	if _, err = eng.ingestAnnouncements(ctx, imc, lease); err != nil {
-		t.Fatal(err)
+	// Platform-wide provenance stays valid across workspace changes and works for zero-workspace Agents,
+	// while admin deletion revokes both turn-input and ContextArchive provenance authorization.
+	imMock.setWorkspace("")
+	live := imMock.add("跨工作区平台通知", "即使尚未加入任何工作区也能接收并保留上下文血缘。")
+	ingestedZeroWS, err := eng.ingestAnnouncements(ctx, imc, lease)
+	if err != nil || len(ingestedZeroWS) != 1 || ingestedZeroWS[0].Seq != live.Seq {
+		t.Fatalf("expected zero-workspace Agent to ingest announcement seq=%d, got %+v err=%v", live.Seq, ingestedZeroWS, err)
 	}
 	pendingLive, err := s.Pending(ctx, lease)
 	if err != nil || len(pendingLive) != 1 || pendingLive[0].Seq != live.Seq {
 		t.Fatalf("expected pending live announcement, got %+v err=%v", pendingLive, err)
 	}
-	imMock.setWorkspace("")
-	if authErr := eng.authorizeAnnouncementInput(ctx, imc, lease, pendingLive[0]); !errors.Is(authErr, errContextUnavailable) {
-		t.Fatalf("expected errContextUnavailable when Agent removed from all workspaces, got %v", authErr)
-	}
-	imMock.setWorkspace(wsID)
 	if authErr := eng.authorizeAnnouncementInput(ctx, imc, lease, pendingLive[0]); authErr != nil {
-		t.Fatalf("expected authorization restored when workspace present, got %v", authErr)
+		t.Fatalf("expected platform announcement to remain authorized with zero workspaces, got %v", authErr)
+	}
+	if authErr := archive.authorizeSources(ctx, pendingLive[0].SourceRefs); authErr != nil {
+		t.Fatalf("expected ContextArchive provenance to remain authorized with zero workspaces, got %v", authErr)
+	}
+	imMock.remove(live.ID)
+	if authErr := archive.authorizeSources(ctx, pendingLive[0].SourceRefs); !errors.Is(authErr, errContextUnavailable) {
+		t.Fatalf("expected ContextArchive provenance errContextUnavailable after announcement deletion, got %v", authErr)
 	}
 	if err = s.Skip(ctx, lease, pendingLive[0].EventID); err != nil {
 		t.Fatal(err)
+	}
+	imMock.setWorkspace(wsID)
+
+	// 3b. Multi-page catch-up (>20 unread announcements) fetches all unread pages in ascending order before advancing readSeq.
+	const burstUnread = 45
+	var expectedSeqs []int64
+	for i := 0; i < burstUnread; i++ {
+		item := imMock.add("离线积压公告 #"+strconv.Itoa(i+1), "第 "+strconv.Itoa(i+1)+" 条积压公告")
+		expectedSeqs = append(expectedSeqs, item.Seq)
+	}
+	catchUp, err := eng.ingestAnnouncements(ctx, imc, lease)
+	if err != nil {
+		t.Fatalf("multi-page ingestAnnouncements: %v", err)
+	}
+	if len(catchUp) != burstUnread {
+		t.Fatalf("expected all %d unread announcements across pages, got %d", burstUnread, len(catchUp))
+	}
+	for i, in := range catchUp {
+		if in.Seq != expectedSeqs[i] {
+			t.Fatalf("expected ascending seq[%d]=%d, got %d", i, expectedSeqs[i], in.Seq)
+		}
+	}
+	if imMock.currentReadSeq() != expectedSeqs[len(expectedSeqs)-1] {
+		t.Fatalf("expected readSeq=%d after multi-page catch-up, got %d", expectedSeqs[len(expectedSeqs)-1], imMock.currentReadSeq())
+	}
+	var drained []Input
+	for {
+		batch, pErr := s.Pending(ctx, lease)
+		if pErr != nil {
+			t.Fatal(pErr)
+		}
+		if len(batch) == 0 {
+			break
+		}
+		for _, in := range batch {
+			drained = append(drained, in)
+			if err = s.Skip(ctx, lease, in.EventID); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if len(drained) != burstUnread {
+		t.Fatalf("expected %d total drained catch-up inputs, got %d", burstUnread, len(drained))
+	}
+	for i, in := range drained {
+		if in.Seq != expectedSeqs[i] {
+			t.Fatalf("expected drained seq[%d]=%d, got %d", i, expectedSeqs[i], in.Seq)
+		}
 	}
 
 	// 4. End-to-end worker TurnLoop processes live announcement without defensive prompt bloat.

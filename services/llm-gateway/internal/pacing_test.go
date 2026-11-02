@@ -17,16 +17,49 @@ import (
 	"teamie/contracts/gen/agent/kitex_gen/agent"
 )
 
-func TestProviderBurstPacingCrossProviderIsolationAnd429Backoff(t *testing.T) {
-	var mu sync.Mutex
-	var arrivalsA []time.Time
-	var arrivalsB []time.Time
+func TestProviderVirtualWorkersCrossProviderIsolationAnd429Backoff(t *testing.T) {
+	var (
+		mu         sync.Mutex
+		arrivalsA  []time.Time
+		arrivalsB  []time.Time
+		activeA    atomic.Int32
+		maxActiveA atomic.Int32
+		holdGateMu sync.Mutex
+		holdNextA  chan struct{}
+		enteredHold chan struct{}
+	)
 
 	serverA := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
+		cur := activeA.Add(1)
+		for {
+			prev := maxActiveA.Load()
+			if cur <= prev || maxActiveA.CompareAndSwap(prev, cur) {
+				break
+			}
+		}
+		defer activeA.Add(-1)
+
 		mu.Lock()
 		arrivalsA = append(arrivalsA, time.Now())
 		mu.Unlock()
+
+		holdGateMu.Lock()
+		hold := holdNextA
+		entered := enteredHold
+		holdGateMu.Unlock()
+		if entered != nil {
+			select {
+			case entered <- struct{}{}:
+			default:
+			}
+		}
+		if hold != nil {
+			<-hold
+		} else {
+			time.Sleep(35 * time.Millisecond)
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"chatcmpl-a","object":"chat.completion","choices":[{"message":{"role":"assistant","content":"ok-a"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":2}}`))
 	}))
@@ -65,12 +98,15 @@ func TestProviderBurstPacingCrossProviderIsolationAnd429Backoff(t *testing.T) {
 	}}
 	svc := New(store, crypto, testToken)
 	svc.Provider = Provider{HTTP: sharedClient}
-	svc.App.SetProviderPace(70*time.Millisecond, 0)
+	svc.App.SetMaxConcurrentCalls(2)
+	svc.App.SetProviderWorkers(1, 8)
 	svc.App.SetRateLimitRetry(2, 25*time.Millisecond, 5*time.Millisecond)
 
+	// 1. Burst of 4 calls on Provider A queues cleanly behind Provider A's 1 virtual worker
+	//    without holding the 2nd global gateway slot, so Provider B executes with 0ms wait.
 	start := time.Now()
 	var wg sync.WaitGroup
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 4; i++ {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
@@ -92,6 +128,7 @@ func TestProviderBurstPacingCrossProviderIsolationAnd429Backoff(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		time.Sleep(10 * time.Millisecond)
 		res, callErr := fixtureHTTPChat(t, svc, context.Background(), &agent.GatewayChatRequest{
 			ServiceToken: testToken,
 			OwnerId:      "owner",
@@ -111,20 +148,120 @@ func TestProviderBurstPacingCrossProviderIsolationAnd429Backoff(t *testing.T) {
 	gotA := append([]time.Time(nil), arrivalsA...)
 	gotB := append([]time.Time(nil), arrivalsB...)
 	mu.Unlock()
-	if len(gotA) != 3 || len(gotB) != 1 {
-		t.Fatalf("expected 3 arrivals on A and 1 on B, got A=%d B=%d", len(gotA), len(gotB))
+	if len(gotA) != 4 || len(gotB) != 1 {
+		t.Fatalf("expected 4 arrivals on A (even under 2-slot cap) and 1 on B, got A=%d B=%d", len(gotA), len(gotB))
+	}
+	if maxActiveA.Load() != 1 {
+		t.Fatalf("expected Provider A virtual worker pool (maxWorkers=1) to cap simultaneous upstream calls at 1, got %d", maxActiveA.Load())
 	}
 	if firstDelay := gotA[0].Sub(start); firstDelay > 50*time.Millisecond {
-		t.Fatalf("idle first call on Provider A should not be artificially delayed, took %v", firstDelay)
+		t.Fatalf("idle first call on Provider A should dispatch immediately, took %v", firstDelay)
 	}
-	if bDelay := gotB[0].Sub(start); bDelay > 50*time.Millisecond {
-		t.Fatalf("Provider B should dispatch independently without waiting on Provider A burst, took %v", bDelay)
-	}
-	if span := gotA[2].Sub(gotA[0]); span < 120*time.Millisecond {
-		t.Fatalf("expected 3 concurrent calls on Provider A to be burst-paced >=120ms across 2 intervals, got %v", span)
+	if bDelay := gotB[0].Sub(start); bDelay > 60*time.Millisecond {
+		t.Fatalf("Provider B should dispatch without waiting on Provider A queue or starving on 2-slot pool, took %v", bDelay)
 	}
 
-	// Upstream 429 retry recovery for unary and streaming (before first chunk), exhaustion, and mid-backoff cancellation.
+	// 2. Bounded queue overflow returns 429 gateway_busy, and canceling a queued waiter frees its queue slot cleanly.
+	svc.App.SetProviderWorkers(1, 1)
+	holdCh := make(chan struct{})
+	holdEntered := make(chan struct{}, 2)
+	holdGateMu.Lock()
+	holdNextA = holdCh
+	enteredHold = holdEntered
+	holdGateMu.Unlock()
+
+	holderDone := make(chan *agent.GatewayChatResponse, 1)
+	go func() {
+		res, _ := fixtureHTTPChat(t, svc, context.Background(), &agent.GatewayChatRequest{
+			ServiceToken: testToken,
+			OwnerId:      "owner",
+			AgentId:      "agent-holder",
+			SessionId:    "session-holder",
+			RunId:        "run-holder",
+			ModelId:      ptr("model-a"),
+			RequestJson:  fixtureNativeRequest(`{"messages":[{"role":"user","content":"hold"}]}`, false),
+		})
+		holderDone <- res
+	}()
+	select {
+	case <-holdEntered:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for holder to enter Provider A")
+	}
+
+	queued1Done := make(chan *agent.GatewayChatResponse, 1)
+	go func() {
+		res, _ := fixtureHTTPChat(t, svc, context.Background(), &agent.GatewayChatRequest{
+			ServiceToken: testToken,
+			OwnerId:      "owner",
+			AgentId:      "agent-q1",
+			SessionId:    "session-q1",
+			RunId:        "run-q1",
+			ModelId:      ptr("model-a"),
+			RequestJson:  fixtureNativeRequest(`{"messages":[{"role":"user","content":"queued-1"}]}`, false),
+		})
+		queued1Done <- res
+	}()
+	// Give agent-q1 a moment to park in the 1-slot wait queue.
+	time.Sleep(20 * time.Millisecond)
+
+	overflowRes, err := fixtureHTTPChat(t, svc, context.Background(), &agent.GatewayChatRequest{
+		ServiceToken: testToken,
+		OwnerId:      "owner",
+		AgentId:      "agent-overflow",
+		SessionId:    "session-overflow",
+		RunId:        "run-overflow",
+		ModelId:      ptr("model-a"),
+		RequestJson:  fixtureNativeRequest(`{"messages":[{"role":"user","content":"overflow"}]}`, false),
+	})
+	if err != nil || overflowRes.Ok || overflowRes.GetErrorCode() != "gateway_busy" || overflowRes.GetStatusCode() != 429 {
+		t.Fatalf("expected provider queue overflow to fail fast with 429 gateway_busy, got %+v (%v)", overflowRes, err)
+	}
+
+	// Cancel queued waiter agent-q1; verify it exits promptly and frees the queue slot for agent-q2.
+	svc.CancelRun("agent-q1", "run-q1")
+	select {
+	case q1Res := <-queued1Done:
+		if q1Res == nil || q1Res.Ok || q1Res.GetErrorCode() != "canceled" {
+			t.Fatalf("expected canceled queued waiter to return canceled, got %+v", q1Res)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("CancelRun did not abort queued provider waiter promptly")
+	}
+
+	queued2Done := make(chan *agent.GatewayChatResponse, 1)
+	go func() {
+		res, _ := fixtureHTTPChat(t, svc, context.Background(), &agent.GatewayChatRequest{
+			ServiceToken: testToken,
+			OwnerId:      "owner",
+			AgentId:      "agent-q2",
+			SessionId:    "session-q2",
+			RunId:        "run-q2",
+			ModelId:      ptr("model-a"),
+			RequestJson:  fixtureNativeRequest(`{"messages":[{"role":"user","content":"queued-2"}]}`, false),
+		})
+		queued2Done <- res
+	}()
+	time.Sleep(20 * time.Millisecond)
+
+	holdGateMu.Lock()
+	holdNextA = nil
+	enteredHold = nil
+	holdGateMu.Unlock()
+	close(holdCh)
+
+	for name, ch := range map[string]chan *agent.GatewayChatResponse{"holder": holderDone, "queued-2": queued2Done} {
+		select {
+		case res := <-ch:
+			if res == nil || !res.Ok {
+				t.Fatalf("expected %s to complete after release, got %+v", name, res)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for %s to complete", name)
+		}
+	}
+
+	// 3. Upstream 429 retry recovery for unary and streaming (before first chunk), exhaustion, and mid-backoff cancellation.
 	var rateAttempts atomic.Int32
 	var failUntilAttempt atomic.Int32
 	entered429 := make(chan struct{}, 4)
@@ -153,18 +290,26 @@ func TestProviderBurstPacingCrossProviderIsolationAnd429Backoff(t *testing.T) {
 	}))
 	defer rateServer.Close()
 
-	rateStore := &memoryStore{c: singleModel(
-		ProviderProfile{ID: "prov-rate", BaseURL: rateServer.URL + "/v1", CipherKey: encKey, Enabled: true},
-		ModelProfile{ID: "model-rate", Model: "gpt-rate", Enabled: true},
-	)}
+	rateStore := &memoryStore{c: Config{
+		Providers: []ProviderProfile{
+			{ID: "prov-rate", DisplayName: "Rate Provider", BaseURL: rateServer.URL + "/v1", CipherKey: encKey, Enabled: true},
+			{ID: "prov-healthy", DisplayName: "Healthy Provider", BaseURL: serverB.URL + "/v1", CipherKey: encKey, Enabled: true},
+		},
+		Models: []ModelProfile{
+			{ID: "model-rate", ProviderID: "prov-rate", DisplayName: "Rate Model", Model: "gpt-rate", Enabled: true},
+			{ID: "model-healthy", ProviderID: "prov-healthy", DisplayName: "Healthy Model", Model: "gpt-healthy", Enabled: true},
+		},
+		Routing: ModelRoutingConfig{DefaultModelID: "model-rate"},
+	}}
 	rateSvc := New(rateStore, crypto, testToken)
-	rateSvc.Provider = Provider{HTTP: rateServer.Client()}
-	rateSvc.App.SetProviderPace(0, 0)
+	rateSvc.Provider = Provider{HTTP: sharedClient}
+	rateSvc.App.SetMaxConcurrentCalls(2)
+	rateSvc.App.SetProviderWorkers(2, 16)
 	rateSvc.App.SetRateLimitRetry(2, 25*time.Millisecond, 5*time.Millisecond)
 	rateHTTP := httptest.NewServer(rateSvc.Routes(AdminAuth{}))
 	defer rateHTTP.Close()
 
-	// 1. Unary call hits 429 twice and succeeds on attempt 3.
+	// 3a. Unary call hits 429 twice and succeeds on attempt 3.
 	rateAttempts.Store(0)
 	failUntilAttempt.Store(2)
 	unaryRes, err := fixtureHTTPChat(t, rateSvc, context.Background(), &agent.GatewayChatRequest{
@@ -179,7 +324,7 @@ func TestProviderBurstPacingCrossProviderIsolationAnd429Backoff(t *testing.T) {
 		t.Fatalf("expected unary 429 recovery on attempt 3, got attempts=%d res=%+v err=%v", rateAttempts.Load(), unaryRes, err)
 	}
 
-	// 2. Streaming call hits 429 twice before any chunk and succeeds on attempt 3.
+	// 3b. Streaming call hits 429 twice before any chunk and succeeds on attempt 3.
 	rateAttempts.Store(0)
 	failUntilAttempt.Store(2)
 	sReq := streamRequest(t, context.Background(), rateHTTP.URL, "run-rate-s")
@@ -206,7 +351,7 @@ func TestProviderBurstPacingCrossProviderIsolationAnd429Backoff(t *testing.T) {
 		t.Fatalf("expected stream 429 recovery on attempt 3, sawChunk=%v sawDone=%v attempts=%d", sawChunk, sawDone, rateAttempts.Load())
 	}
 
-	// 3. Persistent 429 exhausts maxRetries=2 (3 total attempts) and returns 429 upstream_rate_limited.
+	// 3c. Persistent 429 exhausts maxRetries=2 (3 total attempts) and returns 429 upstream_rate_limited.
 	rateAttempts.Store(0)
 	failUntilAttempt.Store(99)
 	exhausted, err := fixtureHTTPChat(t, rateSvc, context.Background(), &agent.GatewayChatRequest{
@@ -221,37 +366,70 @@ func TestProviderBurstPacingCrossProviderIsolationAnd429Backoff(t *testing.T) {
 		t.Fatalf("expected exhausted 429 after 3 attempts, got attempts=%d res=%+v err=%v", rateAttempts.Load(), exhausted, err)
 	}
 
-	// 4. Canceling an active run during 429 backoff aborts immediately without another upstream attempt.
+	// 3d. Slots and virtual workers are released during 429 backoff so 2 sleeping calls on prov-rate
+	//     do not starve prov-healthy on a 2-slot gateway, and CancelRun aborts backoff immediately.
 	rateSvc.App.SetRateLimitRetry(2, 2*time.Second, 0)
 	rateAttempts.Store(0)
 	failUntilAttempt.Store(99)
 	for len(entered429) > 0 {
 		<-entered429
 	}
-	cancelDone := make(chan *agent.GatewayChatResponse, 1)
+	cancelDone1 := make(chan *agent.GatewayChatResponse, 1)
+	cancelDone2 := make(chan *agent.GatewayChatResponse, 1)
 	go func() {
 		res, _ := fixtureHTTPChat(t, rateSvc, context.Background(), &agent.GatewayChatRequest{
 			ServiceToken: testToken,
 			OwnerId:      "owner",
-			AgentId:      "agent",
-			SessionId:    "session",
-			RunId:        "run-cancel-backoff",
-			RequestJson:  fixtureNativeRequest(`{"messages":[{"role":"user","content":"cancel"}]}`, false),
+			AgentId:      "agent-1",
+			SessionId:    "session-1",
+			RunId:        "run-cancel-backoff-1",
+			RequestJson:  fixtureNativeRequest(`{"messages":[{"role":"user","content":"cancel-1"}]}`, false),
 		})
-		cancelDone <- res
+		cancelDone1 <- res
 	}()
-	select {
-	case <-entered429:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for first 429")
-	}
-	rateSvc.CancelRun("agent", "run-cancel-backoff")
-	select {
-	case canceledRes := <-cancelDone:
-		if canceledRes == nil || canceledRes.Ok || canceledRes.GetErrorCode() != "canceled" || rateAttempts.Load() != 1 {
-			t.Fatalf("expected immediate cancellation during backoff after 1 attempt, got attempts=%d res=%+v", rateAttempts.Load(), canceledRes)
+	go func() {
+		res, _ := fixtureHTTPChat(t, rateSvc, context.Background(), &agent.GatewayChatRequest{
+			ServiceToken: testToken,
+			OwnerId:      "owner",
+			AgentId:      "agent-2",
+			SessionId:    "session-2",
+			RunId:        "run-cancel-backoff-2",
+			RequestJson:  fixtureNativeRequest(`{"messages":[{"role":"user","content":"cancel-2"}]}`, false),
+		})
+		cancelDone2 <- res
+	}()
+	for range 2 {
+		select {
+		case <-entered429:
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for 429 entry before backoff")
 		}
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("CancelRun did not abort 429 backoff sleep promptly")
+	}
+	healthyRes, healthyErr := fixtureHTTPChat(t, rateSvc, context.Background(), &agent.GatewayChatRequest{
+		ServiceToken: testToken,
+		OwnerId:      "owner",
+		AgentId:      "agent-healthy",
+		SessionId:    "session-healthy",
+		RunId:        "run-healthy",
+		ModelId:      ptr("model-healthy"),
+		RequestJson:  fixtureNativeRequest(`{"messages":[{"role":"user","content":"healthy-while-backoff"}]}`, false),
+	})
+	if healthyErr != nil || !healthyRes.Ok {
+		t.Fatalf("expected healthy provider call to succeed while 2 calls sleep in 429 backoff on a 2-slot gateway, got res=%+v err=%v", healthyRes, healthyErr)
+	}
+	rateSvc.CancelRun("agent-1", "run-cancel-backoff-1")
+	rateSvc.CancelRun("agent-2", "run-cancel-backoff-2")
+	for _, ch := range []chan *agent.GatewayChatResponse{cancelDone1, cancelDone2} {
+		select {
+		case canceledRes := <-ch:
+			if canceledRes == nil || canceledRes.Ok || canceledRes.GetErrorCode() != "canceled" {
+				t.Fatalf("expected immediate cancellation during backoff, got res=%+v", canceledRes)
+			}
+		case <-time.After(500 * time.Millisecond):
+			t.Fatal("CancelRun did not abort 429 backoff sleep promptly")
+		}
+	}
+	if rateAttempts.Load() != 2 {
+		t.Fatalf("expected exactly 2 upstream attempts (1 per canceled call), got %d", rateAttempts.Load())
 	}
 }

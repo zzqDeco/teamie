@@ -3,10 +3,43 @@ package domain
 import (
 	"slices"
 	"sort"
+	"strconv"
+	"strings"
 )
 
 // MaxExtractedInputSources caps the inline provenance source list on a single input batch.
 const MaxExtractedInputSources = 128
+
+const (
+	// PlatformAnnouncementWorkspace is the synthetic platform-wide provenance workspace sentinel.
+	PlatformAnnouncementWorkspace = "__platform__"
+	// PlatformAnnouncementConversation is the synthetic platform-wide announcement stream sentinel.
+	PlatformAnnouncementConversation = "__announcements__"
+)
+
+// IsPlatformAnnouncementSource reports whether ref is a canonical platform-wide
+// announcement provenance reference and returns its positive announcement sequence.
+func IsPlatformAnnouncementSource(ref InputSource) (int64, bool) {
+	if ref.WorkspaceID != PlatformAnnouncementWorkspace ||
+		ref.ConversationID != PlatformAnnouncementConversation ||
+		!ValidUUID(ref.MessageID) ||
+		!strings.HasPrefix(ref.EventID, "announcement:") ||
+		ref.ReplyToID != "" ||
+		ref.SenderID != "" ||
+		ref.SenderKind != "" ||
+		len(ref.AttachmentIDs) != 0 {
+		return 0, false
+	}
+	seqText := strings.TrimPrefix(ref.EventID, "announcement:")
+	if seqText == "" || seqText[0] < '1' || seqText[0] > '9' {
+		return 0, false
+	}
+	seq, err := strconv.ParseInt(seqText, 10, 64)
+	if err != nil || seq <= 0 {
+		return 0, false
+	}
+	return seq, true
+}
 
 // InputSource is a provenance reference, never an inferred destination or an ACL grant.
 // Source bodies remain in ordinary IM history and private Session events.
@@ -92,13 +125,15 @@ func ExtractInputSources(inputs []Input) ([]InputSource, bool) {
 func CanonicalContextSources(refs []InputSource) ([]InputSource, error) {
 	byKey := make(map[string]InputSource, len(refs))
 	for _, ref := range refs {
-		if !ValidUUID(ref.ConversationID) || !ValidUUID(ref.MessageID) || (ref.WorkspaceID != "" && !ValidUUID(ref.WorkspaceID)) || (ref.SenderID != "" && !ValidUUID(ref.SenderID)) {
-			// A conversation-only or workspace-only source represents metadata from a
-			// committed IM conversation/workspace tool response, never a fabricated message ID.
-			convOnly := ValidUUID(ref.ConversationID) && (ref.WorkspaceID == "" || ValidUUID(ref.WorkspaceID))
-			wsOnly := ref.ConversationID == "" && ValidUUID(ref.WorkspaceID)
-			if (!convOnly && !wsOnly) || ref.MessageID != "" || ref.EventID != "" || ref.ReplyToID != "" || ref.SenderID != "" || ref.SenderKind != "" || len(ref.AttachmentIDs) != 0 {
-				return nil, ErrContextUnavailable
+		if _, isPlatformAnn := IsPlatformAnnouncementSource(ref); !isPlatformAnn {
+			if !ValidUUID(ref.ConversationID) || !ValidUUID(ref.MessageID) || (ref.WorkspaceID != "" && !ValidUUID(ref.WorkspaceID)) || (ref.SenderID != "" && !ValidUUID(ref.SenderID)) {
+				// A conversation-only or workspace-only source represents metadata from a
+				// committed IM conversation/workspace tool response, never a fabricated message ID.
+				convOnly := ValidUUID(ref.ConversationID) && (ref.WorkspaceID == "" || ValidUUID(ref.WorkspaceID))
+				wsOnly := ref.ConversationID == "" && ValidUUID(ref.WorkspaceID)
+				if (!convOnly && !wsOnly) || ref.MessageID != "" || ref.EventID != "" || ref.ReplyToID != "" || ref.SenderID != "" || ref.SenderKind != "" || len(ref.AttachmentIDs) != 0 {
+					return nil, ErrContextUnavailable
+				}
 			}
 		}
 		ref.AttachmentIDs = append([]string(nil), ref.AttachmentIDs...)

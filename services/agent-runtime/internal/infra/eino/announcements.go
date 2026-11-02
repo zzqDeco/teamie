@@ -16,7 +16,10 @@ import (
 	"teamie/services/agent-runtime/internal/domain"
 )
 
-const defaultAnnouncementPollInterval = 5 * time.Second
+const (
+	defaultAnnouncementPollInterval = 5 * time.Second
+	announcementIngestPageLimit     = 20
+)
 
 type imAnnouncement struct {
 	ID         string `json:"id"`
@@ -29,11 +32,10 @@ type imAnnouncement struct {
 }
 
 type imAnnouncementPage struct {
-	Items         []imAnnouncement `json:"items"`
-	ReadSeq       int64            `json:"readSeq"`
-	LatestSeq     int64            `json:"latestSeq"`
-	HasMore       bool             `json:"hasMore"`
-	NextBeforeSeq *int64           `json:"nextBeforeSeq"`
+	Items     []imAnnouncement `json:"items"`
+	ReadSeq   int64            `json:"readSeq"`
+	LatestSeq int64            `json:"latestSeq"`
+	HasMore   bool             `json:"hasMore"`
 }
 
 func formatAnnouncementInputBody(title, body string) string {
@@ -48,6 +50,15 @@ func formatAnnouncementInputBody(title, body string) string {
 	return "# " + title + "\n\n" + body
 }
 
+func announcementInputSource(item imAnnouncement) InputSource {
+	return InputSource{
+		EventID:        fmt.Sprintf("announcement:%d", item.Seq),
+		WorkspaceID:    domain.PlatformAnnouncementWorkspace,
+		ConversationID: domain.PlatformAnnouncementConversation,
+		MessageID:      item.ID,
+	}
+}
+
 func (e *Engine) ingestAnnouncements(ctx context.Context, imc *IM, l *Lease) (committed []Input, failure error) {
 	if e == nil || e.Store == nil || imc == nil || l == nil {
 		return nil, nil
@@ -56,7 +67,8 @@ func (e *Engine) ingestAnnouncements(ctx context.Context, imc *IM, l *Lease) (co
 	defer func() { operation.EndQuiet(failure) }()
 
 	var page imAnnouncementPage
-	if err := imc.Call(ctx, http.MethodGet, "/api/v1/announcements?limit=20", nil, &page); err != nil {
+	firstPath := fmt.Sprintf("/api/v1/announcements?limit=%d", announcementIngestPageLimit)
+	if err := imc.Call(ctx, http.MethodGet, firstPath, nil, &page); err != nil {
 		var api *APIError
 		if errors.As(err, &api) && api.Status == http.StatusNotFound {
 			return nil, nil
@@ -81,10 +93,43 @@ func (e *Engine) ingestAnnouncements(ctx context.Context, imc *IM, l *Lease) (co
 			unread = []imAnnouncement{latest}
 		}
 	} else {
-		for _, item := range page.Items {
-			if item.Seq > page.ReadSeq {
-				unread = append(unread, item)
+		readCursor := page.ReadSeq
+		seenIDs := make(map[string]bool, len(page.Items))
+		curPage := page
+		for {
+			var minSeq int64
+			reachedReadCursor := false
+			for i, item := range curPage.Items {
+				if i == 0 || item.Seq < minSeq {
+					minSeq = item.Seq
+				}
+				if item.Seq <= readCursor {
+					reachedReadCursor = true
+					continue
+				}
+				if !seenIDs[item.ID] {
+					seenIDs[item.ID] = true
+					unread = append(unread, item)
+				}
 			}
+			if reachedReadCursor || !curPage.HasMore || len(curPage.Items) == 0 || minSeq <= readCursor+1 {
+				break
+			}
+			var nextPage imAnnouncementPage
+			nextPath := fmt.Sprintf("/api/v1/announcements?beforeSeq=%d&limit=%d", minSeq, announcementIngestPageLimit)
+			if err := imc.Call(ctx, http.MethodGet, nextPath, nil, &nextPage); err != nil {
+				return nil, err
+			}
+			nextMin := minSeq
+			for _, item := range nextPage.Items {
+				if item.Seq < nextMin {
+					nextMin = item.Seq
+				}
+			}
+			if len(nextPage.Items) == 0 || nextMin >= minSeq {
+				break
+			}
+			curPage = nextPage
 		}
 		slices.SortFunc(unread, func(a, b imAnnouncement) int {
 			return cmp.Compare(a.Seq, b.Seq)
@@ -94,32 +139,9 @@ func (e *Engine) ingestAnnouncements(ctx context.Context, imc *IM, l *Lease) (co
 		return nil, nil
 	}
 
-	b, err := imc.Bootstrap(ctx)
-	if err != nil {
-		return nil, err
-	}
-	rawSources := make([]InputSource, 0, len(b.Workspaces)+len(b.Conversations))
-	for _, ws := range b.Workspaces {
-		if domain.ValidUUID(ws.ID) {
-			rawSources = append(rawSources, InputSource{WorkspaceID: ws.ID})
-		}
-	}
-	for _, c := range b.Conversations {
-		if domain.ValidUUID(c.WorkspaceID) {
-			rawSources = append(rawSources, InputSource{WorkspaceID: c.WorkspaceID})
-		}
-	}
-	if len(rawSources) == 0 {
-		return nil, nil
-	}
-	sourceRefs, err := canonicalContextSources(rawSources)
-	if err != nil || len(sourceRefs) == 0 {
-		return nil, err
-	}
-
 	var maxSeq int64
 	persisted := make([]Input, 0, len(unread))
-	err = e.Store.DB.WithinFencedTx(ctx, l, func(txCtx context.Context) error {
+	err := e.Store.DB.WithinFencedTx(ctx, l, func(txCtx context.Context) error {
 		for _, item := range unread {
 			if !domain.ValidUUID(item.ID) || item.Seq <= 0 {
 				continue
@@ -127,6 +149,10 @@ func (e *Engine) ingestAnnouncements(ctx context.Context, imc *IM, l *Lease) (co
 			bodyStr := formatAnnouncementInputBody(item.Title, item.Body)
 			if bodyStr == "" {
 				continue
+			}
+			sourceRefs, err := canonicalContextSources([]InputSource{announcementInputSource(item)})
+			if err != nil || len(sourceRefs) == 0 {
+				return err
 			}
 			var seq string
 			if err := e.Store.DB.QueryRow(txCtx, `SELECT (90000000000000000000::numeric+nextval('runtime_notification_input_seq'))::text`).Scan(&seq); err != nil {
@@ -198,17 +224,26 @@ func (e *Engine) authorizeAnnouncementInput(ctx context.Context, imc *IM, lease 
 	}
 	if in.Seq > 0 && strings.HasPrefix(in.NotificationID, "announcement:") {
 		annID := strings.TrimPrefix(in.NotificationID, "announcement:")
-		var check imAnnouncementPage
-		path := fmt.Sprintf("/api/v1/announcements?beforeSeq=%d&limit=1", in.Seq+1)
-		if err := imc.Call(ctx, http.MethodGet, path, nil, &check); err != nil {
-			var api *APIError
-			if errors.As(err, &api) && api.Status >= 400 && api.Status < 500 {
+		hasPlatformRef := false
+		for _, ref := range in.SourceRefs {
+			if seq, ok := domain.IsPlatformAnnouncementSource(ref); ok && seq == in.Seq && ref.MessageID == annID {
+				hasPlatformRef = true
+				break
+			}
+		}
+		if !hasPlatformRef {
+			var check imAnnouncementPage
+			path := fmt.Sprintf("/api/v1/announcements?beforeSeq=%d&limit=1", in.Seq+1)
+			if err := imc.Call(ctx, http.MethodGet, path, nil, &check); err != nil {
+				var api *APIError
+				if errors.As(err, &api) && api.Status >= 400 && api.Status < 500 {
+					return errContextUnavailable
+				}
+				return err
+			}
+			if len(check.Items) == 0 || check.Items[0].Seq != in.Seq || check.Items[0].ID != annID {
 				return errContextUnavailable
 			}
-			return err
-		}
-		if len(check.Items) == 0 || check.Items[0].Seq != in.Seq || check.Items[0].ID != annID {
-			return errContextUnavailable
 		}
 	}
 	refs, err := canonicalContextSources(in.SourceRefs)

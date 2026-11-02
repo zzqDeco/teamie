@@ -51,12 +51,25 @@ func main() {
 	if err != nil {
 		observability.Fatal("invalid GATEWAY_MAX_CONCURRENT_CALLS", err)
 	}
+	providerMaxWorkers, err := app.ParseProviderMaxWorkers(httpx.Env("GATEWAY_PROVIDER_MAX_WORKERS", ""))
+	if err != nil {
+		observability.Fatal("invalid GATEWAY_PROVIDER_MAX_WORKERS", err)
+	}
 	provider := upstream.Provider{HTTP: upstream.NewHTTPClient()}
-	svc := app.New(store, cipher, provider, provider, token, app.WithMaxConcurrentCalls(maxConcurrentCalls))
+	svc := app.New(
+		store,
+		cipher,
+		provider,
+		provider,
+		token,
+		app.WithMaxConcurrentCalls(maxConcurrentCalls),
+		app.WithProviderWorkers(providerMaxWorkers, app.DefaultProviderMaxQueue),
+	)
 	observability.L(nil).Info("Gateway concurrency configured",
 		zap.String("event.action", "gateway-concurrency-configured"),
 		zap.String("event.outcome", "success"),
 		zap.Int("custom.gateway.max_concurrent_calls", svc.MaxConcurrentCalls()),
+		zap.Int("custom.gateway.provider_max_workers", svc.ProviderMaxWorkers()),
 	)
 	rpcSrv := rpcAdapter.New(svc)
 	httpHandler := httpAdapter.New(svc)

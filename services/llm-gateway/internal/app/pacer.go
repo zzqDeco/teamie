@@ -5,18 +5,23 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
+	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"teamie/services/llm-gateway/internal/domain"
 )
 
 const (
-	// DefaultProviderPaceInterval spaces simultaneous burst dispatches targeting the
-	// same upstream ProviderProfile while keeping idle single dispatches at 0ms delay.
-	DefaultProviderPaceInterval = 200 * time.Millisecond
-	// DefaultProviderPaceJitter adds bounded random jitter to burst dispatch spacing.
-	DefaultProviderPaceJitter = 100 * time.Millisecond
+	// DefaultProviderMaxWorkers bounds simultaneous in-flight upstream requests per
+	// ProviderProfile so bursts on one provider queue behind its virtual workers
+	// without exhausting global gateway slots or triggering upstream concurrency 429s.
+	DefaultProviderMaxWorkers = 4
+	// DefaultProviderMaxQueue bounds waiting callers queued behind a single provider's
+	// virtual workers; excess burst callers fail fast with 429 gateway_busy.
+	DefaultProviderMaxQueue = 128
 	// DefaultRateLimitRetries bounds automatic gateway retries on upstream HTTP 429
 	// before any streaming chunks have been emitted.
 	DefaultRateLimitRetries = 2
@@ -25,24 +30,56 @@ const (
 	// DefaultRateLimitMaxJitter is the random jitter added to each 429 backoff window.
 	DefaultRateLimitMaxJitter = 400 * time.Millisecond
 
-	providerPaceIdleTTL = 5 * time.Minute
+	providerIdleTTL = 5 * time.Minute
 )
 
-type paceConfig struct {
-	configured        bool
-	interval          time.Duration
-	jitter            time.Duration
+type providerPoolConfig struct {
+	workersConfigured bool
+	maxWorkers        int
+	maxQueue          int
 	retriesConfigured bool
 	maxRetries        int
 	baseBackoff       time.Duration
 	maxJitter         time.Duration
 }
 
-// WithProviderPace configures per-ProviderProfile burst dispatch spacing and jitter.
-// Passing interval <= 0 and jitter <= 0 disables burst spacing (useful in tight unit tests).
-func WithProviderPace(interval, jitter time.Duration) Option {
+type providerWaiter struct {
+	ready chan struct{}
+}
+
+type providerGate struct {
+	active        int
+	waiters       []*providerWaiter
+	cooldownUntil time.Time
+	lastActive    time.Time
+}
+
+// ParseProviderMaxWorkers parses GATEWAY_PROVIDER_MAX_WORKERS.
+// An empty value returns DefaultProviderMaxWorkers; a non-empty value must be >= 1.
+func ParseProviderMaxWorkers(raw string) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return DefaultProviderMaxWorkers, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return 0, domain.Err(400, "invalid_provider_workers", "GATEWAY_PROVIDER_MAX_WORKERS must be an integer >= 1")
+	}
+	return n, nil
+}
+
+func defaultProviderMaxWorkers() int {
+	if n, err := ParseProviderMaxWorkers(os.Getenv("GATEWAY_PROVIDER_MAX_WORKERS")); err == nil {
+		return n
+	}
+	return DefaultProviderMaxWorkers
+}
+
+// WithProviderWorkers configures per-ProviderProfile virtual worker concurrency and wait queue bounds.
+// Passing maxWorkers <= 0 disables the per-provider cap; maxQueue < 0 falls back to DefaultProviderMaxQueue.
+func WithProviderWorkers(maxWorkers, maxQueue int) Option {
 	return func(s *Service) {
-		s.SetProviderPace(interval, jitter)
+		s.SetProviderWorkers(maxWorkers, maxQueue)
 	}
 }
 
@@ -54,19 +91,32 @@ func WithRateLimitRetry(maxRetries int, baseBackoff, maxJitter time.Duration) Op
 	}
 }
 
-// SetProviderPace updates per-ProviderProfile burst spacing at runtime or in tests.
-func (s *Service) SetProviderPace(interval, jitter time.Duration) {
-	if interval < 0 {
-		interval = 0
+// SetProviderWorkers updates per-ProviderProfile virtual worker bounds at runtime or in tests.
+// Passing maxWorkers <= 0 disables per-provider worker capping; maxQueue == 0 disables queueing
+// (excess concurrent calls on the provider fail immediately with 429 gateway_busy).
+func (s *Service) SetProviderWorkers(maxWorkers, maxQueue int) {
+	if maxWorkers < 0 {
+		maxWorkers = 0
 	}
-	if jitter < 0 {
-		jitter = 0
+	if maxQueue < 0 {
+		maxQueue = DefaultProviderMaxQueue
 	}
 	s.mu.Lock()
-	s.pace.configured = true
-	s.pace.interval = interval
-	s.pace.jitter = jitter
+	s.pool.workersConfigured = true
+	s.pool.maxWorkers = maxWorkers
+	s.pool.maxQueue = maxQueue
+	for _, g := range s.providers {
+		s.wakeProviderWaitersLocked(g, maxWorkers)
+	}
 	s.mu.Unlock()
+}
+
+// ProviderMaxWorkers returns the effective per-ProviderProfile virtual worker limit.
+func (s *Service) ProviderMaxWorkers() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	w, _ := s.effectiveProviderWorkersLocked()
+	return w
 }
 
 // SetRateLimitRetry updates upstream 429 retry parameters at runtime or in tests.
@@ -81,10 +131,10 @@ func (s *Service) SetRateLimitRetry(maxRetries int, baseBackoff, maxJitter time.
 		maxJitter = 0
 	}
 	s.mu.Lock()
-	s.pace.retriesConfigured = true
-	s.pace.maxRetries = maxRetries
-	s.pace.baseBackoff = baseBackoff
-	s.pace.maxJitter = maxJitter
+	s.pool.retriesConfigured = true
+	s.pool.maxRetries = maxRetries
+	s.pool.baseBackoff = baseBackoff
+	s.pool.maxJitter = maxJitter
 	s.mu.Unlock()
 }
 
@@ -99,68 +149,165 @@ func randomJitter(max time.Duration) time.Duration {
 	return time.Duration(binary.LittleEndian.Uint64(b[:]) % uint64(max+1))
 }
 
-func providerPaceKey(c domain.ResolvedModel) string {
+func providerWorkerKey(c domain.ResolvedModel) string {
 	if id := strings.TrimSpace(c.ProviderID); id != "" {
 		return "provider:" + id
 	}
 	return "url:" + strings.TrimSpace(c.BaseURL)
 }
 
-func (s *Service) effectivePace() (interval, jitter time.Duration) {
-	if s.pace.configured {
-		return s.pace.interval, s.pace.jitter
+func (s *Service) effectiveProviderWorkersLocked() (maxWorkers, maxQueue int) {
+	if s.pool.workersConfigured {
+		return s.pool.maxWorkers, s.pool.maxQueue
 	}
-	return DefaultProviderPaceInterval, DefaultProviderPaceJitter
+	return defaultProviderMaxWorkers(), DefaultProviderMaxQueue
 }
 
-func (s *Service) effectiveRateLimitRetry() (maxRetries int, baseBackoff, maxJitter time.Duration) {
-	if s.pace.retriesConfigured {
-		return s.pace.maxRetries, s.pace.baseBackoff, s.pace.maxJitter
+func (s *Service) effectiveRateLimitRetryLocked() (maxRetries int, baseBackoff, maxJitter time.Duration) {
+	if s.pool.retriesConfigured {
+		return s.pool.maxRetries, s.pool.baseBackoff, s.pool.maxJitter
 	}
 	return DefaultRateLimitRetries, DefaultRateLimitBaseBackoff, DefaultRateLimitMaxJitter
 }
 
-func (s *Service) reserveProviderDispatch(key string) time.Duration {
-	now := time.Now()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.providerNext == nil {
-		s.providerNext = make(map[string]time.Time)
+func (s *Service) providerGateLocked(key string, now time.Time) *providerGate {
+	if s.providers == nil {
+		s.providers = make(map[string]*providerGate)
 	}
-	for k, t := range s.providerNext {
-		if now.Sub(t) > providerPaceIdleTTL {
-			delete(s.providerNext, k)
+	for k, gate := range s.providers {
+		if k != key && gate.active == 0 && len(gate.waiters) == 0 && !gate.cooldownUntil.After(now) && now.Sub(gate.lastActive) > providerIdleTTL {
+			delete(s.providers, k)
 		}
 	}
-	interval, jitter := s.effectivePace()
-	step := interval + randomJitter(jitter)
-	scheduled := s.providerNext[key]
-	if scheduled.IsZero() || !scheduled.After(now) {
-		if step > 0 {
-			s.providerNext[key] = now.Add(step)
-		} else {
-			delete(s.providerNext, key)
-		}
-		return 0
+	gate := s.providers[key]
+	if gate == nil {
+		gate = &providerGate{lastActive: now}
+		s.providers[key] = gate
 	}
-	wait := scheduled.Sub(now)
-	s.providerNext[key] = scheduled.Add(step)
-	return wait
+	return gate
 }
 
-func (s *Service) recordProviderCooldown(key string, backoff time.Duration) {
-	if backoff <= 0 {
+func (s *Service) wakeProviderWaitersLocked(gate *providerGate, maxWorkers int) {
+	if gate == nil {
 		return
 	}
-	until := time.Now().Add(backoff)
-	s.mu.Lock()
-	if s.providerNext == nil {
-		s.providerNext = make(map[string]time.Time)
+	for (maxWorkers <= 0 || gate.active < maxWorkers) && len(gate.waiters) > 0 {
+		w := gate.waiters[0]
+		gate.waiters[0] = nil
+		gate.waiters = gate.waiters[1:]
+		if len(gate.waiters) == 0 {
+			gate.waiters = nil
+		}
+		gate.active++
+		gate.lastActive = time.Now()
+		close(w.ready)
 	}
-	if until.After(s.providerNext[key]) {
-		s.providerNext[key] = until
+}
+
+func (s *Service) releaseProviderWorkerLocked(key string) {
+	gate := s.providers[key]
+	if gate == nil {
+		return
+	}
+	if gate.active > 0 {
+		gate.active--
+	}
+	gate.lastActive = time.Now()
+	maxWorkers, _ := s.effectiveProviderWorkersLocked()
+	s.wakeProviderWaitersLocked(gate, maxWorkers)
+}
+
+func (s *Service) makeProviderRelease(key string) func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.mu.Lock()
+			s.releaseProviderWorkerLocked(key)
+			s.mu.Unlock()
+		})
+	}
+}
+
+func (s *Service) acquireProviderWorker(ctx context.Context, key string) (func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, domain.StreamError(ctx, "gateway_unavailable")
+	}
+	if StrictModelSelection(ctx) {
+		return func() {}, nil
+	}
+
+	now := time.Now()
+	s.mu.Lock()
+	maxWorkers, maxQueue := s.effectiveProviderWorkersLocked()
+	if maxWorkers <= 0 {
+		s.mu.Unlock()
+		return func() {}, nil
+	}
+	gate := s.providerGateLocked(key, now)
+	if gate.active < maxWorkers && len(gate.waiters) == 0 {
+		gate.active++
+		gate.lastActive = now
+		s.mu.Unlock()
+		return s.makeProviderRelease(key), nil
+	}
+	if len(gate.waiters) >= maxQueue {
+		s.mu.Unlock()
+		return nil, domain.Err(429, "gateway_busy", "The model gateway is busy")
+	}
+	w := &providerWaiter{ready: make(chan struct{})}
+	gate.waiters = append(gate.waiters, w)
+	gate.lastActive = now
+	s.mu.Unlock()
+
+	select {
+	case <-w.ready:
+		if ctx.Err() != nil {
+			s.mu.Lock()
+			s.releaseProviderWorkerLocked(key)
+			s.mu.Unlock()
+			return nil, domain.StreamError(ctx, "gateway_unavailable")
+		}
+		return s.makeProviderRelease(key), nil
+	case <-ctx.Done():
+		s.mu.Lock()
+		select {
+		case <-w.ready:
+			s.releaseProviderWorkerLocked(key)
+			s.mu.Unlock()
+			return nil, domain.StreamError(ctx, "gateway_unavailable")
+		default:
+			for i, candidate := range gate.waiters {
+				if candidate == w {
+					copy(gate.waiters[i:], gate.waiters[i+1:])
+					gate.waiters[len(gate.waiters)-1] = nil
+					gate.waiters = gate.waiters[:len(gate.waiters)-1]
+					if len(gate.waiters) == 0 {
+						gate.waiters = nil
+					}
+					break
+				}
+			}
+			gate.lastActive = time.Now()
+			s.mu.Unlock()
+			return nil, domain.StreamError(ctx, "gateway_unavailable")
+		}
+	}
+}
+
+func (s *Service) waitProviderCooldown(ctx context.Context, key string) error {
+	if StrictModelSelection(ctx) {
+		return nil
+	}
+	s.mu.Lock()
+	var until time.Time
+	if gate := s.providers[key]; gate != nil {
+		until = gate.cooldownUntil
 	}
 	s.mu.Unlock()
+	if until.IsZero() {
+		return sleepWithContext(ctx, 0)
+	}
+	return sleepWithContext(ctx, time.Until(until))
 }
 
 func sleepWithContext(ctx context.Context, d time.Duration) error {
@@ -180,32 +327,35 @@ func sleepWithContext(ctx context.Context, d time.Duration) error {
 	}
 }
 
-func (s *Service) waitProviderPace(ctx context.Context, key string) error {
-	if err := ctx.Err(); err != nil {
-		return domain.StreamError(ctx, "gateway_unavailable")
-	}
-	wait := s.reserveProviderDispatch(key)
-	return sleepWithContext(ctx, wait)
-}
-
 func isRetryableUpstreamRateLimit(err error) bool {
 	var de *domain.Error
 	return errors.As(err, &de) && de.Status == 429 && de.Code == "upstream_rate_limited"
 }
 
-func (s *Service) waitRateLimitRetry(ctx context.Context, key string, attempt int) (bool, error) {
-	maxRetries, baseBackoff, maxJitter := s.effectiveRateLimitRetry()
-	if attempt >= maxRetries || ctx.Err() != nil {
-		return false, nil
+func (s *Service) planRateLimitRetry(ctx context.Context, key string, attempt int) (time.Duration, bool) {
+	if ctx.Err() != nil {
+		return 0, false
+	}
+	s.mu.Lock()
+	maxRetries, baseBackoff, maxJitter := s.effectiveRateLimitRetryLocked()
+	if attempt >= maxRetries {
+		s.mu.Unlock()
+		return 0, false
 	}
 	shift := attempt
 	if shift > 4 {
 		shift = 4
 	}
 	backoff := (baseBackoff << shift) + randomJitter(maxJitter)
-	s.recordProviderCooldown(key, backoff)
-	if err := sleepWithContext(ctx, backoff); err != nil {
-		return false, err
+	if backoff > 0 {
+		now := time.Now()
+		gate := s.providerGateLocked(key, now)
+		until := now.Add(backoff)
+		if until.After(gate.cooldownUntil) {
+			gate.cooldownUntil = until
+		}
+		gate.lastActive = now
 	}
-	return true, nil
+	s.mu.Unlock()
+	return backoff, true
 }
