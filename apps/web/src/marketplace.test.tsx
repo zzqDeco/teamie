@@ -103,6 +103,22 @@ async function flush() {
   }
 }
 
+function dialogButton(text: string) {
+  const dialogs = [...document.body.querySelectorAll<HTMLElement>('[role="dialog"]')];
+  const button = [...(dialogs.at(-1)?.querySelectorAll("button") ?? [])].find(
+    (b) => b.textContent?.trim() === text,
+  );
+  if (!button) throw new Error(`Missing dialog button: ${text}`);
+  return button;
+}
+
+async function press(button: HTMLElement) {
+  await act(async () => {
+    button.click();
+  });
+  await flush();
+}
+
 async function typeInput(node: HTMLInputElement, value: string) {
   await act(async () => {
     Object.getOwnPropertyDescriptor(
@@ -205,20 +221,31 @@ describe("Marketplace platform admin catalog", () => {
       'input[aria-label="应用签名密钥"]',
     );
     expect(secretInput?.value).toBe("secret-initial-123");
+    // The one-time secret closes only through the explicit acknowledgement.
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(document.body.querySelector('input[aria-label="应用签名密钥"]')).not.toBeNull();
+    await press(dialogButton("我已保存"));
+    expect(document.body.querySelector('input[aria-label="应用签名密钥"]')).toBeNull();
 
     const rotateBtn = document.body.querySelector<HTMLButtonElement>(
       'button[aria-label="轮换 协作棋盘 密钥"]',
     )!;
-    await act(async () => {
-      rotateBtn.click();
-    });
-    await flush();
+    await press(rotateBtn);
+    expect(rotateSpy).not.toHaveBeenCalled();
+    const rotateDialog = [...document.body.querySelectorAll('[role="dialog"]')].at(-1)!;
+    expect(rotateDialog.textContent).toContain("旧密钥将立即失效");
+    expect(rotateDialog.textContent).toContain("所有已安装它的工作空间都会中断");
+    expect(document.activeElement?.textContent?.trim()).toBe("取消");
+    await press(dialogButton("轮换密钥"));
     expect(rotateSpy).toHaveBeenCalledWith("app-1");
     expect(
       document.body.querySelector<HTMLInputElement>(
         'input[aria-label="应用签名密钥"]',
       )?.value,
     ).toBe("secret-rotated-456");
+    await press(dialogButton("我已保存"));
 
     const disableBtn = [...document.body.querySelectorAll("button")].find(
       (b) => b.textContent?.trim() === "停用",
@@ -232,10 +259,12 @@ describe("Marketplace platform admin catalog", () => {
     const deleteBtn = document.body.querySelector<HTMLButtonElement>(
       'button[aria-label="删除 协作棋盘"]',
     )!;
-    await act(async () => {
-      deleteBtn.click();
-    });
-    await flush();
+    await press(deleteBtn);
+    expect(deleteSpy).not.toHaveBeenCalled();
+    expect(
+      [...document.body.querySelectorAll('[role="dialog"]')].at(-1)!.textContent,
+    ).toContain("所有工作空间中该应用的安装都会被一并删除");
+    await press(dialogButton("永久删除"));
     expect(deleteSpy).toHaveBeenCalledWith("app-1");
   });
 });
@@ -281,10 +310,9 @@ describe("Workspace marketplace installation modal", () => {
     const uninstallBtn = [...document.body.querySelectorAll("button")].find(
       (b) => b.textContent?.trim() === "卸载应用",
     )!;
-    await act(async () => {
-      uninstallBtn.click();
-    });
-    await flush();
+    await press(uninstallBtn);
+    expect(uninstallSpy).not.toHaveBeenCalled();
+    await press(dialogButton("卸载应用"));
     expect(uninstallSpy).toHaveBeenCalledWith("ws-1", "app-1");
   });
 });

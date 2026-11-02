@@ -340,7 +340,11 @@ describe("model gateway settings page", () => {
     expect(deleteProvButtons[0]!.disabled).toBe(true);
     expect(deleteProvButtons[1]!.disabled).toBe(false);
     await click(deleteProvButtons[1]!);
+    expect(deleteProviderSpy).not.toHaveBeenCalled();
+    expect(find('[role="dialog"]').textContent).toContain("API Key 将被永久删除");
+    await click(buttonByText("确认删除"));
     expect(deleteProviderSpy).toHaveBeenCalledWith("empty-backup");
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
 
     // Test Model A and Model B separately -> both results remain displayed simultaneously!
     const testButtons = [
@@ -388,7 +392,16 @@ describe("model gateway settings page", () => {
     const deleteButtons = [
       ...document.body.querySelectorAll<HTMLButtonElement>("button"),
     ].filter((b) => b.textContent?.trim() === "移除");
+    // Removing the configured default explains the fallback; cancel keeps it.
+    await click(deleteButtons[0]!);
+    expect(find('[role="dialog"]').textContent).toContain("这是当前的平台默认模型");
+    await click(buttonByText("取消"));
+    expect(deleteModelSpy).not.toHaveBeenCalled();
     await click(deleteButtons[1]!);
+    const removeDialog = find('[role="dialog"]').textContent;
+    expect(removeDialog).toContain("自动回退到平台默认模型");
+    expect(removeDialog).not.toContain("这是当前的平台默认模型");
+    await click(buttonByText("确认移除"));
     expect(deleteModelSpy).toHaveBeenCalledWith("gpt-4o-mini");
   });
 });

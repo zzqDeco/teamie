@@ -6,7 +6,14 @@ import type {
 } from "@teamie/api-client";
 import { gatewayFailureText } from "../agent-management";
 import type { ModelProfileFormValue } from "../agent-management";
-import { Button, FormRow, Modal, Notice, SwitchField } from "../ui";
+import {
+  Button,
+  FormRow,
+  Modal,
+  ModalCloseButton,
+  Notice,
+  SwitchField,
+} from "../ui";
 
 export function ModelProfileDialog({
   providers,
@@ -158,9 +165,7 @@ export function ModelProfileDialog({
           onChange={setEnabled}
         />
         <div className="modal-actions">
-          <Button type="button" variant="secondary" onClick={onClose}>
-            取消
-          </Button>
+          <ModalCloseButton>取消</ModalCloseButton>
           <Button type="submit" busy={busy}>
             {initial ? "保存模型" : "添加模型"}
           </Button>

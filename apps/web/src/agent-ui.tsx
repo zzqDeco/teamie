@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { Bot, Check, CirclePause, Eye, LockKeyhole } from "lucide-react";
 import type { WebSearchGatewayConfig, Workspace } from "@teamie/api-client";
-import { Button, Modal, Notice, SwitchField } from "./ui";
+import { Button, ConfirmDialog, Notice, SwitchField } from "./ui";
 import { ICON } from "./icons";
 
 export function AgentBadge({
@@ -58,7 +58,7 @@ export function WorkspaceVisibilityFields({
         <Eye size={ICON.sm} />
         可见工作空间
       </legend>
-      <p>选择的团队成员可以发现此 Agent。</p>
+      <p>所选工作空间的成员可以发现此 Agent。</p>
       {workspaces.length ? (
         <div className="visibility-options">
           {workspaces.map((workspace) => (
@@ -91,11 +91,11 @@ export function WorkspaceVisibilityFields({
           ))}
         </div>
       ) : (
-        <div className="visibility-empty">加入团队后，可在这里选择。</div>
+        <div className="visibility-empty">加入工作空间后，可在这里选择。</div>
       )}
       <small>
         <LockKeyhole size={ICON.xs} />
-        可访问所选团队的频道；私信和小组需要加入对话。
+        可访问所选工作空间的频道；私信和小组需要被加入对话。
       </small>
     </fieldset>
   );
@@ -202,21 +202,17 @@ export function WebSearchConfigurationFields({
         </div>
       </form>
       {confirm && (
-        <Modal title="清除搜索密钥" onClose={() => setConfirm(false)}>
-          <p>联网搜索与网页提取将暂停，直到重新配置。</p>
-          <div className="modal-actions">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => setConfirm(false)}
-            >
-              取消
-            </Button>
-            <Button type="button" onClick={() => void save()}>
-              确认保存
-            </Button>
-          </div>
-        </Modal>
+        <ConfirmDialog
+          tone="danger"
+          title="清除搜索密钥？"
+          impact={[
+            "联网搜索与网页提取将暂停，直到重新配置。",
+            "已保存的搜索密钥将被永久清除，恢复使用需要重新填写。",
+          ]}
+          confirmLabel="确认保存"
+          onCancel={() => setConfirm(false)}
+          onConfirm={() => void save()}
+        />
       )}
     </section>
   );

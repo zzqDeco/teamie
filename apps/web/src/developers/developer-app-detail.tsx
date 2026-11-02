@@ -14,7 +14,7 @@ import {
   ShieldCheck,
   Undo2,
 } from "lucide-react";
-import { api } from "@teamie/api-client";
+import { api, ApiError } from "@teamie/api-client";
 import type {
   DeveloperMarketplaceApp,
   MarketplaceEndpointVerification,
@@ -31,6 +31,10 @@ import {
 } from "../marketplace";
 import { BadgePill, Button, Notice, SwitchField } from "../ui";
 import { ICON } from "../icons";
+import {
+  IssuedSecretDialog,
+  RotateSecretConfirm,
+} from "../marketplace/secret-dialogs";
 
 export function DeveloperAppDetail({
   appId,
@@ -100,10 +104,8 @@ export function DeveloperAppDetail({
   const [liveReport, setLiveReport] = useState<MarketplaceEndpointVerification | null>(
     null,
   );
-  const [issuedSecret, setIssuedSecret] = useState<{
-    secret: string;
-    copied: boolean;
-  } | null>(null);
+  const [issuedSecret, setIssuedSecret] = useState("");
+  const [confirmingRotate, setConfirmingRotate] = useState(false);
   const [copiedAppId, setCopiedAppId] = useState(false);
 
   async function refreshApp() {
@@ -121,6 +123,9 @@ export function DeveloperAppDetail({
       await refreshApp();
     } catch (e) {
       setError(errorText(e));
+      // A failed submission persists its verification report; show it.
+      if (e instanceof ApiError && e.code === "endpoint_verification_failed")
+        await refreshApp().catch(() => {});
     } finally {
       setBusyAction("");
     }
@@ -146,6 +151,19 @@ export function DeveloperAppDetail({
     return (
       <div className="admin-view">
         <p className="muted">正在加载应用详情…</p>
+      </div>
+    );
+  }
+
+  const missing =
+    detailQuery.error instanceof ApiError &&
+    [403, 404].includes(detailQuery.error.status);
+  if (!app && detailQuery.isError && !missing) {
+    return (
+      <div className="unavailable-view" role="alert">
+        <h2>加载失败</h2>
+        <p>{errorText(detailQuery.error)}</p>
+        <Button onClick={() => void detailQuery.refetch()}>重新加载</Button>
       </div>
     );
   }
@@ -224,7 +242,7 @@ export function DeveloperAppDetail({
         </div>
       </div>
 
-      <Notice>{error}</Notice>
+      <Notice>{confirmingRotate ? "" : error}</Notice>
       <Notice kind="success">{successMsg}</Notice>
 
       {app.reviewStatus === "rejected" && app.reviewNote && (
@@ -247,12 +265,10 @@ export function DeveloperAppDetail({
             size="sm"
             disabled={isLocked || !!busyAction}
             busy={busyAction === "rotate"}
-            onClick={() =>
-              void runAction("rotate", async () => {
-                const res = await api.rotateDeveloperMarketplaceAppSecret(app.id);
-                setIssuedSecret({ secret: res.signingSecret, copied: false });
-              })
-            }
+            onClick={() => {
+              setError("");
+              setConfirmingRotate(true);
+            }}
           >
             <KeyRound size={ICON.xs} /> 轮换签名密钥
           </Button>
@@ -272,35 +288,30 @@ export function DeveloperAppDetail({
             </button>
           </div>
         </label>
-        {issuedSecret && (
-          <label>
-            最新生成的 HMAC-SHA256 签名密钥（仅显示一次）
-            <div className="copy-input">
-              <input
-                value={issuedSecret.secret}
-                readOnly
-                aria-label="应用签名密钥"
-                onFocus={(e) => e.target.select()}
-              />
-              <button
-                type="button"
-                aria-label="复制签名密钥"
-                onClick={() => {
-                  void navigator.clipboard?.writeText(issuedSecret.secret).then(() =>
-                    setIssuedSecret({ ...issuedSecret, copied: true }),
-                  );
-                }}
-              >
-                {issuedSecret.copied ? (
-                  <CheckCheck size={ICON.md} />
-                ) : (
-                  <Copy size={ICON.md} />
-                )}
-              </button>
-            </div>
-          </label>
-        )}
       </section>
+      {confirmingRotate && (
+        <RotateSecretConfirm
+          appName={app.draftName || app.name}
+          published={app.publishedVersion > 0}
+          busy={busyAction === "rotate"}
+          error={error}
+          onCancel={() => setConfirmingRotate(false)}
+          onConfirm={() =>
+            void runAction("rotate", async () => {
+              const res = await api.rotateDeveloperMarketplaceAppSecret(app.id);
+              setConfirmingRotate(false);
+              setIssuedSecret(res.signingSecret);
+            })
+          }
+        />
+      )}
+      {issuedSecret && (
+        <IssuedSecretDialog
+          appName={app.draftName || app.name}
+          secret={issuedSecret}
+          onAcknowledge={() => setIssuedSecret("")}
+        />
+      )}
 
       {app.publishedVersion > 0 && (
         <section className="settings-form" aria-label="线上与草稿版本对比">

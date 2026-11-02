@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Eye, Hash } from "lucide-react";
+import { EyeOff, Hash } from "lucide-react";
 import { api } from "@teamie/api-client";
 import type { Agent, ModelCatalog, Workspace } from "@teamie/api-client";
 import { useAuth } from "../auth";
@@ -14,7 +14,7 @@ import {
   agentProfileInput,
   snapshotAgentProfile,
 } from "../agent-management";
-import { Button, Modal, Notice, SwitchField } from "../ui";
+import { Button, ConfirmDialog, Modal, ModalCloseButton, Notice, SwitchField } from "../ui";
 import { toast } from "../toast";
 import { ICON } from "../icons";
 
@@ -53,7 +53,7 @@ export function WorkspaceChips({
         })
       ) : (
         <span className="private-agent-chip">
-          <Eye size={ICON.xs} />
+          <EyeOff size={ICON.xs} />
           未选择工作空间
         </span>
       )}
@@ -92,22 +92,38 @@ export function AgentProfileDialog({
   const defaultModel = catalogModels.find(
     (item) => item.isDefault || item.id === catalogQuery.data?.defaultModelId,
   );
-  const [workspaceIds, setWorkspaceIds] = useState(
+  // A new Agent starts visible in the workspace the owner came from (only if
+  // it is a current membership), or the only workspace they belong to.
+  const [workspaceIds, setWorkspaceIds] = useState(() =>
     initialAgent
       ? initialAgent.workspaceIds.filter((id) =>
           workspaces.some((w) => w.id === id),
         )
-      : initialWorkspaceId
+      : initialWorkspaceId && workspaces.some((w) => w.id === initialWorkspaceId)
         ? [initialWorkspaceId]
-        : [],
+        : workspaces.length === 1
+          ? [workspaces[0].id]
+          : [],
   );
   const createIntent = useRef<{ fingerprint: string; key: string } | null>(null);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
-    [dirty, setDirty] = useState(false);
-  async function submit(event: FormEvent) {
+    [dirty, setDirty] = useState(false),
+    [confirmingHidden, setConfirmingHidden] = useState(false);
+  const hidden = workspaceIds.length === 0;
+  // Saving with no workspace makes the Agent undiscoverable; ask once unless
+  // an existing Agent was already hidden and its visibility is unchanged.
+  const needsHiddenConfirm =
+    hidden && (!initialAgent || initialAgent.workspaceIds.length > 0);
+  function submit(event: FormEvent) {
     event.preventDefault();
     if (busy) return;
+    if (needsHiddenConfirm) setConfirmingHidden(true);
+    else void save();
+  }
+  async function save() {
+    if (busy) return;
+    setConfirmingHidden(false);
     setBusy(true);
     setError("");
     const sessionToken = api.csrfToken;
@@ -173,7 +189,7 @@ export function AgentProfileDialog({
       busy={busy}
       dirty={dirty}
     >
-      <form onSubmit={submit} onInput={() => setDirty(true)}>
+      <form noValidate onSubmit={submit} onInput={() => setDirty(true)}>
         <Notice>{error}</Notice>
         <label>
           Agent 名称
@@ -229,9 +245,17 @@ export function AgentProfileDialog({
         <WorkspaceVisibilityFields
           workspaces={workspaces}
           selectedIds={workspaceIds}
-          onChange={setWorkspaceIds}
+          onChange={(ids) => {
+            setDirty(true);
+            setWorkspaceIds(ids);
+          }}
           disabled={busy}
         />
+        {hidden && (
+          <p className="field-warning" role="status">
+            未选择工作空间：其他成员将无法发现、@ 或邀请这个 Agent。
+          </p>
+        )}
         <SwitchField
           checked={enabled}
           disabled={
@@ -248,14 +272,25 @@ export function AgentProfileDialog({
           onChange={setEnabled}
         />
         <div className="modal-actions">
-          <Button type="button" variant="secondary" onClick={onClose}>
-            取消
-          </Button>
+          <ModalCloseButton>取消</ModalCloseButton>
           <Button type="submit" busy={busy} disabled={!name.trim()}>
             {initialAgent ? "保存资料" : "创建 Agent"}
           </Button>
         </div>
       </form>
+      {confirmingHidden && (
+        <ConfirmDialog
+          title={initialAgent ? "不在任何工作空间显示？" : "不选择工作空间就创建？"}
+          impact={[
+            "其他成员将无法在成员列表中发现它，也无法 @ 它或邀请它加入对话。",
+            "之后可以随时在「编辑资料」中选择可见的工作空间。",
+          ]}
+          cancelLabel="返回选择"
+          confirmLabel={initialAgent ? "仍然保存" : "仍然创建"}
+          onCancel={() => setConfirmingHidden(false)}
+          onConfirm={() => void save()}
+        />
+      )}
     </Modal>
   );
 }

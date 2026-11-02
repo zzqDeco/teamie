@@ -25,7 +25,7 @@ import {
   agentFailureText,
   canManageAgent,
 } from "./agent-management";
-import { BadgePill, Button, Modal, Notice } from "./ui";
+import { BadgePill, Button, ConfirmDialog, Notice } from "./ui";
 import { toast } from "./toast";
 import { ICON } from "./icons";
 import {
@@ -37,7 +37,12 @@ const queryRetry = (count: number, error: Error) =>
   !(error instanceof ApiError && [401, 403, 404].includes(error.status)) &&
   count < 1;
 
-export function MyAgents() {
+export function MyAgents({
+  lastWorkspaceId = "",
+}: {
+  /** Workspace of the last visited conversation; preselected on create. */
+  lastWorkspaceId?: string;
+}) {
   const { user } = useAuth();
   const { data } = useChat();
   const [creating, setCreating] = useState(false);
@@ -149,6 +154,7 @@ export function MyAgents() {
       {creating && (
         <AgentProfileDialog
           workspaces={data?.workspaces || []}
+          initialWorkspaceId={lastWorkspaceId || undefined}
           onClose={closeCreate}
         />
       )}
@@ -375,31 +381,21 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         />
       )}{" "}
       {deleting && (
-        <Modal
+        <ConfirmDialog
+          tone="danger"
           title={`删除「${agent.name}」？`}
-          subtitle="删除后，这个 Agent 将停止工作并从发现列表移除，已有聊天消息仍会保留。"
-          onClose={closeDelete}
-          dismissible={!busy}
-        >
-          <Notice>{error}</Notice>
-          <div className="modal-actions">
-            <Button
-              variant="secondary"
-              onClick={closeDelete}
-              disabled={busy}
-              data-autofocus
-            >
-              保留 Agent
-            </Button>
-            <Button
-              variant="danger"
-              busy={busy}
-              onClick={() => void remove()}
-            >
-              确认删除
-            </Button>
-          </div>
-        </Modal>
+          impact={[
+            "这个 Agent 将停止工作，并从发现列表中移除。",
+            "已有聊天消息仍会保留。",
+            "删除后无法恢复。",
+          ]}
+          cancelLabel="保留 Agent"
+          confirmLabel="确认删除"
+          busy={busy}
+          error={error}
+          onCancel={closeDelete}
+          onConfirm={() => void remove()}
+        />
       )}
     </div>
   );

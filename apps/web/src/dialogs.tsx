@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -19,7 +19,7 @@ import { useAuth } from "./auth";
 import { useChat } from "./chat";
 import { errorText } from "./errors";
 import { chatStore } from "./store";
-import { Avatar, Button, Modal, Notice, SwitchField } from "./ui";
+import { Avatar, Button, Modal, ModalCloseButton, Notice, SwitchField } from "./ui";
 import { enrichParticipants } from "./participants";
 import { ParticipantIdentity } from "./group-members";
 import { canConfigureModelGateway } from "./agent-management";
@@ -57,6 +57,9 @@ export function WorkspaceDialog({
     } | null>(null),
     [copied, setCopied] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<{ name?: string; members?: string }>({});
+  const nameErrorId = useId();
+  const membersErrorId = useId();
   const memberQuery = useQuery({
     queryKey: ["members", user!.id, workspace?.id],
     queryFn: () => api.members(workspace!.id),
@@ -92,13 +95,20 @@ export function WorkspaceDialog({
     event.preventDefault();
     setBusy(true);
     setError("");
-    const name = String(
-      new FormData(event.currentTarget).get("name") || "",
-    ).trim();
+    const form = event.currentTarget;
+    const name = String(new FormData(form).get("name") || "").trim();
     const generation = chatStore.generation;
     try {
-      if (kind === "group" && (eligibleSelected.length < 1 || eligibleSelected.length > 49)) {
-        setError("请选择 1 至 49 位伙伴。");
+      // The form is noValidate so required-field feedback is inline Chinese
+      // copy rather than the browser's native bubble.
+      const nextErrors: { name?: string; members?: string } = {};
+      if (["workspace", "channel", "group"].includes(kind) && !name)
+        nextErrors.name = `请填写${{ workspace: "工作空间", channel: "频道", group: "小组" }[kind as "workspace" | "channel" | "group"]}名称。`;
+      if (kind === "group" && (eligibleSelected.length < 1 || eligibleSelected.length > 49))
+        nextErrors.members = "请选择 1 至 49 位成员。";
+      setFieldErrors(nextErrors);
+      if (nextErrors.name || nextErrors.members) {
+        if (nextErrors.name) form.querySelector<HTMLInputElement>('input[name="name"]')?.focus();
         return;
       }
       if (kind === "workspace") {
@@ -150,7 +160,14 @@ export function WorkspaceDialog({
           : "放弃未保存的更改？"
       }
     >
-      <form onSubmit={submit} onInput={() => setDirty(true)}>
+      <form
+        noValidate
+        onSubmit={submit}
+        onInput={() => {
+          setDirty(true);
+          if (fieldErrors.name) setFieldErrors((old) => ({ ...old, name: undefined }));
+        }}
+      >
         <Notice>{error}</Notice>
         {kind === "workspace" && (
           <>
@@ -162,8 +179,11 @@ export function WorkspaceDialog({
                 maxLength={80}
                 required
                 autoComplete="off"
+                aria-invalid={fieldErrors.name ? true : undefined}
+                aria-describedby={fieldErrors.name ? nameErrorId : undefined}
               />
             </label>
+            <FieldError id={nameErrorId} message={fieldErrors.name} />
             <div className="form-note">
               <Hash size={ICON.md} />
               <span>自动创建 general 频道。</span>
@@ -182,9 +202,12 @@ export function WorkspaceDialog({
                   maxLength={80}
                   required
                   autoComplete="off"
+                  aria-invalid={fieldErrors.name ? true : undefined}
+                  aria-describedby={fieldErrors.name ? nameErrorId : undefined}
                 />
               </div>
             </label>
+            <FieldError id={nameErrorId} message={fieldErrors.name} />
             <div className="form-note">
               <Users size={ICON.md} />
               <span>工作空间内的所有成员都可以访问这个频道。</span>
@@ -192,25 +215,40 @@ export function WorkspaceDialog({
           </>
         )}
         {kind === "group" && (
-          <label>
-            小组名称
-            <input
-              name="name"
-              placeholder="例如：周五灵感碰头"
-              maxLength={80}
-              required
-            />
-          </label>
+          <>
+            <label>
+              小组名称
+              <input
+                name="name"
+                placeholder="例如：周五灵感碰头"
+                maxLength={80}
+                required
+                aria-invalid={fieldErrors.name ? true : undefined}
+                aria-describedby={fieldErrors.name ? nameErrorId : undefined}
+              />
+            </label>
+            <FieldError id={nameErrorId} message={fieldErrors.name} />
+          </>
         )}
         {["direct", "group"].includes(kind) && (
-          <div className="member-select">
+          <div
+            className="member-select"
+            aria-describedby={fieldErrors.members ? membersErrorId : undefined}
+          >
             <span className="label-text">
               {kind === "direct"
                 ? "选择一位伙伴"
                 : `选择小组成员 · 已选 ${eligibleSelected.length} 位`}
             </span>
             {memberQuery.isLoading && <p className="muted">正在加载成员…</p>}
-            {memberQuery.error && <Notice>成员加载失败，请关闭后重试。</Notice>}
+            {memberQuery.error && (
+              <div role="alert">
+                <Notice>成员加载失败。</Notice>
+                <Button type="button" variant="secondary" size="sm" onClick={() => void memberQuery.refetch()}>
+                  重新加载
+                </Button>
+              </div>
+            )}
             {participants.map((member) => (
               <button
                 key={member.userId}
@@ -219,6 +257,7 @@ export function WorkspaceDialog({
                 className={`member-option ${selected.includes(member.userId) ? "selected" : ""}`}
                 onClick={() => {
                   setDirty(true);
+                  setFieldErrors((old) => ({ ...old, members: undefined }));
                   setSelected((old) =>
                     kind === "direct"
                       ? [member.userId]
@@ -236,11 +275,13 @@ export function WorkspaceDialog({
             ))}
             {!memberQuery.isLoading &&
               !agentsQuery.isLoading &&
+              !memberQuery.error &&
               participants.length === 0 && (
                 <div className="mini-empty">
-                  暂无可选成员。请先邀请成员加入团队。
+                  暂无可选成员。请先邀请成员加入工作空间。
                 </div>
               )}
+            <FieldError id={membersErrorId} message={fieldErrors.members} />
           </div>
         )}
         {kind === "invite" && (
@@ -280,9 +321,7 @@ export function WorkspaceDialog({
           </div>
         )}
         <div className="modal-actions">
-          <Button type="button" variant="secondary" onClick={onClose}>
-            {invite ? "完成" : "取消"}
-          </Button>
+          <ModalCloseButton>{invite ? "完成" : "取消"}</ModalCloseButton>
           {!invite && (
             <Button
               type="submit"
@@ -309,6 +348,13 @@ export function WorkspaceDialog({
       </form>
     </Modal>
   );
+}
+function FieldError({ id, message }: { id: string; message?: string }) {
+  return message ? (
+    <small id={id} className="field-error" role="alert">
+      {message}
+    </small>
+  ) : null;
 }
 export function ProfileSettings() {
   const { user, updateUser, logout } = useAuth();

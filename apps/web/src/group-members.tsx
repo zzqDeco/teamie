@@ -9,7 +9,7 @@ import { useChat, useChatState } from "./chat";
 import { errorText } from "./errors";
 import { chatStore } from "./store";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
-import { Avatar, Button, Modal, Notice } from "./ui";
+import { Avatar, Button, ConfirmDialog, Modal, ModalCloseButton, Notice } from "./ui";
 import type { Participant } from "./participants";
 import { ICON } from "./icons";
 import { toast } from "./toast";
@@ -104,37 +104,20 @@ export function GroupMembersDialog({
   }
   if (confirmingRemoval)
     return (
-      <Modal
+      <ConfirmDialog
         key="confirm-removal"
+        tone="danger"
         title={`将 ${confirmingRemoval.displayName} 移出小组？`}
         subtitle="移出后，该成员将无法继续访问这个小组对话。工作空间成员资格不受影响。"
-        onClose={() => {
+        confirmLabel="确认移出"
+        busy={busyId === confirmingRemoval.userId}
+        error={error}
+        onCancel={() => {
           setError("");
           setConfirmingRemoval(null);
         }}
-        dismissible={!busyId}
-      >
-        <Notice>{error}</Notice>
-        <div className="modal-actions">
-          <Button
-            className="secondary"
-            disabled={!!busyId}
-            onClick={() => {
-              setError("");
-              setConfirmingRemoval(null);
-            }}
-          >
-            取消
-          </Button>
-          <Button
-            className="danger"
-            busy={busyId === confirmingRemoval.userId}
-            onClick={() => void confirmRemoval(confirmingRemoval)}
-          >
-            确认移出
-          </Button>
-        </div>
-      </Modal>
+        onConfirm={() => void confirmRemoval(confirmingRemoval)}
+      />
     );
   return (
     <Modal
@@ -200,9 +183,7 @@ export function GroupMembersDialog({
         </div>
       )}
       <div className="modal-actions">
-        <Button className="secondary" onClick={onClose}>
-          完成
-        </Button>
+        <ModalCloseButton>完成</ModalCloseButton>
       </div>
     </Modal>
   );
@@ -262,6 +243,7 @@ export function AddParticipantToGroupDialog({
       title={`将 ${member.displayName} 添加到小组`}
       subtitle="选择一个你管理的小组。"
       onClose={onClose}
+      busy={busy}
     >
       <div className="adding-agent-summary">
         <ParticipantIdentity member={member} />
@@ -306,9 +288,7 @@ export function AddParticipantToGroupDialog({
         创建新小组
       </button>
       <div className="modal-actions">
-        <Button className="secondary" onClick={onClose}>
-          取消
-        </Button>
+        <ModalCloseButton disabled={busy}>取消</ModalCloseButton>
         <Button
           busy={busy}
           disabled={!selectedGroup || !addAllowed}

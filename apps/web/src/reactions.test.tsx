@@ -4,7 +4,8 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api } from "@teamie/api-client";
+import { api, ApiError } from "@teamie/api-client";
+import { toast } from "./toast";
 import type {
   Bootstrap,
   Conversation,
@@ -265,6 +266,28 @@ describe("versioned reaction state across message windows", () => {
     await act(async () => own.click());
     await flush();
     expect(remove).toHaveBeenCalledWith(conv.id, msg.id, "👍");
+  });
+
+  it("reports reaction failures, with specific copy for the 20-emoji limit", async () => {
+    const conv = makeConversation("c-group", "group");
+    const msg = makeMessage(conv.id, 1, peerAlice.userId, {
+      reactions: [{ emoji: "🎉", count: 1, userIds: [peerAlice.userId] }],
+      reactionsVersion: "1",
+    });
+    vi.spyOn(api, "messages").mockResolvedValue({ messages: [msg], hasMore: false });
+    const error = vi.spyOn(toast, "error");
+    vi.spyOn(api, "putReaction")
+      .mockRejectedValueOnce(new ApiError(409, "reaction_limit", "limit"))
+      .mockRejectedValueOnce(new ApiError(403, "feature_disabled", "off"));
+    await act(async () => root.render(<MemoryRouter><ConversationView conversation={conv} members={members} onMembers={noop} membersOpen={false} onMenu={noop} /></MemoryRouter>));
+    await flush();
+    const chip = host.querySelector<HTMLButtonElement>(".reaction-chip")!;
+    await act(async () => chip.click());
+    await flush();
+    expect(error).toHaveBeenLastCalledWith("每条消息最多 20 种表情回应，请选择已有的表情。");
+    await act(async () => chip.click());
+    await flush();
+    expect(error).toHaveBeenLastCalledWith("表情回应失败：该功能已由平台关闭，暂时无法使用。");
   });
 
   it("updates successful reaction on located historical message", async () => {

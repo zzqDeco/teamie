@@ -3,7 +3,15 @@ import type { FormEvent } from "react";
 import type { AdminModelProvider } from "@teamie/api-client";
 import { gatewayFailureText } from "../agent-management";
 import type { ProviderProfileFormValue } from "../agent-management";
-import { Button, FormRow, Modal, Notice, SwitchField } from "../ui";
+import {
+  Button,
+  ConfirmDialog,
+  FormRow,
+  Modal,
+  ModalCloseButton,
+  Notice,
+  SwitchField,
+} from "../ui";
 
 export function ProviderProfileDialog({
   initial,
@@ -22,10 +30,21 @@ export function ProviderProfileDialog({
     [enabled, setEnabled] = useState(initial?.enabled ?? true),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
-    [dirty, setDirty] = useState(false);
+    [dirty, setDirty] = useState(false),
+    [confirming, setConfirming] = useState(false);
+  // Clearing the key or disabling a live connection pauses every model under
+  // it, so (like the web-search key) it needs an explicit confirmation.
+  const disabling = !!initial?.enabled && !enabled;
+  const needsConfirm = !!initial && (clearApiKey || disabling);
 
-  async function submit(event: FormEvent) {
+  function submit(event: FormEvent) {
     event.preventDefault();
+    if (needsConfirm) setConfirming(true);
+    else void save();
+  }
+
+  async function save() {
+    setConfirming(false);
     setBusy(true);
     setError("");
     try {
@@ -141,14 +160,34 @@ export function ProviderProfileDialog({
           onChange={setEnabled}
         />
         <div className="modal-actions">
-          <Button type="button" variant="secondary" onClick={onClose}>
-            取消
-          </Button>
+          <ModalCloseButton>取消</ModalCloseButton>
           <Button type="submit" busy={busy}>
             {initial ? "保存服务商" : "添加服务商"}
           </Button>
         </div>
       </form>
+      {confirming && initial && (
+        <ConfirmDialog
+          tone="danger"
+          title={
+            clearApiKey && disabling
+              ? `清除密钥并停用「${initial.displayName}」？`
+              : clearApiKey
+                ? `清除「${initial.displayName}」的 API Key？`
+                : `停用服务商「${initial.displayName}」？`
+          }
+          impact={[
+            `该服务商下的 ${initial.modelCount} 个模型将从 Agent 可选目录中隐藏，进行中的调用会被取消。`,
+            "选择了这些模型的 Agent 会平滑回退到平台默认模型；若默认模型也在该服务商下，将回退到其他可用模型。",
+            ...(clearApiKey
+              ? ["已保存的 API Key 将被永久清除，恢复使用需要重新填写。"]
+              : []),
+          ]}
+          confirmLabel="确认保存"
+          onCancel={() => setConfirming(false)}
+          onConfirm={() => void save()}
+        />
+      )}
     </Modal>
   );
 }

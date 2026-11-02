@@ -11,6 +11,8 @@ vi.mock("./auth", () => ({ useAuth: () => ({ user: { id: "owner", kind: "human" 
 vi.mock("./chat", () => ({ useChat: () => ({ data: { capabilities: { "agents.enabled": true } } }) }));
 
 let root: Root, host: HTMLDivElement, client: QueryClient;
+// The only membership is preselected, so no zero-workspace confirmation.
+const workspace = { id: "ws-1", name: "研发空间", createdBy: "owner", createdAt: "2026-10-28T00:00:00Z" };
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   api.csrfToken = "create-session";
@@ -24,7 +26,7 @@ afterEach(async () => {
 });
 async function mount(onClose = vi.fn()) {
   vi.spyOn(api, "modelCatalog").mockResolvedValue({ models: [] });
-  await act(async () => root.render(<MemoryRouter><QueryClientProvider client={client}><AgentProfileDialog workspaces={[]} onClose={onClose} /></QueryClientProvider></MemoryRouter>));
+  await act(async () => root.render(<MemoryRouter><QueryClientProvider client={client}><AgentProfileDialog workspaces={[workspace]} onClose={onClose} /></QueryClientProvider></MemoryRouter>));
   return onClose;
 }
 async function name(value: string) {

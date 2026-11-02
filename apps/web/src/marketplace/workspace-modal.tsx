@@ -5,7 +5,8 @@ import { Code2 } from "lucide-react";
 import { api } from "@teamie/api-client";
 import type { DeveloperMarketplaceApp, MarketplaceApp, Workspace } from "@teamie/api-client";
 import { errorText } from "../errors";
-import { BadgePill, Button, Modal, Notice } from "../ui";
+import { BadgePill, Button, ConfirmDialog, Modal, ModalCloseButton } from "../ui";
+import { toast } from "../toast";
 import { ICON } from "../icons";
 
 export function WorkspaceMarketplaceModal({
@@ -20,7 +21,10 @@ export function WorkspaceMarketplaceModal({
   const queryClient = useQueryClient();
   const inRouter = useInRouterContext();
   const [busyAppId, setBusyAppId] = useState("");
-  const [error, setError] = useState("");
+  const [confirmingUninstall, setConfirmingUninstall] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
 
   const catalogQuery = useQuery({
     queryKey: ["marketplaceCatalog"],
@@ -61,20 +65,23 @@ export function WorkspaceMarketplaceModal({
     });
   }, [catalogIdSet, developerAppsQuery.data, isOwner]);
 
-  async function toggleInstall(appId: string, installed: boolean) {
+  async function toggleInstall(appId: string, installed: boolean, name: string) {
     if (!isOwner || busyAppId) return;
     setBusyAppId(appId);
-    setError("");
     try {
       if (installed) {
         await api.uninstallWorkspaceApp(workspace.id, appId);
+        setConfirmingUninstall(null);
+        toast.success(`已从「${workspace.name}」卸载「${name}」`);
       } else {
         await api.installWorkspaceApp(workspace.id, appId);
+        toast.success(`已将「${name}」安装到「${workspace.name}」`);
       }
       await queryClient.invalidateQueries({ queryKey: ["workspaceApps", workspace.id] });
       await queryClient.invalidateQueries({ queryKey: ["conversationApps"] });
     } catch (e) {
-      setError(errorText(e));
+      const message = errorText(e);
+      toast.error(installed ? `卸载失败：${message}` : `安装失败：${message}`);
     } finally {
       setBusyAppId("");
     }
@@ -126,7 +133,11 @@ export function WorkspaceMarketplaceModal({
               className={isInstalled ? "secondary danger-text" : ""}
               busy={busyAppId === app.id}
               disabled={!!busyAppId}
-              onClick={() => void toggleInstall(app.id, isInstalled)}
+              onClick={() => {
+                if (isInstalled) {
+                  setConfirmingUninstall({ id: app.id, name: displayName });
+                } else void toggleInstall(app.id, false, displayName);
+              }}
             >
               {isInstalled ? "卸载应用" : "安装到工作空间"}
             </Button>
@@ -138,15 +149,28 @@ export function WorkspaceMarketplaceModal({
 
   return (
     <Modal
-      title={`「${workspace.name}」工作区应用`}
-      subtitle="安装后的应用将在当前工作空间的所有群聊（小组对话）中对人类成员与 Agent 开放。"
+      title={`「${workspace.name}」工作空间应用`}
+      subtitle="安装后的应用将在当前工作空间的所有小组中对人类成员与 Agent 开放。"
       onClose={onClose}
       busy={!!busyAppId}
     >
       <div>
-        <Notice>{error}</Notice>
         {catalogQuery.isLoading || installedQuery.isLoading ? (
           <p className="muted">正在加载应用目录…</p>
+        ) : catalogQuery.isError || installedQuery.isError ? (
+          <div className="admin-empty" role="alert">
+            <p>加载失败：{errorText(catalogQuery.error || installedQuery.error)}</p>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                if (catalogQuery.isError) void catalogQuery.refetch();
+                if (installedQuery.isError) void installedQuery.refetch();
+              }}
+            >
+              重新加载
+            </Button>
+          </div>
         ) : catalogApps.length === 0 ? (
           <p className="muted">平台目录中暂无可用应用。</p>
         ) : (
@@ -182,11 +206,26 @@ export function WorkspaceMarketplaceModal({
                 <Code2 size={ICON.sm} /> 开发者平台
               </a>
             ))}
-          <Button type="button" variant="secondary" onClick={onClose}>
-            关闭
-          </Button>
+          <ModalCloseButton>关闭</ModalCloseButton>
         </div>
       </div>
+      {confirmingUninstall && (
+        <ConfirmDialog
+          tone="danger"
+          title={`从「${workspace.name}」卸载「${confirmingUninstall.name}」？`}
+          impact={[
+            "该工作空间所有小组的应用面板都会移除这个应用，正在使用的成员会立即断开。",
+            "Agent 将无法再调用这个应用提供的工具。",
+            "之后可以随时从目录重新安装。",
+          ]}
+          confirmLabel="卸载应用"
+          busy={busyAppId === confirmingUninstall.id}
+          onCancel={() => setConfirmingUninstall(null)}
+          onConfirm={() =>
+            void toggleInstall(confirmingUninstall.id, true, confirmingUninstall.name)
+          }
+        />
+      )}
     </Modal>
   );
 }

@@ -5,9 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Ban,
   Blocks,
-  CheckCheck,
   CheckCircle2,
-  Copy,
   Eye,
   KeyRound,
   Plus,
@@ -23,8 +21,18 @@ import type {
 } from "@teamie/api-client";
 import { useAuth } from "../auth";
 import { errorText } from "../errors";
-import { BadgePill, Button, Modal, Notice, SwitchField } from "../ui";
+import {
+  BadgePill,
+  Button,
+  ConfirmDialog,
+  Modal,
+  ModalCloseButton,
+  Notice,
+  SwitchField,
+} from "../ui";
+import { toast } from "../toast";
 import { ICON } from "../icons";
+import { IssuedSecretDialog, RotateSecretConfirm } from "./secret-dialogs";
 import { probeStageLabel, reviewActionLabel, reviewStatusMeta } from "./marketplace-labels";
 
 function AdminRequired() {
@@ -66,7 +74,10 @@ function AdminMarketplaceCatalog({ user }: { user: User }) {
   const [issuedSecret, setIssuedSecret] = useState<{
     appName: string;
     secret: string;
-    copied: boolean;
+  } | null>(null);
+  const [pending, setPending] = useState<{
+    kind: "rotate" | "delete";
+    app: DeveloperMarketplaceApp;
   } | null>(null);
 
   const appsQuery = useQuery({
@@ -94,11 +105,7 @@ function AdminMarketplaceCatalog({ user }: { user: User }) {
       setWebUrl("");
       setMcpUrl("");
       setEnabled(true);
-      setIssuedSecret({
-        appName: created.app.name,
-        secret: created.signingSecret,
-        copied: false,
-      });
+      setIssuedSecret({ appName: created.app.name, secret: created.signingSecret });
       await queryClient.invalidateQueries({ queryKey: ["adminMarketplaceApps"] });
       await queryClient.invalidateQueries({ queryKey: ["marketplaceCatalog"] });
     } catch (e) {
@@ -114,6 +121,7 @@ function AdminMarketplaceCatalog({ user }: { user: User }) {
     setError("");
     try {
       await fn();
+      setPending(null);
       await queryClient.invalidateQueries({ queryKey: ["adminMarketplaceApps"] });
       await queryClient.invalidateQueries({ queryKey: ["marketplaceCatalog"] });
     } catch (e) {
@@ -123,14 +131,19 @@ function AdminMarketplaceCatalog({ user }: { user: User }) {
     }
   }
 
-  async function copySecret() {
-    if (!issuedSecret) return;
-    try {
-      await navigator.clipboard.writeText(issuedSecret.secret);
-      setIssuedSecret({ ...issuedSecret, copied: true });
-    } catch {
-      setError("复制未成功，请手动选中密钥复制。");
-    }
+  function confirmPending() {
+    if (!pending) return;
+    const { kind, app } = pending;
+    const label = app.name || app.draftName;
+    void runAppMutation(app.id, async () => {
+      if (kind === "delete") {
+        await api.deleteAdminMarketplaceApp(app.id);
+        toast.success(`已删除「${label}」`);
+        return;
+      }
+      const rotated = await api.rotateAdminMarketplaceAppSecret(app.id);
+      setIssuedSecret({ appName: rotated.app.name, secret: rotated.signingSecret });
+    });
   }
 
   const apps = useMemo(() => appsQuery.data?.apps || [], [appsQuery.data]);
@@ -181,27 +194,7 @@ function AdminMarketplaceCatalog({ user }: { user: User }) {
         </span>
       </div>
 
-      <Notice>{error}</Notice>
-
-      {issuedSecret && (
-        <section className="settings-form" aria-label="应用签名密钥">
-          <h3>「{issuedSecret.appName}」的 Context Token 签名密钥</h3>
-          <p className="field-help">
-            此 HMAC-SHA256 密钥仅显示一次，请妥善保存并配置到对应的第三方 MCP Server 用于校验 Bearer Context Token。
-          </p>
-          <div className="copy-input">
-            <input
-              value={issuedSecret.secret}
-              readOnly
-              aria-label="应用签名密钥"
-              onFocus={(e) => e.target.select()}
-            />
-            <button type="button" onClick={() => void copySecret()} aria-label="复制签名密钥">
-              {issuedSecret.copied ? <CheckCheck size={ICON.md} /> : <Copy size={ICON.md} />}
-            </button>
-          </div>
-        </section>
-      )}
+      <Notice>{pending ? "" : error}</Notice>
 
       <form className="settings-form" onSubmit={handleCreate}>
         <h3>上架官方应用</h3>
@@ -302,6 +295,13 @@ function AdminMarketplaceCatalog({ user }: { user: User }) {
 
         {appsQuery.isLoading ? (
           <p className="muted">正在加载应用目录…</p>
+        ) : appsQuery.isError ? (
+          <div className="admin-empty" role="alert">
+            <p>加载失败：{errorText(appsQuery.error)}</p>
+            <Button variant="secondary" size="sm" onClick={() => void appsQuery.refetch()}>
+              重新加载
+            </Button>
+          </div>
         ) : filteredApps.length === 0 ? (
           <p className="muted">当前筛选条件下暂无应用。</p>
         ) : (
@@ -362,16 +362,10 @@ function AdminMarketplaceCatalog({ user }: { user: User }) {
                       type="button"
                       className="secondary"
                       disabled={!!busyAppId}
-                      onClick={() =>
-                        void runAppMutation(app.id, async () => {
-                          const rotated = await api.rotateAdminMarketplaceAppSecret(app.id);
-                          setIssuedSecret({
-                            appName: rotated.app.name,
-                            secret: rotated.signingSecret,
-                            copied: false,
-                          });
-                        })
-                      }
+                      onClick={() => {
+                        setError("");
+                        setPending({ kind: "rotate", app });
+                      }}
                       aria-label={`轮换 ${displayName} 密钥`}
                     >
                       <KeyRound size={ICON.sm} /> 轮换密钥
@@ -380,11 +374,10 @@ function AdminMarketplaceCatalog({ user }: { user: User }) {
                       type="button"
                       className="secondary danger-text"
                       disabled={!!busyAppId}
-                      onClick={() =>
-                        void runAppMutation(app.id, async () => {
-                          await api.deleteAdminMarketplaceApp(app.id);
-                        })
-                      }
+                      onClick={() => {
+                        setError("");
+                        setPending({ kind: "delete", app });
+                      }}
                       aria-label={`删除 ${displayName}`}
                     >
                       <Trash2 size={ICON.sm} /> 删除
@@ -397,6 +390,39 @@ function AdminMarketplaceCatalog({ user }: { user: User }) {
         )}
       </section>
 
+      {pending?.kind === "rotate" && (
+        <RotateSecretConfirm
+          appName={pending.app.name || pending.app.draftName}
+          published={pending.app.isPublished}
+          busy={busyAppId === pending.app.id}
+          error={error}
+          onCancel={() => setPending(null)}
+          onConfirm={confirmPending}
+        />
+      )}
+      {pending?.kind === "delete" && (
+        <ConfirmDialog
+          tone="danger"
+          title={`删除应用「${pending.app.name || pending.app.draftName}」？`}
+          impact={[
+            "所有工作空间中该应用的安装都会被一并删除，各小组的应用面板与 Agent 工具随之消失。",
+            "应用的目录信息、审核记录与签名密钥将被永久删除，无法恢复。",
+            "如只想暂时下架，请改用「停用」或「封禁下架」。",
+          ]}
+          confirmLabel="永久删除"
+          busy={busyAppId === pending.app.id}
+          error={error}
+          onCancel={() => setPending(null)}
+          onConfirm={confirmPending}
+        />
+      )}
+      {issuedSecret && (
+        <IssuedSecretDialog
+          appName={issuedSecret.appName}
+          secret={issuedSecret.secret}
+          onAcknowledge={() => setIssuedSecret(null)}
+        />
+      )}
       {reviewAppId && (
         <AdminReviewModal
           appId={reviewAppId}
@@ -629,9 +655,7 @@ function AdminReviewModal({ appId, onClose }: { appId: string; onClose: () => vo
           </>
         )}
         <div className="modal-actions">
-          <Button type="button" variant="secondary" onClick={onClose}>
-            关闭
-          </Button>
+          <ModalCloseButton>关闭</ModalCloseButton>
         </div>
       </div>
     </Modal>

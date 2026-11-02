@@ -16,7 +16,8 @@ import type { DeveloperMarketplaceApp } from "@teamie/api-client";
 import { useAuth } from "../auth";
 import { errorText } from "../errors";
 import { reviewStatusMeta } from "../marketplace";
-import { BadgePill, Button, Notice } from "../ui";
+import { BadgePill, Button, ConfirmDialog, Notice } from "../ui";
+import { toast } from "../toast";
 import { ICON } from "../icons";
 
 export function DeveloperAppsList() {
@@ -29,6 +30,8 @@ export function DeveloperAppsList() {
   const [mcpUrl, setMcpUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [deletingId, setDeletingId] = useState("");
+  const [confirmingDelete, setConfirmingDelete] =
+    useState<DeveloperMarketplaceApp | null>(null);
   const [error, setError] = useState("");
   const [createdResult, setCreatedResult] = useState<{
     app: DeveloperMarketplaceApp;
@@ -78,6 +81,9 @@ export function DeveloperAppsList() {
     setError("");
     try {
       await api.deleteDeveloperMarketplaceApp(app.id);
+      setConfirmingDelete(null);
+      if (createdResult?.app.id === app.id) setCreatedResult(null);
+      toast.success(`已删除草稿「${app.draftName}」`);
       await queryClient.invalidateQueries({ queryKey: ["developerMarketplaceApps"] });
     } catch (e) {
       setError(errorText(e));
@@ -149,7 +155,7 @@ export function DeveloperAppsList() {
         </div>
       </div>
 
-      <Notice>{error}</Notice>
+      <Notice>{confirmingDelete ? "" : error}</Notice>
 
       {createdResult && (
         <section className="settings-form" aria-label="新建应用签名密钥">
@@ -251,6 +257,13 @@ export function DeveloperAppsList() {
         <h3>我的应用（{apps.length}）</h3>
         {appsQuery.isLoading ? (
           <p className="muted">正在加载你的应用列表…</p>
+        ) : appsQuery.isError ? (
+          <div className="admin-empty" role="alert">
+            <p>加载失败：{errorText(appsQuery.error)}</p>
+            <Button variant="secondary" size="sm" onClick={() => void appsQuery.refetch()}>
+              重新加载
+            </Button>
+          </div>
         ) : apps.length === 0 ? (
           <p className="muted">你还没有创建任何应用草稿，可先从上方创建并阅读开发者手册。</p>
         ) : (
@@ -295,7 +308,10 @@ export function DeveloperAppsList() {
                         size="sm"
                         busy={deletingId === app.id}
                         disabled={!!deletingId}
-                        onClick={() => void handleDelete(app)}
+                        onClick={() => {
+                          setError("");
+                          setConfirmingDelete(app);
+                        }}
                         aria-label={`删除草稿 ${displayName}`}
                       >
                         <Trash2 size={ICON.sm} /> 删除草稿
@@ -308,6 +324,21 @@ export function DeveloperAppsList() {
           </ul>
         )}
       </section>
+      {confirmingDelete && (
+        <ConfirmDialog
+          tone="danger"
+          title={`删除草稿「${confirmingDelete.draftName}」？`}
+          impact={[
+            "草稿配置、App ID 与签名密钥将一起被永久删除，无法恢复。",
+            "若外部服务仍在使用这个 App ID 与密钥，请同步改用新应用的凭证。",
+          ]}
+          confirmLabel="删除草稿"
+          busy={deletingId === confirmingDelete.id}
+          error={error}
+          onCancel={() => setConfirmingDelete(null)}
+          onConfirm={() => void handleDelete(confirmingDelete)}
+        />
+      )}
     </div>
   );
 }
