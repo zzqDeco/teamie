@@ -89,7 +89,29 @@ func (s *Service) CallChat(ctx context.Context, owner, agentID, sessionID, runID
 
 	start := time.Now()
 	outcome.Phase = "provider-generate"
-	body, prompt, completion, err := s.Model.Chat(callCtx, c, key, raw, messageLimits...)
+	paceKey := providerPaceKey(c)
+	var (
+		body               string
+		prompt, completion int64
+	)
+	for attempt := 0; ; attempt++ {
+		if pErr := s.waitProviderPace(callCtx, paceKey); pErr != nil {
+			err = pErr
+			break
+		}
+		body, prompt, completion, err = s.Model.Chat(callCtx, c, key, raw, messageLimits...)
+		if err == nil || !isRetryableUpstreamRateLimit(err) {
+			break
+		}
+		retry, wErr := s.waitRateLimitRetry(callCtx, paceKey, attempt)
+		if wErr != nil {
+			err = wErr
+			break
+		}
+		if !retry {
+			break
+		}
+	}
 	outcome.PromptTokens = prompt
 	outcome.CompletionTokens = completion
 	status := "success"
@@ -200,9 +222,28 @@ func (s *Service) StreamChat(ctx context.Context, owner, agentID, sessionID, run
 
 	start := time.Now()
 	outcome.Phase = "provider-stream"
-	prompt, completion, err := s.Model.Stream(callCtx, c, key, raw, func(chunk string) error {
-		return writeEvent(domain.StreamEvent{Type: "chunk", ResponseJSON: chunk})
-	}, messageLimits...)
+	paceKey := providerPaceKey(c)
+	var prompt, completion int64
+	for attempt := 0; ; attempt++ {
+		if pErr := s.waitProviderPace(callCtx, paceKey); pErr != nil {
+			err = pErr
+			break
+		}
+		prompt, completion, err = s.Model.Stream(callCtx, c, key, raw, func(chunk string) error {
+			return writeEvent(domain.StreamEvent{Type: "chunk", ResponseJSON: chunk})
+		}, messageLimits...)
+		if err == nil || outcome.ChunkCount > 0 || !isRetryableUpstreamRateLimit(err) {
+			break
+		}
+		retry, wErr := s.waitRateLimitRetry(callCtx, paceKey, attempt)
+		if wErr != nil {
+			err = wErr
+			break
+		}
+		if !retry {
+			break
+		}
+	}
 	outcome.PromptTokens = prompt
 	outcome.CompletionTokens = completion
 	status := "success"

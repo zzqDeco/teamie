@@ -7,6 +7,7 @@ import {
   Bot,
   ChevronDown,
   Hash,
+  Megaphone,
   Plus,
   Users,
   X,
@@ -184,6 +185,8 @@ export function ShellSidebar({
   onOpenDialog,
   onSignOut,
   onShortcuts,
+  onOpenAnnouncements,
+  hasUnreadAnnouncement = false,
 }: {
   navigationRef: RefObject<HTMLDivElement | null>;
   mobile: boolean;
@@ -212,6 +215,8 @@ export function ShellSidebar({
   onOpenDialog: (kind: DialogKind) => void;
   onSignOut: () => void;
   onShortcuts: () => void;
+  onOpenAnnouncements?: () => void;
+  hasUnreadAnnouncement?: boolean;
 }) {
   const activeSnapshot = snapshot || chatStore.getSnapshot();
   const presenceEnabled = !!caps["im.presence.publish"];
@@ -295,6 +300,25 @@ export function ShellSidebar({
           <Plus size={ICON.xl} />
         </IconButton>
         <span className="rail-spacer" />
+        {onOpenAnnouncements && (
+          <button
+            type="button"
+            className="rail-settings rail-announcements"
+            title={hasUnreadAnnouncement ? "平台公告（有新公告）" : "平台公告"}
+            aria-label={
+              hasUnreadAnnouncement ? "平台公告（有新公告）" : "平台公告"
+            }
+            onClick={() => {
+              onCloseSidebar();
+              onOpenAnnouncements();
+            }}
+          >
+            <Megaphone size={ICON.lg} aria-hidden="true" />
+            {hasUnreadAnnouncement && (
+              <span className="rail-announcement-dot" aria-hidden="true" />
+            )}
+          </button>
+        )}
         <Link
           to="/app/agents"
           className={`rail-settings rail-agents ${isAgentsPage ? "selected" : ""}`}
@@ -314,6 +338,8 @@ export function ShellSidebar({
           onSignOut={onSignOut}
           onNavigate={onCloseSidebar}
           onShortcuts={onShortcuts}
+          onAnnouncements={onOpenAnnouncements}
+          hasUnreadAnnouncement={hasUnreadAnnouncement}
         />
       </aside>
       <aside className="navigation-sidebar">

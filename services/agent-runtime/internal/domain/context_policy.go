@@ -250,9 +250,9 @@ func SummaryTrigger(window int) int {
 }
 
 // IsMachineNotificationKind reports whether an input kind is a machine observation
-// (background task notification, scheduled wakeup, marketplace app notification, or unread digest) rather than a new IM message.
+// (background task notification, scheduled wakeup, marketplace app notification, unread digest, or platform announcement) rather than a new IM message.
 func IsMachineNotificationKind(kind string) bool {
-	return kind == "task.notification" || kind == "schedule.wakeup" || kind == "app.notification" || kind == "im.unread_digest"
+	return kind == "task.notification" || kind == "schedule.wakeup" || kind == "app.notification" || kind == "im.unread_digest" || kind == "platform.announcement"
 }
 
 // ShouldPinCurrentInput reports whether an input of the given kind should be pinned

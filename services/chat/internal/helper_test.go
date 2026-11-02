@@ -213,6 +213,7 @@ func (s *Store) App(identity httpx.Identity, controlToken string) *app.Service {
 		Memberships:    repo,
 		Messages:       repo,
 		Attachments:    repo,
+		Announcements:  repo,
 		Outbox:         repo,
 		Identity:       idDir,
 		Flags:          flags.New(s.Flags),

@@ -241,3 +241,15 @@ func ErrReactionLimit() error {
 func ErrInvalidNotificationLevel() error {
 	return Err(400, "invalid_notification_level", "Notification level must be all, mentions or none")
 }
+
+func ErrPlatformAdminRequired() error {
+	return Err(403, "forbidden", "Platform administrator permission is required")
+}
+
+func ErrInvalidAnnouncementTitle() error {
+	return Err(400, "invalid_title", "Announcement title must contain 1 to 120 characters")
+}
+
+func ErrInvalidAnnouncementBody() error {
+	return Err(400, "invalid_body", "Announcement body must contain 1 to 8000 characters")
+}

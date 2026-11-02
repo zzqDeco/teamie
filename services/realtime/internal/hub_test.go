@@ -127,3 +127,44 @@ func TestWebSocketOriginTypingAuthorizationAndRevocation(t *testing.T) {
 		t.Fatal("removed member received typing payload")
 	}
 }
+
+func TestAnnouncementPublishedHintBroadcastsToAllConnectedPeers(t *testing.T) {
+	aliceToken, bobToken := strings.Repeat("a", 64), strings.Repeat("b", 64)
+	identity := &testIdentity{sessions: map[string]httpx.User{
+		aliceToken: {ID: "alice", DisplayName: "Alice", Kind: "human"},
+		bobToken:   {ID: "bob", DisplayName: "Bob", Kind: "human"},
+	}}
+	h := &Hub{
+		Identity:             identity,
+		Chat:                 &testAccess{allowed: map[string]bool{}},
+		Origin:               "https://teamie.example",
+		RevalidationInterval: 100 * time.Millisecond,
+	}
+	server := httptest.NewServer(h.Routes())
+	defer server.Close()
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/v1/ws"
+	connect := func(token string) *websocket.Conn {
+		headers := http.Header{"Origin": {h.Origin}, "Cookie": {httpx.CookieName + "=" + token}}
+		c, _, err := websocket.DefaultDialer.Dial(wsURL, headers)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = c.Close() })
+		for _, kind := range []string{"ready", "sync.required"} {
+			var v map[string]any
+			if err = c.ReadJSON(&v); err != nil || v["type"] != kind {
+				t.Fatal("handshake event", err, v)
+			}
+		}
+		return c
+	}
+	alice, bob := connect(aliceToken), connect(bobToken)
+	h.deliver(context.Background(), Hint{Type: "announcement.published"})
+	for _, conn := range []*websocket.Conn{alice, bob} {
+		_ = conn.SetReadDeadline(time.Now().Add(time.Second))
+		var frame map[string]any
+		if err := conn.ReadJSON(&frame); err != nil || frame["type"] != "announcement.published" {
+			t.Fatalf("expected announcement.published frame, got err=%v frame=%v", err, frame)
+		}
+	}
+}

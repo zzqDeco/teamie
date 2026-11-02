@@ -25,15 +25,16 @@ import (
 
 type Config struct{ ControlAddr, GatewayAddr, SandboxAddr, IdentityAddr, IMURL, IMRealtimeURL, MarketplaceURL, ControlToken, GatewayToken, SandboxToken, IMToken, FlagsFile, GatewayStreamURL string }
 type Engine struct {
-	Store                *Store
-	Config               Config
-	Control              agentcontrolservice.Client
-	Gateway              modelgatewayservice.Client
-	Sandbox              sandboxservice.Client
-	Identity             identityservice.Client
-	UnreadDigestInterval time.Duration
-	slots                chan struct{}
-	owner                string
+	Store                    *Store
+	Config                   Config
+	Control                  agentcontrolservice.Client
+	Gateway                  modelgatewayservice.Client
+	Sandbox                  sandboxservice.Client
+	Identity                 identityservice.Client
+	UnreadDigestInterval     time.Duration
+	AnnouncementPollInterval time.Duration
+	slots                    chan struct{}
+	owner                    string
 }
 
 func (e *Engine) unreadDigestInterval() time.Duration {
@@ -41,6 +42,13 @@ func (e *Engine) unreadDigestInterval() time.Duration {
 		return e.UnreadDigestInterval
 	}
 	return defaultUnreadDigestInterval
+}
+
+func (e *Engine) announcementPollInterval() time.Duration {
+	if e != nil && e.AnnouncementPollInterval > 0 {
+		return e.AnnouncementPollInterval
+	}
+	return defaultAnnouncementPollInterval
 }
 
 func (e *Engine) presenceEnabled() bool {
@@ -215,9 +223,10 @@ type agentWorker struct {
 	generation       int64
 	queued           map[string]int64
 	qmu              sync.Mutex
-	lastState        string
-	lastReport       time.Time
-	heartbeatEnsured bool
+	lastState            string
+	lastReport           time.Time
+	heartbeatEnsured     bool
+	lastAnnouncementPoll time.Time
 }
 
 func (w *agentWorker) authorize(ctx context.Context) error {
@@ -405,6 +414,9 @@ func (e *Engine) work(ctx context.Context, def *wire.AgentDefinition, lease *Lea
 	if d := e.unreadDigestInterval(); d > 0 && d < pollInterval {
 		pollInterval = d
 	}
+	if d := e.announcementPollInterval(); d > 0 && d < pollInterval {
+		pollInterval = d
+	}
 	poll := time.NewTicker(pollInterval)
 	defer poll.Stop()
 	if !w.tick(ctx) {
@@ -447,6 +459,12 @@ func (w *agentWorker) tick(ctx context.Context) bool {
 	}
 	if err := w.tasks.notifications(ctx, w.lease); errors.Is(err, ErrLeaseLost) {
 		return false
+	}
+	if now := time.Now(); w.lastAnnouncementPoll.IsZero() || now.Sub(w.lastAnnouncementPoll) >= w.engine.announcementPollInterval() {
+		w.lastAnnouncementPoll = now
+		if _, annErr := w.engine.ingestAnnouncements(ctx, w.imc, w.lease); errors.Is(annErr, ErrLeaseLost) {
+			return false
+		}
 	}
 	if !w.heartbeatEnsured {
 		ensured, hbErr := w.engine.ensureDefaultHeartbeatSchedule(ctx, w.def, w.imc, w.lease)

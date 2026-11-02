@@ -14,9 +14,10 @@ import {
 } from "./normalizers";
 import { executeTransportRequest, part, routePath } from "./transport";
 import type {
-  AgentProfileInput, AttentionPage, Bootstrap, Conversation,
+  AgentProfileInput, AnnouncementsPage, AttentionPage, Bootstrap, Conversation,
+  CreateAnnouncementInput, CreatedAnnouncement,
   CreatedPasswordResetLink, CreatedRegistrationInvite,
-  Member, Mention, Message, MessagePage,
+  MarkAnnouncementsReadResult, Member, Mention, Message, MessagePage,
   NotificationLevel, PasswordResetInspection,
   PlatformUsersPage, PresenceItem, ReadReceipts, RegistrationPolicy, Session,
   SyncPage, User,
@@ -455,6 +456,40 @@ export class TeamieClient {
   uninstallWorkspaceApp = this.#marketplace.uninstallWorkspaceApp;
   conversationApps = this.#marketplace.conversationApps;
   createConversationAppSession = this.#marketplace.createConversationAppSession;
+  announcements = (
+    options: { beforeSeq?: number; limit?: number } = {},
+    signal?: AbortSignal,
+  ) => {
+    const params = new URLSearchParams();
+    if (options.beforeSeq !== undefined)
+      params.set("beforeSeq", String(options.beforeSeq));
+    if (options.limit !== undefined)
+      params.set("limit", String(options.limit));
+    return this.#request<AnnouncementsPage>(
+      `${IDL_ROUTES.ListAnnouncements.clientPath}${params.size ? `?${params}` : ""}`,
+      { signal },
+    );
+  };
+  markAnnouncementsRead = (seq: number) =>
+    this.#request<MarkAnnouncementsReadResult>(
+      IDL_ROUTES.MarkAnnouncementsRead.clientPath,
+      {
+        method: IDL_ROUTES.MarkAnnouncementsRead.method,
+        body: JSON.stringify({ seq }),
+      },
+    );
+  createAnnouncement = (input: CreateAnnouncementInput) =>
+    this.#request<CreatedAnnouncement>(
+      IDL_ROUTES.CreateAnnouncement.clientPath,
+      {
+        method: IDL_ROUTES.CreateAnnouncement.method,
+        body: JSON.stringify(input),
+      },
+    );
+  deleteAnnouncement = (id: string) =>
+    this.#request<void>(routePath(IDL_ROUTES.DeleteAnnouncement, { id }), {
+      method: IDL_ROUTES.DeleteAnnouncement.method,
+    });
   sync = (cursor: string) =>
     this.#request<SyncPage>(
       `${IDL_ROUTES.Sync.clientPath}?cursor=${part(cursor)}&limit=100`,

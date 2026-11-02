@@ -539,6 +539,49 @@ export interface DownloadAttachmentResp {
   content: Uint8Array;
 }
 
+export interface AnnouncementDTO {
+  id: string;
+  seq: number;
+  title: string;
+  body: string;
+  authorId: string;
+  authorName: string;
+  createdAt: string;
+}
+
+export interface ListAnnouncementsReq {
+  beforeSeq?: string;
+  limit?: string;
+}
+
+export interface ListAnnouncementsResp {
+  items: AnnouncementDTO[];
+  latestSeq: number;
+  readSeq: number;
+  hasMore: boolean;
+}
+
+export interface MarkAnnouncementsReadReq {
+  seq: number;
+}
+
+export interface MarkAnnouncementsReadResp {
+  readSeq: number;
+}
+
+export interface CreateAnnouncementReq {
+  title: string;
+  body: string;
+}
+
+export interface AnnouncementResp {
+  announcement: AnnouncementDTO;
+}
+
+export interface DeleteAnnouncementReq {
+  id: string;
+}
+
 // ============================================================================
 // Source: contracts/im/http_marketplace.thrift (namespace im.marketplace)
 // ============================================================================
@@ -1405,6 +1448,42 @@ export const IDL_ROUTES = {
     clientPath: "/conversations/:id/attachments/:attachmentId/content",
     requestType: "DownloadAttachmentReq",
     responseType: "DownloadAttachmentResp",
+  },
+  ListAnnouncements: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "GET",
+    path: "/api/v1/announcements",
+    clientPath: "/announcements",
+    requestType: "ListAnnouncementsReq",
+    responseType: "ListAnnouncementsResp",
+  },
+  MarkAnnouncementsRead: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "POST",
+    path: "/api/v1/announcements/read",
+    clientPath: "/announcements/read",
+    requestType: "MarkAnnouncementsReadReq",
+    responseType: "MarkAnnouncementsReadResp",
+  },
+  CreateAnnouncement: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "POST",
+    path: "/api/v1/admin/announcements",
+    clientPath: "/admin/announcements",
+    requestType: "CreateAnnouncementReq",
+    responseType: "AnnouncementResp",
+  },
+  DeleteAnnouncement: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "DELETE",
+    path: "/api/v1/admin/announcements/:id",
+    clientPath: "/admin/announcements/:id",
+    requestType: "DeleteAnnouncementReq",
+    responseType: "EmptyResp",
   },
   ListDeveloperMarketplaceApps: {
     service: "MarketplaceHTTPService",

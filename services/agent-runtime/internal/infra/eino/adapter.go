@@ -89,6 +89,8 @@ func FormatInputEnvelope(kind string, rawJSON []byte) string {
 		prefix = "TEAMIE_APP_NOTIFICATION "
 	} else if kind == "im.unread_digest" {
 		prefix = "TEAMIE_UNREAD_DIGEST "
+	} else if kind == "platform.announcement" {
+		prefix = "TEAMIE_PLATFORM_ANNOUNCEMENT "
 	}
 	return prefix + string(rawJSON)
 }

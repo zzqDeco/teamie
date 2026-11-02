@@ -330,6 +330,7 @@ func (a *Adapter) GetBootstrap(ctx context.Context, _ *chatgen.GetBootstrapReq) 
 		wsDTOs = append(wsDTOs, toWorkspaceDTO(item))
 	}
 	flags["im.channel.create"] = flags["im.channel.create"] && owner
+	flags["im.announcements.publish"] = flags["im.announcements.publish"] && user.Kind == "human" && user.PlatformRole == "admin"
 	convDTOs := make([]*chatgen.ConversationDTO, 0, len(cs))
 	for _, c := range cs {
 		convDTOs = append(convDTOs, toConversationDTO(c))

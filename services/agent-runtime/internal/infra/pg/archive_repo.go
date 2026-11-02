@@ -47,7 +47,7 @@ func (r *Repository) ResolveRunSources(ctx context.Context, agentID, runID strin
 					return domain.ErrContextUnavailable
 				}
 				refs = append(refs, domain.InputSource{WorkspaceID: in.WorkspaceID, ConversationID: in.ConversationID})
-			} else if in.Kind == "im.unread_digest" {
+			} else if in.Kind == "im.unread_digest" || in.Kind == "platform.announcement" {
 				if len(in.SourceRefs) == 0 {
 					return domain.ErrContextUnavailable
 				}

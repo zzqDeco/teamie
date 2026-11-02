@@ -28,6 +28,7 @@
     "agents.mentions.v1": true,
     "agents.web.v1": true,
     "agents.schedule.v1": true,
-    "im.marketplace.enabled": true
+    "im.marketplace.enabled": true,
+    "im.announcements.publish": true
   }
 }

@@ -519,6 +519,26 @@ class AgentManifestTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "lower database schema"):
             manifest.check_transition(v2, v3)
 
+    def test_v3_platform_announcements_schema_11_forward_upgrade_and_rollback_guard(self):
+        prev = self.modern()
+        prev["manifestVersion"] = 3
+        prev["version"] = "v0.4.5"
+        prev["source"]["ref"] = "refs/heads/release/v0.4.5"
+        prev["schema"] = {"identity": 3, "chat": 10, "marketplace": 1, "agent_control": 3, "agent_runtime": 15, "gateway": 6}
+        prev["images"]["marketplace"] = "ghcr.io/zzqdeco/teamie-marketplace@sha256:" + "2" * 64
+        curr = copy.deepcopy(prev)
+        curr["version"] = "v0.4.6"
+        curr["source"]["ref"] = "refs/heads/release/v0.4.6"
+        curr["schema"] = dict(manifest.SCHEMA_V3)
+        self.assertEqual(curr["schema"]["chat"], 11)
+        manifest.validate(prev)
+        manifest.validate(curr)
+        manifest.check_transition(curr, prev, prev)
+        with self.assertRaisesRegex(ValueError, "identical schema versions"):
+            manifest.check_transition(prev, curr, rollback=True)
+        with self.assertRaisesRegex(ValueError, "lower database schema"):
+            manifest.check_transition(prev, curr)
+
 
 class ProductionConfigTest(unittest.TestCase):
     def setUp(self):

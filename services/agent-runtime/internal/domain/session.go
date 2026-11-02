@@ -219,7 +219,7 @@ func ResumeCompatible(m *CheckpointMetadata, revision int64, runID string) bool 
 // after the Agent switches away from the conversation that started this turn.
 // Legacy turns use their consumed inputs' conversation provenance instead.
 func RelevantPreemptInput(in Input, consumed []Input, active *InputSource) bool {
-	if in.Kind == "task.notification" || in.Kind == "schedule.wakeup" || in.SourceOverflow {
+	if in.Kind == "task.notification" || in.Kind == "schedule.wakeup" || in.Kind == "platform.announcement" || in.SourceOverflow {
 		return false
 	}
 	machine := in.Kind == "app.notification" || in.Kind == "im.unread_digest"

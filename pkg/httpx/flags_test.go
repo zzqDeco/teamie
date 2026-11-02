@@ -43,4 +43,13 @@ func TestPrivateContextFlagDoesNotBecomeBrowserCapability(t *testing.T) {
 	if !loaded.Flags["agents.enabled"] {
 		t.Fatal("filtering private flags changed the ordinary Agent capability")
 	}
+	if !loaded.Flags["im.announcements.publish"] {
+		t.Fatal("expected im.announcements.publish to default on when omitted from valid older flag files")
+	}
+	if err := os.WriteFile(path, []byte(`{"revision":"announcements-off","flags":{"im.announcements.publish":false}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if (Flags{Path: path}).Load().Flags["im.announcements.publish"] {
+		t.Fatal("expected explicit im.announcements.publish=false to disable announcement publishing")
+	}
 }
