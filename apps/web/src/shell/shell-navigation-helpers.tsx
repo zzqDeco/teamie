@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { Suspense, useEffect, useRef } from "react";
 import type { RefObject } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -22,14 +22,7 @@ import type {
   Workspace,
 } from "@teamie/api-client";
 import { ProfileSettings } from "../dialogs";
-import { PlatformInvitations } from "../admin";
-import { PlatformUsers } from "../platform-users";
-import { ModelGatewaySettings } from "../model-gateway";
-import { PlatformMarketplace } from "../marketplace";
-import { PlatformAnnouncementsAdmin } from "../announcements-admin";
-import { DeveloperPortal } from "../developers";
-import { AgentDetail, MyAgents } from "../agents";
-import { WorkspaceMembers } from "../members";
+import { lazyView } from "../lazy-view";
 import type { Participant } from "../participants";
 import { conversationName } from "../messages";
 import {
@@ -37,8 +30,40 @@ import {
   summarizeConversationUnread,
 } from "../store";
 import type { ChatSnapshot } from "../store";
-import { IconButton, useOverlayFocus } from "../ui";
+import { IconButton, Loading, useOverlayFocus } from "../ui";
 import { ICON } from "../icons";
+
+const PlatformInvitations = lazyView(() =>
+  import("../admin").then((m) => ({ default: m.PlatformInvitations })),
+);
+const PlatformUsers = lazyView(() =>
+  import("../platform-users").then((m) => ({ default: m.PlatformUsers })),
+);
+const ModelGatewaySettings = lazyView(() =>
+  import("../model-gateway").then((m) => ({ default: m.ModelGatewaySettings })),
+);
+const PlatformMarketplace = lazyView(() =>
+  import("../marketplace/admin-marketplace").then((m) => ({
+    default: m.PlatformMarketplace,
+  })),
+);
+const PlatformAnnouncementsAdmin = lazyView(() =>
+  import("../announcements-admin").then((m) => ({
+    default: m.PlatformAnnouncementsAdmin,
+  })),
+);
+const DeveloperPortal = lazyView(() =>
+  import("../developers").then((m) => ({ default: m.DeveloperPortal })),
+);
+const AgentDetail = lazyView(() =>
+  import("../agents").then((m) => ({ default: m.AgentDetail })),
+);
+const MyAgents = lazyView(() =>
+  import("../agents").then((m) => ({ default: m.MyAgents })),
+);
+const WorkspaceMembers = lazyView(() =>
+  import("../members").then((m) => ({ default: m.WorkspaceMembers })),
+);
 
 export function ShellManagementView({
   user,
@@ -179,6 +204,7 @@ export function ShellManagementView({
             </Link>
           </nav>
         )}
+      <Suspense fallback={<Loading />}>
       {isUsersPage ? (
         <PlatformUsers />
       ) : isMarketplacePage ? (
@@ -227,6 +253,7 @@ export function ShellManagementView({
       ) : (
         <ProfileSettings />
       )}
+      </Suspense>
     </>
   );
 }
