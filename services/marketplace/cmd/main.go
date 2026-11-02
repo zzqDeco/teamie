@@ -67,7 +67,8 @@ func main() {
 		Flags:              flags.New(cfgFlags),
 		AppOrigin:          origin,
 		RequirePublicHTTPS: &requirePublicHTTPS,
-		VerifyCooldown:     2 * time.Second,
+		VerifyCooldown:      2 * time.Second,
+		MaxConcurrentProbes: app.DefaultMaxConcurrentProbes,
 		Verifier: &probe.Verifier{
 			AppOrigin:          origin,
 			RequirePublicHTTPS: requirePublicHTTPS,
