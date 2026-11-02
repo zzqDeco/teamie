@@ -97,8 +97,8 @@ func TestConversationalStyleMultiBubbleSequentialDeliveryAndFlagGate(t *testing.
 	s := testStore(t)
 	e, f, base, _ := fixtureEngine(t, s)
 	flagsPath := filepath.Join(t.TempDir(), "flags.json")
-	// Omitting agents.style.conversational.v1 defaults to true so existing host feature-flags.json works out of the box.
-	if err := os.WriteFile(flagsPath, []byte(`{"revision":"style-default-on","flags":{"agents.runtime.v3":true,"agents.tasks.execute":true,"agents.context.v1":true,"agents.mentions.v1":true,"im.dm.create":true}}`), 0600); err != nil {
+	// Omitting agents.style.conversational.v1 defaults to true when human_presence.v2 is disabled.
+	if err := os.WriteFile(flagsPath, []byte(`{"revision":"style-default-on","flags":{"agents.runtime.v3":true,"agents.tasks.execute":true,"agents.context.v1":true,"agents.mentions.v1":true,"im.dm.create":true,"agents.style.human_presence.v2":false}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	e.Config.FlagsFile = flagsPath
@@ -190,7 +190,7 @@ func TestConversationalStyleMultiBubbleSequentialDeliveryAndFlagGate(t *testing.
 	})
 
 	// Explicitly disable agents.style.conversational.v1 for subsequent new Runs.
-	if err := os.WriteFile(flagsPath, []byte(`{"revision":"style-disabled","flags":{"agents.runtime.v3":true,"agents.tasks.execute":true,"agents.context.v1":true,"agents.mentions.v1":true,"im.dm.create":true,"agents.style.conversational.v1":false}}`), 0600); err != nil {
+	if err := os.WriteFile(flagsPath, []byte(`{"revision":"style-disabled","flags":{"agents.runtime.v3":true,"agents.tasks.execute":true,"agents.context.v1":true,"agents.mentions.v1":true,"im.dm.create":true,"agents.style.conversational.v1":false,"agents.style.human_presence.v2":false}}`), 0600); err != nil {
 		cancel()
 		<-done
 		t.Fatal(err)

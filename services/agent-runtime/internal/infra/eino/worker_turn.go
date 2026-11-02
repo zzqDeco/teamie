@@ -147,30 +147,35 @@ func (w *agentWorker) makeAgent(ctx context.Context) (adk.TypedAgent[*schema.Age
 		}
 		handlers = append(handlers, pipeline)
 		handlers = append(handlers, w.tasks.handlers...)
-		instruction := contextInstruction(w.def, budget)
-		if budget.FileDelivery {
-			instruction += fileDeliveryGuidance
-		}
-		if budget.StructuredMentions {
-			instruction += mentionGuidance
-		}
-		if budget.WebSearch {
-			instruction += webSearchGuidance
-		}
-		if budget.ScheduledWakeups {
-			if budget.DirectMessages {
-				instruction += autonomousScheduleGuidance
-			} else {
-				instruction += scheduleWakeupGuidance
+		var instruction string
+		if budget.HumanPresenceV2 {
+			instruction = humanPresenceV2Instruction(w.def, budget, presenceActive, len(mcpTools) > 0)
+		} else {
+			instruction = contextInstruction(w.def, budget)
+			if budget.FileDelivery {
+				instruction += fileDeliveryGuidance
 			}
-		}
-		if budget.DirectMessages {
-			instruction += directMessageGuidance
-		}
-		if presenceActive {
-			instruction += presenceAndMarketplaceGuidance
-		} else if len(mcpTools) > 0 {
-			instruction += marketplaceAppGuidance
+			if budget.StructuredMentions {
+				instruction += mentionGuidance
+			}
+			if budget.WebSearch {
+				instruction += webSearchGuidance
+			}
+			if budget.ScheduledWakeups {
+				if budget.DirectMessages {
+					instruction += autonomousScheduleGuidance
+				} else {
+					instruction += scheduleWakeupGuidance
+				}
+			}
+			if budget.DirectMessages {
+				instruction += directMessageGuidance
+			}
+			if presenceActive {
+				instruction += presenceAndMarketplaceGuidance
+			} else if len(mcpTools) > 0 {
+				instruction += marketplaceAppGuidance
+			}
 		}
 		return adk.NewTypedChatModelAgent(ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{Name: "teamie_agent", Description: "A user-owned Teamie participant", Instruction: instruction, Model: w.gatewayModel, ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: activeTools, ExecuteSequentially: true, UnknownToolsHandler: unknownHandler}}, MaxIterations: math.MaxInt, Handlers: handlers, ModelRetryConfig: pipeline.RetryConfig()})
 	}
@@ -330,7 +335,8 @@ func (w *agentWorker) prepare(ctx context.Context, items []Input, resume *checkp
 	// their persisted selection even when the flag or gateway changes.
 	if w.engine.Config.FlagsFile != "" && runtimeFlag(w.engine.Config.FlagsFile, "agents.context.v1") {
 		profile = contextProfileV1
-		budget, err = newRunContextBudget(int(w.contextWindow.Load()), runtimeFlag(w.engine.Config.FlagsFile, "agents.files.deliver.v1"), runtimeFlag(w.engine.Config.FlagsFile, "agents.mentions.v1"), runtimeFlag(w.engine.Config.FlagsFile, "agents.web.v1"), runtimeFlag(w.engine.Config.FlagsFile, "agents.schedule.v1"), runtimeFlag(w.engine.Config.FlagsFile, "im.dm.create"), runtimeFlagDefault(w.engine.Config.FlagsFile, "agents.style.conversational.v1", true))
+		dmEnabled := runtimeFlag(w.engine.Config.FlagsFile, "im.dm.create")
+		budget, err = newRunContextBudget(int(w.contextWindow.Load()), runtimeFlag(w.engine.Config.FlagsFile, "agents.files.deliver.v1"), runtimeFlag(w.engine.Config.FlagsFile, "agents.mentions.v1"), runtimeFlag(w.engine.Config.FlagsFile, "agents.web.v1"), runtimeFlag(w.engine.Config.FlagsFile, "agents.schedule.v1"), dmEnabled, runtimeFlagDefault(w.engine.Config.FlagsFile, "agents.style.conversational.v1", true), dmEnabled && runtimeFlagDefault(w.engine.Config.FlagsFile, "agents.style.human_presence.v2", true))
 		if err != nil {
 			return nil, nil, nil, err
 		}

@@ -433,7 +433,17 @@ class AgentManifestTest(unittest.TestCase):
         previous = self.modern()
         previous["schema"]["agent_runtime"] = 13
         current = self.modern()
+        current["schema"]["agent_runtime"] = 14
         self.assertEqual(current["schema"]["agent_runtime"], 14)
+        with self.assertRaisesRegex(ValueError, "identical schema versions"):
+            manifest.compatible(current, previous)
+        manifest.compatible(current, copy.deepcopy(current))
+
+    def test_human_presence_v2_schema_fences_previous_writer_and_allows_same_schema_rollback(self):
+        previous = self.modern()
+        previous["schema"]["agent_runtime"] = 14
+        current = self.modern()
+        self.assertEqual(current["schema"]["agent_runtime"], 15)
         with self.assertRaisesRegex(ValueError, "identical schema versions"):
             manifest.compatible(current, previous)
         manifest.compatible(current, copy.deepcopy(current))
