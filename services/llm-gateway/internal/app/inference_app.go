@@ -109,7 +109,8 @@ func (s *Service) CallChat(ctx context.Context, owner, agentID, sessionID, runID
 			}
 			defer releaseWorker()
 
-			if cErr := s.waitProviderCooldown(callCtx, providerKey); cErr != nil {
+			dispatchedAt, cErr := s.waitProviderCooldown(callCtx, providerKey)
+			if cErr != nil {
 				err = cErr
 				return true
 			}
@@ -130,8 +131,10 @@ func (s *Service) CallChat(ctx context.Context, owner, agentID, sessionID, runID
 
 			outcome.Phase = "provider-generate"
 			body, prompt, completion, err = s.Model.Chat(callCtx, c, key, raw, messageLimits...)
-			if err != nil && isRetryableUpstreamRateLimit(err) {
-				if backoff, retry := s.planRateLimitRetry(callCtx, providerKey, attempt); retry {
+			if err == nil {
+				s.recordProviderSuccess(callCtx, providerKey, dispatchedAt)
+			} else if isRetryableUpstreamRateLimit(err) {
+				if backoff, retry := s.recordRateLimitAndPlanRetry(callCtx, providerKey, dispatchedAt, err, attempt); retry {
 					retryBackoff = backoff
 					shouldRetry = true
 				}
@@ -275,7 +278,8 @@ func (s *Service) StreamChat(ctx context.Context, owner, agentID, sessionID, run
 			}
 			defer releaseWorker()
 
-			if cErr := s.waitProviderCooldown(callCtx, providerKey); cErr != nil {
+			dispatchedAt, cErr := s.waitProviderCooldown(callCtx, providerKey)
+			if cErr != nil {
 				err = cErr
 				return true
 			}
@@ -298,8 +302,10 @@ func (s *Service) StreamChat(ctx context.Context, owner, agentID, sessionID, run
 			prompt, completion, err = s.Model.Stream(callCtx, c, key, raw, func(chunk string) error {
 				return writeEvent(domain.StreamEvent{Type: "chunk", ResponseJSON: chunk})
 			}, messageLimits...)
-			if err != nil && outcome.ChunkCount == 0 && isRetryableUpstreamRateLimit(err) {
-				if backoff, retry := s.planRateLimitRetry(callCtx, providerKey, attempt); retry {
+			if err == nil {
+				s.recordProviderSuccess(callCtx, providerKey, dispatchedAt)
+			} else if outcome.ChunkCount == 0 && isRetryableUpstreamRateLimit(err) {
+				if backoff, retry := s.recordRateLimitAndPlanRetry(callCtx, providerKey, dispatchedAt, err, attempt); retry {
 					retryBackoff = backoff
 					shouldRetry = true
 				}

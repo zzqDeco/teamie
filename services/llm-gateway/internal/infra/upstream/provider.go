@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cloudwego/eino-ext/libs/acl/openai"
 	"github.com/cloudwego/eino/components/model"
@@ -265,7 +268,7 @@ func (g *providerBoundary) RoundTrip(request *http.Request) (*http.Response, err
 			}
 		}
 		if response.StatusCode == 429 {
-			return nil, domain.Err(429, "upstream_rate_limited", "Provider rejected the request")
+			return nil, domain.ErrRateLimited(ParseRetryAfterHeader(response.Header, time.Now()))
 		}
 		if g.streaming {
 			return nil, domain.Err(502, "upstream_http_error", "Provider rejected the request")
@@ -315,4 +318,74 @@ func guardUnary(body []byte, key string) error {
 		return domain.Err(502, "invalid_upstream_response", "Invalid chat completion response")
 	}
 	return domain.GuardSingleResponse(string(body), key)
+}
+
+// MaxRetryAfterCooldown caps upstream Retry-After cooldown windows so a malformed
+// or extreme upstream header cannot wedge a provider indefinitely.
+const MaxRetryAfterCooldown = 5 * time.Minute
+
+// ParseRetryAfterHeader extracts a bounded positive retry delay from Retry-After
+// (non-negative seconds or RFC 7231 HTTP-date) and optional Retry-After-Ms.
+// Malformed, non-positive, past, or oversized header values return 0.
+func ParseRetryAfterHeader(header http.Header, now time.Time) time.Duration {
+	if header == nil {
+		return 0
+	}
+	d := parseRetryAfterValue(header.Get("Retry-After"), now)
+	if ms := parseRetryAfterMillis(header.Get("Retry-After-Ms")); ms > d {
+		d = ms
+	}
+	return d
+}
+
+func parseRetryAfterValue(raw string, now time.Time) time.Duration {
+	s := strings.TrimSpace(raw)
+	if s == "" || len(s) > 128 {
+		return 0
+	}
+	if secs, err := strconv.ParseInt(s, 10, 64); err == nil {
+		if secs <= 0 {
+			return 0
+		}
+		maxSecs := int64(MaxRetryAfterCooldown / time.Second)
+		if secs >= maxSecs {
+			return MaxRetryAfterCooldown
+		}
+		return time.Duration(secs) * time.Second
+	}
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
+		if math.IsNaN(f) || math.IsInf(f, 0) || f <= 0 {
+			return 0
+		}
+		if f >= MaxRetryAfterCooldown.Seconds() {
+			return MaxRetryAfterCooldown
+		}
+		return time.Duration(math.Ceil(f*1000)) * time.Millisecond
+	}
+	if parsed, err := http.ParseTime(s); err == nil {
+		d := parsed.Sub(now)
+		if d <= 0 {
+			return 0
+		}
+		if d > MaxRetryAfterCooldown {
+			return MaxRetryAfterCooldown
+		}
+		return d
+	}
+	return 0
+}
+
+func parseRetryAfterMillis(raw string) time.Duration {
+	s := strings.TrimSpace(raw)
+	if s == "" || len(s) > 128 {
+		return 0
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) || f <= 0 {
+		return 0
+	}
+	if f >= float64(MaxRetryAfterCooldown/time.Millisecond) {
+		return MaxRetryAfterCooldown
+	}
+	return time.Duration(math.Ceil(f)) * time.Millisecond
 }

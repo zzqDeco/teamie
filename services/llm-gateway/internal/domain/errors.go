@@ -9,15 +9,17 @@ import (
 	"errors"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // Error represents a domain or upstream boundary violation with a canonical
 // HTTP status code, machine-readable error code, diagnostic stage/reason, and internal cause.
 type Error struct {
-	Status                int
-	Code, Stage, Reason   string
-	Message               string
-	Cause                 error
+	Status              int
+	Code, Stage, Reason string
+	Message             string
+	Cause               error
+	RetryAfter          time.Duration
 }
 
 func (e *Error) Error() string             { return e.Code }
@@ -32,6 +34,20 @@ func (e *Error) Unwrap() error             { return e.Cause }
 // Err creates a new domain Error.
 func Err(status int, code, message string) *Error {
 	return &Error{Status: status, Code: code, Message: message}
+}
+
+// ErrRateLimited creates a canonical 429 upstream_rate_limited domain Error carrying
+// a parsed positive RetryAfter duration without exposing raw upstream header text.
+func ErrRateLimited(retryAfter time.Duration) *Error {
+	if retryAfter < 0 {
+		retryAfter = 0
+	}
+	return &Error{
+		Status:     429,
+		Code:       "upstream_rate_limited",
+		Message:    "Provider rejected the request",
+		RetryAfter: retryAfter,
+	}
 }
 
 // ErrWithCause creates a new domain Error preserving the underlying cause.
