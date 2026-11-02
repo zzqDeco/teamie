@@ -176,6 +176,8 @@ Runtime schema 13 freezes the optional `directMessages` admission flag and works
 
 Runtime schema 14 freezes the optional `conversationalStyle` admission flag (`teamie-conversational-presence-v1`, enabled by default at new context-v1 Run admission unless `agents.style.conversational.v1:false` is set in `FEATURE_FLAGS_FILE`), selecting emotional, anti-corporate expression and sequential short-bubble `im_send_message` guidance/tool descriptions while preserving byte-exact prompts, tool schemas, checkpoints and model request hashes for all persisted schema-13 and earlier Runs. Schema 14 raises the writer protocol fence and rejects schema-13 image-only rollback.
 
+Runtime schema 15 freezes the optional `humanPresenceV2` admission flag (`teamie-human-presence-v2`, enabled by default when `im.dm.create` is active unless `agents.style.human_presence.v2:false` is set in `FEATURE_FLAGS_FILE`), selecting the unified four-part peer-presence instruction, asymmetric single-first `im_send_message` tool description and social-rapport compaction summary guidance while preserving byte-exact prompts, tool schemas, checkpoints and model request hashes for all persisted schema-14 and earlier Runs. Schema 15 raises the writer protocol fence and rejects schema-14 image-only rollback.
+
 ### Conversation presence, unread digests, dynamic Marketplace MCP tools and app notifications
 
 When `im.marketplace.enabled` is active, Runtime enforces unified single-conversation presence (`activeConversationId`, initially `""`) across `group`, `channel` and `direct` conversations inside `services/agent-runtime` without modifying IM (`services/identity`, `services/chat`, `services/realtime`) contracts:
