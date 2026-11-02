@@ -9,21 +9,26 @@ flowchart LR
   Edge --> Identity[Identity · Hertz]
   Edge --> Chat[Chat · Hertz]
   Edge --> RT[Realtime · Hertz + Gorilla]
+  Edge --> MP[Marketplace · Hertz]
   Edge --> CP[Agent Control Plane]
   Edge --> Gateway[Admin model gateway]
   Chat -->|Kitex| Identity
   RT -->|Kitex| Identity
   RT -->|Kitex| Chat
+  MP -->|Kitex| Identity
+  MP -->|Kitex| Chat
   CP -->|Generic principal RPC| Identity
   CP -->|Generic membership RPC| Chat
   Runtime[Eino runtime] -->|Definitions / safe status RPC| CP
   Runtime -->|Own participant HTTP| Chat
+  Runtime -->|Installed apps / Context Token HTTP| MP
   Runtime -->|Scoped token RPC| Identity
   Runtime -->|Private model HTTP / control RPC| Gateway
   Runtime -->|Execution RPC| Sandbox[Sandbox service]
   Sandbox --> Child[Isolated execution child]
   Identity --> IDB[(Identity DB)]
   Chat --> CDB[(Chat DB)]
+  MP --> MDB[(Marketplace DB)]
   CP --> ADB[(Control DB)]
   Runtime --> RDB[(Runtime DB)]
   Gateway --> GDB[(Gateway DB)]
@@ -38,12 +43,13 @@ flowchart LR
 | Identity | Human credentials/platform roles, registration invitations, one-time password resets, profiles, sessions/CSRF; generic machine principals and scoped expiring credentials |
 | Chat | Workspaces, current normal memberships, conversations, durable messages/files/read/sync/outbox; generic delegated grants and moderation |
 | Realtime | Connections, heartbeats, disposable typing and sync hints; authorization checked through RPC |
+| Marketplace | Developer app catalog, submission/review workflow, workspace/conversation installations, symmetric Context Token issuance and bounded outbound endpoint verification |
 | Agent Control Plane | Human-owned Agent profiles, selected visibility/enabled state, reconciliation revisions and safe runtime status |
 | Agent runtime | Durable inbox/cursor, one Session per Agent, leases/fences, TurnLoop, checkpoints, compaction and model/tool receipts |
-| Model gateway | Platform-admin provider/model policy, encrypted secrets and upstream invocation |
+| Model gateway | Platform-admin provider/model policy, per-provider concurrency/cooldown pacing, encrypted secrets and upstream invocation |
 | Sandbox | Protected per-Agent filesystem workspaces, execution receipts, cancellation and isolated child containers |
 
-Five persistent services own separate PostgreSQL databases and application roles: Identity, Chat, Agent Control Plane, runtime and gateway. Sandbox owns protected filesystem data; Realtime has no durable database. Sharing a PostgreSQL instance does not authorize foreign-table reads. Cross-service authority is expressed through authenticated Kitex control RPC, private model HTTP or the ordinary IM participant HTTP API.
+Six persistent services own separate PostgreSQL databases and application roles: Identity, Chat, Marketplace, Agent Control Plane, runtime and gateway. Sandbox owns protected filesystem data; Realtime has no durable database. Sharing a PostgreSQL instance does not authorize foreign-table reads. Cross-service authority is expressed through authenticated Kitex control RPC, private model HTTP or the ordinary IM participant HTTP API.
 
 Only Caddy publishes host HTTP/HTTPS. Static web and public API paths are routed through it; backend HTTP/RPC, PostgreSQL, Redis, gateway model HTTP/control RPC and Sandbox RPC remain private. Browser requests are same-origin. CP/worker credentials stay out of browser bundles and Sandbox children.
 
@@ -69,9 +75,9 @@ Agent visibility creates ordinary membership selected from its human owner's cur
 
 Each Agent has one durable global Session `agent:<id>`, with a single writer and serial native TurnLoop. Fresh message bodies plus sender/workspace/conversation/message/event IDs enter the input envelope even while an earlier input batch is active; Eino consumes new input at its native safe points. Source-closed context compaction and PostgreSQL artifact archives preserve provenance references and revalidate IM ACLs on retrieval (see [Private Agent context engineering](context-engineering.md)), while older IM history is queried through explicit tools. All sends/replies (`im_send_message`, `im_send_file`), scheduled wakeups (`schedule_*`), and web searches (`web_search`, `web_extract`) use explicit tools; ordinary model output and operational errors are never automatically sent to IM.
 
-Desired definition state is persisted before provisioning; Identity is disabled while CP reconciles membership/configuration, then enabled only for the applied revision. Tokens rotate/expire and are revoked on disable/delete/revision. Runtime definitions and tool/model preflight checks stop stale work. Inbox persistence and IM cursor advancement commit together. Stable sends and known tool results replay without duplicate public messages; unknown execution effects are not silently rerun.
+Desired definition state is persisted before provisioning; Identity is disabled while CP reconciles membership/configuration, then enabled only for the applied revision. Tokens rotate/expire and are revoked on disable/delete/revision. Runtime definitions and tool/model preflight checks stop stale work. Inbox persistence and IM cursor advancement commit together. Turn preparation partitions runnable inputs strictly by homogeneous `run_id` and enforces a `FOR UPDATE` Run-ownership fence in PostgreSQL so fresh pending inputs never rebind recovering `retry` inputs or orphan their tool/IM send receipts. Stable sends and known tool results replay without duplicate public messages; unknown execution effects are not silently rerun.
 
-The runtime process maintains a durable single-writer lease per Agent while allowing foreground model calls across different Agents to execute concurrently without a global 1-slot ceiling. Native background tasks run asynchronously while the Agent's Session writer stays serial. Eino background-task Manager, PostgreSQL TaskStore/events and notification outbox recover task completion into the Agent inbox. Workers, attempts and fencing are internal implementation details, not additional architecture services. Browser APIs expose only the basic Agent profile (including optional platform-catalog `modelId`), selected workspace visibility and enabled state. Session, runs, tasks, tools, errors, events and operational control remain private; Control Plane has no outgoing runtime client. Sandbox workspaces persist independently of execution children. Children receive fixed platform mounts/resource policy and no network, host socket or service/provider credentials.
+The runtime process maintains a durable single-writer lease per Agent while allowing foreground model calls across different Agents to execute concurrently without a global 1-slot ceiling. Within the model gateway, per-provider virtual workers bound concurrent upstream dispatches per `ProviderProfile`, honor sanitized `Retry-After` / `Retry-After-Ms` durations, and retain provider-scoped rate-limit cooldowns across calls so exhausted retries do not immediately hammer a throttled upstream. Native background tasks run asynchronously while the Agent's Session writer stays serial. Eino background-task Manager, PostgreSQL TaskStore/events and notification outbox recover task completion into the Agent inbox. Workers, attempts and fencing are internal implementation details, not additional architecture services. Browser APIs expose only the basic Agent profile (including optional platform-catalog `modelId`), selected workspace visibility and enabled state. Session, runs, tasks, tools, errors, events and operational control remain private; Control Plane has no outgoing runtime client. Sandbox workspaces persist independently of execution children. Children receive fixed platform mounts/resource policy and no network, host socket or service/provider credentials.
 
 The gateway uses the official CloudWeGo `agenticopenai.NewChatModel` extension for its existing OpenAI-compatible Chat Completions endpoint. Runtime uses a native typed Agentic ChatModelAgent, Session, TurnLoop and middleware; ordered reasoning, text and tool blocks survive model receipts and Session persistence. Its authenticated private transport carries native messages and common model options, while the gateway owns provider serialization, administrator-selected policy and encrypted credentials. [Model gateway architecture](model-gateway.md) describes dependency compatibility, transport guards and the read-compatible format cutover.
 
@@ -79,14 +85,14 @@ Fresh installations start with an unconfigured model gateway. Healthy readiness 
 
 ## Flags, infrastructure and release
 
-Versioned backend flag files carry a revision (currently `mentions-v1` in `deploy/feature-flags.default.json`). Effective capabilities intersect implemented behavior and enabled keys; the backend independently checks authorization. Agent capabilities are false when absent from an older file. `agents.runtime.v3`, `agents.context.v1`, `agents.files.deliver.v1`, `agents.tasks.execute`, `agents.mentions.v1`, `agents.web.v1`, and `agents.schedule.v1` gate new Agent work, context archiving, file delivery, background task submission, mention handling, web research, and scheduled wakeups; reads and cancellation remain available when writes are disabled. `im.attachments.upload` and `im.message.mentions` gate file uploads and structured `@` mentions while preserving authorized reads of persisted content. Reactions and threads remain unavailable.
+Versioned backend flag files carry a revision (currently `presence-v1` in `deploy/feature-flags.default.json`). Effective capabilities intersect implemented behavior and enabled keys; the backend independently checks authorization. Agent capabilities are false when absent from an older file (except `agents.presence.v1`, which falls back to `im.marketplace.enabled` only when `agents.presence.v1` is absent from a legacy flag file). `agents.runtime.v3`, `agents.context.v1`, `agents.files.deliver.v1`, `agents.tasks.execute`, `agents.mentions.v1`, `agents.web.v1`, `agents.schedule.v1`, and `agents.presence.v1` gate new Agent work, context archiving, file delivery, background task submission, mention handling, web research, scheduled wakeups, and native single-conversation presence/unread digests; reads and cancellation remain available when writes are disabled. `im.attachments.upload`, `im.message.mentions`, `im.reactions.create`, `im.read_receipts.view`, `im.notifications.configure`, `im.marketplace.enabled`, and `im.announcements.publish` gate file uploads, structured `@` mentions, reactions, read receipts, notification levels, Marketplace apps/dynamic MCP tools, and platform announcements while preserving authorized reads of persisted content. `im.threads.create` remains false.
 
-One Debian x86_64 host runs the Compose services. The release contains twelve immutable Alibaba Cloud Container Registry images: web, Identity, Chat, Realtime, Control Plane, runtime, gateway, Sandbox, execution-runner, Caddy, PostgreSQL and Redis. Execution-runner is an on-demand child image. Hosted CI pushes to the ACR public endpoint; the production host pulls digest-pinned artifacts through the same instance's VPC endpoint. Persistent volumes preserve databases, workspaces, receipts, certificates and backups.
+One Debian x86_64 host runs the Compose services. The release (`manifestVersion: 3`) contains thirteen immutable Alibaba Cloud Container Registry images: web, Identity, Chat, Realtime, Marketplace, Control Plane, runtime, gateway, Sandbox, execution-runner, Caddy, PostgreSQL and Redis. Execution-runner is an on-demand child image. Hosted CI pushes to the ACR public endpoint; the production host pulls digest-pinned artifacts through the same instance's VPC endpoint. Persistent volumes and private roots preserve databases, workspaces, receipts, certificates and backups.
 
-Only `production` is deployed; disposable CI databases do not constitute a second environment. `main` is the ongoing trunk. Published `release/vx.x.x` branches/tags are immutable permanent archives; fixes require a new version. Forward migrations preserve existing accounts/messages. The current schema vector (`SCHEMA_V2` in `ops/manifest.py`) is Identity 3, Chat 5, Control Plane 1, Runtime 13, Gateway 3. Cross-schema image rollback is rejected; verify a pre-upgrade backup/restore path before migration.
+Only `production` is deployed; disposable CI databases do not constitute a second environment. `main` is the ongoing trunk. Published `release/vx.x.x` branches/tags are immutable permanent archives; fixes require a new version. Forward migrations preserve existing accounts/messages. The current schema vector (`SCHEMA_V3` in `ops/manifest.py`) is Identity 3, Chat 11, Marketplace 1, Control Plane 3, Runtime 15, Gateway 6. Cross-schema image rollback is rejected; verify a pre-upgrade backup/restore path before migration.
 
 The public IP uses the configured Let's Encrypt ACME `shortlived` issuer and `TLS_SERVER_NAME`/`default_sni` for non-SNI clients. Public trusted HTTPS and renewal are separate acceptance gates. Internal-CA or disabled-verification checks do not establish public trust.
 
-Memory/CPU limits are initial budgets for a 2-vCPU/2-GB host, not measured capacity claims. Connections, queues, concurrent turns and execution children are bounded. A single host is not highly available. Same-disk backups cover some mistakes but not host loss; off-host storage remains future operational work.
+Memory/CPU limits are initial budgets for a 2-vCPU/2-GB host, not measured capacity claims. Connections, queues, concurrent turns and execution children are bounded. A single host is not highly available. `ops/backup.sh` enforces a 2 GiB free-disk reserve, dumps all six PostgreSQL databases, archives confined `sandbox-workspaces` and `sandbox-state` tarballs (with optional `--quiesce-agents` writer quiescing), and writes verified `SHA256SUMS`; `ops/backup-config-encrypted.sh` separately encrypts `production.env` (`GATEWAY_MASTER_KEY` and service credentials) plus `feature-flags.json` outside `$TEAMIE_ROOT/backups`, and `ops/sync-backup-offhost.sh` / `ops/check-backup-health.sh` verify backup freshness and replicate bundles off-host.
 
 Gateway administrator configuration uses independent provider-profile, model-profile, routing-policy and web-search commands and stores. Fallback resolution is read-only; search saves cannot alter provider credentials or model enabled state. See [model gateway](model-gateway.md#independent-administrator-configuration).
