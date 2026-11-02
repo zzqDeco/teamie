@@ -23,6 +23,7 @@ var (
 	ErrCheckpointScopeMismatch = errors.New("checkpoint scope mismatch")
 	ErrContextUnavailable      = errors.New("context_unavailable")
 	ErrContextArguments        = errors.New("invalid_context_arguments")
+	ErrMixedInputRunOwnership  = errors.New("mixed input run ownership")
 )
 
 // Error represents a coded domain error with an optional HTTP/RPC status, diagnostic stage/reason, internal cause, and retry classification.
@@ -275,7 +276,8 @@ func PublicErrorCode(code string) string {
 		"im_unavailable", "source_unavailable", "new_input", "principal_disabled",
 		"control_unavailable", "runtime_disabled", "task_execution_disabled",
 		"sandbox_unavailable", "sandbox_busy", "sandbox_command_failed",
-		"sandbox_execution_unknown", "gateway_stream_interrupted":
+		"sandbox_execution_unknown", "gateway_stream_interrupted",
+		"superseded_orphan_run":
 		return code
 	}
 	return "execution_failed"

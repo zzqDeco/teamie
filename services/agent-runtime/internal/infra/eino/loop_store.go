@@ -140,3 +140,82 @@ func (s *Store) eligibleInputs(ctx context.Context, l *Lease, inputs []Input) ([
 	}
 	return out, nil
 }
+
+func isResumableRunState(state string) bool {
+	switch state {
+	case "running", "interrupted", "waiting_configuration", "retry", "waiting_input":
+		return true
+	default:
+		return false
+	}
+}
+
+// partitionRunnableInputs groups candidate inputs so an existing recoverable Run's inputs
+// are never mixed into the same batch as unbound fresh inputs or inputs from a different Run.
+func (s *Store) partitionRunnableInputs(ctx context.Context, l *Lease, inputs []Input, resume *checkpointMetadata) (batch []Input, extra []Input, resumedRun bool, err error) {
+	if len(inputs) == 0 {
+		return nil, nil, false, nil
+	}
+	ids := make([]string, 0, len(inputs))
+	for _, in := range inputs {
+		ids = append(ids, in.EventID)
+	}
+	bindings, err := s.DB.InspectInputBindings(ctx, l.AgentID, ids)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	eligible := make([]Input, 0, len(inputs))
+	for _, in := range inputs {
+		b, ok := bindings[in.EventID]
+		if !ok {
+			continue
+		}
+		if b.RunID != "" && !isResumableRunState(b.RunState) {
+			continue
+		}
+		eligible = append(eligible, in)
+	}
+	if len(eligible) == 0 {
+		return nil, nil, false, nil
+	}
+
+	var targetRunID string
+	if resume != nil && resume.RunID != "" {
+		for _, in := range eligible {
+			if bindings[in.EventID].RunID == resume.RunID {
+				targetRunID = resume.RunID
+				break
+			}
+		}
+	}
+	if targetRunID == "" {
+		var bestSeq int64
+		hasBest := false
+		for _, in := range eligible {
+			b := bindings[in.EventID]
+			if b.RunID == "" {
+				continue
+			}
+			if !hasBest || (b.DeliverySeq > 0 && (bestSeq == 0 || b.DeliverySeq < bestSeq)) {
+				targetRunID = b.RunID
+				bestSeq = b.DeliverySeq
+				hasBest = true
+			}
+		}
+	}
+	if targetRunID != "" {
+		sameRun := make([]Input, 0, len(eligible))
+		deferred := make([]Input, 0, len(eligible))
+		for _, in := range eligible {
+			if bindings[in.EventID].RunID == targetRunID {
+				sameRun = append(sameRun, in)
+			} else {
+				deferred = append(deferred, in)
+			}
+		}
+		return sameRun, deferred, true, nil
+	}
+
+	freshBatch, overflow := boundedInputBatch(eligible)
+	return freshBatch, overflow, false, nil
+}

@@ -6,23 +6,40 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/google/uuid"
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/google/uuid"
 	"teamie/pkg/postgres"
+	"teamie/services/agent-runtime/internal/domain"
 	"teamie/services/agent-runtime/internal/infra/pg"
 )
 
 func main() {
+	if len(os.Args) < 2 {
+		usage()
+	}
+	switch os.Args[1] {
+	case "acceptance":
+		runAcceptance(os.Args[2:])
+	case "orphan-runs":
+		runOrphanRuns(os.Args[2:])
+	default:
+		usage()
+	}
+}
+
+func usage() {
+	fmt.Fprintln(os.Stderr, "usage: runtimectl <acceptance|orphan-runs> [flags]")
+	os.Exit(2)
+}
+
+func runAcceptance(args []string) {
 	flags := flag.NewFlagSet("runtimectl acceptance", flag.ExitOnError)
 	agent := flags.String("agent", "", "Agent ID")
 	message := flags.String("message", "", "trigger message ID")
-	if len(os.Args) < 2 || os.Args[1] != "acceptance" {
-		fmt.Fprintln(os.Stderr, "usage: runtimectl acceptance --agent ID --message ID")
-		os.Exit(2)
-	}
-	_ = flags.Parse(os.Args[2:])
+	_ = flags.Parse(args)
 	if _, e := uuid.Parse(*agent); e != nil {
 		os.Exit(2)
 	}
@@ -33,15 +50,62 @@ func main() {
 	defer cancel()
 	pool, err := postgres.Open(ctx, os.Getenv("DATABASE_URL"), postgres.WithRuntimeParam("default_transaction_read_only", "on"))
 	if err != nil {
-		fail()
+		fail("acceptance evidence unavailable")
 	}
 	defer pool.Close()
 	out, err := pg.NewFromPool(pool).ReadAcceptanceEvidence(ctx, *agent, *message)
 	if err != nil {
-		fail()
+		fail("acceptance evidence unavailable")
 	}
 	if json.NewEncoder(os.Stdout).Encode(out) != nil {
-		fail()
+		fail("acceptance evidence unavailable")
 	}
 }
-func fail() { fmt.Fprintln(os.Stderr, "acceptance evidence unavailable"); os.Exit(1) }
+
+func runOrphanRuns(args []string) {
+	flags := flag.NewFlagSet("runtimectl orphan-runs", flag.ExitOnError)
+	mode := flags.String("mode", "audit", "Operation mode: audit or reconcile")
+	agent := flags.String("agent", "", "Optional Agent UUID filter")
+	_ = flags.Parse(args)
+	if *mode != "audit" && *mode != "reconcile" {
+		fmt.Fprintln(os.Stderr, "invalid --mode: expected audit or reconcile")
+		os.Exit(2)
+	}
+	if *agent != "" {
+		if _, e := uuid.Parse(*agent); e != nil {
+			fmt.Fprintln(os.Stderr, "invalid --agent UUID")
+			os.Exit(2)
+		}
+	}
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+
+	var opts []postgres.Option
+	if *mode == "audit" {
+		opts = append(opts, postgres.WithRuntimeParam("default_transaction_read_only", "on"))
+	}
+	pool, err := postgres.Open(ctx, os.Getenv("DATABASE_URL"), opts...)
+	if err != nil {
+		fail("orphan-runs inspection unavailable")
+	}
+	defer pool.Close()
+
+	repo := pg.NewFromPool(pool)
+	var report *domain.OrphanRunReport
+	if *mode == "reconcile" {
+		report, err = repo.ReconcileOrphanRuns(ctx, *agent)
+	} else {
+		report, err = repo.AuditOrphanRuns(ctx, *agent)
+	}
+	if err != nil {
+		fail("orphan-runs operation failed")
+	}
+	if json.NewEncoder(os.Stdout).Encode(report) != nil {
+		fail("orphan-runs output encode failed")
+	}
+}
+
+func fail(msg string) {
+	fmt.Fprintln(os.Stderr, msg)
+	os.Exit(1)
+}

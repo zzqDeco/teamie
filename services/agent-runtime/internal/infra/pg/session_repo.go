@@ -228,6 +228,28 @@ func (r *Repository) FilterEligibleInputIDs(ctx context.Context, agentID string,
 	return eligible, rows.Err()
 }
 
+// InspectInputBindings returns the durable state, Run binding, Run state, and delivery sequence
+// for each pending or processing input in ids.
+func (r *Repository) InspectInputBindings(ctx context.Context, agentID string, ids []string) (map[string]domain.InputRunBinding, error) {
+	if len(ids) == 0 {
+		return map[string]domain.InputRunBinding{}, nil
+	}
+	rows, err := r.db.Conn(ctx).Query(ctx, `SELECT i.event_id::text,i.state,COALESCE(i.run_id::text,''),COALESCE(r.state,''),i.delivery_seq FROM runtime_inputs i LEFT JOIN runtime_runs r ON i.run_id=r.id WHERE i.agent_id=$1 AND i.event_id::text=ANY($2::text[]) AND i.state IN ('pending','processing')`, agentID, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	bindings := make(map[string]domain.InputRunBinding, len(ids))
+	for rows.Next() {
+		var b domain.InputRunBinding
+		if err = rows.Scan(&b.EventID, &b.State, &b.RunID, &b.RunState, &b.DeliverySeq); err != nil {
+			return nil, err
+		}
+		bindings[b.EventID] = b
+	}
+	return bindings, rows.Err()
+}
+
 // CheckpointExists reports whether a checkpoint row exists for id.
 func (r *Repository) CheckpointExists(ctx context.Context, id string) bool {
 	var v bool

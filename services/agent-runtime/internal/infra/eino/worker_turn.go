@@ -330,14 +330,34 @@ func (w *agentWorker) prepare(ctx context.Context, items []Input, resume *checkp
 		}
 		unique = pending
 	}
-	eligible, err := w.engine.Store.eligibleInputs(ctx, w.lease, unique)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	batch, extra := boundedInputBatch(eligible)
-	valid, err := w.validate(ctx, batch)
-	if err != nil {
-		return nil, nil, nil, err
+	candidates := unique
+	var (
+		batch      []Input
+		extra      []Input
+		valid      []Input
+		resumedRun bool
+		err        error
+	)
+	for len(candidates) > 0 {
+		batch, extra, resumedRun, err = w.engine.Store.partitionRunnableInputs(ctx, w.lease, candidates, resume)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if len(batch) == 0 {
+			break
+		}
+		if resumedRun {
+			valid = batch
+			break
+		}
+		valid, err = w.validate(ctx, batch)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if len(valid) > 0 {
+			break
+		}
+		candidates = extra
 	}
 	if len(valid) == 0 {
 		return nil, nil, nil, errors.New("no_pending_inputs")

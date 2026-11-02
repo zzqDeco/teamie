@@ -21,6 +21,7 @@ import (
 
 var ErrLeaseLost = domain.ErrLeaseLost
 var ErrReplayConflict = domain.ErrReplayConflict
+var ErrMixedInputRunOwnership = domain.ErrMixedInputRunOwnership
 
 type Store struct {
 	DB          domain.RuntimeRepository
@@ -410,11 +411,15 @@ func (s *Store) StartRunWithContextPolicy(ctx context.Context, l *Lease, inputs 
 	if len(inputs) == 0 {
 		return nil, errors.New("empty run")
 	}
+	candidateIDs := make([]string, len(inputs))
+	for i, in := range inputs {
+		candidateIDs[i] = in.EventID
+	}
 	r := &Run{ID: uuid.NewString(), Attempt: uuid.NewString(), AgentID: l.AgentID, Inputs: inputs}
 	runID, inputsJSON, contextHead, acceptanceHead, contextProfile, contextBudget, resumed, err := s.DB.StartOrResumeRun(
 		ctx,
 		l,
-		inputs[0].EventID,
+		candidateIDs,
 		r.ID,
 		r.Attempt,
 		func() (string, []byte, string, json.RawMessage, []string, error) {

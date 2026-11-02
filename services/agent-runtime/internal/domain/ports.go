@@ -389,6 +389,57 @@ type NotificationDeliveryRow struct {
 	Receipt  []byte
 }
 
+// InputRunBinding describes the durable inbox state and Run ownership of an input row.
+type InputRunBinding struct {
+	EventID     string
+	State       string
+	RunID       string
+	RunState    string
+	DeliverySeq int64
+}
+
+// Orphan run audit classifications.
+const (
+	OrphanRunSupersededCompleted  = "superseded_completed"
+	OrphanRunManualReviewRequired = "manual_review_required"
+)
+
+// OrphanRunInputSummary reports the current durable fate of one input originally recorded in an orphan Run.
+type OrphanRunInputSummary struct {
+	EventID         string `json:"eventId"`
+	CurrentState    string `json:"currentState"`
+	CurrentRunID    string `json:"currentRunId,omitempty"`
+	CurrentRunState string `json:"currentRunState,omitempty"`
+}
+
+// OrphanRunAuditItem reports safe metadata and classification for an orphan non-terminal Run.
+type OrphanRunAuditItem struct {
+	RunID              string                  `json:"runId"`
+	AgentID            string                  `json:"agentId"`
+	State              string                  `json:"state"`
+	SafeError          string                  `json:"safeError,omitempty"`
+	StartedAt          time.Time               `json:"startedAt"`
+	UpdatedAt          time.Time               `json:"updatedAt"`
+	InputCount         int                     `json:"inputCount"`
+	ModelCallCount     int                     `json:"modelCallCount"`
+	CompletedToolCalls int                     `json:"completedToolCalls"`
+	UnconfirmedIntents int                     `json:"unconfirmedToolIntents"`
+	ActiveTasks        int                     `json:"activeTasks"`
+	Classification     string                  `json:"classification"`
+	Reconciled         bool                    `json:"reconciled,omitempty"`
+	Inputs             []OrphanRunInputSummary `json:"inputs"`
+}
+
+// OrphanRunReport summarizes an orphan-runs audit or reconciliation operation.
+type OrphanRunReport struct {
+	Mode                string               `json:"mode"`
+	TotalOrphans        int                  `json:"totalOrphans"`
+	SupersededCompleted int                  `json:"supersededCompleted"`
+	ManualReview        int                  `json:"manualReviewRequired"`
+	ReconciledCount     int                  `json:"reconciledCount"`
+	Runs                []OrphanRunAuditItem `json:"runs"`
+}
+
 // RuntimeRepository defines the full outbound persistence contract for the Agent Runtime engine.
 type RuntimeRepository interface {
 	TxManager
@@ -406,10 +457,12 @@ type RuntimeRepository interface {
 	ListPendingInputs(ctx context.Context, agentID string) ([][]byte, error)
 	ListFreshPendingInputs(ctx context.Context, agentID string) ([][]byte, error)
 	FilterEligibleInputIDs(ctx context.Context, agentID string, ids []string) (map[string]bool, error)
+	InspectInputBindings(ctx context.Context, agentID string, ids []string) (map[string]InputRunBinding, error)
 	StartOrResumeRun(
 		ctx context.Context,
 		l *Lease,
-		firstEventID, newRunID, newAttemptID string,
+		candidateEventIDs []string,
+		newRunID, newAttemptID string,
 		prepareNew func() (key string, inputsJSON []byte, canonProfile string, canonBudget json.RawMessage, inputIDs []string, err error),
 	) (runID string, inputsJSON []byte, contextHead, acceptanceHead int64, contextProfile string, contextBudget json.RawMessage, resumed bool, err error)
 	FinishRun(ctx context.Context, l *Lease, runID, state, safeError string, retry bool) error
