@@ -22,10 +22,14 @@ func newRunContextBudget(window int, files, mentions bool, webSearch ...bool) (j
 	budget.ScheduledWakeups = len(webSearch) > 1 && webSearch[1]
 	budget.DirectMessages = len(webSearch) > 2 && webSearch[2]
 	budget.ConversationalStyle = len(webSearch) > 3 && webSearch[3]
+	budget.HumanPresenceV2 = len(webSearch) > 4 && webSearch[4]
 	return json.Marshal(budget)
 }
 
 func contextInstruction(def *wire.AgentDefinition, budget ContextBudgetSnapshot) string {
+	if budget.HumanPresenceV2 {
+		return humanPresenceV2Instruction(def, budget, false, false)
+	}
 	text := contextV1Instruction(def)
 	if budget.EventDrivenInputs {
 		text += eventDrivenInputGuidance
@@ -128,7 +132,14 @@ func contextToolInfos(infos []*schema.ToolInfo, budget ContextBudgetSnapshot) []
 			}
 		}
 	}
-	if budget.ConversationalStyle {
+	if budget.HumanPresenceV2 {
+		sendDesc := humanPresenceV2SendDescription(budget)
+		for _, info := range out {
+			if info != nil && info.Name == "im_send_message" {
+				info.Desc = sendDesc
+			}
+		}
+	} else if budget.ConversationalStyle {
 		sendDesc := conversationalSendDescription(budget)
 		for _, info := range out {
 			if info != nil && info.Name == "im_send_message" {
@@ -145,6 +156,9 @@ func contextSummaryInstruction(budget ContextBudgetSnapshot) string {
 	if budget.EventDrivenInputs {
 		text += `
 Preserve settled facts and their source references, relevant history already inspected and its coverage, which requested fields are resolved, and any specific unresolved fact, conflicting evidence, unread required page or original passage still needed. Do not turn completed checks into new work or invent a need to reconfirm them. Final/latest/confirm wording alone is not an unresolved gap after a sufficient conflict-free lookup. Preserve explicit requests to verify an original and concrete evidence of relevant changes. Runtime delivers new messages through its durable inbox and serial TurnLoop; do not create a follow-up task to poll, refresh or scan for new IM inputs before starting, during work or before finishing. Sufficient existing context supports continuing and delivering the current work, then ending the turn for Runtime to wake on later input.`
+	}
+	if budget.HumanPresenceV2 {
+		text += humanPresenceV2SummaryGuidance
 	}
 	return text
 }

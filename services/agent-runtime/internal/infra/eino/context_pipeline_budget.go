@@ -41,6 +41,7 @@ type ContextBudgetSnapshot struct {
 	ScheduledWakeups     bool   `json:"scheduledWakeups,omitempty"`
 	DirectMessages       bool   `json:"directMessages,omitempty"`
 	ConversationalStyle  bool   `json:"conversationalStyle,omitempty"`
+	HumanPresenceV2      bool   `json:"humanPresenceV2,omitempty"`
 }
 
 func makeContextBudgetSnapshot(window int) (ContextBudgetSnapshot, error) {

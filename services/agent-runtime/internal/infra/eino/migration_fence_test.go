@@ -36,6 +36,7 @@ var (
 	schemaV11SQL             = pg.SchemaV11SQL
 	schemaV12SQL             = pg.SchemaV12SQL
 	schemaV13SQL             = pg.SchemaV13SQL
+	schemaV14SQL             = pg.SchemaV14SQL
 )
 
 var errUnsupportedRuntimeSchema = pg.ErrUnsupportedRuntimeSchema
@@ -145,7 +146,7 @@ func TestRuntimeSchemaUpgradePreservesDataAndRejectsV037Startup(t *testing.T) {
 			if cursor != "99" || body != "durable legacy input" || profile != contextProfileLegacy || budget != "{}" || request != "immutable-request-hash" || string(response) != "immutable-model-response" {
 				t.Fatal("forward migration changed legacy durable execution data")
 			}
-			if err = current.DB.QueryRow(ctx, `SELECT string_agg(version::text,',' ORDER BY version),current_setting('teamie.runtime_writer_schema') FROM agent_runtime_schema_migrations`).Scan(&ledger, &protocol); err != nil || ledger != "1,2,3,4,5,6,7,8,9,10,11,12,13,14" || protocol != "14" {
+			if err = current.DB.QueryRow(ctx, `SELECT string_agg(version::text,',' ORDER BY version),current_setting('teamie.runtime_writer_schema') FROM agent_runtime_schema_migrations`).Scan(&ledger, &protocol); err != nil || ledger != "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15" || protocol != "15" {
 				t.Fatal("current writer did not install its schema/protocol", ledger, protocol, err)
 			}
 			// The old DDL recreates this index before its INSERT(1) ON CONFLICT.
