@@ -74,11 +74,6 @@ func (s *Service) CallChat(ctx context.Context, owner, agentID, sessionID, runID
 	if expected := ExpectedModelConfigID(ctx); expected != "" && expected != configID {
 		return fail(domain.Err(409, "gateway_unavailable", "Model gateway configuration changed"), configID)
 	}
-	release, ok := s.AcquireSlot()
-	if !ok {
-		return fail(domain.Err(429, "gateway_busy", "The model gateway is busy"), configID)
-	}
-	defer release()
 	key, err := s.Cipher.Decrypt(c.CipherKey)
 	if err != nil {
 		return fail(domain.ErrWithCause(503, "credential_unavailable", "Saved model credential could not be decrypted", err), configID)
@@ -99,8 +94,29 @@ func (s *Service) CallChat(ctx context.Context, owner, agentID, sessionID, runID
 			err = pErr
 			break
 		}
-		body, prompt, completion, err = s.Model.Chat(callCtx, c, key, raw, messageLimits...)
-		if err == nil || !isRetryableUpstreamRateLimit(err) {
+		var early *CallOutcome
+		done := func() bool {
+			release, ok := s.AcquireSlot()
+			if !ok {
+				busyErr := domain.Err(429, "gateway_busy", "The model gateway is busy")
+				if attempt == 0 {
+					outcome.Phase = "admission"
+					res := fail(busyErr, configID)
+					early = &res
+					return true
+				}
+				err = busyErr
+				return true
+			}
+			defer release()
+			outcome.Phase = "provider-generate"
+			body, prompt, completion, err = s.Model.Chat(callCtx, c, key, raw, messageLimits...)
+			return false
+		}()
+		if early != nil {
+			return *early
+		}
+		if done || err == nil || !isRetryableUpstreamRateLimit(err) {
 			break
 		}
 		retry, wErr := s.waitRateLimitRetry(callCtx, paceKey, attempt)
@@ -207,11 +223,6 @@ func (s *Service) StreamChat(ctx context.Context, owner, agentID, sessionID, run
 	if expected := strings.TrimSpace(expectedConfigID); expected != "" && expected != configID {
 		return terminal(domain.Err(409, "gateway_unavailable", "Model gateway configuration changed"))
 	}
-	release, ok := s.AcquireSlot()
-	if !ok {
-		return terminal(domain.Err(429, "gateway_busy", "The model gateway is busy"))
-	}
-	defer release()
 	key, err := s.Cipher.Decrypt(c.CipherKey)
 	if err != nil {
 		return terminal(domain.ErrWithCause(503, "credential_unavailable", "Saved model credential could not be decrypted", err))
@@ -229,10 +240,31 @@ func (s *Service) StreamChat(ctx context.Context, owner, agentID, sessionID, run
 			err = pErr
 			break
 		}
-		prompt, completion, err = s.Model.Stream(callCtx, c, key, raw, func(chunk string) error {
-			return writeEvent(domain.StreamEvent{Type: "chunk", ResponseJSON: chunk})
-		}, messageLimits...)
-		if err == nil || outcome.ChunkCount > 0 || !isRetryableUpstreamRateLimit(err) {
+		var early *StreamOutcome
+		done := func() bool {
+			release, ok := s.AcquireSlot()
+			if !ok {
+				busyErr := domain.Err(429, "gateway_busy", "The model gateway is busy")
+				if attempt == 0 {
+					outcome.Phase = "admission"
+					res := terminal(busyErr)
+					early = &res
+					return true
+				}
+				err = busyErr
+				return true
+			}
+			defer release()
+			outcome.Phase = "provider-stream"
+			prompt, completion, err = s.Model.Stream(callCtx, c, key, raw, func(chunk string) error {
+				return writeEvent(domain.StreamEvent{Type: "chunk", ResponseJSON: chunk})
+			}, messageLimits...)
+			return false
+		}()
+		if early != nil {
+			return *early
+		}
+		if done || err == nil || outcome.ChunkCount > 0 || !isRetryableUpstreamRateLimit(err) {
 			break
 		}
 		retry, wErr := s.waitRateLimitRetry(callCtx, paceKey, attempt)

@@ -65,12 +65,13 @@ func TestProviderBurstPacingCrossProviderIsolationAnd429Backoff(t *testing.T) {
 	}}
 	svc := New(store, crypto, testToken)
 	svc.Provider = Provider{HTTP: sharedClient}
+	svc.App.SetMaxConcurrentCalls(2)
 	svc.App.SetProviderPace(70*time.Millisecond, 0)
 	svc.App.SetRateLimitRetry(2, 25*time.Millisecond, 5*time.Millisecond)
 
 	start := time.Now()
 	var wg sync.WaitGroup
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 4; i++ {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
@@ -92,6 +93,8 @@ func TestProviderBurstPacingCrossProviderIsolationAnd429Backoff(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		// Wait briefly so Provider A's burst is actively sleeping in waitProviderPace.
+		time.Sleep(10 * time.Millisecond)
 		res, callErr := fixtureHTTPChat(t, svc, context.Background(), &agent.GatewayChatRequest{
 			ServiceToken: testToken,
 			OwnerId:      "owner",
@@ -111,17 +114,17 @@ func TestProviderBurstPacingCrossProviderIsolationAnd429Backoff(t *testing.T) {
 	gotA := append([]time.Time(nil), arrivalsA...)
 	gotB := append([]time.Time(nil), arrivalsB...)
 	mu.Unlock()
-	if len(gotA) != 3 || len(gotB) != 1 {
-		t.Fatalf("expected 3 arrivals on A and 1 on B, got A=%d B=%d", len(gotA), len(gotB))
+	if len(gotA) != 4 || len(gotB) != 1 {
+		t.Fatalf("expected 4 arrivals on A (even under 2-slot cap) and 1 on B, got A=%d B=%d", len(gotA), len(gotB))
 	}
 	if firstDelay := gotA[0].Sub(start); firstDelay > 50*time.Millisecond {
 		t.Fatalf("idle first call on Provider A should not be artificially delayed, took %v", firstDelay)
 	}
-	if bDelay := gotB[0].Sub(start); bDelay > 50*time.Millisecond {
-		t.Fatalf("Provider B should dispatch independently without waiting on Provider A burst, took %v", bDelay)
+	if bDelay := gotB[0].Sub(start); bDelay > 60*time.Millisecond {
+		t.Fatalf("Provider B should dispatch without waiting on Provider A burst or starving on 2-slot pool, took %v", bDelay)
 	}
-	if span := gotA[2].Sub(gotA[0]); span < 120*time.Millisecond {
-		t.Fatalf("expected 3 concurrent calls on Provider A to be burst-paced >=120ms across 2 intervals, got %v", span)
+	if span := gotA[3].Sub(gotA[0]); span < 180*time.Millisecond {
+		t.Fatalf("expected 4 concurrent calls on Provider A to be burst-paced >=180ms across 3 intervals, got %v", span)
 	}
 
 	// Upstream 429 retry recovery for unary and streaming (before first chunk), exhaustion, and mid-backoff cancellation.
@@ -153,12 +156,20 @@ func TestProviderBurstPacingCrossProviderIsolationAnd429Backoff(t *testing.T) {
 	}))
 	defer rateServer.Close()
 
-	rateStore := &memoryStore{c: singleModel(
-		ProviderProfile{ID: "prov-rate", BaseURL: rateServer.URL + "/v1", CipherKey: encKey, Enabled: true},
-		ModelProfile{ID: "model-rate", Model: "gpt-rate", Enabled: true},
-	)}
+	rateStore := &memoryStore{c: Config{
+		Providers: []ProviderProfile{
+			{ID: "prov-rate", DisplayName: "Rate Provider", BaseURL: rateServer.URL + "/v1", CipherKey: encKey, Enabled: true},
+			{ID: "prov-healthy", DisplayName: "Healthy Provider", BaseURL: serverB.URL + "/v1", CipherKey: encKey, Enabled: true},
+		},
+		Models: []ModelProfile{
+			{ID: "model-rate", ProviderID: "prov-rate", DisplayName: "Rate Model", Model: "gpt-rate", Enabled: true},
+			{ID: "model-healthy", ProviderID: "prov-healthy", DisplayName: "Healthy Model", Model: "gpt-healthy", Enabled: true},
+		},
+		Routing: ModelRoutingConfig{DefaultModelID: "model-rate"},
+	}}
 	rateSvc := New(rateStore, crypto, testToken)
-	rateSvc.Provider = Provider{HTTP: rateServer.Client()}
+	rateSvc.Provider = Provider{HTTP: sharedClient}
+	rateSvc.App.SetMaxConcurrentCalls(2)
 	rateSvc.App.SetProviderPace(0, 0)
 	rateSvc.App.SetRateLimitRetry(2, 25*time.Millisecond, 5*time.Millisecond)
 	rateHTTP := httptest.NewServer(rateSvc.Routes(AdminAuth{}))
@@ -221,37 +232,70 @@ func TestProviderBurstPacingCrossProviderIsolationAnd429Backoff(t *testing.T) {
 		t.Fatalf("expected exhausted 429 after 3 attempts, got attempts=%d res=%+v err=%v", rateAttempts.Load(), exhausted, err)
 	}
 
-	// 4. Canceling an active run during 429 backoff aborts immediately without another upstream attempt.
+	// 4. Slots are released during 429 backoff so 2 sleeping calls on prov-rate do not starve prov-healthy on a 2-slot gateway,
+	//    and Canceling an active run during 429 backoff aborts immediately without another upstream attempt.
 	rateSvc.App.SetRateLimitRetry(2, 2*time.Second, 0)
 	rateAttempts.Store(0)
 	failUntilAttempt.Store(99)
 	for len(entered429) > 0 {
 		<-entered429
 	}
-	cancelDone := make(chan *agent.GatewayChatResponse, 1)
+	cancelDone1 := make(chan *agent.GatewayChatResponse, 1)
+	cancelDone2 := make(chan *agent.GatewayChatResponse, 1)
 	go func() {
 		res, _ := fixtureHTTPChat(t, rateSvc, context.Background(), &agent.GatewayChatRequest{
 			ServiceToken: testToken,
 			OwnerId:      "owner",
-			AgentId:      "agent",
-			SessionId:    "session",
-			RunId:        "run-cancel-backoff",
-			RequestJson:  fixtureNativeRequest(`{"messages":[{"role":"user","content":"cancel"}]}`, false),
+			AgentId:      "agent-1",
+			SessionId:    "session-1",
+			RunId:        "run-cancel-backoff-1",
+			RequestJson:  fixtureNativeRequest(`{"messages":[{"role":"user","content":"cancel-1"}]}`, false),
 		})
-		cancelDone <- res
+		cancelDone1 <- res
 	}()
-	select {
-	case <-entered429:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for first 429")
-	}
-	rateSvc.CancelRun("agent", "run-cancel-backoff")
-	select {
-	case canceledRes := <-cancelDone:
-		if canceledRes == nil || canceledRes.Ok || canceledRes.GetErrorCode() != "canceled" || rateAttempts.Load() != 1 {
-			t.Fatalf("expected immediate cancellation during backoff after 1 attempt, got attempts=%d res=%+v", rateAttempts.Load(), canceledRes)
+	go func() {
+		res, _ := fixtureHTTPChat(t, rateSvc, context.Background(), &agent.GatewayChatRequest{
+			ServiceToken: testToken,
+			OwnerId:      "owner",
+			AgentId:      "agent-2",
+			SessionId:    "session-2",
+			RunId:        "run-cancel-backoff-2",
+			RequestJson:  fixtureNativeRequest(`{"messages":[{"role":"user","content":"cancel-2"}]}`, false),
+		})
+		cancelDone2 <- res
+	}()
+	for range 2 {
+		select {
+		case <-entered429:
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for 429 entry before backoff")
 		}
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("CancelRun did not abort 429 backoff sleep promptly")
+	}
+	healthyRes, healthyErr := fixtureHTTPChat(t, rateSvc, context.Background(), &agent.GatewayChatRequest{
+		ServiceToken: testToken,
+		OwnerId:      "owner",
+		AgentId:      "agent-healthy",
+		SessionId:    "session-healthy",
+		RunId:        "run-healthy",
+		ModelId:      ptr("model-healthy"),
+		RequestJson:  fixtureNativeRequest(`{"messages":[{"role":"user","content":"healthy-while-backoff"}]}`, false),
+	})
+	if healthyErr != nil || !healthyRes.Ok {
+		t.Fatalf("expected healthy provider call to succeed while 2 calls sleep in 429 backoff on a 2-slot gateway, got res=%+v err=%v", healthyRes, healthyErr)
+	}
+	rateSvc.CancelRun("agent-1", "run-cancel-backoff-1")
+	rateSvc.CancelRun("agent-2", "run-cancel-backoff-2")
+	for _, ch := range []chan *agent.GatewayChatResponse{cancelDone1, cancelDone2} {
+		select {
+		case canceledRes := <-ch:
+			if canceledRes == nil || canceledRes.Ok || canceledRes.GetErrorCode() != "canceled" {
+				t.Fatalf("expected immediate cancellation during backoff, got res=%+v", canceledRes)
+			}
+		case <-time.After(500 * time.Millisecond):
+			t.Fatal("CancelRun did not abort 429 backoff sleep promptly")
+		}
+	}
+	if rateAttempts.Load() != 2 {
+		t.Fatalf("expected exactly 2 upstream attempts (1 per canceled call), got %d", rateAttempts.Load())
 	}
 }

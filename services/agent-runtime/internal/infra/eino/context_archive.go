@@ -6,7 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"github.com/cloudwego/eino/compose"
+	"fmt"
+	"net/http"
 	"slices"
 	"sort"
 	"strings"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/cloudwego/eino/adk/filesystem"
 	"github.com/cloudwego/eino/adk/middlewares/reduction"
+	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
 	"teamie/services/agent-runtime/internal/domain"
@@ -374,6 +376,21 @@ func (a *ContextArchive) authorizeSourcesWithTombstones(ctx context.Context, ref
 	var conversations map[string]string
 	var workspaces map[string]bool
 	for _, ref := range refs {
+		if seq, ok := domain.IsPlatformAnnouncementSource(ref); ok {
+			var check imAnnouncementPage
+			path := fmt.Sprintf("/api/v1/announcements?beforeSeq=%d&limit=1", seq+1)
+			if err := a.IM.Call(ctx, http.MethodGet, path, nil, &check); err != nil {
+				var api *APIError
+				if errors.As(err, &api) && api.Status >= 400 && api.Status < 500 {
+					return errContextUnavailable
+				}
+				return err
+			}
+			if len(check.Items) == 0 || check.Items[0].Seq != seq || check.Items[0].ID != ref.MessageID {
+				return errContextUnavailable
+			}
+			continue
+		}
 		if ref.MessageID == "" {
 			if conversations == nil {
 				bootstrap, err := a.IM.Bootstrap(ctx)

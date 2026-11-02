@@ -25,6 +25,7 @@ const (
 	// DefaultRateLimitMaxJitter is the random jitter added to each 429 backoff window.
 	DefaultRateLimitMaxJitter = 400 * time.Millisecond
 
+	maxProviderPaceWait = 15 * time.Second
 	providerPaceIdleTTL = 5 * time.Minute
 )
 
@@ -144,6 +145,10 @@ func (s *Service) reserveProviderDispatch(key string) time.Duration {
 		return 0
 	}
 	wait := scheduled.Sub(now)
+	if wait > maxProviderPaceWait {
+		wait = maxProviderPaceWait
+		scheduled = now.Add(wait)
+	}
 	s.providerNext[key] = scheduled.Add(step)
 	return wait
 }
@@ -183,6 +188,9 @@ func sleepWithContext(ctx context.Context, d time.Duration) error {
 func (s *Service) waitProviderPace(ctx context.Context, key string) error {
 	if err := ctx.Err(); err != nil {
 		return domain.StreamError(ctx, "gateway_unavailable")
+	}
+	if StrictModelSelection(ctx) {
+		return nil
 	}
 	wait := s.reserveProviderDispatch(key)
 	return sleepWithContext(ctx, wait)
