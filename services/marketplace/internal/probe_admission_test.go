@@ -76,8 +76,8 @@ func setupProbeAdmissionService(t *testing.T) (*app.Service, domain.User) {
 func assertRateLimitedError(t *testing.T, err error) {
 	t.Helper()
 	var domErr *domain.Error
-	if !errors.As(err, &domErr) || domErr.Status != 429 || domErr.Code != "marketplace_verify_rate_limited" {
-		t.Fatalf("expected 429 marketplace_verify_rate_limited, got %v", err)
+	if !errors.As(err, &domErr) || domErr.Status != 429 || domErr.Code != "verify_rate_limited" {
+		t.Fatalf("expected 429 verify_rate_limited, got %v", err)
 	}
 }
 
