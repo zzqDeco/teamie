@@ -45,12 +45,44 @@ stamp=$(date -u +%Y%m%dT%H%M%SZ)
 destination=$(mktemp -d "$TEAMIE_ROOT/backups/$stamp-XXXXXX")
 complete=0
 quiesced=0
+sandbox_children_quiesced=0
+paused_sandbox_containers=()
+
+unpause_sandbox_children() {
+  local unpause_rc=0
+  if [[ ${#paused_sandbox_containers[@]} -gt 0 ]]; then
+    local cid state
+    for cid in "${paused_sandbox_containers[@]}"; do
+      [[ -n $cid ]] || continue
+      if ! docker unpause "$cid" >/dev/null 2>&1; then
+        state=$(docker inspect --format '{{.State.Status}}' "$cid" 2>/dev/null || echo missing)
+        if [[ $state == paused ]]; then
+          echo "Failed to unpause Sandbox execution container: $cid" >&2
+          unpause_rc=1
+        fi
+      fi
+    done
+    paused_sandbox_containers=()
+  fi
+  return "$unpause_rc"
+}
+
+resume_quiesced_services() {
+  local resume_rc=0
+  unpause_sandbox_children || resume_rc=1
+  if [[ $quiesced == 1 ]]; then
+    if "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 sandbox agent-runtime; then
+      quiesced=0
+    else
+      resume_rc=1
+    fi
+  fi
+  return "$resume_rc"
+}
 
 cleanup() {
   local rc=$?
-  if [[ $quiesced == 1 ]]; then
-    "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 sandbox agent-runtime || rc=1
-  fi
+  resume_quiesced_services || rc=1
   if [[ $complete != 1 || $rc -ne 0 ]]; then
     rm -rf -- "$destination"
   fi
@@ -62,6 +94,47 @@ runner_image=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["
 if [[ $quiesce_agents == 1 && -n $runner_image ]]; then
   "${COMPOSE[@]}" stop --timeout 30 agent-runtime sandbox
   quiesced=1
+
+  drain_attempts=${TEAMIE_BACKUP_SANDBOX_DRAIN_ATTEMPTS:-6}
+  attempt=0
+  while (( attempt < drain_attempts )); do
+    running_cids=$(docker ps -q --filter "label=io.teamie.sandbox=true" --filter "status=running")
+    if [[ -z $running_cids ]]; then
+      break
+    fi
+    sleep 0.5
+    attempt=$((attempt + 1))
+  done
+
+  running_cids=$(docker ps -q --filter "label=io.teamie.sandbox=true" --filter "status=running")
+  if [[ -n $running_cids ]]; then
+    while IFS= read -r cid; do
+      [[ -n $cid ]] || continue
+      if docker pause "$cid" >/dev/null 2>&1; then
+        paused_sandbox_containers+=("$cid")
+      else
+        state=$(docker inspect --format '{{.State.Status}}' "$cid" 2>/dev/null || echo missing)
+        case "$state" in
+          paused)
+            paused_sandbox_containers+=("$cid")
+            ;;
+          exited|dead|removing|missing)
+            ;;
+          *)
+            echo "Failed to quiesce running Sandbox execution container $cid (status=$state)." >&2
+            exit 1
+            ;;
+        esac
+      fi
+    done <<< "$running_cids"
+  fi
+
+  still_running=$(docker ps -q --filter "label=io.teamie.sandbox=true" --filter "status=running")
+  if [[ -n $still_running ]]; then
+    echo "Refusing quiesced backup while Sandbox execution containers remain running: $still_running" >&2
+    exit 1
+  fi
+  sandbox_children_quiesced=1
 fi
 
 db_list=$(python3 -c 'import json,sys; print(" ".join("teamie_"+name for name in sorted(json.load(open(sys.argv[1]))["schema"])))' "$current/release-manifest.json")
@@ -115,7 +188,7 @@ if [[ -f $current/deployment.json ]]; then
   cp "$current/deployment.json" "$destination/deployment.json"
 fi
 
-python3 - "$destination/backup-manifest.json" "$stamp" "$sandbox_archived" "$quiesce_agents" "${databases[@]}" <<'PY'
+python3 - "$destination/backup-manifest.json" "$stamp" "$sandbox_archived" "$sandbox_children_quiesced" "${databases[@]}" <<'PY'
 import datetime, json, os, sys
 out_path, stamp, sb_archived, sb_quiesced = sys.argv[1], sys.argv[2], sys.argv[3] == "1", sys.argv[4] == "1"
 dbs = sys.argv[5:]
@@ -140,9 +213,8 @@ PY
 python3 "$script_dir/sandbox_archive.py" checksums-write --dir "$destination" >/dev/null
 python3 "$script_dir/sandbox_archive.py" checksums-verify --dir "$destination" >/dev/null
 
-if [[ $quiesced == 1 ]]; then
-  "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 sandbox agent-runtime
-  quiesced=0
+if [[ $quiesced == 1 || ${#paused_sandbox_containers[@]} -gt 0 ]]; then
+  resume_quiesced_services
 fi
 
 complete=1

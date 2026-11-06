@@ -414,10 +414,54 @@ python3 ops/sandbox_archive.py checksums-verify --dir "$backup_bundle" >/dev/nul
 
 python3 ops/sandbox_archive.py restore \
   --archive "$backup_bundle/sandbox-workspaces.tar.gz" \
-  --target "$scratch/restored-workspaces" >/dev/null
+  --target "$scratch/restored-workspaces" \
+  --scope workspaces >/dev/null
 python3 ops/sandbox_archive.py restore \
   --archive "$backup_bundle/sandbox-state.tar.gz" \
-  --target "$scratch/restored-state" >/dev/null
+  --target "$scratch/restored-state" \
+  --scope state >/dev/null
+
+if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
+  python3 - "$scratch/restored-workspaces" "$scratch/restored-state" <<'PY'
+import hashlib, os, pathlib, sys
+ws_root = pathlib.Path(sys.argv[1])
+st_root = pathlib.Path(sys.argv[2])
+agent_hash = hashlib.sha256(b"10000000-0000-4000-8000-000000000001").hexdigest()
+assert (os.stat(ws_root).st_uid, os.stat(ws_root).st_gid) == (0, 0)
+assert (os.stat(ws_root / agent_hash).st_uid, os.stat(ws_root / agent_hash).st_gid) == (0, 0)
+assert (os.stat(ws_root / agent_hash / "reports").st_uid, os.stat(ws_root / agent_hash / "reports").st_gid) == (10001, 10001)
+assert (os.stat(ws_root / agent_hash / "reports/summary.md").st_uid, os.stat(ws_root / agent_hash / "reports/summary.md").st_gid) == (10001, 10001)
+assert (os.stat(st_root).st_uid, os.stat(st_root).st_gid) == (0, 0)
+assert (os.stat(st_root / "mutation-restore-01.file.json").st_uid, os.stat(st_root / "mutation-restore-01.file.json").st_gid) == (0, 0)
+PY
+elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+  chmod 0755 "$scratch" "$backup_bundle"
+  chmod 0644 "$backup_bundle/sandbox-workspaces.tar.gz" "$backup_bundle/sandbox-state.tar.gz"
+  sudo -n python3 ops/sandbox_archive.py restore \
+    --archive "$backup_bundle/sandbox-workspaces.tar.gz" \
+    --target "$scratch/root-restored-workspaces" \
+    --scope workspaces >/dev/null
+  sudo -n python3 ops/sandbox_archive.py restore \
+    --archive "$backup_bundle/sandbox-state.tar.gz" \
+    --target "$scratch/root-restored-state" \
+    --scope state >/dev/null
+  sudo -n python3 - "$scratch/root-restored-workspaces" "$scratch/root-restored-state" <<'PY'
+import hashlib, os, pathlib, shutil, sys
+ws_root = pathlib.Path(sys.argv[1])
+st_root = pathlib.Path(sys.argv[2])
+try:
+    agent_hash = hashlib.sha256(b"10000000-0000-4000-8000-000000000001").hexdigest()
+    assert (os.stat(ws_root).st_uid, os.stat(ws_root).st_gid) == (0, 0)
+    assert (os.stat(ws_root / agent_hash).st_uid, os.stat(ws_root / agent_hash).st_gid) == (0, 0)
+    assert (os.stat(ws_root / agent_hash / "reports").st_uid, os.stat(ws_root / agent_hash / "reports").st_gid) == (10001, 10001)
+    assert (os.stat(ws_root / agent_hash / "reports/summary.md").st_uid, os.stat(ws_root / agent_hash / "reports/summary.md").st_gid) == (10001, 10001)
+    assert (os.stat(st_root).st_uid, os.stat(st_root).st_gid) == (0, 0)
+    assert (os.stat(st_root / "mutation-restore-01.file.json").st_uid, os.stat(st_root / "mutation-restore-01.file.json").st_gid) == (0, 0)
+finally:
+    shutil.rmtree(ws_root, ignore_errors=True)
+    shutil.rmtree(st_root, ignore_errors=True)
+PY
+fi
 
 (cd services/sandbox && go build -o "$scratch/sandboxctl" ./cmd/sandboxctl)
 completed_probe=$(SANDBOX_STATE_ROOT="$scratch/restored-state" "$scratch/sandboxctl" task \

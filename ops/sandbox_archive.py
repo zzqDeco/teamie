@@ -16,6 +16,10 @@ import tarfile
 DEFAULT_MIN_FREE_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB reserve
 DEFAULT_MAX_ARCHIVE_BYTES = 4 * 1024 * 1024 * 1024  # 4 GiB ceiling
 MAX_ARCHIVE_ENTRIES = 200_000
+MAX_ARCHIVE_DEPTH = 64
+SANDBOX_RUNNER_UID = 10001
+SANDBOX_RUNNER_GID = 10001
+VALID_RESTORE_SCOPES = ("auto", "workspaces", "state")
 CHUNK_BYTES = 65536
 CHECKSUM_LINE_RE = re.compile(r"^([0-9a-f]{64}) [ \*](?:\./)?([A-Za-z0-9._-]+)$")
 METADATA_FILES = ("release-manifest.json", "deployment.json", "backup-manifest.json")
@@ -25,13 +29,30 @@ def fail(message: str) -> "NoReturn":  # type: ignore[name-defined]
     raise ValueError(message)
 
 
-def open_nofollow_rdonly(path: str) -> int:
+def _dir_open_flags() -> int:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    if hasattr(os, "O_DIRECTORY"):
+        flags |= os.O_DIRECTORY
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    return flags
+
+
+def _file_open_flags() -> int:
     flags = os.O_RDONLY
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
     if hasattr(os, "O_NONBLOCK"):
         flags |= os.O_NONBLOCK
-    return os.open(path, flags)
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    return flags
+
+
+def open_nofollow_rdonly(path: str) -> int:
+    return os.open(path, _file_open_flags())
 
 
 def sha256_file(path: Path) -> str:
@@ -89,37 +110,129 @@ def validate_rel_path(raw_name: str) -> str:
     return "/".join(parts)
 
 
-def _walk_confined_entries(root_dir: Path):
+class _ExactFDReader:
+    def __init__(self, fd: int, expected_size: int, rel: str) -> None:
+        self._fd = fd
+        self._remaining = expected_size
+        self._rel = rel
+
+    def read(self, size: int = -1) -> bytes:
+        if self._remaining <= 0:
+            return b""
+        want = self._remaining if size is None or size < 0 else min(size, self._remaining)
+        chunk = os.read(self._fd, want)
+        if not chunk:
+            fail(f"concurrent truncation detected while archiving: {self._rel}")
+        self._remaining -= len(chunk)
+        return chunk
+
+
+def _walk_confined_entries(root_dir: Path, _hooks: dict | None = None):
     root_stat = os.lstat(root_dir)
     if stat.S_ISLNK(root_stat.st_mode) or not stat.S_ISDIR(root_stat.st_mode):
         fail(f"sandbox root must be a real non-symlink directory: {root_dir}")
 
-    stack = [("", root_dir)]
-    while stack:
-        rel_prefix, current_dir = stack.pop()
-        with os.scandir(current_dir) as it:
-            entries = sorted(it, key=lambda e: e.name)
-        subdirs = []
-        for entry in entries:
-            rel = f"{rel_prefix}/{entry.name}" if rel_prefix else entry.name
+    try:
+        root_fd = os.open(str(root_dir), _dir_open_flags())
+    except OSError as exc:
+        fail(f"sandbox root must be a real non-symlink directory: {root_dir} ({exc})")
+
+    on_listed = _hooks.get("on_dir_listed") if _hooks else None
+    on_stat = _hooks.get("on_entry_stat") if _hooks else None
+    frames: list[list] = []
+    try:
+        root_fst = os.fstat(root_fd)
+        if not stat.S_ISDIR(root_fst.st_mode) or (root_fst.st_dev, root_fst.st_ino) != (
+            root_stat.st_dev,
+            root_stat.st_ino,
+        ):
+            os.close(root_fd)
+            fail(f"concurrent replacement of sandbox root detected: {root_dir}")
+        root_names = sorted(os.listdir(root_fd))
+        if on_listed is not None:
+            on_listed("")
+        frames.append(["", root_fd, root_names, 0])
+
+        while frames:
+            frame = frames[-1]
+            rel_prefix, current_fd, names, idx = frame
+            if idx >= len(names):
+                frames.pop()
+                os.close(current_fd)
+                continue
+            name = names[idx]
+            frame[3] = idx + 1
+            rel = f"{rel_prefix}/{name}" if rel_prefix else name
             validate_rel_path(rel)
-            st = os.lstat(entry.path)
+
+            try:
+                st = os.stat(name, dir_fd=current_fd, follow_symlinks=False)
+            except OSError as exc:
+                fail(f"concurrent modification detected while scanning {rel}: {exc}")
+
+            if on_stat is not None:
+                on_stat(rel)
+
             mode = st.st_mode
             if stat.S_ISLNK(mode):
                 fail(f"symlink entry rejected in sandbox archive: {rel}")
             if stat.S_ISDIR(mode):
-                yield rel, Path(entry.path), st, True
-                subdirs.append((rel, Path(entry.path)))
+                if len(frames) >= MAX_ARCHIVE_DEPTH:
+                    fail(f"sandbox archive directory depth exceeded safety bound: {rel}")
+                try:
+                    child_fd = os.open(name, _dir_open_flags(), dir_fd=current_fd)
+                except OSError as exc:
+                    fail(f"symlink or concurrent directory replacement rejected in sandbox archive: {rel} ({exc})")
+                try:
+                    child_fst = os.fstat(child_fd)
+                    if not stat.S_ISDIR(child_fst.st_mode) or (child_fst.st_dev, child_fst.st_ino) != (
+                        st.st_dev,
+                        st.st_ino,
+                    ):
+                        fail(f"concurrent directory replacement detected while archiving: {rel}")
+                    child_names = sorted(os.listdir(child_fd))
+                except Exception:
+                    os.close(child_fd)
+                    raise
+                if on_listed is not None:
+                    on_listed(rel)
+                frames.append([rel, child_fd, child_names, 0])
+                yield rel, -1, child_fst, True
             elif stat.S_ISREG(mode):
-                yield rel, Path(entry.path), st, False
+                try:
+                    file_fd = os.open(name, _file_open_flags(), dir_fd=current_fd)
+                except OSError as exc:
+                    fail(f"symlink or concurrent file replacement rejected in sandbox archive: {rel} ({exc})")
+                try:
+                    file_fst = os.fstat(file_fd)
+                    if not stat.S_ISREG(file_fst.st_mode) or (file_fst.st_dev, file_fst.st_ino) != (
+                        st.st_dev,
+                        st.st_ino,
+                    ):
+                        fail(f"concurrent file replacement detected while archiving: {rel}")
+                    yield rel, file_fd, file_fst, False
+                finally:
+                    os.close(file_fd)
             else:
                 fail(f"unsupported special file rejected in sandbox archive: {rel}")
-        for item in reversed(subdirs):
-            stack.append(item)
+    finally:
+        while frames:
+            _, fd_to_close, _, _ = frames.pop()
+            try:
+                os.close(fd_to_close)
+            except OSError:
+                pass
 
 
-def write_tar_gz_stream(source_dir: Path, out_stream, allow_missing: bool = False) -> dict:
-    if not source_dir.exists():
+def write_tar_gz_stream(
+    source_dir: Path,
+    out_stream,
+    allow_missing: bool = False,
+    _hooks: dict | None = None,
+) -> dict:
+    try:
+        os.lstat(source_dir)
+    except FileNotFoundError:
         if not allow_missing:
             fail(f"sandbox source directory does not exist: {source_dir}")
         with gzip.GzipFile(filename="", mode="wb", fileobj=out_stream, mtime=0) as gz:
@@ -140,13 +253,13 @@ def write_tar_gz_stream(source_dir: Path, out_stream, allow_missing: bool = Fals
     total_bytes = 0
     with gzip.GzipFile(filename="", mode="wb", fileobj=out_stream, mtime=0) as gz:
         with tarfile.open(mode="w", fileobj=gz, format=tarfile.PAX_FORMAT) as tf:
-            for rel, full_path, st, is_dir in _walk_confined_entries(source_dir):
+            for rel, file_fd, st, is_dir in _walk_confined_entries(source_dir, _hooks=_hooks):
                 entry_count += 1
                 if entry_count > MAX_ARCHIVE_ENTRIES:
                     fail("sandbox archive entry count exceeded safety bound")
                 info = tarfile.TarInfo(name=rel)
-                info.uid = 0
-                info.gid = 0
+                info.uid = int(st.st_uid)
+                info.gid = int(st.st_gid)
                 info.uname = ""
                 info.gname = ""
                 info.mtime = int(st.st_mtime)
@@ -163,19 +276,11 @@ def write_tar_gz_stream(source_dir: Path, out_stream, allow_missing: bool = Fals
                 if total_bytes > DEFAULT_MAX_ARCHIVE_BYTES:
                     fail("sandbox archive byte size exceeded safety bound")
 
-                fd = open_nofollow_rdonly(str(full_path))
-                try:
-                    fst = os.fstat(fd)
-                    if (
-                        not stat.S_ISREG(fst.st_mode)
-                        or (fst.st_dev, fst.st_ino) != (st.st_dev, st.st_ino)
-                        or fst.st_size != st.st_size
-                    ):
-                        fail(f"concurrent modification detected while archiving: {rel}")
-                    with os.fdopen(fd, "rb", closefd=False) as reader:
-                        tf.addfile(info, fileobj=reader)
-                finally:
-                    os.close(fd)
+                reader = _ExactFDReader(file_fd, st.st_size, rel)
+                tf.addfile(info, fileobj=reader)
+                after_fst = os.fstat(file_fd)
+                if after_fst.st_size != st.st_size:
+                    fail(f"concurrent modification detected while archiving: {rel}")
                 file_count += 1
 
     return {
@@ -261,19 +366,120 @@ def inspect_and_validate_archive(archive_path: Path, max_bytes: int = DEFAULT_MA
     }
 
 
-def _assert_confined_no_symlinks(target_root: Path, candidate: Path) -> None:
-    root_str = str(target_root)
-    cand_str = str(candidate)
-    if os.path.commonpath([root_str, cand_str]) != root_str:
-        fail(f"restore path escaped target root: {candidate}")
-    rel = candidate.relative_to(target_root)
-    cur = target_root
-    for part in rel.parts[:-1]:
-        cur = cur / part
-        if cur.exists() or cur.is_symlink():
-            st = os.lstat(cur)
-            if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
-                fail(f"non-directory or symlink parent encountered during restore: {cur}")
+def _resolve_restore_scope(scope: str, archive_path: Path, target_dir: Path) -> str:
+    if scope not in VALID_RESTORE_SCOPES:
+        fail(f"invalid restore scope {scope!r}; expected one of {VALID_RESTORE_SCOPES}")
+    if scope != "auto":
+        return scope
+    arch_name = archive_path.name.lower()
+    tgt_name = target_dir.name.lower()
+    if "workspace" in arch_name or "workspace" in tgt_name:
+        return "workspaces"
+    return "state"
+
+
+def _desired_restore_owner(
+    effective_scope: str,
+    parts: tuple[str, ...],
+    is_dir: bool,
+    safe_mode: int,
+    member_uid: int,
+    member_gid: int,
+) -> tuple[int, int]:
+    if effective_scope != "workspaces":
+        return (0, 0)
+    # Top-level <agent-hash> directory under sandbox-workspaces stays 0:0 so supervisor
+    # WorkspaceDir chmod(0777) succeeds under cap_drop=[ALL].
+    if len(parts) <= 1:
+        return (0, 0)
+    # Supervisor-created shared directories (0777) and shared files (0666) stay 0:0.
+    if member_uid == 0 and member_gid == 0:
+        if (is_dir and safe_mode == 0o777) or (not is_dir and safe_mode == 0o666):
+            return (0, 0)
+    return (SANDBOX_RUNNER_UID, SANDBOX_RUNNER_GID)
+
+
+def _ensure_restore_dir_path(
+    root_fd: int,
+    parts: tuple[str, ...],
+    effective_scope: str,
+    dir_specs: dict[tuple[str, ...], tuple[int, int, int, int | None]],
+) -> int:
+    cur_fd = root_fd
+    try:
+        for idx, part in enumerate(parts):
+            prefix = parts[: idx + 1]
+            try:
+                os.mkdir(part, 0o700, dir_fd=cur_fd)
+            except FileExistsError:
+                pass
+            except OSError as exc:
+                fail(f"unable to create restore directory {'/'.join(prefix)}: {exc}")
+
+            try:
+                next_fd = os.open(part, _dir_open_flags(), dir_fd=cur_fd)
+            except OSError as exc:
+                fail(f"non-directory or symlink parent encountered during restore: {'/'.join(prefix)} ({exc})")
+
+            fst = os.fstat(next_fd)
+            if not stat.S_ISDIR(fst.st_mode):
+                os.close(next_fd)
+                fail(f"non-directory parent encountered during restore: {'/'.join(prefix)}")
+
+            if prefix not in dir_specs:
+                imp_mode = 0o777 if (effective_scope == "workspaces" and len(prefix) == 1) else 0o755
+                imp_uid, imp_gid = _desired_restore_owner(
+                    effective_scope,
+                    prefix,
+                    True,
+                    imp_mode,
+                    SANDBOX_RUNNER_UID,
+                    SANDBOX_RUNNER_GID,
+                )
+                dir_specs[prefix] = (imp_uid, imp_gid, imp_mode, None)
+
+            if cur_fd != root_fd:
+                os.close(cur_fd)
+            cur_fd = next_fd
+        return cur_fd
+    except Exception:
+        if cur_fd != root_fd:
+            try:
+                os.close(cur_fd)
+            except OSError:
+                pass
+        raise
+
+
+def _open_existing_subdir(root_fd: int, parts: tuple[str, ...]) -> int:
+    cur_fd = root_fd
+    try:
+        for idx, part in enumerate(parts):
+            try:
+                next_fd = os.open(part, _dir_open_flags(), dir_fd=cur_fd)
+            except OSError as exc:
+                fail(f"unable to reopen restored directory {'/'.join(parts[: idx + 1])}: {exc}")
+            if cur_fd != root_fd:
+                os.close(cur_fd)
+            cur_fd = next_fd
+        return cur_fd
+    except Exception:
+        if cur_fd != root_fd:
+            try:
+                os.close(cur_fd)
+            except OSError:
+                pass
+        raise
+
+
+def _write_all(fd: int, data: bytes) -> None:
+    view = memoryview(data)
+    offset = 0
+    while offset < len(view):
+        written = os.write(fd, view[offset:])
+        if written <= 0:
+            fail("short write to file descriptor during restore")
+        offset += written
 
 
 def restore_archive(
@@ -281,69 +487,125 @@ def restore_archive(
     target_dir: Path,
     root_mode: int = 0o700,
     max_bytes: int = DEFAULT_MAX_ARCHIVE_BYTES,
+    scope: str = "auto",
+    chown_fn=None,
 ) -> dict:
+    effective_scope = _resolve_restore_scope(scope, archive_path, target_dir)
     summary = inspect_and_validate_archive(archive_path, max_bytes=max_bytes)
+
+    if chown_fn is None and hasattr(os, "geteuid") and os.geteuid() == 0 and hasattr(os, "fchown"):
+        chown_fn = os.fchown
 
     if target_dir.exists() or target_dir.is_symlink():
         st = os.lstat(target_dir)
         if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
             fail(f"restore target must be a real directory: {target_dir}")
-        if os.listdir(target_dir):
-            fail(f"refusing to restore into non-empty target directory: {target_dir}")
-        os.chmod(target_dir, root_mode & 0o777)
     else:
-        target_dir.mkdir(parents=True, exist_ok=False, mode=root_mode & 0o777)
-        os.chmod(target_dir, root_mode & 0o777)
+        target_dir.mkdir(parents=True, exist_ok=False, mode=0o700)
 
-    target_real = Path(os.path.realpath(target_dir))
-    dir_modes: list[tuple[Path, int]] = []
+    try:
+        root_fd = os.open(str(target_dir), _dir_open_flags())
+    except OSError as exc:
+        fail(f"restore target must be a real directory: {target_dir} ({exc})")
 
-    with tarfile.open(archive_path, mode="r:gz") as tf:
-        for member in tf:
-            rel = validate_rel_path(member.name)
-            if not rel:
-                continue
-            dest = target_real / rel
-            _assert_confined_no_symlinks(target_real, dest)
-            parent = dest.parent
-            if parent != target_real and not parent.exists():
-                parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            _assert_confined_no_symlinks(target_real, dest)
+    dir_specs: dict[tuple[str, ...], tuple[int, int, int, int | None]] = {}
+    try:
+        root_fst = os.fstat(root_fd)
+        if not stat.S_ISDIR(root_fst.st_mode):
+            fail(f"restore target must be a real directory: {target_dir}")
+        if os.listdir(root_fd):
+            fail(f"refusing to restore into non-empty target directory: {target_dir}")
+        os.fchmod(root_fd, 0o700)
 
-            safe_mode = member.mode & 0o777
-            if member.isdir():
-                if not dest.exists():
-                    dest.mkdir(mode=0o700, exist_ok=False)
-                dir_modes.append((dest, safe_mode if safe_mode else 0o700))
-                continue
+        with tarfile.open(archive_path, mode="r:gz") as tf:
+            for member in tf:
+                rel = validate_rel_path(member.name)
+                if not rel:
+                    continue
+                parts = tuple(rel.split("/"))
+                if len(parts) > MAX_ARCHIVE_DEPTH:
+                    fail(f"archive member exceeds maximum directory depth: {rel}")
 
-            open_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-            if hasattr(os, "O_NOFOLLOW"):
-                open_flags |= os.O_NOFOLLOW
-            file_mode = safe_mode if safe_mode else 0o600
-            fd = os.open(str(dest), open_flags, file_mode)
+                safe_mode = member.mode & 0o777
+                if member.isdir():
+                    dfd = _ensure_restore_dir_path(root_fd, parts, effective_scope, dir_specs)
+                    if dfd != root_fd:
+                        os.close(dfd)
+                    desired_mode = safe_mode if safe_mode else 0o700
+                    uid, gid = _desired_restore_owner(
+                        effective_scope,
+                        parts,
+                        True,
+                        desired_mode,
+                        int(member.uid),
+                        int(member.gid),
+                    )
+                    dir_specs[parts] = (uid, gid, desired_mode, int(member.mtime))
+                    continue
+
+                parent_parts, leaf = parts[:-1], parts[-1]
+                parent_fd = _ensure_restore_dir_path(root_fd, parent_parts, effective_scope, dir_specs)
+                try:
+                    open_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                    if hasattr(os, "O_NOFOLLOW"):
+                        open_flags |= os.O_NOFOLLOW
+                    if hasattr(os, "O_CLOEXEC"):
+                        open_flags |= os.O_CLOEXEC
+                    file_mode = safe_mode if safe_mode else 0o600
+                    uid, gid = _desired_restore_owner(
+                        effective_scope,
+                        parts,
+                        False,
+                        file_mode,
+                        int(member.uid),
+                        int(member.gid),
+                    )
+                    fd = os.open(leaf, open_flags, 0o600, dir_fd=parent_fd)
+                    try:
+                        reader = tf.extractfile(member)
+                        if reader is None:
+                            fail(f"missing data stream for {rel}")
+                        written = 0
+                        while True:
+                            chunk = reader.read(CHUNK_BYTES)
+                            if not chunk:
+                                break
+                            _write_all(fd, chunk)
+                            written += len(chunk)
+                        if written != member.size:
+                            fail(f"short write while restoring {rel}")
+                        os.fsync(fd)
+                        os.utime(fd, (member.mtime, member.mtime))
+                        if chown_fn is not None:
+                            chown_fn(fd, uid, gid)
+                        os.fchmod(fd, file_mode)
+                    finally:
+                        os.close(fd)
+                finally:
+                    if parent_fd != root_fd:
+                        os.close(parent_fd)
+
+        for parts, (uid, gid, desired_mode, mtime) in sorted(
+            dir_specs.items(), key=lambda item: len(item[0]), reverse=True
+        ):
+            dfd = _open_existing_subdir(root_fd, parts)
             try:
-                os.fchmod(fd, file_mode)
-                reader = tf.extractfile(member)
-                if reader is None:
-                    fail(f"missing data stream for {rel}")
-                written = 0
-                while True:
-                    chunk = reader.read(CHUNK_BYTES)
-                    if not chunk:
-                        break
-                    os.write(fd, chunk)
-                    written += len(chunk)
-                if written != member.size:
-                    fail(f"short write while restoring {rel}")
-                os.fsync(fd)
+                if mtime is not None:
+                    os.utime(dfd, (mtime, mtime))
+                if chown_fn is not None:
+                    chown_fn(dfd, uid, gid)
+                os.fchmod(dfd, desired_mode)
             finally:
-                os.close(fd)
-            os.utime(dest, (member.mtime, member.mtime), follow_symlinks=False)
+                if dfd != root_fd:
+                    os.close(dfd)
 
-    for directory, desired_mode in sorted(dir_modes, key=lambda item: len(item[0].parts), reverse=True):
-        os.chmod(directory, desired_mode)
-    os.chmod(target_real, root_mode & 0o777)
+        if chown_fn is not None:
+            chown_fn(root_fd, 0, 0)
+        os.fchmod(root_fd, root_mode & 0o777)
+    finally:
+        os.close(root_fd)
+
+    summary["scope"] = effective_scope
     return summary
 
 
@@ -462,6 +724,7 @@ def main() -> int:
     restore_cmd = sub.add_parser("restore")
     restore_cmd.add_argument("--archive", required=True)
     restore_cmd.add_argument("--target", required=True)
+    restore_cmd.add_argument("--scope", choices=VALID_RESTORE_SCOPES, default="auto")
     restore_cmd.add_argument("--root-mode", default="0700")
     restore_cmd.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_ARCHIVE_BYTES)
 
@@ -504,6 +767,7 @@ def main() -> int:
                         Path(args.target),
                         root_mode=root_mode,
                         max_bytes=args.max_bytes,
+                        scope=args.scope,
                     ),
                     sort_keys=True,
                 )

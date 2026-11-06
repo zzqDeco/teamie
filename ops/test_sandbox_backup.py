@@ -1,6 +1,7 @@
 import datetime as dt
 import gzip
 import hashlib
+import importlib.util
 import io
 import json
 import os
@@ -14,6 +15,17 @@ import unittest
 
 OPS = Path(__file__).resolve().parent
 REPO_ROOT = OPS.parent
+
+
+def _load_sandbox_archive_module():
+    spec = importlib.util.spec_from_file_location("sandbox_archive", OPS / "sandbox_archive.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+SANDBOX_ARCHIVE = _load_sandbox_archive_module()
 
 
 def write_exec(path: Path, body: str) -> None:
@@ -382,6 +394,13 @@ class SandboxArchiveAndBackupTests(unittest.TestCase):
             (record / "release-manifest.json").write_text(json.dumps(manifest_data), encoding="utf-8")
             (host / "current").symlink_to(record)
 
+            child_state_file = root / "sandbox-children-state.json"
+            child_state_file.write_text(
+                json.dumps({"sbx-child-1": "running", "sbx-child-2": "running"}),
+                encoding="utf-8",
+            )
+            fail_dump_marker = root / "fail-pg-dump"
+
             bin_dir = root / "bin"
             bin_dir.mkdir()
             write_exec(bin_dir / "flock", "#!/bin/sh\nexit 0\n")
@@ -390,20 +409,52 @@ class SandboxArchiveAndBackupTests(unittest.TestCase):
                 f"""#!/usr/bin/env python3
 import json, os, pathlib, subprocess, sys
 log = pathlib.Path({str(root / 'docker-calls.jsonl')!r})
+state_path = pathlib.Path({str(child_state_file)!r})
+fail_marker = pathlib.Path({str(fail_dump_marker)!r})
 args = sys.argv[1:]
 with log.open("a", encoding="utf-8") as fh:
     fh.write(json.dumps(args) + "\\n")
+state = json.loads(state_path.read_text(encoding="utf-8"))
+
+if args[0] == "ps":
+    if "status=running" in " ".join(args):
+        running = [cid for cid, st in sorted(state.items()) if st == "running"]
+        if running:
+            print("\\n".join(running))
+    sys.exit(0)
+if args[0] == "pause":
+    cid = args[1]
+    assert cid in state, f"unknown child {{cid}}"
+    state[cid] = "paused"
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    sys.exit(0)
+if args[0] == "unpause":
+    cid = args[1]
+    assert cid in state, f"unknown child {{cid}}"
+    state[cid] = "running"
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    sys.exit(0)
+if args[0] == "inspect":
+    cid = args[-1]
+    print(state.get(cid, "missing"))
+    sys.exit(0)
 if args[0] == "compose":
     if "pg_restore" in args:
         data = sys.stdin.buffer.read()
         assert data.startswith(b"PGDMP:"), "expected custom dump bytes"
         sys.exit(0)
     if "exec" in args and "postgres" in args:
+        assert all(st == "paused" for st in state.values()), f"expected paused children during pg_dump, got {{state}}"
+        if fail_marker.exists():
+            sys.exit(42)
         db = args[-1]
         sys.stdout.buffer.write(("PGDMP:" + db).encode("utf-8"))
         sys.exit(0)
+    if "up" in args and "sandbox" in args and "agent-runtime" in args:
+        assert all(st == "running" for st in state.values()), f"expected children unpaused before compose up, got {{state}}"
     sys.exit(0)
 if args[0] == "run":
+    assert all(st == "paused" for st in state.values()), f"expected paused children during archive, got {{state}}"
     # Simulate the confined read-only runner container streaming sandbox_archive.py
     src_mount = next(a for a in args if a.endswith(":/mnt/source:ro")).split(":", 1)[0]
     script_mount = next(a for a in args if a.endswith(":/mnt/sandbox_archive.py:ro")).split(":", 1)[0]
@@ -430,6 +481,7 @@ for item in src.iterdir():
                 "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"],
                 "TEAMIE_ROOT": str(host),
                 "TEAMIE_BACKUP_MIN_FREE_BYTES": "1024",
+                "TEAMIE_BACKUP_SANDBOX_DRAIN_ATTEMPTS": "0",
             }
             res = subprocess.run(
                 ["bash", str(OPS / "backup.sh"), "--quiesce-agents"],
@@ -463,7 +515,31 @@ for item in src.iterdir():
 
             calls = [json.loads(line) for line in (root / "docker-calls.jsonl").read_text().splitlines()]
             self.assertTrue(any("stop" in c and "agent-runtime" in c and "sandbox" in c for c in calls))
+            self.assertTrue(any(c == ["pause", "sbx-child-1"] for c in calls))
+            self.assertTrue(any(c == ["pause", "sbx-child-2"] for c in calls))
+            self.assertTrue(any(c == ["unpause", "sbx-child-1"] for c in calls))
+            self.assertTrue(any(c == ["unpause", "sbx-child-2"] for c in calls))
             self.assertTrue(any("up" in c and "sandbox" in c and "agent-runtime" in c for c in calls))
+            self.assertEqual(
+                json.loads(child_state_file.read_text(encoding="utf-8")),
+                {"sbx-child-1": "running", "sbx-child-2": "running"},
+            )
+
+            # Error path during dump must still unpause Sandbox children, restart services, and prune incomplete output!
+            fail_dump_marker.write_text("1", encoding="utf-8")
+            failed_res = subprocess.run(
+                ["bash", str(OPS / "backup.sh"), "--quiesce-agents"],
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(failed_res.returncode, 0)
+            fail_dump_marker.unlink()
+            self.assertEqual(
+                json.loads(child_state_file.read_text(encoding="utf-8")),
+                {"sbx-child-1": "running", "sbx-child-2": "running"},
+            )
+            self.assertEqual(list((host / "backups").iterdir()), [bdir])
 
             # Health probe succeeds on fresh backup, fails when max-age is exceeded, and syncs off-host.
             health_ok = subprocess.run(
@@ -576,6 +652,158 @@ for item in src.iterdir():
             self.assertEqual((restored / "production.env").stat().st_mode & 0o777, 0o600)
             self.assertEqual((restored / "feature-flags.json").read_text(encoding="utf-8"), flags_body)
             self.assertEqual((restored / "feature-flags.json").stat().st_mode & 0o777, 0o644)
+
+    def test_mid_walk_directory_to_symlink_toctou_rejected_and_confined(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            outside = root / "outside-secrets"
+            outside.mkdir(mode=0o700)
+            (outside / "secret.txt").write_text("TOP_SECRET_DO_NOT_ARCHIVE", encoding="utf-8")
+
+            # Case 1: Child directory swapped to symlink AFTER parent os.listdir() and BEFORE stat/open.
+            src1 = root / "ws-race-after-listdir"
+            (src1 / "victim").mkdir(parents=True)
+            (src1 / "victim/legit.txt").write_text("safe", encoding="utf-8")
+
+            def swap_after_root_list(rel_prefix: str) -> None:
+                if rel_prefix == "":
+                    shutil.rmtree(src1 / "victim")
+                    (src1 / "victim").symlink_to(outside)
+
+            buf1 = io.BytesIO()
+            with self.assertRaises(ValueError) as ctx1:
+                SANDBOX_ARCHIVE.write_tar_gz_stream(src1, buf1, _hooks={"on_dir_listed": swap_after_root_list})
+            self.assertIn("symlink", str(ctx1.exception))
+
+            # Case 2: Child directory swapped to symlink BETWEEN os.stat(..., dir_fd) and os.open(..., dir_fd).
+            src2 = root / "ws-race-between-stat-and-open"
+            (src2 / "victim").mkdir(parents=True)
+            (src2 / "victim/legit.txt").write_text("safe", encoding="utf-8")
+
+            def swap_after_stat(rel: str) -> None:
+                if rel == "victim":
+                    shutil.rmtree(src2 / "victim")
+                    (src2 / "victim").symlink_to(outside)
+
+            buf2 = io.BytesIO()
+            with self.assertRaises(ValueError) as ctx2:
+                SANDBOX_ARCHIVE.write_tar_gz_stream(src2, buf2, _hooks={"on_entry_stat": swap_after_stat})
+            self.assertIn("victim", str(ctx2.exception))
+
+            # Case 3: Directory renamed/swapped to symlink AFTER child_fd was opened; open child_fd stays
+            # pinned to the original confined directory inode and NEVER reads outside/secret.txt!
+            src3 = root / "ws-race-after-open"
+            (src3 / "victim").mkdir(parents=True)
+            (src3 / "victim/legit.txt").write_text("confined-payload", encoding="utf-8")
+            retired = root / "retired-victim"
+
+            def swap_after_child_open(rel_prefix: str) -> None:
+                if rel_prefix == "victim":
+                    (src3 / "victim").rename(retired)
+                    (src3 / "victim").symlink_to(outside)
+
+            buf3 = io.BytesIO()
+            summary = SANDBOX_ARCHIVE.write_tar_gz_stream(src3, buf3, _hooks={"on_dir_listed": swap_after_child_open})
+            self.assertEqual(summary["files"], 1)
+            buf3.seek(0)
+            with tarfile.open(fileobj=buf3, mode="r:gz") as tf:
+                names = [m.name for m in tf.getmembers()]
+                self.assertEqual(names, ["victim", "victim/legit.txt"])
+                extracted = tf.extractfile("victim/legit.txt")
+                assert extracted is not None
+                self.assertEqual(extracted.read(), b"confined-payload")
+
+    def test_workspace_runner_ownership_preserved_and_restored(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            src = root / "src"
+            (src / "dir").mkdir(parents=True, mode=0o755)
+            (src / "dir/file.txt").write_text("uid-check", encoding="utf-8")
+
+            raw_tar = io.BytesIO()
+            SANDBOX_ARCHIVE.write_tar_gz_stream(src, raw_tar)
+            raw_tar.seek(0)
+            with tarfile.open(fileobj=raw_tar, mode="r:gz") as tf:
+                members = {m.name: m for m in tf.getmembers()}
+            self.assertEqual(members["dir/file.txt"].uid, os.getuid())
+            self.assertEqual(members["dir/file.txt"].gid, os.getgid())
+
+            agent_hash = "a" * 64
+            ws_tar = root / "sandbox-workspaces.tar.gz"
+            with gzip.open(ws_tar, "wb") as gz:
+                with tarfile.open(mode="w", fileobj=gz, format=tarfile.PAX_FORMAT) as tf:
+                    def add_dir(name: str, mode: int, uid: int, gid: int) -> None:
+                        ti = tarfile.TarInfo(name=name)
+                        ti.type = tarfile.DIRTYPE
+                        ti.mode = mode
+                        ti.uid = uid
+                        ti.gid = gid
+                        ti.mtime = 1700000000
+                        tf.addfile(ti)
+
+                    def add_file(name: str, data: bytes, mode: int, uid: int, gid: int) -> None:
+                        ti = tarfile.TarInfo(name=name)
+                        ti.type = tarfile.REGTYPE
+                        ti.size = len(data)
+                        ti.mode = mode
+                        ti.uid = uid
+                        ti.gid = gid
+                        ti.mtime = 1700000000
+                        tf.addfile(ti, io.BytesIO(data))
+
+                    add_dir(agent_hash, 0o777, 0, 0)
+                    add_dir(f"{agent_hash}/sup-shared", 0o777, 0, 0)
+                    add_file(f"{agent_hash}/sup-shared/from-supervisor.txt", b"sup", 0o666, 0, 0)
+                    add_dir(f"{agent_hash}/runner-priv", 0o700, 10001, 10001)
+                    add_file(f"{agent_hash}/runner-priv/secret.json", b"{}", 0o600, 10001, 10001)
+                    add_file(f"{agent_hash}/runner-pub.txt", b"pub", 0o644, 10001, 10001)
+                    add_file(f"{agent_hash}/unexpected-uid.txt", b"host", 0o644, 501, 20)
+                    add_file(f"{agent_hash}/legacy-zero-uid.txt", b"legacy", 0o644, 0, 0)
+
+            chown_by_inode: dict[tuple[int, int], tuple[int, int]] = {}
+
+            def record_chown(fd: int, uid: int, gid: int) -> None:
+                st = os.fstat(fd)
+                chown_by_inode[(st.st_dev, st.st_ino)] = (uid, gid)
+
+            ws_dst = root / "restored-workspaces"
+            SANDBOX_ARCHIVE.restore_archive(ws_tar, ws_dst, scope="workspaces", chown_fn=record_chown)
+
+            def owner_of(p: Path) -> tuple[int, int]:
+                st = os.lstat(p)
+                return chown_by_inode[(st.st_dev, st.st_ino)]
+
+            self.assertEqual(owner_of(ws_dst), (0, 0))
+            self.assertEqual(ws_dst.stat().st_mode & 0o777, 0o700)
+            self.assertEqual(owner_of(ws_dst / agent_hash), (0, 0))
+            self.assertEqual(owner_of(ws_dst / agent_hash / "sup-shared"), (0, 0))
+            self.assertEqual(owner_of(ws_dst / agent_hash / "sup-shared/from-supervisor.txt"), (0, 0))
+            self.assertEqual(owner_of(ws_dst / agent_hash / "runner-priv"), (10001, 10001))
+            self.assertEqual((ws_dst / agent_hash / "runner-priv").stat().st_mode & 0o777, 0o700)
+            self.assertEqual(owner_of(ws_dst / agent_hash / "runner-priv/secret.json"), (10001, 10001))
+            self.assertEqual((ws_dst / agent_hash / "runner-priv/secret.json").stat().st_mode & 0o777, 0o600)
+            self.assertEqual(owner_of(ws_dst / agent_hash / "runner-pub.txt"), (10001, 10001))
+            self.assertEqual(owner_of(ws_dst / agent_hash / "unexpected-uid.txt"), (10001, 10001))
+            self.assertEqual(owner_of(ws_dst / agent_hash / "legacy-zero-uid.txt"), (10001, 10001))
+
+            # State scope MUST force 0:0 on every receipt regardless of tar header UID.
+            state_chown: dict[tuple[int, int], tuple[int, int]] = {}
+
+            def record_state_chown(fd: int, uid: int, gid: int) -> None:
+                st = os.fstat(fd)
+                state_chown[(st.st_dev, st.st_ino)] = (uid, gid)
+
+            st_dst = root / "restored-state"
+            SANDBOX_ARCHIVE.restore_archive(ws_tar, st_dst, scope="state", chown_fn=record_state_chown)
+            for p in (
+                st_dst,
+                st_dst / agent_hash,
+                st_dst / agent_hash / "runner-priv",
+                st_dst / agent_hash / "runner-priv/secret.json",
+                st_dst / agent_hash / "runner-pub.txt",
+            ):
+                pst = os.lstat(p)
+                self.assertEqual(state_chown[(pst.st_dev, pst.st_ino)], (0, 0), f"expected 0:0 on {p}")
 
 
 if __name__ == "__main__":
