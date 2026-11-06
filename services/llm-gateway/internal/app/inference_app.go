@@ -93,6 +93,7 @@ func (s *Service) CallChat(ctx context.Context, owner, agentID, sessionID, runID
 	for attempt := 0; ; attempt++ {
 		var early *CallOutcome
 		var retryBackoff time.Duration
+		var retryWake <-chan struct{}
 		shouldRetry := false
 		done := func() bool {
 			releaseWorker, wErr := s.acquireProviderWorker(callCtx, providerKey)
@@ -134,8 +135,9 @@ func (s *Service) CallChat(ctx context.Context, owner, agentID, sessionID, runID
 			if err == nil {
 				s.recordProviderSuccess(callCtx, providerKey, dispatchedAt)
 			} else if isRetryableUpstreamRateLimit(err) {
-				if backoff, retry := s.recordRateLimitAndPlanRetry(callCtx, providerKey, dispatchedAt, err, attempt); retry {
+				if backoff, wake, retry := s.recordRateLimitAndPlanRetry(callCtx, providerKey, dispatchedAt, err, attempt); retry {
 					retryBackoff = backoff
+					retryWake = wake
 					shouldRetry = true
 				}
 			}
@@ -147,7 +149,7 @@ func (s *Service) CallChat(ctx context.Context, owner, agentID, sessionID, runID
 		if done || !shouldRetry {
 			break
 		}
-		if sErr := sleepWithContext(callCtx, retryBackoff); sErr != nil {
+		if sErr := sleepWithContextOrWake(callCtx, retryBackoff, retryWake); sErr != nil {
 			err = sErr
 			break
 		}
@@ -262,6 +264,7 @@ func (s *Service) StreamChat(ctx context.Context, owner, agentID, sessionID, run
 	for attempt := 0; ; attempt++ {
 		var early *StreamOutcome
 		var retryBackoff time.Duration
+		var retryWake <-chan struct{}
 		shouldRetry := false
 		done := func() bool {
 			releaseWorker, wErr := s.acquireProviderWorker(callCtx, providerKey)
@@ -305,8 +308,9 @@ func (s *Service) StreamChat(ctx context.Context, owner, agentID, sessionID, run
 			if err == nil {
 				s.recordProviderSuccess(callCtx, providerKey, dispatchedAt)
 			} else if outcome.ChunkCount == 0 && isRetryableUpstreamRateLimit(err) {
-				if backoff, retry := s.recordRateLimitAndPlanRetry(callCtx, providerKey, dispatchedAt, err, attempt); retry {
+				if backoff, wake, retry := s.recordRateLimitAndPlanRetry(callCtx, providerKey, dispatchedAt, err, attempt); retry {
 					retryBackoff = backoff
+					retryWake = wake
 					shouldRetry = true
 				}
 			}
@@ -318,7 +322,7 @@ func (s *Service) StreamChat(ctx context.Context, owner, agentID, sessionID, run
 		if done || !shouldRetry {
 			break
 		}
-		if sErr := sleepWithContext(callCtx, retryBackoff); sErr != nil {
+		if sErr := sleepWithContextOrWake(callCtx, retryBackoff, retryWake); sErr != nil {
 			err = sErr
 			break
 		}

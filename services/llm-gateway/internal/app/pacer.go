@@ -57,8 +57,26 @@ type providerGate struct {
 	waiters        []*providerWaiter
 	cooldownUntil  time.Time
 	cooldownSetAt  time.Time
+	cooldownWake   chan struct{}
 	consecutive429 int
 	lastActive     time.Time
+}
+
+func (g *providerGate) cooldownWakeChanLocked() <-chan struct{} {
+	if g.cooldownWake == nil {
+		g.cooldownWake = make(chan struct{})
+	}
+	return g.cooldownWake
+}
+
+func (g *providerGate) resetCooldownLocked() {
+	g.cooldownUntil = time.Time{}
+	g.cooldownSetAt = time.Time{}
+	g.consecutive429 = 0
+	if g.cooldownWake != nil {
+		close(g.cooldownWake)
+		g.cooldownWake = nil
+	}
 }
 
 // ParseProviderMaxWorkers parses GATEWAY_PROVIDER_MAX_WORKERS.
@@ -143,9 +161,7 @@ func (s *Service) SetRateLimitRetry(maxRetries int, baseBackoff, maxJitter time.
 	s.pool.baseBackoff = baseBackoff
 	s.pool.maxJitter = maxJitter
 	for _, g := range s.providers {
-		g.cooldownUntil = time.Time{}
-		g.cooldownSetAt = time.Time{}
-		g.consecutive429 = 0
+		g.resetCooldownLocked()
 	}
 	s.mu.Unlock()
 }
@@ -158,9 +174,7 @@ func (s *Service) resetProviderCooldown(providerID string) {
 	key := "provider:" + id
 	s.mu.Lock()
 	if g := s.providers[key]; g != nil {
-		g.cooldownUntil = time.Time{}
-		g.cooldownSetAt = time.Time{}
-		g.consecutive429 = 0
+		g.resetCooldownLocked()
 	}
 	s.mu.Unlock()
 }
@@ -329,8 +343,10 @@ func (s *Service) waitProviderCooldown(ctx context.Context, key string) (time.Ti
 		now := time.Now()
 		s.mu.Lock()
 		var until time.Time
-		if gate := s.providers[key]; gate != nil {
+		var wake <-chan struct{}
+		if gate := s.providers[key]; gate != nil && gate.cooldownUntil.After(now) {
 			until = gate.cooldownUntil
+			wake = gate.cooldownWakeChanLocked()
 		}
 		s.mu.Unlock()
 		if !until.After(now) {
@@ -339,13 +355,17 @@ func (s *Service) waitProviderCooldown(ctx context.Context, key string) (time.Ti
 			}
 			return time.Now(), nil
 		}
-		if err := sleepWithContext(ctx, until.Sub(now)); err != nil {
+		if err := sleepWithContextOrWake(ctx, until.Sub(now), wake); err != nil {
 			return time.Time{}, err
 		}
 	}
 }
 
 func sleepWithContext(ctx context.Context, d time.Duration) error {
+	return sleepWithContextOrWake(ctx, d, nil)
+}
+
+func sleepWithContextOrWake(ctx context.Context, d time.Duration, wake <-chan struct{}) error {
 	if err := ctx.Err(); err != nil {
 		return domain.StreamError(ctx, "gateway_unavailable")
 	}
@@ -356,6 +376,11 @@ func sleepWithContext(ctx context.Context, d time.Duration) error {
 	defer timer.Stop()
 	select {
 	case <-timer.C:
+		return nil
+	case <-wake:
+		if err := ctx.Err(); err != nil {
+			return domain.StreamError(ctx, "gateway_unavailable")
+		}
 		return nil
 	case <-ctx.Done():
 		return domain.StreamError(ctx, "gateway_unavailable")
@@ -374,16 +399,14 @@ func (s *Service) recordProviderSuccess(ctx context.Context, key string, dispatc
 	s.mu.Lock()
 	if gate := s.providers[key]; gate != nil {
 		if gate.cooldownSetAt.IsZero() || dispatchedAt.IsZero() || !dispatchedAt.Before(gate.cooldownSetAt) {
-			gate.consecutive429 = 0
-			gate.cooldownSetAt = time.Time{}
-			gate.cooldownUntil = time.Time{}
+			gate.resetCooldownLocked()
 		}
 		gate.lastActive = time.Now()
 	}
 	s.mu.Unlock()
 }
 
-func (s *Service) recordRateLimitAndPlanRetry(ctx context.Context, key string, dispatchedAt time.Time, err error, attempt int) (time.Duration, bool) {
+func (s *Service) recordRateLimitAndPlanRetry(ctx context.Context, key string, dispatchedAt time.Time, err error, attempt int) (time.Duration, <-chan struct{}, bool) {
 	var retryAfter time.Duration
 	var de *domain.Error
 	if errors.As(err, &de) && de.RetryAfter > 0 {
@@ -393,6 +416,7 @@ func (s *Service) recordRateLimitAndPlanRetry(ctx context.Context, key string, d
 	s.mu.Lock()
 	maxRetries, baseBackoff, maxJitter := s.effectiveRateLimitRetryLocked()
 	var wait time.Duration
+	var wake <-chan struct{}
 	if !StrictModelSelection(ctx) {
 		now := time.Now()
 		gate := s.providerGateLocked(key, now)
@@ -424,6 +448,7 @@ func (s *Service) recordRateLimitAndPlanRetry(ctx context.Context, key string, d
 		gate.lastActive = now
 		if gate.cooldownUntil.After(now) {
 			wait = gate.cooldownUntil.Sub(now)
+			wake = gate.cooldownWakeChanLocked()
 		}
 	} else {
 		shift := attempt
@@ -442,7 +467,7 @@ func (s *Service) recordRateLimitAndPlanRetry(ctx context.Context, key string, d
 	s.mu.Unlock()
 
 	if ctx.Err() != nil || attempt >= maxRetries || wait > DefaultMaxInlineRetryWait {
-		return 0, false
+		return 0, nil, false
 	}
-	return wait, true
+	return wait, wake, true
 }

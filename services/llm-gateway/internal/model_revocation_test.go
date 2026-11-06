@@ -204,13 +204,14 @@ func TestModelAndProviderRevocationCannotMissAdmittingCall(t *testing.T) {
 					cancel()
 					wg.Wait()
 				}()
+				callDone := make(chan error, 1)
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
 					if mode == "unary" {
-						s.CallChat(ctx, "owner", "agent", "session", "run", "{}")
+						callDone <- s.CallChat(ctx, "owner", "agent", "session", "run", "{}").Failure
 					} else {
-						s.StreamChat(ctx, "owner", "agent", "session", "run", "", "{}", nil, func(StreamEvent) error { return nil })
+						callDone <- s.StreamChat(ctx, "owner", "agent", "session", "run", "", "{}", nil, func(StreamEvent) error { return nil }).Failure
 					}
 				}()
 				<-gate.entered // Configuration was read, but cancellation is not registered yet.
@@ -245,6 +246,17 @@ func TestModelAndProviderRevocationCannotMissAdmittingCall(t *testing.T) {
 				case call := <-provider.started:
 					if call.ctx.Err() == nil {
 						t.Fatal("revocation missed the admitting call")
+					}
+				case callErr := <-callDone:
+					if callErr == nil {
+						t.Fatal("revoked call succeeded without cancellation")
+					}
+					select {
+					case call := <-provider.started:
+						if call.ctx.Err() == nil {
+							t.Fatal("revocation missed the admitting call")
+						}
+					default:
 					}
 				case <-time.After(3 * time.Second):
 					t.Fatal("provider admission did not finish")

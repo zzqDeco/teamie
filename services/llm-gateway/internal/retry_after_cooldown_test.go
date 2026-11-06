@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"teamie/contracts/gen/agent/kitex_gen/agent"
+	"teamie/services/llm-gateway/internal/app"
 	"teamie/services/llm-gateway/internal/infra/upstream"
 )
 
@@ -340,5 +341,132 @@ func TestRetryAfterHonoredAndCooldownPersistsAcrossExhaustedCallsAndModels(t *te
 	})
 	if elapsed := time.Since(cStart); elapsed > 400*time.Millisecond {
 		t.Fatalf("caller cancellation during provider cooldown took too long: %v", elapsed)
+	}
+}
+
+func TestProviderUpdateWakesBlockedCooldownWaitersImmediately(t *testing.T) {
+	var mode atomic.Int32
+	mode.Store(1)
+
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		if mode.Load() == 1 {
+			w.Header().Set("Retry-After", "60")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"message":"long_cooldown"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-wake","object":"chat.completion","choices":[{"message":{"role":"assistant","content":"woke-up"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":2}}`))
+	}))
+	defer server.Close()
+
+	pool := server.Client().Transport.(*http.Transport).Clone()
+	pool.TLSClientConfig = pool.TLSClientConfig.Clone()
+	pool.TLSClientConfig.InsecureSkipVerify = true
+	client := &http.Client{Transport: pool}
+
+	crypto := testCipher(t)
+	encKey, err := crypto.Encrypt("initial-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &memoryStore{c: Config{
+		Providers: []ProviderProfile{
+			{ID: "prov-wake", DisplayName: "Wake Provider", BaseURL: server.URL + "/v1", CipherKey: encKey, Enabled: true},
+		},
+		Models: []ModelProfile{
+			{ID: "model-wake", ProviderID: "prov-wake", DisplayName: "Wake Model", Model: "gpt-wake", Enabled: true},
+		},
+		Routing: ModelRoutingConfig{DefaultModelID: "model-wake"},
+	}}
+
+	svc := New(store, crypto, testToken)
+	svc.Provider = Provider{HTTP: client}
+	svc.App.SetMaxConcurrentCalls(4)
+	// Single virtual worker slot so a waiter parked in waitProviderCooldown also blocks queued callers behind it.
+	svc.App.SetProviderWorkers(1, 16)
+	svc.App.SetRateLimitRetry(0, 10*time.Millisecond, 0)
+
+	// Seed a 60s Retry-After cooldown on prov-wake.
+	seedRes, err := fixtureHTTPChat(t, svc, context.Background(), &agent.GatewayChatRequest{
+		ServiceToken: testToken,
+		OwnerId:      "owner",
+		AgentId:      "agent-seed",
+		SessionId:    "sess-seed",
+		RunId:        "run-seed-60s",
+		ModelId:      ptr("model-wake"),
+		RequestJson:  fixtureNativeRequest(`{"messages":[{"role":"user","content":"seed"}]}`, false),
+	})
+	if err != nil || seedRes.Ok || seedRes.GetStatusCode() != 429 {
+		t.Fatalf("expected 429 seed response, got res=%+v err=%v", seedRes, err)
+	}
+
+	mode.Store(2)
+
+	type callOutcome struct {
+		res *agent.GatewayChatResponse
+		err error
+	}
+	ch1 := make(chan callOutcome, 1)
+	ch2 := make(chan callOutcome, 1)
+	start := time.Now()
+
+	go func() {
+		r, e := fixtureHTTPChat(t, svc, context.Background(), &agent.GatewayChatRequest{
+			ServiceToken: testToken,
+			OwnerId:      "owner",
+			AgentId:      "agent-w1",
+			SessionId:    "sess-w1",
+			RunId:        "run-w1",
+			ModelId:      ptr("model-wake"),
+			RequestJson:  fixtureNativeRequest(`{"messages":[{"role":"user","content":"waiter-1"}]}`, false),
+		})
+		ch1 <- callOutcome{res: r, err: e}
+	}()
+	go func() {
+		r, e := fixtureHTTPChat(t, svc, context.Background(), &agent.GatewayChatRequest{
+			ServiceToken: testToken,
+			OwnerId:      "owner",
+			AgentId:      "agent-w2",
+			SessionId:    "sess-w2",
+			RunId:        "run-w2",
+			ModelId:      ptr("model-wake"),
+			RequestJson:  fixtureNativeRequest(`{"messages":[{"role":"user","content":"waiter-2"}]}`, false),
+		})
+		ch2 <- callOutcome{res: r, err: e}
+	}()
+
+	// Give waiter-1 time to acquire the single worker slot and enter the 60s cooldown sleep,
+	// while waiter-2 queues behind waiter-1.
+	time.Sleep(50 * time.Millisecond)
+	select {
+	case out := <-ch1:
+		t.Fatalf("waiter-1 returned before provider reset despite 60s cooldown: %+v (%v)", out.res, out.err)
+	default:
+	}
+
+	// Updating the provider (e.g. rotating credentials) must reset cooldown AND wake parked waiters immediately.
+	newName := "Wake Provider Updated"
+	if _, err := svc.App.UpdateModelProvider(context.Background(), app.UpdateModelProviderInput{
+		ID:          "prov-wake",
+		DisplayName: &newName,
+		APIKey:      ptr("rotated-key"),
+	}); err != nil {
+		t.Fatalf("UpdateModelProvider failed: %v", err)
+	}
+
+	for i, ch := range []chan callOutcome{ch1, ch2} {
+		select {
+		case out := <-ch:
+			if out.err != nil || out.res == nil || !out.res.Ok {
+				t.Fatalf("waiter-%d failed after provider reset: res=%+v err=%v", i+1, out.res, out.err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("waiter-%d stayed blocked on obsolete 60s cooldown after UpdateModelProvider", i+1)
+		}
+	}
+	if elapsed := time.Since(start); elapsed > 1500*time.Millisecond {
+		t.Fatalf("expected immediate wakeup after UpdateModelProvider, took %v", elapsed)
 	}
 }
