@@ -159,10 +159,14 @@ func TestNativePresenceDecoupledFromMarketplaceFlagAndMidRunToggleSafe(t *testin
 		paused:          make(chan struct{}),
 	}
 	gateway.respond = func(index int, req behaviorRequest) (chatMessage, error) {
-		rawMessages := req.Binding.RequestJson
-		if strings.Contains(rawMessages, "mcp__") {
-			return chatMessage{}, fmt.Errorf("unexpected mcp__ reference in decoupled presence prompt")
+		if len(req.Messages) == 0 || req.Messages[0].Role != "system" {
+			return chatMessage{}, fmt.Errorf("native Agent request omitted its leading system instruction")
 		}
+		sys := req.Messages[0].Content
+		if strings.Contains(sys, "mcp__") || strings.Contains(sys, "TEAMIE_APP_NOTIFICATION") {
+			return chatMessage{}, fmt.Errorf("unexpected MCP reference in decoupled presence system prompt")
+		}
+		rawMessages := req.Binding.RequestJson
 		if strings.Contains(rawMessages, "TEAMIE_UNREAD_DIGEST") {
 			sawDigestEnvelope.Store(true)
 		}
@@ -203,15 +207,28 @@ func TestNativePresenceDecoupledFromMarketplaceFlagAndMidRunToggleSafe(t *testin
 	select {
 	case <-gateway.paused:
 	case <-time.After(10 * time.Second):
-		t.Fatal("timed out waiting for mid-Run checkpoint boundary")
+		gateway.mu.Lock()
+		failErr := gateway.failure
+		gateway.mu.Unlock()
+		t.Fatalf("timed out waiting for mid-Run checkpoint boundary (calls=%d, failure=%v)", gateway.calls.Load(), failErr)
 	}
 
-	// Stop worker cleanly via runtime flag, then flip BOTH flags mid-Run to prove
-	// frozen presence_snapshot/v1 + CheckpointPresence survive flag toggles without replay conflict!
-	writeFlags(false, false, true)
-	waitFor(t, func() bool { return s.checkpointExists(ctx, "turnloop:"+f.agent) })
+	// Stop worker cleanly via runtime flag while keeping Marketplace disabled so we
+	// verify zero Marketplace calls occurred throughout Worker #1, then flip both
+	// presence and Marketplace flags before resuming to prove frozen presence_snapshot/v1
+	// + CheckpointPresence survive mid-Run flag toggles without replay conflict!
+	writeFlags(false, false, false)
+	waitFor(t, func() bool {
+		meta, metaErr := s.ResumeMetadata(ctx, "turnloop:"+f.agent)
+		return metaErr == nil && meta != nil && resumeCompatible(meta, 1, meta.RunID) &&
+			count(t, s, `SELECT count(*) FROM runtime_runs WHERE id=$1 AND state='retry'`, meta.RunID) == 1
+	})
 	cancel()
 	<-done
+
+	if got := marketplaceCalls.Load(); got != 0 {
+		t.Fatalf("expected 0 Marketplace HTTP calls when im.marketplace.enabled=false, got %d", got)
+	}
 
 	metadata, err := s.ResumeMetadata(ctx, "turnloop:"+f.agent)
 	if err != nil || metadata == nil || metadata.Presence == nil || !metadata.Presence.MarketplaceDisabled {
@@ -231,7 +248,10 @@ func TestNativePresenceDecoupledFromMarketplaceFlagAndMidRunToggleSafe(t *testin
 	})
 	cancel2()
 	<-done2
-	gateway.snapshot(t)
+	reqs := gateway.snapshot(t)
+	if len(reqs) != 4 {
+		t.Fatalf("expected 4 model steps across pause and resume, got %d", len(reqs))
+	}
 
 	if !sawDigestEnvelope.Load() {
 		t.Fatal("expected non-active conversation message to arrive as TEAMIE_UNREAD_DIGEST")
@@ -241,8 +261,5 @@ func TestNativePresenceDecoupledFromMarketplaceFlagAndMidRunToggleSafe(t *testin
 	}
 	if got := targetMessagesSent.Load(); got != 1 {
 		t.Fatalf("expected exactly 1 delivered message in targetGroup after enter + resume, got %d", got)
-	}
-	if got := marketplaceCalls.Load(); got != 0 {
-		t.Fatalf("expected 0 Marketplace HTTP calls when im.marketplace.enabled=false at Run start, got %d", got)
 	}
 }

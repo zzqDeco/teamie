@@ -1458,9 +1458,9 @@ func (e *Engine) authorizeUnreadDigestInput(ctx context.Context, imc *IM, _ *Lea
 	if len(in.SourceRefs) == 0 {
 		return errContextUnavailable
 	}
-	if e.Config.FlagsFile != "" && !e.presenceEnabled() {
-		return errContextUnavailable
-	}
+	// Already-persisted unread digests advanced the IM sync cursor and may belong
+	// to an in-flight Run whose frozen presence_snapshot/v1 survives flag toggles;
+	// authorize against live IM conversation membership rather than current write flags.
 	var body UnreadDigestBody
 	if err := json.Unmarshal([]byte(in.Body), &body); err != nil || len(body.UnreadConversations) == 0 {
 		return errContextUnavailable
