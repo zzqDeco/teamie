@@ -666,5 +666,51 @@ class ProductionConfigTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             manifest.ensure_host_env(self.env, v3)
 
+    def test_common_sh_validates_teamie_root_segments(self):
+        common = str(Path(__file__).with_name("common.sh"))
+        valid_roots = [
+            "/srv/teamie",
+            "/tmp/tmp.AbCdEf1234/cfg-host",
+            "/opt/teamie-v1.0",
+            "/srv/teamie.prod/instance_01",
+            "/var/folders/jr/fzvjb54j1hs03jxrmmbxmlz00000gn/T/tmp.wLtdBpzwZK",
+        ]
+        for candidate in valid_roots:
+            with self.subTest(valid=candidate):
+                res = subprocess.run(
+                    ["bash", "-c", 'source "$COMMON" && printf "%s" "$HOST_ENV"'],
+                    env={**os.environ, "COMMON": common, "TEAMIE_ROOT": candidate},
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(res.returncode, 0, res.stderr)
+                self.assertEqual(res.stdout, f"{candidate}/config/production.env")
+
+        invalid_roots = [
+            "relative/teamie",
+            "/",
+            "//",
+            "///",
+            "/srv/teamie/",
+            "/srv//teamie",
+            "/srv/./teamie",
+            "/srv/../etc",
+            "/srv/teamie/.",
+            "/srv/teamie/..",
+            "/srv/my teamie",
+            "/srv/teamie;id",
+            "/srv/teamie$HOME",
+        ]
+        for candidate in invalid_roots:
+            with self.subTest(invalid=candidate):
+                res = subprocess.run(
+                    ["bash", "-c", 'source "$COMMON"'],
+                    env={**os.environ, "COMMON": common, "TEAMIE_ROOT": candidate},
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertNotEqual(res.returncode, 0, f"expected {candidate!r} to fail")
+                self.assertIn("Invalid TEAMIE_ROOT", res.stderr)
+
 
 if __name__ == "__main__": unittest.main()

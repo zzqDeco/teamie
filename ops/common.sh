@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Shared host paths. Callers set umask 077 before sourcing.
 TEAMIE_ROOT=${TEAMIE_ROOT:-/srv/teamie}
-[[ $TEAMIE_ROOT =~ ^/[a-zA-Z0-9/_-]+$ ]] || { echo 'Invalid TEAMIE_ROOT' >&2; exit 1; }
+[[ $TEAMIE_ROOT =~ ^(/[a-zA-Z0-9._-]+)+$ && ! "$TEAMIE_ROOT/" =~ /\.\.?/ ]] || { echo 'Invalid TEAMIE_ROOT' >&2; exit 1; }
 HOST_ENV="$TEAMIE_ROOT/config/production.env"
 export COMPOSE_PARALLEL_LIMIT=1
 
