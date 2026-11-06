@@ -80,29 +80,38 @@ func runOrphanRuns(args []string) {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	var opts []postgres.Option
-	if *mode == "audit" {
-		opts = append(opts, postgres.WithRuntimeParam("default_transaction_read_only", "on"))
-	}
-	pool, err := postgres.Open(ctx, os.Getenv("DATABASE_URL"), opts...)
+	report, opened, err := executeOrphanRuns(ctx, os.Getenv("DATABASE_URL"), *mode, *agent)
 	if err != nil {
-		fail("orphan-runs inspection unavailable")
-	}
-	defer pool.Close()
-
-	repo := pg.NewFromPool(pool)
-	var report *domain.OrphanRunReport
-	if *mode == "reconcile" {
-		report, err = repo.ReconcileOrphanRuns(ctx, *agent)
-	} else {
-		report, err = repo.AuditOrphanRuns(ctx, *agent)
-	}
-	if err != nil {
+		if !opened {
+			fail("orphan-runs inspection unavailable")
+		}
 		fail("orphan-runs operation failed")
 	}
 	if json.NewEncoder(os.Stdout).Encode(report) != nil {
 		fail("orphan-runs output encode failed")
 	}
+}
+
+func executeOrphanRuns(ctx context.Context, dsn, mode, agent string) (*domain.OrphanRunReport, bool, error) {
+	if mode == "audit" {
+		pool, err := postgres.Open(ctx, dsn, postgres.WithRuntimeParam("default_transaction_read_only", "on"))
+		if err != nil {
+			return nil, false, err
+		}
+		defer pool.Close()
+		report, err := pg.NewFromPool(pool).AuditOrphanRuns(ctx, agent)
+		return report, true, err
+	}
+	pool, err := pg.OpenPool(ctx, dsn, pg.RuntimeWriterSchemaSetting, pg.RuntimeSchemaVersion)
+	if err != nil {
+		return nil, false, err
+	}
+	defer pool.Close()
+	if err := pg.ValidateRuntimeSchema(ctx, pool); err != nil {
+		return nil, true, err
+	}
+	report, err := pg.NewFromPool(pool).ReconcileOrphanRuns(ctx, agent)
+	return report, true, err
 }
 
 func fail(msg string) {
