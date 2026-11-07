@@ -98,13 +98,28 @@ export function ConversationAppsPane(props: {
             <LoaderCircle size={ICON.sm} className="spin" />
             加载群聊应用…
           </div>
+        ) : appsQuery.isError && apps.length === 0 ? (
+          <div className="members-description" role="alert">
+            <h3>加载失败</h3>
+            <p className="field-help">{errorText(appsQuery.error)}</p>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void appsQuery.refetch()}
+            >
+              <RefreshCw size={ICON.xs} /> 重新加载
+            </Button>
+          </div>
         ) : apps.length === 0 ? (
           <div className="members-description">
             <span className="member-cover">
               <Blocks size={ICON.xl} />
             </span>
             <h3>暂无已安装应用</h3>
-            <p className="field-help">「{workspace.name}」尚未安装群聊应用。</p>
+            <p className="field-help">
+              「{workspace.name}」尚未安装应用。
+              {!owner && "如需使用，请联系工作空间创建者安装。"}
+            </p>
             {owner && (
               <Button type="button" onClick={onOpenWorkspaceApps}>
                 管理工作区应用

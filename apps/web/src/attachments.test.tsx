@@ -17,7 +17,12 @@ import {
   useAttachmentDraft,
   validateFile,
 } from "./attachments";
-import { ChatStore, reconcileMessages } from "./store";
+import { ChatStore, chatStore, reconcileMessages } from "./store";
+import {
+  discardAttachmentDrafts,
+  pruneExpiredAttachmentDrafts,
+  readAttachmentDraft,
+} from "./attachment-drafts";
 import type { Message, SyncPage } from "@teamie/api-client";
 
 const descriptor: Attachment = {
@@ -30,8 +35,8 @@ const descriptor: Attachment = {
 let root: Root | undefined;
 let host: HTMLDivElement;
 let draft: ReturnType<typeof useAttachmentDraft>;
-function Harness() {
-  const value = useAttachmentDraft("conversation", defaultAttachmentLimits);
+function Harness({ conversationId = "conversation" }: { conversationId?: string }) {
+  const value = useAttachmentDraft(conversationId, defaultAttachmentLimits);
   useEffect(() => {
     draft = value;
   });
@@ -44,13 +49,23 @@ function Harness() {
     />
   );
 }
-async function mount() {
+async function mount(conversationId = "conversation") {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
   await act(async () => {
-    root!.render(<Harness />);
+    root!.render(<Harness conversationId={conversationId} />);
   });
+}
+async function show(conversationId: string) {
+  await act(async () => {
+    root!.render(<Harness conversationId={conversationId} />);
+  });
+}
+async function remount(conversationId = "conversation") {
+  await act(async () => root!.unmount());
+  root = createRoot(host);
+  await show(conversationId);
 }
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -59,6 +74,10 @@ afterEach(async () => {
   if (root) await act(async () => root!.unmount());
   root = undefined;
   host?.remove();
+  // Drafts are module-level; reset them between tests without real requests.
+  vi.spyOn(api, "deletePendingAttachment").mockResolvedValue(undefined);
+  await discardAttachmentDrafts();
+  if (chatStore.getSnapshot().userId) chatStore.clear();
   vi.restoreAllMocks();
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -140,7 +159,29 @@ describe("conversation file drafts", () => {
       "无效",
     );
   });
-  it("cancels an unmounted upload and drops its late result without deleting sent content", async () => {
+  it("keeps uploaded files across conversation switches and deep-link remounts without deleting them", async () => {
+    vi.spyOn(api, "uploadAttachment").mockResolvedValue({ attachment: descriptor });
+    const remove = vi
+      .spyOn(api, "deletePendingAttachment")
+      .mockResolvedValue(undefined);
+    await mount("a");
+    await act(async () => {
+      draft.add([new File(["abc"], "kept.bin")]);
+    });
+    expect(draft.ready).toBe(true);
+    await show("b");
+    expect(draft.files).toEqual([]);
+    expect(host.textContent).not.toContain("kept.bin");
+    await show("a");
+    expect(draft.files.map((f) => f.file.name)).toEqual(["kept.bin"]);
+    expect(draft.files[0].attachment).toEqual(descriptor);
+    // A message deep link re-keys (remounts) the same conversation view.
+    await remount("a");
+    expect(host.textContent).toContain("kept.bin");
+    expect(draft.ready).toBe(true);
+    expect(remove).not.toHaveBeenCalled();
+  });
+  it("finishes an upload after unmount and shows its result on return", async () => {
     let finish!: (value: { attachment: Attachment }) => void;
     const upload = vi.spyOn(api, "uploadAttachment").mockImplementation(
       () =>
@@ -158,11 +199,116 @@ describe("conversation file drafts", () => {
     const signal = upload.mock.calls[0][2]!;
     await act(async () => root!.unmount());
     root = undefined;
-    expect(signal.aborted).toBe(true);
+    expect(signal.aborted).toBe(false);
     await act(async () => {
       finish({ attachment: descriptor });
     });
-    expect(remove).toHaveBeenCalledWith("conversation", descriptor.id);
+    expect(remove).not.toHaveBeenCalled();
+    expect(readAttachmentDraft("conversation")[0].state).toBe("ready");
+    root = createRoot(host);
+    await show("conversation");
+    expect(draft.ready).toBe(true);
+    expect(host.textContent).toContain("已就绪");
+  });
+  it("send consumes drafts without deleting the linked files", async () => {
+    vi.spyOn(api, "uploadAttachment").mockResolvedValue({ attachment: descriptor });
+    const remove = vi
+      .spyOn(api, "deletePendingAttachment")
+      .mockResolvedValue(undefined);
+    await mount();
+    await act(async () => {
+      draft.add([new File(["abc"], "sent.bin")]);
+    });
+    let sent: Attachment[] = [];
+    await act(async () => {
+      sent = draft.consume();
+    });
+    expect(sent).toEqual([descriptor]);
+    await remount();
+    expect(draft.files).toEqual([]);
+    expect(remove).not.toHaveBeenCalled();
+  });
+  it("logout deletes ready uploads, aborts in-flight ones and clears every draft", async () => {
+    const upload = vi
+      .spyOn(api, "uploadAttachment")
+      .mockResolvedValueOnce({ attachment: descriptor })
+      .mockImplementationOnce(() => new Promise(() => {}));
+    const remove = vi
+      .spyOn(api, "deletePendingAttachment")
+      .mockResolvedValue(undefined);
+    await mount("a");
+    await act(async () => {
+      draft.add([new File(["abc"], "ready.bin")]);
+    });
+    await show("b");
+    await act(async () => {
+      draft.add([new File(["abc"], "inflight.bin")]);
+    });
+    const inflight = upload.mock.calls[1][2]!;
+    await act(async () => {
+      await discardAttachmentDrafts();
+    });
+    expect(remove).toHaveBeenCalledExactlyOnceWith("a", descriptor.id);
+    expect(inflight.aborted).toBe(true);
+    expect(readAttachmentDraft("a")).toEqual([]);
+    expect(draft.files).toEqual([]);
+  });
+  it("clears drafts on account switch without cross-account requests and prunes revoked conversations", async () => {
+    vi.spyOn(api, "uploadAttachment").mockResolvedValue({ attachment: descriptor });
+    const remove = vi
+      .spyOn(api, "deletePendingAttachment")
+      .mockResolvedValue(undefined);
+    chatStore.begin("drafts-user-a");
+    await mount("kept");
+    await act(async () => {
+      draft.add([new File(["abc"], "a.bin")]);
+    });
+    await act(async () => {
+      chatStore.clear();
+      chatStore.begin("drafts-user-b");
+    });
+    expect(draft.files).toEqual([]);
+    expect(remove).not.toHaveBeenCalled();
+
+    const conversation = (id: string) => ({
+      id,
+      workspaceId: "w",
+      type: "group" as const,
+      name: id,
+      memberIds: ["drafts-user-b"],
+      lastSeq: 0,
+      readSeq: 0,
+      updatedAt: "2026-10-17T00:00:00Z",
+    });
+    await act(async () => {
+      chatStore.replaceConversations([conversation("kept"), conversation("revoked")]);
+    });
+    await show("revoked");
+    await act(async () => {
+      draft.add([new File(["abc"], "b.bin")]);
+    });
+    await act(async () => {
+      chatStore.replaceConversations([conversation("kept")]);
+    });
+    expect(draft.files).toEqual([]);
+    expect(remove).toHaveBeenCalledExactlyOnceWith("revoked", descriptor.id);
+  });
+  it("drops ready drafts whose pending upload has expired server-side", async () => {
+    vi.spyOn(api, "uploadAttachment").mockResolvedValue({ attachment: descriptor });
+    await mount();
+    await act(async () => {
+      draft.add([new File(["abc"], "old.bin")]);
+    });
+    expect(pruneExpiredAttachmentDrafts("conversation", Date.now() + 60_000)).toBe(0);
+    let expired = 0;
+    await act(async () => {
+      expired = pruneExpiredAttachmentDrafts(
+        "conversation",
+        Date.now() + 24 * 60 * 60 * 1000,
+      );
+    });
+    expect(expired).toBe(1);
+    expect(draft.files).toEqual([]);
   });
 });
 

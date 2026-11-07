@@ -14,6 +14,7 @@ import { api, ApiError } from "@teamie/api-client";
 import type { Session, User } from "@teamie/api-client";
 import { chatStore } from "./store";
 import { clearAttachmentPreviews } from "./attachment-previews";
+import { discardAttachmentDrafts } from "./attachment-drafts";
 import { markSessionExpired } from "./session-notice";
 
 type Auth = {
@@ -116,14 +117,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [attempt, expire, reconcileSession, setSession]);
   const logout = async () => {
-    const requestGeneration = generation.current;
-    const requestSubject = subject.current;
+    const request = captureSession();
+    // Delete pending uploads while this session can still authorize it.
+    await discardAttachmentDrafts();
+    if (!request.isCurrent()) return;
     await api.logout();
-    if (
-      requestGeneration !== generation.current ||
-      requestSubject !== subject.current
-    )
-      return;
+    if (!request.isCurrent()) return;
     reset();
   };
   const changePassword = async (

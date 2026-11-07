@@ -334,6 +334,13 @@ describe("member and account navigation", () => {
       expect(find<HTMLButtonElement>('.member-option:nth-of-type(50)').disabled).toBe(false);
       await click('.member-option:nth-of-type(1)');
     }
+    // The form is noValidate: a missing group name is reported inline.
+    await settle(() => find<HTMLFormElement>(".modal form").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    expect(create).not.toHaveBeenCalled();
+    expect(find('.modal input[name="name"]').getAttribute("aria-invalid")).toBe("true");
+    expect(find(".modal .field-error").textContent).toBe("请填写小组名称。");
+    await input('.modal input[name="name"]', "周五碰头");
+    expect(container.querySelector(".modal .field-error")).toBeNull();
     await settle(() => find<HTMLFormElement>(".modal form").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
     expect(create).toHaveBeenCalledOnce();
     expect(create.mock.calls[0][1].type).toBe("group");

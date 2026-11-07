@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, ApiError } from "@teamie/api-client";
 import type { Session, User } from "@teamie/api-client";
 import { AuthProvider, useAuth } from "./auth";
+import { addAttachmentDraftFiles, discardAttachmentDrafts } from "./attachment-drafts";
 import { ProfileSettings } from "./dialogs";
 import { passwordPolicyError } from "./password-policy";
 import { Login } from "./public";
@@ -157,6 +158,8 @@ beforeEach(() => {
 });
 afterEach(async () => {
   await settle(() => root.unmount());
+  vi.spyOn(api, "deletePendingAttachment").mockResolvedValue(undefined);
+  await discardAttachmentDrafts();
   client.clear();
   chatStore.clear();
   api.csrfToken = "";
@@ -462,6 +465,45 @@ describe("account changes with pending requests", () => {
     await settle(() => activeAuth.setSession(nextSession));
     client.setQueryData(["protected-content", nextSession.user.id], "new account content");
     await settle(() => logout.resolve());
+    expect(find("[data-account]").textContent).toBe(nextSession.user.id);
+    expect(api.csrfToken).toBe(nextSession.csrfToken);
+    expect(find("[data-location]").textContent).toBe("/app/settings");
+    expect(client.getQueryData(["protected-content", nextSession.user.id])).toBe("new account content");
+  });
+
+  it("rechecks the captured session after pending attachment cleanup before calling logout", async () => {
+    const pendingDelete = deferred<void>();
+    vi.spyOn(api, "uploadAttachment").mockResolvedValue({
+      attachment: {
+        id: "pending-file-1",
+        filename: "draft.txt",
+        mediaType: "text/plain",
+        sizeBytes: 5,
+        sha256: "a".repeat(64),
+      },
+    });
+    vi.spyOn(api, "deletePendingAttachment").mockReturnValue(pendingDelete.promise);
+    await mount("/app/settings", true);
+    await settle(() =>
+      addAttachmentDraftFiles("conv-1", [
+        {
+          id: "draft-1",
+          uploadKey: "upload-key-1",
+          file: new File(["hello"], "draft.txt", { type: "text/plain" }),
+          state: "uploading",
+        },
+      ]),
+    );
+    await settle();
+    await settle(() => find<HTMLButtonElement>(".session-setting button").click());
+    expect(api.deletePendingAttachment).toHaveBeenCalledExactlyOnceWith("conv-1", "pending-file-1");
+    expect(api.logout).not.toHaveBeenCalled();
+
+    await settle(() => activeAuth.setSession(nextSession));
+    client.setQueryData(["protected-content", nextSession.user.id], "new account content");
+    await settle(() => pendingDelete.resolve());
+
+    expect(api.logout).not.toHaveBeenCalled();
     expect(find("[data-account]").textContent).toBe(nextSession.user.id);
     expect(api.csrfToken).toBe(nextSession.csrfToken);
     expect(find("[data-location]").textContent).toBe("/app/settings");

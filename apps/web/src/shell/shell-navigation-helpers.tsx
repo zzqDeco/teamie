@@ -228,7 +228,10 @@ export function ShellManagementView({
         agentId ? (
           <AgentDetail key={`${user.id}:${agentId}`} agentId={agentId} />
         ) : (
-          <MyAgents key={user.id} />
+          <MyAgents
+            key={user.id}
+            lastWorkspaceId={routeWorkspaceId(backChatRoute)}
+          />
         )
       ) : isDirectoryPage ? (
         workspace ? (
@@ -458,6 +461,11 @@ export function useShellViewportAndFocus({
 
 export function route(conversation: Conversation) {
   return `/app/w/${conversation.workspaceId}/c/${conversation.id}`;
+}
+
+/** Workspace ID of a `route()` path, or "" for non-conversation paths. */
+export function routeWorkspaceId(path: string) {
+  return /^\/app\/w\/([^/]+)\/c\//.exec(path)?.[1] || "";
 }
 
 export function pickAdjacentConversation(

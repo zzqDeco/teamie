@@ -38,6 +38,8 @@ import { Button, Notice } from "./ui";
 import { ICON } from "./icons";
 import { ModelProfileDialog } from "./admin/model-profile-dialog";
 import { ProviderProfileDialog } from "./admin/provider-profile-dialog";
+import { GatewayConfirmDialog } from "./admin/gateway-confirm";
+import type { GatewayConfirmation } from "./admin/gateway-confirm";
 
 type ModelTestOutcome = {
   ok: boolean;
@@ -63,7 +65,8 @@ export function ModelGatewaySettings() {
     >(null),
     [editingModel, setEditingModel] = useState<AdminModelProfile | null>(null),
     [error, setError] = useState(""),
-    [saved, setSaved] = useState(false);
+    [saved, setSaved] = useState(false),
+    [confirmation, setConfirmation] = useState<GatewayConfirmation | null>(null);
   const testVersions = useRef(new Map<string, number>());
   const defaultTestVersion = useRef(0);
   const [test, setTest] = useState<ModelTestOutcome | null>(null);
@@ -183,6 +186,7 @@ export function ModelGatewaySettings() {
     try {
       const response = await api.deleteModelProvider(providerId);
       if (sessionToken === api.csrfToken) {
+        setConfirmation(null);
         invalidateTests([]);
         await syncGatewayResponse(response);
         setSaved(true);
@@ -244,6 +248,7 @@ export function ModelGatewaySettings() {
     try {
       const response = await api.deleteModelProfile(profileId);
       if (sessionToken === api.csrfToken) {
+        setConfirmation(null);
         invalidateTests([profileId]);
         await syncGatewayResponse(response);
         setSaved(true);
@@ -390,7 +395,7 @@ export function ModelGatewaySettings() {
               </p>
             </div>
           </div>
-          <Notice>{error}</Notice>
+          <Notice>{confirmation ? "" : error}</Notice>
           <Notice kind="success">{saved ? "配置已保存。" : ""}</Notice>
           <Notice kind={test?.ok ? "success" : "error"}>
             {test
@@ -493,9 +498,10 @@ export function ModelGatewaySettings() {
                                 ? "请先迁移或移除该服务商下的模型后再删除"
                                 : "删除服务商"
                             }
-                            onClick={() =>
-                              void handleDeleteProvider(provider.id)
-                            }
+                            onClick={() => {
+                              setError("");
+                              setConfirmation({ kind: "deleteProvider", provider });
+                            }}
                           >
                             <Trash2 size={ICON.xs} />
                             删除服务商
@@ -596,9 +602,10 @@ export function ModelGatewaySettings() {
                                     variant="secondary"
                                     className="danger-text"
                                     disabled={modelBusyId === item.id}
-                                    onClick={() =>
-                                      void handleDeleteModel(item.id)
-                                    }
+                                    onClick={() => {
+                                      setError("");
+                                      setConfirmation({ kind: "deleteModel", model: item });
+                                    }}
                                   >
                                     <Trash2 size={ICON.xs} />
                                     移除
@@ -660,6 +667,19 @@ export function ModelGatewaySettings() {
               defaultProviderId={creatingForProviderId}
               onSave={handleCreateModel}
               onClose={() => setCreatingForProviderId(null)}
+            />
+          )}
+          {confirmation && (
+            <GatewayConfirmDialog
+              confirmation={confirmation}
+              busy={confirmation.kind === "deleteProvider"
+                ? providerBusyId === confirmation.provider.id
+                : modelBusyId === confirmation.model.id}
+              error={error}
+              onCancel={() => setConfirmation(null)}
+              onConfirm={() => void (confirmation.kind === "deleteProvider"
+                ? handleDeleteProvider(confirmation.provider.id)
+                : handleDeleteModel(confirmation.model.id))}
             />
           )}
           {editingModel && (

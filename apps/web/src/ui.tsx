@@ -1,5 +1,7 @@
 import {
+  createContext,
   useCallback,
+  useContext,
   useEffect,
   useId,
   useLayoutEffect,
@@ -340,10 +342,35 @@ export function useOverlayFocus(
     };
   }, [active, preferFormField, ref]);
 }
+const ModalCloseContext = createContext<(() => void) | null>(null);
 /**
- * Every dismissal path (Escape, backdrop, close button) goes through one
- * request: `busy` or `dismissible={false}` blocks it with a visual cue, and
- * `dirty` asks for an inline discard confirmation instead of closing.
+ * Returns the enclosing Modal's dismissal request so in-dialog 取消/完成
+ * buttons take the same busy/dirty path as Escape, the backdrop and the X.
+ */
+export function useModalRequestClose() {
+  const requestClose = useContext(ModalCloseContext);
+  if (!requestClose)
+    throw new Error("useModalRequestClose must be used inside a Modal");
+  return requestClose;
+}
+/** A button that asks the enclosing Modal to close (dirty/busy aware). */
+export function ModalCloseButton({
+  children,
+  variant = "secondary",
+  ...props
+}: Omit<Parameters<typeof Button>[0], "onClick" | "type">) {
+  const requestClose = useModalRequestClose();
+  return (
+    <Button {...props} type="button" variant={variant} onClick={requestClose}>
+      {children}
+    </Button>
+  );
+}
+/**
+ * Every dismissal path (Escape, backdrop, close button, in-dialog
+ * `ModalCloseButton`) goes through one request: `busy` or
+ * `dismissible={false}` blocks it with a visual cue, and `dirty` asks for an
+ * inline discard confirmation instead of closing.
  */
 export function Modal({
   title,
@@ -477,9 +504,81 @@ export function Modal({
             </div>
           </div>
         )}
-        {children}
+        <ModalCloseContext.Provider value={requestClose}>
+          {children}
+        </ModalCloseContext.Provider>
       </div>
     </div>
+  );
+}
+/**
+ * Confirmation for consequential actions. Focus starts on Cancel, `busy`
+ * blocks every dismissal path, and `impact` lists what will happen so the
+ * consequence is read before the confirm button.
+ */
+export function ConfirmDialog({
+  title,
+  subtitle,
+  impact = [],
+  children,
+  tone = "default",
+  confirmLabel,
+  cancelLabel = "取消",
+  busy = false,
+  confirmDisabled = false,
+  error,
+  onConfirm,
+  onCancel,
+}: {
+  title: string;
+  subtitle?: string;
+  impact?: ReactNode[];
+  children?: ReactNode;
+  tone?: "default" | "danger";
+  confirmLabel: string;
+  cancelLabel?: string;
+  busy?: boolean;
+  confirmDisabled?: boolean;
+  error?: ReactNode;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const impactId = useId();
+  return (
+    <Modal
+      title={title}
+      subtitle={subtitle}
+      onClose={onCancel}
+      busy={busy}
+      className={`confirm-dialog ${tone === "danger" ? "danger" : ""}`.trim()}
+    >
+      {impact.length > 0 && (
+        <ul id={impactId} className="confirm-impact" aria-label="影响">
+          {impact.map((item, index) => (
+            <li key={index}>{item}</li>
+          ))}
+        </ul>
+      )}
+      {children}
+      {error ? <Notice>{error}</Notice> : null}
+      <div className="modal-actions">
+        <ModalCloseButton disabled={busy} data-autofocus>
+          {cancelLabel}
+        </ModalCloseButton>
+        <Button
+          type="button"
+          variant={tone === "danger" ? "danger" : "primary"}
+          busy={busy}
+          disabled={confirmDisabled}
+          aria-describedby={impact.length > 0 ? impactId : undefined}
+          onClick={() => {
+            if (!busy) onConfirm();
+          }}
+        >
+          {confirmLabel}
+        </Button>
+      </div>
+    </Modal>
   );
 }
 export function PublicHeader() {

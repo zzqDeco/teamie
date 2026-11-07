@@ -37,7 +37,7 @@ import { trimMentionDraft } from "../mentions";
 import { sameMentions } from "../composer-drafts";
 import { Button, IconButton, Modal, Notice } from "../ui";
 import { ICON } from "../icons";
-
+import { toast } from "../toast";
 export function useMessageActions(conversationId: string) {
   const editPending = useRef(false);
   const [actionMessageId, setActionMessageId] = useState("");
@@ -276,8 +276,8 @@ export function ConversationHeader({
           result.notificationLevel,
         );
       }
-    } catch {
-      // Keep current level if request fails
+    } catch (e) {
+      if (token === chatStore.generation) toast.error(`通知设置未保存：${errorText(e)}`);
     } finally {
       setNotifBusy(false);
     }

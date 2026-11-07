@@ -12,7 +12,7 @@ import {
   SmilePlus,
   Trash2,
 } from "lucide-react";
-import { api } from "@teamie/api-client";
+import { api, ApiError } from "@teamie/api-client";
 import type {
   Conversation,
   Member,
@@ -21,6 +21,8 @@ import type {
 } from "@teamie/api-client";
 import { sendMessage } from "./chat";
 import { chatStore } from "./store";
+import { errorText } from "./errors";
+import { toast } from "./toast";
 import type { LocalMessage } from "./store";
 import { ReactionPicker } from "./chat/reaction-picker";
 import { MentionInput } from "./mentions";
@@ -178,8 +180,13 @@ export const MessageItem = memo(function MessageItem({
       if (chatStore.reactionScopeCurrent(scope)) {
         chatStore.setReactions(conversationId, message.id, result.reactions, result.reactionsVersion, scope);
       }
-    } catch {
-      // Ignore transient reaction toggle failures
+    } catch (e) {
+      if (chatStore.reactionScopeCurrent(scope))
+        toast.error(
+          e instanceof ApiError && e.code === "reaction_limit"
+            ? "每条消息最多 20 种表情回应，请选择已有的表情。"
+            : `${reactedByMe ? "取消表情回应" : "表情回应"}失败：${errorText(e)}`,
+        );
     } finally {
       setReactionBusy(false);
     }

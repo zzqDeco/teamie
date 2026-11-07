@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   Download,
   File as FileIcon,
@@ -11,6 +11,16 @@ import { api } from "@teamie/api-client";
 import type { Attachment, AttachmentLimits } from "@teamie/api-client";
 import { errorText } from "./errors";
 import { subscribeAttachmentPreview } from "./attachment-previews";
+import {
+  addAttachmentDraftFiles,
+  consumeAttachmentDraft,
+  pruneExpiredAttachmentDrafts,
+  queueAttachmentUpload,
+  readAttachmentDraft,
+  removeAttachmentDraftFile,
+  subscribeAttachmentDrafts,
+} from "./attachment-drafts";
+import type { DraftFile } from "./attachment-drafts";
 import { ICON } from "./icons";
 import { Button, Modal } from "./ui";
 import "./styles/attachments.css";
@@ -26,14 +36,7 @@ export function isPreviewableImage(mediaType: string): boolean {
   return SAFE_IMAGE_MEDIA_TYPES.has(mediaType.trim().toLowerCase());
 }
 
-export type DraftFile = {
-  id: string;
-  uploadKey: string;
-  file: File;
-  state: "uploading" | "ready" | "failed";
-  attachment?: Attachment;
-  error?: string;
-};
+export type { DraftFile } from "./attachment-drafts";
 export function fileSize(bytes: number) {
   return bytes >= 1024 * 1024
     ? `${(bytes / (1024 * 1024)).toFixed(1)} MiB`
@@ -62,129 +65,56 @@ export function validateFile(
   return "";
 }
 
+/**
+ * Pending files for one conversation, backed by the module-level draft store
+ * so they survive conversation switches and same-conversation remounts.
+ */
 export function useAttachmentDraft(
   conversationId: string,
   limits: AttachmentLimits,
 ) {
-  const [files, setFiles] = useState<DraftFile[]>([]);
-  const [error, setError] = useState("");
-  const current = useRef<DraftFile[]>([]);
-  const controllers = useRef(new Map<string, AbortController>());
-  const active = useRef(true);
-  const queue = useRef(Promise.resolve());
-  const update = (value: DraftFile[]) => {
-    current.current = value;
-    if (active.current) setFiles(value);
-  };
+  const files = useSyncExternalStore(subscribeAttachmentDrafts, () =>
+    readAttachmentDraft(conversationId),
+  );
+  const [error, setError] = useState({ conversationId, message: "" });
   useEffect(() => {
-    active.current = true;
-    const requests = controllers.current;
-    return () => {
-      active.current = false;
-      requests.forEach((controller) => controller.abort());
-      requests.clear();
-      current.current.forEach((file) => {
-        if (file.attachment)
-          void api
-            .deletePendingAttachment(conversationId, file.attachment.id)
-            .catch(() => {});
-      });
-      current.current = [];
-    };
+    pruneExpiredAttachmentDrafts(conversationId);
   }, [conversationId]);
-  async function upload(file: DraftFile) {
-    const controller = new AbortController();
-    controllers.current.set(file.id, controller);
-    update(
-      current.current.map((f) =>
-        f.id === file.id ? { ...f, state: "uploading", error: undefined } : f,
-      ),
-    );
-    try {
-      const result = await api.uploadAttachment(
-        conversationId,
-        file.file,
-        controller.signal,
-        file.uploadKey,
-      );
-      if (!active.current || !current.current.some((f) => f.id === file.id)) {
-        void api
-          .deletePendingAttachment(conversationId, result.attachment.id)
-          .catch(() => {});
-        return;
-      }
-      update(
-        current.current.map((f) =>
-          f.id === file.id
-            ? { ...f, state: "ready", attachment: result.attachment }
-            : f,
-        ),
-      );
-    } catch (e) {
-      if (active.current && !controller.signal.aborted)
-        update(
-          current.current.map((f) =>
-            f.id === file.id
-              ? { ...f, state: "failed", error: errorText(e) }
-              : f,
-          ),
-        );
-    } finally {
-      controllers.current.delete(file.id);
-    }
-  }
-  function queueUpload(file: DraftFile) {
-    queue.current = queue.current.then(async () => {
-      if (active.current && current.current.some((f) => f.id === file.id))
-        await upload(file);
-    });
-  }
+  const showError = (message: string) => setError({ conversationId, message });
   function add(selected: FileList | File[]) {
-    setError("");
+    showError("");
+    const accepted: DraftFile[] = [];
+    let count = readAttachmentDraft(conversationId).length;
     for (const file of Array.from(selected)) {
-      if (current.current.length >= limits.maxFilesPerMessage) {
-        setError(`每条消息最多 ${limits.maxFilesPerMessage} 个文件`);
+      if (count >= limits.maxFilesPerMessage) {
+        showError(`每条消息最多 ${limits.maxFilesPerMessage} 个文件`);
         break;
       }
       const failure = validateFile(file, limits.maxFileBytes);
       if (failure) {
-        setError(`${file.name}：${failure}`);
+        showError(`${file.name}：${failure}`);
         continue;
       }
-      const draft: DraftFile = {
+      accepted.push({
         id: crypto.randomUUID(),
         uploadKey: crypto.randomUUID(),
         file,
         state: "uploading",
-      };
-      update([...current.current, draft]);
-      queueUpload(draft);
+      });
+      count++;
     }
-  }
-  function remove(id: string) {
-    const file = current.current.find((f) => f.id === id);
-    controllers.current.get(id)?.abort();
-    update(current.current.filter((f) => f.id !== id));
-    if (file?.attachment)
-      void api
-        .deletePendingAttachment(conversationId, file.attachment.id)
-        .catch(() => {});
-  }
-  function consume() {
-    const attachments = current.current.flatMap((f) =>
-      f.attachment ? [f.attachment] : [],
-    );
-    update([]);
-    setError("");
-    return attachments;
+    addAttachmentDraftFiles(conversationId, accepted);
   }
   return {
     files,
-    error,
+    error: error.conversationId === conversationId ? error.message : "",
     add,
-    remove,
-    retry: queueUpload,
-    consume,
+    remove: (id: string) => removeAttachmentDraftFile(conversationId, id),
+    retry: (file: DraftFile) => queueAttachmentUpload(conversationId, file.id),
+    consume: () => {
+      showError("");
+      return consumeAttachmentDraft(conversationId);
+    },
     ready: files.length > 0 && files.every((f) => f.state === "ready"),
     blocked: files.some((f) => f.state !== "ready"),
   };

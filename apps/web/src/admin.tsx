@@ -20,7 +20,7 @@ import type {
 } from "@teamie/api-client";
 import { useAuth } from "./auth";
 import { errorText } from "./errors";
-import { Button, IconButton, Modal, Notice } from "./ui";
+import { Button, ConfirmDialog, IconButton, Notice } from "./ui";
 import { toast } from "./toast";
 import { ICON } from "./icons";
 export type InviteStatus = "available" | "used" | "revoked" | "expired";
@@ -368,32 +368,23 @@ export function PlatformInvitations() {
         已使用、撤销或过期的邀请码均不能再次注册账户。
       </p>
       {revoking && (
-        <Modal
+        <ConfirmDialog
+          tone="danger"
           title="撤销这个注册邀请？"
           subtitle="撤销后，这个邀请码与对应注册链接将立即失效。已注册的账户不会受影响。"
-          onClose={closeRevoke}
-          dismissible={!busy}
+          cancelLabel="保留邀请"
+          confirmLabel="确认撤销"
+          busy={busy}
+          error={error}
+          onCancel={closeRevoke}
+          onConfirm={revoke}
         >
           <div className="revoke-details">
             <span>邀请码编号</span>
             <b>#{revoking.id.slice(-8)}</b>
             <small>创建于 {formatDate(revoking.createdAt)}</small>
           </div>
-          <Notice>{error}</Notice>
-          <div className="modal-actions">
-            <Button
-              variant="secondary"
-              onClick={closeRevoke}
-              disabled={busy}
-              data-autofocus
-            >
-              保留邀请
-            </Button>
-            <Button variant="danger" busy={busy} onClick={revoke}>
-              确认撤销
-            </Button>
-          </div>
-        </Modal>
+        </ConfirmDialog>
       )}
     </div>
   );
