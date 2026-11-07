@@ -9,15 +9,19 @@ import (
 
 func (r *Repository) FindAttachmentUpload(ctx context.Context, userID, key string) (domain.AttachmentUpload, bool, error) {
 	var out domain.AttachmentUpload
-	err := r.DB.Conn(ctx).QueryRow(ctx, `SELECT u.conversation_id,u.fingerprint,COALESCE(a.id,''),COALESCE(a.filename,''),COALESCE(a.media_type,''),COALESCE(a.size_bytes,0),COALESCE(a.sha256,''),
+	var width, height *int
+	err := r.DB.Conn(ctx).QueryRow(ctx, `SELECT u.conversation_id,u.fingerprint,COALESCE(a.id,''),COALESCE(a.filename,''),COALESCE(a.media_type,''),COALESCE(a.size_bytes,0),COALESCE(a.sha256,''),a.image_width,a.image_height,
  a.id IS NOT NULL AND ((a.message_id IS NULL AND a.expires_at>now()) OR (m.id IS NOT NULL AND m.retracted_at IS NULL))
  FROM attachment_uploads u LEFT JOIN attachments a ON a.id=u.attachment_id LEFT JOIN messages m ON m.id=a.message_id
- WHERE u.uploader_id=$1 AND u.upload_key=$2`, userID, key).Scan(&out.Conversation, &out.Fingerprint, &out.Attachment.ID, &out.Attachment.Filename, &out.Attachment.MediaType, &out.Attachment.SizeBytes, &out.Attachment.SHA256, &out.Available)
+ WHERE u.uploader_id=$1 AND u.upload_key=$2`, userID, key).Scan(&out.Conversation, &out.Fingerprint, &out.Attachment.ID, &out.Attachment.Filename, &out.Attachment.MediaType, &out.Attachment.SizeBytes, &out.Attachment.SHA256, &width, &height, &out.Available)
 	if postgres.IsNoRows(err) {
 		return domain.AttachmentUpload{}, false, nil
 	}
 	if err != nil {
 		return domain.AttachmentUpload{}, false, err
+	}
+	if width != nil && height != nil {
+		out.Attachment.Image = &domain.AttachmentImage{Width: *width, Height: *height}
 	}
 	return out, true, nil
 }
@@ -33,9 +37,21 @@ func (r *Repository) CountPendingForSender(ctx context.Context, userID string) (
 	return pending, err
 }
 
-func (r *Repository) InsertAttachment(ctx context.Context, a domain.Attachment, conversationID, uploaderID string, content []byte) error {
-	_, err := r.DB.Conn(ctx).Exec(ctx, "INSERT INTO attachments(id,conversation_id,uploader_id,filename,media_type,size_bytes,sha256,content) VALUES($1,$2,$3,$4,$5,$6,$7,$8)", a.ID, conversationID, uploaderID, a.Filename, a.MediaType, a.SizeBytes, a.SHA256, content)
-	return err
+func (r *Repository) InsertAttachment(ctx context.Context, a domain.Attachment, conversationID, uploaderID string, content []byte, thumb *domain.AttachmentThumbnail) error {
+	conn := r.DB.Conn(ctx)
+	var width, height *int
+	if thumb != nil {
+		width, height = &thumb.Width, &thumb.Height
+	}
+	if _, err := conn.Exec(ctx, "INSERT INTO attachments(id,conversation_id,uploader_id,filename,media_type,size_bytes,sha256,content,image_width,image_height) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)", a.ID, conversationID, uploaderID, a.Filename, a.MediaType, a.SizeBytes, a.SHA256, content, width, height); err != nil {
+		return err
+	}
+	if thumb != nil {
+		if _, err := conn.Exec(ctx, "INSERT INTO attachment_thumbnails(attachment_id,media_type,content) VALUES($1,$2,$3)", a.ID, thumb.MediaType, thumb.Content); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *Repository) InsertAttachmentUpload(ctx context.Context, uploaderID, key, conversationID, fingerprint, attachmentID string) error {
@@ -71,12 +87,16 @@ func (r *Repository) AttachFilesToMessage(ctx context.Context, userID, conversat
 	out := []domain.Attachment{}
 	for _, id := range attachmentIDs {
 		var a domain.Attachment
-		err := conn.QueryRow(ctx, `UPDATE attachments SET message_id=$1 WHERE id=$2 AND conversation_id=$3 AND uploader_id=$4 AND message_id IS NULL AND expires_at>now() RETURNING id,filename,media_type,size_bytes,sha256`, messageID, id, conversationID, userID).Scan(&a.ID, &a.Filename, &a.MediaType, &a.SizeBytes, &a.SHA256)
+		var width, height *int
+		err := conn.QueryRow(ctx, `UPDATE attachments SET message_id=$1 WHERE id=$2 AND conversation_id=$3 AND uploader_id=$4 AND message_id IS NULL AND expires_at>now() RETURNING id,filename,media_type,size_bytes,sha256,image_width,image_height`, messageID, id, conversationID, userID).Scan(&a.ID, &a.Filename, &a.MediaType, &a.SizeBytes, &a.SHA256, &width, &height)
 		if postgres.IsNoRows(err) {
 			return nil, domain.ErrInvalidAttachmentUnavailable()
 		}
 		if err != nil {
 			return nil, err
+		}
+		if width != nil && height != nil {
+			a.Image = &domain.AttachmentImage{Width: *width, Height: *height}
 		}
 		out = append(out, a)
 	}
@@ -86,6 +106,17 @@ func (r *Repository) AttachFilesToMessage(ctx context.Context, userID, conversat
 func (r *Repository) GetAuthorizedAttachmentContent(ctx context.Context, attachmentID, conversationID, userID string) (domain.Attachment, []byte, error) {
 	var a domain.Attachment
 	var content []byte
-	err := r.DB.Conn(ctx).QueryRow(ctx, `SELECT a.id,a.filename,a.media_type,a.size_bytes,a.sha256,a.content FROM attachments a LEFT JOIN messages m ON m.id=a.message_id WHERE a.id=$1 AND a.conversation_id=$2 AND ((a.message_id IS NULL AND a.uploader_id=$3 AND a.expires_at>now()) OR (a.message_id IS NOT NULL AND m.retracted_at IS NULL))`, attachmentID, conversationID, userID).Scan(&a.ID, &a.Filename, &a.MediaType, &a.SizeBytes, &a.SHA256, &content)
+	var width, height *int
+	err := r.DB.Conn(ctx).QueryRow(ctx, `SELECT a.id,a.filename,a.media_type,a.size_bytes,a.sha256,a.image_width,a.image_height,a.content FROM attachments a LEFT JOIN messages m ON m.id=a.message_id WHERE a.id=$1 AND a.conversation_id=$2 AND ((a.message_id IS NULL AND a.uploader_id=$3 AND a.expires_at>now()) OR (a.message_id IS NOT NULL AND m.retracted_at IS NULL))`, attachmentID, conversationID, userID).Scan(&a.ID, &a.Filename, &a.MediaType, &a.SizeBytes, &a.SHA256, &width, &height, &content)
+	if err == nil && width != nil && height != nil {
+		a.Image = &domain.AttachmentImage{Width: *width, Height: *height}
+	}
 	return a, content, notFound(err)
+}
+
+func (r *Repository) GetAuthorizedAttachmentThumbnail(ctx context.Context, attachmentID, conversationID, userID string) (string, []byte, string, error) {
+	var mediaType, sha256 string
+	var content []byte
+	err := r.DB.Conn(ctx).QueryRow(ctx, `SELECT t.media_type,t.content,a.sha256 FROM attachment_thumbnails t JOIN attachments a ON a.id=t.attachment_id LEFT JOIN messages m ON m.id=a.message_id WHERE a.id=$1 AND a.conversation_id=$2 AND ((a.message_id IS NULL AND a.uploader_id=$3 AND a.expires_at>now()) OR (a.message_id IS NOT NULL AND m.retracted_at IS NULL))`, attachmentID, conversationID, userID).Scan(&mediaType, &content, &sha256)
+	return mediaType, content, sha256, notFound(err)
 }

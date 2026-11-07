@@ -273,7 +273,10 @@ export function sameMentions(a: Mention[], b: Mention[]) {
     a.length === b.length &&
     a.every(
       (m, i) =>
-        m.userId === b[i].userId && m.start === b[i].start && m.end === b[i].end,
+        m.userId === b[i].userId &&
+        m.kind === b[i].kind &&
+        m.start === b[i].start &&
+        m.end === b[i].end,
     )
   );
 }

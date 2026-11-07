@@ -43,6 +43,12 @@ struct ConversationDTO {
   9: optional string createdBy (api.body="createdBy")
   10: required bool canManageMembers (api.body="canManageMembers")
   11: optional string notificationLevel (api.body="notificationLevel")
+  12: optional i64 manualUnreadSeq (api.body="manualUnreadSeq")
+}
+
+struct AttachmentImageDTO {
+  1: required i64 width (api.body="width")
+  2: required i64 height (api.body="height")
 }
 
 struct AttachmentDTO {
@@ -51,6 +57,7 @@ struct AttachmentDTO {
   3: required string mediaType (api.body="mediaType")
   4: required i64 sizeBytes (api.body="sizeBytes")
   5: required string sha256 (api.body="sha256")
+  6: optional AttachmentImageDTO image (api.body="image")
 }
 
 struct AttachmentLimitsDTO {
@@ -59,15 +66,35 @@ struct AttachmentLimitsDTO {
 }
 
 struct MentionDTO {
-  1: required string userId (api.body="userId")
+  1: optional string userId (api.body="userId")
   2: required i64 start (api.body="start")
   3: required i64 end (api.body="end")
+  4: optional string kind (api.body="kind")
+  5: optional list<string> recipientIds (api.body="recipientIds")
+  6: optional i64 recipientCount (api.body="recipientCount")
 }
 
 struct ReactionDTO {
   1: required string emoji (api.body="emoji")
   2: required i64 count (api.body="count")
   3: required list<string> userIds (api.body="userIds")
+}
+
+struct ForwardSourceDTO {
+  1: required string conversationId (api.body="conversationId")
+  2: required string messageId (api.body="messageId")
+}
+
+struct ForwardedSnapshotDTO {
+  1: required string sourceConversationId (api.body="sourceConversationId")
+  2: required string sourceMessageId (api.body="sourceMessageId")
+  3: required string senderId (api.body="senderId")
+  4: required string senderName (api.body="senderName")
+  5: required string senderKind (api.body="senderKind")
+  6: required string createdAt (api.body="createdAt")
+  7: required string body (api.body="body")
+  8: optional list<MentionDTO> mentions (api.body="mentions")
+  9: optional list<AttachmentDTO> attachments (api.body="attachments")
 }
 
 struct MessageDTO {
@@ -87,6 +114,7 @@ struct MessageDTO {
   14: optional list<MentionDTO> mentions (api.body="mentions")
   15: optional list<ReactionDTO> reactions (api.body="reactions")
   16: optional string reactionsVersion (api.body="reactionsVersion")
+  17: optional ForwardedSnapshotDTO forwarded (api.body="forwarded")
 }
 
 struct EventDTO {
@@ -102,6 +130,13 @@ struct EventDTO {
   10: optional list<ReactionDTO> reactions (api.body="reactions")
   11: optional string notificationLevel (api.body="notificationLevel")
   12: optional string reactionsVersion (api.body="reactionsVersion")
+  13: optional i64 manualUnreadSeq (api.body="manualUnreadSeq")
+  14: optional bool pinned (api.body="pinned")
+  15: optional string pinnedBy (api.body="pinnedBy")
+  16: optional string pinnedAt (api.body="pinnedAt")
+  17: optional string pinsVersion (api.body="pinsVersion")
+  18: optional bool saved (api.body="saved")
+  19: optional string savedAt (api.body="savedAt")
 }
 
 struct AttentionConversationDTO {
@@ -249,6 +284,7 @@ struct SendMessageReq {
   4: optional string replyToId (api.body="replyToId")
   5: optional list<string> attachmentIds (api.body="attachmentIds")
   6: optional list<MentionDTO> mentions (api.body="mentions")
+  7: optional ForwardSourceDTO forwardOf (api.body="forwardOf")
 }
 
 struct EditMessageReq {
@@ -270,6 +306,7 @@ struct MarkReadReq {
 
 struct MarkReadResp {
   1: required i64 readSeq (api.body="readSeq")
+  2: optional i64 manualUnreadSeq (api.body="manualUnreadSeq")
 }
 
 struct PutReactionReq {
@@ -336,6 +373,7 @@ struct GetAttentionReq {
   1: optional string cursor (api.query="cursor")
   2: optional string limit (api.query="limit")
   3: optional string unreadOnly (api.query="unreadOnly")
+  4: optional string messageId (api.query="messageId")
 }
 
 struct AttentionUnreadDTO {
@@ -436,6 +474,105 @@ struct DeleteAnnouncementReq {
   1: required string id (api.path="id")
 }
 
+struct PinDTO {
+  1: required MessageDTO message (api.body="message")
+  2: required string pinnedBy (api.body="pinnedBy")
+  3: required string pinnedByName (api.body="pinnedByName")
+  4: required string pinnedAt (api.body="pinnedAt")
+}
+
+struct PutPinReq {
+  1: required string id (api.path="id")
+  2: required string messageId (api.path="messageId")
+}
+
+struct PutPinResp {
+  1: required PinDTO pin (api.body="pin")
+  2: required string pinsVersion (api.body="pinsVersion")
+}
+
+struct DeletePinReq {
+  1: required string id (api.path="id")
+  2: required string messageId (api.path="messageId")
+}
+
+struct DeletePinResp {
+  1: required string pinsVersion (api.body="pinsVersion")
+}
+
+struct ListPinsReq {
+  1: required string id (api.path="id")
+}
+
+struct ListPinsResp {
+  1: required list<PinDTO> pins (api.body="pins")
+  2: required string pinsVersion (api.body="pinsVersion")
+}
+
+struct SavedMarkerDTO {
+  1: required string conversationId (api.body="conversationId")
+  2: required string messageId (api.body="messageId")
+  3: required string savedAt (api.body="savedAt")
+}
+
+struct SaveMessageReq {
+  1: required string id (api.path="id")
+  2: required string messageId (api.path="messageId")
+}
+
+struct SaveMessageResp {
+  1: required SavedMarkerDTO saved (api.body="saved")
+}
+
+struct UnsaveMessageReq {
+  1: required string id (api.path="id")
+  2: required string messageId (api.path="messageId")
+}
+
+struct SavedItemDTO {
+  1: required MessageDTO message (api.body="message")
+  2: required AttentionConversationDTO conversation (api.body="conversation")
+  3: required string workspaceName (api.body="workspaceName")
+  4: required string savedAt (api.body="savedAt")
+}
+
+struct ListSavedReq {
+  1: optional string cursor (api.query="cursor")
+  2: optional string limit (api.query="limit")
+}
+
+struct ListSavedResp {
+  1: required list<SavedItemDTO> items (api.body="items")
+  2: optional string cursor (api.body="cursor")
+}
+
+struct ListConversationSavedReq {
+  1: required string id (api.path="id")
+}
+
+struct ListConversationSavedResp {
+  1: required list<string> messageIds (api.body="messageIds")
+}
+
+struct MarkUnreadReq {
+  1: required string id (api.path="id", go.tag="json:\"-\"")
+  2: required i64 seq (api.body="seq")
+}
+
+struct MarkUnreadResp {
+  1: required string conversationId (api.body="conversationId")
+  2: required i64 manualUnreadSeq (api.body="manualUnreadSeq")
+}
+
+struct ClearUnreadReq {
+  1: required string id (api.path="id")
+}
+
+struct DownloadAttachmentThumbnailReq {
+  1: required string id (api.path="id")
+  2: required string attachmentId (api.path="attachmentId")
+}
+
 service ChatHTTPService {
   BootstrapResp GetBootstrap(1: GetBootstrapReq req) (api.get="/api/v1/bootstrap")
   CreateWorkspaceResp CreateWorkspace(1: CreateWorkspaceReq req) (api.post="/api/v1/workspaces", api.status="201")
@@ -455,7 +592,16 @@ service ChatHTTPService {
   MessageResp RetractMessage(1: RetractMessageReq req) (api.delete="/api/v1/conversations/:id/messages/:messageId")
   ReactionsResp PutReaction(1: PutReactionReq req) (api.put="/api/v1/conversations/:id/messages/:messageId/reactions/:emoji")
   ReactionsResp DeleteReaction(1: DeleteReactionReq req) (api.delete="/api/v1/conversations/:id/messages/:messageId/reactions/:emoji")
+  PutPinResp PutPin(1: PutPinReq req) (api.put="/api/v1/conversations/:id/pins/:messageId")
+  DeletePinResp DeletePin(1: DeletePinReq req) (api.delete="/api/v1/conversations/:id/pins/:messageId")
+  ListPinsResp ListPins(1: ListPinsReq req) (api.get="/api/v1/conversations/:id/pins")
+  SaveMessageResp SaveMessage(1: SaveMessageReq req) (api.put="/api/v1/conversations/:id/messages/:messageId/saved")
+  EmptyResp UnsaveMessage(1: UnsaveMessageReq req) (api.delete="/api/v1/conversations/:id/messages/:messageId/saved")
+  ListSavedResp ListSaved(1: ListSavedReq req) (api.get="/api/v1/saved")
+  ListConversationSavedResp ListConversationSaved(1: ListConversationSavedReq req) (api.get="/api/v1/conversations/:id/saved")
   MarkReadResp MarkRead(1: MarkReadReq req) (api.post="/api/v1/conversations/:id/read")
+  MarkUnreadResp MarkUnread(1: MarkUnreadReq req) (api.post="/api/v1/conversations/:id/unread")
+  EmptyResp ClearUnread(1: ClearUnreadReq req) (api.delete="/api/v1/conversations/:id/unread")
   ReadReceiptsResp GetReadReceipts(1: GetReadReceiptsReq req) (api.get="/api/v1/conversations/:id/read-receipts")
   NotificationLevelResp SetNotificationLevel(1: SetNotificationLevelReq req) (api.put="/api/v1/conversations/:id/notification-level")
   WorkspaceSearchPageResp SearchWorkspaceMessages(1: SearchWorkspaceMessagesReq req) (api.get="/api/v1/workspaces/:id/messages/search")
@@ -465,6 +611,7 @@ service ChatHTTPService {
   AttachmentResp GetAttachmentUpload(1: GetAttachmentUploadReq req) (api.get="/api/v1/conversations/:id/attachment-uploads/:uploadKey")
   EmptyResp DeletePendingAttachment(1: DeletePendingAttachmentReq req) (api.delete="/api/v1/conversations/:id/attachments/:attachmentId")
   DownloadAttachmentResp DownloadAttachment(1: DownloadAttachmentReq req) (api.get="/api/v1/conversations/:id/attachments/:attachmentId/content")
+  DownloadAttachmentResp DownloadAttachmentThumbnail(1: DownloadAttachmentThumbnailReq req) (api.get="/api/v1/conversations/:id/attachments/:attachmentId/thumbnail")
   ListAnnouncementsResp ListAnnouncements(1: ListAnnouncementsReq req) (api.get="/api/v1/announcements")
   MarkAnnouncementsReadResp MarkAnnouncementsRead(1: MarkAnnouncementsReadReq req) (api.post="/api/v1/announcements/read")
   AnnouncementResp CreateAnnouncement(1: CreateAnnouncementReq req) (api.post="/api/v1/admin/announcements", api.status="201")

@@ -4,7 +4,9 @@ import type { Mention } from "@teamie/api-client";
 
 export type ValidMention = {
   index: number;
-  userId: string;
+  userId?: string;
+  kind?: "all" | "here";
+  recipientIds?: string[];
   text: string;
 };
 
@@ -133,10 +135,17 @@ export function injectMentions(
     if (slice.includes("\n") || slice.includes("\r")) {
       continue;
     }
+    const broadcastKind =
+      m.kind === "all" || m.kind === "here" ? m.kind : undefined;
+    if (!m.userId && !broadcastKind) {
+      continue;
+    }
     const index = validMentions.length;
     validMentions.push({
       index,
       userId: m.userId,
+      kind: broadcastKind,
+      recipientIds: m.recipientIds,
       text: slice,
     });
     annotated += body.slice(cursor, m.start) + `${prefix}${index}\uE001`;

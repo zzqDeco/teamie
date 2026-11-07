@@ -18,6 +18,24 @@ func (s *Service) UploadAttachmentWithKey(ctx context.Context, userID, conversat
 	if len(content) == 0 || len(content) > domain.AttachmentBytes {
 		return a, false, domain.ErrAttachmentTooLarge()
 	}
+	mediaType := "application/octet-stream"
+	if s.SniffMediaType != nil {
+		mediaType = s.SniffMediaType(content)
+	}
+	var thumb *domain.AttachmentThumbnail
+	if s.GenerateThumbnail != nil && s.Flags != nil && s.Flags.Enabled("im.attachments.upload") {
+		skipThumb := false
+		if key != "" {
+			if _, found, lookupErr := s.Attachments.FindAttachmentUpload(ctx, userID, key); lookupErr == nil && found {
+				skipThumb = true
+			}
+		}
+		if !skipThumb {
+			if _, accessErr := s.Conversations.ConversationAccess(ctx, conversationID, userID); accessErr == nil {
+				thumb = s.GenerateThumbnail(ctx, mediaType, content)
+			}
+		}
+	}
 	first := false
 	err := s.Tx.WithinTx(ctx, func(txCtx context.Context) error {
 		if err := s.Tx.LockAttachmentSender(txCtx, userID); err != nil {
@@ -57,10 +75,6 @@ func (s *Service) UploadAttachmentWithKey(ctx context.Context, userID, conversat
 		if pending >= domain.PendingAttachmentsPerSender {
 			return domain.ErrAttachmentCapacity()
 		}
-		mediaType := "application/octet-stream"
-		if s.SniffMediaType != nil {
-			mediaType = s.SniffMediaType(content)
-		}
 		a = domain.Attachment{
 			ID:        domain.NewID(),
 			Filename:  filename,
@@ -68,7 +82,10 @@ func (s *Service) UploadAttachmentWithKey(ctx context.Context, userID, conversat
 			SizeBytes: len(content),
 			SHA256:    contentHash,
 		}
-		if err = s.Attachments.InsertAttachment(txCtx, a, conversationID, userID, content); err != nil {
+		if thumb != nil {
+			a.Image = &domain.AttachmentImage{Width: thumb.Width, Height: thumb.Height}
+		}
+		if err = s.Attachments.InsertAttachment(txCtx, a, conversationID, userID, content, thumb); err != nil {
 			return err
 		}
 		if key != "" {
@@ -141,6 +158,21 @@ func (s *Service) DownloadAttachment(ctx context.Context, userID, conversationID
 		return getErr
 	})
 	return a, content, err
+}
+
+// DownloadAttachmentThumbnail returns authorized thumbnail media type, bytes, and source SHA-256.
+func (s *Service) DownloadAttachmentThumbnail(ctx context.Context, userID, conversationID, attachmentID string) (string, []byte, string, error) {
+	var mediaType, sha256 string
+	var content []byte
+	err := s.Tx.WithinTx(ctx, func(txCtx context.Context) error {
+		if err := s.lockConversationRead(txCtx, userID, conversationID); err != nil {
+			return err
+		}
+		var getErr error
+		mediaType, content, sha256, getErr = s.Attachments.GetAuthorizedAttachmentThumbnail(txCtx, attachmentID, conversationID, userID)
+		return getErr
+	})
+	return mediaType, content, sha256, err
 }
 
 // DeleteAllExpiredPendingAttachments removes expired unlinked attachments.

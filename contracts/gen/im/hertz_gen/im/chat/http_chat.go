@@ -167,6 +167,7 @@ type ConversationDTO struct {
 	CreatedBy         *string  `thrift:"createdBy,9,optional" json:"createdBy,omitempty"`
 	CanManageMembers  bool     `thrift:"canManageMembers,10,required" json:"canManageMembers"`
 	NotificationLevel *string  `thrift:"notificationLevel,11,optional" json:"notificationLevel,omitempty"`
+	ManualUnreadSeq   *int64   `thrift:"manualUnreadSeq,12,optional" json:"manualUnreadSeq,omitempty"`
 }
 
 func NewConversationDTO() *ConversationDTO {
@@ -230,12 +231,25 @@ func (p *ConversationDTO) GetNotificationLevel() (v string) {
 	return *p.NotificationLevel
 }
 
+var ConversationDTO_ManualUnreadSeq_DEFAULT int64
+
+func (p *ConversationDTO) GetManualUnreadSeq() (v int64) {
+	if !p.IsSetManualUnreadSeq() {
+		return ConversationDTO_ManualUnreadSeq_DEFAULT
+	}
+	return *p.ManualUnreadSeq
+}
+
 func (p *ConversationDTO) IsSetCreatedBy() bool {
 	return p.CreatedBy != nil
 }
 
 func (p *ConversationDTO) IsSetNotificationLevel() bool {
 	return p.NotificationLevel != nil
+}
+
+func (p *ConversationDTO) IsSetManualUnreadSeq() bool {
+	return p.ManualUnreadSeq != nil
 }
 
 func (p *ConversationDTO) String() string {
@@ -245,12 +259,40 @@ func (p *ConversationDTO) String() string {
 	return fmt.Sprintf("ConversationDTO(%+v)", *p)
 }
 
+type AttachmentImageDTO struct {
+	Width  int64 `thrift:"width,1,required" json:"width"`
+	Height int64 `thrift:"height,2,required" json:"height"`
+}
+
+func NewAttachmentImageDTO() *AttachmentImageDTO {
+	return &AttachmentImageDTO{}
+}
+
+func (p *AttachmentImageDTO) InitDefault() {
+}
+
+func (p *AttachmentImageDTO) GetWidth() (v int64) {
+	return p.Width
+}
+
+func (p *AttachmentImageDTO) GetHeight() (v int64) {
+	return p.Height
+}
+
+func (p *AttachmentImageDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("AttachmentImageDTO(%+v)", *p)
+}
+
 type AttachmentDTO struct {
-	ID        string `thrift:"id,1,required" json:"id"`
-	Filename  string `thrift:"filename,2,required" json:"filename"`
-	MediaType string `thrift:"mediaType,3,required" json:"mediaType"`
-	SizeBytes int64  `thrift:"sizeBytes,4,required" json:"sizeBytes"`
-	Sha256    string `thrift:"sha256,5,required" json:"sha256"`
+	ID        string              `thrift:"id,1,required" json:"id"`
+	Filename  string              `thrift:"filename,2,required" json:"filename"`
+	MediaType string              `thrift:"mediaType,3,required" json:"mediaType"`
+	SizeBytes int64               `thrift:"sizeBytes,4,required" json:"sizeBytes"`
+	Sha256    string              `thrift:"sha256,5,required" json:"sha256"`
+	Image     *AttachmentImageDTO `thrift:"image,6,optional" json:"image,omitempty"`
 }
 
 func NewAttachmentDTO() *AttachmentDTO {
@@ -278,6 +320,19 @@ func (p *AttachmentDTO) GetSizeBytes() (v int64) {
 
 func (p *AttachmentDTO) GetSha256() (v string) {
 	return p.Sha256
+}
+
+var AttachmentDTO_Image_DEFAULT *AttachmentImageDTO
+
+func (p *AttachmentDTO) GetImage() (v *AttachmentImageDTO) {
+	if !p.IsSetImage() {
+		return AttachmentDTO_Image_DEFAULT
+	}
+	return p.Image
+}
+
+func (p *AttachmentDTO) IsSetImage() bool {
+	return p.Image != nil
 }
 
 func (p *AttachmentDTO) String() string {
@@ -315,9 +370,12 @@ func (p *AttachmentLimitsDTO) String() string {
 }
 
 type MentionDTO struct {
-	UserId string `thrift:"userId,1,required" json:"userId"`
-	Start  int64  `thrift:"start,2,required" json:"start"`
-	End    int64  `thrift:"end,3,required" json:"end"`
+	UserId         *string  `thrift:"userId,1,optional" json:"userId,omitempty"`
+	Start          int64    `thrift:"start,2,required" json:"start"`
+	End            int64    `thrift:"end,3,required" json:"end"`
+	Kind           *string  `thrift:"kind,4,optional" json:"kind,omitempty"`
+	RecipientIds   []string `thrift:"recipientIds,5,optional,list<string>" json:"recipientIds,omitempty"`
+	RecipientCount *int64   `thrift:"recipientCount,6,optional" json:"recipientCount,omitempty"`
 }
 
 func NewMentionDTO() *MentionDTO {
@@ -327,8 +385,13 @@ func NewMentionDTO() *MentionDTO {
 func (p *MentionDTO) InitDefault() {
 }
 
+var MentionDTO_UserId_DEFAULT string
+
 func (p *MentionDTO) GetUserId() (v string) {
-	return p.UserId
+	if !p.IsSetUserId() {
+		return MentionDTO_UserId_DEFAULT
+	}
+	return *p.UserId
 }
 
 func (p *MentionDTO) GetStart() (v int64) {
@@ -337,6 +400,49 @@ func (p *MentionDTO) GetStart() (v int64) {
 
 func (p *MentionDTO) GetEnd() (v int64) {
 	return p.End
+}
+
+var MentionDTO_Kind_DEFAULT string
+
+func (p *MentionDTO) GetKind() (v string) {
+	if !p.IsSetKind() {
+		return MentionDTO_Kind_DEFAULT
+	}
+	return *p.Kind
+}
+
+var MentionDTO_RecipientIds_DEFAULT []string
+
+func (p *MentionDTO) GetRecipientIds() (v []string) {
+	if !p.IsSetRecipientIds() {
+		return MentionDTO_RecipientIds_DEFAULT
+	}
+	return p.RecipientIds
+}
+
+var MentionDTO_RecipientCount_DEFAULT int64
+
+func (p *MentionDTO) GetRecipientCount() (v int64) {
+	if !p.IsSetRecipientCount() {
+		return MentionDTO_RecipientCount_DEFAULT
+	}
+	return *p.RecipientCount
+}
+
+func (p *MentionDTO) IsSetUserId() bool {
+	return p.UserId != nil
+}
+
+func (p *MentionDTO) IsSetKind() bool {
+	return p.Kind != nil
+}
+
+func (p *MentionDTO) IsSetRecipientIds() bool {
+	return p.RecipientIds != nil
+}
+
+func (p *MentionDTO) IsSetRecipientCount() bool {
+	return p.RecipientCount != nil
 }
 
 func (p *MentionDTO) String() string {
@@ -378,23 +484,131 @@ func (p *ReactionDTO) String() string {
 	return fmt.Sprintf("ReactionDTO(%+v)", *p)
 }
 
+type ForwardSourceDTO struct {
+	ConversationId string `thrift:"conversationId,1,required" json:"conversationId"`
+	MessageId      string `thrift:"messageId,2,required" json:"messageId"`
+}
+
+func NewForwardSourceDTO() *ForwardSourceDTO {
+	return &ForwardSourceDTO{}
+}
+
+func (p *ForwardSourceDTO) InitDefault() {
+}
+
+func (p *ForwardSourceDTO) GetConversationId() (v string) {
+	return p.ConversationId
+}
+
+func (p *ForwardSourceDTO) GetMessageId() (v string) {
+	return p.MessageId
+}
+
+func (p *ForwardSourceDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ForwardSourceDTO(%+v)", *p)
+}
+
+type ForwardedSnapshotDTO struct {
+	SourceConversationId string           `thrift:"sourceConversationId,1,required" json:"sourceConversationId"`
+	SourceMessageId      string           `thrift:"sourceMessageId,2,required" json:"sourceMessageId"`
+	SenderId             string           `thrift:"senderId,3,required" json:"senderId"`
+	SenderName           string           `thrift:"senderName,4,required" json:"senderName"`
+	SenderKind           string           `thrift:"senderKind,5,required" json:"senderKind"`
+	CreatedAt            string           `thrift:"createdAt,6,required" json:"createdAt"`
+	Body                 string           `thrift:"body,7,required" json:"body"`
+	Mentions             []*MentionDTO    `thrift:"mentions,8,optional,list<MentionDTO>" json:"mentions,omitempty"`
+	Attachments          []*AttachmentDTO `thrift:"attachments,9,optional,list<AttachmentDTO>" json:"attachments,omitempty"`
+}
+
+func NewForwardedSnapshotDTO() *ForwardedSnapshotDTO {
+	return &ForwardedSnapshotDTO{}
+}
+
+func (p *ForwardedSnapshotDTO) InitDefault() {
+}
+
+func (p *ForwardedSnapshotDTO) GetSourceConversationId() (v string) {
+	return p.SourceConversationId
+}
+
+func (p *ForwardedSnapshotDTO) GetSourceMessageId() (v string) {
+	return p.SourceMessageId
+}
+
+func (p *ForwardedSnapshotDTO) GetSenderId() (v string) {
+	return p.SenderId
+}
+
+func (p *ForwardedSnapshotDTO) GetSenderName() (v string) {
+	return p.SenderName
+}
+
+func (p *ForwardedSnapshotDTO) GetSenderKind() (v string) {
+	return p.SenderKind
+}
+
+func (p *ForwardedSnapshotDTO) GetCreatedAt() (v string) {
+	return p.CreatedAt
+}
+
+func (p *ForwardedSnapshotDTO) GetBody() (v string) {
+	return p.Body
+}
+
+var ForwardedSnapshotDTO_Mentions_DEFAULT []*MentionDTO
+
+func (p *ForwardedSnapshotDTO) GetMentions() (v []*MentionDTO) {
+	if !p.IsSetMentions() {
+		return ForwardedSnapshotDTO_Mentions_DEFAULT
+	}
+	return p.Mentions
+}
+
+var ForwardedSnapshotDTO_Attachments_DEFAULT []*AttachmentDTO
+
+func (p *ForwardedSnapshotDTO) GetAttachments() (v []*AttachmentDTO) {
+	if !p.IsSetAttachments() {
+		return ForwardedSnapshotDTO_Attachments_DEFAULT
+	}
+	return p.Attachments
+}
+
+func (p *ForwardedSnapshotDTO) IsSetMentions() bool {
+	return p.Mentions != nil
+}
+
+func (p *ForwardedSnapshotDTO) IsSetAttachments() bool {
+	return p.Attachments != nil
+}
+
+func (p *ForwardedSnapshotDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ForwardedSnapshotDTO(%+v)", *p)
+}
+
 type MessageDTO struct {
-	ID               string           `thrift:"id,1,required" json:"id"`
-	ConversationId   string           `thrift:"conversationId,2,required" json:"conversationId"`
-	SenderId         string           `thrift:"senderId,3,required" json:"senderId"`
-	SenderName       string           `thrift:"senderName,4,required" json:"senderName"`
-	SenderKind       string           `thrift:"senderKind,5,required" json:"senderKind"`
-	ClientMessageId  string           `thrift:"clientMessageId,6,required" json:"clientMessageId"`
-	Seq              int64            `thrift:"seq,7,required" json:"seq"`
-	Body             string           `thrift:"body,8,required" json:"body"`
-	ReplyToId        *string          `thrift:"replyToId,9,optional" json:"replyToId,omitempty"`
-	CreatedAt        string           `thrift:"createdAt,10,required" json:"createdAt"`
-	EditedAt         *string          `thrift:"editedAt,11,optional" json:"editedAt,omitempty"`
-	RetractedAt      *string          `thrift:"retractedAt,12,optional" json:"retractedAt,omitempty"`
-	Attachments      []*AttachmentDTO `thrift:"attachments,13,optional,list<AttachmentDTO>" json:"attachments,omitempty"`
-	Mentions         []*MentionDTO    `thrift:"mentions,14,optional,list<MentionDTO>" json:"mentions,omitempty"`
-	Reactions        []*ReactionDTO   `thrift:"reactions,15,optional,list<ReactionDTO>" json:"reactions,omitempty"`
-	ReactionsVersion *string          `thrift:"reactionsVersion,16,optional" json:"reactionsVersion,omitempty"`
+	ID               string                `thrift:"id,1,required" json:"id"`
+	ConversationId   string                `thrift:"conversationId,2,required" json:"conversationId"`
+	SenderId         string                `thrift:"senderId,3,required" json:"senderId"`
+	SenderName       string                `thrift:"senderName,4,required" json:"senderName"`
+	SenderKind       string                `thrift:"senderKind,5,required" json:"senderKind"`
+	ClientMessageId  string                `thrift:"clientMessageId,6,required" json:"clientMessageId"`
+	Seq              int64                 `thrift:"seq,7,required" json:"seq"`
+	Body             string                `thrift:"body,8,required" json:"body"`
+	ReplyToId        *string               `thrift:"replyToId,9,optional" json:"replyToId,omitempty"`
+	CreatedAt        string                `thrift:"createdAt,10,required" json:"createdAt"`
+	EditedAt         *string               `thrift:"editedAt,11,optional" json:"editedAt,omitempty"`
+	RetractedAt      *string               `thrift:"retractedAt,12,optional" json:"retractedAt,omitempty"`
+	Attachments      []*AttachmentDTO      `thrift:"attachments,13,optional,list<AttachmentDTO>" json:"attachments,omitempty"`
+	Mentions         []*MentionDTO         `thrift:"mentions,14,optional,list<MentionDTO>" json:"mentions,omitempty"`
+	Reactions        []*ReactionDTO        `thrift:"reactions,15,optional,list<ReactionDTO>" json:"reactions,omitempty"`
+	ReactionsVersion *string               `thrift:"reactionsVersion,16,optional" json:"reactionsVersion,omitempty"`
+	Forwarded        *ForwardedSnapshotDTO `thrift:"forwarded,17,optional" json:"forwarded,omitempty"`
 }
 
 func NewMessageDTO() *MessageDTO {
@@ -503,6 +717,15 @@ func (p *MessageDTO) GetReactionsVersion() (v string) {
 	return *p.ReactionsVersion
 }
 
+var MessageDTO_Forwarded_DEFAULT *ForwardedSnapshotDTO
+
+func (p *MessageDTO) GetForwarded() (v *ForwardedSnapshotDTO) {
+	if !p.IsSetForwarded() {
+		return MessageDTO_Forwarded_DEFAULT
+	}
+	return p.Forwarded
+}
+
 func (p *MessageDTO) IsSetReplyToId() bool {
 	return p.ReplyToId != nil
 }
@@ -531,6 +754,10 @@ func (p *MessageDTO) IsSetReactionsVersion() bool {
 	return p.ReactionsVersion != nil
 }
 
+func (p *MessageDTO) IsSetForwarded() bool {
+	return p.Forwarded != nil
+}
+
 func (p *MessageDTO) String() string {
 	if p == nil {
 		return "<nil>"
@@ -551,6 +778,13 @@ type EventDTO struct {
 	Reactions         []*ReactionDTO   `thrift:"reactions,10,optional,list<ReactionDTO>" json:"reactions,omitempty"`
 	NotificationLevel *string          `thrift:"notificationLevel,11,optional" json:"notificationLevel,omitempty"`
 	ReactionsVersion  *string          `thrift:"reactionsVersion,12,optional" json:"reactionsVersion,omitempty"`
+	ManualUnreadSeq   *int64           `thrift:"manualUnreadSeq,13,optional" json:"manualUnreadSeq,omitempty"`
+	Pinned            *bool            `thrift:"pinned,14,optional" json:"pinned,omitempty"`
+	PinnedBy          *string          `thrift:"pinnedBy,15,optional" json:"pinnedBy,omitempty"`
+	PinnedAt          *string          `thrift:"pinnedAt,16,optional" json:"pinnedAt,omitempty"`
+	PinsVersion       *string          `thrift:"pinsVersion,17,optional" json:"pinsVersion,omitempty"`
+	Saved             *bool            `thrift:"saved,18,optional" json:"saved,omitempty"`
+	SavedAt           *string          `thrift:"savedAt,19,optional" json:"savedAt,omitempty"`
 }
 
 func NewEventDTO() *EventDTO {
@@ -653,6 +887,69 @@ func (p *EventDTO) GetReactionsVersion() (v string) {
 	return *p.ReactionsVersion
 }
 
+var EventDTO_ManualUnreadSeq_DEFAULT int64
+
+func (p *EventDTO) GetManualUnreadSeq() (v int64) {
+	if !p.IsSetManualUnreadSeq() {
+		return EventDTO_ManualUnreadSeq_DEFAULT
+	}
+	return *p.ManualUnreadSeq
+}
+
+var EventDTO_Pinned_DEFAULT bool
+
+func (p *EventDTO) GetPinned() (v bool) {
+	if !p.IsSetPinned() {
+		return EventDTO_Pinned_DEFAULT
+	}
+	return *p.Pinned
+}
+
+var EventDTO_PinnedBy_DEFAULT string
+
+func (p *EventDTO) GetPinnedBy() (v string) {
+	if !p.IsSetPinnedBy() {
+		return EventDTO_PinnedBy_DEFAULT
+	}
+	return *p.PinnedBy
+}
+
+var EventDTO_PinnedAt_DEFAULT string
+
+func (p *EventDTO) GetPinnedAt() (v string) {
+	if !p.IsSetPinnedAt() {
+		return EventDTO_PinnedAt_DEFAULT
+	}
+	return *p.PinnedAt
+}
+
+var EventDTO_PinsVersion_DEFAULT string
+
+func (p *EventDTO) GetPinsVersion() (v string) {
+	if !p.IsSetPinsVersion() {
+		return EventDTO_PinsVersion_DEFAULT
+	}
+	return *p.PinsVersion
+}
+
+var EventDTO_Saved_DEFAULT bool
+
+func (p *EventDTO) GetSaved() (v bool) {
+	if !p.IsSetSaved() {
+		return EventDTO_Saved_DEFAULT
+	}
+	return *p.Saved
+}
+
+var EventDTO_SavedAt_DEFAULT string
+
+func (p *EventDTO) GetSavedAt() (v string) {
+	if !p.IsSetSavedAt() {
+		return EventDTO_SavedAt_DEFAULT
+	}
+	return *p.SavedAt
+}
+
 func (p *EventDTO) IsSetConversationId() bool {
 	return p.ConversationId != nil
 }
@@ -687,6 +984,34 @@ func (p *EventDTO) IsSetNotificationLevel() bool {
 
 func (p *EventDTO) IsSetReactionsVersion() bool {
 	return p.ReactionsVersion != nil
+}
+
+func (p *EventDTO) IsSetManualUnreadSeq() bool {
+	return p.ManualUnreadSeq != nil
+}
+
+func (p *EventDTO) IsSetPinned() bool {
+	return p.Pinned != nil
+}
+
+func (p *EventDTO) IsSetPinnedBy() bool {
+	return p.PinnedBy != nil
+}
+
+func (p *EventDTO) IsSetPinnedAt() bool {
+	return p.PinnedAt != nil
+}
+
+func (p *EventDTO) IsSetPinsVersion() bool {
+	return p.PinsVersion != nil
+}
+
+func (p *EventDTO) IsSetSaved() bool {
+	return p.Saved != nil
+}
+
+func (p *EventDTO) IsSetSavedAt() bool {
+	return p.SavedAt != nil
 }
 
 func (p *EventDTO) String() string {
@@ -1640,12 +1965,13 @@ func (p *MessageResp) String() string {
 }
 
 type SendMessageReq struct {
-	ID              string        `thrift:"id,1,required" json:"-"`
-	ClientMessageId string        `thrift:"clientMessageId,2,required" json:"clientMessageId"`
-	Body            string        `thrift:"body,3,required" json:"body"`
-	ReplyToId       *string       `thrift:"replyToId,4,optional" json:"replyToId,omitempty"`
-	AttachmentIds   []string      `thrift:"attachmentIds,5,optional,list<string>" json:"attachmentIds,omitempty"`
-	Mentions        []*MentionDTO `thrift:"mentions,6,optional,list<MentionDTO>" json:"mentions,omitempty"`
+	ID              string            `thrift:"id,1,required" json:"-"`
+	ClientMessageId string            `thrift:"clientMessageId,2,required" json:"clientMessageId"`
+	Body            string            `thrift:"body,3,required" json:"body"`
+	ReplyToId       *string           `thrift:"replyToId,4,optional" json:"replyToId,omitempty"`
+	AttachmentIds   []string          `thrift:"attachmentIds,5,optional,list<string>" json:"attachmentIds,omitempty"`
+	Mentions        []*MentionDTO     `thrift:"mentions,6,optional,list<MentionDTO>" json:"mentions,omitempty"`
+	ForwardOf       *ForwardSourceDTO `thrift:"forwardOf,7,optional" json:"forwardOf,omitempty"`
 }
 
 func NewSendMessageReq() *SendMessageReq {
@@ -1694,6 +2020,15 @@ func (p *SendMessageReq) GetMentions() (v []*MentionDTO) {
 	return p.Mentions
 }
 
+var SendMessageReq_ForwardOf_DEFAULT *ForwardSourceDTO
+
+func (p *SendMessageReq) GetForwardOf() (v *ForwardSourceDTO) {
+	if !p.IsSetForwardOf() {
+		return SendMessageReq_ForwardOf_DEFAULT
+	}
+	return p.ForwardOf
+}
+
 func (p *SendMessageReq) IsSetReplyToId() bool {
 	return p.ReplyToId != nil
 }
@@ -1704,6 +2039,10 @@ func (p *SendMessageReq) IsSetAttachmentIds() bool {
 
 func (p *SendMessageReq) IsSetMentions() bool {
 	return p.Mentions != nil
+}
+
+func (p *SendMessageReq) IsSetForwardOf() bool {
+	return p.ForwardOf != nil
 }
 
 func (p *SendMessageReq) String() string {
@@ -1814,7 +2153,8 @@ func (p *MarkReadReq) String() string {
 }
 
 type MarkReadResp struct {
-	ReadSeq int64 `thrift:"readSeq,1,required" json:"readSeq"`
+	ReadSeq         int64  `thrift:"readSeq,1,required" json:"readSeq"`
+	ManualUnreadSeq *int64 `thrift:"manualUnreadSeq,2,optional" json:"manualUnreadSeq,omitempty"`
 }
 
 func NewMarkReadResp() *MarkReadResp {
@@ -1826,6 +2166,19 @@ func (p *MarkReadResp) InitDefault() {
 
 func (p *MarkReadResp) GetReadSeq() (v int64) {
 	return p.ReadSeq
+}
+
+var MarkReadResp_ManualUnreadSeq_DEFAULT int64
+
+func (p *MarkReadResp) GetManualUnreadSeq() (v int64) {
+	if !p.IsSetManualUnreadSeq() {
+		return MarkReadResp_ManualUnreadSeq_DEFAULT
+	}
+	return *p.ManualUnreadSeq
+}
+
+func (p *MarkReadResp) IsSetManualUnreadSeq() bool {
+	return p.ManualUnreadSeq != nil
 }
 
 func (p *MarkReadResp) String() string {
@@ -2206,6 +2559,7 @@ type GetAttentionReq struct {
 	Cursor     *string `thrift:"cursor,1,optional" json:"cursor,omitempty"`
 	Limit      *string `thrift:"limit,2,optional" json:"limit,omitempty"`
 	UnreadOnly *string `thrift:"unreadOnly,3,optional" json:"unreadOnly,omitempty"`
+	MessageId  *string `thrift:"messageId,4,optional" json:"messageId,omitempty"`
 }
 
 func NewGetAttentionReq() *GetAttentionReq {
@@ -2242,6 +2596,15 @@ func (p *GetAttentionReq) GetUnreadOnly() (v string) {
 	return *p.UnreadOnly
 }
 
+var GetAttentionReq_MessageId_DEFAULT string
+
+func (p *GetAttentionReq) GetMessageId() (v string) {
+	if !p.IsSetMessageId() {
+		return GetAttentionReq_MessageId_DEFAULT
+	}
+	return *p.MessageId
+}
+
 func (p *GetAttentionReq) IsSetCursor() bool {
 	return p.Cursor != nil
 }
@@ -2252,6 +2615,10 @@ func (p *GetAttentionReq) IsSetLimit() bool {
 
 func (p *GetAttentionReq) IsSetUnreadOnly() bool {
 	return p.UnreadOnly != nil
+}
+
+func (p *GetAttentionReq) IsSetMessageId() bool {
+	return p.MessageId != nil
 }
 
 func (p *GetAttentionReq) String() string {
@@ -2877,6 +3244,613 @@ func (p *DeleteAnnouncementReq) String() string {
 	return fmt.Sprintf("DeleteAnnouncementReq(%+v)", *p)
 }
 
+type PinDTO struct {
+	Message      *MessageDTO `thrift:"message,1,required" json:"message"`
+	PinnedBy     string      `thrift:"pinnedBy,2,required" json:"pinnedBy"`
+	PinnedByName string      `thrift:"pinnedByName,3,required" json:"pinnedByName"`
+	PinnedAt     string      `thrift:"pinnedAt,4,required" json:"pinnedAt"`
+}
+
+func NewPinDTO() *PinDTO {
+	return &PinDTO{}
+}
+
+func (p *PinDTO) InitDefault() {
+}
+
+var PinDTO_Message_DEFAULT *MessageDTO
+
+func (p *PinDTO) GetMessage() (v *MessageDTO) {
+	if !p.IsSetMessage() {
+		return PinDTO_Message_DEFAULT
+	}
+	return p.Message
+}
+
+func (p *PinDTO) GetPinnedBy() (v string) {
+	return p.PinnedBy
+}
+
+func (p *PinDTO) GetPinnedByName() (v string) {
+	return p.PinnedByName
+}
+
+func (p *PinDTO) GetPinnedAt() (v string) {
+	return p.PinnedAt
+}
+
+func (p *PinDTO) IsSetMessage() bool {
+	return p.Message != nil
+}
+
+func (p *PinDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PinDTO(%+v)", *p)
+}
+
+type PutPinReq struct {
+	ID        string `thrift:"id,1,required" json:"id"`
+	MessageId string `thrift:"messageId,2,required" json:"messageId"`
+}
+
+func NewPutPinReq() *PutPinReq {
+	return &PutPinReq{}
+}
+
+func (p *PutPinReq) InitDefault() {
+}
+
+func (p *PutPinReq) GetID() (v string) {
+	return p.ID
+}
+
+func (p *PutPinReq) GetMessageId() (v string) {
+	return p.MessageId
+}
+
+func (p *PutPinReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PutPinReq(%+v)", *p)
+}
+
+type PutPinResp struct {
+	Pin         *PinDTO `thrift:"pin,1,required" json:"pin"`
+	PinsVersion string  `thrift:"pinsVersion,2,required" json:"pinsVersion"`
+}
+
+func NewPutPinResp() *PutPinResp {
+	return &PutPinResp{}
+}
+
+func (p *PutPinResp) InitDefault() {
+}
+
+var PutPinResp_Pin_DEFAULT *PinDTO
+
+func (p *PutPinResp) GetPin() (v *PinDTO) {
+	if !p.IsSetPin() {
+		return PutPinResp_Pin_DEFAULT
+	}
+	return p.Pin
+}
+
+func (p *PutPinResp) GetPinsVersion() (v string) {
+	return p.PinsVersion
+}
+
+func (p *PutPinResp) IsSetPin() bool {
+	return p.Pin != nil
+}
+
+func (p *PutPinResp) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PutPinResp(%+v)", *p)
+}
+
+type DeletePinReq struct {
+	ID        string `thrift:"id,1,required" json:"id"`
+	MessageId string `thrift:"messageId,2,required" json:"messageId"`
+}
+
+func NewDeletePinReq() *DeletePinReq {
+	return &DeletePinReq{}
+}
+
+func (p *DeletePinReq) InitDefault() {
+}
+
+func (p *DeletePinReq) GetID() (v string) {
+	return p.ID
+}
+
+func (p *DeletePinReq) GetMessageId() (v string) {
+	return p.MessageId
+}
+
+func (p *DeletePinReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("DeletePinReq(%+v)", *p)
+}
+
+type DeletePinResp struct {
+	PinsVersion string `thrift:"pinsVersion,1,required" json:"pinsVersion"`
+}
+
+func NewDeletePinResp() *DeletePinResp {
+	return &DeletePinResp{}
+}
+
+func (p *DeletePinResp) InitDefault() {
+}
+
+func (p *DeletePinResp) GetPinsVersion() (v string) {
+	return p.PinsVersion
+}
+
+func (p *DeletePinResp) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("DeletePinResp(%+v)", *p)
+}
+
+type ListPinsReq struct {
+	ID string `thrift:"id,1,required" json:"id"`
+}
+
+func NewListPinsReq() *ListPinsReq {
+	return &ListPinsReq{}
+}
+
+func (p *ListPinsReq) InitDefault() {
+}
+
+func (p *ListPinsReq) GetID() (v string) {
+	return p.ID
+}
+
+func (p *ListPinsReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ListPinsReq(%+v)", *p)
+}
+
+type ListPinsResp struct {
+	Pins        []*PinDTO `thrift:"pins,1,required,list<PinDTO>" json:"pins"`
+	PinsVersion string    `thrift:"pinsVersion,2,required" json:"pinsVersion"`
+}
+
+func NewListPinsResp() *ListPinsResp {
+	return &ListPinsResp{}
+}
+
+func (p *ListPinsResp) InitDefault() {
+}
+
+func (p *ListPinsResp) GetPins() (v []*PinDTO) {
+	return p.Pins
+}
+
+func (p *ListPinsResp) GetPinsVersion() (v string) {
+	return p.PinsVersion
+}
+
+func (p *ListPinsResp) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ListPinsResp(%+v)", *p)
+}
+
+type SavedMarkerDTO struct {
+	ConversationId string `thrift:"conversationId,1,required" json:"conversationId"`
+	MessageId      string `thrift:"messageId,2,required" json:"messageId"`
+	SavedAt        string `thrift:"savedAt,3,required" json:"savedAt"`
+}
+
+func NewSavedMarkerDTO() *SavedMarkerDTO {
+	return &SavedMarkerDTO{}
+}
+
+func (p *SavedMarkerDTO) InitDefault() {
+}
+
+func (p *SavedMarkerDTO) GetConversationId() (v string) {
+	return p.ConversationId
+}
+
+func (p *SavedMarkerDTO) GetMessageId() (v string) {
+	return p.MessageId
+}
+
+func (p *SavedMarkerDTO) GetSavedAt() (v string) {
+	return p.SavedAt
+}
+
+func (p *SavedMarkerDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SavedMarkerDTO(%+v)", *p)
+}
+
+type SaveMessageReq struct {
+	ID        string `thrift:"id,1,required" json:"id"`
+	MessageId string `thrift:"messageId,2,required" json:"messageId"`
+}
+
+func NewSaveMessageReq() *SaveMessageReq {
+	return &SaveMessageReq{}
+}
+
+func (p *SaveMessageReq) InitDefault() {
+}
+
+func (p *SaveMessageReq) GetID() (v string) {
+	return p.ID
+}
+
+func (p *SaveMessageReq) GetMessageId() (v string) {
+	return p.MessageId
+}
+
+func (p *SaveMessageReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SaveMessageReq(%+v)", *p)
+}
+
+type SaveMessageResp struct {
+	Saved *SavedMarkerDTO `thrift:"saved,1,required" json:"saved"`
+}
+
+func NewSaveMessageResp() *SaveMessageResp {
+	return &SaveMessageResp{}
+}
+
+func (p *SaveMessageResp) InitDefault() {
+}
+
+var SaveMessageResp_Saved_DEFAULT *SavedMarkerDTO
+
+func (p *SaveMessageResp) GetSaved() (v *SavedMarkerDTO) {
+	if !p.IsSetSaved() {
+		return SaveMessageResp_Saved_DEFAULT
+	}
+	return p.Saved
+}
+
+func (p *SaveMessageResp) IsSetSaved() bool {
+	return p.Saved != nil
+}
+
+func (p *SaveMessageResp) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SaveMessageResp(%+v)", *p)
+}
+
+type UnsaveMessageReq struct {
+	ID        string `thrift:"id,1,required" json:"id"`
+	MessageId string `thrift:"messageId,2,required" json:"messageId"`
+}
+
+func NewUnsaveMessageReq() *UnsaveMessageReq {
+	return &UnsaveMessageReq{}
+}
+
+func (p *UnsaveMessageReq) InitDefault() {
+}
+
+func (p *UnsaveMessageReq) GetID() (v string) {
+	return p.ID
+}
+
+func (p *UnsaveMessageReq) GetMessageId() (v string) {
+	return p.MessageId
+}
+
+func (p *UnsaveMessageReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("UnsaveMessageReq(%+v)", *p)
+}
+
+type SavedItemDTO struct {
+	Message       *MessageDTO               `thrift:"message,1,required" json:"message"`
+	Conversation  *AttentionConversationDTO `thrift:"conversation,2,required" json:"conversation"`
+	WorkspaceName string                    `thrift:"workspaceName,3,required" json:"workspaceName"`
+	SavedAt       string                    `thrift:"savedAt,4,required" json:"savedAt"`
+}
+
+func NewSavedItemDTO() *SavedItemDTO {
+	return &SavedItemDTO{}
+}
+
+func (p *SavedItemDTO) InitDefault() {
+}
+
+var SavedItemDTO_Message_DEFAULT *MessageDTO
+
+func (p *SavedItemDTO) GetMessage() (v *MessageDTO) {
+	if !p.IsSetMessage() {
+		return SavedItemDTO_Message_DEFAULT
+	}
+	return p.Message
+}
+
+var SavedItemDTO_Conversation_DEFAULT *AttentionConversationDTO
+
+func (p *SavedItemDTO) GetConversation() (v *AttentionConversationDTO) {
+	if !p.IsSetConversation() {
+		return SavedItemDTO_Conversation_DEFAULT
+	}
+	return p.Conversation
+}
+
+func (p *SavedItemDTO) GetWorkspaceName() (v string) {
+	return p.WorkspaceName
+}
+
+func (p *SavedItemDTO) GetSavedAt() (v string) {
+	return p.SavedAt
+}
+
+func (p *SavedItemDTO) IsSetMessage() bool {
+	return p.Message != nil
+}
+
+func (p *SavedItemDTO) IsSetConversation() bool {
+	return p.Conversation != nil
+}
+
+func (p *SavedItemDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SavedItemDTO(%+v)", *p)
+}
+
+type ListSavedReq struct {
+	Cursor *string `thrift:"cursor,1,optional" json:"cursor,omitempty"`
+	Limit  *string `thrift:"limit,2,optional" json:"limit,omitempty"`
+}
+
+func NewListSavedReq() *ListSavedReq {
+	return &ListSavedReq{}
+}
+
+func (p *ListSavedReq) InitDefault() {
+}
+
+var ListSavedReq_Cursor_DEFAULT string
+
+func (p *ListSavedReq) GetCursor() (v string) {
+	if !p.IsSetCursor() {
+		return ListSavedReq_Cursor_DEFAULT
+	}
+	return *p.Cursor
+}
+
+var ListSavedReq_Limit_DEFAULT string
+
+func (p *ListSavedReq) GetLimit() (v string) {
+	if !p.IsSetLimit() {
+		return ListSavedReq_Limit_DEFAULT
+	}
+	return *p.Limit
+}
+
+func (p *ListSavedReq) IsSetCursor() bool {
+	return p.Cursor != nil
+}
+
+func (p *ListSavedReq) IsSetLimit() bool {
+	return p.Limit != nil
+}
+
+func (p *ListSavedReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ListSavedReq(%+v)", *p)
+}
+
+type ListSavedResp struct {
+	Items  []*SavedItemDTO `thrift:"items,1,required,list<SavedItemDTO>" json:"items"`
+	Cursor *string         `thrift:"cursor,2,optional" json:"cursor,omitempty"`
+}
+
+func NewListSavedResp() *ListSavedResp {
+	return &ListSavedResp{}
+}
+
+func (p *ListSavedResp) InitDefault() {
+}
+
+func (p *ListSavedResp) GetItems() (v []*SavedItemDTO) {
+	return p.Items
+}
+
+var ListSavedResp_Cursor_DEFAULT string
+
+func (p *ListSavedResp) GetCursor() (v string) {
+	if !p.IsSetCursor() {
+		return ListSavedResp_Cursor_DEFAULT
+	}
+	return *p.Cursor
+}
+
+func (p *ListSavedResp) IsSetCursor() bool {
+	return p.Cursor != nil
+}
+
+func (p *ListSavedResp) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ListSavedResp(%+v)", *p)
+}
+
+type ListConversationSavedReq struct {
+	ID string `thrift:"id,1,required" json:"id"`
+}
+
+func NewListConversationSavedReq() *ListConversationSavedReq {
+	return &ListConversationSavedReq{}
+}
+
+func (p *ListConversationSavedReq) InitDefault() {
+}
+
+func (p *ListConversationSavedReq) GetID() (v string) {
+	return p.ID
+}
+
+func (p *ListConversationSavedReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ListConversationSavedReq(%+v)", *p)
+}
+
+type ListConversationSavedResp struct {
+	MessageIds []string `thrift:"messageIds,1,required,list<string>" json:"messageIds"`
+}
+
+func NewListConversationSavedResp() *ListConversationSavedResp {
+	return &ListConversationSavedResp{}
+}
+
+func (p *ListConversationSavedResp) InitDefault() {
+}
+
+func (p *ListConversationSavedResp) GetMessageIds() (v []string) {
+	return p.MessageIds
+}
+
+func (p *ListConversationSavedResp) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ListConversationSavedResp(%+v)", *p)
+}
+
+type MarkUnreadReq struct {
+	ID  string `thrift:"id,1,required" json:"-"`
+	Seq int64  `thrift:"seq,2,required" json:"seq"`
+}
+
+func NewMarkUnreadReq() *MarkUnreadReq {
+	return &MarkUnreadReq{}
+}
+
+func (p *MarkUnreadReq) InitDefault() {
+}
+
+func (p *MarkUnreadReq) GetID() (v string) {
+	return p.ID
+}
+
+func (p *MarkUnreadReq) GetSeq() (v int64) {
+	return p.Seq
+}
+
+func (p *MarkUnreadReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("MarkUnreadReq(%+v)", *p)
+}
+
+type MarkUnreadResp struct {
+	ConversationId  string `thrift:"conversationId,1,required" json:"conversationId"`
+	ManualUnreadSeq int64  `thrift:"manualUnreadSeq,2,required" json:"manualUnreadSeq"`
+}
+
+func NewMarkUnreadResp() *MarkUnreadResp {
+	return &MarkUnreadResp{}
+}
+
+func (p *MarkUnreadResp) InitDefault() {
+}
+
+func (p *MarkUnreadResp) GetConversationId() (v string) {
+	return p.ConversationId
+}
+
+func (p *MarkUnreadResp) GetManualUnreadSeq() (v int64) {
+	return p.ManualUnreadSeq
+}
+
+func (p *MarkUnreadResp) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("MarkUnreadResp(%+v)", *p)
+}
+
+type ClearUnreadReq struct {
+	ID string `thrift:"id,1,required" json:"id"`
+}
+
+func NewClearUnreadReq() *ClearUnreadReq {
+	return &ClearUnreadReq{}
+}
+
+func (p *ClearUnreadReq) InitDefault() {
+}
+
+func (p *ClearUnreadReq) GetID() (v string) {
+	return p.ID
+}
+
+func (p *ClearUnreadReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ClearUnreadReq(%+v)", *p)
+}
+
+type DownloadAttachmentThumbnailReq struct {
+	ID           string `thrift:"id,1,required" json:"id"`
+	AttachmentId string `thrift:"attachmentId,2,required" json:"attachmentId"`
+}
+
+func NewDownloadAttachmentThumbnailReq() *DownloadAttachmentThumbnailReq {
+	return &DownloadAttachmentThumbnailReq{}
+}
+
+func (p *DownloadAttachmentThumbnailReq) InitDefault() {
+}
+
+func (p *DownloadAttachmentThumbnailReq) GetID() (v string) {
+	return p.ID
+}
+
+func (p *DownloadAttachmentThumbnailReq) GetAttachmentId() (v string) {
+	return p.AttachmentId
+}
+
+func (p *DownloadAttachmentThumbnailReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("DownloadAttachmentThumbnailReq(%+v)", *p)
+}
+
 type ChatHTTPService interface {
 	GetBootstrap(ctx context.Context, req *GetBootstrapReq) (r *BootstrapResp, err error)
 
@@ -2914,7 +3888,25 @@ type ChatHTTPService interface {
 
 	DeleteReaction(ctx context.Context, req *DeleteReactionReq) (r *ReactionsResp, err error)
 
+	PutPin(ctx context.Context, req *PutPinReq) (r *PutPinResp, err error)
+
+	DeletePin(ctx context.Context, req *DeletePinReq) (r *DeletePinResp, err error)
+
+	ListPins(ctx context.Context, req *ListPinsReq) (r *ListPinsResp, err error)
+
+	SaveMessage(ctx context.Context, req *SaveMessageReq) (r *SaveMessageResp, err error)
+
+	UnsaveMessage(ctx context.Context, req *UnsaveMessageReq) (r *EmptyResp, err error)
+
+	ListSaved(ctx context.Context, req *ListSavedReq) (r *ListSavedResp, err error)
+
+	ListConversationSaved(ctx context.Context, req *ListConversationSavedReq) (r *ListConversationSavedResp, err error)
+
 	MarkRead(ctx context.Context, req *MarkReadReq) (r *MarkReadResp, err error)
+
+	MarkUnread(ctx context.Context, req *MarkUnreadReq) (r *MarkUnreadResp, err error)
+
+	ClearUnread(ctx context.Context, req *ClearUnreadReq) (r *EmptyResp, err error)
 
 	GetReadReceipts(ctx context.Context, req *GetReadReceiptsReq) (r *ReadReceiptsResp, err error)
 
@@ -2933,6 +3925,8 @@ type ChatHTTPService interface {
 	DeletePendingAttachment(ctx context.Context, req *DeletePendingAttachmentReq) (r *EmptyResp, err error)
 
 	DownloadAttachment(ctx context.Context, req *DownloadAttachmentReq) (r *DownloadAttachmentResp, err error)
+
+	DownloadAttachmentThumbnail(ctx context.Context, req *DownloadAttachmentThumbnailReq) (r *DownloadAttachmentResp, err error)
 
 	ListAnnouncements(ctx context.Context, req *ListAnnouncementsReq) (r *ListAnnouncementsResp, err error)
 

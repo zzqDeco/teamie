@@ -529,8 +529,28 @@ class AgentManifestTest(unittest.TestCase):
         curr = copy.deepcopy(prev)
         curr["version"] = "v0.4.6"
         curr["source"]["ref"] = "refs/heads/release/v0.4.6"
-        curr["schema"] = dict(manifest.SCHEMA_V3)
+        curr["schema"] = {"identity": 3, "chat": 11, "marketplace": 1, "agent_control": 3, "agent_runtime": 15, "gateway": 6}
         self.assertEqual(curr["schema"]["chat"], 11)
+        manifest.validate(prev)
+        manifest.validate(curr)
+        manifest.check_transition(curr, prev, prev)
+        with self.assertRaisesRegex(ValueError, "identical schema versions"):
+            manifest.check_transition(prev, curr, rollback=True)
+        with self.assertRaisesRegex(ValueError, "lower database schema"):
+            manifest.check_transition(prev, curr)
+
+    def test_v3_collaboration_chat_12_and_gateway_7_forward_upgrade_and_rollback_guard(self):
+        prev = self.modern()
+        prev["manifestVersion"] = 3
+        prev["version"] = "v0.4.6"
+        prev["source"]["ref"] = "refs/heads/release/v0.4.6"
+        prev["schema"] = {"identity": 3, "chat": 11, "marketplace": 1, "agent_control": 3, "agent_runtime": 15, "gateway": 6}
+        prev["images"]["marketplace"] = "ghcr.io/zzqdeco/teamie-marketplace@sha256:" + "2" * 64
+        curr = copy.deepcopy(prev)
+        curr["version"] = "v0.4.7"
+        curr["source"]["ref"] = "refs/heads/release/v0.4.7"
+        curr["schema"] = dict(manifest.SCHEMA_V3)
+        self.assertEqual(curr["schema"], {"identity": 3, "chat": 12, "marketplace": 1, "agent_control": 3, "agent_runtime": 15, "gateway": 7})
         manifest.validate(prev)
         manifest.validate(curr)
         manifest.check_transition(curr, prev, prev)
@@ -636,15 +656,18 @@ class ProductionConfigTest(unittest.TestCase):
         self.assertFalse(manifest.ensure_host_env(self.env, v2))
         self.assertEqual(self.env.read_text(encoding="utf-8"), initial)
 
-        # First v3 rollout atomically populates independent marketplace role credentials on the same postgres host.
+        # First v3 rollout atomically populates independent marketplace role and realtime RPC credentials.
         self.assertTrue(manifest.ensure_host_env(self.env, v3))
         self.assertEqual(self.env.stat().st_mode & 0o777, 0o600)
         after_first = self.env.read_text(encoding="utf-8")
         self.assertTrue(after_first.startswith(initial + "\n"))
         parsed = dict(line.split("=", 1) for line in after_first.splitlines() if "=" in line)
         pw = parsed["POSTGRES_MARKETPLACE_PASSWORD"]
+        rt_token = parsed["REALTIME_RPC_TOKEN"]
         self.assertEqual(len(pw), 64)
-        self.assertNotIn(pw, {"a" * 64, "i" * 64, "c" * 64})
+        self.assertEqual(len(rt_token), 64)
+        self.assertNotIn(pw, {"a" * 64, "i" * 64, "c" * 64, rt_token})
+        self.assertNotIn(rt_token, {"a" * 64, "i" * 64, "c" * 64})
         self.assertEqual(
             parsed["MARKETPLACE_DATABASE_URL"],
             f"postgres://teamie_marketplace:{pw}@postgres:5432/teamie_marketplace?sslmode=disable",
@@ -653,6 +676,19 @@ class ProductionConfigTest(unittest.TestCase):
         # Subsequent rollouts preserve existing credentials untouched.
         self.assertFalse(manifest.ensure_host_env(self.env, v3))
         self.assertEqual(self.env.read_text(encoding="utf-8"), after_first)
+
+        # Upgrading an existing v3 host that already has marketplace credentials provisions REALTIME_RPC_TOKEN once.
+        existing_v3 = (
+            initial + "\n"
+            "POSTGRES_MARKETPLACE_PASSWORD=" + "m" * 64 + "\n"
+            "MARKETPLACE_DATABASE_URL=postgres://teamie_marketplace:" + "m" * 64 + "@postgres:5432/teamie_marketplace?sslmode=disable\n"
+        )
+        self.env.write_text(existing_v3, encoding="utf-8")
+        self.assertTrue(manifest.ensure_host_env(self.env, v3))
+        upgraded = dict(line.split("=", 1) for line in self.env.read_text(encoding="utf-8").splitlines() if "=" in line)
+        self.assertEqual(upgraded["POSTGRES_MARKETPLACE_PASSWORD"], "m" * 64)
+        self.assertEqual(len(upgraded["REALTIME_RPC_TOKEN"]), 64)
+        self.assertFalse(manifest.ensure_host_env(self.env, v3))
 
         # Partial pre-existing configuration is never overwritten silently.
         partial = initial + "\nPOSTGRES_MARKETPLACE_PASSWORD=" + "m" * 64 + "\n"
@@ -665,6 +701,27 @@ class ProductionConfigTest(unittest.TestCase):
         self.env.chmod(0o644)
         with self.assertRaises(ValueError):
             manifest.ensure_host_env(self.env, v3)
+
+    def test_realtime_rpc_scoping_and_private_network_guards(self):
+        base = copy.deepcopy(self.config)
+        base["services"]["chat"]["environment"]["REALTIME_RPC_ADDR"] = "realtime:8883"
+        base["services"]["chat"]["environment"]["REALTIME_RPC_TOKEN"] = "r" * 64
+        base["services"]["realtime"]["environment"]["RPC_ADDR"] = ":8883"
+        base["services"]["realtime"]["environment"]["REALTIME_RPC_TOKEN"] = "r" * 64
+        self.assertEqual(manifest.validate_config(base, self.env), "https://192.0.2.1")
+        for mutate in (
+            lambda c: c["services"]["realtime"]["environment"].update(REALTIME_RPC_TOKEN="x" * 64),
+            lambda c: c["services"]["chat"]["environment"].update(REALTIME_RPC_TOKEN="c" * 64),
+            lambda c: c["services"]["identity"]["environment"].update(REALTIME_RPC_TOKEN="r" * 64),
+            lambda c: c["services"]["chat"]["environment"].update(REALTIME_RPC_ADDR="realtime:9000"),
+            lambda c: c["services"]["realtime"]["environment"].update(RPC_ADDR=":9000"),
+            lambda c: c["services"]["realtime"].update(networks={"private": {}, "egress": {}}),
+            lambda c: c["services"]["realtime"].update(ports=[{"target": 8883, "published": "8883"}]),
+        ):
+            candidate = copy.deepcopy(base)
+            mutate(candidate)
+            with self.assertRaises(ValueError):
+                manifest.validate_config(candidate, self.env)
 
     def test_common_sh_validates_teamie_root_segments(self):
         common = str(Path(__file__).with_name("common.sh"))

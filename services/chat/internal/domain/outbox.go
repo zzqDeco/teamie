@@ -17,7 +17,15 @@ type Event struct {
 	Reactions         []Reaction    `json:"reactions,omitempty"`
 	ReactionsVersion  int64         `json:"reactionsVersion,omitempty,string"`
 	NotificationLevel *string       `json:"notificationLevel,omitempty"`
-	CreatedAt         time.Time     `json:"createdAt"`
+	// ManualUnreadSeq accompanies every read.updated event; 0 means no marker.
+	ManualUnreadSeq *int64     `json:"manualUnreadSeq,omitempty"`
+	Pinned          *bool      `json:"pinned,omitempty"`
+	PinnedBy        string     `json:"pinnedBy,omitempty"`
+	PinnedAt        *time.Time `json:"pinnedAt,omitempty"`
+	PinsVersion     int64      `json:"pinsVersion,omitempty,string"`
+	Saved           *bool      `json:"saved,omitempty"`
+	SavedAt         *time.Time `json:"savedAt,omitempty"`
+	CreatedAt       time.Time  `json:"createdAt"`
 }
 
 // OutboxEvent is an alias for Event.

@@ -65,7 +65,16 @@ const (
 	PatternRetractMessage = "DELETE /api/v1/conversations/{id}/messages/{messageId}"
 	PatternPutReaction = "PUT /api/v1/conversations/{id}/messages/{messageId}/reactions/{emoji}"
 	PatternDeleteReaction = "DELETE /api/v1/conversations/{id}/messages/{messageId}/reactions/{emoji}"
+	PatternPutPin = "PUT /api/v1/conversations/{id}/pins/{messageId}"
+	PatternDeletePin = "DELETE /api/v1/conversations/{id}/pins/{messageId}"
+	PatternListPins = "GET /api/v1/conversations/{id}/pins"
+	PatternSaveMessage = "PUT /api/v1/conversations/{id}/messages/{messageId}/saved"
+	PatternUnsaveMessage = "DELETE /api/v1/conversations/{id}/messages/{messageId}/saved"
+	PatternListSaved = "GET /api/v1/saved"
+	PatternListConversationSaved = "GET /api/v1/conversations/{id}/saved"
 	PatternMarkRead = "POST /api/v1/conversations/{id}/read"
+	PatternMarkUnread = "POST /api/v1/conversations/{id}/unread"
+	PatternClearUnread = "DELETE /api/v1/conversations/{id}/unread"
 	PatternGetReadReceipts = "GET /api/v1/conversations/{id}/read-receipts"
 	PatternSetNotificationLevel = "PUT /api/v1/conversations/{id}/notification-level"
 	PatternSearchWorkspaceMessages = "GET /api/v1/workspaces/{id}/messages/search"
@@ -75,13 +84,14 @@ const (
 	PatternGetAttachmentUpload = "GET /api/v1/conversations/{id}/attachment-uploads/{uploadKey}"
 	PatternDeletePendingAttachment = "DELETE /api/v1/conversations/{id}/attachments/{attachmentId}"
 	PatternDownloadAttachment = "GET /api/v1/conversations/{id}/attachments/{attachmentId}/content"
+	PatternDownloadAttachmentThumbnail = "GET /api/v1/conversations/{id}/attachments/{attachmentId}/thumbnail"
 	PatternListAnnouncements = "GET /api/v1/announcements"
 	PatternMarkAnnouncementsRead = "POST /api/v1/announcements/read"
 	PatternCreateAnnouncement = "POST /api/v1/admin/announcements"
 	PatternDeleteAnnouncement = "DELETE /api/v1/admin/announcements/{id}"
 )
 
-// ChatHTTPServiceRoutes lists all 32 route specifications declared on ChatHTTPService.
+// ChatHTTPServiceRoutes lists all 42 route specifications declared on ChatHTTPService.
 var ChatHTTPServiceRoutes = []RouteSpec{
 	{Name: "GetBootstrap", Method: "GET", Path: "/api/v1/bootstrap", MuxPattern: PatternGetBootstrap, RequestType: "GetBootstrapReq", ResponseType: "BootstrapResp"},
 	{Name: "CreateWorkspace", Method: "POST", Path: "/api/v1/workspaces", MuxPattern: PatternCreateWorkspace, RequestType: "CreateWorkspaceReq", ResponseType: "CreateWorkspaceResp"},
@@ -101,7 +111,16 @@ var ChatHTTPServiceRoutes = []RouteSpec{
 	{Name: "RetractMessage", Method: "DELETE", Path: "/api/v1/conversations/:id/messages/:messageId", MuxPattern: PatternRetractMessage, RequestType: "RetractMessageReq", ResponseType: "MessageResp"},
 	{Name: "PutReaction", Method: "PUT", Path: "/api/v1/conversations/:id/messages/:messageId/reactions/:emoji", MuxPattern: PatternPutReaction, RequestType: "PutReactionReq", ResponseType: "ReactionsResp"},
 	{Name: "DeleteReaction", Method: "DELETE", Path: "/api/v1/conversations/:id/messages/:messageId/reactions/:emoji", MuxPattern: PatternDeleteReaction, RequestType: "DeleteReactionReq", ResponseType: "ReactionsResp"},
+	{Name: "PutPin", Method: "PUT", Path: "/api/v1/conversations/:id/pins/:messageId", MuxPattern: PatternPutPin, RequestType: "PutPinReq", ResponseType: "PutPinResp"},
+	{Name: "DeletePin", Method: "DELETE", Path: "/api/v1/conversations/:id/pins/:messageId", MuxPattern: PatternDeletePin, RequestType: "DeletePinReq", ResponseType: "DeletePinResp"},
+	{Name: "ListPins", Method: "GET", Path: "/api/v1/conversations/:id/pins", MuxPattern: PatternListPins, RequestType: "ListPinsReq", ResponseType: "ListPinsResp"},
+	{Name: "SaveMessage", Method: "PUT", Path: "/api/v1/conversations/:id/messages/:messageId/saved", MuxPattern: PatternSaveMessage, RequestType: "SaveMessageReq", ResponseType: "SaveMessageResp"},
+	{Name: "UnsaveMessage", Method: "DELETE", Path: "/api/v1/conversations/:id/messages/:messageId/saved", MuxPattern: PatternUnsaveMessage, RequestType: "UnsaveMessageReq", ResponseType: "EmptyResp"},
+	{Name: "ListSaved", Method: "GET", Path: "/api/v1/saved", MuxPattern: PatternListSaved, RequestType: "ListSavedReq", ResponseType: "ListSavedResp"},
+	{Name: "ListConversationSaved", Method: "GET", Path: "/api/v1/conversations/:id/saved", MuxPattern: PatternListConversationSaved, RequestType: "ListConversationSavedReq", ResponseType: "ListConversationSavedResp"},
 	{Name: "MarkRead", Method: "POST", Path: "/api/v1/conversations/:id/read", MuxPattern: PatternMarkRead, RequestType: "MarkReadReq", ResponseType: "MarkReadResp"},
+	{Name: "MarkUnread", Method: "POST", Path: "/api/v1/conversations/:id/unread", MuxPattern: PatternMarkUnread, RequestType: "MarkUnreadReq", ResponseType: "MarkUnreadResp"},
+	{Name: "ClearUnread", Method: "DELETE", Path: "/api/v1/conversations/:id/unread", MuxPattern: PatternClearUnread, RequestType: "ClearUnreadReq", ResponseType: "EmptyResp"},
 	{Name: "GetReadReceipts", Method: "GET", Path: "/api/v1/conversations/:id/read-receipts", MuxPattern: PatternGetReadReceipts, RequestType: "GetReadReceiptsReq", ResponseType: "ReadReceiptsResp"},
 	{Name: "SetNotificationLevel", Method: "PUT", Path: "/api/v1/conversations/:id/notification-level", MuxPattern: PatternSetNotificationLevel, RequestType: "SetNotificationLevelReq", ResponseType: "NotificationLevelResp"},
 	{Name: "SearchWorkspaceMessages", Method: "GET", Path: "/api/v1/workspaces/:id/messages/search", MuxPattern: PatternSearchWorkspaceMessages, RequestType: "SearchWorkspaceMessagesReq", ResponseType: "WorkspaceSearchPageResp"},
@@ -111,6 +130,7 @@ var ChatHTTPServiceRoutes = []RouteSpec{
 	{Name: "GetAttachmentUpload", Method: "GET", Path: "/api/v1/conversations/:id/attachment-uploads/:uploadKey", MuxPattern: PatternGetAttachmentUpload, RequestType: "GetAttachmentUploadReq", ResponseType: "AttachmentResp"},
 	{Name: "DeletePendingAttachment", Method: "DELETE", Path: "/api/v1/conversations/:id/attachments/:attachmentId", MuxPattern: PatternDeletePendingAttachment, RequestType: "DeletePendingAttachmentReq", ResponseType: "EmptyResp"},
 	{Name: "DownloadAttachment", Method: "GET", Path: "/api/v1/conversations/:id/attachments/:attachmentId/content", MuxPattern: PatternDownloadAttachment, RequestType: "DownloadAttachmentReq", ResponseType: "DownloadAttachmentResp"},
+	{Name: "DownloadAttachmentThumbnail", Method: "GET", Path: "/api/v1/conversations/:id/attachments/:attachmentId/thumbnail", MuxPattern: PatternDownloadAttachmentThumbnail, RequestType: "DownloadAttachmentThumbnailReq", ResponseType: "DownloadAttachmentResp"},
 	{Name: "ListAnnouncements", Method: "GET", Path: "/api/v1/announcements", MuxPattern: PatternListAnnouncements, RequestType: "ListAnnouncementsReq", ResponseType: "ListAnnouncementsResp"},
 	{Name: "MarkAnnouncementsRead", Method: "POST", Path: "/api/v1/announcements/read", MuxPattern: PatternMarkAnnouncementsRead, RequestType: "MarkAnnouncementsReadReq", ResponseType: "MarkAnnouncementsReadResp"},
 	{Name: "CreateAnnouncement", Method: "POST", Path: "/api/v1/admin/announcements", MuxPattern: PatternCreateAnnouncement, RequestType: "CreateAnnouncementReq", ResponseType: "AnnouncementResp"},
@@ -137,7 +157,16 @@ type ChatHTTPServiceRouteHandlers struct {
 	RetractMessage http.HandlerFunc
 	PutReaction http.HandlerFunc
 	DeleteReaction http.HandlerFunc
+	PutPin http.HandlerFunc
+	DeletePin http.HandlerFunc
+	ListPins http.HandlerFunc
+	SaveMessage http.HandlerFunc
+	UnsaveMessage http.HandlerFunc
+	ListSaved http.HandlerFunc
+	ListConversationSaved http.HandlerFunc
 	MarkRead http.HandlerFunc
+	MarkUnread http.HandlerFunc
+	ClearUnread http.HandlerFunc
 	GetReadReceipts http.HandlerFunc
 	SetNotificationLevel http.HandlerFunc
 	SearchWorkspaceMessages http.HandlerFunc
@@ -147,6 +176,7 @@ type ChatHTTPServiceRouteHandlers struct {
 	GetAttachmentUpload http.HandlerFunc
 	DeletePendingAttachment http.HandlerFunc
 	DownloadAttachment http.HandlerFunc
+	DownloadAttachmentThumbnail http.HandlerFunc
 	ListAnnouncements http.HandlerFunc
 	MarkAnnouncementsRead http.HandlerFunc
 	CreateAnnouncement http.HandlerFunc
@@ -227,10 +257,46 @@ func RegisterChatHTTPServiceRoutes(mux *http.ServeMux, h ChatHTTPServiceRouteHan
 		panic("ChatHTTPServiceRouteHandlers.DeleteReaction (" + PatternDeleteReaction + ") is nil")
 	}
 	mux.HandleFunc(PatternDeleteReaction, h.DeleteReaction)
+	if h.PutPin == nil {
+		panic("ChatHTTPServiceRouteHandlers.PutPin (" + PatternPutPin + ") is nil")
+	}
+	mux.HandleFunc(PatternPutPin, h.PutPin)
+	if h.DeletePin == nil {
+		panic("ChatHTTPServiceRouteHandlers.DeletePin (" + PatternDeletePin + ") is nil")
+	}
+	mux.HandleFunc(PatternDeletePin, h.DeletePin)
+	if h.ListPins == nil {
+		panic("ChatHTTPServiceRouteHandlers.ListPins (" + PatternListPins + ") is nil")
+	}
+	mux.HandleFunc(PatternListPins, h.ListPins)
+	if h.SaveMessage == nil {
+		panic("ChatHTTPServiceRouteHandlers.SaveMessage (" + PatternSaveMessage + ") is nil")
+	}
+	mux.HandleFunc(PatternSaveMessage, h.SaveMessage)
+	if h.UnsaveMessage == nil {
+		panic("ChatHTTPServiceRouteHandlers.UnsaveMessage (" + PatternUnsaveMessage + ") is nil")
+	}
+	mux.HandleFunc(PatternUnsaveMessage, h.UnsaveMessage)
+	if h.ListSaved == nil {
+		panic("ChatHTTPServiceRouteHandlers.ListSaved (" + PatternListSaved + ") is nil")
+	}
+	mux.HandleFunc(PatternListSaved, h.ListSaved)
+	if h.ListConversationSaved == nil {
+		panic("ChatHTTPServiceRouteHandlers.ListConversationSaved (" + PatternListConversationSaved + ") is nil")
+	}
+	mux.HandleFunc(PatternListConversationSaved, h.ListConversationSaved)
 	if h.MarkRead == nil {
 		panic("ChatHTTPServiceRouteHandlers.MarkRead (" + PatternMarkRead + ") is nil")
 	}
 	mux.HandleFunc(PatternMarkRead, h.MarkRead)
+	if h.MarkUnread == nil {
+		panic("ChatHTTPServiceRouteHandlers.MarkUnread (" + PatternMarkUnread + ") is nil")
+	}
+	mux.HandleFunc(PatternMarkUnread, h.MarkUnread)
+	if h.ClearUnread == nil {
+		panic("ChatHTTPServiceRouteHandlers.ClearUnread (" + PatternClearUnread + ") is nil")
+	}
+	mux.HandleFunc(PatternClearUnread, h.ClearUnread)
 	if h.GetReadReceipts == nil {
 		panic("ChatHTTPServiceRouteHandlers.GetReadReceipts (" + PatternGetReadReceipts + ") is nil")
 	}
@@ -267,6 +333,10 @@ func RegisterChatHTTPServiceRoutes(mux *http.ServeMux, h ChatHTTPServiceRouteHan
 		panic("ChatHTTPServiceRouteHandlers.DownloadAttachment (" + PatternDownloadAttachment + ") is nil")
 	}
 	mux.HandleFunc(PatternDownloadAttachment, h.DownloadAttachment)
+	if h.DownloadAttachmentThumbnail == nil {
+		panic("ChatHTTPServiceRouteHandlers.DownloadAttachmentThumbnail (" + PatternDownloadAttachmentThumbnail + ") is nil")
+	}
+	mux.HandleFunc(PatternDownloadAttachmentThumbnail, h.DownloadAttachmentThumbnail)
 	if h.ListAnnouncements == nil {
 		panic("ChatHTTPServiceRouteHandlers.ListAnnouncements (" + PatternListAnnouncements + ") is nil")
 	}
@@ -1075,6 +1145,309 @@ func RegisterChatHTTPServiceHertzServer(r *route.RouterGroup, srv ChatHTTPServer
 		})
 	}
 	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "PutPin", Method: "PUT", Path: "/api/v1/conversations/:id/pins/:messageId", MuxPattern: PatternPutPin, RequestType: "PutPinReq", ResponseType: "PutPinResp"}); hfn != nil {
+			r.PUT("/api/v1/conversations/:id/pins/:messageId", hfn)
+		} else {
+			r.PUT("/api/v1/conversations/:id/pins/:messageId", func(ctx context.Context, c *app.RequestContext) {
+				var req PutPinReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				if req.MessageId == "" {
+					req.MessageId = c.Param("messageId")
+				}
+				resp, err := srv.PutPin(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.PUT("/api/v1/conversations/:id/pins/:messageId", func(ctx context.Context, c *app.RequestContext) {
+			var req PutPinReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			if req.MessageId == "" {
+				req.MessageId = c.Param("messageId")
+			}
+			resp, err := srv.PutPin(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "DeletePin", Method: "DELETE", Path: "/api/v1/conversations/:id/pins/:messageId", MuxPattern: PatternDeletePin, RequestType: "DeletePinReq", ResponseType: "DeletePinResp"}); hfn != nil {
+			r.DELETE("/api/v1/conversations/:id/pins/:messageId", hfn)
+		} else {
+			r.DELETE("/api/v1/conversations/:id/pins/:messageId", func(ctx context.Context, c *app.RequestContext) {
+				var req DeletePinReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				if req.MessageId == "" {
+					req.MessageId = c.Param("messageId")
+				}
+				resp, err := srv.DeletePin(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.DELETE("/api/v1/conversations/:id/pins/:messageId", func(ctx context.Context, c *app.RequestContext) {
+			var req DeletePinReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			if req.MessageId == "" {
+				req.MessageId = c.Param("messageId")
+			}
+			resp, err := srv.DeletePin(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "ListPins", Method: "GET", Path: "/api/v1/conversations/:id/pins", MuxPattern: PatternListPins, RequestType: "ListPinsReq", ResponseType: "ListPinsResp"}); hfn != nil {
+			r.GET("/api/v1/conversations/:id/pins", hfn)
+		} else {
+			r.GET("/api/v1/conversations/:id/pins", func(ctx context.Context, c *app.RequestContext) {
+				var req ListPinsReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				resp, err := srv.ListPins(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.GET("/api/v1/conversations/:id/pins", func(ctx context.Context, c *app.RequestContext) {
+			var req ListPinsReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			resp, err := srv.ListPins(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "SaveMessage", Method: "PUT", Path: "/api/v1/conversations/:id/messages/:messageId/saved", MuxPattern: PatternSaveMessage, RequestType: "SaveMessageReq", ResponseType: "SaveMessageResp"}); hfn != nil {
+			r.PUT("/api/v1/conversations/:id/messages/:messageId/saved", hfn)
+		} else {
+			r.PUT("/api/v1/conversations/:id/messages/:messageId/saved", func(ctx context.Context, c *app.RequestContext) {
+				var req SaveMessageReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				if req.MessageId == "" {
+					req.MessageId = c.Param("messageId")
+				}
+				resp, err := srv.SaveMessage(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.PUT("/api/v1/conversations/:id/messages/:messageId/saved", func(ctx context.Context, c *app.RequestContext) {
+			var req SaveMessageReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			if req.MessageId == "" {
+				req.MessageId = c.Param("messageId")
+			}
+			resp, err := srv.SaveMessage(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "UnsaveMessage", Method: "DELETE", Path: "/api/v1/conversations/:id/messages/:messageId/saved", MuxPattern: PatternUnsaveMessage, RequestType: "UnsaveMessageReq", ResponseType: "EmptyResp"}); hfn != nil {
+			r.DELETE("/api/v1/conversations/:id/messages/:messageId/saved", hfn)
+		} else {
+			r.DELETE("/api/v1/conversations/:id/messages/:messageId/saved", func(ctx context.Context, c *app.RequestContext) {
+				var req UnsaveMessageReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				if req.MessageId == "" {
+					req.MessageId = c.Param("messageId")
+				}
+				resp, err := srv.UnsaveMessage(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.DELETE("/api/v1/conversations/:id/messages/:messageId/saved", func(ctx context.Context, c *app.RequestContext) {
+			var req UnsaveMessageReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			if req.MessageId == "" {
+				req.MessageId = c.Param("messageId")
+			}
+			resp, err := srv.UnsaveMessage(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "ListSaved", Method: "GET", Path: "/api/v1/saved", MuxPattern: PatternListSaved, RequestType: "ListSavedReq", ResponseType: "ListSavedResp"}); hfn != nil {
+			r.GET("/api/v1/saved", hfn)
+		} else {
+			r.GET("/api/v1/saved", func(ctx context.Context, c *app.RequestContext) {
+				var req ListSavedReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if v := c.Query("cursor"); v != "" {
+					req.Cursor = &v
+				}
+				if v := c.Query("limit"); v != "" {
+					req.Limit = &v
+				}
+				resp, err := srv.ListSaved(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.GET("/api/v1/saved", func(ctx context.Context, c *app.RequestContext) {
+			var req ListSavedReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if v := c.Query("cursor"); v != "" {
+				req.Cursor = &v
+			}
+			if v := c.Query("limit"); v != "" {
+				req.Limit = &v
+			}
+			resp, err := srv.ListSaved(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "ListConversationSaved", Method: "GET", Path: "/api/v1/conversations/:id/saved", MuxPattern: PatternListConversationSaved, RequestType: "ListConversationSavedReq", ResponseType: "ListConversationSavedResp"}); hfn != nil {
+			r.GET("/api/v1/conversations/:id/saved", hfn)
+		} else {
+			r.GET("/api/v1/conversations/:id/saved", func(ctx context.Context, c *app.RequestContext) {
+				var req ListConversationSavedReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				resp, err := srv.ListConversationSaved(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.GET("/api/v1/conversations/:id/saved", func(ctx context.Context, c *app.RequestContext) {
+			var req ListConversationSavedReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			resp, err := srv.ListConversationSaved(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
 		if hfn := hmw.HertzHandler(RouteSpec{Name: "MarkRead", Method: "POST", Path: "/api/v1/conversations/:id/read", MuxPattern: PatternMarkRead, RequestType: "MarkReadReq", ResponseType: "MarkReadResp"}); hfn != nil {
 			r.POST("/api/v1/conversations/:id/read", hfn)
 		} else {
@@ -1106,6 +1479,84 @@ func RegisterChatHTTPServiceHertzServer(r *route.RouterGroup, srv ChatHTTPServer
 				req.ID = c.Param("id")
 			}
 			resp, err := srv.MarkRead(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "MarkUnread", Method: "POST", Path: "/api/v1/conversations/:id/unread", MuxPattern: PatternMarkUnread, RequestType: "MarkUnreadReq", ResponseType: "MarkUnreadResp"}); hfn != nil {
+			r.POST("/api/v1/conversations/:id/unread", hfn)
+		} else {
+			r.POST("/api/v1/conversations/:id/unread", func(ctx context.Context, c *app.RequestContext) {
+				var req MarkUnreadReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				resp, err := srv.MarkUnread(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.POST("/api/v1/conversations/:id/unread", func(ctx context.Context, c *app.RequestContext) {
+			var req MarkUnreadReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			resp, err := srv.MarkUnread(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "ClearUnread", Method: "DELETE", Path: "/api/v1/conversations/:id/unread", MuxPattern: PatternClearUnread, RequestType: "ClearUnreadReq", ResponseType: "EmptyResp"}); hfn != nil {
+			r.DELETE("/api/v1/conversations/:id/unread", hfn)
+		} else {
+			r.DELETE("/api/v1/conversations/:id/unread", func(ctx context.Context, c *app.RequestContext) {
+				var req ClearUnreadReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				resp, err := srv.ClearUnread(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.DELETE("/api/v1/conversations/:id/unread", func(ctx context.Context, c *app.RequestContext) {
+			var req ClearUnreadReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			resp, err := srv.ClearUnread(ctx, &req)
 			if err != nil {
 				m.WriteDomainError(ctx, c, err)
 				return
@@ -1267,6 +1718,9 @@ func RegisterChatHTTPServiceHertzServer(r *route.RouterGroup, srv ChatHTTPServer
 				if v := c.Query("unreadOnly"); v != "" {
 					req.UnreadOnly = &v
 				}
+				if v := c.Query("messageId"); v != "" {
+					req.MessageId = &v
+				}
 				resp, err := srv.GetAttention(ctx, &req)
 				if err != nil {
 					m.WriteDomainError(ctx, c, err)
@@ -1290,6 +1744,9 @@ func RegisterChatHTTPServiceHertzServer(r *route.RouterGroup, srv ChatHTTPServer
 			}
 			if v := c.Query("unreadOnly"); v != "" {
 				req.UnreadOnly = &v
+			}
+			if v := c.Query("messageId"); v != "" {
+				req.MessageId = &v
 			}
 			resp, err := srv.GetAttention(ctx, &req)
 			if err != nil {
@@ -1517,6 +1974,51 @@ func RegisterChatHTTPServiceHertzServer(r *route.RouterGroup, srv ChatHTTPServer
 				req.AttachmentId = c.Param("attachmentId")
 			}
 			resp, err := srv.DownloadAttachment(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "DownloadAttachmentThumbnail", Method: "GET", Path: "/api/v1/conversations/:id/attachments/:attachmentId/thumbnail", MuxPattern: PatternDownloadAttachmentThumbnail, RequestType: "DownloadAttachmentThumbnailReq", ResponseType: "DownloadAttachmentResp"}); hfn != nil {
+			r.GET("/api/v1/conversations/:id/attachments/:attachmentId/thumbnail", hfn)
+		} else {
+			r.GET("/api/v1/conversations/:id/attachments/:attachmentId/thumbnail", func(ctx context.Context, c *app.RequestContext) {
+				var req DownloadAttachmentThumbnailReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				if req.AttachmentId == "" {
+					req.AttachmentId = c.Param("attachmentId")
+				}
+				resp, err := srv.DownloadAttachmentThumbnail(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.GET("/api/v1/conversations/:id/attachments/:attachmentId/thumbnail", func(ctx context.Context, c *app.RequestContext) {
+			var req DownloadAttachmentThumbnailReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			if req.AttachmentId == "" {
+				req.AttachmentId = c.Param("attachmentId")
+			}
+			resp, err := srv.DownloadAttachmentThumbnail(ctx, &req)
 			if err != nil {
 				m.WriteDomainError(ctx, c, err)
 				return
@@ -2020,6 +2522,128 @@ func RegisterChatHTTPServer(mux *http.ServeMux, srv ChatHTTPServer, m HTTPRespon
 		}
 		h.DeleteReaction = fn
 	}
+	if h.PutPin == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req PutPinReq
+			req.ID = r.PathValue("id")
+			req.MessageId = r.PathValue("messageId")
+			resp, err := srv.PutPin(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "PutPin", Method: "PUT", Path: "/api/v1/conversations/:id/pins/:messageId", MuxPattern: PatternPutPin, RequestType: "PutPinReq", ResponseType: "PutPinResp"}, fn)
+		}
+		h.PutPin = fn
+	}
+	if h.DeletePin == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req DeletePinReq
+			req.ID = r.PathValue("id")
+			req.MessageId = r.PathValue("messageId")
+			resp, err := srv.DeletePin(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "DeletePin", Method: "DELETE", Path: "/api/v1/conversations/:id/pins/:messageId", MuxPattern: PatternDeletePin, RequestType: "DeletePinReq", ResponseType: "DeletePinResp"}, fn)
+		}
+		h.DeletePin = fn
+	}
+	if h.ListPins == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req ListPinsReq
+			req.ID = r.PathValue("id")
+			resp, err := srv.ListPins(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "ListPins", Method: "GET", Path: "/api/v1/conversations/:id/pins", MuxPattern: PatternListPins, RequestType: "ListPinsReq", ResponseType: "ListPinsResp"}, fn)
+		}
+		h.ListPins = fn
+	}
+	if h.SaveMessage == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req SaveMessageReq
+			req.ID = r.PathValue("id")
+			req.MessageId = r.PathValue("messageId")
+			resp, err := srv.SaveMessage(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "SaveMessage", Method: "PUT", Path: "/api/v1/conversations/:id/messages/:messageId/saved", MuxPattern: PatternSaveMessage, RequestType: "SaveMessageReq", ResponseType: "SaveMessageResp"}, fn)
+		}
+		h.SaveMessage = fn
+	}
+	if h.UnsaveMessage == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req UnsaveMessageReq
+			req.ID = r.PathValue("id")
+			req.MessageId = r.PathValue("messageId")
+			_, err := srv.UnsaveMessage(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusNoContent, nil)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "UnsaveMessage", Method: "DELETE", Path: "/api/v1/conversations/:id/messages/:messageId/saved", MuxPattern: PatternUnsaveMessage, RequestType: "UnsaveMessageReq", ResponseType: "EmptyResp"}, fn)
+		}
+		h.UnsaveMessage = fn
+	}
+	if h.ListSaved == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req ListSavedReq
+			q := r.URL.Query()
+			if v := q.Get("cursor"); v != "" {
+				req.Cursor = &v
+			}
+			if v := q.Get("limit"); v != "" {
+				req.Limit = &v
+			}
+			resp, err := srv.ListSaved(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "ListSaved", Method: "GET", Path: "/api/v1/saved", MuxPattern: PatternListSaved, RequestType: "ListSavedReq", ResponseType: "ListSavedResp"}, fn)
+		}
+		h.ListSaved = fn
+	}
+	if h.ListConversationSaved == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req ListConversationSavedReq
+			req.ID = r.PathValue("id")
+			resp, err := srv.ListConversationSaved(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "ListConversationSaved", Method: "GET", Path: "/api/v1/conversations/:id/saved", MuxPattern: PatternListConversationSaved, RequestType: "ListConversationSavedReq", ResponseType: "ListConversationSavedResp"}, fn)
+		}
+		h.ListConversationSaved = fn
+	}
 	if h.MarkRead == nil {
 		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req MarkReadReq
@@ -2039,6 +2663,42 @@ func RegisterChatHTTPServer(mux *http.ServeMux, srv ChatHTTPServer, m HTTPRespon
 			fn = mw.WrapRoute(RouteSpec{Name: "MarkRead", Method: "POST", Path: "/api/v1/conversations/:id/read", MuxPattern: PatternMarkRead, RequestType: "MarkReadReq", ResponseType: "MarkReadResp"}, fn)
 		}
 		h.MarkRead = fn
+	}
+	if h.MarkUnread == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req MarkUnreadReq
+			if err := m.DecodeRequest(w, r, &req); err != nil {
+				m.WriteBindErrorHTTP(w, r, err)
+				return
+			}
+			req.ID = r.PathValue("id")
+			resp, err := srv.MarkUnread(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "MarkUnread", Method: "POST", Path: "/api/v1/conversations/:id/unread", MuxPattern: PatternMarkUnread, RequestType: "MarkUnreadReq", ResponseType: "MarkUnreadResp"}, fn)
+		}
+		h.MarkUnread = fn
+	}
+	if h.ClearUnread == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req ClearUnreadReq
+			req.ID = r.PathValue("id")
+			_, err := srv.ClearUnread(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusNoContent, nil)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "ClearUnread", Method: "DELETE", Path: "/api/v1/conversations/:id/unread", MuxPattern: PatternClearUnread, RequestType: "ClearUnreadReq", ResponseType: "EmptyResp"}, fn)
+		}
+		h.ClearUnread = fn
 	}
 	if h.GetReadReceipts == nil {
 		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2114,6 +2774,9 @@ func RegisterChatHTTPServer(mux *http.ServeMux, srv ChatHTTPServer, m HTTPRespon
 			}
 			if v := q.Get("unreadOnly"); v != "" {
 				req.UnreadOnly = &v
+			}
+			if v := q.Get("messageId"); v != "" {
+				req.MessageId = &v
 			}
 			resp, err := srv.GetAttention(r.Context(), &req)
 			if err != nil {
@@ -2218,6 +2881,23 @@ func RegisterChatHTTPServer(mux *http.ServeMux, srv ChatHTTPServer, m HTTPRespon
 			fn = mw.WrapRoute(RouteSpec{Name: "DownloadAttachment", Method: "GET", Path: "/api/v1/conversations/:id/attachments/:attachmentId/content", MuxPattern: PatternDownloadAttachment, RequestType: "DownloadAttachmentReq", ResponseType: "DownloadAttachmentResp"}, fn)
 		}
 		h.DownloadAttachment = fn
+	}
+	if h.DownloadAttachmentThumbnail == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req DownloadAttachmentThumbnailReq
+			req.ID = r.PathValue("id")
+			req.AttachmentId = r.PathValue("attachmentId")
+			resp, err := srv.DownloadAttachmentThumbnail(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "DownloadAttachmentThumbnail", Method: "GET", Path: "/api/v1/conversations/:id/attachments/:attachmentId/thumbnail", MuxPattern: PatternDownloadAttachmentThumbnail, RequestType: "DownloadAttachmentThumbnailReq", ResponseType: "DownloadAttachmentResp"}, fn)
+		}
+		h.DownloadAttachmentThumbnail = fn
 	}
 	if h.ListAnnouncements == nil {
 		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -163,6 +163,14 @@ func (r *Repository) DeleteConversationMembersInWorkspace(ctx context.Context, w
 	if _, err := conn.Exec(ctx, "DELETE FROM conversation_notification_levels nl USING conversations c WHERE nl.conversation_id=c.id AND c.workspace_id=$1 AND nl.user_id=ANY($2)", workspaceID, userIDs); err != nil {
 		return err
 	}
+	// Workspace removal revokes every conversation in it: private saved items and
+	// manual unread markers are deleted with the access.
+	if _, err := conn.Exec(ctx, "DELETE FROM saved_messages s USING conversations c WHERE s.conversation_id=c.id AND c.workspace_id=$1 AND s.user_id=ANY($2)", workspaceID, userIDs); err != nil {
+		return err
+	}
+	if _, err := conn.Exec(ctx, "UPDATE read_cursors r SET manual_unread_seq=NULL FROM conversations c WHERE r.conversation_id=c.id AND c.workspace_id=$1 AND r.user_id=ANY($2) AND r.manual_unread_seq IS NOT NULL", workspaceID, userIDs); err != nil {
+		return err
+	}
 	_, err := conn.Exec(ctx, "DELETE FROM conversation_members cm USING conversations c WHERE cm.conversation_id=c.id AND c.workspace_id=$1 AND cm.user_id=ANY($2)", workspaceID, userIDs)
 	return err
 }

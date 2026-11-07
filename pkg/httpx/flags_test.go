@@ -53,3 +53,25 @@ func TestPrivateContextFlagDoesNotBecomeBrowserCapability(t *testing.T) {
 		t.Fatal("expected explicit im.announcements.publish=false to disable announcement publishing")
 	}
 }
+
+func TestDefaultFeatureFlagsEnableIMCollaborationCapabilities(t *testing.T) {
+	defaultPath := filepath.Join("..", "..", "deploy", "feature-flags.default.json")
+	loaded := (Flags{Path: defaultPath}).Load()
+	if loaded.Revision != "im-collab-v1" {
+		t.Fatalf("expected revision im-collab-v1, got %q", loaded.Revision)
+	}
+	for _, key := range []string{
+		"im.messages.forward",
+		"im.messages.pin",
+		"im.messages.save",
+		"im.unread.mark",
+		"im.mentions.broadcast",
+	} {
+		if !loaded.Flags[key] {
+			t.Fatalf("expected %s enabled in default feature flags", key)
+		}
+		if !(Flags{}).Load().Flags[key] {
+			t.Fatalf("expected %s enabled in built-in default snapshot", key)
+		}
+	}
+}

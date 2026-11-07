@@ -10,19 +10,21 @@ import (
 
 // Service coordinates all Chat application use cases.
 type Service struct {
-	Tx             domain.TxManager
-	Mutations      domain.MutationRepository
-	Workspaces     domain.WorkspaceRepository
-	Conversations  domain.ConversationRepository
-	Memberships    domain.MembershipRepository
-	Messages       domain.MessageRepository
-	Attachments    domain.AttachmentRepository
-	Announcements  domain.AnnouncementRepository
-	Outbox         domain.OutboxRepository
-	Identity       domain.IdentityDirectory
-	Flags          domain.FeatureFlags
-	SniffMediaType func([]byte) string
-	ControlToken   string
+	Tx                domain.TxManager
+	Mutations         domain.MutationRepository
+	Workspaces        domain.WorkspaceRepository
+	Conversations     domain.ConversationRepository
+	Memberships       domain.MembershipRepository
+	Messages          domain.MessageRepository
+	Attachments       domain.AttachmentRepository
+	Announcements     domain.AnnouncementRepository
+	Outbox            domain.OutboxRepository
+	Identity          domain.IdentityDirectory
+	Presence          domain.PresenceDirectory
+	Flags             domain.FeatureFlags
+	SniffMediaType    func([]byte) string
+	GenerateThumbnail func(context.Context, string, []byte) *domain.AttachmentThumbnail
+	ControlToken      string
 }
 
 // MessageApp is an alias for Service focusing on message send/edit/retract/locate use cases.

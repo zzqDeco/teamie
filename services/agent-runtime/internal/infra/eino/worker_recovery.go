@@ -107,9 +107,9 @@ func finalizeSummaryWithSourceFormat(_ context.Context, original []*schema.Agent
 		var in Input
 		if json.Unmarshal([]byte(strings.TrimPrefix(agenticText(message), "TEAMIE_NEW_MESSAGE ")), &in) == nil {
 			source := map[string]any{"eventId": in.EventID, "workspaceId": in.WorkspaceID, "conversationId": in.ConversationID, "messageId": in.MessageID, "replyToId": in.ReplyToID, "senderId": in.SenderID, "senderKind": in.SenderKind}
-			attachmentIDs := []string{}
-			for _, a := range in.Attachments {
-				attachmentIDs = append(attachmentIDs, a.ID)
+			attachmentIDs := domain.MessageAttachmentIDs(in.Attachments, in.Forwarded)
+			if attachmentIDs == nil {
+				attachmentIDs = []string{}
 			}
 			if !omitEmptyAttachmentIDs || len(attachmentIDs) > 0 {
 				source["attachmentIds"] = attachmentIDs

@@ -14,7 +14,16 @@ import {
   restoreMentionsText,
   sanitizeLinkUrl,
 } from "./tokens";
-import type { ParseContext } from "./tokens";
+import type { ParseContext, ValidMention } from "./tokens";
+
+function isSelfMention(mention: ValidMention, currentUserId: string): boolean {
+  if (!currentUserId) return false;
+  if (mention.userId) return mention.userId === currentUserId;
+  if (mention.kind === "all" || mention.kind === "here") {
+    return mention.recipientIds?.includes(currentUserId) ?? false;
+  }
+  return false;
+}
 
 export function renderPlainWithMentions(
   text: string,
@@ -42,8 +51,9 @@ export function renderPlainWithMentions(
             nodes.push(
               <span
                 key={ctx.nextKey()}
-                className={`message-mention mention-pill${mention.userId === ctx.userId ? " mention-self" : ""}`}
+                className={`message-mention mention-pill${isSelfMention(mention, ctx.userId) ? " mention-self" : ""}`}
                 data-user-id={mention.userId}
+                data-mention-kind={mention.kind}
               >
                 {mention.text}
               </span>,
@@ -97,8 +107,9 @@ export function renderInline(
             nodes.push(
               <span
                 key={ctx.nextKey()}
-                className={`message-mention mention-pill${mention.userId === ctx.userId ? " mention-self" : ""}`}
+                className={`message-mention mention-pill${isSelfMention(mention, ctx.userId) ? " mention-self" : ""}`}
                 data-user-id={mention.userId}
+                data-mention-kind={mention.kind}
               >
                 {mention.text}
               </span>,

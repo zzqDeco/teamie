@@ -33,7 +33,7 @@ func (r *Repository) ConversationAccess(ctx context.Context, conversationID, use
 	var c domain.Conversation
 	var role string
 	conn := r.DB.Conn(ctx)
-	err := conn.QueryRow(ctx, `SELECT c.id,c.workspace_id,c.type,c.name,c.last_seq,COALESCE(r.seq,0),c.updated_at,COALESCE(c.created_by,''),wm.role,COALESCE(nl.level,'all') FROM conversations c JOIN workspace_members wm ON wm.workspace_id=c.workspace_id AND wm.user_id=$2 LEFT JOIN read_cursors r ON r.conversation_id=c.id AND r.user_id=$2 LEFT JOIN conversation_notification_levels nl ON nl.conversation_id=c.id AND nl.user_id=$2 WHERE c.id=$1 AND (c.type='channel' OR EXISTS(SELECT 1 FROM conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id=$2))`, conversationID, userID).Scan(&c.ID, &c.WorkspaceID, &c.Type, &c.Name, &c.LastSeq, &c.ReadSeq, &c.UpdatedAt, &c.CreatedBy, &role, &c.NotificationLevel)
+	err := conn.QueryRow(ctx, `SELECT c.id,c.workspace_id,c.type,c.name,c.last_seq,COALESCE(r.seq,0),COALESCE(r.manual_unread_seq,0),c.updated_at,COALESCE(c.created_by,''),wm.role,COALESCE(nl.level,'all') FROM conversations c JOIN workspace_members wm ON wm.workspace_id=c.workspace_id AND wm.user_id=$2 LEFT JOIN read_cursors r ON r.conversation_id=c.id AND r.user_id=$2 LEFT JOIN conversation_notification_levels nl ON nl.conversation_id=c.id AND nl.user_id=$2 WHERE c.id=$1 AND (c.type='channel' OR EXISTS(SELECT 1 FROM conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id=$2))`, conversationID, userID).Scan(&c.ID, &c.WorkspaceID, &c.Type, &c.Name, &c.LastSeq, &c.ReadSeq, &c.ManualUnreadSeq, &c.UpdatedAt, &c.CreatedBy, &role, &c.NotificationLevel)
 	if err != nil {
 		return c, notFound(err)
 	}
@@ -105,6 +105,12 @@ func (r *Repository) LockConversationForShare(ctx context.Context, conversationI
 	return notFound(err)
 }
 
+func (r *Repository) LockConversationForUpdate(ctx context.Context, conversationID string) error {
+	var id string
+	err := r.DB.Conn(ctx).QueryRow(ctx, "SELECT id FROM conversations WHERE id=$1 FOR UPDATE", conversationID).Scan(&id)
+	return notFound(err)
+}
+
 func (r *Repository) FindDirectConversationByPairKey(ctx context.Context, workspaceID, pairKey string) (string, bool, error) {
 	var existing string
 	err := r.DB.Conn(ctx).QueryRow(ctx, "SELECT id FROM conversations WHERE workspace_id=$1 AND pair_key=$2", workspaceID, pairKey).Scan(&existing)
@@ -137,6 +143,14 @@ func (r *Repository) DeleteConversationMember(ctx context.Context, conversationI
 	if _, err := conn.Exec(ctx, "DELETE FROM conversation_notification_levels WHERE conversation_id=$1 AND user_id=$2", conversationID, userID); err != nil {
 		return err
 	}
+	// Access loss deletes private saved items and the manual unread marker;
+	// regaining access never restores them.
+	if _, err := conn.Exec(ctx, "DELETE FROM saved_messages WHERE conversation_id=$1 AND user_id=$2", conversationID, userID); err != nil {
+		return err
+	}
+	if _, err := conn.Exec(ctx, "UPDATE read_cursors SET manual_unread_seq=NULL WHERE conversation_id=$1 AND user_id=$2 AND manual_unread_seq IS NOT NULL", conversationID, userID); err != nil {
+		return err
+	}
 	_, err := conn.Exec(ctx, "DELETE FROM conversation_members WHERE conversation_id=$1 AND user_id=$2", conversationID, userID)
 	return err
 }
@@ -164,6 +178,17 @@ func (r *Repository) IncrementConversationSeq(ctx context.Context, conversationI
 func (r *Repository) UpsertReadCursor(ctx context.Context, conversationID, userID string, seq int64) error {
 	_, err := r.DB.Conn(ctx).Exec(ctx, "INSERT INTO read_cursors(conversation_id,user_id,seq) VALUES($1,$2,$3) ON CONFLICT(conversation_id,user_id) DO UPDATE SET seq=GREATEST(read_cursors.seq,excluded.seq)", conversationID, userID, seq)
 	return err
+}
+
+// SetManualUnread replaces the caller's marker without moving the read cursor.
+func (r *Repository) SetManualUnread(ctx context.Context, conversationID, userID string, seq int64) error {
+	_, err := r.DB.Conn(ctx).Exec(ctx, "INSERT INTO read_cursors(conversation_id,user_id,seq,manual_unread_seq) VALUES($1,$2,0,$3) ON CONFLICT(conversation_id,user_id) DO UPDATE SET manual_unread_seq=excluded.manual_unread_seq", conversationID, userID, seq)
+	return err
+}
+
+func (r *Repository) ClearManualUnread(ctx context.Context, conversationID, userID string) (bool, error) {
+	tag, err := r.DB.Conn(ctx).Exec(ctx, "UPDATE read_cursors SET manual_unread_seq=NULL WHERE conversation_id=$1 AND user_id=$2 AND manual_unread_seq IS NOT NULL", conversationID, userID)
+	return tag.RowsAffected() > 0, err
 }
 
 func (r *Repository) SetNotificationLevel(ctx context.Context, conversationID, userID, level string) (bool, error) {
@@ -367,6 +392,7 @@ func (r *Repository) QuerySyncEvents(ctx context.Context, userID string, afterID
 				ev.Message.Body = ""
 				ev.Message.Attachments = nil
 				ev.Message.Mentions = nil
+				ev.Message.Forwarded = nil
 				ev.Message.Reactions = nil
 				ev.Message.RetractedAt = retractedAt
 				ev.Message.ReactionsVersion = reactionsVersion

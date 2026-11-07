@@ -11,11 +11,21 @@ import (
 
 // CallOutcome records the result and diagnostic telemetry of a unary model call.
 type CallOutcome struct {
-	Result           domain.ChatCallResult
-	Phase            string
-	PromptTokens     int64
-	CompletionTokens int64
-	Failure          error
+	Result            domain.ChatCallResult
+	Phase             string
+	PromptTokens      int64
+	CompletionTokens  int64
+	Failure           error
+	ProviderAttempted bool
+	ProviderOK        bool
+	ProviderErrorCode string
+	ExercisedModelID  string
+	ExercisedModel    string
+	ModelUpdatedAt    time.Time
+	ProviderUpdatedAt time.Time
+	HasCatalogTarget  bool
+	TestedAt          time.Time
+	LatencyMS         *int64
 }
 
 // StreamOutcome records the diagnostic telemetry of a streaming model call.
@@ -57,19 +67,44 @@ func (s *Service) CallChat(ctx context.Context, owner, agentID, sessionID, runID
 	}
 	var c domain.ResolvedModel
 	if StrictModelSelection(ctx) {
-		exact, ok := settings.ResolveExactModel(RequestedModelID(ctx))
+		reqID := RequestedModelID(ctx)
+		if !domain.ValidModelID(reqID) {
+			return fail(domain.Err(400, "invalid_request", "Invalid model ID"), "")
+		}
+		exact, ok := settings.ResolveExactModel(reqID)
 		if !ok {
 			return fail(domain.Err(404, "not_found", "Model profile not found"), "")
+		}
+		if !exact.Configured() {
+			return fail(domain.Err(409, "model_not_configured", "The selected model profile or provider is not configured"), "")
+		}
+		if !exact.ProviderEnabled {
+			return fail(domain.Err(409, "model_disabled", "The selected model's provider is disabled"), "")
+		}
+		if !exact.ModelEnabled {
+			return fail(domain.Err(409, "model_disabled", "The selected model profile is disabled"), "")
 		}
 		c = exact
 	} else {
 		c = settings.ResolveModel(RequestedModelID(ctx))
+		if !c.Configured() {
+			return fail(domain.Err(409, "model_unconfigured", "An administrator must configure the model gateway"), "")
+		}
+		if !c.Enabled {
+			return fail(domain.Err(409, "model_disabled", "The model gateway is disabled"), "")
+		}
 	}
-	if !c.Configured() {
-		return fail(domain.Err(409, "model_unconfigured", "An administrator must configure the model gateway"), "")
+	if _, err := domain.ParseEndpoint(c.BaseURL); err != nil {
+		return fail(err, "")
 	}
-	if !c.Enabled {
-		return fail(domain.Err(409, "model_disabled", "The model gateway is disabled"), "")
+	outcome.ExercisedModelID = c.ID
+	outcome.ExercisedModel = c.Model
+	if mProf, ok := settings.ModelByID(c.ID); ok {
+		if pProf, pOK := settings.ProviderByID(c.ProviderID); pOK {
+			outcome.ModelUpdatedAt = mProf.UpdatedAt
+			outcome.ProviderUpdatedAt = pProf.UpdatedAt
+			outcome.HasCatalogTarget = true
+		}
 	}
 	configID := c.CountingConfigID()
 	if expected := ExpectedModelConfigID(ctx); expected != "" && expected != configID {
@@ -84,6 +119,7 @@ func (s *Service) CallChat(ctx context.Context, owner, agentID, sessionID, runID
 	unlockAdmission()
 
 	start := time.Now()
+	var providerStart time.Time
 	outcome.Phase = "provider-generate"
 	providerKey := providerWorkerKey(c)
 	var (
@@ -130,11 +166,19 @@ func (s *Service) CallChat(ctx context.Context, owner, agentID, sessionID, runID
 			}
 			defer releaseSlot()
 
+			if !outcome.ProviderAttempted {
+				if callCtx.Err() != nil {
+					err = domain.StreamError(callCtx, "")
+					return true
+				}
+				providerStart = time.Now()
+				outcome.ProviderAttempted = true
+			}
 			outcome.Phase = "provider-generate"
 			body, prompt, completion, err = s.Model.Chat(callCtx, c, key, raw, messageLimits...)
 			if err == nil {
 				s.recordProviderSuccess(callCtx, providerKey, dispatchedAt)
-			} else if isRetryableUpstreamRateLimit(err) {
+			} else if isRetryableUpstreamRateLimit(err) && !SingleAttemptTest(callCtx) {
 				if backoff, wake, retry := s.recordRateLimitAndPlanRetry(callCtx, providerKey, dispatchedAt, err, attempt); retry {
 					retryBackoff = backoff
 					retryWake = wake
@@ -152,6 +196,17 @@ func (s *Service) CallChat(ctx context.Context, owner, agentID, sessionID, runID
 		if sErr := sleepWithContextOrWake(callCtx, retryBackoff, retryWake); sErr != nil {
 			err = sErr
 			break
+		}
+	}
+	if outcome.ProviderAttempted {
+		latMS := max(time.Since(providerStart).Milliseconds(), int64(0))
+		outcome.LatencyMS = &latMS
+		outcome.TestedAt = time.Now().UTC().Truncate(time.Microsecond)
+		if err == nil {
+			outcome.ProviderOK = true
+		} else {
+			outcome.ProviderOK = false
+			outcome.ProviderErrorCode = domain.SanitizeModelTestErrorCode(domain.AsError(err).Code)
 		}
 	}
 	outcome.PromptTokens = prompt

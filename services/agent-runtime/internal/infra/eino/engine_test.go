@@ -26,7 +26,6 @@ import (
 	"teamie/contracts/gen/agent/kitex_gen/agent/sandboxservice"
 	"teamie/contracts/gen/im/kitex_gen/im"
 	"teamie/contracts/gen/im/kitex_gen/im/identityservice"
-	"teamie/pkg/imtext"
 	_ "teamie/services/agent-runtime/internal/app"
 	_ "teamie/services/agent-runtime/internal/infra/pg"
 )
@@ -285,10 +284,10 @@ func (f *fixtureIM) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(parts) == 6 && r.Method == "POST" {
 		var body struct {
-			ClientMessageID string           `json:"clientMessageId"`
-			Body            string           `json:"body"`
-			ReplyToID       *string          `json:"replyToId"`
-			Mentions        []imtext.Mention `json:"mentions"`
+			ClientMessageID string        `json:"clientMessageId"`
+			Body            string        `json:"body"`
+			ReplyToID       *string       `json:"replyToId"`
+			Mentions        []MentionSpan `json:"mentions"`
 		}
 		if json.NewDecoder(r.Body).Decode(&body) != nil {
 			w.WriteHeader(400)

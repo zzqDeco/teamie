@@ -32,7 +32,6 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	wire "teamie/contracts/gen/agent/kitex_gen/agent"
 	"teamie/contracts/gen/agent/kitex_gen/agent/modelgatewayservice"
-	"teamie/pkg/imtext"
 	"teamie/services/agent-runtime/internal/domain"
 )
 
@@ -1180,7 +1179,7 @@ func TestConversationPresenceUnreadDigestAndProactiveList(t *testing.T) {
 				SenderKind:     "human",
 				Body:           "@Bot please review later",
 				Seq:            11,
-				Mentions:       []imtext.Mention{{UserID: agentID, Start: 0, End: 4}},
+				Mentions:       []MentionSpan{{UserID: agentID, Start: 0, End: 4}},
 			},
 		},
 		{

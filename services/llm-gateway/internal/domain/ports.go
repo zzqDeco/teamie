@@ -18,6 +18,13 @@ type ConfigStore interface {
 	Ready(ctx context.Context) error
 }
 
+// ModelTestStore persists and loads administrator model connection test diagnostics,
+// isolated from gateway configuration, routing, web-search, and usage stores.
+type ModelTestStore interface {
+	LoadModelTests(ctx context.Context) (map[string]ModelTestRecord, error)
+	RecordModelTest(ctx context.Context, rec ModelTestRecord) error
+}
+
 // UpstreamModel executes unary or streaming model inference against the configured provider.
 type UpstreamModel interface {
 	Chat(ctx context.Context, c ResolvedModel, key, raw string, messageLimits ...int) (body string, prompt, completion int64, err error)
