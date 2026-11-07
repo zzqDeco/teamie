@@ -328,4 +328,180 @@ SQL
   fi
   "${pg[@]}" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "DROP DATABASE restore_$suffix;"
 done
-echo 'All six disposable database dumps were restored and their rows, schema ledgers and binary data verified.'
+
+backup_bundle="$scratch/backup-bundle"
+mkdir -m 0700 "$backup_bundle"
+for suffix in identity chat marketplace agent_control agent_runtime gateway; do
+  cp "$scratch/$suffix.dump" "$backup_bundle/teamie_$suffix.dump"
+  chmod 0600 "$backup_bundle/teamie_$suffix.dump"
+done
+
+python3 - "$scratch" <<'PY'
+import hashlib, json, os, pathlib, sys
+scratch = pathlib.Path(sys.argv[1])
+ws_root = scratch / "sandbox-workspaces"
+st_root = scratch / "sandbox-state"
+ws_root.mkdir(mode=0o700)
+st_root.mkdir(mode=0o700)
+
+agent_id = "10000000-0000-4000-8000-000000000001"
+run_id = "20000000-0000-4000-8000-000000000001"
+agent_hash = hashlib.sha256(agent_id.encode("utf-8")).hexdigest()
+agent_ws = ws_root / agent_hash / "reports"
+agent_ws.mkdir(parents=True, mode=0o755)
+(agent_ws / "summary.md").write_text("# Restored Workspace\nAll invariants intact.\n", encoding="utf-8")
+(agent_ws / "attachment.bin").write_bytes(bytes.fromhex("00fffe80890a0d"))
+
+def task_key(aid: str, tid: str) -> str:
+    return hashlib.sha256((aid + "\x00" + tid).encode("utf-8")).hexdigest()
+
+completed_task = "restore-task-completed"
+unknown_task = "restore-task-unknown"
+(st_root / f"{task_key(agent_id, completed_task)}.task.json").write_text(
+    json.dumps({
+        "version": 2,
+        "agentId": agent_id,
+        "runId": run_id,
+        "taskId": completed_task,
+        "command": "python3 report.py",
+        "fingerprint": "a" * 64,
+        "containerName": "teamie-sbx-restore-1",
+        "cleanupDone": True,
+        "state": "completed",
+        "result": {"exitCode": 0, "stdout": "done\n", "stderr": "", "truncated": False},
+        "updatedAt": "2026-11-02T00:00:00Z",
+    }),
+    encoding="utf-8",
+)
+(st_root / f"{task_key(agent_id, unknown_task)}.task.json").write_text(
+    json.dumps({
+        "version": 2,
+        "agentId": agent_id,
+        "runId": run_id,
+        "taskId": unknown_task,
+        "command": "python3 interrupted.py",
+        "fingerprint": "b" * 64,
+        "containerName": "teamie-sbx-restore-2",
+        "cleanupDone": False,
+        "state": "unknown",
+        "result": {"exitCode": -1, "stdout": "", "stderr": "", "truncated": False, "errorCode": "execution_unknown"},
+        "updatedAt": "2026-11-02T00:00:00Z",
+    }),
+    encoding="utf-8",
+)
+expected_summary_hash = hashlib.sha256(b"# Restored Workspace\nAll invariants intact.\n").hexdigest()
+(st_root / "mutation-restore-01.file.json").write_text(
+    json.dumps({
+        "version": 1,
+        "fingerprint": "c" * 64,
+        "state": "completed",
+        "operation": "write",
+        "path": "reports/summary.md",
+        "expectedHash": expected_summary_hash,
+        "dataJson": "{\"ok\":true}",
+    }),
+    encoding="utf-8",
+)
+os.chmod(st_root / "mutation-restore-01.file.json", 0o600)
+PY
+
+python3 ops/sandbox_archive.py archive \
+  --workspaces "$scratch/sandbox-workspaces" \
+  --state "$scratch/sandbox-state" \
+  --out-dir "$backup_bundle" >/dev/null
+python3 ops/sandbox_archive.py checksums-write --dir "$backup_bundle" >/dev/null
+python3 ops/sandbox_archive.py checksums-verify --dir "$backup_bundle" >/dev/null
+
+python3 ops/sandbox_archive.py restore \
+  --archive "$backup_bundle/sandbox-workspaces.tar.gz" \
+  --target "$scratch/restored-workspaces" \
+  --scope workspaces >/dev/null
+python3 ops/sandbox_archive.py restore \
+  --archive "$backup_bundle/sandbox-state.tar.gz" \
+  --target "$scratch/restored-state" \
+  --scope state >/dev/null
+
+if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
+  python3 - "$scratch/restored-workspaces" "$scratch/restored-state" <<'PY'
+import hashlib, os, pathlib, sys
+ws_root = pathlib.Path(sys.argv[1])
+st_root = pathlib.Path(sys.argv[2])
+agent_hash = hashlib.sha256(b"10000000-0000-4000-8000-000000000001").hexdigest()
+assert (os.stat(ws_root).st_uid, os.stat(ws_root).st_gid) == (0, 0)
+assert (os.stat(ws_root / agent_hash).st_uid, os.stat(ws_root / agent_hash).st_gid) == (0, 0)
+assert (os.stat(ws_root / agent_hash / "reports").st_uid, os.stat(ws_root / agent_hash / "reports").st_gid) == (10001, 10001)
+assert (os.stat(ws_root / agent_hash / "reports/summary.md").st_uid, os.stat(ws_root / agent_hash / "reports/summary.md").st_gid) == (10001, 10001)
+assert (os.stat(st_root).st_uid, os.stat(st_root).st_gid) == (0, 0)
+assert (os.stat(st_root / "mutation-restore-01.file.json").st_uid, os.stat(st_root / "mutation-restore-01.file.json").st_gid) == (0, 0)
+PY
+elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+  chmod 0755 "$scratch" "$backup_bundle"
+  chmod 0644 "$backup_bundle/sandbox-workspaces.tar.gz" "$backup_bundle/sandbox-state.tar.gz"
+  sudo -n python3 ops/sandbox_archive.py restore \
+    --archive "$backup_bundle/sandbox-workspaces.tar.gz" \
+    --target "$scratch/root-restored-workspaces" \
+    --scope workspaces >/dev/null
+  sudo -n python3 ops/sandbox_archive.py restore \
+    --archive "$backup_bundle/sandbox-state.tar.gz" \
+    --target "$scratch/root-restored-state" \
+    --scope state >/dev/null
+  sudo -n python3 - "$scratch/root-restored-workspaces" "$scratch/root-restored-state" <<'PY'
+import hashlib, os, pathlib, shutil, sys
+ws_root = pathlib.Path(sys.argv[1])
+st_root = pathlib.Path(sys.argv[2])
+try:
+    agent_hash = hashlib.sha256(b"10000000-0000-4000-8000-000000000001").hexdigest()
+    assert (os.stat(ws_root).st_uid, os.stat(ws_root).st_gid) == (0, 0)
+    assert (os.stat(ws_root / agent_hash).st_uid, os.stat(ws_root / agent_hash).st_gid) == (0, 0)
+    assert (os.stat(ws_root / agent_hash / "reports").st_uid, os.stat(ws_root / agent_hash / "reports").st_gid) == (10001, 10001)
+    assert (os.stat(ws_root / agent_hash / "reports/summary.md").st_uid, os.stat(ws_root / agent_hash / "reports/summary.md").st_gid) == (10001, 10001)
+    assert (os.stat(st_root).st_uid, os.stat(st_root).st_gid) == (0, 0)
+    assert (os.stat(st_root / "mutation-restore-01.file.json").st_uid, os.stat(st_root / "mutation-restore-01.file.json").st_gid) == (0, 0)
+finally:
+    shutil.rmtree(ws_root, ignore_errors=True)
+    shutil.rmtree(st_root, ignore_errors=True)
+PY
+fi
+
+(cd services/sandbox && go build -o "$scratch/sandboxctl" ./cmd/sandboxctl)
+completed_probe=$(SANDBOX_STATE_ROOT="$scratch/restored-state" "$scratch/sandboxctl" task \
+  --agent 10000000-0000-4000-8000-000000000001 \
+  --run 20000000-0000-4000-8000-000000000001 \
+  --task restore-task-completed)
+unknown_probe=$(SANDBOX_STATE_ROOT="$scratch/restored-state" "$scratch/sandboxctl" task \
+  --agent 10000000-0000-4000-8000-000000000001 \
+  --run 20000000-0000-4000-8000-000000000001 \
+  --task restore-task-unknown)
+
+python3 - "$scratch/restored-workspaces" "$scratch/restored-state" "$completed_probe" "$unknown_probe" <<'PY'
+import hashlib, json, pathlib, sys
+ws_root = pathlib.Path(sys.argv[1])
+st_root = pathlib.Path(sys.argv[2])
+completed = json.loads(sys.argv[3])
+unknown = json.loads(sys.argv[4])
+assert completed["state"] == "completed" and completed["success"] is True, completed
+assert unknown["state"] == "unknown" and unknown["success"] is False, unknown
+agent_hash = hashlib.sha256(b"10000000-0000-4000-8000-000000000001").hexdigest()
+assert (ws_root / agent_hash / "reports/attachment.bin").read_bytes() == bytes.fromhex("00fffe80890a0d")
+file_rec = json.loads((st_root / "mutation-restore-01.file.json").read_text(encoding="utf-8"))
+actual_summary_hash = hashlib.sha256((ws_root / agent_hash / "reports/summary.md").read_bytes()).hexdigest()
+assert file_rec["state"] == "completed" and file_rec["expectedHash"] == actual_summary_hash
+PY
+
+cfg_root="$scratch/cfg-host"
+mkdir -p "$cfg_root/config" "$cfg_root/backups"
+printf 'GATEWAY_MASTER_KEY=%s\nAGENT_RUNTIME_TOKEN=%s\n' "$(printf '%064d' 0 | tr '0' 'e')" "ci-disposable-runtime-token-123456" > "$cfg_root/config/production.env"
+chmod 0600 "$cfg_root/config/production.env"
+cp deploy/feature-flags.default.json "$cfg_root/config/feature-flags.json"
+chmod 0644 "$cfg_root/config/feature-flags.json"
+printf 'ci-restore-passphrase-at-least-sixteen-bytes\n' > "$scratch/passphrase.key"
+chmod 0600 "$scratch/passphrase.key"
+TEAMIE_ROOT="$cfg_root" bash ops/backup-config-encrypted.sh \
+  --out "$scratch/offhost-config.enc" --passphrase-file "$scratch/passphrase.key" >/dev/null
+TEAMIE_ROOT="$cfg_root" bash ops/backup-config-encrypted.sh \
+  --decrypt --in "$scratch/offhost-config.enc" --out-dir "$scratch/restored-config" \
+  --passphrase-file "$scratch/passphrase.key" >/dev/null
+cmp -s "$cfg_root/config/production.env" "$scratch/restored-config/production.env" || { echo 'Encrypted production.env restore mismatch.' >&2; exit 1; }
+cmp -s "$cfg_root/config/feature-flags.json" "$scratch/restored-config/feature-flags.json" || { echo 'Encrypted feature-flags.json restore mismatch.' >&2; exit 1; }
+
+echo 'All six disposable database dumps, Sandbox workspaces/receipts and encrypted configuration bundles were restored and verified.'

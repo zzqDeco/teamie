@@ -83,12 +83,15 @@ func (w *agentWorker) makeAgent(ctx context.Context) (adk.TypedAgent[*schema.Age
 		presenceTools  []tool.BaseTool
 		unknownHandler func(context.Context, string, string) (string, error)
 	)
+	presenceMarketplaceActive := presenceActive && !run.isMarketplaceDisabled()
 	if presenceActive {
 		presenceTools, err = imToolBuilder.BuildPresenceTools()
 		if err != nil {
 			return nil, err
 		}
-		unknownHandler = imToolBuilder.HandleUnknownMCPTool
+		if presenceMarketplaceActive {
+			unknownHandler = imToolBuilder.HandleUnknownMCPTool
+		}
 	} else {
 		mcpTools, err = imToolBuilder.BuildMCPTools(ctx, run)
 		if err != nil {
@@ -142,14 +145,14 @@ func (w *agentWorker) makeAgent(ctx context.Context) (adk.TypedAgent[*schema.Age
 			return nil, err
 		}
 		handlers := []adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]{}
-		if presenceActive {
+		if presenceMarketplaceActive {
 			handlers = append(handlers, imToolBuilder.NewMCPDynamicToolMiddleware())
 		}
 		handlers = append(handlers, pipeline)
 		handlers = append(handlers, w.tasks.handlers...)
 		var instruction string
 		if budget.HumanPresenceV2 {
-			instruction = humanPresenceV2Instruction(w.def, budget, presenceActive, len(mcpTools) > 0)
+			instruction = humanPresenceV2Instruction(w.def, budget, presenceActive, len(mcpTools) > 0, run.isMarketplaceDisabled())
 		} else {
 			instruction = contextInstruction(w.def, budget)
 			if budget.FileDelivery {
@@ -171,8 +174,10 @@ func (w *agentWorker) makeAgent(ctx context.Context) (adk.TypedAgent[*schema.Age
 			if budget.DirectMessages {
 				instruction += directMessageGuidance
 			}
-			if presenceActive {
+			if presenceMarketplaceActive {
 				instruction += presenceAndMarketplaceGuidance
+			} else if presenceActive {
+				instruction += nativePresenceOnlyGuidance
 			} else if len(mcpTools) > 0 {
 				instruction += marketplaceAppGuidance
 			}
@@ -185,8 +190,10 @@ func (w *agentWorker) makeAgent(ctx context.Context) (adk.TypedAgent[*schema.Age
 		activeTools = append(activeTools, mcpTools...)
 	}
 	legacyInstruction := instruction(w.def)
-	if presenceActive {
+	if presenceMarketplaceActive {
 		legacyInstruction += presenceAndMarketplaceGuidance
+	} else if presenceActive {
+		legacyInstruction += nativePresenceOnlyGuidance
 	} else if len(mcpTools) > 0 {
 		legacyInstruction += marketplaceAppGuidance
 	}
@@ -211,7 +218,7 @@ func (w *agentWorker) makeAgent(ctx context.Context) (adk.TypedAgent[*schema.Age
 		return nil, err
 	}
 	handlers := []adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]{}
-	if presenceActive {
+	if presenceMarketplaceActive {
 		handlers = append(handlers, imToolBuilder.NewMCPDynamicToolMiddleware())
 	}
 	handlers = append(handlers, summary)
@@ -330,14 +337,34 @@ func (w *agentWorker) prepare(ctx context.Context, items []Input, resume *checkp
 		}
 		unique = pending
 	}
-	eligible, err := w.engine.Store.eligibleInputs(ctx, w.lease, unique)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	batch, extra := boundedInputBatch(eligible)
-	valid, err := w.validate(ctx, batch)
-	if err != nil {
-		return nil, nil, nil, err
+	candidates := unique
+	var (
+		batch      []Input
+		extra      []Input
+		valid      []Input
+		resumedRun bool
+		err        error
+	)
+	for len(candidates) > 0 {
+		batch, extra, resumedRun, err = w.engine.Store.partitionRunnableInputs(ctx, w.lease, candidates, resume)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if len(batch) == 0 {
+			break
+		}
+		if resumedRun {
+			valid = batch
+			break
+		}
+		valid, err = w.validate(ctx, batch)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if len(valid) > 0 {
+			break
+		}
+		candidates = extra
 	}
 	if len(valid) == 0 {
 		return nil, nil, nil, errors.New("no_pending_inputs")

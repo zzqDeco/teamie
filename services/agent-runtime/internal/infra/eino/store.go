@@ -21,6 +21,7 @@ import (
 
 var ErrLeaseLost = domain.ErrLeaseLost
 var ErrReplayConflict = domain.ErrReplayConflict
+var ErrMixedInputRunOwnership = domain.ErrMixedInputRunOwnership
 
 type Store struct {
 	DB          domain.RuntimeRepository
@@ -66,6 +67,7 @@ type Run struct {
 
 	presenceMu           sync.Mutex
 	presenceEnabled      bool
+	marketplaceDisabled  bool
 	activeWorkspaceID    string
 	activeConversationID string
 	activeConvType       string
@@ -88,6 +90,24 @@ func (r *Run) isPresenceEnabled() bool {
 	r.presenceMu.Lock()
 	defer r.presenceMu.Unlock()
 	return r.presenceEnabled
+}
+
+func (r *Run) setMarketplaceDisabled(disabled bool) {
+	if r == nil {
+		return
+	}
+	r.presenceMu.Lock()
+	r.marketplaceDisabled = disabled
+	r.presenceMu.Unlock()
+}
+
+func (r *Run) isMarketplaceDisabled() bool {
+	if r == nil {
+		return false
+	}
+	r.presenceMu.Lock()
+	defer r.presenceMu.Unlock()
+	return r.marketplaceDisabled
 }
 
 func (r *Run) setActiveConversation(workspaceID, conversationID, convType string) {
@@ -410,11 +430,15 @@ func (s *Store) StartRunWithContextPolicy(ctx context.Context, l *Lease, inputs 
 	if len(inputs) == 0 {
 		return nil, errors.New("empty run")
 	}
+	candidateIDs := make([]string, len(inputs))
+	for i, in := range inputs {
+		candidateIDs[i] = in.EventID
+	}
 	r := &Run{ID: uuid.NewString(), Attempt: uuid.NewString(), AgentID: l.AgentID, Inputs: inputs}
 	runID, inputsJSON, contextHead, acceptanceHead, contextProfile, contextBudget, resumed, err := s.DB.StartOrResumeRun(
 		ctx,
 		l,
-		inputs[0].EventID,
+		candidateIDs,
 		r.ID,
 		r.Attempt,
 		func() (string, []byte, string, json.RawMessage, []string, error) {

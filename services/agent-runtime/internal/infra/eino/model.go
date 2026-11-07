@@ -276,7 +276,7 @@ func retryError(err error) bool {
 	if errors.Is(err, ErrReplayConflict) || errors.Is(err, adk.ErrInvalidEventID) || errors.Is(err, adk.ErrDuplicateEventID) {
 		return false
 	}
-	if errors.Is(err, adk.ErrSessionEventPersistence) {
+	if errors.Is(err, adk.ErrSessionEventPersistence) || errors.Is(err, ErrMixedInputRunOwnership) {
 		return true
 	}
 	var networkError net.Error

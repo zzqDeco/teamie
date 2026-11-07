@@ -10,25 +10,81 @@ import (
 	"teamie/services/agent-runtime/internal/domain"
 )
 
-// StartOrResumeRun atomically starts a new Run or resumes an interrupted/retryable Run for firstEventID.
+// StartOrResumeRun atomically starts a new Run or resumes an interrupted/retryable Run for candidateEventIDs.
+// It enforces homogeneous Run ownership under row locks so fresh inputs and retryable inputs can never mix
+// or overwrite an existing Run's input binding.
 func (r *Repository) StartOrResumeRun(
 	ctx context.Context,
 	l *domain.Lease,
-	firstEventID, newRunID, attemptID string,
+	candidateEventIDs []string,
+	newRunID, attemptID string,
 	resolveNew func() (key string, inputsJSON []byte, profile string, budget json.RawMessage, eventIDs []string, err error),
 ) (runID string, inputsJSON []byte, contextHead, acceptanceHead int64, contextProfile string, contextBudget json.RawMessage, resumed bool, err error) {
+	if len(candidateEventIDs) == 0 {
+		return "", nil, 0, 0, "", nil, false, domain.ErrEmptyRun
+	}
+	uniqueCandidates := make([]string, 0, len(candidateEventIDs))
+	seenCandidate := make(map[string]bool, len(candidateEventIDs))
+	for _, id := range candidateEventIDs {
+		if id != "" && !seenCandidate[id] {
+			seenCandidate[id] = true
+			uniqueCandidates = append(uniqueCandidates, id)
+		}
+	}
+	if len(uniqueCandidates) == 0 {
+		return "", nil, 0, 0, "", nil, false, domain.ErrEmptyRun
+	}
 	err = r.WithinTx(ctx, func(txCtx context.Context) error {
 		if err := r.CheckLeaseForUpdate(txCtx, l); err != nil {
 			return err
 		}
 		conn := r.db.Conn(txCtx)
+		rows, qErr := conn.Query(txCtx, `SELECT event_id::text,state,COALESCE(run_id::text,'') FROM runtime_inputs WHERE agent_id=$1 AND event_id::text=ANY($2::text[]) ORDER BY event_id FOR UPDATE`, l.AgentID, uniqueCandidates)
+		if qErr != nil {
+			return qErr
+		}
+		ingested := make(map[string]bool, len(uniqueCandidates))
+		hasUnbound := false
+		allPending := true
 		var existing string
+		for rows.Next() {
+			var evID, state, boundRunID string
+			if scanErr := rows.Scan(&evID, &state, &boundRunID); scanErr != nil {
+				rows.Close()
+				return scanErr
+			}
+			if state != "pending" && state != "processing" {
+				rows.Close()
+				return domain.ErrMixedInputRunOwnership
+			}
+			if state != "pending" {
+				allPending = false
+			}
+			ingested[evID] = true
+			if boundRunID == "" {
+				hasUnbound = true
+				continue
+			}
+			if existing != "" && existing != boundRunID {
+				rows.Close()
+				return domain.ErrMixedInputRunOwnership
+			}
+			existing = boundRunID
+		}
+		if rowsErr := rows.Err(); rowsErr != nil {
+			rows.Close()
+			return rowsErr
+		}
+		rows.Close()
+		if existing != "" && (hasUnbound || len(ingested) != len(uniqueCandidates)) {
+			return domain.ErrMixedInputRunOwnership
+		}
+
 		var eventIDs []string
-		qErr := conn.QueryRow(txCtx, `SELECT run_id::text FROM runtime_inputs WHERE agent_id=$1 AND event_id=$2 AND run_id IS NOT NULL`, l.AgentID, firstEventID).Scan(&existing)
-		if qErr == nil {
+		if existing != "" {
 			resumed = true
 			runID = existing
-			if err := conn.QueryRow(txCtx, `UPDATE runtime_runs SET state='running',attempt_id=$2,attempts=attempts+1 WHERE id=$1 AND state IN ('running','interrupted','waiting_configuration','retry','waiting_input') RETURNING input_json,context_head,acceptance_head,context_profile,context_budget`, runID, attemptID).Scan(&inputsJSON, &contextHead, &acceptanceHead, &contextProfile, &contextBudget); err != nil {
+			if err := conn.QueryRow(txCtx, `UPDATE runtime_runs SET state='running',attempt_id=$2,attempts=attempts+1,updated_at=now() WHERE id=$1 AND agent_id=$3 AND state IN ('running','interrupted','waiting_configuration','retry','waiting_input') RETURNING input_json,context_head,acceptance_head,context_profile,context_budget`, runID, attemptID, l.AgentID).Scan(&inputsJSON, &contextHead, &acceptanceHead, &contextProfile, &contextBudget); err != nil {
 				return err
 			}
 			var parsed []struct {
@@ -40,26 +96,41 @@ func (r *Repository) StartOrResumeRun(
 			for _, item := range parsed {
 				eventIDs = append(eventIDs, item.EventID)
 			}
-		} else if postgres.IsNoRows(qErr) {
-			runID = newRunID
-			var key string
-			var rErr error
-			key, inputsJSON, contextProfile, contextBudget, eventIDs, rErr = resolveNew()
-			if rErr != nil {
-				return rErr
+			for _, evID := range eventIDs {
+				tag, err := conn.Exec(txCtx, `UPDATE runtime_inputs SET state='processing' WHERE agent_id=$1 AND event_id=$2 AND state IN ('pending','processing') AND run_id=$3`, l.AgentID, evID, runID)
+				if err != nil {
+					return err
+				}
+				if tag.RowsAffected() != 1 {
+					return domain.ErrReplayConflict
+				}
 			}
-			if err := conn.QueryRow(txCtx, `SELECT (SELECT COALESCE(max(seq),0) FROM runtime_session_events WHERE session_id=$1),(SELECT COALESCE(max(seq),0) FROM runtime_session_acceptances WHERE agent_id=$2)`, "agent:"+l.AgentID, l.AgentID).Scan(&contextHead, &acceptanceHead); err != nil {
-				return err
-			}
-			if _, err := conn.Exec(txCtx, `INSERT INTO runtime_runs(id,agent_id,input_key,input_json,attempt_id,context_head,acceptance_head,context_profile,context_budget) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, runID, l.AgentID, key, inputsJSON, attemptID, contextHead, acceptanceHead, contextProfile, contextBudget); err != nil {
-				return err
-			}
-		} else {
-			return qErr
+			return nil
+		}
+
+		if !allPending {
+			return domain.ErrMixedInputRunOwnership
+		}
+		runID = newRunID
+		var key string
+		var rErr error
+		key, inputsJSON, contextProfile, contextBudget, eventIDs, rErr = resolveNew()
+		if rErr != nil {
+			return rErr
+		}
+		if err := conn.QueryRow(txCtx, `SELECT (SELECT COALESCE(max(seq),0) FROM runtime_session_events WHERE session_id=$1),(SELECT COALESCE(max(seq),0) FROM runtime_session_acceptances WHERE agent_id=$2)`, "agent:"+l.AgentID, l.AgentID).Scan(&contextHead, &acceptanceHead); err != nil {
+			return err
+		}
+		if _, err := conn.Exec(txCtx, `INSERT INTO runtime_runs(id,agent_id,input_key,input_json,attempt_id,context_head,acceptance_head,context_profile,context_budget) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, runID, l.AgentID, key, inputsJSON, attemptID, contextHead, acceptanceHead, contextProfile, contextBudget); err != nil {
+			return err
 		}
 		for _, evID := range eventIDs {
-			if _, err := conn.Exec(txCtx, `UPDATE runtime_inputs SET state='processing',run_id=$3 WHERE agent_id=$1 AND event_id=$2 AND state IN ('pending','processing')`, l.AgentID, evID, runID); err != nil {
+			tag, err := conn.Exec(txCtx, `UPDATE runtime_inputs SET state='processing',run_id=$3 WHERE agent_id=$1 AND event_id=$2 AND state='pending' AND run_id IS NULL`, l.AgentID, evID, runID)
+			if err != nil {
 				return err
+			}
+			if ingested[evID] && tag.RowsAffected() != 1 {
+				return domain.ErrMixedInputRunOwnership
 			}
 		}
 		return nil

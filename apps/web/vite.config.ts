@@ -4,7 +4,27 @@ import { fileURLToPath, URL } from "node:url";
 export default defineConfig({
   plugins: [react()],
   build: {
-    chunkSizeWarningLimit: 1000,
+    chunkSizeWarningLimit: 500,
+    rolldownOptions: {
+      output: {
+        manualChunks(id) {
+          const normalized = id.replaceAll("\\", "/");
+          if (normalized.includes("/node_modules/katex/")) {
+            return "katex-vendor";
+          }
+          if (normalized.includes("/node_modules/lucide-react/")) {
+            return "icons-vendor";
+          }
+          if (
+            /\/node_modules\/(react|react-dom|react-router|react-router-dom|scheduler|@tanstack\/react-query)\//.test(
+              normalized,
+            )
+          ) {
+            return "react-vendor";
+          }
+        },
+      },
+    },
   },
   test: {
     testTimeout: 15000,

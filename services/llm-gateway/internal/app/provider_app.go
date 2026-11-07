@@ -160,6 +160,7 @@ func (s *Service) UpdateModelProvider(ctx context.Context, in UpdateModelProvide
 	if err != nil {
 		return domain.Config{}, err
 	}
+	s.resetProviderCooldown(in.ID)
 	s.cancelUnavailableModels(saved)
 	return saved, nil
 }
@@ -197,6 +198,7 @@ func (s *Service) DeleteModelProvider(ctx context.Context, id string) (domain.Co
 	if err != nil {
 		return domain.Config{}, err
 	}
+	s.resetProviderCooldown(id)
 	s.cancelUnavailableModels(saved)
 	return saved, nil
 }

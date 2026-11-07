@@ -245,23 +245,80 @@ func (r *mcpInMemoryRepo) ListPendingInputs(_ context.Context, _ string) ([][]by
 	return out, nil
 }
 
+func (r *mcpInMemoryRepo) InspectInputBindings(_ context.Context, _ string, ids []string) (map[string]domain.InputRunBinding, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	wanted := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		wanted[id] = true
+	}
+	out := make(map[string]domain.InputRunBinding, len(ids))
+	for idx, raw := range r.pending {
+		var in domain.Input
+		if json.Unmarshal(raw, &in) != nil || !wanted[in.EventID] {
+			continue
+		}
+		runID := r.runByKey[in.EventID]
+		state := "pending"
+		runState := ""
+		if runID != "" {
+			state = "processing"
+			runState = "retry"
+		}
+		out[in.EventID] = domain.InputRunBinding{
+			EventID:     in.EventID,
+			State:       state,
+			RunID:       runID,
+			RunState:    runState,
+			DeliverySeq: int64(idx + 1),
+		}
+	}
+	return out, nil
+}
+
 func (r *mcpInMemoryRepo) StartOrResumeRun(
 	_ context.Context,
 	_ *Lease,
-	firstEventID, newRunID, _ string,
+	candidateEventIDs []string,
+	newRunID, _ string,
 	prepareNew func() (key string, inputsJSON []byte, canonProfile string, canonBudget json.RawMessage, inputIDs []string, err error),
 ) (string, []byte, int64, int64, string, json.RawMessage, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if existingID, ok := r.runByKey[firstEventID]; ok {
+	if len(candidateEventIDs) == 0 {
+		return "", nil, 0, 0, "", nil, false, domain.ErrEmptyRun
+	}
+	firstEventID := candidateEventIDs[0]
+	var existingID string
+	hasUnbound := false
+	for _, evID := range candidateEventIDs {
+		bound, ok := r.runByKey[evID]
+		if !ok || bound == "" {
+			hasUnbound = true
+			continue
+		}
+		if existingID != "" && existingID != bound {
+			return "", nil, 0, 0, "", nil, false, domain.ErrMixedInputRunOwnership
+		}
+		existingID = bound
+	}
+	if existingID != "" && hasUnbound {
+		return "", nil, 0, 0, "", nil, false, domain.ErrMixedInputRunOwnership
+	}
+	if existingID != "" {
 		entry := r.runs[existingID]
 		return existingID, entry.inputsJSON, 0, 1, entry.contextProfile, entry.contextBudget, true, nil
 	}
-	key, inputsJSON, canonProfile, canonBudget, _, err := prepareNew()
+	key, inputsJSON, canonProfile, canonBudget, inputIDs, err := prepareNew()
 	if err != nil {
 		return "", nil, 0, 0, "", nil, false, err
 	}
-	r.runByKey[firstEventID] = newRunID
+	for _, evID := range inputIDs {
+		r.runByKey[evID] = newRunID
+	}
+	if len(inputIDs) == 0 {
+		r.runByKey[firstEventID] = newRunID
+	}
 	r.runs[newRunID] = struct {
 		key            string
 		inputsJSON     []byte

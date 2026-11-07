@@ -1,12 +1,26 @@
+import { Suspense } from "react";
 import { Link } from "react-router-dom";
 import { BookOpen, Code2, ShieldCheck } from "lucide-react";
 import type { Workspace } from "@teamie/api-client";
 import { canConfigureModelGateway } from "../agent-management";
 import { useAuth } from "../auth";
 import { ICON } from "../icons";
-import { DeveloperAppsList } from "./developer-apps";
-import { DeveloperAppDetail } from "./developer-app-detail";
-import { DeveloperHandbook } from "./developer-handbook";
+import { lazyView } from "../lazy-view";
+import { Loading } from "../ui";
+
+const DeveloperAppsList = lazyView(() =>
+  import("./developer-apps").then((m) => ({ default: m.DeveloperAppsList })),
+);
+const DeveloperAppDetail = lazyView(() =>
+  import("./developer-app-detail").then((m) => ({
+    default: m.DeveloperAppDetail,
+  })),
+);
+const DeveloperHandbook = lazyView(() =>
+  import("./developer-handbook").then((m) => ({
+    default: m.DeveloperHandbook,
+  })),
+);
 
 export function DeveloperPortal({
   appId,
@@ -37,13 +51,15 @@ export function DeveloperPortal({
           </Link>
         )}
       </nav>
-      {isDocsPage ? (
-        <DeveloperHandbook />
-      ) : appId ? (
-        <DeveloperAppDetail appId={appId} workspaces={workspaces} />
-      ) : (
-        <DeveloperAppsList />
-      )}
+      <Suspense fallback={<Loading />}>
+        {isDocsPage ? (
+          <DeveloperHandbook />
+        ) : appId ? (
+          <DeveloperAppDetail appId={appId} workspaces={workspaces} />
+        ) : (
+          <DeveloperAppsList />
+        )}
+      </Suspense>
     </>
   );
 }

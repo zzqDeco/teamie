@@ -257,16 +257,19 @@ func (s *Service) probeAppSnapshot(
 	ctx context.Context,
 	app domain.MarketplaceApp,
 	webURL, mcpURL string,
-	enforceCooldown bool,
+	mode probeMode,
 ) (domain.MarketplaceEndpointVerification, string, error) {
 	if s.Verifier == nil {
 		return domain.MarketplaceEndpointVerification{}, "", domain.ErrMarketplaceVerificationFailed("Endpoint verifier is not configured")
 	}
-	if enforceCooldown {
-		if err := s.acquireVerifySlot(app); err != nil {
-			return domain.MarketplaceEndpointVerification{}, "", err
-		}
+	release, err := s.acquireProbeAdmission(app, mode)
+	if err != nil {
+		return domain.MarketplaceEndpointVerification{}, "", err
 	}
+	probeSucceeded := false
+	defer func() {
+		release(probeSucceeded)
+	}()
 	secret := app.SigningSecret
 	if secret == "" {
 		var err error
@@ -288,6 +291,7 @@ func (s *Service) probeAppSnapshot(
 	if report.VerifiedAt.IsZero() {
 		report.VerifiedAt = s.nowUTC()
 	}
+	probeSucceeded = report.OK
 	return report, secret, nil
 }
 
@@ -313,7 +317,7 @@ func (s *Service) VerifyDeveloperMarketplaceApp(ctx context.Context, actor domai
 	if err != nil {
 		return domain.MarketplaceApp{}, domain.MarketplaceEndpointVerification{}, err
 	}
-	report, secret, err := s.probeAppSnapshot(ctx, app, webURL, mcpURL, true)
+	report, secret, err := s.probeAppSnapshot(ctx, app, webURL, mcpURL, probeModeVerify)
 	if err != nil {
 		return domain.MarketplaceApp{}, domain.MarketplaceEndpointVerification{}, err
 	}
@@ -372,7 +376,7 @@ func (s *Service) SubmitDeveloperMarketplaceApp(ctx context.Context, actor domai
 		return domain.MarketplaceApp{}, nil, domain.ErrMarketplaceInvalidState("No unpublished draft changes to submit")
 	}
 
-	report, snapshotSecret, err := s.probeAppSnapshot(ctx, snapshotApp, webURL, mcpURL, false)
+	report, snapshotSecret, err := s.probeAppSnapshot(ctx, snapshotApp, webURL, mcpURL, probeModeSubmit)
 	if err != nil {
 		return domain.MarketplaceApp{}, nil, err
 	}

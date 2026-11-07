@@ -29,6 +29,11 @@ const (
 	DefaultRateLimitBaseBackoff = 800 * time.Millisecond
 	// DefaultRateLimitMaxJitter is the random jitter added to each 429 backoff window.
 	DefaultRateLimitMaxJitter = 400 * time.Millisecond
+	// DefaultMaxRateLimitBackoff caps exponential 429 backoff when Retry-After is absent.
+	DefaultMaxRateLimitBackoff = 60 * time.Second
+	// DefaultMaxInlineRetryWait bounds inline sleep inside a single gateway HTTP call;
+	// longer Retry-After windows still persist on providerGate.cooldownUntil for subsequent calls.
+	DefaultMaxInlineRetryWait = 30 * time.Second
 
 	providerIdleTTL = 5 * time.Minute
 )
@@ -48,10 +53,30 @@ type providerWaiter struct {
 }
 
 type providerGate struct {
-	active        int
-	waiters       []*providerWaiter
-	cooldownUntil time.Time
-	lastActive    time.Time
+	active         int
+	waiters        []*providerWaiter
+	cooldownUntil  time.Time
+	cooldownSetAt  time.Time
+	cooldownWake   chan struct{}
+	consecutive429 int
+	lastActive     time.Time
+}
+
+func (g *providerGate) cooldownWakeChanLocked() <-chan struct{} {
+	if g.cooldownWake == nil {
+		g.cooldownWake = make(chan struct{})
+	}
+	return g.cooldownWake
+}
+
+func (g *providerGate) resetCooldownLocked() {
+	g.cooldownUntil = time.Time{}
+	g.cooldownSetAt = time.Time{}
+	g.consecutive429 = 0
+	if g.cooldownWake != nil {
+		close(g.cooldownWake)
+		g.cooldownWake = nil
+	}
 }
 
 // ParseProviderMaxWorkers parses GATEWAY_PROVIDER_MAX_WORKERS.
@@ -135,6 +160,22 @@ func (s *Service) SetRateLimitRetry(maxRetries int, baseBackoff, maxJitter time.
 	s.pool.maxRetries = maxRetries
 	s.pool.baseBackoff = baseBackoff
 	s.pool.maxJitter = maxJitter
+	for _, g := range s.providers {
+		g.resetCooldownLocked()
+	}
+	s.mu.Unlock()
+}
+
+func (s *Service) resetProviderCooldown(providerID string) {
+	id := strings.TrimSpace(providerID)
+	if id == "" {
+		return
+	}
+	key := "provider:" + id
+	s.mu.Lock()
+	if g := s.providers[key]; g != nil {
+		g.resetCooldownLocked()
+	}
 	s.mu.Unlock()
 }
 
@@ -294,23 +335,37 @@ func (s *Service) acquireProviderWorker(ctx context.Context, key string) (func()
 	}
 }
 
-func (s *Service) waitProviderCooldown(ctx context.Context, key string) error {
+func (s *Service) waitProviderCooldown(ctx context.Context, key string) (time.Time, error) {
 	if StrictModelSelection(ctx) {
-		return nil
+		return time.Now(), nil
 	}
-	s.mu.Lock()
-	var until time.Time
-	if gate := s.providers[key]; gate != nil {
-		until = gate.cooldownUntil
+	for {
+		now := time.Now()
+		s.mu.Lock()
+		var until time.Time
+		var wake <-chan struct{}
+		if gate := s.providers[key]; gate != nil && gate.cooldownUntil.After(now) {
+			until = gate.cooldownUntil
+			wake = gate.cooldownWakeChanLocked()
+		}
+		s.mu.Unlock()
+		if !until.After(now) {
+			if err := sleepWithContext(ctx, 0); err != nil {
+				return time.Time{}, err
+			}
+			return time.Now(), nil
+		}
+		if err := sleepWithContextOrWake(ctx, until.Sub(now), wake); err != nil {
+			return time.Time{}, err
+		}
 	}
-	s.mu.Unlock()
-	if until.IsZero() {
-		return sleepWithContext(ctx, 0)
-	}
-	return sleepWithContext(ctx, time.Until(until))
 }
 
 func sleepWithContext(ctx context.Context, d time.Duration) error {
+	return sleepWithContextOrWake(ctx, d, nil)
+}
+
+func sleepWithContextOrWake(ctx context.Context, d time.Duration, wake <-chan struct{}) error {
 	if err := ctx.Err(); err != nil {
 		return domain.StreamError(ctx, "gateway_unavailable")
 	}
@@ -322,6 +377,11 @@ func sleepWithContext(ctx context.Context, d time.Duration) error {
 	select {
 	case <-timer.C:
 		return nil
+	case <-wake:
+		if err := ctx.Err(); err != nil {
+			return domain.StreamError(ctx, "gateway_unavailable")
+		}
+		return nil
 	case <-ctx.Done():
 		return domain.StreamError(ctx, "gateway_unavailable")
 	}
@@ -332,30 +392,82 @@ func isRetryableUpstreamRateLimit(err error) bool {
 	return errors.As(err, &de) && de.Status == 429 && de.Code == "upstream_rate_limited"
 }
 
-func (s *Service) planRateLimitRetry(ctx context.Context, key string, attempt int) (time.Duration, bool) {
-	if ctx.Err() != nil {
-		return 0, false
+func (s *Service) recordProviderSuccess(ctx context.Context, key string, dispatchedAt time.Time) {
+	if StrictModelSelection(ctx) {
+		return
 	}
 	s.mu.Lock()
-	maxRetries, baseBackoff, maxJitter := s.effectiveRateLimitRetryLocked()
-	if attempt >= maxRetries {
-		s.mu.Unlock()
-		return 0, false
-	}
-	shift := attempt
-	if shift > 4 {
-		shift = 4
-	}
-	backoff := (baseBackoff << shift) + randomJitter(maxJitter)
-	if backoff > 0 {
-		now := time.Now()
-		gate := s.providerGateLocked(key, now)
-		until := now.Add(backoff)
-		if until.After(gate.cooldownUntil) {
-			gate.cooldownUntil = until
+	if gate := s.providers[key]; gate != nil {
+		if gate.cooldownSetAt.IsZero() || dispatchedAt.IsZero() || !dispatchedAt.Before(gate.cooldownSetAt) {
+			gate.resetCooldownLocked()
 		}
-		gate.lastActive = now
+		gate.lastActive = time.Now()
 	}
 	s.mu.Unlock()
-	return backoff, true
+}
+
+func (s *Service) recordRateLimitAndPlanRetry(ctx context.Context, key string, dispatchedAt time.Time, err error, attempt int) (time.Duration, <-chan struct{}, bool) {
+	var retryAfter time.Duration
+	var de *domain.Error
+	if errors.As(err, &de) && de.RetryAfter > 0 {
+		retryAfter = de.RetryAfter
+	}
+
+	s.mu.Lock()
+	maxRetries, baseBackoff, maxJitter := s.effectiveRateLimitRetryLocked()
+	var wait time.Duration
+	var wake <-chan struct{}
+	if !StrictModelSelection(ctx) {
+		now := time.Now()
+		gate := s.providerGateLocked(key, now)
+		if gate.consecutive429 == 0 || dispatchedAt.IsZero() || !dispatchedAt.Before(gate.cooldownSetAt) {
+			gate.consecutive429++
+			gate.cooldownSetAt = now
+		}
+		shift := gate.consecutive429 - 1
+		if shift < 0 {
+			shift = 0
+		}
+		if shift > 6 {
+			shift = 6
+		}
+		expBackoff := (baseBackoff << shift) + randomJitter(maxJitter)
+		if expBackoff > DefaultMaxRateLimitBackoff {
+			expBackoff = DefaultMaxRateLimitBackoff
+		}
+		delay := expBackoff
+		if retryAfter > delay {
+			delay = retryAfter
+		}
+		if delay > 0 {
+			until := now.Add(delay)
+			if until.After(gate.cooldownUntil) {
+				gate.cooldownUntil = until
+			}
+		}
+		gate.lastActive = now
+		if gate.cooldownUntil.After(now) {
+			wait = gate.cooldownUntil.Sub(now)
+			wake = gate.cooldownWakeChanLocked()
+		}
+	} else {
+		shift := attempt
+		if shift > 6 {
+			shift = 6
+		}
+		expBackoff := (baseBackoff << shift) + randomJitter(maxJitter)
+		if expBackoff > DefaultMaxRateLimitBackoff {
+			expBackoff = DefaultMaxRateLimitBackoff
+		}
+		wait = expBackoff
+		if retryAfter > wait {
+			wait = retryAfter
+		}
+	}
+	s.mu.Unlock()
+
+	if ctx.Err() != nil || attempt >= maxRetries || wait > DefaultMaxInlineRetryWait {
+		return 0, nil, false
+	}
+	return wait, wake, true
 }

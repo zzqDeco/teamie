@@ -67,7 +67,7 @@ func (s *Service) VerifyAdminMarketplaceApp(ctx context.Context, actor domain.Us
 	if err != nil {
 		return domain.MarketplaceApp{}, domain.MarketplaceEndpointVerification{}, err
 	}
-	report, secret, err := s.probeAppSnapshot(ctx, app, webURL, mcpURL, false)
+	report, secret, err := s.probeAppSnapshot(ctx, app, webURL, mcpURL, probeModeAdminVerify)
 	if err != nil {
 		return domain.MarketplaceApp{}, domain.MarketplaceEndpointVerification{}, err
 	}

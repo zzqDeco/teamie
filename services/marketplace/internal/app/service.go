@@ -12,24 +12,39 @@ import (
 	"teamie/services/marketplace/internal/domain"
 )
 
-const marketplaceFeatureFlag = "im.marketplace.enabled"
+const (
+	marketplaceFeatureFlag     = "im.marketplace.enabled"
+	DefaultMaxConcurrentProbes = 8
+)
+
+type probeMode uint8
+
+const (
+	probeModeVerify probeMode = iota + 1
+	probeModeSubmit
+	probeModeAdminVerify
+)
 
 // Service coordinates Marketplace catalog, developer self-service, protocol probing,
 // platform-admin review/governance, workspace installations, and group context tokens.
 type Service struct {
-	Tx                 domain.TxManager
-	Marketplace        domain.MarketplaceRepository
-	Identity           domain.IdentityDirectory
-	Chat               domain.ChatScope
-	Flags              domain.FeatureFlags
-	Verifier           domain.MarketplaceEndpointVerifier
-	AppOrigin          string
-	RequirePublicHTTPS *bool
-	VerifyCooldown     time.Duration
-	Now                func() time.Time
+	Tx                  domain.TxManager
+	Marketplace         domain.MarketplaceRepository
+	Identity            domain.IdentityDirectory
+	Chat                domain.ChatScope
+	Flags               domain.FeatureFlags
+	Verifier            domain.MarketplaceEndpointVerifier
+	AppOrigin           string
+	RequirePublicHTTPS  *bool
+	VerifyCooldown      time.Duration
+	MaxConcurrentProbes int
+	Now                 func() time.Time
 
-	cooldownMu sync.Mutex
-	lastVerify map[string]time.Time
+	probeMu         sync.Mutex
+	activeProbes    int
+	inFlightProbes  map[string]struct{}
+	lastVerify      map[string]time.Time
+	lastFailedProbe map[string]time.Time
 }
 
 func (s *Service) nowUTC() time.Time {
@@ -83,24 +98,111 @@ func (s *Service) CheckDependencies(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) acquireVerifySlot(app domain.MarketplaceApp) error {
-	if s == nil || s.VerifyCooldown <= 0 || app.ID == "" {
-		return nil
+func (s *Service) maxConcurrentProbes() int {
+	if s != nil && s.MaxConcurrentProbes > 0 {
+		return s.MaxConcurrentProbes
+	}
+	return DefaultMaxConcurrentProbes
+}
+
+func (s *Service) pruneExpiredProbeCooldownsLocked(now time.Time) {
+	if s.VerifyCooldown <= 0 {
+		return
+	}
+	if len(s.lastVerify) > 256 {
+		for id, ts := range s.lastVerify {
+			if now.Sub(ts) >= s.VerifyCooldown {
+				delete(s.lastVerify, id)
+			}
+		}
+	}
+	if len(s.lastFailedProbe) > 256 {
+		for id, ts := range s.lastFailedProbe {
+			if now.Sub(ts) >= s.VerifyCooldown {
+				delete(s.lastFailedProbe, id)
+			}
+		}
+	}
+}
+
+func (s *Service) acquireProbeAdmission(app domain.MarketplaceApp, mode probeMode) (func(succeeded bool), error) {
+	if s == nil {
+		return func(bool) {}, nil
 	}
 	now := s.nowUTC()
-	if app.LastVerifiedAt != nil && now.Sub(*app.LastVerifiedAt) < s.VerifyCooldown {
-		return domain.ErrMarketplaceVerifyRateLimited()
+
+	s.probeMu.Lock()
+	defer s.probeMu.Unlock()
+
+	if s.inFlightProbes == nil {
+		s.inFlightProbes = make(map[string]struct{})
 	}
-	s.cooldownMu.Lock()
-	defer s.cooldownMu.Unlock()
 	if s.lastVerify == nil {
 		s.lastVerify = make(map[string]time.Time)
 	}
-	if prev, ok := s.lastVerify[app.ID]; ok && now.Sub(prev) < s.VerifyCooldown {
-		return domain.ErrMarketplaceVerifyRateLimited()
+	if s.lastFailedProbe == nil {
+		s.lastFailedProbe = make(map[string]time.Time)
 	}
-	s.lastVerify[app.ID] = now
-	return nil
+	s.pruneExpiredProbeCooldownsLocked(now)
+
+	if app.ID != "" {
+		if _, busy := s.inFlightProbes[app.ID]; busy {
+			return nil, domain.ErrMarketplaceVerifyRateLimited()
+		}
+		if s.VerifyCooldown > 0 && mode != probeModeAdminVerify {
+			if prevFail, ok := s.lastFailedProbe[app.ID]; ok && now.Sub(prevFail) < s.VerifyCooldown {
+				return nil, domain.ErrMarketplaceVerifyRateLimited()
+			}
+			if app.LastVerifiedAt != nil && app.VerificationReport != nil && !app.VerificationReport.OK && now.Sub(*app.LastVerifiedAt) < s.VerifyCooldown {
+				return nil, domain.ErrMarketplaceVerifyRateLimited()
+			}
+			if mode == probeModeVerify {
+				if app.LastVerifiedAt != nil && now.Sub(*app.LastVerifiedAt) < s.VerifyCooldown {
+					return nil, domain.ErrMarketplaceVerifyRateLimited()
+				}
+				if prev, ok := s.lastVerify[app.ID]; ok && now.Sub(prev) < s.VerifyCooldown {
+					return nil, domain.ErrMarketplaceVerifyRateLimited()
+				}
+			}
+		}
+	}
+
+	if s.activeProbes >= s.maxConcurrentProbes() {
+		return nil, domain.ErrMarketplaceVerifyRateLimited()
+	}
+
+	s.activeProbes++
+	if app.ID != "" {
+		s.inFlightProbes[app.ID] = struct{}{}
+		if mode == probeModeVerify && s.VerifyCooldown > 0 {
+			s.lastVerify[app.ID] = now
+		}
+	}
+
+	var once sync.Once
+	return func(succeeded bool) {
+		once.Do(func() {
+			finishAt := s.nowUTC()
+			s.probeMu.Lock()
+			defer s.probeMu.Unlock()
+			if s.activeProbes > 0 {
+				s.activeProbes--
+			}
+			if app.ID != "" {
+				delete(s.inFlightProbes, app.ID)
+				if s.VerifyCooldown > 0 && mode != probeModeAdminVerify {
+					if mode == probeModeVerify {
+						s.lastVerify[app.ID] = finishAt
+					}
+					if succeeded {
+						delete(s.lastFailedProbe, app.ID)
+					} else {
+						s.lastFailedProbe[app.ID] = finishAt
+					}
+				}
+			}
+		})
+	}, nil
 }
 
 func normalizeSlug(raw string) (string, error) {
