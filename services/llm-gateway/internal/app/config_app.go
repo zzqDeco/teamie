@@ -184,7 +184,7 @@ func (s *Service) CreateModelProfile(ctx context.Context, in CreateModelProfileI
 		if displayName == "" {
 			displayName = in.Model
 		}
-		now := time.Now().UTC()
+		now := time.Now().UTC().Truncate(time.Microsecond)
 		profile := domain.ModelProfile{
 			ID:                  id,
 			ProviderID:          in.ProviderID,
@@ -260,28 +260,40 @@ func (s *Service) UpdateModelProfile(ctx context.Context, in UpdateModelProfileI
 			return nil, nil, domain.Err(404, "not_found", "Model provider not found")
 		}
 		m := models[idx]
-		if in.ProviderID != nil {
+		changed := false
+		if in.ProviderID != nil && m.ProviderID != *in.ProviderID {
 			m.ProviderID = *in.ProviderID
+			changed = true
 		}
-		if in.Model != nil {
+		if in.Model != nil && m.Model != *in.Model {
 			m.Model = *in.Model
+			changed = true
 		}
 		if in.DisplayName != nil {
-			m.DisplayName = *in.DisplayName
-			if m.DisplayName == "" {
-				m.DisplayName = m.Model
+			nextName := *in.DisplayName
+			if nextName == "" {
+				nextName = m.Model
+			}
+			if m.DisplayName != nextName {
+				m.DisplayName = nextName
+				changed = true
 			}
 		}
-		if in.Description != nil {
+		if in.Description != nil && m.Description != *in.Description {
 			m.Description = *in.Description
+			changed = true
 		}
-		if in.ContextWindowTokens != nil {
+		if in.ContextWindowTokens != nil && m.ContextWindow() != *in.ContextWindowTokens {
 			m.ContextWindowTokens = *in.ContextWindowTokens
+			changed = true
 		}
-		if in.Enabled != nil {
+		if in.Enabled != nil && m.Enabled != *in.Enabled {
 			m.Enabled = *in.Enabled
+			changed = true
 		}
-		m.UpdatedAt = time.Now().UTC()
+		if changed {
+			m.UpdatedAt = advanceUpdatedAt(m.UpdatedAt)
+		}
 		models[idx] = m
 		return providers, models, nil
 	})
@@ -338,7 +350,7 @@ func (s *Service) ResolveModelProfileForTest(ctx context.Context, id string) (do
 		return domain.ResolvedModel{}, domain.Err(404, "not_found", "Model profile not found")
 	}
 	if !rm.Configured() {
-		return domain.ResolvedModel{}, domain.Err(409, "model_unconfigured", "The selected model profile or provider is not configured")
+		return domain.ResolvedModel{}, domain.Err(409, "model_not_configured", "The selected model profile or provider is not configured")
 	}
 	if !rm.ProviderEnabled {
 		return domain.ResolvedModel{}, domain.Err(409, "model_disabled", "The selected model's provider is disabled")

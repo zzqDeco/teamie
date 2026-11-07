@@ -1,5 +1,5 @@
 {
-  "revision": "presence-v1",
+  "revision": "im-collab-v1",
   "flags": {
     "auth.public_signup": false,
     "auth.password_reset": true,
@@ -30,6 +30,11 @@
     "agents.schedule.v1": true,
     "agents.presence.v1": true,
     "im.marketplace.enabled": true,
-    "im.announcements.publish": true
+    "im.announcements.publish": true,
+    "im.messages.forward": true,
+    "im.messages.pin": true,
+    "im.messages.save": true,
+    "im.unread.mark": true,
+    "im.mentions.broadcast": true
   }
 }

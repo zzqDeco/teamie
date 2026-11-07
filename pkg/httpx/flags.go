@@ -27,6 +27,8 @@ var Implemented = map[string]bool{
 	"im.presence.publish": true, "im.attachments.upload": true, "im.reactions.create": true, "im.threads.create": false,
 	"im.read_receipts.view": true, "im.notifications.configure": true, "im.marketplace.enabled": true,
 	"im.announcements.publish": true,
+	"im.messages.forward": true, "im.messages.pin": true, "im.messages.save": true,
+	"im.unread.mark": true, "im.mentions.broadcast": true,
 }
 
 var defaultEnabledWhenOmitted = map[string]bool{

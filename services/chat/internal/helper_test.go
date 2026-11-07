@@ -17,6 +17,7 @@ import (
 	"teamie/services/chat/internal/app"
 	"teamie/services/chat/internal/domain"
 	"teamie/services/chat/internal/infra/flags"
+	"teamie/services/chat/internal/infra/fs"
 	"teamie/services/chat/internal/infra/pg"
 	redisinfra "teamie/services/chat/internal/infra/redis"
 	"teamie/services/chat/internal/infra/rpcclient"
@@ -195,8 +196,19 @@ func fromDomainEvent(ev domain.Event) Event {
 }
 
 type Store struct {
-	DB    *pgxpool.Pool
-	Flags httpx.Flags
+	DB       *pgxpool.Pool
+	Flags    httpx.Flags
+	Presence domain.PresenceDirectory
+}
+
+type storeFlags struct{ s *Store }
+
+func (f storeFlags) Enabled(key string) bool {
+	return flags.New(f.s.Flags).Enabled(key)
+}
+
+func (f storeFlags) Snapshot() (string, map[string]bool) {
+	return flags.New(f.s.Flags).Snapshot()
 }
 
 func (s *Store) App(identity httpx.Identity, controlToken string) *app.Service {
@@ -206,19 +218,21 @@ func (s *Store) App(identity httpx.Identity, controlToken string) *app.Service {
 		idDir = rpcclient.NewIdentity(identity)
 	}
 	return &app.Service{
-		Tx:             repo,
-		Mutations:      repo,
-		Workspaces:     repo,
-		Conversations:  repo,
-		Memberships:    repo,
-		Messages:       repo,
-		Attachments:    repo,
-		Announcements:  repo,
-		Outbox:         repo,
-		Identity:       idDir,
-		Flags:          flags.New(s.Flags),
-		SniffMediaType: http.DetectContentType,
-		ControlToken:   controlToken,
+		Tx:                repo,
+		Mutations:         repo,
+		Workspaces:        repo,
+		Conversations:     repo,
+		Memberships:       repo,
+		Messages:          repo,
+		Attachments:       repo,
+		Announcements:     repo,
+		Outbox:            repo,
+		Identity:          idDir,
+		Presence:          s.Presence,
+		Flags:             storeFlags{s: s},
+		SniffMediaType:    fs.SniffMediaType,
+		GenerateThumbnail: fs.GenerateThumbnail,
+		ControlToken:      controlToken,
 	}
 }
 
@@ -475,11 +489,15 @@ func (s *Store) publishOne(ctx context.Context, rdb outboxPublisher) (bool, erro
 type Handler struct {
 	Store    *Store
 	Identity httpx.Identity
+	Presence domain.PresenceDirectory
 	Origin   string
 }
 
 func (h *Handler) Routes() http.Handler {
 	svc := h.Store.App(h.Identity, "")
+	if h.Presence != nil {
+		svc.Presence = h.Presence
+	}
 	adapter := &httpadapter.Adapter{
 		App:       svc,
 		Auth:      h.Identity,

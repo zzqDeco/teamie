@@ -3,10 +3,13 @@ package httpAdapter
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
+	"go.uber.org/zap"
 	gatewaygen "teamie/contracts/gen/agent/hertz_gen/agent/gateway"
 	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
+	"teamie/pkg/observability"
 	"teamie/services/llm-gateway/internal/app"
 	"teamie/services/llm-gateway/internal/domain"
 )
@@ -45,7 +48,7 @@ func (a *Adapter) GetAdminModelConfig(ctx context.Context, _ *gatewaygen.GetAdmi
 	if err != nil {
 		return nil, err
 	}
-	return toAdminModelConfigResp(c), nil
+	return a.adminModelConfigResp(ctx, c)
 }
 
 func (a *Adapter) UpdateAdminModelConfig(context.Context, *gatewaygen.UpdateAdminModelConfigReq) (*gatewaygen.AdminModelConfigResp, error) {
@@ -60,7 +63,7 @@ func (a *Adapter) UpdateAdminWebSearchConfig(ctx context.Context, req *gatewayge
 	if err != nil {
 		return nil, err
 	}
-	return toAdminModelConfigResp(c), nil
+	return a.adminMutationResp(ctx, c), nil
 }
 
 func (a *Adapter) UpdateAdminModelRouting(ctx context.Context, req *gatewaygen.UpdateAdminModelRoutingReq) (*gatewaygen.AdminModelConfigResp, error) {
@@ -71,7 +74,7 @@ func (a *Adapter) UpdateAdminModelRouting(ctx context.Context, req *gatewaygen.U
 	if err != nil {
 		return nil, err
 	}
-	return toAdminModelConfigResp(c), nil
+	return a.adminMutationResp(ctx, c), nil
 }
 
 func (a *Adapter) CreateAdminModelProvider(ctx context.Context, req *gatewaygen.CreateAdminModelProviderReq) (*gatewaygen.AdminModelConfigResp, error) {
@@ -88,7 +91,7 @@ func (a *Adapter) CreateAdminModelProvider(ctx context.Context, req *gatewaygen.
 	if err != nil {
 		return nil, err
 	}
-	return toAdminModelConfigResp(c), nil
+	return a.adminMutationResp(ctx, c), nil
 }
 
 func (a *Adapter) UpdateAdminModelProvider(ctx context.Context, req *gatewaygen.UpdateAdminModelProviderReq) (*gatewaygen.AdminModelConfigResp, error) {
@@ -106,7 +109,7 @@ func (a *Adapter) UpdateAdminModelProvider(ctx context.Context, req *gatewaygen.
 	if err != nil {
 		return nil, err
 	}
-	return toAdminModelConfigResp(c), nil
+	return a.adminMutationResp(ctx, c), nil
 }
 
 func (a *Adapter) DeleteAdminModelProvider(ctx context.Context, req *gatewaygen.DeleteAdminModelProviderReq) (*gatewaygen.AdminModelConfigResp, error) {
@@ -117,7 +120,7 @@ func (a *Adapter) DeleteAdminModelProvider(ctx context.Context, req *gatewaygen.
 	if err != nil {
 		return nil, err
 	}
-	return toAdminModelConfigResp(c), nil
+	return a.adminMutationResp(ctx, c), nil
 }
 
 func (a *Adapter) CreateAdminModelProfile(ctx context.Context, req *gatewaygen.CreateAdminModelProfileReq) (*gatewaygen.AdminModelConfigResp, error) {
@@ -136,7 +139,7 @@ func (a *Adapter) CreateAdminModelProfile(ctx context.Context, req *gatewaygen.C
 	if err != nil {
 		return nil, err
 	}
-	return toAdminModelConfigResp(c), nil
+	return a.adminMutationResp(ctx, c), nil
 }
 
 func (a *Adapter) UpdateAdminModelProfile(ctx context.Context, req *gatewaygen.UpdateAdminModelProfileReq) (*gatewaygen.AdminModelConfigResp, error) {
@@ -155,7 +158,7 @@ func (a *Adapter) UpdateAdminModelProfile(ctx context.Context, req *gatewaygen.U
 	if err != nil {
 		return nil, err
 	}
-	return toAdminModelConfigResp(c), nil
+	return a.adminMutationResp(ctx, c), nil
 }
 
 func (a *Adapter) DeleteAdminModelProfile(ctx context.Context, req *gatewaygen.DeleteAdminModelProfileReq) (*gatewaygen.AdminModelConfigResp, error) {
@@ -166,7 +169,7 @@ func (a *Adapter) DeleteAdminModelProfile(ctx context.Context, req *gatewaygen.D
 	if err != nil {
 		return nil, err
 	}
-	return toAdminModelConfigResp(c), nil
+	return a.adminMutationResp(ctx, c), nil
 }
 
 func (a *Adapter) TestAdminModelConfig(ctx context.Context, _ *gatewaygen.TestAdminModelConfigReq) (*gatewaygen.TestAdminModelConfigResp, error) {
@@ -177,27 +180,17 @@ func (a *Adapter) TestAdminModelProfile(ctx context.Context, req *gatewaygen.Tes
 	if req == nil {
 		return nil, domain.Err(400, "invalid_request", "Invalid model ID")
 	}
-	if _, err := a.App.ResolveModelProfileForTest(ctx, req.ID); err != nil {
-		return nil, err
+	id := strings.TrimSpace(req.ID)
+	if !domain.ValidModelID(id) {
+		return nil, domain.Err(400, "invalid_request", "Invalid model ID")
 	}
-	return a.testAdminModelConfigWithOwner(ctx, adminOwnerFromContext(ctx), req.ID)
+	return a.testAdminModelConfigWithOwner(ctx, adminOwnerFromContext(ctx), id)
 }
 
 func (a *Adapter) testAdminModelConfigWithOwner(ctx context.Context, owner, modelID string) (*gatewaygen.TestAdminModelConfigResp, error) {
-	c, err := a.App.LoadConfig(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var resolved domain.ResolvedModel
+	ctx = app.WithSingleAttemptTest(ctx)
 	if modelID != "" {
-		exact, ok := c.ResolveExactModel(modelID)
-		if !ok {
-			return nil, domain.Err(404, "not_found", "Model profile not found")
-		}
-		resolved = exact
 		ctx = app.WithStrictRequestedModelID(ctx, modelID)
-	} else {
-		resolved = c.ResolveModel("")
 	}
 	start := time.Now()
 	raw, _ := json.Marshal(modeltransport.Request{
@@ -205,13 +198,28 @@ func (a *Adapter) testAdminModelConfigWithOwner(ctx context.Context, owner, mode
 		Messages: json.RawMessage(`[{"role":"user","content_blocks":[{"type":"user_input_text","user_input_text":{"text":"Reply with OK."}}]}]`),
 		Options:  json.RawMessage(`{"MaxTokens":8,"AgenticToolChoice":{"Type":"forbidden"}}`),
 	})
-	res := a.callWithObservability(ctx, owner, "admin-test", "admin-test", start.UTC().Format("20060102T150405.000000000"), string(raw))
-	if !res.Ok {
-		return nil, domain.Err(int(res.GetStatusCode()), res.GetErrorCode(), res.GetErrorMessage())
+	outcome := a.callOutcomeWithObservability(ctx, owner, "admin-test", "admin-test", start.UTC().Format("20060102T150405.000000000"), string(raw))
+	recordErr := a.App.RecordModelTestOutcome(outcome)
+	res := outcome.Result
+	if !res.OK {
+		if recordErr != nil {
+			observability.L(ctx).Warn("Model test diagnostic write failed",
+				zap.String("event.action", "model-test-record-failed"),
+				zap.String("event.outcome", "failure"),
+			)
+		}
+		return nil, domain.Err(res.StatusCode, res.ErrorCode, res.ErrorMessage)
+	}
+	if recordErr != nil {
+		return nil, domain.ErrWithCause(503, "gateway_unavailable", "Model test diagnostic could not be recorded", recordErr)
+	}
+	latencyMS := time.Since(start).Milliseconds()
+	if outcome.LatencyMS != nil {
+		latencyMS = *outcome.LatencyMS
 	}
 	return &gatewaygen.TestAdminModelConfigResp{
 		Ok:        true,
-		Model:     resolved.Model,
-		LatencyMs: time.Since(start).Milliseconds(),
+		Model:     outcome.ExercisedModel,
+		LatencyMs: latencyMS,
 	}, nil
 }

@@ -316,7 +316,7 @@ func TestSchemaVersionFenceRejectsNewerAndIncompleteLedgers(t *testing.T) {
 	}{
 		{name: "empty_ledger", versions: nil},
 		{name: "gapped_ledger", versions: []int{1, 2, 4}},
-		{name: "future_schema_v7", versions: []int{1, 2, 3, 4, 5, 6, 7}},
+		{name: "future_schema_v8", versions: []int{1, 2, 3, 4, 5, 6, 7, 8}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			admin, err := pgx.Connect(ctx, baseDSN)

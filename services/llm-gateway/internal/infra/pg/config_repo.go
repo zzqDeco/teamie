@@ -16,7 +16,7 @@ import (
 )
 
 // GatewaySchemaVersion is the current durable PostgreSQL schema version for llm-gateway.
-const GatewaySchemaVersion = 6
+const GatewaySchemaVersion = 7
 
 // DefaultPingCacheTTL bounds how long repeated idle Agent Ping checks reuse an
 // unchanged configuration snapshot before re-querying PostgreSQL. Catalog,
@@ -541,12 +541,12 @@ func (s *PGStore) UpdateCatalog(ctx context.Context, change func([]domain.Provid
 			return err
 		}
 		for _, p := range nextProviders {
-			if _, err = s.DB.Conn(ctx).Exec(ctx, `INSERT INTO gateway_providers(id,display_name,base_url,encrypted_key,enabled) VALUES($1,$2,$3,$4,$5) ON CONFLICT(id) DO UPDATE SET display_name=EXCLUDED.display_name,base_url=EXCLUDED.base_url,encrypted_key=EXCLUDED.encrypted_key,enabled=EXCLUDED.enabled,updated_at=now() WHERE (gateway_providers.display_name,gateway_providers.base_url,gateway_providers.encrypted_key,gateway_providers.enabled) IS DISTINCT FROM (EXCLUDED.display_name,EXCLUDED.base_url,EXCLUDED.encrypted_key,EXCLUDED.enabled)`, p.ID, p.DisplayName, p.BaseURL, p.CipherKey, p.Enabled); err != nil {
+			if _, err = s.DB.Conn(ctx).Exec(ctx, `INSERT INTO gateway_providers(id,display_name,base_url,encrypted_key,enabled) VALUES($1,$2,$3,$4,$5) ON CONFLICT(id) DO UPDATE SET display_name=EXCLUDED.display_name,base_url=EXCLUDED.base_url,encrypted_key=EXCLUDED.encrypted_key,enabled=EXCLUDED.enabled,updated_at=GREATEST(now(), gateway_providers.updated_at + interval '1 microsecond') WHERE (gateway_providers.display_name,gateway_providers.base_url,gateway_providers.encrypted_key,gateway_providers.enabled) IS DISTINCT FROM (EXCLUDED.display_name,EXCLUDED.base_url,EXCLUDED.encrypted_key,EXCLUDED.enabled)`, p.ID, p.DisplayName, p.BaseURL, p.CipherKey, p.Enabled); err != nil {
 				return err
 			}
 		}
 		for _, m := range nextModels {
-			if _, err = s.DB.Conn(ctx).Exec(ctx, `INSERT INTO gateway_models(id,provider_id,display_name,description,model,context_window_tokens,enabled) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(id) DO UPDATE SET provider_id=EXCLUDED.provider_id,display_name=EXCLUDED.display_name,description=EXCLUDED.description,model=EXCLUDED.model,context_window_tokens=EXCLUDED.context_window_tokens,enabled=EXCLUDED.enabled,updated_at=now() WHERE (gateway_models.provider_id,gateway_models.display_name,gateway_models.description,gateway_models.model,gateway_models.context_window_tokens,gateway_models.enabled) IS DISTINCT FROM (EXCLUDED.provider_id,EXCLUDED.display_name,EXCLUDED.description,EXCLUDED.model,EXCLUDED.context_window_tokens,EXCLUDED.enabled)`, m.ID, m.ProviderID, m.DisplayName, m.Description, m.Model, m.ContextWindow(), m.Enabled); err != nil {
+			if _, err = s.DB.Conn(ctx).Exec(ctx, `INSERT INTO gateway_models(id,provider_id,display_name,description,model,context_window_tokens,enabled) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(id) DO UPDATE SET provider_id=EXCLUDED.provider_id,display_name=EXCLUDED.display_name,description=EXCLUDED.description,model=EXCLUDED.model,context_window_tokens=EXCLUDED.context_window_tokens,enabled=EXCLUDED.enabled,updated_at=GREATEST(now(), gateway_models.updated_at + interval '1 microsecond') WHERE (gateway_models.provider_id,gateway_models.display_name,gateway_models.description,gateway_models.model,gateway_models.context_window_tokens,gateway_models.enabled) IS DISTINCT FROM (EXCLUDED.provider_id,EXCLUDED.display_name,EXCLUDED.description,EXCLUDED.model,EXCLUDED.context_window_tokens,EXCLUDED.enabled)`, m.ID, m.ProviderID, m.DisplayName, m.Description, m.Model, m.ContextWindow(), m.Enabled); err != nil {
 				return err
 			}
 		}

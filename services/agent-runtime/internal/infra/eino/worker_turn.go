@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
-	"slices"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/middlewares/summarization"
@@ -15,6 +14,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"go.uber.org/zap"
 	"teamie/pkg/observability"
+	"teamie/services/agent-runtime/internal/domain"
 )
 
 func (w *agentWorker) makeAgent(ctx context.Context) (adk.TypedAgent[*schema.AgenticMessage], error) {
@@ -299,16 +299,22 @@ func (w *agentWorker) validate(ctx context.Context, inputs []Input) ([]Input, er
 			}
 			return nil, err
 		}
-		if message.RetractedAt != nil || message.Body == "" && len(message.Attachments) == 0 {
+		if message.RetractedAt != nil || (message.Body == "" && len(message.Attachments) == 0 && message.Forwarded == nil) {
 			if err = w.engine.Store.Skip(ctx, w.lease, in.EventID); err != nil {
 				return nil, err
 			}
 			continue
 		}
+		broadcastAddressed, bcastErr := w.engine.resolveBroadcastAddressed(ctx, w.imc, w.lease, w.authorize, message)
+		if bcastErr != nil {
+			return nil, bcastErr
+		}
 		in.Body = message.Body
 		in.Attachments = message.Attachments
 		in.Mentions = message.Mentions
 		in.ReplyToID = message.ReplyToID
+		in.Forwarded = message.Forwarded
+		in.BroadcastAddressed = broadcastAddressed
 		valid = append(valid, in)
 	}
 	return valid, nil
@@ -447,7 +453,7 @@ func (w *agentWorker) prepare(ctx context.Context, items []Input, resume *checkp
 			_ = w.engine.Store.FinishRun(ctx, w.lease, run, "retry", "im_unavailable", true)
 			return nil, nil, nil, &ModelError{Code: "im_unavailable", Retry: true}
 		}
-		if m.RetractedAt != nil || m.Body != in.Body || !slices.Equal(m.Attachments, in.Attachments) {
+		if m.RetractedAt != nil || m.Body != in.Body || !domain.AttachmentsEqual(m.Attachments, in.Attachments) || !domain.ForwardedEqual(m.Forwarded, in.Forwarded) {
 			invalid = append(invalid, in.EventID)
 		}
 	}

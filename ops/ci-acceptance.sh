@@ -23,9 +23,9 @@ for service in identity chat realtime; do
 done
 HTTP_ADDR=:8081 RPC_ADDR=:8881 DATABASE_URL='postgres://postgres:ci-only-postgres@127.0.0.1:5432/teamie_identity?sslmode=disable' \
   "$scratch/identity" > "$scratch/identity.log" 2>&1 & pids+=("$!")
-HTTP_ADDR=:8082 RPC_ADDR=:8882 IDENTITY_RPC_ADDR=127.0.0.1:8881 DATABASE_URL='postgres://postgres:ci-only-postgres@127.0.0.1:5432/teamie_chat?sslmode=disable' \
+HTTP_ADDR=:8082 RPC_ADDR=:8882 IDENTITY_RPC_ADDR=127.0.0.1:8881 REALTIME_RPC_ADDR=127.0.0.1:8883 REALTIME_RPC_TOKEN=ci-only-realtime-rpc-credential DATABASE_URL='postgres://postgres:ci-only-postgres@127.0.0.1:5432/teamie_chat?sslmode=disable' \
   "$scratch/chat" > "$scratch/chat.log" 2>&1 & pids+=("$!")
-HTTP_ADDR=:8083 IDENTITY_RPC_ADDR=127.0.0.1:8881 CHAT_RPC_ADDR=127.0.0.1:8882 \
+HTTP_ADDR=:8083 RPC_ADDR=:8883 REALTIME_RPC_TOKEN=ci-only-realtime-rpc-credential IDENTITY_RPC_ADDR=127.0.0.1:8881 CHAT_RPC_ADDR=127.0.0.1:8882 \
   "$scratch/realtime" > "$scratch/realtime.log" 2>&1 & pids+=("$!")
 for port in 8081 8082 8083; do
   ready=0

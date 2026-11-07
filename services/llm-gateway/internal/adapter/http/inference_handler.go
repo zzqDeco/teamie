@@ -238,8 +238,7 @@ func gatewayOperation(ctx context.Context, id, session, execution string, stream
 	return ctx, op
 }
 
-// callWithObservability executes a unary model inference call with observability tracing/logging.
-func (a *Adapter) callWithObservability(ctx context.Context, owner, id, session, run, raw string, messageLimits ...int) *agent.GatewayChatResponse {
+func (a *Adapter) callOutcomeWithObservability(ctx context.Context, owner, id, session, run, raw string, messageLimits ...int) app.CallOutcome {
 	ctx, operation := gatewayOperation(ctx, id, session, run, false)
 	outcome := a.App.CallChat(ctx, owner, id, session, run, raw, messageLimits...)
 	operation.End(outcome.Failure,
@@ -249,6 +248,12 @@ func (a *Adapter) callWithObservability(ctx context.Context, owner, id, session,
 		zap.String("custom.duration_scope", "admission-through-provider-response-and-usage-record"),
 		zap.Int("custom.retry.attempts", observability.HTTPAttempts(ctx)),
 	)
+	return outcome
+}
+
+// callWithObservability executes a unary model inference call with observability tracing/logging.
+func (a *Adapter) callWithObservability(ctx context.Context, owner, id, session, run, raw string, messageLimits ...int) *agent.GatewayChatResponse {
+	outcome := a.callOutcomeWithObservability(ctx, owner, id, session, run, raw, messageLimits...)
 	return toGatewayChatResponse(outcome.Result)
 }
 

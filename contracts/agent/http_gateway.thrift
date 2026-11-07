@@ -48,6 +48,13 @@ struct AdminModelProviderDTO {
   8: required string updatedAt (api.body="updatedAt")
 }
 
+struct ModelLastTest {
+  1: required bool ok (api.body="ok")
+  2: required string testedAt (api.body="testedAt")
+  3: optional i64 latencyMs (api.body="latencyMs")
+  4: optional string errorCode (api.body="errorCode")
+}
+
 struct AdminModelProfileDTO {
   1: required string id (api.body="id")
   2: required string displayName (api.body="displayName")
@@ -64,6 +71,7 @@ struct AdminModelProfileDTO {
   13: required string providerDisplayName (api.body="providerDisplayName")
   14: required bool providerEnabled (api.body="providerEnabled")
   15: required bool effectiveEnabled (api.body="effectiveEnabled")
+  16: optional ModelLastTest lastTest (api.body="lastTest")
 }
 
 struct GetModelCatalogReq {}

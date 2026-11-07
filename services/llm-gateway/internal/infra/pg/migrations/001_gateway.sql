@@ -64,3 +64,29 @@ IF NOT EXISTS (SELECT 1 FROM gateway_schema_migrations WHERE version=6) THEN
     INSERT INTO gateway_schema_migrations(version) VALUES(6);
 END IF;
 END $$;
+
+-- Persist latest administrator connection test diagnostics per model (Schema 7),
+-- isolated from provider, model, routing, web-search, and usage stores.
+CREATE TABLE IF NOT EXISTS gateway_model_tests(
+    model_id TEXT PRIMARY KEY REFERENCES gateway_models(id) ON DELETE CASCADE,
+    ok BOOLEAN NOT NULL,
+    tested_at TIMESTAMPTZ NOT NULL,
+    latency_ms BIGINT CHECK (latency_ms IS NULL OR latency_ms >= 0),
+    error_code TEXT,
+    model_updated_at TIMESTAMPTZ NOT NULL,
+    provider_updated_at TIMESTAMPTZ NOT NULL,
+    CHECK (
+        (ok AND error_code IS NULL) OR
+        (NOT ok AND error_code IS NOT NULL AND error_code IN (
+            'provider_auth_failed',
+            'provider_invalid_response',
+            'upstream_rate_limited',
+            'upstream_timeout',
+            'upstream_unavailable',
+            'upstream_http_error',
+            'upstream_error',
+            'provider_failed'
+        ))
+    )
+);
+INSERT INTO gateway_schema_migrations(version) VALUES(7) ON CONFLICT DO NOTHING;

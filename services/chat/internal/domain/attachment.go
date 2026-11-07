@@ -13,7 +13,20 @@ const (
 	AttachmentsPerMessage       = 8
 	PendingAttachmentsPerSender = 32
 	AttachmentRequestBytes      = AttachmentBytes + 64*1024
+	MaxImageDimension           = 16384
+	MaxImageArea                = 40_000_000
+	MaxThumbnailDimension       = 640
+	MaxThumbnailBytes           = 256 * 1024
 )
+
+// AttachmentThumbnail holds a server-generated, metadata-free image preview
+// together with the EXIF-normalized display dimensions of the original upload.
+type AttachmentThumbnail struct {
+	Width     int
+	Height    int
+	MediaType string
+	Content   []byte
+}
 
 type Attachment struct {
 	ID        string `json:"id"`
@@ -21,6 +34,14 @@ type Attachment struct {
 	MediaType string `json:"mediaType"`
 	SizeBytes int    `json:"sizeBytes"`
 	SHA256    string `json:"sha256"`
+	// Image is present iff a thumbnail was stored for this attachment.
+	Image *AttachmentImage `json:"image,omitempty"`
+}
+
+// AttachmentImage carries display dimensions of an image attachment.
+type AttachmentImage struct {
+	Width  int `json:"width"`
+	Height int `json:"height"`
 }
 
 type AttachmentUpload struct {

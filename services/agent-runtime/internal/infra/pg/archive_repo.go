@@ -60,9 +60,7 @@ func (r *Repository) ResolveRunSources(ctx context.Context, agentID, runID strin
 					ReplyToID:      in.ReplyToID,
 					SenderID:       in.SenderID,
 					SenderKind:     in.SenderKind,
-				}
-				for _, attachment := range in.Attachments {
-					ref.AttachmentIDs = append(ref.AttachmentIDs, attachment.ID)
+					AttachmentIDs:  domain.MessageAttachmentIDs(in.Attachments, in.Forwarded),
 				}
 				refs = append(refs, ref)
 			}

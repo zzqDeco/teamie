@@ -289,22 +289,78 @@ func (p *AdminModelProviderDTO) String() string {
 	return fmt.Sprintf("AdminModelProviderDTO(%+v)", *p)
 }
 
+type ModelLastTest struct {
+	Ok        bool    `thrift:"ok,1,required" json:"ok"`
+	TestedAt  string  `thrift:"testedAt,2,required" json:"testedAt"`
+	LatencyMs *int64  `thrift:"latencyMs,3,optional" json:"latencyMs,omitempty"`
+	ErrorCode *string `thrift:"errorCode,4,optional" json:"errorCode,omitempty"`
+}
+
+func NewModelLastTest() *ModelLastTest {
+	return &ModelLastTest{}
+}
+
+func (p *ModelLastTest) InitDefault() {
+}
+
+func (p *ModelLastTest) GetOk() (v bool) {
+	return p.Ok
+}
+
+func (p *ModelLastTest) GetTestedAt() (v string) {
+	return p.TestedAt
+}
+
+var ModelLastTest_LatencyMs_DEFAULT int64
+
+func (p *ModelLastTest) GetLatencyMs() (v int64) {
+	if !p.IsSetLatencyMs() {
+		return ModelLastTest_LatencyMs_DEFAULT
+	}
+	return *p.LatencyMs
+}
+
+var ModelLastTest_ErrorCode_DEFAULT string
+
+func (p *ModelLastTest) GetErrorCode() (v string) {
+	if !p.IsSetErrorCode() {
+		return ModelLastTest_ErrorCode_DEFAULT
+	}
+	return *p.ErrorCode
+}
+
+func (p *ModelLastTest) IsSetLatencyMs() bool {
+	return p.LatencyMs != nil
+}
+
+func (p *ModelLastTest) IsSetErrorCode() bool {
+	return p.ErrorCode != nil
+}
+
+func (p *ModelLastTest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ModelLastTest(%+v)", *p)
+}
+
 type AdminModelProfileDTO struct {
-	ID                  string `thrift:"id,1,required" json:"id"`
-	DisplayName         string `thrift:"displayName,2,required" json:"displayName"`
-	Description         string `thrift:"description,3,required" json:"description"`
-	BaseUrl             string `thrift:"baseUrl,4,required" json:"baseUrl"`
-	Model               string `thrift:"model,5,required" json:"model"`
-	ContextWindowTokens int64  `thrift:"contextWindowTokens,6,required" json:"contextWindowTokens"`
-	HasApiKey           bool   `thrift:"hasApiKey,7,required" json:"hasApiKey"`
-	Enabled             bool   `thrift:"enabled,8,required" json:"enabled"`
-	Configured          bool   `thrift:"configured,9,required" json:"configured"`
-	IsDefault           bool   `thrift:"isDefault,10,required" json:"isDefault"`
-	UpdatedAt           string `thrift:"updatedAt,11,required" json:"updatedAt"`
-	ProviderId          string `thrift:"providerId,12,required" json:"providerId"`
-	ProviderDisplayName string `thrift:"providerDisplayName,13,required" json:"providerDisplayName"`
-	ProviderEnabled     bool   `thrift:"providerEnabled,14,required" json:"providerEnabled"`
-	EffectiveEnabled    bool   `thrift:"effectiveEnabled,15,required" json:"effectiveEnabled"`
+	ID                  string         `thrift:"id,1,required" json:"id"`
+	DisplayName         string         `thrift:"displayName,2,required" json:"displayName"`
+	Description         string         `thrift:"description,3,required" json:"description"`
+	BaseUrl             string         `thrift:"baseUrl,4,required" json:"baseUrl"`
+	Model               string         `thrift:"model,5,required" json:"model"`
+	ContextWindowTokens int64          `thrift:"contextWindowTokens,6,required" json:"contextWindowTokens"`
+	HasApiKey           bool           `thrift:"hasApiKey,7,required" json:"hasApiKey"`
+	Enabled             bool           `thrift:"enabled,8,required" json:"enabled"`
+	Configured          bool           `thrift:"configured,9,required" json:"configured"`
+	IsDefault           bool           `thrift:"isDefault,10,required" json:"isDefault"`
+	UpdatedAt           string         `thrift:"updatedAt,11,required" json:"updatedAt"`
+	ProviderId          string         `thrift:"providerId,12,required" json:"providerId"`
+	ProviderDisplayName string         `thrift:"providerDisplayName,13,required" json:"providerDisplayName"`
+	ProviderEnabled     bool           `thrift:"providerEnabled,14,required" json:"providerEnabled"`
+	EffectiveEnabled    bool           `thrift:"effectiveEnabled,15,required" json:"effectiveEnabled"`
+	LastTest            *ModelLastTest `thrift:"lastTest,16,optional" json:"lastTest,omitempty"`
 }
 
 func NewAdminModelProfileDTO() *AdminModelProfileDTO {
@@ -372,6 +428,19 @@ func (p *AdminModelProfileDTO) GetProviderEnabled() (v bool) {
 
 func (p *AdminModelProfileDTO) GetEffectiveEnabled() (v bool) {
 	return p.EffectiveEnabled
+}
+
+var AdminModelProfileDTO_LastTest_DEFAULT *ModelLastTest
+
+func (p *AdminModelProfileDTO) GetLastTest() (v *ModelLastTest) {
+	if !p.IsSetLastTest() {
+		return AdminModelProfileDTO_LastTest_DEFAULT
+	}
+	return p.LastTest
+}
+
+func (p *AdminModelProfileDTO) IsSetLastTest() bool {
+	return p.LastTest != nil
 }
 
 func (p *AdminModelProfileDTO) String() string {

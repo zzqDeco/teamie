@@ -83,7 +83,22 @@ func (a *Adapter) sendMessage(ctx context.Context, req *chatgen.SendMessageReq) 
 	if err != nil {
 		return domain.Message{}, false, err
 	}
-	return a.App.SendAnnotated(ctx, user, req.ID, req.ClientMessageId, req.Body, req.ReplyToId, req.GetAttachmentIds(), mentions)
+	var forwardOf *domain.ForwardSource
+	if req.IsSetForwardOf() && req.ForwardOf != nil {
+		forwardOf = &domain.ForwardSource{
+			ConversationID: req.ForwardOf.ConversationId,
+			MessageID:      req.ForwardOf.MessageId,
+		}
+	}
+	return a.App.SendMessage(ctx, user, domain.SendRequest{
+		ConversationID:  req.ID,
+		ClientMessageID: req.ClientMessageId,
+		Body:            req.Body,
+		ReplyToID:       req.ReplyToId,
+		AttachmentIDs:   req.GetAttachmentIds(),
+		Mentions:        mentions,
+		ForwardOf:       forwardOf,
+	})
 }
 
 func (a *Adapter) EditMessage(ctx context.Context, req *chatgen.EditMessageReq) (*chatgen.MessageResp, error) {
@@ -219,7 +234,7 @@ func (a *Adapter) GetAttention(ctx context.Context, req *chatgen.GetAttentionReq
 	if unread != "" && unread != "true" && unread != "false" {
 		return nil, domain.Err(400, "invalid_query", "Invalid unread filter")
 	}
-	page, err := a.App.Attention(ctx, user.ID, req.GetCursor(), int(limit), unread == "true")
+	page, err := a.App.AttentionWithMessage(ctx, user.ID, req.GetCursor(), int(limit), unread == "true", req.GetMessageId())
 	if err != nil {
 		return nil, err
 	}
@@ -304,6 +319,26 @@ func (a *Adapter) DownloadAttachment(ctx context.Context, req *chatgen.DownloadA
 	}, nil
 }
 
+func (a *Adapter) DownloadAttachmentThumbnail(ctx context.Context, req *chatgen.DownloadAttachmentThumbnailReq) (*chatgen.DownloadAttachmentResp, error) {
+	user, ok := actorFromContext(ctx)
+	if !ok {
+		return nil, domain.Err(401, "unauthenticated", "Sign in to continue")
+	}
+	mediaType, content, sha256, err := a.App.DownloadAttachmentThumbnail(ctx, user.ID, req.ID, req.AttachmentId)
+	if err != nil {
+		return nil, err
+	}
+	return &chatgen.DownloadAttachmentResp{
+		Attachment: &chatgen.AttachmentDTO{
+			ID:        req.AttachmentId,
+			MediaType: mediaType,
+			SizeBytes: int64(len(content)),
+			Sha256:    sha256,
+		},
+		Content: content,
+	}, nil
+}
+
 func (a *Adapter) uploadAttachmentHTTP(w http.ResponseWriter, r *http.Request, ctx context.Context, s httpx.Session) error {
 	key := r.Header.Get("Idempotency-Key")
 	if key == "" {
@@ -376,6 +411,32 @@ func (a *Adapter) downloadAttachmentHTTP(w http.ResponseWriter, r *http.Request,
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": resp.Attachment.Filename}))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
+	w.Header().Set("X-Attachment-SHA256", resp.Attachment.Sha256)
+	w.Header().Set("Content-Length", strconv.Itoa(len(resp.Content)))
+	if _, err = w.Write(resp.Content); err != nil {
+		return nil
+	}
+	_ = http.NewResponseController(w).Flush()
+	return nil
+}
+
+func (a *Adapter) downloadAttachmentThumbnailHTTP(w http.ResponseWriter, r *http.Request, ctx context.Context, _ httpx.Session) error {
+	release, err := a.acquireTransfer()
+	if err != nil {
+		return err
+	}
+	defer release()
+	resp, err := a.DownloadAttachmentThumbnail(ctx, &chatgen.DownloadAttachmentThumbnailReq{
+		ID:           r.PathValue("id"),
+		AttachmentId: r.PathValue("attachmentId"),
+	})
+	if err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", resp.Attachment.MediaType)
+	w.Header().Set("Content-Disposition", "inline")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
 	w.Header().Set("X-Attachment-SHA256", resp.Attachment.Sha256)

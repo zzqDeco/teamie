@@ -54,22 +54,28 @@ func main() {
 	if err != nil {
 		observability.Fatal("Service initialization failed", err)
 	}
+	realtimeClient, err := rpcclient.NewRealtime(httpx.Env("REALTIME_RPC_ADDR", "realtime:8883"), httpx.Env("REALTIME_RPC_TOKEN", ""))
+	if err != nil {
+		observability.Fatal("Service initialization failed", err)
+	}
 
 	repo := pg.New(postgres.New(pool))
 	appSvc := &app.Service{
-		Tx:             repo,
-		Mutations:      repo,
-		Workspaces:     repo,
-		Conversations:  repo,
-		Memberships:    repo,
-		Messages:       repo,
-		Attachments:    repo,
-		Announcements:  repo,
-		Outbox:         repo,
-		Identity:       rpcclient.NewIdentity(identityClient),
-		Flags:          flags.New(cfgFlags),
-		SniffMediaType: fs.SniffMediaType,
-		ControlToken:   httpx.Env("IM_PRINCIPAL_CONTROL_TOKEN", ""),
+		Tx:                repo,
+		Mutations:         repo,
+		Workspaces:        repo,
+		Conversations:     repo,
+		Memberships:       repo,
+		Messages:          repo,
+		Attachments:       repo,
+		Announcements:     repo,
+		Outbox:            repo,
+		Identity:          rpcclient.NewIdentity(identityClient),
+		Presence:          realtimeClient,
+		Flags:             flags.New(cfgFlags),
+		SniffMediaType:    fs.SniffMediaType,
+		GenerateThumbnail: fs.GenerateThumbnail,
+		ControlToken:      httpx.Env("IM_PRINCIPAL_CONTROL_TOKEN", ""),
 	}
 
 	rdb := goredis.NewClient(&goredis.Options{Addr: httpx.Env("REDIS_ADDR", "redis:6379")})
