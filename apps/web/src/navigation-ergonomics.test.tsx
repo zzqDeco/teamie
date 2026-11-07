@@ -139,6 +139,7 @@ function LocationProbe() {
 }
 
 async function flush() {
+  await act(async () => { await vi.dynamicImportSettled(); });
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
   });

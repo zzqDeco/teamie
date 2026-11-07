@@ -22,9 +22,6 @@
     .hero-copy {
       padding-top: 12px;
     }
-    .hero-copy .eyebrow {
-      font-size: var(--font-xs);
-    }
     .hero h1 {
       line-height: 1.5;
       margin-top: 17px;
@@ -41,10 +38,6 @@
     .hero-actions > span {
       display: block;
       font-size: var(--font-xs);
-    }
-    .hero-footnote {
-      font-size: var(--font-xs);
-      margin-top: 28px;
     }
     .hero-visual {
       max-width: 480px;

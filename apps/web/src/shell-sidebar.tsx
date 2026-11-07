@@ -1,4 +1,5 @@
-import type { RefObject } from "react";
+import { useEffect, useId, useState } from "react";
+import type { ReactNode, RefObject } from "react";
 import { Link } from "react-router-dom";
 import {
   AtSign,
@@ -9,6 +10,7 @@ import {
   Hash,
   Megaphone,
   Plus,
+  Search,
   Users,
   X,
 } from "lucide-react";
@@ -157,6 +159,51 @@ function ConversationItem({
   );
 }
 
+function ConversationSection({
+  title,
+  count,
+  hasUnread,
+  selectedConversationId,
+  action,
+  children,
+}: {
+  title: string;
+  count: number;
+  hasUnread: boolean;
+  selectedConversationId?: string;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const id = useId();
+
+  useEffect(() => {
+    if (selectedConversationId) setExpanded(true);
+  }, [selectedConversationId]);
+
+  return (
+    <section className="nav-section" aria-label={title}>
+      <div className="nav-section-title">
+        <button
+          type="button"
+          className="nav-section-toggle"
+          aria-label={`${title}${hasUnread ? "（有未读消息）" : ""}`}
+          aria-expanded={expanded}
+          aria-controls={id}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          <ChevronDown size={ICON.xs} aria-hidden="true" />
+          <span>{title}</span>
+          <span className="nav-section-count" aria-hidden="true">{count}</span>
+          {hasUnread && <i className="nav-section-unread" aria-hidden="true" />}
+        </button>
+        {action}
+      </div>
+      <div id={id} hidden={!expanded}>{children}</div>
+    </section>
+  );
+}
+
 export function ShellSidebar({
   navigationRef,
   mobile,
@@ -185,6 +232,7 @@ export function ShellSidebar({
   onOpenDialog,
   onSignOut,
   onShortcuts,
+  onOpenQuickSwitcher,
   onOpenAnnouncements,
   hasUnreadAnnouncement = false,
 }: {
@@ -215,6 +263,7 @@ export function ShellSidebar({
   onOpenDialog: (kind: DialogKind) => void;
   onSignOut: () => void;
   onShortcuts: () => void;
+  onOpenQuickSwitcher: () => void;
   onOpenAnnouncements?: () => void;
   hasUnreadAnnouncement?: boolean;
 }) {
@@ -364,21 +413,31 @@ export function ShellSidebar({
             <X size={ICON.md} />
           </IconButton>
         </div>
+        <button
+          type="button"
+          className="sidebar-quick-switcher"
+          aria-label="搜索与快速切换"
+          aria-haspopup="dialog"
+          aria-keyshortcuts="Control+K Meta+K"
+          onClick={onOpenQuickSwitcher}
+        >
+          <Search size={ICON.sm} aria-hidden="true" />
+          <span>搜索与切换</span>
+          <kbd aria-hidden="true">{/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘ K" : "Ctrl K"}</kbd>
+        </button>
         <div className="sidebar-scroll">
-          <div className="nav-section">
-            <div className="nav-section-title">
-              <span>
-                <ChevronDown size={ICON.xs} /> 团队频道
-              </span>
-              {workspace && owner && caps["im.channel.create"] && (
-                <IconButton
-                  label="创建频道"
-                  onClick={() => onOpenDialog("channel")}
-                >
-                  <Plus size={ICON.sm} />
-                </IconButton>
-              )}
-            </div>
+          <ConversationSection
+            key={`${user.id}:${workspace?.id}:channels`}
+            title="团队频道"
+            count={channels.length}
+            hasUnread={channels.some((item) => summarizeConversationUnread(item, activeSnapshot, user.id, attentionProjection).contributesToWorkspaceDot)}
+            selectedConversationId={channels.find((item) => item.id === conversationId)?.id}
+            action={workspace && owner && caps["im.channel.create"] && (
+              <IconButton label="创建频道" onClick={() => onOpenDialog("channel")}>
+                <Plus size={ICON.sm} />
+              </IconButton>
+            )}
+          >
             {channels.map((c) => (
               <ConversationItem
                 key={c.id}
@@ -396,13 +455,14 @@ export function ShellSidebar({
                 {workspace ? "暂无频道" : "暂无团队"}
               </div>
             )}
-          </div>
-          <div className="nav-section">
-            <div className="nav-section-title">
-              <span>
-                <ChevronDown size={ICON.xs} /> 私信与小组
-              </span>
-            </div>
+          </ConversationSection>
+          <ConversationSection
+            key={`${user.id}:${workspace?.id}:direct`}
+            title="私信与小组"
+            count={direct.length}
+            hasUnread={direct.some((item) => summarizeConversationUnread(item, activeSnapshot, user.id, attentionProjection).contributesToWorkspaceDot)}
+            selectedConversationId={direct.find((item) => item.id === conversationId)?.id}
+          >
             {direct.map((c) => (
               <ConversationItem
                 key={c.id}
@@ -430,7 +490,7 @@ export function ShellSidebar({
                 )}
               </div>
             )}
-          </div>
+          </ConversationSection>
         </div>
       </aside>
     </div>

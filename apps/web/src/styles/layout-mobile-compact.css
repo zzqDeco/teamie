@@ -41,9 +41,6 @@
     .visual-grid {
       inset: -15px -8px;
     }
-    .orbit-caption {
-      display: none;
-    }
     .demo-title {
       height: 50px;
     }
@@ -84,7 +81,6 @@
     }
     .story-scene-list {
       min-height: 170px;
-      margin-top: 16px;
     }
     .story-scene-item h3 {
       font-size: var(--font-3xl);

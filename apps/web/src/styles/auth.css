@@ -20,13 +20,6 @@
     color: var(--text-muted);
     margin-top: 3px;
   }
-  .stage-pill {
-    margin-left: auto;
-    padding: 4px 10px;
-    border-radius: var(--r-pill);
-    font-size: var(--font-xs);
-    font-weight: 600;
-  }
   .stage-channel-list {
     display: flex;
     flex-direction: column;
@@ -248,13 +241,7 @@
     font-size: var(--font-4xl);
     font-weight: 600;
     color: var(--text-strong);
-    margin-top: 8px;
     letter-spacing: -0.7px;
-  }
-  .landing-cta .eyebrow {
-    font-size: var(--font-xs);
-    letter-spacing: 1.4px;
-    color: var(--text-muted);
   }
   .landing-cta-actions {
     display: flex;

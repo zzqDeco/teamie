@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, ApiError } from "@teamie/api-client";
 import type { CreatedPasswordResetLink, PasswordResetInspection, Session, User } from "@teamie/api-client";
 import { AuthProvider, useAuth } from "./auth";
-import { Login } from "./public";
+import { Login } from "./public/auth-views";
 import { ForgotPassword, ResetPassword } from "./password-recovery";
 import { PlatformUsers } from "./platform-users";
 import { chatStore } from "./store";

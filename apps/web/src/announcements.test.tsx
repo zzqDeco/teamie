@@ -85,6 +85,7 @@ async function settle(action?: () => void) {
     action?.();
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
+  await act(async () => { await vi.dynamicImportSettled(); });
 }
 
 async function mount(path = "/app") {

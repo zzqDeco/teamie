@@ -9,7 +9,7 @@ import { api, ApiError } from "@teamie/api-client";
 import type { Session, User } from "@teamie/api-client";
 import { AuthProvider } from "./auth";
 import { PasswordField } from "./password-field";
-import { Join, Login } from "./public";
+import { Join, Login } from "./public/auth-views";
 import { chatStore } from "./store";
 import { TOAST_DURATION, Toaster, toast } from "./toast";
 import { Button, Modal } from "./ui";

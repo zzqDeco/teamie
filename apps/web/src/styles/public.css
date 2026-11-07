@@ -24,6 +24,49 @@
   .loading-screen > .button {
     min-width: 160px;
   }
+  .route-state {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    min-height: 240px;
+    padding: 32px;
+    text-align: center;
+    color: var(--text-muted);
+  }
+  .route-state-page {
+    min-height: 100dvh;
+    background: var(--bg);
+  }
+  .route-state h2 {
+    color: var(--text-strong);
+    font-size: var(--font-xl);
+  }
+  .route-state p {
+    font-size: var(--font-sm);
+    line-height: 1.8;
+  }
+  .route-loading-lines {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: min(360px, 100%);
+    margin-top: 8px;
+  }
+  .route-loading-lines span {
+    display: block;
+    height: 12px;
+    border-radius: var(--r-sm);
+    background: var(--surface-sunken);
+  }
+  .route-loading-lines span:nth-child(2) {
+    width: 82%;
+  }
+  .route-loading-lines span:last-child {
+    width: 60%;
+  }
   .not-found {
     min-height: 100dvh;
     display: flex;
@@ -89,14 +132,6 @@
     min-width: 0;
     padding-top: 0;
   }
-  .hero-copy .eyebrow {
-    letter-spacing: 1px;
-    font-size: var(--font-sm);
-    color: var(--text-muted);
-    display: flex;
-    align-items: center;
-    gap: 9px;
-  }
   .hero h1 {
     font-weight: 700;
     margin: 21px 0 21px;
@@ -148,26 +183,6 @@
     font-size: var(--font-sm);
     color: var(--text-muted);
   }
-  .hero-footnote {
-    display: flex;
-    align-items: center;
-    gap: 13px;
-    margin-top: 37px;
-    color: var(--text-muted);
-    font-size: var(--font-sm);
-  }
-  .mini-avatars {
-    display: flex;
-    padding-left: 4px;
-  }
-  .mini-avatars .avatar {
-    width: 28px;
-    height: 28px;
-    font-size: var(--font-xs);
-    border: 3px solid var(--bg);
-    margin-left: -5px;
-    border-radius: 50%;
-  }
   .hero-visual {
     position: relative;
     isolation: isolate;
@@ -185,25 +200,14 @@
     background-size: 30px 30px;
     transform: rotate(-7deg);
   }
-  .orbit-caption {
-    position: absolute;
-    top: -11px;
-    right: 15px;
-    color: var(--text-muted);
-    font-size: var(--font-xs);
-    font-weight: 600;
-    line-height: 1.6;
-    letter-spacing: 2px;
-    transform: rotate(7deg);
-  }
   .demo-window {
+    transform: rotate(-1.5deg);
     background: var(--surface);
     border-radius: var(--r-lg);
     border: 1px solid var(--border-strong);
     box-shadow: var(--shadow-lg);
     overflow: hidden;
     width: 100%;
-    transform: rotate(-1.5deg);
     min-height: 0;
   }
   .demo-title {
@@ -449,22 +453,9 @@
   .story-copy-column {
     min-width: 0;
   }
-  .story-header .eyebrow {
-    font-size: var(--font-xs);
-    letter-spacing: 1.5px;
-    color: var(--text-muted);
-  }
-  .story-header h2 {
-    font-size: var(--font-2xl);
-    font-weight: 600;
-    color: var(--text-muted);
-    letter-spacing: -0.4px;
-    margin-top: 8px;
-  }
   .story-scene-list {
     position: relative;
     min-height: 220px;
-    margin-top: 28px;
   }
   .story-scene-item {
     position: absolute;
@@ -480,14 +471,6 @@
     transform: translate3d(0, 0, 0);
     pointer-events: auto;
   }
-  .story-scene-eyebrow {
-    display: inline-block;
-    font-size: var(--font-xs);
-    font-weight: 600;
-    letter-spacing: 1.4px;
-    color: var(--purple);
-    margin-bottom: 12px;
-  }
   .story-scene-item h3 {
     font-size: clamp(28px, 3.2vw, 38px);
     font-weight: 700;
@@ -501,13 +484,6 @@
     line-height: 1.95;
     color: var(--text);
     max-width: 460px;
-  }
-  .story-scene-footnote {
-    display: inline-block;
-    margin-top: 18px;
-    font-size: var(--font-base);
-    font-weight: 600;
-    color: var(--brand-text);
   }
   .story-controls {
     display: flex;
@@ -556,12 +532,6 @@
     background: var(--purple);
     border-radius: var(--r-pill);
     transition: width 0.22s ease-out;
-  }
-  .story-scroll-hint {
-    display: block;
-    margin-top: 12px;
-    font-size: var(--font-sm);
-    color: var(--text-muted);
   }
   .story-stage-canvas {
     position: relative;
