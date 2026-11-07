@@ -551,7 +551,6 @@ export function QuickSwitcher({
             aria-activedescendant={
               activeItemId ? `quick-switcher-opt-${activeItemId}` : undefined
             }
-            autoFocus
             data-autofocus
             value={query}
             onChange={(event) => {

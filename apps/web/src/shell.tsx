@@ -29,7 +29,8 @@ import {
   useShellViewportAndFocus,
 } from "./shell-sidebar";
 import { RemoveMemberModal, ShellMembersPane } from "./shell-members-pane";
-import { ConversationAppsPane, WorkspaceMarketplaceModal } from "./marketplace";
+import { ConversationAppsPane } from "./marketplace/conversation-apps";
+import { WorkspaceMarketplaceModal } from "./marketplace/workspace-modal";
 import { AnnouncementModals, usePlatformAnnouncements } from "./announcements";
 import { parseInviteCode, Welcome } from "./shell-welcome";
 import {
@@ -452,6 +453,7 @@ export function Shell() {
         members={members} onCloseSidebar={closeSidebar}
         onSelectWorkspace={selectWorkspace} onOpenDialog={openDialog}
         onSignOut={() => void signOut()} onShortcuts={() => setShortcutsOpen(true)}
+        onOpenQuickSwitcher={() => setQuickSwitcherOpen(true)}
         onOpenAnnouncements={() => setAnnouncementsHistoryOpen(true)}
         hasUnreadAnnouncement={announcements.hasUnread}
       />

@@ -236,10 +236,6 @@
     .floating-note small {
       font-size: var(--font-xs);
     }
-    .hero-footnote {
-      font-size: var(--font-xs);
-      gap: 9px;
-    }
     .auth-page {
       grid-template-columns: minmax(330px, 44%) 1fr;
     }

@@ -72,7 +72,7 @@
     --focus-ring-offset: 2px;
     --focus-halo: 0 0 0 3px rgba(116, 99, 212, 0.2);
 
-    /* Typography families & scale (Latin fixed to self-hosted DM Sans; Chinese follows platform system fonts) */
+    /* Typography families & scale (Chinese prefers system fonts; the self-hosted fallback loads only when those lack a glyph) */
     --font-sans:
       "DM Sans Variable",
       "DM Sans",
@@ -85,6 +85,7 @@
       "Microsoft YaHei",
       "Noto Sans CJK SC",
       "Source Han Sans SC",
+      "Noto Sans SC Variable",
       sans-serif;
     --font-mono:
       "JetBrains Mono",

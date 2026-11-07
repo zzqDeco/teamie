@@ -14,7 +14,8 @@ import type {
   User,
   Workspace,
 } from "@teamie/api-client";
-import { Landing, Login } from "./public";
+import { Landing } from "./public";
+import { Login } from "./public/auth-views";
 import { Shell } from "./shell";
 import { chatStore } from "./store";
 
@@ -128,6 +129,7 @@ async function settle(action?: () => void) {
     action?.();
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
+  await act(async () => { await vi.dynamicImportSettled(); });
 }
 async function mount(path = "/app/w/team/members", mobile = false) {
   vi.stubGlobal(
@@ -244,6 +246,53 @@ afterEach(async () => {
 });
 
 describe("member and account navigation", () => {
+  it("collapses channel lists without hiding unread indicators or the permitted create action", async () => {
+    bootstrap.capabilities["im.channel.create"] = true;
+    chatStore.replaceConversations([
+      channel,
+      { ...channel, id: "news", name: "公告", lastSeq: 3 },
+      group,
+    ]);
+    await mount("/app/w/team/c/general");
+    const toggle = find<HTMLButtonElement>('.nav-section-toggle[aria-label^="团队频道"]');
+    const content = document.getElementById(toggle.getAttribute("aria-controls")!)!;
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(toggle.getAttribute("aria-label")).toContain("有未读消息");
+    await settle(() => toggle.click());
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(content.hidden).toBe(true);
+    expect(toggle.querySelector(".nav-section-unread")).not.toBeNull();
+    expect(find('[aria-label="创建频道"]').closest("[hidden]")).toBeNull();
+    await settle(() => toggle.click());
+    expect(content.hidden).toBe(false);
+    expect(content.querySelectorAll(".conversation-link")).toHaveLength(2);
+  });
+
+  it("reopens a collapsed group when a keyboard shortcut selects its conversation", async () => {
+    await mount("/app/w/team/c/general");
+    const toggle = find<HTMLButtonElement>('.nav-section-toggle[aria-label^="私信与小组"]');
+    await settle(() => toggle.click());
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    await settle(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "ArrowDown", altKey: true, bubbles: true,
+    })));
+    expect(find("[data-location]").textContent).toBe("/app/w/team/c/group");
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(find('a[href="/app/w/team/c/group"]').getAttribute("aria-current")).toBe("page");
+  });
+
+  it("opens quick switching from the visible sidebar action and restores focus on Escape", async () => {
+    await mount("/app/w/team/c/general");
+    const launcher = find<HTMLButtonElement>('[aria-label="搜索与快速切换"]');
+    expect(launcher.getAttribute("aria-keyshortcuts")).toBe("Control+K Meta+K");
+    await click('[aria-label="搜索与快速切换"]');
+    expect(find('.modal input')).toBe(document.activeElement);
+    expect(find('.modal').textContent).toContain("快速跳转");
+    await escape();
+    expect(container.querySelector(".modal")).toBeNull();
+    expect(document.activeElement).toBe(launcher);
+  });
+
   it("closes an unavailable apps pane, clears inert, and does not reopen it on enable", async () => {
     vi.spyOn(api, "conversationApps").mockResolvedValue({ apps: [] });
     bootstrap.capabilities["im.marketplace.enabled"] = true;
@@ -1144,79 +1193,89 @@ describe("member and account navigation", () => {
     expect(find("[data-location]").textContent).toBe("/app/w/team/c/group");
   });
 
-  it("renders a sticky scroll-locked product story without top anchor links for signed-out visitors", async () => {
+  it("preserves the original sticky product story and reduced-motion scene navigation", async () => {
     signedOut = true;
     const scrollTo = vi.fn();
     vi.stubGlobal("scrollTo", scrollTo);
-    vi.stubGlobal(
-      "matchMedia",
-      vi.fn((query: string) => ({
-        matches: query.includes("prefers-reduced-motion"),
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-      })),
-    );
-    await settle(() =>
-      root.render(
-        <MemoryRouter initialEntries={["/"]}>
-          <Landing />
-          <Location />
-        </MemoryRouter>,
-      ),
-    );
-    await settle();
+    vi.stubGlobal("innerWidth", 1280);
+    vi.stubGlobal("innerHeight", 800);
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+      matches: query.includes("prefers-reduced-motion"),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })));
+    await settle(() => root.render(
+      <MemoryRouter initialEntries={["/"]}><Landing /><Location /></MemoryRouter>,
+    ));
     expect(find("[data-location]").textContent).toBe("/");
     expect(container.querySelector('.public-header a[href^="#"]')).toBeNull();
+    expect(container.querySelector('[role="tablist"]')).toBeNull();
     const track = find(".scroll-story-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({
-      top: 0,
-      bottom: 2400,
-      left: 0,
-      right: 1200,
-      width: 1200,
-      height: 2400,
-      x: 0,
-      y: 0,
-      toJSON: () => ({}),
+      top: 0, bottom: 3200, left: 0, right: 1280,
+      width: 1280, height: 3200, x: 0, y: 0, toJSON: () => ({}),
     });
+    const controls = container.querySelectorAll<HTMLButtonElement>(".story-step-pill");
+    const articles = container.querySelectorAll<HTMLElement>(".story-scene-item");
+    expect(controls).toHaveLength(4);
+    expect(find(".story-controls").getAttribute("role")).toBe("group");
     expect(track.getAttribute("data-active-scene")).toBe("0");
-    expect(find(".story-scene-item.active").textContent).toContain(
-      "对的讨论，在对的地方。",
-    );
-    const controls = find(".story-controls");
-    expect(controls.getAttribute("role")).toBe("group");
-    const tabs = container.querySelectorAll<HTMLButtonElement>(".story-step-pill");
-    expect(tabs).toHaveLength(4);
-    expect(tabs[0]?.getAttribute("aria-pressed")).toBe("true");
-    expect(tabs[1]?.getAttribute("aria-pressed")).toBe("false");
-    const articles =
-      container.querySelectorAll<HTMLElement>(".story-scene-item");
-    expect(articles[0]?.getAttribute("aria-hidden")).toBe("false");
-    expect(articles[1]?.getAttribute("aria-hidden")).toBe("true");
-    expect(find(".story-scroll-hint").textContent).toContain(
-      "继续滑动切换下一幕",
-    );
-    await settle(() => tabs[1]?.click());
+    expect(controls[0].getAttribute("aria-pressed")).toBe("true");
+    expect(articles[0].getAttribute("aria-hidden")).toBe("false");
+    expect(articles[1].getAttribute("aria-hidden")).toBe("true");
+    expect(container.querySelector(".hero-footnote, .story-scroll-hint, .story-scene-eyebrow, .story-scene-footnote, .stage-pill")).toBeNull();
+    expect(container.textContent).not.toMatch(/向下滑动|继续滑动切换|点击上方标签|点击任意引用/);
+    expect(find("#features-heading").classList.contains("sr-only")).toBe(true);
+    expect(find(".hero-copy > p").textContent).toBe("频道、小组与专属 Agent，在 Teamie 自然配合。");
+    for (const article of articles) {
+      expect(Array.from(article.children, (element) => element.tagName)).toEqual(["H3", "P"]);
+    }
+    expect(find(".story-scene-item.active").textContent).toContain("对的讨论，在对的地方。");
+
+    await click(".story-step-pill:nth-child(2)");
     expect(track.getAttribute("data-active-scene")).toBe("1");
-    expect(articles[0]?.getAttribute("aria-hidden")).toBe("true");
-    expect(articles[1]?.getAttribute("aria-hidden")).toBe("false");
-    expect(tabs[1]?.getAttribute("aria-pressed")).toBe("true");
-    expect(scrollTo).toHaveBeenLastCalledWith(
-      expect.objectContaining({ behavior: "auto" }),
-    );
-    expect(find(".story-scene-item.active").textContent).toContain(
-      "每位成员，都有专属伙伴。",
-    );
-    await settle(() => tabs[3]?.click());
+    expect(articles[0].getAttribute("aria-hidden")).toBe("true");
+    expect(articles[1].getAttribute("aria-hidden")).toBe("false");
+    expect(controls[1].getAttribute("aria-pressed")).toBe("true");
+    expect(document.activeElement).toBe(controls[1]);
+    expect(scrollTo).toHaveBeenLastCalledWith(expect.objectContaining({ behavior: "auto" }));
+    expect(find(".story-scene-item.active").textContent).toContain("每位成员，都有专属伙伴。");
+
+    await click(".story-step-pill:nth-child(4)");
     expect(track.getAttribute("data-active-scene")).toBe("3");
-    expect(tabs[3]?.getAttribute("aria-pressed")).toBe("true");
-    expect(find(".story-scene-item.active").textContent).toContain(
-      "像邀请一位新队友，安静可靠。",
-    );
+    expect(find(".story-scene-item.active").textContent).toContain("像邀请一位新队友，安静可靠。");
     expect(container.textContent).toContain("下一件好事，一起开始。");
   });
 
-  it("keeps the public landing usable while session discovery is pending, disables scroll auto-switching on mobile, and resets scroll on register navigation", async () => {
+  it("advances and reverses the original story with native scrolling without forcing scroll position", async () => {
+    signedOut = true;
+    const scrollTo = vi.fn();
+    vi.stubGlobal("scrollTo", scrollTo);
+    vi.stubGlobal("innerWidth", 1280);
+    vi.stubGlobal("innerHeight", 800);
+    vi.stubGlobal("matchMedia", vi.fn(() => ({
+      matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn(),
+    })));
+    await settle(() => root.render(<MemoryRouter><Landing /></MemoryRouter>));
+    const track = find(".scroll-story-track");
+    let top = 0;
+    vi.spyOn(track, "getBoundingClientRect").mockImplementation(() => ({
+      top, bottom: top + 3200, left: 0, right: 1280,
+      width: 1280, height: 3200, x: 0, y: top, toJSON: () => ({}),
+    }));
+    scrollTo.mockClear();
+    for (const [position, scene] of [[-720, 1], [-1440, 2], [-2160, 3], [-120, 0]]) {
+      top = position;
+      await settle(() => window.dispatchEvent(new Event("scroll")));
+      expect(track.getAttribute("data-active-scene")).toBe(String(scene));
+      expect(container.querySelectorAll('.story-scene-item[aria-hidden="false"]')).toHaveLength(1);
+      expect(container.querySelectorAll('.story-stage-card[aria-hidden="false"]')).toHaveLength(1);
+      expect(find(`.story-step-pill:nth-child(${scene + 1})`).getAttribute("aria-pressed")).toBe("true");
+    }
+    expect(scrollTo).not.toHaveBeenCalled();
+  });
+
+  it("keeps mobile story controls usable during session discovery and resets scroll on register navigation", async () => {
     signedOut = true;
     authLoading = true;
     vi.spyOn(api, "registration").mockResolvedValue({
@@ -1250,31 +1309,23 @@ describe("member and account navigation", () => {
     );
     await settle();
     expect(find("[data-location]").textContent).toBe("/");
-    expect(find(".story-scroll-hint").textContent).toContain(
-      "点击上方标签切换下一幕",
-    );
+    expect(container.querySelector(".story-scroll-hint")).toBeNull();
+    expect(find(".landing-register").textContent).toContain("凭邀请码注册");
     expect(find(".landing-register").getAttribute("href")).toBe(
       "/login?mode=register",
     );
-    const track = find(".scroll-story-track");
-    vi.spyOn(track, "getBoundingClientRect").mockReturnValue({
-      top: -180,
-      bottom: 720,
-      left: 0,
-      right: 375,
-      width: 375,
-      height: 900,
-      x: 0,
-      y: -180,
-      toJSON: () => ({}),
+    const story = find(".scroll-story-track");
+    vi.spyOn(story, "getBoundingClientRect").mockReturnValue({
+      top: -180, bottom: 720, left: 0, right: 375,
+      width: 375, height: 900, x: 0, y: -180, toJSON: () => ({}),
     });
     await settle(() => window.dispatchEvent(new Event("scroll")));
-    expect(track.getAttribute("data-active-scene")).toBe("0");
+    expect(story.getAttribute("data-active-scene")).toBe("0");
     scrollTo.mockClear();
-    const pills =
-      container.querySelectorAll<HTMLButtonElement>(".story-step-pill");
-    await settle(() => pills[1]?.click());
-    expect(track.getAttribute("data-active-scene")).toBe("1");
+    await click(".story-step-pill:nth-child(2)");
+    expect(story.getAttribute("data-active-scene")).toBe("1");
+    await settle(() => window.dispatchEvent(new Event("scroll")));
+    expect(story.getAttribute("data-active-scene")).toBe("1");
     expect(scrollTo).not.toHaveBeenCalled();
     document.documentElement.scrollTop = 343;
     document.body.scrollTop = 343;

@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import type { RefObject } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -23,6 +23,7 @@ import type {
 } from "@teamie/api-client";
 import { ProfileSettings } from "../dialogs";
 import { lazyView } from "../lazy-view";
+import { RouteBoundary } from "../route-boundary";
 import type { Participant } from "../participants";
 import { conversationName } from "../messages";
 import {
@@ -30,7 +31,7 @@ import {
   summarizeConversationUnread,
 } from "../store";
 import type { ChatSnapshot } from "../store";
-import { IconButton, Loading, useOverlayFocus } from "../ui";
+import { IconButton, useOverlayFocus } from "../ui";
 import { ICON } from "../icons";
 
 const PlatformInvitations = lazyView(() =>
@@ -204,7 +205,7 @@ export function ShellManagementView({
             </Link>
           </nav>
         )}
-      <Suspense fallback={<Loading />}>
+      <RouteBoundary>
       {isUsersPage ? (
         <PlatformUsers />
       ) : isMarketplacePage ? (
@@ -256,7 +257,7 @@ export function ShellManagementView({
       ) : (
         <ProfileSettings />
       )}
-      </Suspense>
+      </RouteBoundary>
     </>
   );
 }

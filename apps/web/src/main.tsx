@@ -1,5 +1,5 @@
 import "./layers.css";
-import { StrictMode, Suspense, useEffect } from "react";
+import { StrictMode, useEffect } from "react";
 import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -13,10 +13,12 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider, useAuth } from "./auth";
 import { lazyView } from "./lazy-view";
+import { RouteBoundary } from "./route-boundary";
 import { applyTheme, useThemePreference } from "./theme";
 import { Button, Loading, Logo, Notice } from "./ui";
 import { Toaster } from "./toast";
 import "@fontsource-variable/dm-sans";
+import "@fontsource-variable/noto-sans-sc";
 import "./tokens.css";
 import "./styles.css";
 import "./layout.css";
@@ -82,7 +84,7 @@ function App() {
     }
   }, [user]);
   return (
-    <Suspense fallback={<Loading />}>
+    <RouteBoundary fullPage>
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
@@ -119,7 +121,7 @@ function App() {
           }
         />
       </Routes>
-    </Suspense>
+    </RouteBoundary>
   );
 }
 createRoot(document.getElementById("root")!).render(

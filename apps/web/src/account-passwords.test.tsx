@@ -17,7 +17,7 @@ import { AuthProvider, useAuth } from "./auth";
 import { addAttachmentDraftFiles, discardAttachmentDrafts } from "./attachment-drafts";
 import { ProfileSettings } from "./dialogs";
 import { passwordPolicyError } from "./password-policy";
-import { Login } from "./public";
+import { Login } from "./public/auth-views";
 import { chatStore } from "./store";
 
 const user: User = {
