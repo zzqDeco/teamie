@@ -72,7 +72,7 @@ func (s *Service) CreateModelProvider(ctx context.Context, in CreateModelProvide
 		if displayName == "" {
 			displayName = id
 		}
-		now := time.Now().UTC()
+		now := time.Now().UTC().Truncate(time.Microsecond)
 		provider := domain.ProviderProfile{
 			ID:          id,
 			DisplayName: displayName,
@@ -131,20 +131,28 @@ func (s *Service) UpdateModelProvider(ctx context.Context, in UpdateModelProvide
 			return nil, nil, domain.Err(404, "not_found", "Model provider not found")
 		}
 		p := providers[idx]
-		if in.BaseURL != nil {
+		changed := false
+		if in.BaseURL != nil && p.BaseURL != *in.BaseURL {
 			p.BaseURL = *in.BaseURL
+			changed = true
 		}
 		if in.DisplayName != nil {
-			p.DisplayName = *in.DisplayName
-			if p.DisplayName == "" {
-				p.DisplayName = p.ID
+			nextName := *in.DisplayName
+			if nextName == "" {
+				nextName = p.ID
+			}
+			if p.DisplayName != nextName {
+				p.DisplayName = nextName
+				changed = true
 			}
 		}
-		if in.Enabled != nil {
+		if in.Enabled != nil && p.Enabled != *in.Enabled {
 			p.Enabled = *in.Enabled
+			changed = true
 		}
-		if in.ClearAPIKey {
+		if in.ClearAPIKey && len(p.CipherKey) > 0 {
 			p.CipherKey = nil
+			changed = true
 		}
 		if in.APIKey != nil {
 			enc, err := s.Cipher.Encrypt(*in.APIKey)
@@ -152,8 +160,11 @@ func (s *Service) UpdateModelProvider(ctx context.Context, in UpdateModelProvide
 				return nil, nil, err
 			}
 			p.CipherKey = enc
+			changed = true
 		}
-		p.UpdatedAt = time.Now().UTC()
+		if changed {
+			p.UpdatedAt = advanceUpdatedAt(p.UpdatedAt)
+		}
 		providers[idx] = p
 		return providers, models, nil
 	})

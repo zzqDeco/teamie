@@ -191,6 +191,12 @@ export interface ConversationDTO {
   createdBy?: string;
   canManageMembers: boolean;
   notificationLevel?: string;
+  manualUnreadSeq?: number;
+}
+
+export interface AttachmentImageDTO {
+  width: number;
+  height: number;
 }
 
 export interface AttachmentDTO {
@@ -199,6 +205,7 @@ export interface AttachmentDTO {
   mediaType: string;
   sizeBytes: number;
   sha256: string;
+  image?: AttachmentImageDTO;
 }
 
 export interface AttachmentLimitsDTO {
@@ -207,15 +214,35 @@ export interface AttachmentLimitsDTO {
 }
 
 export interface MentionDTO {
-  userId: string;
+  userId?: string;
   start: number;
   end: number;
+  kind?: string;
+  recipientIds?: string[];
+  recipientCount?: number;
 }
 
 export interface ReactionDTO {
   emoji: string;
   count: number;
   userIds: string[];
+}
+
+export interface ForwardSourceDTO {
+  conversationId: string;
+  messageId: string;
+}
+
+export interface ForwardedSnapshotDTO {
+  sourceConversationId: string;
+  sourceMessageId: string;
+  senderId: string;
+  senderName: string;
+  senderKind: string;
+  createdAt: string;
+  body: string;
+  mentions?: MentionDTO[];
+  attachments?: AttachmentDTO[];
 }
 
 export interface MessageDTO {
@@ -235,6 +262,7 @@ export interface MessageDTO {
   mentions?: MentionDTO[];
   reactions?: ReactionDTO[];
   reactionsVersion?: string;
+  forwarded?: ForwardedSnapshotDTO;
 }
 
 export interface EventDTO {
@@ -250,6 +278,13 @@ export interface EventDTO {
   reactions?: ReactionDTO[];
   notificationLevel?: string;
   reactionsVersion?: string;
+  manualUnreadSeq?: number;
+  pinned?: boolean;
+  pinnedBy?: string;
+  pinnedAt?: string;
+  pinsVersion?: string;
+  saved?: boolean;
+  savedAt?: string;
 }
 
 export interface AttentionConversationDTO {
@@ -395,6 +430,7 @@ export interface SendMessageReq {
   replyToId?: string;
   attachmentIds?: string[];
   mentions?: MentionDTO[];
+  forwardOf?: ForwardSourceDTO;
 }
 
 export interface EditMessageReq {
@@ -416,6 +452,7 @@ export interface MarkReadReq {
 
 export interface MarkReadResp {
   readSeq: number;
+  manualUnreadSeq?: number;
 }
 
 export interface PutReactionReq {
@@ -482,6 +519,7 @@ export interface GetAttentionReq {
   cursor?: string;
   limit?: string;
   unreadOnly?: string;
+  messageId?: string;
 }
 
 export interface AttentionUnreadDTO {
@@ -580,6 +618,105 @@ export interface AnnouncementResp {
 
 export interface DeleteAnnouncementReq {
   id: string;
+}
+
+export interface PinDTO {
+  message: MessageDTO;
+  pinnedBy: string;
+  pinnedByName: string;
+  pinnedAt: string;
+}
+
+export interface PutPinReq {
+  id: string;
+  messageId: string;
+}
+
+export interface PutPinResp {
+  pin: PinDTO;
+  pinsVersion: string;
+}
+
+export interface DeletePinReq {
+  id: string;
+  messageId: string;
+}
+
+export interface DeletePinResp {
+  pinsVersion: string;
+}
+
+export interface ListPinsReq {
+  id: string;
+}
+
+export interface ListPinsResp {
+  pins: PinDTO[];
+  pinsVersion: string;
+}
+
+export interface SavedMarkerDTO {
+  conversationId: string;
+  messageId: string;
+  savedAt: string;
+}
+
+export interface SaveMessageReq {
+  id: string;
+  messageId: string;
+}
+
+export interface SaveMessageResp {
+  saved: SavedMarkerDTO;
+}
+
+export interface UnsaveMessageReq {
+  id: string;
+  messageId: string;
+}
+
+export interface SavedItemDTO {
+  message: MessageDTO;
+  conversation: AttentionConversationDTO;
+  workspaceName: string;
+  savedAt: string;
+}
+
+export interface ListSavedReq {
+  cursor?: string;
+  limit?: string;
+}
+
+export interface ListSavedResp {
+  items: SavedItemDTO[];
+  cursor?: string;
+}
+
+export interface ListConversationSavedReq {
+  id: string;
+}
+
+export interface ListConversationSavedResp {
+  messageIds: string[];
+}
+
+export interface MarkUnreadReq {
+  id: string;
+  seq: number;
+}
+
+export interface MarkUnreadResp {
+  conversationId: string;
+  manualUnreadSeq: number;
+}
+
+export interface ClearUnreadReq {
+  id: string;
+}
+
+export interface DownloadAttachmentThumbnailReq {
+  id: string;
+  attachmentId: string;
 }
 
 // ============================================================================
@@ -952,6 +1089,13 @@ export interface AdminModelProviderDTO {
   updatedAt: string;
 }
 
+export interface ModelLastTest {
+  ok: boolean;
+  testedAt: string;
+  latencyMs?: number;
+  errorCode?: string;
+}
+
 export interface AdminModelProfileDTO {
   id: string;
   displayName: string;
@@ -968,6 +1112,7 @@ export interface AdminModelProfileDTO {
   providerDisplayName: string;
   providerEnabled: boolean;
   effectiveEnabled: boolean;
+  lastTest?: ModelLastTest;
 }
 
 export type GetModelCatalogReq = Record<string, never>;
@@ -1359,6 +1504,69 @@ export const IDL_ROUTES = {
     requestType: "DeleteReactionReq",
     responseType: "ReactionsResp",
   },
+  PutPin: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "PUT",
+    path: "/api/v1/conversations/:id/pins/:messageId",
+    clientPath: "/conversations/:id/pins/:messageId",
+    requestType: "PutPinReq",
+    responseType: "PutPinResp",
+  },
+  DeletePin: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "DELETE",
+    path: "/api/v1/conversations/:id/pins/:messageId",
+    clientPath: "/conversations/:id/pins/:messageId",
+    requestType: "DeletePinReq",
+    responseType: "DeletePinResp",
+  },
+  ListPins: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "GET",
+    path: "/api/v1/conversations/:id/pins",
+    clientPath: "/conversations/:id/pins",
+    requestType: "ListPinsReq",
+    responseType: "ListPinsResp",
+  },
+  SaveMessage: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "PUT",
+    path: "/api/v1/conversations/:id/messages/:messageId/saved",
+    clientPath: "/conversations/:id/messages/:messageId/saved",
+    requestType: "SaveMessageReq",
+    responseType: "SaveMessageResp",
+  },
+  UnsaveMessage: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "DELETE",
+    path: "/api/v1/conversations/:id/messages/:messageId/saved",
+    clientPath: "/conversations/:id/messages/:messageId/saved",
+    requestType: "UnsaveMessageReq",
+    responseType: "EmptyResp",
+  },
+  ListSaved: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "GET",
+    path: "/api/v1/saved",
+    clientPath: "/saved",
+    requestType: "ListSavedReq",
+    responseType: "ListSavedResp",
+  },
+  ListConversationSaved: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "GET",
+    path: "/api/v1/conversations/:id/saved",
+    clientPath: "/conversations/:id/saved",
+    requestType: "ListConversationSavedReq",
+    responseType: "ListConversationSavedResp",
+  },
   MarkRead: {
     service: "ChatHTTPService",
     namespace: "im.chat",
@@ -1367,6 +1575,24 @@ export const IDL_ROUTES = {
     clientPath: "/conversations/:id/read",
     requestType: "MarkReadReq",
     responseType: "MarkReadResp",
+  },
+  MarkUnread: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "POST",
+    path: "/api/v1/conversations/:id/unread",
+    clientPath: "/conversations/:id/unread",
+    requestType: "MarkUnreadReq",
+    responseType: "MarkUnreadResp",
+  },
+  ClearUnread: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "DELETE",
+    path: "/api/v1/conversations/:id/unread",
+    clientPath: "/conversations/:id/unread",
+    requestType: "ClearUnreadReq",
+    responseType: "EmptyResp",
   },
   GetReadReceipts: {
     service: "ChatHTTPService",
@@ -1447,6 +1673,15 @@ export const IDL_ROUTES = {
     path: "/api/v1/conversations/:id/attachments/:attachmentId/content",
     clientPath: "/conversations/:id/attachments/:attachmentId/content",
     requestType: "DownloadAttachmentReq",
+    responseType: "DownloadAttachmentResp",
+  },
+  DownloadAttachmentThumbnail: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "GET",
+    path: "/api/v1/conversations/:id/attachments/:attachmentId/thumbnail",
+    clientPath: "/conversations/:id/attachments/:attachmentId/thumbnail",
+    requestType: "DownloadAttachmentThumbnailReq",
     responseType: "DownloadAttachmentResp",
   },
   ListAnnouncements: {

@@ -253,7 +253,8 @@ var fieldIDToName_UsersRequest = map[int16]string{
 }
 
 type UsersResponse struct {
-	Users []*User `thrift:"users,1,required" frugal:"1,required,list<User>" json:"users"`
+	Users      []*User         `thrift:"users,1,required" frugal:"1,required,list<User>" json:"users"`
+	ActiveById map[string]bool `thrift:"activeById,2,optional" frugal:"2,optional,map<string:bool>" json:"activeById,omitempty"`
 }
 
 func NewUsersResponse() *UsersResponse {
@@ -266,8 +267,24 @@ func (p *UsersResponse) InitDefault() {
 func (p *UsersResponse) GetUsers() (v []*User) {
 	return p.Users
 }
+
+var UsersResponse_ActiveById_DEFAULT map[string]bool
+
+func (p *UsersResponse) GetActiveById() (v map[string]bool) {
+	if !p.IsSetActiveById() {
+		return UsersResponse_ActiveById_DEFAULT
+	}
+	return p.ActiveById
+}
 func (p *UsersResponse) SetUsers(val []*User) {
 	p.Users = val
+}
+func (p *UsersResponse) SetActiveById(val map[string]bool) {
+	p.ActiveById = val
+}
+
+func (p *UsersResponse) IsSetActiveById() bool {
+	return p.ActiveById != nil
 }
 
 func (p *UsersResponse) String() string {
@@ -279,6 +296,7 @@ func (p *UsersResponse) String() string {
 
 var fieldIDToName_UsersResponse = map[int16]string{
 	1: "users",
+	2: "activeById",
 }
 
 type PrincipalControlRequest struct {
@@ -1134,6 +1152,129 @@ var fieldIDToName_PrincipalWorkspacesRequest = map[int16]string{
 	3: "grantorUserId",
 	4: "workspaceIds",
 	5: "revision",
+}
+
+type PresenceRequest struct {
+	ServiceToken string   `thrift:"serviceToken,1,required" frugal:"1,required,string" json:"serviceToken"`
+	UserIds      []string `thrift:"userIds,2,required" frugal:"2,required,list<string>" json:"userIds"`
+}
+
+func NewPresenceRequest() *PresenceRequest {
+	return &PresenceRequest{}
+}
+
+func (p *PresenceRequest) InitDefault() {
+}
+
+func (p *PresenceRequest) GetServiceToken() (v string) {
+	return p.ServiceToken
+}
+
+func (p *PresenceRequest) GetUserIds() (v []string) {
+	return p.UserIds
+}
+func (p *PresenceRequest) SetServiceToken(val string) {
+	p.ServiceToken = val
+}
+func (p *PresenceRequest) SetUserIds(val []string) {
+	p.UserIds = val
+}
+
+func (p *PresenceRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PresenceRequest(%+v)", *p)
+}
+
+var fieldIDToName_PresenceRequest = map[int16]string{
+	1: "serviceToken",
+	2: "userIds",
+}
+
+type UserPresence struct {
+	UserId string `thrift:"userId,1,required" frugal:"1,required,string" json:"userId"`
+	State  string `thrift:"state,2,required" frugal:"2,required,string" json:"state"`
+}
+
+func NewUserPresence() *UserPresence {
+	return &UserPresence{}
+}
+
+func (p *UserPresence) InitDefault() {
+}
+
+func (p *UserPresence) GetUserId() (v string) {
+	return p.UserId
+}
+
+func (p *UserPresence) GetState() (v string) {
+	return p.State
+}
+func (p *UserPresence) SetUserId(val string) {
+	p.UserId = val
+}
+func (p *UserPresence) SetState(val string) {
+	p.State = val
+}
+
+func (p *UserPresence) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("UserPresence(%+v)", *p)
+}
+
+var fieldIDToName_UserPresence = map[int16]string{
+	1: "userId",
+	2: "state",
+}
+
+type PresenceResponse struct {
+	Ok        bool            `thrift:"ok,1,required" frugal:"1,required,bool" json:"ok"`
+	ErrorCode string          `thrift:"errorCode,2,required" frugal:"2,required,string" json:"errorCode"`
+	Presence  []*UserPresence `thrift:"presence,3,required" frugal:"3,required,list<UserPresence>" json:"presence"`
+}
+
+func NewPresenceResponse() *PresenceResponse {
+	return &PresenceResponse{}
+}
+
+func (p *PresenceResponse) InitDefault() {
+}
+
+func (p *PresenceResponse) GetOk() (v bool) {
+	return p.Ok
+}
+
+func (p *PresenceResponse) GetErrorCode() (v string) {
+	return p.ErrorCode
+}
+
+func (p *PresenceResponse) GetPresence() (v []*UserPresence) {
+	return p.Presence
+}
+func (p *PresenceResponse) SetOk(val bool) {
+	p.Ok = val
+}
+func (p *PresenceResponse) SetErrorCode(val string) {
+	p.ErrorCode = val
+}
+func (p *PresenceResponse) SetPresence(val []*UserPresence) {
+	p.Presence = val
+}
+
+func (p *PresenceResponse) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PresenceResponse(%+v)", *p)
+}
+
+var fieldIDToName_PresenceResponse = map[int16]string{
+	1: "ok",
+	2: "errorCode",
+	3: "presence",
 }
 
 type IdentityService interface {
@@ -2307,5 +2448,163 @@ func (p *ChatServiceSetPrincipalWorkspacesResult) String() string {
 }
 
 var fieldIDToName_ChatServiceSetPrincipalWorkspacesResult = map[int16]string{
+	0: "success",
+}
+
+type RealtimeService interface {
+	GetPresence(ctx context.Context, request *PresenceRequest) (r *PresenceResponse, err error)
+
+	Ping(ctx context.Context, request *PingRequest) (r *PingResponse, err error)
+}
+
+type RealtimeServiceGetPresenceArgs struct {
+	Request *PresenceRequest `thrift:"request,1" frugal:"1,default,PresenceRequest" json:"request"`
+}
+
+func NewRealtimeServiceGetPresenceArgs() *RealtimeServiceGetPresenceArgs {
+	return &RealtimeServiceGetPresenceArgs{}
+}
+
+func (p *RealtimeServiceGetPresenceArgs) InitDefault() {
+}
+
+var RealtimeServiceGetPresenceArgs_Request_DEFAULT *PresenceRequest
+
+func (p *RealtimeServiceGetPresenceArgs) GetRequest() (v *PresenceRequest) {
+	if !p.IsSetRequest() {
+		return RealtimeServiceGetPresenceArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *RealtimeServiceGetPresenceArgs) SetRequest(val *PresenceRequest) {
+	p.Request = val
+}
+
+func (p *RealtimeServiceGetPresenceArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *RealtimeServiceGetPresenceArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("RealtimeServiceGetPresenceArgs(%+v)", *p)
+}
+
+var fieldIDToName_RealtimeServiceGetPresenceArgs = map[int16]string{
+	1: "request",
+}
+
+type RealtimeServiceGetPresenceResult struct {
+	Success *PresenceResponse `thrift:"success,0,optional" frugal:"0,optional,PresenceResponse" json:"success,omitempty"`
+}
+
+func NewRealtimeServiceGetPresenceResult() *RealtimeServiceGetPresenceResult {
+	return &RealtimeServiceGetPresenceResult{}
+}
+
+func (p *RealtimeServiceGetPresenceResult) InitDefault() {
+}
+
+var RealtimeServiceGetPresenceResult_Success_DEFAULT *PresenceResponse
+
+func (p *RealtimeServiceGetPresenceResult) GetSuccess() (v *PresenceResponse) {
+	if !p.IsSetSuccess() {
+		return RealtimeServiceGetPresenceResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *RealtimeServiceGetPresenceResult) SetSuccess(x interface{}) {
+	p.Success = x.(*PresenceResponse)
+}
+
+func (p *RealtimeServiceGetPresenceResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *RealtimeServiceGetPresenceResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("RealtimeServiceGetPresenceResult(%+v)", *p)
+}
+
+var fieldIDToName_RealtimeServiceGetPresenceResult = map[int16]string{
+	0: "success",
+}
+
+type RealtimeServicePingArgs struct {
+	Request *PingRequest `thrift:"request,1" frugal:"1,default,PingRequest" json:"request"`
+}
+
+func NewRealtimeServicePingArgs() *RealtimeServicePingArgs {
+	return &RealtimeServicePingArgs{}
+}
+
+func (p *RealtimeServicePingArgs) InitDefault() {
+}
+
+var RealtimeServicePingArgs_Request_DEFAULT *PingRequest
+
+func (p *RealtimeServicePingArgs) GetRequest() (v *PingRequest) {
+	if !p.IsSetRequest() {
+		return RealtimeServicePingArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *RealtimeServicePingArgs) SetRequest(val *PingRequest) {
+	p.Request = val
+}
+
+func (p *RealtimeServicePingArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *RealtimeServicePingArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("RealtimeServicePingArgs(%+v)", *p)
+}
+
+var fieldIDToName_RealtimeServicePingArgs = map[int16]string{
+	1: "request",
+}
+
+type RealtimeServicePingResult struct {
+	Success *PingResponse `thrift:"success,0,optional" frugal:"0,optional,PingResponse" json:"success,omitempty"`
+}
+
+func NewRealtimeServicePingResult() *RealtimeServicePingResult {
+	return &RealtimeServicePingResult{}
+}
+
+func (p *RealtimeServicePingResult) InitDefault() {
+}
+
+var RealtimeServicePingResult_Success_DEFAULT *PingResponse
+
+func (p *RealtimeServicePingResult) GetSuccess() (v *PingResponse) {
+	if !p.IsSetSuccess() {
+		return RealtimeServicePingResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *RealtimeServicePingResult) SetSuccess(x interface{}) {
+	p.Success = x.(*PingResponse)
+}
+
+func (p *RealtimeServicePingResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *RealtimeServicePingResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("RealtimeServicePingResult(%+v)", *p)
+}
+
+var fieldIDToName_RealtimeServicePingResult = map[int16]string{
 	0: "success",
 }

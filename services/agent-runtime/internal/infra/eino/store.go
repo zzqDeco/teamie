@@ -15,7 +15,6 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
 	"teamie/contracts/gen/agent/hertz_gen/agent/modeltransport"
-	"teamie/pkg/imtext"
 	"teamie/services/agent-runtime/internal/domain"
 )
 
@@ -28,28 +27,37 @@ type Store struct {
 	Coordinator func(im domain.IMGateway) domain.ScheduleCoordinator
 }
 type Lease = domain.Lease
+type MentionSpan = domain.MentionSpan
+type ForwardedMessage = domain.ForwardedMessage
+type AttachmentImage = domain.AttachmentImage
 type Input struct {
-	EventID        string           `json:"eventId"`
-	WorkspaceID    string           `json:"workspaceId"`
-	ConversationID string           `json:"conversationId"`
-	MessageID      string           `json:"messageId"`
-	SenderID       string           `json:"senderId"`
-	SenderName     string           `json:"senderName"`
-	SenderKind     string           `json:"senderKind"`
-	Body           string           `json:"body"`
-	Attachments    []Attachment     `json:"attachments,omitempty"`
-	Mentions       []imtext.Mention `json:"mentions,omitempty"`
-	ReplyToID      string           `json:"replyToId,omitempty"`
-	Seq            int64            `json:"seq"`
-	CreatedAt      string           `json:"createdAt"`
-	Kind           string           `json:"kind,omitempty"`
-	TaskID         string           `json:"taskId,omitempty"`
-	ScheduleID     string           `json:"scheduleId,omitempty"`
-	NotificationID string           `json:"notificationId,omitempty"`
-	Status         string           `json:"status,omitempty"`
-	ParentRunID    string           `json:"parentRunId,omitempty"`
-	SourceRefs     []InputSource    `json:"sourceRefs,omitempty"`
-	SourceOverflow bool             `json:"sourceOverflow,omitempty"`
+	EventID            string            `json:"eventId"`
+	WorkspaceID        string            `json:"workspaceId"`
+	ConversationID     string            `json:"conversationId"`
+	MessageID          string            `json:"messageId"`
+	SenderID           string            `json:"senderId"`
+	SenderName         string            `json:"senderName"`
+	SenderKind         string            `json:"senderKind"`
+	Body               string            `json:"body"`
+	Attachments        []Attachment      `json:"attachments,omitempty"`
+	Mentions           []MentionSpan     `json:"mentions,omitempty"`
+	ReplyToID          string            `json:"replyToId,omitempty"`
+	Forwarded          *ForwardedMessage `json:"forwarded,omitempty"`
+	BroadcastAddressed bool              `json:"broadcastAddressed,omitempty"`
+	Seq                int64             `json:"seq"`
+	CreatedAt          string            `json:"createdAt"`
+	Kind               string            `json:"kind,omitempty"`
+	TaskID             string            `json:"taskId,omitempty"`
+	ScheduleID         string            `json:"scheduleId,omitempty"`
+	NotificationID     string            `json:"notificationId,omitempty"`
+	Status             string            `json:"status,omitempty"`
+	ParentRunID        string            `json:"parentRunId,omitempty"`
+	SourceRefs         []InputSource     `json:"sourceRefs,omitempty"`
+	SourceOverflow     bool              `json:"sourceOverflow,omitempty"`
+}
+
+func (in Input) AddressedTo(agentID string) bool {
+	return toDomainInput(in).AddressedTo(agentID)
 }
 type Run struct {
 	diagnostic                  *observability.Operation
@@ -301,35 +309,30 @@ func CurrentRun(ctx context.Context) (*Run, error) {
 func digest(b []byte) string { return domain.Digest(b) }
 
 func toDomainInput(in Input) domain.Input {
-	var mentions []domain.MentionSpan
-	if len(in.Mentions) > 0 {
-		mentions = make([]domain.MentionSpan, len(in.Mentions))
-		for i, m := range in.Mentions {
-			mentions[i] = domain.MentionSpan(m)
-		}
-	}
 	return domain.Input{
-		EventID:        in.EventID,
-		WorkspaceID:    in.WorkspaceID,
-		ConversationID: in.ConversationID,
-		MessageID:      in.MessageID,
-		SenderID:       in.SenderID,
-		SenderName:     in.SenderName,
-		SenderKind:     in.SenderKind,
-		Body:           in.Body,
-		Attachments:    in.Attachments,
-		Mentions:       mentions,
-		ReplyToID:      in.ReplyToID,
-		Seq:            in.Seq,
-		CreatedAt:      in.CreatedAt,
-		Kind:           in.Kind,
-		TaskID:         in.TaskID,
-		ScheduleID:     in.ScheduleID,
-		NotificationID: in.NotificationID,
-		Status:         in.Status,
-		ParentRunID:    in.ParentRunID,
-		SourceRefs:     in.SourceRefs,
-		SourceOverflow: in.SourceOverflow,
+		EventID:            in.EventID,
+		WorkspaceID:        in.WorkspaceID,
+		ConversationID:     in.ConversationID,
+		MessageID:          in.MessageID,
+		SenderID:           in.SenderID,
+		SenderName:         in.SenderName,
+		SenderKind:         in.SenderKind,
+		Body:               in.Body,
+		Attachments:        in.Attachments,
+		Mentions:           in.Mentions,
+		ReplyToID:          in.ReplyToID,
+		Forwarded:          in.Forwarded,
+		BroadcastAddressed: in.BroadcastAddressed,
+		Seq:                in.Seq,
+		CreatedAt:          in.CreatedAt,
+		Kind:               in.Kind,
+		TaskID:             in.TaskID,
+		ScheduleID:         in.ScheduleID,
+		NotificationID:     in.NotificationID,
+		Status:             in.Status,
+		ParentRunID:        in.ParentRunID,
+		SourceRefs:         in.SourceRefs,
+		SourceOverflow:     in.SourceOverflow,
 	}
 }
 

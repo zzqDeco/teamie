@@ -162,11 +162,14 @@ func (a *Adapter) MarkRead(ctx context.Context, req *chatgen.MarkReadReq) (*chat
 	if !ok {
 		return nil, domain.Err(401, "unauthenticated", "Sign in to continue")
 	}
-	seq, err := a.App.Read(ctx, user.ID, req.ID, req.Seq)
+	state, err := a.App.ReadThrough(ctx, user.ID, req.ID, req.Seq)
 	if err != nil {
 		return nil, err
 	}
-	return &chatgen.MarkReadResp{ReadSeq: seq}, nil
+	return &chatgen.MarkReadResp{
+		ReadSeq:         state.ReadSeq,
+		ManualUnreadSeq: optPositiveInt64(state.ManualUnreadSeq),
+	}, nil
 }
 
 func (a *Adapter) SetNotificationLevel(ctx context.Context, req *chatgen.SetNotificationLevelReq) (*chatgen.NotificationLevelResp, error) {

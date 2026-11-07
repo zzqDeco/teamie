@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,7 +23,6 @@ import (
 	"teamie/contracts/gen/agent/kitex_gen/agent/sandboxservice"
 	"teamie/contracts/gen/im/kitex_gen/im"
 	"teamie/contracts/gen/im/kitex_gen/im/identityservice"
-	"teamie/pkg/imtext"
 )
 
 type APIError struct {
@@ -209,18 +209,19 @@ type Conversation struct {
 	LastSeq      int64    `json:"lastSeq,omitempty"`
 }
 type Message struct {
-	ID             string           `json:"id"`
-	ConversationID string           `json:"conversationId"`
-	SenderID       string           `json:"senderId"`
-	SenderName     string           `json:"senderName"`
-	SenderKind     string           `json:"senderKind"`
-	Body           string           `json:"body"`
-	ReplyToID      string           `json:"replyToId,omitempty"`
-	Seq            int64            `json:"seq"`
-	CreatedAt      string           `json:"createdAt"`
-	RetractedAt    *string          `json:"retractedAt,omitempty"`
-	Attachments    []Attachment     `json:"attachments,omitempty"`
-	Mentions       []imtext.Mention `json:"mentions,omitempty"`
+	ID             string            `json:"id"`
+	ConversationID string            `json:"conversationId"`
+	SenderID       string            `json:"senderId"`
+	SenderName     string            `json:"senderName"`
+	SenderKind     string            `json:"senderKind"`
+	Body           string            `json:"body"`
+	ReplyToID      string            `json:"replyToId,omitempty"`
+	Seq            int64             `json:"seq"`
+	CreatedAt      string            `json:"createdAt"`
+	RetractedAt    *string           `json:"retractedAt,omitempty"`
+	Attachments    []Attachment      `json:"attachments,omitempty"`
+	Mentions       []MentionSpan     `json:"mentions,omitempty"`
+	Forwarded      *ForwardedMessage `json:"forwarded,omitempty"`
 }
 type Workspace struct {
 	ID   string `json:"id"`
@@ -254,6 +255,39 @@ func (imc *IM) Message(ctx context.Context, c, m string) (*Message, error) {
 	}
 	e = imc.Call(ctx, http.MethodGet, path, nil, &out)
 	return &out.Message, e
+}
+
+// HereMentionAddressed checks whether a "here" broadcast on messageID addressed this Agent
+// through Chat's per-principal attention projection. Network/5xx/429/401/principal-revocation
+// failures are returned so ingestion retries before advancing the inbox cursor; 403/404 access
+// loss on the message/endpoint resolves cleanly as unaddressed.
+func (imc *IM) HereMentionAddressed(ctx context.Context, messageID string) (bool, error) {
+	if imc == nil || strings.TrimSpace(messageID) == "" {
+		return false, nil
+	}
+	var out struct {
+		Items []struct {
+			Message struct {
+				ID string `json:"id"`
+			} `json:"message"`
+			Reasons []string `json:"reasons"`
+		} `json:"items"`
+	}
+	path := "/api/v1/attention?messageId=" + url.QueryEscape(messageID)
+	if err := imc.Call(ctx, http.MethodGet, path, nil, &out); err != nil {
+		var api *APIError
+		if errors.As(err, &api) && (api.Status == http.StatusForbidden || api.Status == http.StatusNotFound) &&
+			api.Code != "principal_disabled" && api.Code != "principal_deleted" {
+			return false, nil
+		}
+		return false, err
+	}
+	for _, item := range out.Items {
+		if item.Message.ID == messageID && slices.Contains(item.Reasons, "mention") {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 type Tools struct {
@@ -712,7 +746,7 @@ func historyPage(messages []Message, hasMore bool, keyword string) ([]Message, i
 		used += len(b)
 		examined++
 		cursor = m.Seq
-		if keyword == "" || strings.Contains(strings.ToLower(m.Body), strings.ToLower(keyword)) {
+		if keyword == "" || strings.Contains(strings.ToLower(m.Body), strings.ToLower(keyword)) || (m.Forwarded != nil && strings.Contains(strings.ToLower(m.Forwarded.Body), strings.ToLower(keyword))) {
 			out = append(out, m)
 		}
 	}

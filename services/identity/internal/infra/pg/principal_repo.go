@@ -148,23 +148,34 @@ func (r *Repository) UpdatePasswordHash(ctx context.Context, userID, passwordHas
 }
 
 func (r *Repository) FindByIDs(ctx context.Context, ids []string) ([]domain.User, error) {
+	users, _, err := r.FindByIDsWithActive(ctx, ids)
+	return users, err
+}
+
+func (r *Repository) FindByIDsWithActive(ctx context.Context, ids []string) ([]domain.User, map[string]bool, error) {
 	users := []domain.User{}
+	active := make(map[string]bool, len(ids))
+	if len(ids) == 0 {
+		return users, active, nil
+	}
 	rows, err := r.DB.Conn(ctx).Query(ctx,
-		"SELECT id,COALESCE(email,''),display_name,kind,platform_role,created_at FROM identity_users WHERE id=ANY($1)",
+		"SELECT id,COALESCE(email,''),display_name,kind,platform_role,created_at,(enabled AND deleted_at IS NULL) FROM identity_users WHERE id=ANY($1)",
 		ids,
 	)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var u domain.User
-		if err = rows.Scan(&u.ID, &u.Email, &u.DisplayName, &u.Kind, &u.PlatformRole, &u.CreatedAt); err != nil {
-			return nil, err
+		var isActive bool
+		if err = rows.Scan(&u.ID, &u.Email, &u.DisplayName, &u.Kind, &u.PlatformRole, &u.CreatedAt, &isActive); err != nil {
+			return nil, nil, err
 		}
 		users = append(users, u)
+		active[u.ID] = isActive
 	}
-	return users, rows.Err()
+	return users, active, rows.Err()
 }
 
 func (r *Repository) ListAdminHumans(ctx context.Context, afterID, query, likePattern string, limit int) ([]domain.User, error) {

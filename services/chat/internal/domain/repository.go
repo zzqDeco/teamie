@@ -12,6 +12,7 @@ type TxManager interface {
 	LockSenderClientMessage(ctx context.Context, senderID, clientMessageID string) error
 	LockAttachmentSender(ctx context.Context, userID string) error
 	LockPrincipalMembership(ctx context.Context, principalID string) error
+	LockSavedItems(ctx context.Context, userID string) error
 	Ping(ctx context.Context) error
 }
 
@@ -24,7 +25,13 @@ type FeatureFlags interface {
 // IdentityDirectory resolves participant profiles across the Identity boundary.
 type IdentityDirectory interface {
 	Users(ctx context.Context, ids []string) ([]User, error)
+	UsersWithActive(ctx context.Context, ids []string) ([]User, map[string]bool, error)
 	Ping(ctx context.Context) error
+}
+
+// PresenceDirectory resolves live human presence states across the private Realtime boundary.
+type PresenceDirectory interface {
+	Presence(ctx context.Context, userIDs []string) (map[string]string, error)
 }
 
 // OutboxPublisher publishes realtime wakeup hints from the durable outbox.
@@ -60,6 +67,7 @@ type ConversationRepository interface {
 	GetConversationScope(ctx context.Context, conversationID, userID string) (workspaceID string, workspaceOwnerID string, convType string, allowed bool, err error)
 	LockConversation(ctx context.Context, conversationID, userID string) (Conversation, error)
 	LockConversationForShare(ctx context.Context, conversationID string) error
+	LockConversationForUpdate(ctx context.Context, conversationID string) error
 	GetConversationWorkspaceID(ctx context.Context, conversationID string) (string, error)
 	FindDirectConversationByPairKey(ctx context.Context, workspaceID, pairKey string) (string, bool, error)
 	InsertConversation(ctx context.Context, c Conversation, pairKey string) (time.Time, error)
@@ -70,6 +78,8 @@ type ConversationRepository interface {
 	CountConversationMembersAndCheckTarget(ctx context.Context, conversationID, targetUserID string) (count int, present bool, err error)
 	IncrementConversationSeq(ctx context.Context, conversationID string) (int64, error)
 	UpsertReadCursor(ctx context.Context, conversationID, userID string, seq int64) error
+	SetManualUnread(ctx context.Context, conversationID, userID string, seq int64) error
+	ClearManualUnread(ctx context.Context, conversationID, userID string) (bool, error)
 	SetNotificationLevel(ctx context.Context, conversationID, userID, level string) (bool, error)
 	QueryReadReceipts(ctx context.Context, c Conversation, callerUserID string) (ReadReceipts, error)
 	EnqueueOutboxHint(ctx context.Context, payload any) error
@@ -89,13 +99,15 @@ type MembershipRepository interface {
 // MessageRepository defines persistence operations for messages, history, search, and attention.
 type MessageRepository interface {
 	GetMessage(ctx context.Context, conversationID, messageID string) (Message, error)
-	FindMessageBySenderClientID(ctx context.Context, senderID, clientMessageID string) (msg Message, originalBodyHash string, originalAttachmentIDs []string, originalMentions []Mention, found bool, err error)
+	FindMessageBySenderClientID(ctx context.Context, senderID, clientMessageID string) (msg Message, identity MessageIdentity, found bool, err error)
 	MessageExistsInConversation(ctx context.Context, messageID, conversationID string) (bool, error)
-	InsertMessage(ctx context.Context, m Message, originalBodyHash string) (time.Time, error)
-	SetMessageInitialMentions(ctx context.Context, messageID string, mentions []Mention) error
+	InsertMessage(ctx context.Context, m Message, originalBodyHash string, forwardOf *ForwardSource) (time.Time, error)
+	CopyForwardAttachments(ctx context.Context, sourceConversationID, sourceMessageID, targetConversationID, targetMessageID, forwarderID string, descriptors []Attachment) ([]Attachment, error)
+	SetMessageForwarded(ctx context.Context, messageID string, snapshot ForwardedSnapshot) error
+	SetMessageInitialMentions(ctx context.Context, messageID string, mentions, originalMentions []Mention, broadcastRecipientIDs []string) error
 	SetMessageInitialAttachments(ctx context.Context, messageID string, attachments []Attachment, originalIDs []string) error
 	RetractMessageAndDeleteAttachments(ctx context.Context, messageID string, retractedAt time.Time) error
-	UpdateMessageBodyAndMentions(ctx context.Context, messageID, body string, editedAt time.Time, mentions []Mention) error
+	UpdateMessageBodyAndMentions(ctx context.Context, messageID, body string, editedAt time.Time, mentions []Mention, broadcastRecipientIDs []string) error
 	AddReaction(ctx context.Context, conversationID, messageID, userID, emoji string) (ReactionState, bool, error)
 	RemoveReaction(ctx context.Context, conversationID, messageID, userID, emoji string) (ReactionState, bool, error)
 	QueryMessageHistory(ctx context.Context, conversationID string, before, around int64, query string, limit int, filesOnly bool) ([]Message, bool, error)
@@ -104,7 +116,25 @@ type MessageRepository interface {
 	QueryVerifiedWorkspaceSearchItems(ctx context.Context, userID, query string, before any, cursorID string, limit int, candidateMessageIDs, conversationIDs []string) ([]WorkspaceSearchItem, error)
 	LockUserWorkspacesForShare(ctx context.Context, userID string) ([]string, error)
 	LockUserConversationsForShare(ctx context.Context, userID string, workspaceIDs []string) ([]string, error)
-	QueryAttentionProjection(ctx context.Context, userID string, before any, cursorID string, unreadOnly bool, limit int, conversationIDs []string) (unreadCount, channelUnreadCount int64, items []AttentionItem, unreadByConversation []AttentionUnread, err error)
+	QueryAttentionProjection(ctx context.Context, userID string, before any, cursorID string, unreadOnly bool, limit int, conversationIDs []string, messageID string) (unreadCount, channelUnreadCount int64, items []AttentionItem, unreadByConversation []AttentionUnread, err error)
+
+	// Pins: mutations run under the conversation row lock so the counter,
+	// pin rows and durable event commit together.
+	FindPin(ctx context.Context, conversationID, messageID string) (Pin, bool, error)
+	CountPins(ctx context.Context, conversationID string) (int, error)
+	InsertPin(ctx context.Context, conversationID, messageID, pinnedBy, pinnedByName string) (Pin, int64, error)
+	DeletePin(ctx context.Context, conversationID, messageID string) (version int64, deleted bool, err error)
+	PinsVersion(ctx context.Context, conversationID string) (int64, error)
+	ListPins(ctx context.Context, conversationID string) ([]Pin, error)
+
+	// Saved items are private to userID.
+	FindSaved(ctx context.Context, userID, messageID string) (SavedMarker, bool, error)
+	CountSaved(ctx context.Context, userID string) (int, error)
+	InsertSaved(ctx context.Context, userID, conversationID, messageID string) (SavedMarker, error)
+	DeleteSaved(ctx context.Context, userID, conversationID, messageID string) (bool, error)
+	DeleteSavedForMessage(ctx context.Context, messageID string) error
+	SavedMessageIDs(ctx context.Context, userID, conversationID string) ([]string, error)
+	QuerySavedPage(ctx context.Context, userID string, before any, cursorID string, limit int, conversationIDs []string) ([]SavedItem, error)
 }
 
 // AttachmentRepository defines persistence operations for file attachments and upload receipts.
@@ -112,13 +142,14 @@ type AttachmentRepository interface {
 	FindAttachmentUpload(ctx context.Context, userID, key string) (AttachmentUpload, bool, error)
 	DeleteExpiredPendingForSender(ctx context.Context, userID string) error
 	CountPendingForSender(ctx context.Context, userID string) (int, error)
-	InsertAttachment(ctx context.Context, a Attachment, conversationID, uploaderID string, content []byte) error
+	InsertAttachment(ctx context.Context, a Attachment, conversationID, uploaderID string, content []byte, thumb *AttachmentThumbnail) error
 	InsertAttachmentUpload(ctx context.Context, uploaderID, key, conversationID, fingerprint, attachmentID string) error
 	DeleteAllExpiredPending(ctx context.Context) error
 	LockAttachmentForUpdate(ctx context.Context, attachmentID, conversationID string) (ownerID string, messageID *string, found bool, err error)
 	DeleteAttachmentByID(ctx context.Context, attachmentID string) error
 	AttachFilesToMessage(ctx context.Context, userID, conversationID, messageID string, attachmentIDs []string) ([]Attachment, error)
 	GetAuthorizedAttachmentContent(ctx context.Context, attachmentID, conversationID, userID string) (Attachment, []byte, error)
+	GetAuthorizedAttachmentThumbnail(ctx context.Context, attachmentID, conversationID, userID string) (mediaType string, content []byte, sha256 string, err error)
 }
 
 // OutboxRepository defines persistence operations for the durable realtime hint outbox.

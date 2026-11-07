@@ -12,6 +12,7 @@ import type {
   AnnouncementDTO,
   AnnouncementResp,
   AttachmentDTO,
+  AttachmentImageDTO,
   AttachmentLimitsDTO,
   AttentionItemDTO,
   AttentionPageResp,
@@ -21,10 +22,17 @@ import type {
   CreateAdminModelProviderReq,
   CreateAnnouncementReq,
   CreatePasswordResetLinkResp,
+  DeletePinResp,
   EventDTO,
+  ForwardedSnapshotDTO,
+  ForwardSourceDTO,
   ListAnnouncementsResp,
+  ListConversationSavedResp,
   ListMessagesResp,
+  ListPinsResp,
+  ListSavedResp,
   MarkAnnouncementsReadResp,
+  MarkUnreadResp,
   MemberDTO,
   MemberReadReceiptDTO,
   MentionDTO,
@@ -33,14 +41,19 @@ import type {
   ModelConfigDTO,
   PasswordResetDTO,
   PasswordResetInspectionResp,
+  PinDTO,
   PresenceItemDTO,
   PublicAgentDTO,
   PublicModelOptionDTO,
+  PutPinResp,
   ReactionDTO,
   ReadReceiptsResp,
   ReadSeqCountDTO,
   RegistrationInviteDTO,
   RegistrationMetadataResp,
+  SavedItemDTO,
+  SavedMarkerDTO,
+  SaveMessageResp,
   SessionResp,
   SyncResp,
   UpdateAdminModelProfileReq,
@@ -124,12 +137,18 @@ export type ModelGateway = Omit<AdminModelConfigResp, "config" | "status"> & {
 export type WebSearchInput = UpdateAdminWebSearchConfigReq;
 export type ModelRoutingInput = UpdateAdminModelRoutingReq;
 export type Attachment = AttachmentDTO;
+export type AttachmentImage = AttachmentImageDTO;
 export type AttachmentLimits = AttachmentLimitsDTO;
 export const defaultAttachmentLimits: AttachmentLimits = {
   maxFileBytes: 4 * 1024 * 1024,
   maxFilesPerMessage: 8,
 };
+export type BroadcastMentionKind = "all" | "here";
 export type Mention = MentionDTO;
+export type ForwardSource = ForwardSourceDTO;
+export type ForwardedSnapshot = Omit<ForwardedSnapshotDTO, "senderKind"> & {
+  senderKind: "human" | "agent";
+};
 export type Reaction = ReactionDTO;
 export type ReadSeqCount = ReadSeqCountDTO;
 export type MemberReadReceipt = MemberReadReceiptDTO;
@@ -138,9 +157,25 @@ export type PresenceState = "online" | "away" | "offline";
 export type PresenceItem = Omit<PresenceItemDTO, "state"> & {
   state: "online" | "away";
 };
-export type Message = Omit<MessageDTO, "senderKind"> & {
+export type Message = Omit<MessageDTO, "senderKind" | "forwarded"> & {
   senderKind: "human" | "agent";
+  forwarded?: ForwardedSnapshot;
 };
+export type Pin = Omit<PinDTO, "message"> & { message: Message };
+export type PutPinResult = Omit<PutPinResp, "pin"> & { pin: Pin };
+export type DeletePinResult = DeletePinResp;
+export type PinsList = Omit<ListPinsResp, "pins"> & { pins: Pin[] };
+export type SavedMarker = SavedMarkerDTO;
+export type SaveMessageResult = SaveMessageResp;
+export type SavedItem = Omit<SavedItemDTO, "message" | "conversation"> & {
+  message: Message;
+  conversation: Pick<Conversation, "id" | "workspaceId" | "name" | "type">;
+};
+export type SavedPage = Omit<ListSavedResp, "items"> & {
+  items: SavedItem[];
+};
+export type ConversationSavedIds = ListConversationSavedResp;
+export type MarkUnreadResult = MarkUnreadResp;
 export type Bootstrap = Omit<
   BootstrapResp,
   "user" | "workspaces" | "conversations" | "attachmentLimits"
@@ -162,7 +197,9 @@ export type SyncEvent = Omit<
     | "membership.changed"
     | "read.updated"
     | "reaction.updated"
-    | "preference.updated";
+    | "preference.updated"
+    | "pin.updated"
+    | "saved.updated";
   message?: Message;
   conversation?: Conversation;
   notificationLevel?: NotificationLevel;

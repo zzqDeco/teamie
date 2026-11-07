@@ -60,8 +60,9 @@ SQL
     "${pg[@]}" bash -s < deploy/postgres/02-migrate-chat-marketplace.sh
     "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 < services/chat/internal/infra/pg/migrations/010_retire_embedded_marketplace.sql >/dev/null
     "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 < services/chat/internal/infra/pg/migrations/011_platform_announcements.sql >/dev/null
+    "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 < services/chat/internal/infra/pg/migrations/012_collaboration.sql >/dev/null
     "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 <<'SQL'
-INSERT INTO chat_schema_migrations(version) VALUES(10),(11) ON CONFLICT DO NOTHING;
+INSERT INTO chat_schema_migrations(version) VALUES(10),(11),(12) ON CONFLICT DO NOTHING;
 INSERT INTO platform_announcements(id,title,body,author_id,author_name) VALUES('restore-announcement','Teamie v0.4.6','### 更新说明\n- 新增平台公告','owner','Owner');
 INSERT INTO platform_announcement_reads(user_id,read_seq) VALUES('owner',1);
 INSERT INTO conversations(id,workspace_id,type,name) VALUES('restore-conversation','restore-workspace','channel','general');
@@ -83,6 +84,14 @@ INSERT INTO messages(id,conversation_id,sender_id,sender_name,sender_kind,client
 VALUES('restore-empty-reactions','restore-conversation','owner','Owner','human','restore-empty-send',2,'Persist the empty reaction watermark','fixture',4);
 INSERT INTO conversation_notification_levels(conversation_id,user_id,level)
 VALUES('restore-conversation','owner','mentions'),('restore-conversation','reader','none');
+INSERT INTO conversation_pins(conversation_id,message_id,pinned_by,pinned_by_name)
+VALUES('restore-conversation','restore-message','owner','Owner');
+INSERT INTO saved_messages(user_id,conversation_id,message_id)
+VALUES('owner','restore-conversation','restore-message');
+INSERT INTO read_cursors(conversation_id,user_id,seq,manual_unread_seq)
+VALUES('restore-conversation','owner',2,1);
+INSERT INTO attachment_thumbnails(attachment_id,media_type,content)
+VALUES('restore-attachment','image/png',decode('89504e470d0a1a0a','hex'));
 SQL
   fi
   if [[ $suffix == marketplace ]]; then
@@ -183,13 +192,18 @@ VALUES('20000000-0000-4000-8000-000000000001',2,'teamie-context-v038',repeat('b'
 SQL
   fi
   if [[ $suffix == gateway ]]; then
-    "${pg[@]}" psql -U postgres -d teamie_gateway -v ON_ERROR_STOP=1 < services/llm-gateway/internal/infra/pg/migrations/001_gateway.sql >/dev/null
+    for migration in services/llm-gateway/internal/infra/pg/migrations/*.sql; do
+      "${pg[@]}" psql -U postgres -d teamie_gateway -v ON_ERROR_STOP=1 < "$migration" >/dev/null
+    done
     "${pg[@]}" psql -U postgres -d teamie_gateway -v ON_ERROR_STOP=1 <<'SQL'
 INSERT INTO gateway_providers(id,display_name,base_url,encrypted_key,enabled)
 VALUES('restore-provider','Restore Provider','https://1.1.1.1/v1',decode('00fffe80890a0d','hex'),true);
 INSERT INTO gateway_models(id,provider_id,display_name,description,model,context_window_tokens,enabled)
 VALUES('restore-model-a','restore-provider','Model A','Primary model','gpt-restore-a',32768,true),
       ('restore-model-b','restore-provider','Model B','Secondary model','gpt-restore-b',131072,false);
+INSERT INTO gateway_model_tests(model_id,ok,tested_at,latency_ms,error_code,model_updated_at,provider_updated_at)
+VALUES('restore-model-a',true,'2026-11-07T00:00:00Z',42,NULL,'2026-11-07T00:00:00Z','2026-11-07T00:00:00Z'),
+      ('restore-model-b',false,'2026-11-07T00:01:00Z',150,'provider_auth_failed','2026-11-07T00:00:00Z','2026-11-07T00:00:00Z');
 UPDATE gateway_model_routing SET default_model_id='restore-model-a' WHERE id=true;
 UPDATE gateway_web_search_config SET encrypted_key=decode('aabbccddeeff00','hex'),enabled=true WHERE id=true;
 SQL
@@ -217,7 +231,10 @@ SQL
     [[ $actual == '00fffe80890a0d:binary.restore.bin:restore-attachment:restore-attachment' ]] || { echo 'Chat attachment binary restore verification failed.' >&2; exit 1; }
     actual=$("${pg[@]}" psql -U postgres -d restore_chat -At -v ON_ERROR_STOP=1 -c \
       "SELECT (SELECT string_agg(version::text,',' ORDER BY version) FROM chat_schema_migrations)||':'||(SELECT attachment_id FROM attachment_uploads WHERE uploader_id='owner' AND upload_key='restore-upload')||':'||(SELECT count(*) FROM attachment_uploads WHERE upload_key='restore-removed' AND attachment_id IS NULL)||':'||(to_regclass('public.marketplace_apps') IS NULL)::text;")
-    [[ $actual == '1,2,3,4,5,6,7,8,9,10,11:restore-attachment:1:true' ]] || { echo 'Chat upload receipts, tombstones and retired marketplace cleanup verification failed.' >&2; exit 1; }
+    [[ $actual == '1,2,3,4,5,6,7,8,9,10,11,12:restore-attachment:1:true' ]] || { echo 'Chat upload receipts, tombstones and retired marketplace cleanup verification failed.' >&2; exit 1; }
+    actual=$("${pg[@]}" psql -U postgres -d restore_chat -At -v ON_ERROR_STOP=1 -c \
+      "SELECT (SELECT pinned_by FROM conversation_pins WHERE conversation_id='restore-conversation' AND message_id='restore-message')||':'||(SELECT count(*) FROM saved_messages WHERE user_id='owner' AND message_id='restore-message')||':'||(SELECT seq||','||manual_unread_seq FROM read_cursors WHERE conversation_id='restore-conversation' AND user_id='owner')||':'||(SELECT media_type||','||encode(content,'hex') FROM attachment_thumbnails WHERE attachment_id='restore-attachment');")
+    [[ $actual == 'owner:1:2,1:image/png,89504e470d0a1a0a' ]] || { echo 'Chat collaboration pins, saved messages, manual unread and thumbnail restore failed.' >&2; exit 1; }
     actual=$("${pg[@]}" psql -U postgres -d restore_chat -At -v ON_ERROR_STOP=1 -c \
       "SELECT a.seq||':'||a.title||':'||r.read_seq FROM platform_announcements a JOIN platform_announcement_reads r ON r.user_id=a.author_id WHERE a.id='restore-announcement';")
     [[ $actual == '1:Teamie v0.4.6:1' ]] || { echo 'Chat platform announcements restore failed.' >&2; exit 1; }
@@ -319,8 +336,8 @@ SQL
   fi
   if [[ $suffix == gateway ]]; then
     actual=$("${pg[@]}" psql -U postgres -d restore_gateway -At -v ON_ERROR_STOP=1 -c \
-      "SELECT (SELECT string_agg(version::text,',' ORDER BY version) FROM gateway_schema_migrations)||':'||encode(p.encrypted_key,'hex')||':'||(SELECT string_agg(m.id||'='||m.model||':'||m.context_window_tokens||':'||m.enabled::text,',' ORDER BY m.id) FROM gateway_models m WHERE m.provider_id=p.id)||':'||(SELECT default_model_id FROM gateway_model_routing WHERE id=true)||':'||(SELECT encode(encrypted_key,'hex')||':'||enabled::text FROM gateway_web_search_config WHERE id=true) FROM gateway_providers p WHERE p.id='restore-provider';")
-    [[ $actual == '1,2,3,4,5,6:00fffe80890a0d:restore-model-a=gpt-restore-a:32768:true,restore-model-b=gpt-restore-b:131072:false:restore-model-a:aabbccddeeff00:true' ]] || { echo 'Gateway provider, multi-model catalog, routing and encrypted secret restore verification failed.' >&2; exit 1; }
+      "SELECT (SELECT string_agg(version::text,',' ORDER BY version) FROM gateway_schema_migrations)||':'||encode(p.encrypted_key,'hex')||':'||(SELECT string_agg(m.id||'='||m.model||':'||m.context_window_tokens||':'||m.enabled::text,',' ORDER BY m.id) FROM gateway_models m WHERE m.provider_id=p.id)||':'||(SELECT default_model_id FROM gateway_model_routing WHERE id=true)||':'||(SELECT encode(encrypted_key,'hex')||':'||enabled::text FROM gateway_web_search_config WHERE id=true)||':'||(SELECT string_agg(model_id||'='||ok::text||':'||coalesce(error_code,'ok')||':'||latency_ms,',' ORDER BY model_id) FROM gateway_model_tests) FROM gateway_providers p WHERE p.id='restore-provider';")
+    [[ $actual == '1,2,3,4,5,6,7:00fffe80890a0d:restore-model-a=gpt-restore-a:32768:true,restore-model-b=gpt-restore-b:131072:false:restore-model-a:aabbccddeeff00:true:restore-model-a=true:ok:42,restore-model-b=false:provider_auth_failed:150' ]] || { echo 'Gateway provider, multi-model catalog, routing, connection test diagnostics and encrypted secret restore verification failed.' >&2; exit 1; }
   fi
   # Ordinary owners may not connect to another service's database.
   if "${pg[@]}" env PGPASSWORD=ci-identity-disposable-password psql -h 127.0.0.1 -U teamie_identity -d teamie_gateway -c 'SELECT 1' >/dev/null 2>&1; then

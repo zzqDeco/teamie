@@ -51,8 +51,8 @@ launch() {
     "$@" "$scratch/$service" > "$scratch/$service.log" 2>&1 & pids+=("$!")
 }
 launch identity 1 identity env RPC_ADDR=":$((rpc_base+1))"
-launch chat 2 chat env RPC_ADDR=":$((rpc_base+2))"
-launch realtime 3 unused env
+launch chat 2 chat env RPC_ADDR=":$((rpc_base+2))" REALTIME_RPC_ADDR="127.0.0.1:$((rpc_base+3))" REALTIME_RPC_TOKEN=ci-only-realtime-rpc-credential
+launch realtime 3 unused env RPC_ADDR=":$((rpc_base+3))" REALTIME_RPC_TOKEN=ci-only-realtime-rpc-credential
 launch marketplace 8 marketplace env
 launch agent-control 4 agent_control env RPC_ADDR=":$((rpc_base+4))"
 launch llm-gateway 6 gateway env RPC_ADDR=":$((rpc_base+6))"

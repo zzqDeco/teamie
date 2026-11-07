@@ -42,15 +42,18 @@ func (t *Tools) recordContextIMArguments(ctx context.Context, run *Run, call, na
 }
 
 func contextMessageSource(message Message) InputSource {
-	ref := InputSource{ConversationID: message.ConversationID, MessageID: message.ID, SenderID: message.SenderID, SenderKind: message.SenderKind, ReplyToID: message.ReplyToID}
-	for _, attachment := range message.Attachments {
-		ref.AttachmentIDs = append(ref.AttachmentIDs, attachment.ID)
+	return InputSource{
+		ConversationID: message.ConversationID,
+		MessageID:      message.ID,
+		SenderID:       message.SenderID,
+		SenderKind:     message.SenderKind,
+		ReplyToID:      message.ReplyToID,
+		AttachmentIDs:  domain.MessageAttachmentIDs(message.Attachments, message.Forwarded),
 	}
-	return ref
 }
 
 func emptyIMTombstone(message Message) bool {
-	return message.RetractedAt != nil && message.Body == "" && len(message.Attachments) == 0 && len(message.Mentions) == 0
+	return message.RetractedAt != nil && message.Body == "" && len(message.Attachments) == 0 && len(message.Mentions) == 0 && message.Forwarded == nil
 }
 
 func (a *ContextArchive) authorizeIMReadReplay(ctx context.Context, refs []InputSource, name string, raw []byte) error {
@@ -258,7 +261,7 @@ func (a *ContextArchive) imReceiptSourcesWithArgs(ctx context.Context, runID, ca
 		refs = append(refs, InputSource{ConversationID: conversation.ID, WorkspaceID: conversation.WorkspaceID})
 	case "im_retract_message":
 		var message Message
-		if json.Unmarshal(observation.Data, &message) != nil || !validUUID(message.ID) || !validUUID(message.ConversationID) || message.RetractedAt == nil || message.Body != "" || len(message.Attachments) != 0 {
+		if json.Unmarshal(observation.Data, &message) != nil || !validUUID(message.ID) || !validUUID(message.ConversationID) || message.RetractedAt == nil || message.Body != "" || len(message.Attachments) != 0 || message.Forwarded != nil {
 			return nil, errContextUnavailable
 		}
 		refs = append(refs, InputSource{ConversationID: message.ConversationID})

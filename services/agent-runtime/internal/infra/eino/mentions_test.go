@@ -28,7 +28,7 @@ func TestStructuredMentionsNativeSessionReceivesAllInputsAndSendsIdentity(t *tes
 	for _, m := range f.messages {
 		source = m
 	}
-	source.Mentions = []imtext.Mention{{UserID: f.agent, Start: 0, End: 6}}
+	source.Mentions = []MentionSpan{{UserID: f.agent, Start: 0, End: 6}}
 	gw := &toolPathGateway{fixtureGateway: base}
 	gw.steps = []func(toolPathRequest) (chatMessage, error){
 		func(req toolPathRequest) (chatMessage, error) {

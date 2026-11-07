@@ -42,11 +42,14 @@ func (s *Server) ValidateSession(ctx context.Context, r *im.SessionRequest) (*im
 }
 
 func (s *Server) GetUsers(ctx context.Context, r *im.UsersRequest) (*im.UsersResponse, error) {
-	us, err := s.App.GetUsers(ctx, r.Ids)
+	us, active, err := s.App.GetUsersWithActive(ctx, r.Ids)
 	if err != nil {
 		return nil, err
 	}
-	out := &im.UsersResponse{Users: make([]*im.User, 0, len(us))}
+	out := &im.UsersResponse{
+		Users:      make([]*im.User, 0, len(us)),
+		ActiveById: active,
+	}
 	for _, u := range us {
 		out.Users = append(out.Users, toWireUser(u))
 	}

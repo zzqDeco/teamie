@@ -472,3 +472,60 @@ func (s *StreamApp) WorkspacePresence(ctx context.Context, clients func() []doma
 	})
 	return out, nil
 }
+
+// BatchPresence returns current non-offline human presence states for a bounded batch of userIDs.
+// It is used exclusively by the private Realtime RPC for @here resolution and exposes no last-seen data.
+func (s *StreamApp) BatchPresence(ctx context.Context, clients func() []domain.Client, userIDs []string) ([]domain.PresenceItem, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if len(userIDs) > domain.MaxPresenceLookupUsers {
+		return nil, domain.ErrInvalidRequest("userIds exceeds maximum batch size")
+	}
+	if len(userIDs) == 0 || (s.Flags != nil && !s.Flags.PresencePublishEnabled()) {
+		return []domain.PresenceItem{}, nil
+	}
+	unique := make([]string, 0, len(userIDs))
+	seen := make(map[string]bool, len(userIDs))
+	for _, uid := range userIDs {
+		if len(uid) > 128 {
+			return nil, domain.ErrInvalidRequest("invalid userId")
+		}
+		if uid == "" || seen[uid] {
+			continue
+		}
+		seen[uid] = true
+		unique = append(unique, uid)
+	}
+	if len(unique) == 0 {
+		return []domain.PresenceItem{}, nil
+	}
+	s.SweepPresence(ctx, clients)
+	byUser := make(map[string]string, len(unique))
+	if s.PresenceStore != nil {
+		stored, err := s.PresenceStore.GetUsersPresence(ctx, unique)
+		if err != nil {
+			return nil, err
+		}
+		for uid, st := range stored {
+			if st == "online" || st == "away" {
+				byUser[uid] = st
+			}
+		}
+	}
+	if s.Presence != nil {
+		for _, item := range s.Presence.Snapshot(unique) {
+			byUser[item.UserID] = item.State
+		}
+	}
+	out := make([]domain.PresenceItem, 0, len(byUser))
+	for _, uid := range unique {
+		if st, ok := byUser[uid]; ok && (st == "online" || st == "away") {
+			out = append(out, domain.PresenceItem{UserID: uid, State: st})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].UserID < out[j].UserID
+	})
+	return out, nil
+}

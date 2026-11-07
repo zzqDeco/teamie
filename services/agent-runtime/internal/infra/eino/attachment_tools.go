@@ -134,6 +134,14 @@ func (t *Tools) attachmentTool() (tool.BaseTool, error) {
 					break
 				}
 			}
+			if descriptor == nil && message.Forwarded != nil {
+				for i := range message.Forwarded.Attachments {
+					if message.Forwarded.Attachments[i].ID == args.AttachmentID {
+						descriptor = &message.Forwarded.Attachments[i]
+						break
+					}
+				}
+			}
 			if descriptor == nil {
 				return &Observation{Error: "attachment_unavailable"}, nil
 			}

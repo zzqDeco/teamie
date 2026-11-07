@@ -400,7 +400,7 @@ func TestPostgresConfigBoundariesAndRestart(t *testing.T) {
 	_ = store.DB.QueryRow(ctx, "SELECT max(version) FROM gateway_schema_migrations").Scan(&version)
 	_ = store.DB.QueryRow(ctx, "SELECT count(*) FROM gateway_usage").Scan(&count)
 	_ = store.DB.QueryRow(ctx, "SELECT model_id FROM gateway_usage LIMIT 1").Scan(&modelID)
-	if version != 6 || count != 1 || modelID != "b1" {
+	if version != 7 || count != 1 || modelID != "b1" {
 		t.Fatal(version, count, modelID)
 	}
 }

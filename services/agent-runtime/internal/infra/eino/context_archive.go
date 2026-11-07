@@ -436,9 +436,9 @@ func (a *ContextArchive) authorizeSourcesWithTombstones(ctx context.Context, ref
 		}
 		var snap *domain.SourceMessageSnapshot
 		if message != nil {
-			attIDs := make([]string, len(message.Attachments))
-			for i, att := range message.Attachments {
-				attIDs[i] = att.ID
+			attIDs := domain.MessageAttachmentIDs(message.Attachments, message.Forwarded)
+			if attIDs == nil {
+				attIDs = []string{}
 			}
 			snap = &domain.SourceMessageSnapshot{
 				ID:             message.ID,

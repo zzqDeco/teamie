@@ -268,6 +268,16 @@ func (c Config) ProviderByID(id string) (ProviderProfile, bool) {
 	return ProviderProfile{}, false
 }
 
+// ModelByID looks up a model profile by ID in the read snapshot.
+func (c Config) ModelByID(id string) (ModelProfile, bool) {
+	for _, m := range c.Models {
+		if m.ID == id {
+			return m, true
+		}
+	}
+	return ModelProfile{}, false
+}
+
 // ResolveModelProfile projects a ModelProfile together with its owning ProviderProfile.
 func (c Config) ResolveModelProfile(m ModelProfile) ResolvedModel {
 	p, ok := c.ProviderByID(m.ProviderID)

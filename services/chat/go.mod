@@ -8,6 +8,7 @@ require (
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/redis/go-redis/v9 v9.23.0
 	go.uber.org/zap v1.27.1
+	golang.org/x/image v0.41.0
 	teamie/contracts/gen/im v0.0.0
 	teamie/pkg v0.0.0
 )

@@ -95,6 +95,13 @@ func optString(s string) *string {
 	return &s
 }
 
+func optPositiveInt64(n int64) *int64 {
+	if n <= 0 {
+		return nil
+	}
+	return &n
+}
+
 func toUserDTO(u domain.User) *chatgen.UserDTO {
 	return &chatgen.UserDTO{
 		ID:           u.ID,
@@ -145,25 +152,45 @@ func toConversationDTO(c domain.Conversation) *chatgen.ConversationDTO {
 		CreatedBy:         optString(c.CreatedBy),
 		CanManageMembers:  c.CanManageMembers,
 		NotificationLevel: &level,
+		ManualUnreadSeq:   optPositiveInt64(c.ManualUnreadSeq),
 	}
 }
 
 func toAttachmentDTO(a domain.Attachment) *chatgen.AttachmentDTO {
+	var img *chatgen.AttachmentImageDTO
+	if a.Image != nil {
+		img = &chatgen.AttachmentImageDTO{
+			Width:  int64(a.Image.Width),
+			Height: int64(a.Image.Height),
+		}
+	}
 	return &chatgen.AttachmentDTO{
 		ID:        a.ID,
 		Filename:  a.Filename,
 		MediaType: a.MediaType,
 		SizeBytes: int64(a.SizeBytes),
 		Sha256:    a.SHA256,
+		Image:     img,
 	}
 }
 
 func toMentionDTO(m domain.Mention) *chatgen.MentionDTO {
-	return &chatgen.MentionDTO{
-		UserId: m.UserID,
+	dto := &chatgen.MentionDTO{
+		UserId: optString(m.UserID),
 		Start:  int64(m.Start),
 		End:    int64(m.End),
+		Kind:   optString(m.Kind),
 	}
+	if m.RecipientIDs != nil {
+		ids := make([]string, len(m.RecipientIDs))
+		copy(ids, m.RecipientIDs)
+		dto.RecipientIds = ids
+	}
+	if m.RecipientCount != nil {
+		c := int64(*m.RecipientCount)
+		dto.RecipientCount = &c
+	}
+	return dto
 }
 
 func fromMentionDTOs(ms []*chatgen.MentionDTO) ([]domain.Mention, error) {
@@ -173,10 +200,14 @@ func fromMentionDTOs(ms []*chatgen.MentionDTO) ([]domain.Mention, error) {
 	out := make([]domain.Mention, 0, len(ms))
 	for _, m := range ms {
 		if m == nil {
-			return nil, domain.Err(400, "invalid_mentions", "Invalid mentions")
+			return nil, domain.ErrInvalidMentionsRange()
+		}
+		if m.IsSetKind() && m.IsSetUserId() {
+			return nil, domain.ErrInvalidMentionsRange()
 		}
 		out = append(out, domain.Mention{
-			UserID: m.UserId,
+			UserID: m.GetUserId(),
+			Kind:   m.GetKind(),
 			Start:  int(m.Start),
 			End:    int(m.End),
 		})
@@ -194,6 +225,65 @@ func eventReactionVersionDTO(event domain.Event) *string {
 		return nil
 	}
 	return reactionVersionDTO(event.ReactionsVersion)
+}
+
+func eventPinsVersionDTO(event domain.Event) *string {
+	if event.Type != "pin.updated" {
+		return nil
+	}
+	return reactionVersionDTO(event.PinsVersion)
+}
+
+func eventManualUnreadSeqDTO(event domain.Event) *int64 {
+	if event.Type != "read.updated" {
+		return nil
+	}
+	if event.ManualUnreadSeq != nil {
+		v := *event.ManualUnreadSeq
+		return &v
+	}
+	var zero int64
+	return &zero
+}
+
+func toForwardedSnapshotDTO(f *domain.ForwardedSnapshot) *chatgen.ForwardedSnapshotDTO {
+	if f == nil {
+		return nil
+	}
+	var mentions []*chatgen.MentionDTO
+	if len(f.Mentions) > 0 {
+		mentions = make([]*chatgen.MentionDTO, 0, len(f.Mentions))
+		for _, m := range f.Mentions {
+			mentions = append(mentions, toMentionDTO(m))
+		}
+	}
+	var attachments []*chatgen.AttachmentDTO
+	if len(f.Attachments) > 0 {
+		attachments = make([]*chatgen.AttachmentDTO, 0, len(f.Attachments))
+		for _, a := range f.Attachments {
+			attachments = append(attachments, toAttachmentDTO(a))
+		}
+	}
+	return &chatgen.ForwardedSnapshotDTO{
+		SourceConversationId: f.SourceConversationID,
+		SourceMessageId:      f.SourceMessageID,
+		SenderId:             f.SenderID,
+		SenderName:           f.SenderName,
+		SenderKind:           f.SenderKind,
+		CreatedAt:            f.CreatedAt.UTC().Format(time.RFC3339Nano),
+		Body:                 f.Body,
+		Mentions:             mentions,
+		Attachments:          attachments,
+	}
+}
+
+func toPinDTO(p domain.Pin) *chatgen.PinDTO {
+	return &chatgen.PinDTO{
+		Message:      toMessageDTO(p.Message),
+		PinnedBy:     p.PinnedBy,
+		PinnedByName: p.PinnedByName,
+		PinnedAt:     p.PinnedAt.UTC().Format(time.RFC3339Nano),
+	}
 }
 
 func toReactionDTOs(rs []domain.Reaction) []*chatgen.ReactionDTO {
@@ -247,6 +337,7 @@ func toMessageDTO(m domain.Message) *chatgen.MessageDTO {
 		Mentions:         mentions,
 		Reactions:        toReactionDTOs(m.Reactions),
 		ReactionsVersion: reactionVersionDTO(m.ReactionsVersion),
+		Forwarded:        toForwardedSnapshotDTO(m.Forwarded),
 	}
 }
 
@@ -271,10 +362,17 @@ func toEventDTO(ev domain.Event) *chatgen.EventDTO {
 		Message:           msg,
 		Conversation:      conv,
 		ReadSeq:           ev.ReadSeq,
+		ManualUnreadSeq:   eventManualUnreadSeqDTO(ev),
 		MessageId:         optString(ev.MessageID),
 		Reactions:         reactions,
 		ReactionsVersion:  eventReactionVersionDTO(ev),
 		NotificationLevel: ev.NotificationLevel,
+		Pinned:            ev.Pinned,
+		PinnedBy:          optString(ev.PinnedBy),
+		PinnedAt:          formatOptTime(ev.PinnedAt),
+		PinsVersion:       eventPinsVersionDTO(ev),
+		Saved:             ev.Saved,
+		SavedAt:           formatOptTime(ev.SavedAt),
 		CreatedAt:         ev.CreatedAt.UTC().Format(time.RFC3339Nano),
 	}
 }
@@ -331,6 +429,7 @@ func (a *Adapter) GetBootstrap(ctx context.Context, _ *chatgen.GetBootstrapReq) 
 	}
 	flags["im.channel.create"] = flags["im.channel.create"] && owner
 	flags["im.announcements.publish"] = flags["im.announcements.publish"] && user.Kind == "human" && user.PlatformRole == "admin"
+	flags["im.mentions.broadcast"] = flags["im.mentions.broadcast"] && flags["im.message.mentions"]
 	convDTOs := make([]*chatgen.ConversationDTO, 0, len(cs))
 	for _, c := range cs {
 		convDTOs = append(convDTOs, toConversationDTO(c))
@@ -426,8 +525,9 @@ func (a *Adapter) Routes() http.Handler {
 		muxHandler: adaptor.HertzHandler(observability.HTTP(m)),
 	}
 	chatgen.RegisterChatHTTPServer(m, a, resp, chatgen.ChatHTTPServiceRouteHandlers{
-		UploadAttachment:   withAuth(a.uploadAttachmentHTTP),
-		DownloadAttachment: withAuth(a.downloadAttachmentHTTP),
+		UploadAttachment:            withAuth(a.uploadAttachmentHTTP),
+		DownloadAttachment:          withAuth(a.downloadAttachmentHTTP),
+		DownloadAttachmentThumbnail: withAuth(a.downloadAttachmentThumbnailHTTP),
 	})
 
 	return httpx.WrapHertzRouter(m, func(r *route.RouterGroup) {

@@ -601,4 +601,28 @@ describe("Combined @mention pills, Markdown, and KaTeX in IM messages", () => {
     expect(host.querySelector("h4")?.textContent).toBe("Heading");
     expect(host.querySelector("h5")?.textContent).toBe("");
   });
+
+  it("renders broadcast @all and @here mentions with optional recipient self-highlighting", async () => {
+    const body = "@all 集合确认，@here 当前在线先看";
+    await render(
+      <MessageBody
+        body={body}
+        mentions={[
+          { kind: "all", start: 0, end: 4, recipientIds: [user.id, "human-two"] },
+          { kind: "here", start: 10, end: 15, recipientCount: 1 },
+        ]}
+        userId={user.id}
+      />,
+    );
+
+    const pills = host.querySelectorAll(".message-mention.mention-pill");
+    expect(pills).toHaveLength(2);
+    expect(pills[0].textContent).toBe("@all");
+    expect(pills[0].getAttribute("data-mention-kind")).toBe("all");
+    expect(pills[0].getAttribute("data-user-id")).toBeNull();
+    expect(pills[0].classList.contains("mention-self")).toBe(true);
+    expect(pills[1].textContent).toBe("@here");
+    expect(pills[1].getAttribute("data-mention-kind")).toBe("here");
+    expect(pills[1].classList.contains("mention-self")).toBe(false);
+  });
 });

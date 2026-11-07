@@ -2,10 +2,14 @@ package main
 
 import (
 	"context"
+	"net"
 
 	goredis "github.com/redis/go-redis/v9"
+	"teamie/contracts/gen/im/kitex_gen/im/realtimeservice"
 	"teamie/pkg/httpx"
 	"teamie/pkg/observability"
+	"teamie/pkg/rpcx"
+	rpcadapter "teamie/services/realtime/internal/adapter/rpc"
 	wsadapter "teamie/services/realtime/internal/adapter/ws"
 	"teamie/services/realtime/internal/app"
 	"teamie/services/realtime/internal/domain"
@@ -66,6 +70,22 @@ func main() {
 	go func() {
 		defer close(subscriberDone)
 		redisinfra.RunSubscriber(ctx, rdb, streamApp, adapter.ActiveClients, adapter.CloseAll)
+	}()
+
+	rpcAddr, err := net.ResolveTCPAddr("tcp", httpx.Env("RPC_ADDR", ":8883"))
+	if err != nil {
+		observability.Fatal("Service initialization failed", err)
+	}
+	rpcSrv := realtimeservice.NewServer(&rpcadapter.Server{
+		App:          streamApp,
+		Clients:      adapter.ActiveClients,
+		ServiceToken: httpx.Env("REALTIME_RPC_TOKEN", ""),
+	}, rpcx.ServerOptions(rpcAddr, 0)...)
+	defer rpcSrv.Stop()
+	go func() {
+		if err := rpcSrv.Run(); err != nil {
+			observability.Fatal("Service initialization failed", err)
+		}
 	}()
 
 	httpx.Serve(httpx.Env("HTTP_ADDR", ":8083"), adapter.Routes())

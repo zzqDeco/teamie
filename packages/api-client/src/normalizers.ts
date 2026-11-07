@@ -119,6 +119,18 @@ export function publicAdminModelProfile(
     configured: model.configured,
     isDefault: model.isDefault,
     updatedAt: model.updatedAt,
+    ...(model.lastTest === undefined
+      ? {}
+      : {
+          lastTest: {
+            ok: model.lastTest.ok,
+            testedAt: model.lastTest.testedAt,
+            latencyMs: model.lastTest.latencyMs,
+            ...(model.lastTest.errorCode === undefined
+              ? {}
+              : { errorCode: model.lastTest.errorCode }),
+          },
+        }),
   };
 }
 

@@ -4,13 +4,22 @@
 // frameworks.
 package domain
 
-import "time"
+import (
+	"crypto/subtle"
+	"time"
+)
 
 const (
-	HintChannel     = "teamie:im:hints:v1"
-	MaxPeersPerUser = 8
-	MaxTotalPeers   = 10000
+	HintChannel            = "teamie:im:hints:v1"
+	MaxPeersPerUser        = 8
+	MaxTotalPeers          = 10000
+	MaxPresenceLookupUsers = 500
 )
+
+// ValidServiceKey performs a constant-time comparison of non-empty service credentials.
+func ValidServiceKey(expected, provided string) bool {
+	return expected != "" && provided != "" && subtle.ConstantTimeCompare([]byte(expected), []byte(provided)) == 1
+}
 
 // Error represents a domain-level business rule violation with a canonical
 // status classification and machine-readable error code.

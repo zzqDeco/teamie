@@ -31,6 +31,13 @@ func WithMaxConcurrentCalls(n int) Option {
 	}
 }
 
+// WithModelTestStore overrides the isolated persistence port for administrator model test diagnostics.
+func WithModelTestStore(store domain.ModelTestStore) Option {
+	return func(s *Service) {
+		s.ModelTests = store
+	}
+}
+
 // ParseMaxConcurrentCalls parses GATEWAY_MAX_CONCURRENT_CALLS.
 // An empty value returns DefaultMaxConcurrentCalls. A non-empty value must be an
 // integer >= 2 so foreground calls across different Agents can execute concurrently
@@ -57,6 +64,7 @@ func defaultSlotCap() int {
 // Service coordinates Model Gateway use cases, slot admission, and run cancellation.
 type Service struct {
 	Store         domain.ConfigStore
+	ModelTests    domain.ModelTestStore
 	Cipher        domain.Cipher
 	Model         domain.UpstreamModel
 	WebSearch     domain.WebSearchProvider
@@ -101,7 +109,22 @@ func New(store domain.ConfigStore, cipher domain.Cipher, model domain.UpstreamMo
 			opt(s)
 		}
 	}
+	if s.ModelTests == nil {
+		if ts, ok := store.(domain.ModelTestStore); ok {
+			s.ModelTests = ts
+		}
+	}
 	return s
+}
+
+func (s *Service) modelTestStore() domain.ModelTestStore {
+	if s.ModelTests != nil {
+		return s.ModelTests
+	}
+	if ts, ok := s.Store.(domain.ModelTestStore); ok {
+		return ts
+	}
+	return nil
 }
 
 // SetMaxConcurrentCalls configures the foreground model concurrency cap.

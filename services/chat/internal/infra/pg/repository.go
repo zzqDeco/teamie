@@ -44,6 +44,9 @@ var SchemaV10 string
 //go:embed migrations/011_platform_announcements.sql
 var SchemaV11 string
 
+//go:embed migrations/012_collaboration.sql
+var SchemaV12 string
+
 // Migrate applies all Chat PostgreSQL schema migrations under advisory lock 704102.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	return postgres.Migrate(ctx, pool, 704102, "chat_schema_migrations", []postgres.Migration{
@@ -58,6 +61,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		{Version: 9, SQL: SchemaV9},
 		{Version: 10, SQL: SchemaV10},
 		{Version: 11, SQL: SchemaV11},
+		{Version: 12, SQL: SchemaV12},
 	})
 }
 
@@ -65,7 +69,8 @@ const (
 	senderClientMessageSeed int64 = 704103
 	attachmentSenderSeed    int64 = 704104
 	principalMembershipSeed int64 = 704106
-	messageColumns                = "id,conversation_id,sender_id,sender_name,sender_kind,client_message_id,seq,body,reply_to_id,created_at,edited_at,retracted_at,attachments,mentions"
+	savedItemsSeed          int64 = 704108
+	messageColumns                = "id,conversation_id,sender_id,sender_name,sender_kind,client_message_id,seq,body,reply_to_id,created_at,edited_at,retracted_at,attachments,mentions,forwarded"
 )
 
 // Repository implements the Chat domain repository and TxManager interfaces on
@@ -91,14 +96,7 @@ type rowScanner interface {
 }
 
 func scanMessage(row rowScanner) (domain.Message, error) {
-	var m domain.Message
-	err := row.Scan(&m.ID, &m.ConversationID, &m.SenderID, &m.SenderName, &m.SenderKind, &m.ClientMessageID, &m.Seq, &m.Body, &m.ReplyToID, &m.CreatedAt, &m.EditedAt, &m.RetractedAt, &m.Attachments, &m.Mentions)
-	if m.RetractedAt != nil {
-		m.Body = ""
-		m.Attachments = nil
-		m.Mentions = nil
-	}
-	return m, err
+	return scanMessageWith(row)
 }
 
 // --- TxManager ---
@@ -117,6 +115,10 @@ func (r *Repository) LockAttachmentSender(ctx context.Context, userID string) er
 
 func (r *Repository) LockPrincipalMembership(ctx context.Context, principalID string) error {
 	return r.DB.AdvisoryXactLockKey(ctx, principalID, principalMembershipSeed)
+}
+
+func (r *Repository) LockSavedItems(ctx context.Context, userID string) error {
+	return r.DB.AdvisoryXactLockKey(ctx, userID, savedItemsSeed)
 }
 
 func (r *Repository) Ping(ctx context.Context) error {

@@ -106,9 +106,7 @@ func ExtractInputSources(inputs []Input) ([]InputSource, bool) {
 					ReplyToID:      in.ReplyToID,
 					SenderID:       in.SenderID,
 					SenderKind:     in.SenderKind,
-				}
-				for _, attachment := range in.Attachments {
-					ref.AttachmentIDs = append(ref.AttachmentIDs, attachment.ID)
+					AttachmentIDs:  MessageAttachmentIDs(in.Attachments, in.Forwarded),
 				}
 				appendRef(ref)
 			}

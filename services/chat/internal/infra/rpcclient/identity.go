@@ -68,6 +68,11 @@ func (c *Identity) Validate(ctx context.Context, token string) (httpx.Session, e
 }
 
 func (c *Identity) Users(ctx context.Context, ids []string) ([]httpx.User, error) {
+	users, _, err := c.UsersWithActive(ctx, ids)
+	return users, err
+}
+
+func (c *Identity) UsersWithActive(ctx context.Context, ids []string) ([]httpx.User, map[string]bool, error) {
 	unique := make([]string, 0, len(ids))
 	seen := make(map[string]bool, len(ids))
 	for _, id := range ids {
@@ -77,17 +82,27 @@ func (c *Identity) Users(ctx context.Context, ids []string) ([]httpx.User, error
 		}
 	}
 	out := []httpx.User{}
+	active := make(map[string]bool, len(unique))
 	for start := 0; start < len(unique); start += 1000 {
 		end := min(start+1000, len(unique))
 		r, err := c.Client.GetUsers(ctx, &im.UsersRequest{Ids: unique[start:end]})
 		if err != nil || r == nil {
-			return nil, httpx.Err(503, "identity_unavailable", "Identity service is temporarily unavailable")
+			return nil, nil, httpx.Err(503, "identity_unavailable", "Identity service is temporarily unavailable")
 		}
+		batchActive := r.GetActiveById()
 		for _, u := range r.Users {
+			if u == nil {
+				continue
+			}
 			out = append(out, FromUser(u))
+			if batchActive != nil {
+				active[u.Id] = batchActive[u.Id]
+			} else {
+				active[u.Id] = true
+			}
 		}
 	}
-	return out, nil
+	return out, active, nil
 }
 
 func (c *Identity) Ping(ctx context.Context) error {
@@ -129,6 +144,36 @@ func (a IdentityAdapter) Users(ctx context.Context, ids []string) ([]domain.User
 	if err != nil {
 		return nil, err
 	}
+	return toDomainUsers(us), nil
+}
+
+type activeUsersProvider interface {
+	UsersWithActive(ctx context.Context, ids []string) ([]httpx.User, map[string]bool, error)
+}
+
+func (a IdentityAdapter) UsersWithActive(ctx context.Context, ids []string) ([]domain.User, map[string]bool, error) {
+	if a.Identity == nil {
+		return nil, nil, httpx.Err(503, "identity_unavailable", "Identity service is temporarily unavailable")
+	}
+	if p, ok := a.Identity.(activeUsersProvider); ok {
+		us, active, err := p.UsersWithActive(ctx, ids)
+		if err != nil {
+			return nil, nil, err
+		}
+		return toDomainUsers(us), active, nil
+	}
+	us, err := a.Identity.Users(ctx, ids)
+	if err != nil {
+		return nil, nil, err
+	}
+	active := make(map[string]bool, len(us))
+	for _, u := range us {
+		active[u.ID] = true
+	}
+	return toDomainUsers(us), active, nil
+}
+
+func toDomainUsers(us []httpx.User) []domain.User {
 	out := make([]domain.User, 0, len(us))
 	for _, u := range us {
 		out = append(out, domain.User{
@@ -140,7 +185,7 @@ func (a IdentityAdapter) Users(ctx context.Context, ids []string) ([]domain.User
 			CreatedAt:    u.CreatedAt,
 		})
 	}
-	return out, nil
+	return out
 }
 
 func (a IdentityAdapter) Ping(ctx context.Context) error {

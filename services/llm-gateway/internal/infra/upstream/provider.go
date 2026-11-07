@@ -273,6 +273,9 @@ func (g *providerBoundary) RoundTrip(request *http.Request) (*http.Response, err
 		if g.streaming {
 			return nil, domain.Err(502, "upstream_http_error", "Provider rejected the request")
 		}
+		if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
+			return nil, domain.Err(502, "provider_auth_failed", "Provider rejected the saved credential")
+		}
 		return nil, domain.Err(502, "upstream_error", "Provider rejected the request")
 	}
 	if g.streaming {

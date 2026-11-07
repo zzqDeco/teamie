@@ -30,6 +30,9 @@ func TestPrincipalCredentialScopeRotationAndRevocation(t *testing.T) {
 	if r, e := rpc.ProvisionPrincipal(ctx, req); e != nil || !r.Ok || r.User.Kind != "agent" || r.User.PlatformRole != "user" {
 		t.Fatal("provision", r, e)
 	}
+	if ur, e := rpc.GetUsers(ctx, &im.UsersRequest{Ids: []string{id, "missing"}}); e != nil || !ur.GetActiveById()[id] || ur.GetActiveById()["missing"] {
+		t.Fatal("active principal lookup", ur, e)
+	}
 	if r, e := rpc.IssuePrincipalToken(ctx, &im.PrincipalTokenRequest{ServiceToken: s.ControlToken, PrincipalId: id}); e != nil || r.Ok {
 		t.Fatal("control credential minted runtime token", e)
 	}
@@ -88,6 +91,9 @@ func TestPrincipalCredentialScopeRotationAndRevocation(t *testing.T) {
 	if _, e = s.ProvisionPrincipal(ctx, id, "Assistant", "agent", false, false, 2); e != nil {
 		t.Fatal(e)
 	}
+	if ur, e := rpc.GetUsers(ctx, &im.UsersRequest{Ids: []string{id}}); e != nil || ur.GetActiveById()[id] {
+		t.Fatal("disabled principal remained active in GetUsers", ur, e)
+	}
 	if _, e = s.ValidatePrincipal(ctx, third, s.RuntimeToken); e == nil {
 		t.Fatal("disable did not revoke token")
 	}
@@ -105,6 +111,9 @@ func TestPrincipalCredentialScopeRotationAndRevocation(t *testing.T) {
 	}
 	if _, e = s.ProvisionPrincipal(ctx, id, "Assistant", "agent", false, true, 3); e != nil {
 		t.Fatal(e)
+	}
+	if ur, e := rpc.GetUsers(ctx, &im.UsersRequest{Ids: []string{id}}); e != nil || ur.GetActiveById()[id] {
+		t.Fatal("deleted principal remained active in GetUsers", ur, e)
 	}
 	if _, e = s.ProvisionPrincipal(ctx, id, "Assistant", "agent", true, false, 4); e == nil {
 		t.Fatal("deleted principal resurrected")
