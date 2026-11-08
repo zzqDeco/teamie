@@ -25,7 +25,7 @@ func (w *agentWorker) genResume(ctx context.Context, _ *adk.TurnLoop[Input, *sch
 		}
 		return &adk.GenResumeResult[Input, *schema.AgenticMessage]{RunCtx: runctx, Decision: adk.TurnLoopResumeDecisionResume, ResumeParams: &adk.ResumeParams{Targets: targets}, Consumed: run.Inputs, Remaining: remaining}, nil
 	}
-	return &adk.GenResumeResult[Input, *schema.AgenticMessage]{RunCtx: runctx, Decision: adk.TurnLoopResumeDecisionStartNewTurn, Input: &adk.TypedAgentInput[*schema.AgenticMessage]{Messages: inputMessages(run.Inputs), EnableStreaming: w.engine.Config.GatewayStreamURL != ""}, Consumed: run.Inputs, Remaining: remaining}, nil
+	return &adk.GenResumeResult[Input, *schema.AgenticMessage]{RunCtx: runctx, Decision: adk.TurnLoopResumeDecisionStartNewTurn, Input: &adk.TypedAgentInput[*schema.AgenticMessage]{Messages: inputMessagesForRun(run), EnableStreaming: w.engine.Config.GatewayStreamURL != ""}, Consumed: run.Inputs, Remaining: remaining}, nil
 }
 
 func finalizeSummary(ctx context.Context, original []*schema.AgenticMessage, summary *schema.AgenticMessage) ([]*schema.AgenticMessage, error) {
@@ -101,11 +101,8 @@ func finalizeSummaryWithSourceFormat(_ context.Context, original []*schema.Agent
 				}
 			}
 		}
-		if !strings.HasPrefix(agenticText(message), "TEAMIE_NEW_MESSAGE ") {
-			continue
-		}
-		var in Input
-		if json.Unmarshal([]byte(strings.TrimPrefix(agenticText(message), "TEAMIE_NEW_MESSAGE ")), &in) == nil {
+		in, ok := parseNewMessageEnvelope(agenticText(message))
+		if ok {
 			source := map[string]any{"eventId": in.EventID, "workspaceId": in.WorkspaceID, "conversationId": in.ConversationID, "messageId": in.MessageID, "replyToId": in.ReplyToID, "senderId": in.SenderID, "senderKind": in.SenderKind}
 			attachmentIDs := domain.MessageAttachmentIDs(in.Attachments, in.Forwarded)
 			if attachmentIDs == nil {

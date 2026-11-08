@@ -67,5 +67,8 @@ func legacyChatRequest(messages []*schema.Message, tools []*schema.ToolInfo, opt
 			req["tool_choice"] = "required"
 		}
 	}
+	if opts.Temperature != nil {
+		req["temperature"] = *opts.Temperature
+	}
 	return json.Marshal(req)
 }

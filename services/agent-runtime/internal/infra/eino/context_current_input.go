@@ -25,7 +25,8 @@ func (p *ContextPipeline) currentInputSet(ctx context.Context, messages []*schem
 	}
 	wanted := map[string]bool{}
 	required := map[string]bool{}
-	for index, message := range inputMessages(run.Inputs) {
+	altToCanonical := map[string]string{}
+	for index, message := range inputMessagesForBudget(run.Inputs, p.cfg.Budget) {
 		// Task, schedule and app notifications are durable machine
 		// observations, not new IM bodies. A completed batch can fill the
 		// entire window if every repeated source envelope is pinned. Keep its
@@ -41,14 +42,19 @@ func (p *ContextPipeline) currentInputSet(ctx context.Context, messages []*schem
 		// Keep this legacy required-input rule for frozen budgets before v5;
 		// current budgets excluded every machine notification above.
 		required[text] = run.Inputs[index].Kind != "task.notification" && run.Inputs[index].Kind != "schedule.wakeup"
+		altToCanonical[text] = text
+		altToCanonical[formatInputEventPrompt(run.Inputs[index])] = text
+		if isOrdinaryNewMessageInput(run.Inputs[index]) {
+			altToCanonical[formatHumanPresenceV3NewMessage(run.Inputs[index])] = text
+		}
 	}
 	for _, message := range messages {
 		if message == nil || message.Role != schema.AgenticRoleTypeUser || hasToolResults(message) || isContextSummary(message) || message.Extra["teamie_context_data"] == contextProfileV1 {
 			continue
 		}
-		text := agenticText(message)
-		if _, ok := wanted[text]; ok {
-			pinned[message], wanted[text] = true, true
+		text := stripHumanPresenceV3TailAnchor(agenticText(message))
+		if canon, ok := altToCanonical[text]; ok {
+			pinned[message], wanted[canon] = true, true
 		}
 	}
 	for text, found := range wanted {

@@ -98,6 +98,27 @@ func targetsFromError(err error) []string {
 func inputMessages(inputs []Input) []*schema.AgenticMessage {
 	return BuildInputMessages(inputs, func(in Input) string { return in.Kind })
 }
+func inputMessagesForBudget(inputs []Input, budget ContextBudgetSnapshot) []*schema.AgenticMessage {
+	if !budget.HumanPresenceV3 {
+		return inputMessages(inputs)
+	}
+	out := make([]*schema.AgenticMessage, 0, len(inputs))
+	for _, in := range inputs {
+		out = append(out, schema.UserAgenticMessage(formatInputEventPromptForBudget(in, budget)))
+	}
+	return out
+}
+func inputMessagesForRun(run *Run) []*schema.AgenticMessage {
+	if run == nil {
+		return nil
+	}
+	if humanPresenceV3ForRun(run) {
+		if budget, err := ParseContextBudgetSnapshot(run.ContextBudget); err == nil {
+			return inputMessagesForBudget(run.Inputs, budget)
+		}
+	}
+	return inputMessages(run.Inputs)
+}
 func relevantInput(in Input, tc *adk.TurnContext[Input, *schema.AgenticMessage], presence *conversationPresenceState) bool {
 	if tc == nil {
 		return false

@@ -159,9 +159,8 @@ func (a *ContextArchive) eventArtifact(ctx context.Context, r *Run, item context
 	}
 	// A real outer input envelope can narrow a multi-input Run's candidate set.
 	// Match it to persisted input provenance; model-created text cannot add refs.
-	if message != nil && message.Role == schema.AgenticRoleTypeUser && !hasToolResults(message) && strings.HasPrefix(agenticText(message), "TEAMIE_NEW_MESSAGE ") {
-		var input Input
-		if json.Unmarshal([]byte(strings.TrimPrefix(agenticText(message), "TEAMIE_NEW_MESSAGE ")), &input) == nil {
+	if message != nil && message.Role == schema.AgenticRoleTypeUser && !hasToolResults(message) {
+		if input, ok := parseNewMessageEnvelope(agenticText(message)); ok {
 			for _, ref := range refs {
 				if ref.EventID == input.EventID && ref.ConversationID == input.ConversationID && ref.MessageID == input.MessageID {
 					refs = []InputSource{ref}

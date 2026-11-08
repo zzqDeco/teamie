@@ -313,6 +313,10 @@ func (m *GatewayModel) capRunOutput(run *Run, opts *model.Options) error {
 	} else if *opts.MaxTokens > limit {
 		opts.MaxTokens = &limit
 	}
+	if budget.HumanPresenceV3 && opts.Temperature == nil && !isSummaryModelOptions(opts) {
+		temp := humanPresenceV3DefaultTemperature
+		opts.Temperature = &temp
+	}
 	return nil
 }
 
@@ -378,11 +382,19 @@ func agenticRequestForRun(run *Run, messages []*schema.AgenticMessage, opts *mod
 		if err != nil {
 			return nil, err
 		}
+		if budget.HumanPresenceV3 && opts != nil && opts.Temperature == nil && !isSummaryModelOptions(opts) {
+			temp := humanPresenceV3DefaultTemperature
+			opts.Temperature = &temp
+		}
 		if budget.Version >= 6 {
 			return agenticRequest(messages, opts, streaming, modeltransport.MaxOutputTokens)
 		}
 	}
 	return agenticRequest(messages, opts, streaming)
+}
+
+func ComputeRequestHash(raw []byte) string {
+	return modelRequestHash(raw)
 }
 
 func modelResultByteLimit(run *Run) int {

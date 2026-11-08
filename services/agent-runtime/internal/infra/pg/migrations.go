@@ -9,7 +9,7 @@ import (
 	"teamie/pkg/postgres"
 )
 
-const RuntimeSchemaVersion = 15
+const RuntimeSchemaVersion = 16
 const RuntimeWriterSchemaSetting = "teamie.runtime_writer_schema"
 
 var ErrUnsupportedRuntimeSchema = errors.New("unsupported runtime schema")
@@ -49,6 +49,8 @@ var (
 	SchemaV14SQL string
 	//go:embed migrations/015_human_presence_v2.sql
 	SchemaV15SQL string
+	//go:embed migrations/016_human_presence_v3.sql
+	SchemaV16SQL string
 )
 
 // ValidateRuntimeSchema validates the schema ledger before any DDL, including
@@ -96,7 +98,7 @@ func OpenRepository(ctx context.Context, url string) (*Repository, error) {
 		return nil, err
 	}
 	repo := NewFromPool(pool)
-	allSQL := SchemaSQL + SchemaV2SQL + SchemaV3SQL + ContextArchiveSchemaSQL + ContextRecoverySchemaSQL + SchemaV4SQL + SchemaV5SQL + SchemaV6SQL + SchemaV7SQL + SchemaV8SQL + SchemaV9SQL + SchemaV10SQL + SchemaV11SQL + SchemaV12SQL + SchemaV13SQL + SchemaV14SQL + SchemaV15SQL
+	allSQL := SchemaSQL + SchemaV2SQL + SchemaV3SQL + ContextArchiveSchemaSQL + ContextRecoverySchemaSQL + SchemaV4SQL + SchemaV5SQL + SchemaV6SQL + SchemaV7SQL + SchemaV8SQL + SchemaV9SQL + SchemaV10SQL + SchemaV11SQL + SchemaV12SQL + SchemaV13SQL + SchemaV14SQL + SchemaV15SQL + SchemaV16SQL
 	if err := postgres.MigrateSQL(ctx, repo.db, 704205, allSQL, ValidateRuntimeSchema); err != nil {
 		repo.Close()
 		return nil, err
