@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   Download,
   File as FileIcon,
@@ -10,7 +16,7 @@ import {
 import { api } from "@teamie/api-client";
 import type { Attachment, AttachmentLimits } from "@teamie/api-client";
 import { errorText } from "./errors";
-import { subscribeAttachmentPreview } from "./attachment-previews";
+import { subscribeAttachmentPreview, subscribeAttachmentThumbnail } from "./attachment-previews";
 import {
   addAttachmentDraftFiles,
   consumeAttachmentDraft,
@@ -221,6 +227,78 @@ export function AttachmentDraft({
   );
 }
 
+function AttachmentThumbnailPreview({
+  conversationId,
+  item,
+  onOpenPreview,
+  onReadyUrl,
+  onFailed,
+}: {
+  conversationId: string;
+  item: Attachment;
+  onOpenPreview: (item: Attachment) => void;
+  onReadyUrl: (id: string, url: string | undefined) => void;
+  onFailed: (id: string) => void;
+}) {
+  const [blobUrl, setBlobUrl] = useState("");
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setBlobUrl("");
+    setFailed(false);
+    const unsubscribe = subscribeAttachmentThumbnail(
+      conversationId,
+      item.id,
+      item.mediaType,
+      (preview) => {
+        if (preview.url) {
+          setBlobUrl(preview.url);
+          onReadyUrl(item.id, preview.url);
+        } else if (typeof preview.retryable === "boolean") {
+          setFailed(true);
+          onReadyUrl(item.id, undefined);
+          onFailed(item.id);
+        }
+      },
+    );
+    return () => {
+      unsubscribe();
+      onReadyUrl(item.id, undefined);
+    };
+  }, [conversationId, item.id, item.mediaType, onReadyUrl, onFailed]);
+
+  if (failed || !item.image) return null;
+  const { width, height } = item.image;
+  return (
+    <button
+      type="button"
+      className="attachment-thumbnail-button"
+      style={{ aspectRatio: `${width} / ${height}` }}
+      disabled={!blobUrl}
+      onClick={() => {
+        if (blobUrl) onOpenPreview(item);
+      }}
+      aria-label={`预览图片 ${item.filename}`}
+    >
+      {blobUrl && (
+        <img
+          className="attachment-thumbnail"
+          src={blobUrl}
+          width={width}
+          height={height}
+          alt={item.filename}
+          loading="lazy"
+          onError={() => {
+            setFailed(true);
+            onReadyUrl(item.id, undefined);
+            onFailed(item.id);
+          }}
+        />
+      )}
+    </button>
+  );
+}
+
 export function MessageAttachments({
   conversationId,
   attachments,
@@ -231,9 +309,11 @@ export function MessageAttachments({
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
+  const [thumbUrls, setThumbUrls] = useState<Record<string, string>>({});
+  const [thumbFallbacks, setThumbFallbacks] = useState<Record<string, boolean>>({});
   const [previewFile, setPreviewFile] = useState<Attachment | null>(null);
   const imageIdsKey = attachments
-    .filter((attachment) => isPreviewableImage(attachment.mediaType))
+    .filter((attachment) => isPreviewableImage(attachment.mediaType) && !attachment.image)
     .map((attachment) => attachment.id)
     .join("\u0000");
 
@@ -244,6 +324,8 @@ export function MessageAttachments({
   useEffect(() => {
     setPreviewFile(null);
     setPreviewUrls({});
+    setThumbUrls({});
+    setThumbFallbacks({});
     setPreviewErrors({});
     let active = true;
     const subscriptions = new Map<string, () => void>();
@@ -301,19 +383,51 @@ export function MessageAttachments({
       setBusy("");
     }
   }
-  const activePreviewUrl = previewFile ? previewUrls[previewFile.id] : undefined;
+  const handleReadyUrl = useCallback((id: string, url: string | undefined) => {
+    setThumbUrls((prev) => {
+      if (url && prev[id] === url) return prev;
+      if (!url && !(id in prev)) return prev;
+      const next = { ...prev };
+      if (url) next[id] = url;
+      else delete next[id];
+      return next;
+    });
+  }, []);
+  const handleFailed = useCallback((id: string) => {
+    setThumbFallbacks((prev) => (prev[id] ? prev : { ...prev, [id]: true }));
+  }, []);
+  const activePreviewUrl = previewFile
+    ? thumbUrls[previewFile.id] || previewUrls[previewFile.id]
+    : undefined;
   return (
     <>
       <ul ref={listRef} className="message-attachments" aria-label="消息附件">
         {attachments.map((attachment) => {
+          const hasImageMeta =
+            isPreviewableImage(attachment.mediaType) &&
+            Boolean(attachment.image) &&
+            !thumbFallbacks[attachment.id];
           const previewUrl = previewUrls[attachment.id];
+          const needsBlobObserver =
+            isPreviewableImage(attachment.mediaType) && !attachment.image;
           return (
             <li
               key={attachment.id}
-              data-preview-id={isPreviewableImage(attachment.mediaType) ? attachment.id : undefined}
-              className={previewUrl ? "attachment-image-item" : undefined}
+              data-preview-id={needsBlobObserver ? attachment.id : undefined}
+              className={
+                hasImageMeta || previewUrl ? "attachment-image-item" : undefined
+              }
             >
-              {previewUrl && (
+              {hasImageMeta && (
+                <AttachmentThumbnailPreview
+                  conversationId={conversationId}
+                  item={attachment}
+                  onOpenPreview={(item) => setPreviewFile(item)}
+                  onReadyUrl={handleReadyUrl}
+                  onFailed={handleFailed}
+                />
+              )}
+              {!hasImageMeta && previewUrl && (
                 <button
                   type="button"
                   className="attachment-thumbnail-button"
@@ -323,6 +437,8 @@ export function MessageAttachments({
                   <img
                     className="attachment-thumbnail"
                     src={previewUrl}
+                    width={attachment.image?.width}
+                    height={attachment.image?.height}
                     alt={attachment.filename}
                     loading="lazy"
                   />

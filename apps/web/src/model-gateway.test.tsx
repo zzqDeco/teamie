@@ -9,6 +9,7 @@ import { api } from "@teamie/api-client";
 import type { ModelGateway, User } from "@teamie/api-client";
 import { WebSearchConfigurationFields } from "./agent-ui";
 import type { WebSearchFormValue } from "./agent-ui";
+import { formatModelTestErrorCode } from "./admin/model-last-test";
 import { ModelGatewaySettings } from "./model-gateway";
 
 const admin: User = {
@@ -403,5 +404,197 @@ describe("model gateway settings page", () => {
     expect(removeDialog).not.toContain("这是当前的平台默认模型");
     await click(buttonByText("确认移除"));
     expect(deleteModelSpy).toHaveBeenCalledWith("gpt-4o-mini");
+  });
+
+  it("maps contract errorCode allowlist to localized Chinese diagnostics and falls back for unknown codes", () => {
+    expect(formatModelTestErrorCode("provider_auth_failed")).toBe(
+      "认证失败（请检查 API Key 或权限配置）",
+    );
+    expect(formatModelTestErrorCode("provider_rate_limited")).toBe(
+      "请求触发限流（请稍后重试或检查配额）",
+    );
+    expect(formatModelTestErrorCode("provider_bad_request")).toBe(
+      "请求参数被拒绝（请检查模型名称或协议兼容性）",
+    );
+    expect(formatModelTestErrorCode("provider_timeout")).toBe(
+      "连接超时（上游响应过慢）",
+    );
+    expect(formatModelTestErrorCode("provider_unreachable")).toBe(
+      "无法连接上游服务（请检查 Base URL 或网络）",
+    );
+    expect(formatModelTestErrorCode("provider_upstream_error")).toBe(
+      "上游服务异常（5xx 错误）",
+    );
+    expect(formatModelTestErrorCode("provider_invalid_response")).toBe(
+      "上游返回格式无效（非预期响应结构）",
+    );
+    expect(formatModelTestErrorCode("gateway_misconfigured")).toBe(
+      "网关配置不完整（请检查提供商与密钥）",
+    );
+    expect(formatModelTestErrorCode("custom_unknown_code")).toBe(
+      "测试未通过（custom_unknown_code）",
+    );
+  });
+
+  it("renders persisted item.lastTest on initial load, shows verified banner, and refreshes gateway state on live test", async () => {
+    const persistedGateway: ModelGateway = {
+      ...gateway,
+      defaultModelId: "gpt-4o",
+      providers: [
+        {
+          id: "openai-main",
+          displayName: "OpenAI 主连接",
+          baseUrl: "https://model.example.test/v1",
+          hasApiKey: true,
+          enabled: true,
+          configured: true,
+          modelCount: 2,
+          updatedAt: "2026-10-16T00:00:00Z",
+        },
+      ],
+      models: [
+        {
+          id: "gpt-4o",
+          providerId: "openai-main",
+          providerDisplayName: "OpenAI 主连接",
+          providerEnabled: true,
+          displayName: "GPT-4o",
+          description: "通用默认模型",
+          baseUrl: "https://model.example.test/v1",
+          model: "gpt-4o",
+          contextWindowTokens: 32768,
+          hasApiKey: true,
+          enabled: true,
+          effectiveEnabled: true,
+          configured: true,
+          isDefault: true,
+          updatedAt: "2026-10-16T00:00:00Z",
+          lastTest: {
+            ok: true,
+            testedAt: "2026-10-16T08:30:00Z",
+            latencyMs: 64,
+          },
+        },
+        {
+          id: "gpt-4o-mini",
+          providerId: "openai-main",
+          providerDisplayName: "OpenAI 主连接",
+          providerEnabled: true,
+          displayName: "GPT-4o Mini",
+          description: "轻量快速模型",
+          baseUrl: "https://model.example.test/v1",
+          model: "gpt-4o-mini",
+          contextWindowTokens: 131072,
+          hasApiKey: true,
+          enabled: true,
+          effectiveEnabled: true,
+          configured: true,
+          isDefault: false,
+          updatedAt: "2026-10-16T00:00:00Z",
+          lastTest: {
+            ok: false,
+            testedAt: "2026-10-16T09:15:00Z",
+            latencyMs: 112,
+            errorCode: "provider_auth_failed",
+          },
+        },
+      ],
+    };
+    const refreshedGateway: ModelGateway = {
+      ...persistedGateway,
+      models: [
+        persistedGateway.models![0]!,
+        {
+          ...persistedGateway.models![1]!,
+          lastTest: {
+            ok: true,
+            testedAt: "2026-10-16T10:00:00Z",
+            latencyMs: 29,
+          },
+        },
+      ],
+    };
+
+    const gatewaySpy = vi
+      .spyOn(api, "modelGateway")
+      .mockResolvedValueOnce(persistedGateway)
+      .mockResolvedValue(refreshedGateway);
+    const testProfileSpy = vi
+      .spyOn(api, "testModelProfile")
+      .mockResolvedValueOnce({
+        ok: true,
+        model: "gpt-4o-mini",
+        latencyMs: 29,
+      });
+
+    await renderSettings();
+
+    // Top banner reflects persisted lastTest.ok === true without clicking "测试"
+    expect(find(".gateway-saved-state").textContent).toContain(
+      "连接测试已通过，Agent 可以调用模型。",
+    );
+
+    const cards = [
+      ...document.body.querySelectorAll<HTMLElement>(".gateway-model-card"),
+    ];
+    expect(cards).toHaveLength(2);
+
+    // Card 0: persisted ok: true with latency + timestamp
+    expect(
+      cards[0]!.querySelector(".gateway-model-test-badge.ok")?.textContent,
+    ).toContain("64ms");
+    const okResult = cards[0]!.querySelector(".gateway-model-test-result.ok");
+    expect(okResult?.textContent).toContain("gpt-4o · 64 ms");
+    expect(okResult?.textContent).toContain("2026-10-16 08:30");
+
+    // Card 1: persisted ok: false with mapped Chinese errorCode + latency + timestamp
+    expect(
+      cards[1]!.querySelector(".gateway-model-test-badge.failed")?.textContent,
+    ).toContain("112ms");
+    const failedResult = cards[1]!.querySelector(
+      ".gateway-model-test-result.failed",
+    );
+    expect(failedResult?.textContent).toContain(
+      "认证失败（请检查 API Key 或权限配置）",
+    );
+    expect(failedResult?.textContent).toContain("112 ms");
+    expect(failedResult?.textContent).toContain("2026-10-16 09:15");
+
+    // Clicking "测试此模型" on Card 1 updates its status and refreshes gateway state
+    const testButtons = [
+      ...document.body.querySelectorAll<HTMLButtonElement>("button"),
+    ].filter((b) => b.textContent?.trim() === "测试此模型");
+    await click(testButtons[1]!);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(testProfileSpy).toHaveBeenCalledWith("gpt-4o-mini");
+    expect(gatewaySpy).toHaveBeenCalledTimes(2);
+    const updatedResult = cards[1]!.querySelector(
+      ".gateway-model-test-result.ok",
+    );
+    expect(updatedResult?.textContent).toContain("gpt-4o-mini · 29 ms");
+    expect(updatedResult?.textContent).toContain("2026-10-16 10:00");
+
+    // Editing the provider clears stale in-memory and persisted lastTest entries for its models
+    vi.spyOn(api, "updateModelProvider").mockResolvedValueOnce({
+      ...refreshedGateway,
+      providers: [
+        {
+          ...refreshedGateway.providers![0]!,
+          baseUrl: "https://new-model.example.test/v1",
+          updatedAt: "2026-10-16T11:00:00Z",
+        },
+      ],
+    });
+    await click(buttonByText("编辑服务商"));
+    await type('[name="providerBaseUrl"]', "https://new-model.example.test/v1");
+    await click(buttonByText("保存服务商"));
+    expect(document.querySelector(".gateway-model-test-result")).toBeNull();
+    expect(document.querySelector(".gateway-model-test-badge")).toBeNull();
+    expect(find(".gateway-saved-state").textContent).toContain(
+      "连接尚需测试验证。",
+    );
   });
 });

@@ -335,6 +335,29 @@
     color: var(--warning-text);
   }
 
+  .gateway-model-test-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: var(--font-xs);
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: var(--r-pill);
+    border: 1px solid var(--border);
+  }
+
+  .gateway-model-test-badge.ok {
+    background: var(--success-bg);
+    border-color: var(--success-border);
+    color: var(--success-text);
+  }
+
+  .gateway-model-test-badge.failed {
+    background: var(--danger-bg);
+    border-color: var(--danger-border);
+    color: var(--danger-text);
+  }
+
   .gateway-model-test-result {
     font-size: var(--font-xs);
     font-weight: 500;

@@ -18,6 +18,7 @@ import {
   resetNotificationSession,
 } from "./notifications";
 import { chatStore } from "./store";
+import { refreshConversationPins } from "./chat/conversation-context-loader";
 import { typingStore } from "./typing-store";
 import { presenceStore, receiptStore } from "./engagement-store";
 import { errorText, isNetworkError } from "./errors";
@@ -210,6 +211,18 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               void client.invalidateQueries({ queryKey: ["workspaceAgents"] });
             }
             chatStore.apply(page);
+            for (const event of page.events) {
+              const pinConvId =
+                event.type === "pin.updated"
+                  ? event.conversationId || event.message?.conversationId
+                  : undefined;
+              if (
+                pinConvId &&
+                chatStore.getSnapshot().pinsNeedsRefreshByConversation?.[pinConvId]
+              ) {
+                refreshConversationPins(pinConvId);
+              }
+            }
             if (initialSyncCompleted) {
               for (const event of page.events) {
                 if (event.type === "message.created" && event.message) {
@@ -472,11 +485,25 @@ export function isPermanentSendError(error: unknown) {
     error.status !== 401
   );
 }
-export async function sendMessage(message: Message, generation: number) {
+export async function sendMessage(
+  message: Message & {
+    forwardOf?: { conversationId: string; messageId: string };
+  },
+  generation: number,
+) {
+  chatStore.setManualUnread(message.conversationId, undefined);
   chatStore.merge([
     { ...message, status: "sending", error: undefined, permanent: undefined },
   ]);
   try {
+    const forwardOf =
+      message.forwardOf ||
+      (message.forwarded
+        ? {
+            conversationId: message.forwarded.sourceConversationId,
+            messageId: message.forwarded.sourceMessageId,
+          }
+        : undefined);
     const response = await api.send(message.conversationId, {
       clientMessageId: message.clientMessageId,
       body: message.body,
@@ -485,6 +512,7 @@ export async function sendMessage(message: Message, generation: number) {
       ...(message.attachments?.length
         ? { attachmentIds: message.attachments.map((a) => a.id) }
         : {}),
+      ...(forwardOf ? { forwardOf } : {}),
     });
     if (chatStore.generation === generation)
       chatStore.merge([response.message]);

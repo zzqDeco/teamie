@@ -10,7 +10,6 @@ import {
   Plus,
   Server,
   ShieldCheck,
-  Star,
   Trash2,
 } from "lucide-react";
 import { api, ApiError } from "@teamie/api-client";
@@ -36,17 +35,16 @@ import { AgentEnabledStatus, WebSearchConfigurationFields } from "./agent-ui";
 import type { WebSearchFormValue } from "./agent-ui";
 import { Button, Notice } from "./ui";
 import { ICON } from "./icons";
+import {
+  clearModelsLastTest,
+  GatewayModelCard,
+  resolveModelLastTest,
+} from "./admin/model-last-test";
+import type { ModelTestOutcome } from "./admin/model-last-test";
 import { ModelProfileDialog } from "./admin/model-profile-dialog";
 import { ProviderProfileDialog } from "./admin/provider-profile-dialog";
 import { GatewayConfirmDialog } from "./admin/gateway-confirm";
 import type { GatewayConfirmation } from "./admin/gateway-confirm";
-
-type ModelTestOutcome = {
-  ok: boolean;
-  model: string;
-  latencyMs: number;
-  error?: string;
-};
 
 export function ModelGatewaySettings() {
   const { user } = useAuth();
@@ -131,23 +129,29 @@ export function ModelGatewaySettings() {
   async function testConnection() {
     const sessionToken = api.csrfToken;
     const version = ++defaultTestVersion.current;
-    const current = () => sessionToken === api.csrfToken &&
+    const current = () =>
+      sessionToken === api.csrfToken &&
       defaultTestVersion.current === version;
     setTesting(true);
     setError("");
     setTest(null);
     try {
       const result = await api.testModelGateway();
-      if (current())
+      if (current()) {
         setTest({
           ok: result.ok,
           model: result.model,
           latencyMs: result.latencyMs,
         });
+        await client.invalidateQueries({ queryKey: key });
+      }
     } catch (e) {
       if (current()) {
         if (e instanceof ApiError && e.status === 403) setDenied(true);
         setError(gatewayFailureText(e));
+        if (!(e instanceof ApiError && e.status === 403)) {
+          await client.invalidateQueries({ queryKey: key });
+        }
       }
     } finally {
       if (current()) setTesting(false);
@@ -173,9 +177,11 @@ export function ModelGatewaySettings() {
     const input = providerProfileUpdateInput(value);
     const response = await api.updateModelProvider(providerId, input);
     if (sessionToken !== api.csrfToken) return false;
-    invalidateTests((query.data?.models || [])
-      .filter((m) => (m.providerId || m.id) === providerId).map((m) => m.id));
-    await syncGatewayResponse(response);
+    const affectedIds = (query.data?.models || [])
+      .filter((m) => (m.providerId || m.id) === providerId)
+      .map((m) => m.id);
+    invalidateTests(affectedIds);
+    await syncGatewayResponse(clearModelsLastTest(response, affectedIds));
     setSaved(true);
     return true;
   }
@@ -218,7 +224,7 @@ export function ModelGatewaySettings() {
     const response = await api.updateModelProfile(profileId, input);
     if (sessionToken !== api.csrfToken) return false;
     invalidateTests([profileId]);
-    await syncGatewayResponse(response);
+    await syncGatewayResponse(clearModelsLastTest(response, [profileId]));
     setSaved(true);
     return true;
   }
@@ -263,29 +269,52 @@ export function ModelGatewaySettings() {
     const sessionToken = api.csrfToken;
     const version = (testVersions.current.get(profileId) || 0) + 1;
     testVersions.current.set(profileId, version);
-    const current = () => sessionToken === api.csrfToken &&
+    const targetModel = query.data?.models?.find((m) => m.id === profileId);
+    const targetProvider = query.data?.providers?.find(
+      (p) => p.id === (targetModel?.providerId || profileId),
+    );
+    const baselineTestedAt = targetModel?.lastTest?.testedAt;
+    const baselineModelUpdatedAt = targetModel?.updatedAt;
+    const baselineProviderUpdatedAt = targetProvider?.updatedAt;
+    const current = () =>
+      sessionToken === api.csrfToken &&
       testVersions.current.get(profileId) === version;
     setTestingModels((prev) => ({ ...prev, [profileId]: true }));
     setError("");
     setSaved(false);
     try {
       const result = await api.testModelProfile(profileId);
-      if (current())
+      if (current()) {
         setModelTests((prev) => ({
           ...prev,
           [profileId]: {
             ok: result.ok,
             model: result.model,
             latencyMs: result.latencyMs,
+            baselineTestedAt,
+            baselineModelUpdatedAt,
+            baselineProviderUpdatedAt,
           },
         }));
+        await client.invalidateQueries({ queryKey: key });
+      }
     } catch (e) {
       if (current()) {
         const message = gatewayFailureText(e);
         setModelTests((prev) => ({
           ...prev,
-          [profileId]: { ok: false, model: "", latencyMs: 0, error: message },
+          [profileId]: {
+            ok: false,
+            model: "",
+            latencyMs: 0,
+            error: message,
+            errorCode: e instanceof ApiError ? e.code : undefined,
+            baselineTestedAt,
+            baselineModelUpdatedAt,
+            baselineProviderUpdatedAt,
+          },
         }));
+        await client.invalidateQueries({ queryKey: key });
       }
     } finally {
       if (current()) {
@@ -337,7 +366,12 @@ export function ModelGatewaySettings() {
           ).values(),
         ];
   const anyVerified = Boolean(
-    test?.ok || Object.values(modelTests).some((entry) => entry.ok),
+    test?.ok ||
+      (test === null &&
+        models.some((m) => {
+          const p = providers.find((pr) => pr.id === (m.providerId || m.id));
+          return resolveModelLastTest(m, modelTests[m.id], p)?.ok === true;
+        })),
   );
   return (
     <div className="admin-view gateway-view">
@@ -514,106 +548,28 @@ export function ModelGatewaySettings() {
                         </p>
                       ) : (
                         <div className="gateway-models-list">
-                          {providerModels.map((item) => {
-                            const modelTest = modelTests[item.id];
-                            const effectiveEnabled =
-                              item.effectiveEnabled ??
-                              (item.enabled && provider.enabled);
-                            return (
-                              <div
-                                key={item.id}
-                                className="gateway-model-card"
-                              >
-                                <div className="gateway-model-info">
-                                  <div className="gateway-model-title">
-                                    <b>{item.displayName}</b>
-                                    <code>{item.id}</code>
-                                    {item.isDefault && (
-                                      <span className="platform-role-badge">
-                                        <Star size={ICON.xs} />
-                                        默认模型
-                                      </span>
-                                    )}
-                                    <AgentEnabledStatus enabled={item.enabled} />
-                                    {item.enabled && !provider.enabled && (
-                                      <span className="gateway-model-paused-hint">
-                                        随服务商停用
-                                      </span>
-                                    )}
-                                  </div>
-                                  {item.description && (
-                                    <p>{item.description}</p>
-                                  )}
-                                  <small>
-                                    上游模型：{item.model} · 上下文：
-                                    {item.contextWindowTokens} Token
-                                  </small>
-                                  {modelTest && (
-                                    <div
-                                      className={`gateway-model-test-result ${modelTest.ok ? "ok" : "failed"}`}
-                                      role={modelTest.ok ? "status" : "alert"}
-                                    >
-                                      {modelTest.ok
-                                        ? `连接测试通过 · ${modelTest.model} · ${Math.round(modelTest.latencyMs)} ms`
-                                        : modelTest.error ||
-                                          "连接测试未通过，请检查服务商地址、密钥和上游模型 ID。"}
-                                    </div>
-                                  )}
-                                </div>
-                                <div className="gateway-model-actions">
-                                  {!item.isDefault && (
-                                    <Button
-                                      type="button"
-                                      variant="secondary"
-                                      disabled={modelBusyId === item.id}
-                                      onClick={() =>
-                                        void handleSetDefaultModel(item.id)
-                                      }
-                                    >
-                                      设为默认
-                                    </Button>
-                                  )}
-                                  <Button
-                                    type="button"
-                                    variant="secondary"
-                                    busy={Boolean(testingModels[item.id])}
-                                    disabled={
-                                      modelBusyId === item.id ||
-                                      !item.configured ||
-                                      !effectiveEnabled
-                                    }
-                                    onClick={() =>
-                                      void handleTestModel(item.id)
-                                    }
-                                  >
-                                    测试此模型
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant="secondary"
-                                    disabled={modelBusyId === item.id}
-                                    onClick={() => setEditingModel(item)}
-                                  >
-                                    <Pencil size={ICON.xs} />
-                                    编辑
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant="secondary"
-                                    className="danger-text"
-                                    disabled={modelBusyId === item.id}
-                                    onClick={() => {
-                                      setError("");
-                                      setConfirmation({ kind: "deleteModel", model: item });
-                                    }}
-                                  >
-                                    <Trash2 size={ICON.xs} />
-                                    移除
-                                  </Button>
-                                </div>
-                              </div>
-                            );
-                          })}
+                          {providerModels.map((item) => (
+                            <GatewayModelCard
+                              key={item.id}
+                              item={item}
+                              provider={provider}
+                              inMemoryTest={modelTests[item.id]}
+                              busy={modelBusyId === item.id}
+                              testing={Boolean(testingModels[item.id])}
+                              onSetDefault={() =>
+                                void handleSetDefaultModel(item.id)
+                              }
+                              onTest={() => void handleTestModel(item.id)}
+                              onEdit={() => setEditingModel(item)}
+                              onDelete={() => {
+                                setError("");
+                                setConfirmation({
+                                  kind: "deleteModel",
+                                  model: item,
+                                });
+                              }}
+                            />
+                          ))}
                         </div>
                       )}
                     </div>

@@ -53,6 +53,31 @@
   .attention-list > li {
     border-bottom: 1px solid var(--border);
   }
+  .attention-saved-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+  }
+  .attention-saved-row > .attention-item {
+    flex: 1;
+    min-width: 0;
+  }
+  .attention-unsave-button {
+    flex-shrink: 0;
+    margin-right: var(--space-3);
+    padding: 6px 12px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-sm);
+    background: var(--surface);
+    color: var(--text-muted);
+    font-size: var(--font-xs);
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .attention-unsave-button:hover {
+    background: var(--lavender);
+    color: var(--brand-text);
+  }
   .attention-item {
     display: flex;
     align-items: flex-start;

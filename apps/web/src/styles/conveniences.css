@@ -472,4 +472,217 @@
   .reaction-chip-count {
     font-variant-numeric: tabular-nums;
   }
+
+  .message-forwarded-card {
+    margin: 6px 0;
+    padding: 8px 12px;
+    border-left: 3px solid var(--brand);
+    border-radius: var(--r-sm);
+    background: var(--surface-sunken);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .message-forwarded-header {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: var(--font-xs);
+    color: var(--text-muted);
+  }
+  .message-forwarded-prefix {
+    color: var(--text-subtle);
+  }
+  .message-forwarded-sender {
+    color: var(--text-strong);
+    font-weight: 600;
+  }
+  .message-forwarded-jump {
+    margin-left: auto;
+    border: 0;
+    background: transparent;
+    color: var(--brand-text);
+    font-size: var(--font-xs);
+    font-weight: 600;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: var(--r-xs);
+  }
+  .message-forwarded-jump:hover {
+    background: var(--lavender);
+  }
+  .message-forwarded-body {
+    font-size: var(--font-sm);
+    color: var(--text);
+  }
+  .message-forwarded-attachments {
+    margin-top: 2px;
+  }
+  .forward-modal-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+  .forward-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: var(--font-sm);
+    font-weight: 500;
+  }
+  .forward-preview-box {
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    background: var(--surface-sunken);
+  }
+  .forward-preview-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--font-xs);
+    color: var(--text-muted);
+    margin-bottom: 4px;
+  }
+  .forward-preview-snippet {
+    margin: 0;
+    font-size: var(--font-sm);
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pinned-messages-bar {
+    position: relative;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-sunken);
+  }
+  .pinned-messages-summary {
+    display: flex;
+    align-items: center;
+    padding: 4px var(--space-4);
+  }
+  .pinned-messages-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+    padding: 4px 8px;
+    border: 0;
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--text);
+    font-size: var(--font-xs);
+    cursor: pointer;
+    text-align: left;
+  }
+  .pinned-messages-toggle:hover {
+    background: var(--lavender);
+  }
+  .pinned-messages-count {
+    font-weight: 600;
+    color: var(--brand-text);
+    flex-shrink: 0;
+  }
+  .pinned-messages-latest {
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .pinned-messages-panel {
+    padding: var(--space-2) var(--space-4) var(--space-3);
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    max-height: 260px;
+    overflow-y: auto;
+  }
+  .pinned-messages-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: var(--font-xs);
+    margin-bottom: 6px;
+  }
+  .pinned-messages-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .pinned-message-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    background: var(--surface-sunken);
+  }
+  .pinned-message-jump {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+    padding: 0;
+    color: inherit;
+  }
+  .pinned-message-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--font-xs);
+    color: var(--text-muted);
+  }
+  .pinned-message-snippet {
+    margin: 2px 0 0;
+    font-size: var(--font-sm);
+    color: var(--text-strong);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pinned-message-unpin {
+    flex-shrink: 0;
+    padding: 4px 8px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-xs);
+    background: var(--surface);
+    color: var(--text-muted);
+    font-size: var(--font-xs);
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .pinned-message-unpin:hover {
+    background: var(--lavender);
+    color: var(--brand-text);
+  }
+  .manual-unread-banner {
+    border-bottom: 1px solid var(--border);
+  }
+  .message-collab-indicators {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .message-pin-badge,
+  .message-saved-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 6px;
+    border-radius: var(--r-pill);
+    background: var(--lavender);
+    color: var(--brand-text);
+    font-size: var(--font-xs);
+    font-weight: 600;
+  }
 }
