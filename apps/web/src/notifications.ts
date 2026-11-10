@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@teamie/api-client";
 import type { Message } from "@teamie/api-client";
-import { isRelevantMessage } from "./notification-model";
+import { isRelevantMessage, isUserMentioned } from "./notification-model";
 import { chatStore, effectiveNotificationLevel, reconcileMessages } from "./store";
 import type { ChatSnapshot } from "./store";
 
@@ -201,6 +201,7 @@ export function notifySyncedMessages(
   snapshot: ChatSnapshot,
   currentUserId: string,
   verifiedParents?: ReadonlyMap<string, Message>,
+  verifiedMentions?: ReadonlySet<string>,
 ): void {
   if (!candidates.length || snapshot.userId !== currentUserId) return;
   if (notifiedUserId !== currentUserId) {
@@ -230,9 +231,38 @@ export function notifySyncedMessages(
     const level = effectiveNotificationLevel(conversation);
     if (level === "none") continue;
 
-    const isMention = Boolean(
-      message.mentions?.some((mention) => mention.userId === currentUserId),
+    const isMention =
+      isUserMentioned(message.mentions, currentUserId) ||
+      Boolean(verifiedMentions?.has(messageId));
+    const hasUnverifiedHere = Boolean(
+      message.mentions?.some((m) => m.kind === "here" && !m.recipientIds),
     );
+    if (
+      !isMention &&
+      hasUnverifiedHere &&
+      typeof api.attention === "function" &&
+      !verifiedMentions?.has(`checked:${messageId}`)
+    ) {
+      const key = `here:${currentUserId}:${conversationId}:${messageId}`;
+      if (!pendingMessages.has(key)) {
+        const controller = new AbortController();
+        const epoch = notificationEpoch, generation = chatStore.generation;
+        pendingMessages.set(key, controller);
+        void api.attention({ messageId }, controller.signal).then((res) => {
+          if (controller.signal.aborted || epoch !== notificationEpoch || generation !== chatStore.generation) return;
+          const latest = chatStore.getSnapshot();
+          if (latest.userId !== currentUserId) return;
+          const nextVerified = new Set<string>([`checked:${messageId}`]);
+          if (res?.items?.some((item) => item.message.id === messageId && item.reasons.includes("mention"))) {
+            nextVerified.add(messageId);
+          }
+          notifySyncedMessages([{ conversationId, messageId }], latest, currentUserId, verifiedParents, nextVerified);
+        }).catch(() => { /* Unverified @here never grants a channel mention notification. */ }).finally(() => {
+          if (pendingMessages.get(key) === controller) pendingMessages.delete(key);
+        });
+      }
+      continue;
+    }
     let parent = message.replyToId ? cached.find((m) => m.id === message.replyToId) : undefined;
     if (message.replyToId && verifiedParents?.has(message.replyToId)) {
       const verified = verifiedParents.get(message.replyToId)!;
@@ -248,14 +278,14 @@ export function notifySyncedMessages(
           if (controller.signal.aborted || epoch !== notificationEpoch || generation !== chatStore.generation) return;
           const latest = chatStore.getSnapshot();
           if (latest.userId !== currentUserId) return;
-          notifySyncedMessages([{ conversationId, messageId }], latest, currentUserId, new Map([[original.id, original]]));
+          notifySyncedMessages([{ conversationId, messageId }], latest, currentUserId, new Map([[original.id, original]]), verifiedMentions);
         }).catch(() => { /* Unknown reply context never grants a notification. */ }).finally(() => {
           if (pendingMessages.get(key) === controller) pendingMessages.delete(key);
         });
       }
       continue;
     }
-    if (!isRelevantMessage(conversation, message, currentUserId, parent)) continue;
+    if (!isMention && !isRelevantMessage(conversation, message, currentUserId, parent)) continue;
     const isReplyToMe = Boolean(parent && !parent.retractedAt && parent.senderId === currentUserId);
 
     if (!isTabInBackground() && getCurrentConversationId() === conversation.id) {

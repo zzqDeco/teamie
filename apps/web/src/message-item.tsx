@@ -33,6 +33,11 @@ import { Avatar, Button, date, IconButton, Notice, time } from "./ui";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
 import { ICON } from "./icons";
 import {
+  ForwardedMessageCard,
+  MessageCollaborationActions,
+  MessageCollaborationIndicators,
+} from "./chat/collaboration-ui";
+import {
   ConversationBanners,
   ConversationEmptyStart,
   ConversationHeader,
@@ -74,6 +79,14 @@ export const MessageItem = memo(function MessageItem({
   canRetract,
   canReact = false,
   canViewReceipts = false,
+  canForward = true,
+  canPin = true,
+  canSave = true,
+  canMarkUnread = true,
+  isPinned = false,
+  isSaved = false,
+  allowBroadcastMentions = false,
+  allowHereMention = true,
   isLatestOwn = false,
   senderReadSeq = 0,
   showUnreadDivider,
@@ -96,6 +109,7 @@ export const MessageItem = memo(function MessageItem({
   setEditing,
   startEdit,
   onReply,
+  onForward,
   onRetractRequest,
 }: {
   message: LocalMessage;
@@ -117,6 +131,14 @@ export const MessageItem = memo(function MessageItem({
   canRetract: boolean;
   canReact?: boolean;
   canViewReceipts?: boolean;
+  canForward?: boolean;
+  canPin?: boolean;
+  canSave?: boolean;
+  canMarkUnread?: boolean;
+  isPinned?: boolean;
+  isSaved?: boolean;
+  allowBroadcastMentions?: boolean;
+  allowHereMention?: boolean;
   isLatestOwn?: boolean;
   senderReadSeq?: number;
   showUnreadDivider: boolean;
@@ -142,6 +164,7 @@ export const MessageItem = memo(function MessageItem({
   setEditing: (message: Message | null) => void;
   startEdit: (message: Message) => void;
   onReply: (messageId: string) => void;
+  onForward?: (message: Message) => void;
   onRetractRequest: (message: Message) => void;
 }) {
   const actionTabIndex = isRovingTarget || actionsOpen ? 0 : -1;
@@ -283,7 +306,7 @@ export const MessageItem = memo(function MessageItem({
           )}
         </div>
         <div className="message-content">
-          {!compact && (
+          {!compact ? (
             <div className="message-meta">
               <b>{message.senderName}</b>
               {message.senderKind === "agent" && (
@@ -293,7 +316,29 @@ export const MessageItem = memo(function MessageItem({
                 <span className="you-label">你</span>
               )}
               <time dateTime={message.createdAt}>{time(message.createdAt)}</time>
+              <MessageCollaborationIndicators
+                isPinned={isPinned}
+                isSaved={isSaved}
+              />
             </div>
+          ) : (
+            (isPinned || isSaved) && (
+              <div className="message-meta">
+                <MessageCollaborationIndicators
+                  isPinned={isPinned}
+                  isSaved={isSaved}
+                />
+              </div>
+            )
+          )}
+          {!message.retractedAt && message.forwarded && (
+            <ForwardedMessageCard
+              forwarded={message.forwarded}
+              conversationId={conversationId}
+              workspaceId={workspaceId}
+              userId={userId}
+              onLocateMessage={(mid) => void locate(mid)}
+            />
           )}
           {message.replyToId && (
             <button
@@ -324,6 +369,8 @@ export const MessageItem = memo(function MessageItem({
                 }}
                 members={mentionMembers}
                 enabled={mentionsEnabled}
+                allowBroadcastMentions={allowBroadcastMentions}
+                allowHereMention={allowHereMention}
                 required={!editing.attachments?.length}
                 aria-label="编辑消息内容"
                 onKeyDown={(e) => {
@@ -527,6 +574,18 @@ export const MessageItem = memo(function MessageItem({
                 >
                   <CornerUpLeft size={ICON.sm} />
                 </IconButton>
+                <MessageCollaborationActions
+                  conversationId={conversationId}
+                  message={message}
+                  actionTabIndex={actionTabIndex}
+                  isPinned={isPinned}
+                  isSaved={isSaved}
+                  canForward={canForward && Boolean(onForward)}
+                  canPin={canPin}
+                  canSave={canSave}
+                  canMarkUnread={canMarkUnread}
+                  onForward={(msg) => onForward?.(msg)}
+                />
                 {!!message.body && (
                   <IconButton
                     label="复制文本"

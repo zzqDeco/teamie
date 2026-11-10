@@ -42,6 +42,9 @@ export function MessageComposer({
   attachmentBlocked,
   mentionMembers,
   mentionsEnabled,
+  allowBroadcastMentions,
+  showBroadcastOnEmptyQuery = true,
+  allowHereMention,
   inputRef,
   editing,
   located,
@@ -68,6 +71,9 @@ export function MessageComposer({
   attachmentBlocked: boolean;
   mentionMembers: Member[];
   mentionsEnabled: boolean;
+  allowBroadcastMentions?: boolean;
+  showBroadcastOnEmptyQuery?: boolean;
+  allowHereMention?: boolean;
   inputRef: RefObject<HTMLTextAreaElement | null>;
   editing: Message | null;
   located: boolean;
@@ -250,6 +256,13 @@ export function MessageComposer({
           onChange={changeDraft}
           members={mentionMembers}
           enabled={mentionsEnabled}
+          allowBroadcastMentions={
+            allowBroadcastMentions ??
+            (conversation.type !== "direct" &&
+              (conversation as { kind?: string }).kind !== "dm")
+          }
+          showBroadcastOnEmptyQuery={showBroadcastOnEmptyQuery}
+          allowHereMention={allowHereMention}
           onTyping={(value) => {
             if (!value) {
               if (lastTyping.current > 0) {

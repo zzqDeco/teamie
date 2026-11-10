@@ -3,6 +3,7 @@ import type { MutableRefObject, RefObject } from "react";
 import { api } from "@teamie/api-client";
 import type { Conversation } from "@teamie/api-client";
 import { errorText } from "../errors";
+import { manualUnreadHoldEpoch } from "../collaboration-store";
 import { chatStore } from "../store";
 import type { LocalMessage } from "../store";
 
@@ -75,6 +76,13 @@ export function useConversationReadTracking({
   const ackState = useRef({ allowed: true, blocked: false });
   const dwell = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const readFailures = useRef(0);
+  const visitEpochRef = useRef({ convId: conversation.id, epoch: manualUnreadHoldEpoch });
+  useEffect(() => {
+    if (visitEpochRef.current.convId !== conversation.id) {
+      visitEpochRef.current = { convId: conversation.id, epoch: manualUnreadHoldEpoch };
+      lastReadRef.current = readSeq;
+    }
+  }, [conversation.id, lastReadRef, readSeq]);
   useEffect(() => {
     ackState.current = {
       allowed: !located || unreadContext,
@@ -114,12 +122,22 @@ export function useConversationReadTracking({
       }
       for (const row of el.querySelectorAll<HTMLElement>('article[data-seq][data-own="true"]'))
         seenRows.current.add(Number(row.dataset.seq));
-      const base = chatStore.getSnapshot().conversations[conversation.id]?.readSeq ?? 0;
+      const snap = chatStore.getSnapshot();
+      const conv = snap.conversations[conversation.id];
+      const manualSeq =
+        snap.manualUnreadByConversation?.[conversation.id] ??
+        conv?.manualUnreadSeq ??
+        conversation.manualUnreadSeq;
+      const rawRead = conv?.readSeq ?? conversation.readSeq ?? 0;
+      const base =
+        manualSeq && manualSeq > 0
+          ? Math.min(rawRead, Math.max(0, manualSeq - 1))
+          : rawRead;
       let end = base;
       while (seenRows.current.has(end + 1)) end++;
       setReadCandidate(end);
     }, 400);
-  }, [conversation.id, scrollRef]);
+  }, [conversation.id, conversation.manualUnreadSeq, conversation.readSeq, scrollRef]);
   useEffect(() => () => clearTimeout(dwell.current), []);
   useEffect(() => {
     const scroll = scrollRef.current;
@@ -229,7 +247,7 @@ export function useConversationReadTracking({
       .then((result) => {
         if (pending.generation === chatStore.generation && pending.operation === navigationRef.current) {
           lastReadRef.current = Math.max(lastReadRef.current, result.readSeq);
-          chatStore.markRead(conversation.id, result.readSeq);
+          chatStore.markRead(conversation.id, result.readSeq, result.manualUnreadSeq ?? null);
         }
       })
       .catch(() => {
@@ -241,8 +259,20 @@ export function useConversationReadTracking({
     located, membersOpen, messages, navigationRef, scrollRef, setError, visible,
   ]);
   useEffect(() => {
+    const manualHold =
+      chatStore.getSnapshot().manualUnreadByConversation?.[conversation.id] ??
+      conversation.manualUnreadSeq;
+    const heldThisVisit = Boolean(
+      manualHold &&
+        visitEpochRef.current.convId === conversation.id &&
+        manualUnreadHoldEpoch > visitEpochRef.current.epoch,
+    );
+    if (heldThisVisit) return;
     const nextRead = Math.min(readCandidate, latest);
-    if (!nextRead || nextRead <= Math.max(lastReadRef.current, readSeq) || generation !== chatStore.generation)
+    const baseline = manualHold
+      ? Math.min(lastReadRef.current, readSeq)
+      : Math.max(lastReadRef.current, readSeq);
+    if (!nextRead || nextRead <= baseline || generation !== chatStore.generation)
       return;
     void api
       .read(conversation.id, nextRead)
@@ -250,7 +280,7 @@ export function useConversationReadTracking({
         if (generation === chatStore.generation) {
           readFailures.current = 0;
           lastReadRef.current = Math.max(lastReadRef.current, result.readSeq);
-          chatStore.markRead(conversation.id, result.readSeq);
+          chatStore.markRead(conversation.id, result.readSeq, result.manualUnreadSeq ?? null);
         }
       })
       .catch(() => {
@@ -262,22 +292,36 @@ export function useConversationReadTracking({
           }
         }
       });
-  }, [conversation.id, generation, lastReadRef, latest, readCandidate, readSeq, scheduleSeen]);
+  }, [conversation.id, conversation.manualUnreadSeq, generation, lastReadRef, latest, readCandidate, readSeq, scheduleSeen]);
   const markLatestRead = useCallback(() => {
-    if (!latest || latest <= readSeq) return;
+    const hasManualUnread = Boolean(
+      chatStore.getSnapshot().manualUnreadByConversation?.[conversation.id] ||
+        conversation.manualUnreadSeq,
+    );
+    if (!hasManualUnread && (!latest || latest <= readSeq)) return;
     const token = chatStore.generation;
+    chatStore.setManualUnread(conversation.id, undefined);
+    if (hasManualUnread && typeof api.clearConversationUnread === "function") {
+      void Promise.resolve(api.clearConversationUnread(conversation.id)).catch(
+        () => {
+          /* Best-effort clear alongside read */
+        },
+      );
+    }
+    const targetSeq = Math.max(latest, readSeq);
+    if (!targetSeq) return;
     void api
-      .read(conversation.id, latest)
+      .read(conversation.id, targetSeq)
       .then((result) => {
         if (token === chatStore.generation) {
           lastReadRef.current = Math.max(lastReadRef.current, result.readSeq);
-          chatStore.markRead(conversation.id, result.readSeq);
+          chatStore.markRead(conversation.id, result.readSeq, result.manualUnreadSeq ?? null);
         }
       })
       .catch((e) => {
         if (token === chatStore.generation) setError(errorText(e));
       });
-  }, [conversation.id, lastReadRef, latest, readSeq, setError]);
+  }, [conversation.id, conversation.manualUnreadSeq, lastReadRef, latest, readSeq, setError]);
   const resetReadFailures = useCallback(() => {
     readFailures.current = 0;
   }, []);

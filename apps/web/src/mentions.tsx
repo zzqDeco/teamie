@@ -2,6 +2,7 @@ import { Fragment, useId, useLayoutEffect, useRef, useState } from "react";
 import type { ClipboardEvent, KeyboardEvent, RefObject } from "react";
 import type { Member, Mention } from "@teamie/api-client";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
+import { isUserMentioned } from "./notification-model";
 import { Avatar } from "./ui";
 import "./styles/mentions.css";
 
@@ -49,6 +50,10 @@ export function trimMentionDraft(body: string, mentions: Mention[]) {
   };
 }
 
+export function buildMentionSpans(body: string, mentions: Mention[]): Mention[] {
+  return trimMentionDraft(body, mentions).mentions;
+}
+
 // Safari dispatches the candidate-confirming keydown after compositionend with
 // isComposing=false but keyCode 229, so both signals mark an IME keystroke.
 export function isComposingKey(event: KeyboardEvent<HTMLElement>) {
@@ -80,8 +85,9 @@ export function MentionText({
       <Fragment key={`${m.start}-${m.end}`}>
         {body.slice(end, m.start)}
         <span
-          className={`message-mention mention-pill${m.userId === userId ? " mention-self" : ""}`}
+          className={`message-mention mention-pill${isUserMentioned([m], userId) ? " mention-self" : ""}`}
           data-user-id={m.userId}
+          data-mention-kind={m.kind}
         >
           {body.slice(m.start, m.end)}
         </span>
@@ -97,12 +103,19 @@ export function MentionText({
   );
 }
 
+type MentionCandidate =
+  | { type: "member"; member: Member }
+  | { type: "broadcast"; kind: "all" | "here"; token: string; subtitle: string };
+
 export function MentionInput({
   value,
   mentions,
   onChange,
   members,
   enabled,
+  allowBroadcastMentions = false,
+  showBroadcastOnEmptyQuery = true,
+  allowHereMention = true,
   inputRef,
   onKeyDown,
   onTyping,
@@ -113,6 +126,9 @@ export function MentionInput({
   onChange: (body: string, mentions: Mention[]) => void;
   members: Member[];
   enabled: boolean;
+  allowBroadcastMentions?: boolean;
+  showBroadcastOnEmptyQuery?: boolean;
+  allowHereMention?: boolean;
   inputRef?: RefObject<HTMLTextAreaElement | null>;
   onKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onPaste?: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
@@ -134,23 +150,64 @@ export function MentionInput({
   const query = /(?:^|\s)@([^\s@]{0,64})$/u.exec(value.slice(0, caret));
   const start = query ? caret - query[1].length - 1 : -1;
   const signature = `${value}:${caret}`;
-  const candidates =
+  const activeQuery =
     query &&
     enabled &&
     !composing &&
     dismissed !== signature &&
     !mentions.some((m) => m.start <= start && m.end >= caret)
+      ? query[1].toLocaleLowerCase()
+      : null;
+  const hasBroadcastInDraft = mentions.some(
+    (m) => m.kind === "all" || m.kind === "here",
+  );
+  const broadcastCandidates: MentionCandidate[] =
+    activeQuery !== null &&
+    allowBroadcastMentions &&
+    !hasBroadcastInDraft &&
+    (activeQuery.length > 0 || showBroadcastOnEmptyQuery)
+      ? [
+          ...("all".includes(activeQuery) || "所有人".includes(activeQuery)
+            ? [
+                {
+                  type: "broadcast" as const,
+                  kind: "all" as const,
+                  token: "all",
+                  subtitle: "所有人",
+                },
+              ]
+            : []),
+          ...(allowHereMention &&
+          ("here".includes(activeQuery) ||
+            "当前在线".includes(activeQuery) ||
+            "在线成员".includes(activeQuery))
+            ? [
+                {
+                  type: "broadcast" as const,
+                  kind: "here" as const,
+                  token: "here",
+                  subtitle: "当前在线",
+                },
+              ]
+            : []),
+        ]
+      : [];
+  const memberCandidates: MentionCandidate[] =
+    activeQuery !== null
       ? members
           .filter((m) =>
-            m.displayName
-              .toLocaleLowerCase()
-              .includes(query[1].toLocaleLowerCase()),
+            m.displayName.toLocaleLowerCase().includes(activeQuery),
           )
           .slice(0, 12)
+          .map((member) => ({ type: "member" as const, member }))
       : [];
+  const candidates: MentionCandidate[] = [
+    ...memberCandidates,
+    ...broadcastCandidates,
+  ];
   const selected =
     selection.signature === signature
-      ? Math.min(selection.index, candidates.length - 1)
+      ? Math.min(selection.index, Math.max(0, candidates.length - 1))
       : 0;
   useLayoutEffect(() => {
     listRef.current?.children.item(selected)?.scrollIntoView({ block: "nearest" });
@@ -162,12 +219,27 @@ export function MentionInput({
       pendingCaret.current = null;
     }
   }, [ref, value]);
-  function choose(member: Member) {
-    const label = `@${member.displayName}`;
+  function choose(candidate: MentionCandidate) {
+    const label =
+      candidate.type === "member"
+        ? `@${candidate.member.displayName}`
+        : `@${candidate.kind}`;
     const text = value.slice(0, start) + label + " " + value.slice(caret);
     if (text.length > 8000 || mentions.length >= 32) return;
     const next = moveMentions(value, text, mentions);
-    next.push({ userId: member.userId, start, end: start + label.length });
+    if (candidate.type === "member") {
+      next.push({
+        userId: candidate.member.userId,
+        start,
+        end: start + label.length,
+      });
+    } else {
+      next.push({
+        kind: candidate.kind,
+        start,
+        end: start + label.length,
+      });
+    }
     next.sort((a, b) => a.start - b.start);
     const position = start + label.length + 1;
     pendingCaret.current = position;
@@ -246,25 +318,46 @@ export function MentionInput({
           role="listbox"
           aria-label="提及成员"
         >
-          {candidates.map((member, index) => (
-            <button
-              type="button"
-              role="option"
-              id={`${id}-${index}`}
-              aria-selected={selected === index}
-              key={member.userId}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => choose(member)}
-            >
-              {member.kind === "agent" ? (
-                <AgentAvatar />
-              ) : (
-                <Avatar name={member.displayName} seed={member.userId} />
-              )}
-              <span>{member.displayName}</span>
-              {member.kind === "agent" && <AgentBadge />}
-            </button>
-          ))}
+          {candidates.map((candidate, index) =>
+            candidate.type === "member" ? (
+              <button
+                type="button"
+                role="option"
+                id={`${id}-${index}`}
+                aria-selected={selected === index}
+                key={candidate.member.userId}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => choose(candidate)}
+              >
+                {candidate.member.kind === "agent" ? (
+                  <AgentAvatar />
+                ) : (
+                  <Avatar
+                    name={candidate.member.displayName}
+                    seed={candidate.member.userId}
+                  />
+                )}
+                <span>{candidate.member.displayName}</span>
+                {candidate.member.kind === "agent" && <AgentBadge />}
+              </button>
+            ) : (
+              <button
+                type="button"
+                role="option"
+                id={`${id}-${index}`}
+                aria-selected={selected === index}
+                key={`broadcast-${candidate.kind}`}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => choose(candidate)}
+              >
+                <span className="mention-broadcast-icon">@</span>
+                <span>{candidate.token}</span>
+                <span className="mention-broadcast-badge">
+                  {candidate.subtitle}
+                </span>
+              </button>
+            ),
+          )}
         </div>
       )}
     </div>

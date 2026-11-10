@@ -1,15 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { ArrowLeft, Bell, CheckCheck, RefreshCw } from "lucide-react";
 import { api, ApiError } from "@teamie/api-client";
 import type { AttentionItem } from "@teamie/api-client";
 import { useAuth } from "./auth";
-import { useChatState } from "./chat";
+import { useChat, useChatState } from "./chat";
+import { SavedMessagesList } from "./chat/collaboration-ui";
 import { errorText } from "./errors";
 import {
   chatStore,
+  isUserMentioned,
   reconcileMessages,
+  savedItemConversationId,
+  savedItemMessageId,
 } from "./store";
 import type { ChatSnapshot } from "./store";
 import { fetchAttentionCount } from "./notification-projection";
@@ -18,6 +22,8 @@ import { MentionText } from "./mentions";
 import { Avatar, Button, date, IconButton, Notice, time } from "./ui";
 import { ICON } from "./icons";
 import "./styles/attention.css";
+
+export { SavedMessagesList };
 
 function useAttentionScope() {
   const { user } = useAuth();
@@ -85,7 +91,11 @@ export function currentAttention(
   )[0];
   if (message.retractedAt || message.senderId === userId) return null;
   const reasons: AttentionItem["reasons"] = [];
-  if (message.mentions?.some((mention) => mention.userId === userId))
+  const hasHereMention = Boolean(message.mentions?.some((m) => m.kind === "here"));
+  if (
+    isUserMentioned(message.mentions, userId) ||
+    (hasHereMention && item.reasons.includes("mention"))
+  )
     reasons.push("mention");
   if (message.replyToId) {
     const original = cached.find((m) => m.id === message.replyToId);
@@ -97,9 +107,18 @@ export function currentAttention(
       reasons.push("reply");
   }
   if (!reasons.length) return null;
+  const enrichedMessage =
+    hasHereMention && reasons.includes("mention") && message.mentions
+      ? {
+          ...message,
+          mentions: message.mentions.map((m) =>
+            m.kind === "here" && !m.recipientIds ? { ...m, recipientIds: [userId] } : m,
+          ),
+        }
+      : message;
   return {
     ...item,
-    message,
+    message: enrichedMessage,
     reasons,
     isRead: item.isRead || conversation.readSeq >= message.seq,
   };
@@ -114,15 +133,127 @@ const MARK_READ_CONCURRENCY = 4;
 
 export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
   const scope = useAttentionScope();
+  const { data: chatData } = useChat();
   const snapshot = useChatState();
+  const location = useLocation();
   const client = useQueryClient();
-  const [unreadOnly, setUnreadOnly] = useState(false);
+  const [tab, setTab] = useState<"all" | "unread" | "saved">(() =>
+    new URLSearchParams(location.search).get("tab") === "saved"
+      ? "saved"
+      : "all",
+  );
+  const unreadOnly = tab === "unread";
+  const isSavedTab = tab === "saved";
+  const canSave = chatData?.capabilities["im.messages.save"] !== false;
+  const [savedLoading, setSavedLoading] = useState(false);
+  const [savedError, setSavedError] = useState("");
+  const [savedCursor, setSavedCursor] = useState<string | undefined>(undefined);
+  const [loadingMoreSaved, setLoadingMoreSaved] = useState(false);
   const [markingRead, setMarkingRead] = useState(false);
   const [markReadError, setMarkReadError] = useState("");
   const [batchFailure, setBatchFailure] = useState<BatchReadFailure | null>(
     null,
   );
   const markReadAbort = useRef<AbortController | null>(null);
+  const savedBaselineSeq = useRef(0);
+
+  useEffect(() => {
+    if (new URLSearchParams(location.search).get("tab") === "saved") {
+      setTab("saved");
+    }
+  }, [location.search]);
+
+  useEffect(() => {
+    if (!isSavedTab || !scope.enabled || typeof api.listSavedMessages !== "function") return;
+    let active = true;
+    const controller = new AbortController();
+    const token = chatStore.generation;
+    const expectedAccess = scope.access;
+    const startDeltaSeq = chatStore.getSnapshot().savedDeltaSeq ?? 0;
+    savedBaselineSeq.current = startDeltaSeq;
+    setSavedLoading(true);
+    setSavedError("");
+    setSavedCursor(undefined);
+    void Promise.resolve(api.listSavedMessages({ limit: 50 }, controller.signal))
+      .then((page) => {
+        const currentAccess = Object.values(chatStore.getSnapshot().conversations)
+          .sort((a, b) => a.id.localeCompare(b.id))
+          .map((c) => c.id)
+          .join("|");
+        if (
+          !active ||
+          token !== chatStore.generation ||
+          currentAccess !== expectedAccess
+        )
+          return;
+        if (page && Array.isArray(page.items)) {
+          chatStore.setSavedMessages(page.items, startDeltaSeq);
+          setSavedCursor(page.cursor || undefined);
+        }
+      })
+      .catch((e) => {
+        if (!active || controller.signal.aborted || token !== chatStore.generation) return;
+        setSavedError(errorText(e));
+      })
+      .finally(() => {
+        if (active && token === chatStore.generation) setSavedLoading(false);
+      });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [isSavedTab, scope.enabled, scope.userId, scope.generation, scope.access]);
+
+  async function loadMoreSaved() {
+    if (
+      !savedCursor ||
+      loadingMoreSaved ||
+      !scope.enabled ||
+      typeof api.listSavedMessages !== "function"
+    )
+      return;
+    const token = chatStore.generation;
+    const expectedAccess = scope.access;
+    setLoadingMoreSaved(true);
+    setSavedError("");
+    try {
+      const page = await api.listSavedMessages({
+        cursor: savedCursor,
+        limit: 50,
+      });
+      const currentAccess = Object.values(chatStore.getSnapshot().conversations)
+        .sort((a, b) => a.id.localeCompare(b.id))
+        .map((c) => c.id)
+        .join("|");
+      if (token !== chatStore.generation || currentAccess !== expectedAccess)
+        return;
+      if (page && Array.isArray(page.items)) {
+        const existing = chatStore.getSnapshot().savedMessages || [];
+        const seenIds = new Set(
+          existing.map((item) => savedItemMessageId(item)),
+        );
+        const merged = [
+          ...existing,
+          ...page.items.filter((item) => {
+            const id = savedItemMessageId(item);
+            if (!id || seenIds.has(id)) return false;
+            seenIds.add(id);
+            return true;
+          }),
+        ];
+        chatStore.setSavedMessages(merged, savedBaselineSeq.current);
+        setSavedCursor(page.cursor || undefined);
+      }
+    } catch (e) {
+      if (token === chatStore.generation) {
+        setSavedError(errorText(e));
+      }
+    } finally {
+      if (token === chatStore.generation) {
+        setLoadingMoreSaved(false);
+      }
+    }
+  }
 
   useEffect(() => {
     markReadAbort.current?.abort();
@@ -284,7 +415,11 @@ export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
               chatStore.generation !== generation
             )
               return;
-            chatStore.markRead(convId, res.readSeq);
+            chatStore.markRead(
+              convId,
+              res.readSeq,
+              res.manualUnreadSeq ?? null,
+            );
           } catch {
             if (
               controller.signal.aborted ||
@@ -360,13 +495,39 @@ export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
         </div>
       </header>
       <div className="attention-filters" role="group" aria-label="提醒筛选">
-        <button aria-pressed={!unreadOnly} onClick={() => setUnreadOnly(false)}>
+        <button
+          aria-pressed={tab === "all"}
+          onClick={() => setTab("all")}
+        >
           全部
         </button>
-        <button aria-pressed={unreadOnly} onClick={() => setUnreadOnly(true)}>
+        <button
+          aria-pressed={tab === "saved"}
+          onClick={() => setTab("saved")}
+        >
+          收藏
+        </button>
+        <button
+          aria-pressed={tab === "unread"}
+          onClick={() => setTab("unread")}
+        >
           未读
         </button>
       </div>
+      {isSavedTab ? (
+        <SavedMessagesList
+          items={(snapshot.savedMessages || []).filter((item) =>
+            Boolean(snapshot.conversations[savedItemConversationId(item)]),
+          )}
+          loading={savedLoading}
+          error={savedError}
+          userId={scope.userId}
+          canSave={canSave}
+          hasMore={Boolean(savedCursor)}
+          loadingMore={loadingMoreSaved}
+          onLoadMore={() => void loadMoreSaved()}
+        />
+      ) : (
       <div className="attention-scroll" aria-busy={query.isPending}>
         {query.isPending && (
           <p className="attention-empty" role="status">
@@ -457,6 +618,7 @@ export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
           </Button>
         )}
       </div>
+      )}
     </section>
   );
 }

@@ -9,7 +9,7 @@ import { useAttachmentDraft } from "./attachments";
 import { useAuth } from "./auth";
 import { useChat, useChatState } from "./chat";
 import { errorText } from "./errors";
-import { chatStore, reconcileMessages } from "./store";
+import { chatStore, isUserMentioned, pinMessageId, reconcileMessages } from "./store";
 import type { LocalMessage } from "./store";
 import { projectReactionList } from "./reactions";
 import { MessageBody } from "./markdown";
@@ -27,6 +27,9 @@ import {
   ConversationBanners, ConversationEmptyStart, ConversationHeader,
   MessageItem, messageGrouping, RetractMessageModal, useMessageActions,
 } from "./message-item";
+import {
+  ForwardMessageModal, ManualUnreadBanner, PinnedMessagesBar,
+} from "./chat/collaboration-ui";
 import { MessageComposer } from "./message-composer";
 import { useConversationReceiptsSync } from "./engagement-store";
 import { useConversationReadTracking } from "./chat/conversation-read-tracking";
@@ -53,10 +56,16 @@ export function ConversationView({
     attachments.blocked || (attachments.files.length > 0 && !uploadsEnabled);
   const snapshot = useChatState();
   const allMessages = snapshot.messages[conversation.id] || noMessages;
-  const readSeq = Math.max(
-    conversation.readSeq,
-    snapshot.conversations[conversation.id]?.readSeq ?? 0,
-  );
+  const storeConv = snapshot.conversations[conversation.id];
+  const manualUnreadSeq =
+    snapshot.manualUnreadByConversation?.[conversation.id] ||
+    storeConv?.manualUnreadSeq ||
+    conversation.manualUnreadSeq;
+  const hasManualUnread = Boolean(manualUnreadSeq && manualUnreadSeq > 0);
+  const actualReadSeq = Math.max(conversation.readSeq, storeConv?.readSeq ?? 0);
+  const readSeq = hasManualUnread
+    ? Math.min(actualReadSeq, Math.max(0, manualUnreadSeq! - 1))
+    : actualReadSeq;
   const authoritative = data
     ? data.conversations.find((c) => c.id === conversation.id) || conversation
     : undefined;
@@ -86,6 +95,7 @@ export function ConversationView({
   const [focusedMessageId, setFocusedMessageId] = useState("");
   const [locating, setLocating] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [forwardingMessage, setForwardingMessage] = useState<Message | null>(null);
   const [draggingFiles, setDraggingFiles] = useState(false);
   const closeSearch = useCallback(() => setSearchOpen(false), []);
   const navigation = useRef(0);
@@ -208,8 +218,9 @@ export function ConversationView({
     }
   }, [conversation.id, initialMessageId, loading, located, locating]);
   const tailId = messages.at(-1)?.id;
-  const firstUnread =
-    entry && entry.lastSeq > entry.readSeq
+  const firstUnread = hasManualUnread
+    ? messages.find((m) => !m.status && m.seq > readSeq)?.id
+    : entry && entry.lastSeq > entry.readSeq
       ? messages.find(
           (m) => !m.status && m.seq > entry.readSeq && m.seq <= entry.lastSeq && m.senderId !== userId,
         )?.id
@@ -311,7 +322,23 @@ export function ConversationView({
   const canReact = !!data?.capabilities["im.reactions.create"];
   const canViewReceipts = !!data?.capabilities["im.read_receipts.view"];
   const canConfigureNotifications = !!data?.capabilities["im.notifications.configure"];
-  const presenceEnabled = !!data?.capabilities["im.presence.publish"];
+  const presenceEnabled = data?.capabilities["im.presence.publish"] !== false;
+  const canForward = data?.capabilities["im.messages.forward"] !== false;
+  const canPin = data?.capabilities["im.messages.pin"] !== false;
+  const canSave = data?.capabilities["im.messages.save"] !== false;
+  const canMarkUnread = data?.capabilities["im.unread.mark"] !== false;
+  const canUseChannelBroadcast =
+    isWorkspaceOwner ??
+    (data?.workspaces.find((w) => w.id === conversation.workspaceId)?.createdBy === userId ||
+      members.some((m) => m.userId === userId && m.role === "owner"));
+  const allowBroadcastMentions =
+    data?.capabilities["im.mentions.broadcast"] !== false &&
+    conversation.type !== "direct" &&
+    (conversation as { kind?: string }).kind !== "dm" &&
+    (conversation.type !== "channel" || Boolean(canUseChannelBroadcast));
+  const conversationPins = useMemo(() => snapshot.pinsByConversation?.[conversation.id] || [], [snapshot.pinsByConversation, conversation.id]);
+  const pinnedIdSet = useMemo(() => new Set(conversationPins.map((p) => pinMessageId(p))), [conversationPins]);
+  const savedIdSet = useMemo(() => new Set(snapshot.savedByConversation?.[conversation.id] || []), [snapshot.savedByConversation, conversation.id]);
   const latestOwnMessageId = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
@@ -395,7 +422,7 @@ export function ConversationView({
       messages.some((m, index) => {
         if (m.status || m.retractedAt || m.seq <= unreadBaselineSeq || m.senderId === userId)
           return false;
-        if (m.mentions?.some((mention) => mention.userId === userId)) return true;
+        if (isUserMentioned(m.mentions, userId)) return true;
         const target = rows[index]?.replyTarget;
         return !!target && !target.retractedAt && target.senderId === userId;
       }),
@@ -462,8 +489,20 @@ export function ConversationView({
         onMenu={onMenu} onSearchOpen={() => setSearchOpen(true)} onMembers={onMembers}
         members={mentionMembers} userId={userId}
         canConfigureNotifications={canConfigureNotifications}
-        presenceEnabled={presenceEnabled}
+        presenceEnabled={!!data?.capabilities["im.presence.publish"]}
       />
+      <PinnedMessagesBar
+        conversationId={conversation.id}
+        pins={conversationPins}
+        canPin={canPin}
+        onLocate={(id) => void locate(id)}
+      />
+      {hasManualUnread && (
+        <ManualUnreadBanner
+          unreadCount={Math.max(1, currentLastSeq - readSeq)}
+          onMarkRead={markLatestRead}
+        />
+      )}
       {searchOpen && (
         <ConversationSearch
           key={`${user!.id}:${conversation.id}`}
@@ -546,9 +585,17 @@ export function ConversationView({
                 canEdit={canEdit} canRetract={canRetract}
                 canReact={canReact}
                 canViewReceipts={canViewReceipts}
+                canForward={canForward}
+                canPin={canPin}
+                canSave={canSave}
+                canMarkUnread={canMarkUnread}
+                isPinned={pinnedIdSet.has(message.id)}
+                isSaved={savedIdSet.has(message.id)}
+                allowBroadcastMentions={allowBroadcastMentions}
+                allowHereMention={presenceEnabled}
                 isLatestOwn={message.id === latestOwnMessageId}
                 senderReadSeq={message.senderId === userId ? readSeq : 0}
-                showUnreadDivider={message.id === firstUnread && (entry?.readSeq ?? 0) > 0}
+                showUnreadDivider={message.id === firstUnread && (hasManualUnread || (entry?.readSeq ?? 0) > 0)}
                 isRovingTarget={message.id === rovingMessageId}
                 highlighted={highlightId === message.id}
                 actionsOpen={actionMessageId === message.id}
@@ -563,6 +610,7 @@ export function ConversationView({
                 setEditBody={setEditBody} setEditMentions={setEditMentions}
                 setEditing={setEditing} startEdit={startEdit}
                 onReply={replyToMessage}
+                onForward={setForwardingMessage}
                 onRetractRequest={requestRetract}
               />
             );
@@ -602,6 +650,9 @@ export function ConversationView({
         attachments={attachments} attachmentLimits={attachmentLimits}
         uploadsEnabled={uploadsEnabled} attachmentBlocked={attachmentBlocked}
         mentionMembers={mentionMembers} mentionsEnabled={mentionsEnabled}
+        allowBroadcastMentions={allowBroadcastMentions}
+        showBroadcastOnEmptyQuery={Boolean(data?.capabilities["im.mentions.broadcast"])}
+        allowHereMention={presenceEnabled}
         inputRef={inputRef} editing={editing}
         located={!!located} latestLoaded={latestLoaded} latest={latest}
         canEdit={canEdit} messages={messages} sendTyping={sendTyping}
@@ -616,6 +667,24 @@ export function ConversationView({
         <RetractMessageModal
           retracting={retracting} actionError={actionError} actionBusy={actionBusy}
           onClose={closeRetract} onConfirm={() => void retract()}
+        />
+      )}
+      {forwardingMessage && (
+        <ForwardMessageModal
+          message={forwardingMessage}
+          currentConversation={conversation}
+          conversations={
+            Object.values(snapshot.conversations).length > 0
+              ? Object.values(snapshot.conversations)
+              : data?.conversations || [conversation]
+          }
+          members={members}
+          userId={userId}
+          mentionsEnabled={mentionsEnabled}
+          allowBroadcastMentions={data?.capabilities["im.mentions.broadcast"] !== false}
+          isWorkspaceOwner={Boolean(canUseChannelBroadcast)}
+          allowHereMention={presenceEnabled}
+          onClose={() => setForwardingMessage(null)}
         />
       )}
     </section>

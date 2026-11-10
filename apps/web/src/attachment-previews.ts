@@ -6,6 +6,8 @@ type Entry = {
   key: string;
   conversationId: string;
   attachmentId: string;
+  kind?: "content" | "thumbnail";
+  mediaType?: string;
   session: string;
   controller: AbortController;
   listeners: Set<Listener>;
@@ -49,7 +51,14 @@ async function load(entry: Entry) {
     signal.throwIfAborted();
     if (entry.session !== api.csrfToken) return;
     try {
-      const blob = await api.attachmentContent(entry.conversationId, entry.attachmentId, signal);
+      const raw =
+        entry.kind === "thumbnail"
+          ? await api.attachmentThumbnail(entry.conversationId, entry.attachmentId, signal)
+          : await api.attachmentContent(entry.conversationId, entry.attachmentId, signal);
+      const blob =
+        raw instanceof Blob
+          ? raw
+          : new Blob([raw as BlobPart], { type: entry.mediaType || "application/octet-stream" });
       if (!signal.aborted && entry.session === api.csrfToken && entry.listeners.size) {
         publish(entry, { url: URL.createObjectURL(blob) });
       }
@@ -78,10 +87,41 @@ function pump() {
   }).finally(() => { running = false; pump(); });
 }
 export function subscribeAttachmentPreview(conversationId: string, attachmentId: string, listener: Listener) {
-  const key = JSON.stringify([api.csrfToken, conversationId, attachmentId]);
+  const key = JSON.stringify(["content", api.csrfToken, conversationId, attachmentId]);
   let entry = entries.get(key);
   if (!entry) {
-    entry = { key, conversationId, attachmentId, session: api.csrfToken, controller: new AbortController(), listeners: new Set(), preview: {} };
+    entry = { key, conversationId, attachmentId, kind: "content", session: api.csrfToken, controller: new AbortController(), listeners: new Set(), preview: {} };
+    entries.set(key, entry);
+    queue.push(entry);
+  }
+  entry.listeners.add(listener);
+  listener(entry.preview);
+  pump();
+  return () => {
+    entry.listeners.delete(listener);
+    if (!entry.listeners.size) dispose(entry);
+  };
+}
+export function subscribeAttachmentThumbnail(
+  conversationId: string,
+  attachmentId: string,
+  mediaType: string,
+  listener: Listener,
+) {
+  const key = JSON.stringify(["thumbnail", api.csrfToken, conversationId, attachmentId]);
+  let entry = entries.get(key);
+  if (!entry) {
+    entry = {
+      key,
+      conversationId,
+      attachmentId,
+      kind: "thumbnail",
+      mediaType,
+      session: api.csrfToken,
+      controller: new AbortController(),
+      listeners: new Set(),
+      preview: {},
+    };
     entries.set(key, entry);
     queue.push(entry);
   }

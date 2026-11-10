@@ -323,6 +323,36 @@ export function useConversationContextLoader({
   }
 
   useEffect(() => {
+    const token = chatStore.generation;
+    const convId = conversation.id;
+    refreshConversationPins(convId, true);
+    const unsubscribe = chatStore.subscribe(() => {
+      if (token === chatStore.generation) {
+        refreshConversationPins(convId);
+      }
+    });
+    if (typeof api.listConversationSavedMessages === "function") {
+      const startDeltaSeq = chatStore.getSnapshot().savedDeltaSeq ?? 0;
+      void Promise.resolve(api.listConversationSavedMessages(convId))
+        .then((res) => {
+          if (
+            token === chatStore.generation &&
+            res &&
+            Array.isArray(res.messageIds)
+          ) {
+            chatStore.setConversationSaved(convId, res.messageIds, startDeltaSeq);
+          }
+        })
+        .catch(() => {
+          /* Tolerate saved messages load error gracefully */
+        });
+    }
+    return () => {
+      unsubscribe();
+    };
+  }, [conversation.id]);
+
+  useEffect(() => {
     if (initialMessageId) void loadContext(initialMessageId, true);
     else void fetchLatest();
   }, [fetchLatest, loadContext, initialMessageId]);
@@ -335,4 +365,56 @@ export function useConversationContextLoader({
     returnToLatest,
     locate,
   };
+}
+
+const inFlightPinRequests = new Set<string>();
+const lastRefetchedPinVersion = new Map<string, string>();
+
+export function refreshConversationPins(
+  convId: string,
+  forceInitial = false,
+): void {
+  const token = chatStore.generation;
+  const scopeKey = `${token}:${convId}`;
+  if (typeof api.listPins !== "function" || inFlightPinRequests.has(scopeKey)) {
+    return;
+  }
+  const snapBefore = chatStore.getSnapshot();
+  const currentVer = snapBefore.pinsVersionByConversation?.[convId];
+  if (
+    !forceInitial &&
+    (!snapBefore.pinsNeedsRefreshByConversation?.[convId] ||
+      (currentVer && lastRefetchedPinVersion.get(scopeKey) === currentVer))
+  ) {
+    return;
+  }
+  inFlightPinRequests.add(scopeKey);
+  if (currentVer) {
+    lastRefetchedPinVersion.set(scopeKey, currentVer);
+  }
+  void Promise.resolve(api.listPins(convId))
+    .then((res) => {
+      inFlightPinRequests.delete(scopeKey);
+      if (
+        token === chatStore.generation &&
+        res &&
+        Array.isArray(res.pins)
+      ) {
+        if (res.pinsVersion) {
+          lastRefetchedPinVersion.set(scopeKey, res.pinsVersion);
+        }
+        chatStore.setConversationPins(convId, res.pins, res.pinsVersion);
+        const snapAfter = chatStore.getSnapshot();
+        const nextVer = snapAfter.pinsVersionByConversation?.[convId];
+        if (
+          snapAfter.pinsNeedsRefreshByConversation?.[convId] &&
+          nextVer !== lastRefetchedPinVersion.get(scopeKey)
+        ) {
+          refreshConversationPins(convId);
+        }
+      }
+    })
+    .catch(() => {
+      inFlightPinRequests.delete(scopeKey);
+    });
 }
