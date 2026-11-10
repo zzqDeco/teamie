@@ -25,20 +25,110 @@ type memoryStore struct {
 	mu    sync.Mutex
 	c     Config
 	usage []Usage
+	tests map[string]ModelTestRecord
+}
+
+func (m *memoryStore) ensureCatalogTimestampsLocked() {
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	for i := range m.c.Providers {
+		if m.c.Providers[i].CreatedAt.IsZero() {
+			m.c.Providers[i].CreatedAt = now
+		}
+		if m.c.Providers[i].UpdatedAt.IsZero() {
+			m.c.Providers[i].UpdatedAt = m.c.Providers[i].CreatedAt
+		}
+	}
+	for i := range m.c.Models {
+		if m.c.Models[i].CreatedAt.IsZero() {
+			m.c.Models[i].CreatedAt = now
+		}
+		if m.c.Models[i].UpdatedAt.IsZero() {
+			m.c.Models[i].UpdatedAt = m.c.Models[i].CreatedAt
+		}
+	}
+}
+
+func nextMemoryTimestamp(prev time.Time) time.Time {
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	prev = prev.UTC().Truncate(time.Microsecond)
+	if !prev.IsZero() && !now.After(prev) {
+		return prev.Add(time.Microsecond)
+	}
+	return now
 }
 
 func (m *memoryStore) Ready(context.Context) error { return nil }
 func (m *memoryStore) Load(context.Context) (Config, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.ensureCatalogTimestampsLocked()
 	return m.c, nil
 }
 func (m *memoryStore) UpdateCatalog(_ context.Context, change func([]ProviderProfile, []ModelProfile) ([]ProviderProfile, []ModelProfile, error)) (Config, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.ensureCatalogTimestampsLocked()
+	prevProviders := make(map[string]ProviderProfile, len(m.c.Providers))
+	for _, p := range m.c.Providers {
+		prevProviders[p.ID] = p
+	}
+	prevModels := make(map[string]ModelProfile, len(m.c.Models))
+	for _, mod := range m.c.Models {
+		prevModels[mod.ID] = mod
+	}
 	providers, models, err := change(append([]ProviderProfile(nil), m.c.Providers...), append([]ModelProfile(nil), m.c.Models...))
 	if err != nil {
 		return Config{}, err
+	}
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	for i := range providers {
+		p := &providers[i]
+		if old, ok := prevProviders[p.ID]; ok {
+			if p.CreatedAt.IsZero() {
+				p.CreatedAt = old.CreatedAt
+			}
+			distinct := p.DisplayName != old.DisplayName || p.BaseURL != old.BaseURL || string(p.CipherKey) != string(old.CipherKey) || p.Enabled != old.Enabled
+			if distinct && !p.UpdatedAt.After(old.UpdatedAt) {
+				p.UpdatedAt = nextMemoryTimestamp(old.UpdatedAt)
+			} else if p.UpdatedAt.IsZero() {
+				p.UpdatedAt = old.UpdatedAt
+			}
+		} else {
+			if p.CreatedAt.IsZero() {
+				p.CreatedAt = now
+			}
+			if p.UpdatedAt.IsZero() {
+				p.UpdatedAt = p.CreatedAt
+			}
+		}
+	}
+	keepModels := make(map[string]bool, len(models))
+	for i := range models {
+		mod := &models[i]
+		keepModels[mod.ID] = true
+		if old, ok := prevModels[mod.ID]; ok {
+			if mod.CreatedAt.IsZero() {
+				mod.CreatedAt = old.CreatedAt
+			}
+			distinct := mod.ProviderID != old.ProviderID || mod.DisplayName != old.DisplayName || mod.Description != old.Description || mod.Model != old.Model || mod.ContextWindow() != old.ContextWindow() || mod.Enabled != old.Enabled
+			if distinct && !mod.UpdatedAt.After(old.UpdatedAt) {
+				mod.UpdatedAt = nextMemoryTimestamp(old.UpdatedAt)
+			} else if mod.UpdatedAt.IsZero() {
+				mod.UpdatedAt = old.UpdatedAt
+			}
+		} else {
+			if mod.CreatedAt.IsZero() {
+				mod.CreatedAt = now
+			}
+			if mod.UpdatedAt.IsZero() {
+				mod.UpdatedAt = mod.CreatedAt
+			}
+		}
+	}
+	for id := range m.tests {
+		if !keepModels[id] {
+			delete(m.tests, id)
+		}
 	}
 	m.c.Providers = providers
 	m.c.Models = models
@@ -64,6 +154,31 @@ func (m *memoryStore) Record(_ context.Context, u Usage) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.usage = append(m.usage, u)
+	return nil
+}
+func (m *memoryStore) LoadModelTests(context.Context) (map[string]ModelTestRecord, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make(map[string]ModelTestRecord, len(m.tests))
+	for k, v := range m.tests {
+		out[k] = v.Normalized()
+	}
+	return out, nil
+}
+func (m *memoryStore) RecordModelTest(_ context.Context, rec ModelTestRecord) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	norm := rec.Normalized()
+	if _, ok := m.c.ModelByID(norm.ModelID); !ok {
+		return ErrModelTestTargetMissing
+	}
+	if m.tests == nil {
+		m.tests = make(map[string]ModelTestRecord)
+	}
+	if cur, exists := m.tests[norm.ModelID]; exists && norm.TestedAt.Before(cur.TestedAt) {
+		return nil
+	}
+	m.tests[norm.ModelID] = norm
 	return nil
 }
 func testCipher(t *testing.T) Cipher {

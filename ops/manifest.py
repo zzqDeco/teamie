@@ -17,7 +17,7 @@ LEGACY_SERVICES = ("identity", "chat", "realtime", "web", "caddy", "postgres", "
 SERVICES = LEGACY_SERVICES + ("agent-control", "agent-runtime", "llm-gateway", "sandbox", "sandbox-runner")
 SERVICES_V3 = SERVICES + ("marketplace",)
 SCHEMA_V2 = {"identity": 3, "chat": 9, "agent_control": 3, "agent_runtime": 15, "gateway": 6}
-SCHEMA_V3 = {"identity": 3, "chat": 11, "marketplace": 1, "agent_control": 3, "agent_runtime": 15, "gateway": 6}
+SCHEMA_V3 = {"identity": 3, "chat": 12, "marketplace": 1, "agent_control": 3, "agent_runtime": 15, "gateway": 7}
 VERSION = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 SHA = re.compile(r"[0-9a-f]{40}$")
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}$")
@@ -232,6 +232,31 @@ def validate_config(config, host_env, release_manifest=None):
         require("egress" in services["marketplace"].get("networks", ()), "marketplace requires endpoint egress")
         chat_nets = services["chat"].get("networks")
         require(not chat_nets or set(chat_nets) == {"private"}, "chat must stay on private network without egress")
+    requires_realtime_rpc = (
+        (release_manifest is not None and release_manifest["schema"].get("chat", 0) >= 12)
+        or (release_manifest is None and "marketplace" in services)
+        or "REALTIME_RPC_TOKEN" in services["chat"]["environment"]
+        or "REALTIME_RPC_TOKEN" in services["realtime"]["environment"]
+        or "REALTIME_RPC_ADDR" in services["chat"]["environment"]
+    )
+    realtime_tokens = []
+    if requires_realtime_rpc:
+        chat_env = services["chat"]["environment"]
+        rt_env = services["realtime"]["environment"]
+        require(chat_env.get("REALTIME_RPC_ADDR") == "realtime:8883", "chat must use private realtime RPC")
+        require(rt_env.get("RPC_ADDR") == ":8883", "realtime must listen on private RPC :8883")
+        rt_nets = services["realtime"].get("networks")
+        require(not rt_nets or set(rt_nets) == {"private"}, "realtime must stay on private network without egress")
+        rt_token = chat_env.get("REALTIME_RPC_TOKEN", "")
+        require(isinstance(rt_token, str) and len(rt_token) >= 24 and "REPLACE" not in rt_token, "replace realtime rpc credential")
+        require(rt_env.get("REALTIME_RPC_TOKEN") == rt_token, "realtime rpc credential mismatch")
+        for name, svc in services.items():
+            if name not in ("chat", "realtime"):
+                svc_env = svc.get("environment") or {}
+                require("REALTIME_RPC_TOKEN" not in svc_env and "REALTIME_RPC_ADDR" not in svc_env,
+                        "realtime rpc credential and address belong to chat and realtime only")
+        realtime_tokens.append(rt_token)
+        require(len(set(credentials + realtime_tokens)) == len(credentials + realtime_tokens), "database and service credentials must be independent")
     if "llm-gateway" in services:
         gateway = services["llm-gateway"]["environment"]
         runtime = services["agent-runtime"]["environment"]
@@ -242,7 +267,8 @@ def validate_config(config, host_env, release_manifest=None):
         require(re.fullmatch(r"[0-9a-fA-F]{64}", master), "gateway encryption key must be 64 hex characters")
         tokens = [control["AGENT_RUNTIME_TOKEN"], identity["IM_PRINCIPAL_CONTROL_TOKEN"], identity["IM_PRINCIPAL_RUNTIME_TOKEN"], gateway["GATEWAY_RUNTIME_TOKEN"], sandbox["SANDBOX_RUNTIME_TOKEN"]]
         require(all(len(v) >= 24 and "REPLACE" not in v for v in tokens), "replace every internal service credential")
-        require(len(set(credentials + tokens + [master])) == len(credentials + tokens + [master]), "database, encryption and service credentials must be independent")
+        all_secrets = credentials + tokens + realtime_tokens + [master]
+        require(len(set(all_secrets)) == len(all_secrets), "database, encryption and service credentials must be independent")
         for key, source in (("AGENT_RUNTIME_TOKEN",control),("GATEWAY_RUNTIME_TOKEN",gateway),("SANDBOX_RUNTIME_TOKEN",sandbox),("IM_PRINCIPAL_RUNTIME_TOKEN",identity)):
             require(runtime[key] == source[key], "runtime scoped credential mismatch")
         require(control["IM_PRINCIPAL_CONTROL_TOKEN"] == identity["IM_PRINCIPAL_CONTROL_TOKEN"] == services["chat"]["environment"]["IM_PRINCIPAL_CONTROL_TOKEN"], "principal control credential mismatch")
@@ -268,7 +294,9 @@ def ensure_host_env(host_env, release_manifest):
     validate(release_manifest)
     env_path = Path(host_env)
     require((env_path.stat().st_mode & 0o777) == 0o600, "production.env must have mode 0600")
-    if "marketplace" not in release_manifest["images"]:
+    needs_marketplace = "marketplace" in release_manifest["images"]
+    needs_realtime_rpc = release_manifest["schema"].get("chat", 0) >= 12
+    if not needs_marketplace and not needs_realtime_rpc:
         return False
     raw_text = env_path.read_text(encoding="utf-8")
     entries = {}
@@ -281,16 +309,30 @@ def ensure_host_env(host_env, release_manifest):
         if "=" in stripped:
             key, val = stripped.split("=", 1)
             entries[key.strip()] = val.strip().strip("'\"")
-    if entries.get("POSTGRES_MARKETPLACE_PASSWORD") or entries.get("MARKETPLACE_DATABASE_URL"):
+    has_mkt_pw = bool(entries.get("POSTGRES_MARKETPLACE_PASSWORD"))
+    has_mkt_url = bool(entries.get("MARKETPLACE_DATABASE_URL"))
+    if needs_marketplace and has_mkt_pw != has_mkt_url:
         return False
     existing_values = {v for v in entries.values() if v}
-    password = secrets.token_hex(32)
-    while password in existing_values:
+    addition_lines = []
+    if needs_marketplace and not has_mkt_pw and not has_mkt_url:
         password = secrets.token_hex(32)
-    addition = (
-        f"POSTGRES_MARKETPLACE_PASSWORD={password}\n"
-        f"MARKETPLACE_DATABASE_URL=postgres://teamie_marketplace:{password}@postgres:5432/teamie_marketplace?sslmode=disable\n"
-    )
+        while password in existing_values:
+            password = secrets.token_hex(32)
+        existing_values.add(password)
+        addition_lines.append(
+            f"POSTGRES_MARKETPLACE_PASSWORD={password}\n"
+            f"MARKETPLACE_DATABASE_URL=postgres://teamie_marketplace:{password}@postgres:5432/teamie_marketplace?sslmode=disable\n"
+        )
+    if needs_realtime_rpc and not entries.get("REALTIME_RPC_TOKEN"):
+        rt_token = secrets.token_hex(32)
+        while rt_token in existing_values:
+            rt_token = secrets.token_hex(32)
+        existing_values.add(rt_token)
+        addition_lines.append(f"REALTIME_RPC_TOKEN={rt_token}\n")
+    if not addition_lines:
+        return False
+    addition = "".join(addition_lines)
     updated = raw_text + ("" if not raw_text or raw_text.endswith("\n") else "\n") + addition
     fd, tmp_name = tempfile.mkstemp(prefix=".production.env.", dir=str(env_path.parent))
     try:

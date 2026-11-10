@@ -28,6 +28,13 @@ assert set(config['services']['identity']['networks'])=={'private'}
 assert set(config['services']['chat']['networks'])=={'private'}
 assert set(config['services']['realtime']['networks'])=={'private'}
 assert set(config['services']['sandbox']['networks'])=={'private'}
+assert config['services']['chat']['environment']['REALTIME_RPC_ADDR']=='realtime:8883'
+assert config['services']['realtime']['environment']['RPC_ADDR']==':8883'
+assert config['services']['chat']['environment']['REALTIME_RPC_TOKEN']==config['services']['realtime']['environment']['REALTIME_RPC_TOKEN']
+for svc_name,svc_cfg in config['services'].items():
+    if svc_name not in ('chat','realtime'):
+        svc_env=svc_cfg.get('environment') or {}
+        assert 'REALTIME_RPC_TOKEN' not in svc_env and 'REALTIME_RPC_ADDR' not in svc_env, f'{svc_name} received realtime RPC config'
 assert config['services']['sandbox']['environment']['SANDBOX_RUNNER_IMAGE'].startswith('ghcr.io/zzqdeco/teamie-sandbox-runner@sha256:')
 for name,service in config['services'].items():
     assert name=='sandbox' or not any(v.get('target')=='/var/run/docker.sock' for v in service.get('volumes',[]))
@@ -92,6 +99,12 @@ for mutate in (
     lambda s:s['llm-gateway'].update(networks={'private':{}}),
     lambda s:s['marketplace'].update(networks={'private':{}}),
     lambda s:s['chat'].update(networks={'private':{},'egress':{}}),
+    lambda s:s['realtime'].update(networks={'private':{},'egress':{}}),
+    lambda s:s['realtime']['environment'].update(REALTIME_RPC_TOKEN='y'*64),
+    lambda s:s['agent-runtime']['environment'].update(REALTIME_RPC_TOKEN=s['chat']['environment']['REALTIME_RPC_TOKEN']),
+    lambda s:s['sandbox']['environment'].update(REALTIME_RPC_TOKEN=s['chat']['environment']['REALTIME_RPC_TOKEN']),
+    lambda s:s['chat']['environment'].update(REALTIME_RPC_ADDR='realtime:9999'),
+    lambda s:s['realtime']['environment'].update(RPC_ADDR=':9999'),
     lambda s:s['marketplace']['environment'].update(DATABASE_URL=s['chat']['environment']['DATABASE_URL']),
 ):
     changed=copy.deepcopy(c);mutate(changed['services'])

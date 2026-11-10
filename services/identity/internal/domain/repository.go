@@ -33,6 +33,7 @@ type UserRepository interface {
 	UpdateDisplayName(ctx context.Context, userID, displayName string) (User, error)
 	UpdatePasswordHash(ctx context.Context, userID, passwordHash string) error
 	FindByIDs(ctx context.Context, ids []string) ([]User, error)
+	FindByIDsWithActive(ctx context.Context, ids []string) ([]User, map[string]bool, error)
 	ListAdminHumans(ctx context.Context, afterID, query, likePattern string, limit int) ([]User, error)
 }
 

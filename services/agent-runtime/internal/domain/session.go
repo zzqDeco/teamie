@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 )
@@ -107,45 +108,266 @@ func (l Lease) ValidateCheckpointScope(checkpointID string) error {
 	return nil
 }
 
-// Attachment describes an immutable IM attachment metadata descriptor.
-type Attachment struct {
-	ID        string `json:"id"`
-	Filename  string `json:"filename"`
-	MediaType string `json:"mediaType"`
-	SizeBytes int    `json:"sizeBytes"`
-	SHA256    string `json:"sha256"`
+// AttachmentImage carries optional server-verified raster dimensions on an IM attachment descriptor.
+type AttachmentImage struct {
+	Width  int `json:"width"`
+	Height int `json:"height"`
 }
 
-// MentionSpan represents a structured UTF-16 @mention range in an IM message.
+// Attachment describes an immutable IM attachment metadata descriptor.
+type Attachment struct {
+	ID        string           `json:"id"`
+	Filename  string           `json:"filename"`
+	MediaType string           `json:"mediaType"`
+	SizeBytes int              `json:"sizeBytes"`
+	SHA256    string           `json:"sha256"`
+	Image     *AttachmentImage `json:"image,omitempty"`
+}
+
+// AttachmentEqual compares two Attachment descriptors by value, including optional Image dimensions.
+func AttachmentEqual(a, b Attachment) bool {
+	if a.ID != b.ID || a.Filename != b.Filename || a.MediaType != b.MediaType || a.SizeBytes != b.SizeBytes || a.SHA256 != b.SHA256 {
+		return false
+	}
+	if (a.Image == nil) != (b.Image == nil) {
+		return false
+	}
+	return a.Image == nil || *a.Image == *b.Image
+}
+
+// AttachmentsEqual compares two Attachment slices by value.
+func AttachmentsEqual(a, b []Attachment) bool {
+	return slices.EqualFunc(a, b, AttachmentEqual)
+}
+
+// MentionSpan represents a structured UTF-16 @mention or broadcast range in an IM message.
+// When Kind is empty, it marshals identically to an individual {userId,start,end} mention.
+// When Kind is non-empty ("all" or "here"), it preserves broadcast fields losslessly.
 type MentionSpan struct {
-	UserID string `json:"userId"`
-	Start  int    `json:"start"`
-	End    int    `json:"end"`
+	Kind           string
+	UserID         string
+	Start          int
+	End            int
+	RecipientIDs   []string
+	RecipientCount *int
+}
+
+func (m MentionSpan) MarshalJSON() ([]byte, error) {
+	if m.Kind == "" {
+		return json.Marshal(struct {
+			UserID string `json:"userId"`
+			Start  int    `json:"start"`
+			End    int    `json:"end"`
+		}{
+			UserID: m.UserID,
+			Start:  m.Start,
+			End:    m.End,
+		})
+	}
+	var recipientIDs *[]string
+	if m.RecipientIDs != nil {
+		recipientIDs = &m.RecipientIDs
+	}
+	return json.Marshal(struct {
+		Kind           string    `json:"kind"`
+		UserID         string    `json:"userId,omitempty"`
+		Start          int       `json:"start"`
+		End            int       `json:"end"`
+		RecipientIDs   *[]string `json:"recipientIds,omitempty"`
+		RecipientCount *int      `json:"recipientCount,omitempty"`
+	}{
+		Kind:           m.Kind,
+		UserID:         m.UserID,
+		Start:          m.Start,
+		End:            m.End,
+		RecipientIDs:   recipientIDs,
+		RecipientCount: m.RecipientCount,
+	})
+}
+
+func (m *MentionSpan) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Kind           string    `json:"kind"`
+		UserID         string    `json:"userId"`
+		Start          int       `json:"start"`
+		End            int       `json:"end"`
+		RecipientIDs   *[]string `json:"recipientIds"`
+		RecipientCount *int      `json:"recipientCount"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	out := MentionSpan{
+		Kind:   raw.Kind,
+		UserID: raw.UserID,
+		Start:  raw.Start,
+		End:    raw.End,
+	}
+	if raw.RecipientIDs != nil {
+		ids := make([]string, len(*raw.RecipientIDs))
+		copy(ids, *raw.RecipientIDs)
+		out.RecipientIDs = ids
+	}
+	if raw.RecipientCount != nil {
+		c := *raw.RecipientCount
+		out.RecipientCount = &c
+	}
+	*m = out
+	return nil
+}
+
+// MentionSpanEqual compares two MentionSpan values losslessly.
+func MentionSpanEqual(a, b MentionSpan) bool {
+	if a.Kind != b.Kind || a.UserID != b.UserID || a.Start != b.Start || a.End != b.End {
+		return false
+	}
+	if (a.RecipientIDs == nil) != (b.RecipientIDs == nil) || !slices.Equal(a.RecipientIDs, b.RecipientIDs) {
+		return false
+	}
+	if (a.RecipientCount == nil) != (b.RecipientCount == nil) {
+		return false
+	}
+	return a.RecipientCount == nil || *a.RecipientCount == *b.RecipientCount
+}
+
+// MentionsEqual compares two MentionSpan slices losslessly.
+func MentionsEqual(a, b []MentionSpan) bool {
+	return slices.EqualFunc(a, b, MentionSpanEqual)
+}
+
+// HasBroadcastMention reports whether mentions contains any broadcast entry ("all" or "here").
+func HasBroadcastMention(mentions []MentionSpan) bool {
+	for _, m := range mentions {
+		if m.Kind == "all" || m.Kind == "here" {
+			return true
+		}
+	}
+	return false
+}
+
+// HasAllBroadcastTo reports whether mentions contains an "all" broadcast entry whose recipientIds contains agentID.
+func HasAllBroadcastTo(mentions []MentionSpan, agentID string) bool {
+	if agentID == "" {
+		return false
+	}
+	for _, m := range mentions {
+		if m.Kind == "all" && slices.Contains(m.RecipientIDs, agentID) {
+			return true
+		}
+	}
+	return false
+}
+
+// HasHereBroadcast reports whether mentions contains a "here" broadcast entry.
+func HasHereBroadcast(mentions []MentionSpan) bool {
+	for _, m := range mentions {
+		if m.Kind == "here" {
+			return true
+		}
+	}
+	return false
+}
+
+// MentionsAddressAgent reports whether top-level mentions or derived broadcast resolution address agentID.
+// Display-only forwarded snapshot mentions must never be passed here.
+func MentionsAddressAgent(mentions []MentionSpan, agentID string, broadcastAddressed bool) bool {
+	if broadcastAddressed {
+		return true
+	}
+	if agentID == "" {
+		return false
+	}
+	for _, m := range mentions {
+		if m.Kind == "" && m.UserID == agentID {
+			return true
+		}
+		if m.Kind == "all" && slices.Contains(m.RecipientIDs, agentID) {
+			return true
+		}
+	}
+	return false
+}
+
+// ForwardedMessage holds the untrusted display snapshot of a forwarded IM message.
+// Snapshot sourceConversationId/sourceMessageId/senderId are plain references, never provenance grants.
+// Copied snapshot attachments are target-conversation attachment rows owned by the forward message.
+type ForwardedMessage struct {
+	SourceConversationID string        `json:"sourceConversationId"`
+	SourceMessageID      string        `json:"sourceMessageId"`
+	SenderID             string        `json:"senderId"`
+	SenderName           string        `json:"senderName"`
+	SenderKind           string        `json:"senderKind"`
+	CreatedAt            string        `json:"createdAt"`
+	Body                 string        `json:"body"`
+	Mentions             []MentionSpan `json:"mentions,omitempty"`
+	Attachments          []Attachment  `json:"attachments,omitempty"`
+}
+
+// ForwardedEqual compares two ForwardedMessage snapshots by value.
+func ForwardedEqual(a, b *ForwardedMessage) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == nil {
+		return true
+	}
+	return a.SourceConversationID == b.SourceConversationID &&
+		a.SourceMessageID == b.SourceMessageID &&
+		a.SenderID == b.SenderID &&
+		a.SenderName == b.SenderName &&
+		a.SenderKind == b.SenderKind &&
+		a.CreatedAt == b.CreatedAt &&
+		a.Body == b.Body &&
+		MentionsEqual(a.Mentions, b.Mentions) &&
+		AttachmentsEqual(a.Attachments, b.Attachments)
+}
+
+// MessageAttachmentIDs returns the target-conversation attachment IDs owned by a message,
+// including copied forward attachments when forwarded is non-nil.
+func MessageAttachmentIDs(attachments []Attachment, forwarded *ForwardedMessage) []string {
+	var ids []string
+	for _, a := range attachments {
+		ids = append(ids, a.ID)
+	}
+	if forwarded != nil {
+		for _, a := range forwarded.Attachments {
+			ids = append(ids, a.ID)
+		}
+	}
+	return ids
 }
 
 // Input represents a durable inbox event delivered to an Agent's serial TurnLoop.
 type Input struct {
-	EventID        string        `json:"eventId"`
-	WorkspaceID    string        `json:"workspaceId"`
-	ConversationID string        `json:"conversationId"`
-	MessageID      string        `json:"messageId"`
-	SenderID       string        `json:"senderId"`
-	SenderName     string        `json:"senderName"`
-	SenderKind     string        `json:"senderKind"`
-	Body           string        `json:"body"`
-	Attachments    []Attachment  `json:"attachments,omitempty"`
-	Mentions       []MentionSpan `json:"mentions,omitempty"`
-	ReplyToID      string        `json:"replyToId,omitempty"`
-	Seq            int64         `json:"seq"`
-	CreatedAt      string        `json:"createdAt"`
-	Kind           string        `json:"kind,omitempty"`
-	TaskID         string        `json:"taskId,omitempty"`
-	ScheduleID     string        `json:"scheduleId,omitempty"`
-	NotificationID string        `json:"notificationId,omitempty"`
-	Status         string        `json:"status,omitempty"`
-	ParentRunID    string        `json:"parentRunId,omitempty"`
-	SourceRefs     []InputSource `json:"sourceRefs,omitempty"`
-	SourceOverflow bool          `json:"sourceOverflow,omitempty"`
+	EventID            string            `json:"eventId"`
+	WorkspaceID        string            `json:"workspaceId"`
+	ConversationID     string            `json:"conversationId"`
+	MessageID          string            `json:"messageId"`
+	SenderID           string            `json:"senderId"`
+	SenderName         string            `json:"senderName"`
+	SenderKind         string            `json:"senderKind"`
+	Body               string            `json:"body"`
+	Attachments        []Attachment      `json:"attachments,omitempty"`
+	Mentions           []MentionSpan     `json:"mentions,omitempty"`
+	ReplyToID          string            `json:"replyToId,omitempty"`
+	Forwarded          *ForwardedMessage `json:"forwarded,omitempty"`
+	BroadcastAddressed bool              `json:"broadcastAddressed,omitempty"`
+	Seq                int64             `json:"seq"`
+	CreatedAt          string            `json:"createdAt"`
+	Kind               string            `json:"kind,omitempty"`
+	TaskID             string            `json:"taskId,omitempty"`
+	ScheduleID         string            `json:"scheduleId,omitempty"`
+	NotificationID     string            `json:"notificationId,omitempty"`
+	Status             string            `json:"status,omitempty"`
+	ParentRunID        string            `json:"parentRunId,omitempty"`
+	SourceRefs         []InputSource     `json:"sourceRefs,omitempty"`
+	SourceOverflow     bool              `json:"sourceOverflow,omitempty"`
+}
+
+// AddressedTo reports whether this input's top-level mentions or resolved broadcast addressed agentID.
+// Display-only mentions inside Forwarded never address the Agent.
+func (in Input) AddressedTo(agentID string) bool {
+	return MentionsAddressAgent(in.Mentions, agentID, in.BroadcastAddressed)
 }
 
 // SessionState summarizes the runtime state of an Agent's single global Session.

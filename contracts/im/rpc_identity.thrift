@@ -7,7 +7,10 @@ struct SessionResponse {
   3: optional string csrfToken
 }
 struct UsersRequest { 1: required list<string> ids }
-struct UsersResponse { 1: required list<User> users }
+struct UsersResponse {
+  1: required list<User> users
+  2: optional map<string, bool> activeById
+}
 // Generic participant lifecycle; control and runtime service credentials are
 // scoped separately. No runtime execution configuration crosses this contract.
 struct PrincipalControlRequest {

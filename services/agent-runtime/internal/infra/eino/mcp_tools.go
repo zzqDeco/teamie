@@ -347,7 +347,7 @@ func (p *conversationPresenceState) Leave() {
 	}
 }
 
-func (p *conversationPresenceState) RecordUnread(workspaceID string, conv Conversation, m *Message, agentID string, now time.Time) {
+func (p *conversationPresenceState) RecordUnread(workspaceID string, conv Conversation, m *Message, agentID string, now time.Time, broadcastAddressed ...bool) {
 	if p == nil || m == nil || !domain.ValidUUID(conv.ID) {
 		return
 	}
@@ -358,13 +358,8 @@ func (p *conversationPresenceState) RecordUnread(workspaceID string, conv Conver
 	if wsID == "" {
 		wsID = conv.WorkspaceID
 	}
-	mentioned := false
-	for _, mention := range m.Mentions {
-		if mention.UserID == agentID {
-			mentioned = true
-			break
-		}
-	}
+	resolvedBroadcast := len(broadcastAddressed) > 0 && broadcastAddressed[0]
+	mentioned := domain.MentionsAddressAgent(m.Mentions, agentID, resolvedBroadcast)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	entry, ok := p.unread[conv.ID]

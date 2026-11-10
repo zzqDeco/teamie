@@ -20,6 +20,8 @@ type Conversation struct {
 	CreatedBy         string    `json:"createdBy,omitempty"`
 	CanManageMembers  bool      `json:"canManageMembers"`
 	NotificationLevel string    `json:"notificationLevel,omitempty"`
+	// ManualUnreadSeq is the caller's personal mark-as-unread marker (0 = none).
+	ManualUnreadSeq int64 `json:"manualUnreadSeq,omitempty"`
 }
 
 type ReadSeqCount struct {

@@ -26,7 +26,9 @@ type ResolvedModel = domain.ResolvedModel
 type ModelRoutingConfig = domain.ModelRoutingConfig
 type WebSearchConfig = domain.WebSearchConfig
 type Usage = domain.Usage
+type ModelTestRecord = domain.ModelTestRecord
 type Store = domain.ConfigStore
+type ModelTestStore = domain.ModelTestStore
 type Cipher = domain.Cipher
 type StreamEvent = domain.StreamEvent
 type Provider = upstream.Provider
@@ -41,6 +43,10 @@ const (
 )
 
 func NewCipher(master string) (Cipher, error) { return kms.NewCipher(master) }
+func SanitizeModelTestErrorCode(code string) string {
+	return domain.SanitizeModelTestErrorCode(code)
+}
+var ErrModelTestTargetMissing = domain.ErrModelTestTargetMissing
 func Open(ctx context.Context, url string) (*pg.PGStore, error) {
 	return pg.Open(ctx, url)
 }

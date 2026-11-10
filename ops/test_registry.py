@@ -70,6 +70,12 @@ def production_config(data):
         db_specs.append(("marketplace", "marketplace", "m"))
         services["marketplace"]["networks"] = ["private", "egress"]
         services["chat"]["networks"] = ["private"]
+    if data["schema"].get("chat", 0) >= 12:
+        services["chat"]["environment"]["REALTIME_RPC_ADDR"] = "realtime:8883"
+        services["chat"]["environment"]["REALTIME_RPC_TOKEN"] = "q" * 64
+        services["realtime"]["environment"]["RPC_ADDR"] = ":8883"
+        services["realtime"]["environment"]["REALTIME_RPC_TOKEN"] = "q" * 64
+        services["realtime"]["networks"] = ["private"]
     for name, suffix, char in db_specs:
         password = char * 64
         pg["POSTGRES_" + suffix.upper() + "_PASSWORD"] = password

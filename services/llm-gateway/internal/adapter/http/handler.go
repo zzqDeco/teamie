@@ -58,7 +58,40 @@ func adminOwnerFromContext(ctx context.Context) string {
 	return "admin-test"
 }
 
-func toAdminModelConfigResp(c domain.Config) *gatewaygen.AdminModelConfigResp {
+func toModelLastTestDTO(rec domain.ModelTestRecord) *gatewaygen.ModelLastTest {
+	norm := rec.Normalized()
+	dto := &gatewaygen.ModelLastTest{
+		Ok:       norm.OK,
+		TestedAt: norm.TestedAt.UTC().Format(time.RFC3339Nano),
+	}
+	if norm.LatencyMS != nil {
+		ms := *norm.LatencyMS
+		dto.LatencyMs = &ms
+	}
+	if !norm.OK {
+		code := norm.ErrorCode
+		dto.ErrorCode = &code
+	}
+	return dto
+}
+
+func (a *Adapter) adminModelConfigResp(ctx context.Context, c domain.Config) (*gatewaygen.AdminModelConfigResp, error) {
+	tests, err := a.App.LoadModelTests(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return toAdminModelConfigResp(c, tests), nil
+}
+
+func (a *Adapter) adminMutationResp(ctx context.Context, c domain.Config) *gatewaygen.AdminModelConfigResp {
+	tests, err := a.App.LoadModelTests(ctx)
+	if err != nil {
+		return toAdminModelConfigResp(c, nil)
+	}
+	return toAdminModelConfigResp(c, tests)
+}
+
+func toAdminModelConfigResp(c domain.Config, tests map[string]domain.ModelTestRecord) *gatewaygen.AdminModelConfigResp {
 	effDefault := c.EffectiveDefaultModelID()
 	rawModels := c.Models
 	resolved := c.ResolveModel("")
@@ -86,6 +119,10 @@ func toAdminModelConfigResp(c domain.Config) *gatewaygen.AdminModelConfigResp {
 	dtos := make([]*gatewaygen.AdminModelProfileDTO, 0, len(rawModels))
 	for _, m := range rawModels {
 		rm := c.ResolveModelProfile(m)
+		var lastTest *gatewaygen.ModelLastTest
+		if rec, ok := c.FreshModelTest(m, tests); ok {
+			lastTest = toModelLastTestDTO(rec)
+		}
 		dtos = append(dtos, &gatewaygen.AdminModelProfileDTO{
 			ID:                  m.ID,
 			ProviderId:          m.ProviderID,
@@ -102,6 +139,7 @@ func toAdminModelConfigResp(c domain.Config) *gatewaygen.AdminModelConfigResp {
 			Configured:          rm.Configured(),
 			IsDefault:           m.ID == c.Routing.DefaultModelID,
 			UpdatedAt:           m.UpdatedAt.UTC().Format(time.RFC3339Nano),
+			LastTest:            lastTest,
 		})
 	}
 	resp := &gatewaygen.AdminModelConfigResp{

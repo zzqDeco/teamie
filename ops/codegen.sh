@@ -41,7 +41,8 @@ trap 'rm -f "${ROOT_DIR}/contracts/im/rpc.thrift" "${ROOT_DIR}/contracts/agent/r
 assemble_rpc_idl im "${ROOT_DIR}/contracts/im/rpc.thrift" \
   "${ROOT_DIR}/contracts/im/model.thrift" \
   "${ROOT_DIR}/contracts/im/rpc_identity.thrift" \
-  "${ROOT_DIR}/contracts/im/rpc_chat.thrift"
+  "${ROOT_DIR}/contracts/im/rpc_chat.thrift" \
+  "${ROOT_DIR}/contracts/im/rpc_realtime.thrift"
 
 assemble_rpc_idl agent "${ROOT_DIR}/contracts/agent/rpc.thrift" \
   "${ROOT_DIR}/contracts/agent/model.thrift" \

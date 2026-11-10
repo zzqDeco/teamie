@@ -1,3 +1,4 @@
+import { createCollaborationClient } from "./collaboration";
 import { createModelGatewayClient } from "./model-gateway";
 import { createMarketplaceClient } from "./marketplace";
 import {
@@ -14,10 +15,9 @@ import {
 } from "./normalizers";
 import { executeTransportRequest, part, routePath } from "./transport";
 import type {
-  AgentProfileInput, AnnouncementsPage, AttentionPage, Bootstrap, Conversation,
-  CreateAnnouncementInput, CreatedAnnouncement,
+  AgentProfileInput, AttentionPage, Bootstrap, Conversation,
   CreatedPasswordResetLink, CreatedRegistrationInvite,
-  MarkAnnouncementsReadResult, Member, Mention, Message, MessagePage,
+  Member, Mention, Message, MessagePage,
   NotificationLevel, PasswordResetInspection,
   PlatformUsersPage, PresenceItem, ReadReceipts, RegistrationPolicy, Session,
   SyncPage, User,
@@ -249,7 +249,12 @@ export class TeamieClient {
       `${routePath(IDL_ROUTES.ListMessages, { id })}?limit=50${beforeSeq ? `&beforeSeq=${beforeSeq}` : ""}`,
     );
   attention = (
-    options: { cursor?: string; limit?: number; unreadOnly?: boolean } = {},
+    options: {
+      cursor?: string;
+      limit?: number;
+      unreadOnly?: boolean;
+      messageId?: string;
+    } = {},
     signal?: AbortSignal,
   ) => {
     const params = new URLSearchParams();
@@ -257,6 +262,7 @@ export class TeamieClient {
     if (options.limit !== undefined) params.set("limit", String(options.limit));
     if (options.unreadOnly !== undefined)
       params.set("unreadOnly", String(options.unreadOnly));
+    if (options.messageId) params.set("messageId", options.messageId);
     return this.#request<AttentionPage>(
       `${IDL_ROUTES.GetAttention.clientPath}${params.size ? `?${params}` : ""}`,
       { signal },
@@ -456,40 +462,22 @@ export class TeamieClient {
   uninstallWorkspaceApp = this.#marketplace.uninstallWorkspaceApp;
   conversationApps = this.#marketplace.conversationApps;
   createConversationAppSession = this.#marketplace.createConversationAppSession;
-  announcements = (
-    options: { beforeSeq?: number; limit?: number } = {},
-    signal?: AbortSignal,
-  ) => {
-    const params = new URLSearchParams();
-    if (options.beforeSeq !== undefined)
-      params.set("beforeSeq", String(options.beforeSeq));
-    if (options.limit !== undefined)
-      params.set("limit", String(options.limit));
-    return this.#request<AnnouncementsPage>(
-      `${IDL_ROUTES.ListAnnouncements.clientPath}${params.size ? `?${params}` : ""}`,
-      { signal },
-    );
-  };
-  markAnnouncementsRead = (seq: number) =>
-    this.#request<MarkAnnouncementsReadResult>(
-      IDL_ROUTES.MarkAnnouncementsRead.clientPath,
-      {
-        method: IDL_ROUTES.MarkAnnouncementsRead.method,
-        body: JSON.stringify({ seq }),
-      },
-    );
-  createAnnouncement = (input: CreateAnnouncementInput) =>
-    this.#request<CreatedAnnouncement>(
-      IDL_ROUTES.CreateAnnouncement.clientPath,
-      {
-        method: IDL_ROUTES.CreateAnnouncement.method,
-        body: JSON.stringify(input),
-      },
-    );
-  deleteAnnouncement = (id: string) =>
-    this.#request<void>(routePath(IDL_ROUTES.DeleteAnnouncement, { id }), {
-      method: IDL_ROUTES.DeleteAnnouncement.method,
-    });
+  #collaboration = createCollaborationClient(this);
+  pinMessage = this.#collaboration.pinMessage;
+  unpinMessage = this.#collaboration.unpinMessage;
+  listPins = this.#collaboration.listPins;
+  saveMessage = this.#collaboration.saveMessage;
+  unsaveMessage = this.#collaboration.unsaveMessage;
+  listSavedMessages = this.#collaboration.listSavedMessages;
+  listConversationSavedMessages = this.#collaboration.listConversationSavedMessages;
+  markConversationUnread = this.#collaboration.markConversationUnread;
+  clearConversationUnread = this.#collaboration.clearConversationUnread;
+  attachmentThumbnailUrl = this.#collaboration.attachmentThumbnailUrl;
+  attachmentThumbnail = this.#collaboration.attachmentThumbnail;
+  announcements = this.#collaboration.announcements;
+  markAnnouncementsRead = this.#collaboration.markAnnouncementsRead;
+  createAnnouncement = this.#collaboration.createAnnouncement;
+  deleteAnnouncement = this.#collaboration.deleteAnnouncement;
   sync = (cursor: string) =>
     this.#request<SyncPage>(
       `${IDL_ROUTES.Sync.clientPath}?cursor=${part(cursor)}&limit=100`,

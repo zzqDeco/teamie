@@ -447,7 +447,7 @@ func (w *agentWorker) tick(ctx context.Context) bool {
 	if w.engine.presenceEnabled() {
 		activePresence = w.presence
 	}
-	inputs, err := w.engine.ingestWithPresence(ctx, w.imc, w.lease, activePresence)
+	inputs, err := w.engine.ingestWithPresenceAndAuth(ctx, w.imc, w.lease, activePresence, w.authorize)
 	if err != nil {
 		if errors.Is(err, ErrLeaseLost) {
 			return false
@@ -586,12 +586,41 @@ func (w *agentWorker) tick(ctx context.Context) bool {
 }
 
 func (e *Engine) ingest(ctx context.Context, imc *IM, l *Lease) (committed []Input, failure error) {
-	return e.ingestWithPresence(ctx, imc, leaseOrNil(l), nil)
+	return e.ingestWithPresenceAndAuth(ctx, imc, leaseOrNil(l), nil, nil)
 }
 
 func leaseOrNil(l *Lease) *Lease { return l }
 
 func (e *Engine) ingestWithPresence(ctx context.Context, imc *IM, l *Lease, presence *conversationPresenceState) (committed []Input, failure error) {
+	return e.ingestWithPresenceAndAuth(ctx, imc, l, presence, nil)
+}
+
+func (e *Engine) resolveBroadcastAddressed(ctx context.Context, imc *IM, l *Lease, authorize func(context.Context) error, m *Message) (bool, error) {
+	if m == nil {
+		return false, nil
+	}
+	addressed := domain.HasAllBroadcastTo(m.Mentions, l.AgentID)
+	if domain.HasHereBroadcast(m.Mentions) {
+		if authorize != nil {
+			if err := authorize(ctx); err != nil {
+				return false, err
+			}
+		}
+		if err := e.Store.CheckLease(ctx, l); err != nil {
+			return false, err
+		}
+		hereAddressed, err := imc.HereMentionAddressed(ctx, m.ID)
+		if err != nil {
+			return false, err
+		}
+		if hereAddressed {
+			addressed = true
+		}
+	}
+	return addressed, nil
+}
+
+func (e *Engine) ingestWithPresenceAndAuth(ctx context.Context, imc *IM, l *Lease, presence *conversationPresenceState, authorize func(context.Context) error) (committed []Input, failure error) {
 	ctx, operation := observability.Begin(ctx, "agent-input-ingest", zap.String("custom.agent.id", l.AgentID))
 	defer func() { operation.EndQuiet(failure) }()
 	cursor, err := e.Store.Cursor(ctx, l)
@@ -625,21 +654,28 @@ func (e *Engine) ingestWithPresence(ctx context.Context, imc *IM, l *Lease, pres
 		bootstrap = b
 		return bootstrap, nil
 	}
-	now := time.Now().UTC()
-	unreadUpdated := false
 	activeConvID := ""
 	if presence != nil {
-		b, bErr := ensureBootstrap()
-		if bErr != nil {
+		if _, bErr := ensureBootstrap(); bErr != nil {
 			return nil, bErr
 		}
-		unreadUpdated = presence.ReconcileUnread(b.Conversations)
 		activeConvID = presence.ActiveConversationID()
 	}
+	type pendingUnread struct {
+		workspaceID        string
+		conv               Conversation
+		message            *Message
+		broadcastAddressed bool
+	}
+	var pendingUnreads []pendingUnread
 	for _, event := range page.Events {
 		m := event.Message
-		if event.Type != "message.created" || m == nil || m.SenderID == l.AgentID || m.RetractedAt != nil || m.Body == "" && len(m.Attachments) == 0 {
+		if event.Type != "message.created" || m == nil || m.SenderID == l.AgentID || m.RetractedAt != nil || (m.Body == "" && len(m.Attachments) == 0 && m.Forwarded == nil) {
 			continue
+		}
+		broadcastAddressed, bcastErr := e.resolveBroadcastAddressed(ctx, imc, l, authorize, m)
+		if bcastErr != nil {
+			return nil, bcastErr
 		}
 		if presence != nil && event.ConversationID != activeConvID {
 			b, bErr := ensureBootstrap()
@@ -658,8 +694,12 @@ func (e *Engine) ingestWithPresence(ctx context.Context, imc *IM, l *Lease, pres
 				ws = convMeta.WorkspaceID
 			}
 			if convMeta != nil && ws != "" {
-				presence.RecordUnread(ws, *convMeta, m, l.AgentID, now)
-				unreadUpdated = true
+				pendingUnreads = append(pendingUnreads, pendingUnread{
+					workspaceID:        ws,
+					conv:               *convMeta,
+					message:            m,
+					broadcastAddressed: broadcastAddressed,
+				})
 			}
 			continue
 		}
@@ -676,7 +716,32 @@ func (e *Engine) ingestWithPresence(ctx context.Context, imc *IM, l *Lease, pres
 				}
 			}
 		}
-		inputs = append(inputs, Input{EventID: event.ID, WorkspaceID: ws, ConversationID: event.ConversationID, MessageID: m.ID, SenderID: m.SenderID, SenderName: m.SenderName, SenderKind: m.SenderKind, Body: m.Body, Attachments: m.Attachments, Mentions: m.Mentions, ReplyToID: m.ReplyToID, Seq: m.Seq, CreatedAt: m.CreatedAt})
+		inputs = append(inputs, Input{
+			EventID:            event.ID,
+			WorkspaceID:        ws,
+			ConversationID:     event.ConversationID,
+			MessageID:          m.ID,
+			SenderID:           m.SenderID,
+			SenderName:         m.SenderName,
+			SenderKind:         m.SenderKind,
+			Body:               m.Body,
+			Attachments:        m.Attachments,
+			Mentions:           m.Mentions,
+			ReplyToID:          m.ReplyToID,
+			Forwarded:          m.Forwarded,
+			BroadcastAddressed: broadcastAddressed,
+			Seq:                m.Seq,
+			CreatedAt:          m.CreatedAt,
+		})
+	}
+	now := time.Now().UTC()
+	unreadUpdated := false
+	if presence != nil && bootstrap != nil {
+		unreadUpdated = presence.ReconcileUnread(bootstrap.Conversations)
+		for _, u := range pendingUnreads {
+			presence.RecordUnread(u.workspaceID, u.conv, u.message, l.AgentID, now, u.broadcastAddressed)
+			unreadUpdated = true
+		}
 	}
 	if unreadUpdated {
 		if err = presence.Persist(ctx, e.Store, l); err != nil {
