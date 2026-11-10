@@ -245,25 +245,35 @@ func (a *ContextArchive) inputMessageSources(ctx context.Context, r *Run, messag
 	if message.Role != schema.AgenticRoleTypeUser || hasToolResults(message) {
 		return nil, false, nil
 	}
-	text := agenticText(message)
-	prefix := "TEAMIE_NEW_MESSAGE "
-	if strings.HasPrefix(text, "TEAMIE_TASK_NOTIFICATION ") {
-		prefix = "TEAMIE_TASK_NOTIFICATION "
-	} else if strings.HasPrefix(text, "TEAMIE_SCHEDULE_WAKEUP ") {
-		prefix = "TEAMIE_SCHEDULE_WAKEUP "
-	} else if strings.HasPrefix(text, "TEAMIE_APP_NOTIFICATION ") {
-		prefix = "TEAMIE_APP_NOTIFICATION "
-	} else if strings.HasPrefix(text, "TEAMIE_UNREAD_DIGEST ") {
-		prefix = "TEAMIE_UNREAD_DIGEST "
-	} else if strings.HasPrefix(text, "TEAMIE_PLATFORM_ANNOUNCEMENT ") {
-		prefix = "TEAMIE_PLATFORM_ANNOUNCEMENT "
-	}
-	if !strings.HasPrefix(text, prefix) {
-		return nil, false, nil
-	}
+	text := stripHumanPresenceV3TailAnchor(agenticText(message))
 	var input Input
-	if json.Unmarshal([]byte(strings.TrimPrefix(text, prefix)), &input) != nil || len(input.EventID) == 0 || len(input.EventID) > 30 {
-		return nil, false, nil
+	isV3Envelope := false
+	if strings.HasPrefix(text, "TEAMIE_NEW_MESSAGE\n") {
+		parsed, ok := parseV3NewMessageEnvelope(text)
+		if !ok || len(parsed.EventID) == 0 || len(parsed.EventID) > 30 {
+			return nil, false, nil
+		}
+		input = parsed
+		isV3Envelope = true
+	} else {
+		prefix := "TEAMIE_NEW_MESSAGE "
+		if strings.HasPrefix(text, "TEAMIE_TASK_NOTIFICATION ") {
+			prefix = "TEAMIE_TASK_NOTIFICATION "
+		} else if strings.HasPrefix(text, "TEAMIE_SCHEDULE_WAKEUP ") {
+			prefix = "TEAMIE_SCHEDULE_WAKEUP "
+		} else if strings.HasPrefix(text, "TEAMIE_APP_NOTIFICATION ") {
+			prefix = "TEAMIE_APP_NOTIFICATION "
+		} else if strings.HasPrefix(text, "TEAMIE_UNREAD_DIGEST ") {
+			prefix = "TEAMIE_UNREAD_DIGEST "
+		} else if strings.HasPrefix(text, "TEAMIE_PLATFORM_ANNOUNCEMENT ") {
+			prefix = "TEAMIE_PLATFORM_ANNOUNCEMENT "
+		}
+		if !strings.HasPrefix(text, prefix) {
+			return nil, false, nil
+		}
+		if json.Unmarshal([]byte(strings.TrimPrefix(text, prefix)), &input) != nil || len(input.EventID) == 0 || len(input.EventID) > 30 {
+			return nil, false, nil
+		}
 	}
 	for _, c := range input.EventID {
 		if c < '0' || c > '9' {
@@ -281,10 +291,16 @@ func (a *ContextArchive) inputMessageSources(ctx context.Context, r *Run, messag
 	if json.Unmarshal(raw, &actual) != nil {
 		return nil, false, ErrReplayConflict
 	}
-	x, _ := json.Marshal(actual)
-	y, _ := json.Marshal(input)
-	if !bytes.Equal(x, y) {
-		return nil, false, nil
+	if isV3Envelope {
+		if text != formatHumanPresenceV3NewMessage(actual) {
+			return nil, false, nil
+		}
+	} else {
+		x, _ := json.Marshal(actual)
+		y, _ := json.Marshal(input)
+		if !bytes.Equal(x, y) {
+			return nil, false, nil
+		}
 	}
 	refs, overflow := inputSources([]Input{actual})
 	if overflow || actual.Kind == "task.notification" || actual.Kind == "schedule.wakeup" || actual.Kind == "app.notification" || actual.Kind == "im.unread_digest" || actual.Kind == "platform.announcement" {

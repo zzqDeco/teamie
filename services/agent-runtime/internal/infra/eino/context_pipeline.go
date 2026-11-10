@@ -23,6 +23,8 @@ type ContextPipelineConfig struct {
 	ArchivePath       func(context.Context, string, string, string) (string, error)
 	ArchiveToolPath   func(context.Context, string, *reduction.ToolDetail, string) (string, error)
 	ArchiveTranscript func(context.Context, []*schema.AgenticMessage) (string, error)
+	AgentName         string
+	AgentDescription  string
 }
 
 type contextSummarizer interface {
@@ -147,7 +149,7 @@ func (p *ContextPipeline) seedAnchorFromHistory(ctx context.Context, messages []
 		state.clear()
 		return
 	}
-	prefix := messages[:lastIdx]
+	prefix := stripHumanPresenceV3TailAnchors(messages[:lastIdx])
 	visibleBytes, prefixHash, err := visibleContextBytes(prefix, tools, allDeferred, nil, &schema.AgenticToolChoice{Type: schema.ToolChoiceAllowed})
 	if err != nil || lastIdx != savedAnchor.MessageCount || prefixHash != savedAnchor.PrefixHash || estimateVisibleTokensV7(visibleBytes) != savedAnchor.LocalTokens || assistantMsg.ResponseMeta.TokenUsage.PromptTokens != savedAnchor.PromptTokens {
 		clearMessageUsageAnchor(assistantMsg)
@@ -224,8 +226,56 @@ func (p *ContextPipeline) BeforeAgent(ctx context.Context, runCtx *adk.ChatModel
 	return p.summary.BeforeAgent(ctx, runCtx)
 }
 
+func (p *ContextPipeline) PrepareModelInput(ctx context.Context, messages []*schema.AgenticMessage) []*schema.AgenticMessage {
+	if p == nil || !p.cfg.Budget.HumanPresenceV3 || len(messages) == 0 {
+		return messages
+	}
+	clean := stripHumanPresenceV3TailAnchors(messages)
+	targetIdx := -1
+	for i := len(clean) - 1; i >= 0; i-- {
+		msg := clean[i]
+		if msg != nil && msg.Role == schema.AgenticRoleTypeUser && !hasToolResults(msg) && !isContextSummary(msg) {
+			targetIdx = i
+			break
+		}
+	}
+	if targetIdx < 0 {
+		return clean
+	}
+	out := cloneAgenticMessages(clean)
+	anchor := buildHumanPresenceV3TailAnchor(ctx, p.cfg, clean)
+	appended := false
+	for _, block := range out[targetIdx].ContentBlocks {
+		if block != nil && block.UserInputText != nil {
+			block.UserInputText.Text += anchor
+			appended = true
+			break
+		}
+	}
+	if !appended {
+		out[targetIdx] = schema.UserAgenticMessage(agenticText(out[targetIdx]) + anchor)
+	}
+	return out
+}
+
+func (p *ContextPipeline) applyTailAnchorIfFits(ctx context.Context, state *adk.TypedChatModelAgentState[*schema.AgenticMessage]) *adk.TypedChatModelAgentState[*schema.AgenticMessage] {
+	if p == nil || state == nil || !p.cfg.Budget.HumanPresenceV3 || len(state.Messages) == 0 {
+		return state
+	}
+	anchored := p.PrepareModelInput(ctx, state.Messages)
+	if p.cfg.Budget.InputTokenLimit > 0 {
+		if m, err := p.measureMainContext(ctx, anchored, state.ToolInfos, state.DeferredToolInfos); err != nil || !p.cfg.Budget.fits(m) {
+			return state
+		}
+	}
+	out := *state
+	out.Messages = anchored
+	return &out
+}
+
 func (p *ContextPipeline) BeforeModelRewriteState(ctx context.Context, state *adk.TypedChatModelAgentState[*schema.AgenticMessage], mc *adk.TypedModelContext[*schema.AgenticMessage]) (context.Context, *adk.TypedChatModelAgentState[*schema.AgenticMessage], error) {
 	copyState := *state
+	copyState.Messages = stripHumanPresenceV3TailAnchors(state.Messages)
 	copyState.ToolInfos = contextToolInfos(state.ToolInfos, p.cfg.Budget)
 	copyState.DeferredToolInfos = contextToolInfos(state.DeferredToolInfos, p.cfg.Budget)
 	state = &copyState
@@ -282,7 +332,7 @@ func (p *ContextPipeline) BeforeModelRewriteState(ctx context.Context, state *ad
 	reason := p.cfg.Budget.compactionReason(m, false)
 	observability.L(ctx).Info("Context measured", append([]zap.Field{zap.String("event.action", "context-measured"), zap.Bool("custom.context.should_compact", reason != "")}, p.cfg.Budget.measurementLogFields(m, reason)...)...)
 	if !p.cfg.Budget.shouldCompact(m) {
-		return ctx, reduced, nil
+		return ctx, p.applyTailAnchorIfFits(rewriteCtx, reduced), nil
 	}
 	msgs, err := p.compactStage(rewriteCtx, reduced.Messages, reduced.ToolInfos, false, reduced.DeferredToolInfos)
 	if err != nil {
@@ -296,7 +346,7 @@ func (p *ContextPipeline) BeforeModelRewriteState(ctx context.Context, state *ad
 		return ctx, nil, err
 	}
 	p.commitCompaction(rewriteCtx, reduced.Messages, msgs)
-	return ctx, &out, nil
+	return ctx, p.applyTailAnchorIfFits(rewriteCtx, &out), nil
 }
 
 func (p *ContextPipeline) RetryConfig() *adk.TypedModelRetryConfig[*schema.AgenticMessage] {
@@ -330,12 +380,13 @@ func (p *ContextPipeline) RetryConfig() *adk.TypedModelRetryConfig[*schema.Agent
 			}
 			usageState.setAdmissionConfig(configID, entryMode)
 		}
-		msgs, err := p.compactStage(retryCtx, retry.InputMessages, opts.Tools, true, opts.DeferredTools)
+		cleanRetryInputs := stripHumanPresenceV3TailAnchors(retry.InputMessages)
+		msgs, err := p.compactStage(retryCtx, cleanRetryInputs, opts.Tools, true, opts.DeferredTools)
 		if err != nil {
 			usageState.clearAdmissionConfig()
 			return &adk.TypedRetryDecision[*schema.AgenticMessage]{RewriteError: err}
 		}
-		before, err := p.cfg.Budget.measureContext(retry.InputMessages, opts.Tools, p.cfg.Budget.OutputReserveTokens, false, opts.DeferredTools)
+		before, err := p.cfg.Budget.measureContext(cleanRetryInputs, opts.Tools, p.cfg.Budget.OutputReserveTokens, false, opts.DeferredTools)
 		if err != nil {
 			usageState.clearAdmissionConfig()
 			return &adk.TypedRetryDecision[*schema.AgenticMessage]{RewriteError: err}
@@ -353,8 +404,15 @@ func (p *ContextPipeline) RetryConfig() *adk.TypedModelRetryConfig[*schema.Agent
 			usageState.clearAdmissionConfig()
 			return &adk.TypedRetryDecision[*schema.AgenticMessage]{RewriteError: err}
 		}
-		p.commitCompaction(retryCtx, retry.InputMessages, msgs)
-		return &adk.TypedRetryDecision[*schema.AgenticMessage]{Retry: true, ModifiedInputMessages: msgs, PersistModifiedInputMessages: true, RejectReason: "context_overflow"}
+		p.commitCompaction(retryCtx, cleanRetryInputs, msgs)
+		modified := msgs
+		if p.cfg.Budget.HumanPresenceV3 {
+			anchored := p.PrepareModelInput(retryCtx, msgs)
+			if m, mErr := p.cfg.Budget.measureContext(anchored, opts.Tools, p.cfg.Budget.OutputReserveTokens, false, opts.DeferredTools); mErr == nil && p.cfg.Budget.fits(m) {
+				modified = anchored
+			}
+		}
+		return &adk.TypedRetryDecision[*schema.AgenticMessage]{Retry: true, ModifiedInputMessages: modified, PersistModifiedInputMessages: true, RejectReason: "context_overflow"}
 	}}
 }
 
@@ -481,7 +539,16 @@ func contextSources(messages []*schema.AgenticMessage) []InputSource {
 		if msg == nil || msg.Role != schema.AgenticRoleTypeUser || hasToolResults(msg) {
 			continue
 		}
-		text := agenticText(msg)
+		text := stripHumanPresenceV3TailAnchor(agenticText(msg))
+		if strings.HasPrefix(text, "TEAMIE_NEW_MESSAGE\n") {
+			if in, ok := parseV3NewMessageEnvelope(text); ok {
+				sources, _ := inputSources([]Input{in})
+				for _, ref := range sources {
+					appendRef(ref)
+				}
+			}
+			continue
+		}
 		for _, marker := range []string{"TEAMIE_NEW_MESSAGE ", "TEAMIE_TASK_NOTIFICATION ", "TEAMIE_SCHEDULE_WAKEUP ", "TEAMIE_APP_NOTIFICATION ", "TEAMIE_UNREAD_DIGEST ", "TEAMIE_PLATFORM_ANNOUNCEMENT "} {
 			if strings.HasPrefix(text, marker) {
 				var in Input

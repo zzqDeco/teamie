@@ -787,8 +787,8 @@ func TestExistingRunsKeepByteExactPromptsToolManifestsAndRequestHashes(t *testin
 	}
 	var maxMigration int
 	var writerSchema string
-	if err := s.DB.QueryRow(ctx, `SELECT max(version), current_setting('teamie.runtime_writer_schema') FROM agent_runtime_schema_migrations`).Scan(&maxMigration, &writerSchema); err != nil || maxMigration != 15 || writerSchema != "15" {
-		t.Fatalf("Runtime schema version changed: got %d / %s, want 15 / 15 (err=%v)", maxMigration, writerSchema, err)
+	if err := s.DB.QueryRow(ctx, `SELECT max(version), current_setting('teamie.runtime_writer_schema') FROM agent_runtime_schema_migrations`).Scan(&maxMigration, &writerSchema); err != nil || maxMigration != 16 || writerSchema != "16" {
+		t.Fatalf("Runtime schema version changed: got %d / %s, want 16 / 16 (err=%v)", maxMigration, writerSchema, err)
 	}
 
 	// 2. Ordinary Input with text, user @mention, and non-image attachment produces byte-exact legacy JSON.

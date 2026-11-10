@@ -42,6 +42,34 @@ type ContextBudgetSnapshot struct {
 	DirectMessages       bool   `json:"directMessages,omitempty"`
 	ConversationalStyle  bool   `json:"conversationalStyle,omitempty"`
 	HumanPresenceV2      bool   `json:"humanPresenceV2,omitempty"`
+	HumanPresenceV3      bool   `json:"humanPresenceV3,omitempty"`
+}
+
+func DefaultContextBudgetSnapshot() ContextBudgetSnapshot {
+	budget, err := makeContextBudgetSnapshot(65536)
+	if err != nil {
+		budget = ContextBudgetSnapshot{Version: contextBudgetVersion}
+	}
+	budget.EventDrivenInputs = true
+	budget.FileDelivery = true
+	budget.StructuredMentions = true
+	budget.WebSearch = true
+	budget.ScheduledWakeups = true
+	budget.DirectMessages = true
+	budget.ConversationalStyle = true
+	budget.HumanPresenceV2 = true
+	budget.HumanPresenceV3 = true
+	return budget
+}
+
+func NormalizeContextBudgetSnapshot(b ContextBudgetSnapshot) ContextBudgetSnapshot {
+	if b == (ContextBudgetSnapshot{}) {
+		return DefaultContextBudgetSnapshot()
+	}
+	if b.Version == 0 {
+		b.Version = contextBudgetVersion
+	}
+	return b
 }
 
 func makeContextBudgetSnapshot(window int) (ContextBudgetSnapshot, error) {
@@ -131,8 +159,13 @@ func calibratedEffectiveTokens(promptTokens, localTokens, anchorLocalTokens int)
 }
 
 func isSummaryModelOptions(opts *model.Options) bool {
-	return opts != nil && len(opts.Tools) == 0 && len(opts.DeferredTools) == 0 &&
-		opts.AgenticToolChoice != nil && opts.AgenticToolChoice.Type == schema.ToolChoiceForbidden
+	if opts == nil || len(opts.Tools) != 0 || len(opts.DeferredTools) != 0 {
+		return false
+	}
+	if opts.AgenticToolChoice != nil && opts.AgenticToolChoice.Type == schema.ToolChoiceForbidden {
+		return true
+	}
+	return opts.ToolChoice != nil && *opts.ToolChoice == schema.ToolChoiceForbidden
 }
 
 func isSummaryRequest(request []byte) bool {
@@ -150,7 +183,7 @@ func (b ContextBudgetSnapshot) measureCalibratedContext(anchor *contextUsageAnch
 	if err != nil || b.Version < 7 || anchor == nil || anchor.ConfigID == "" || !validCalibratedTokenBounds(anchor.PromptTokens, anchor.LocalTokens) || anchor.MessageCount <= 0 || len(messages) < anchor.MessageCount {
 		return base, err
 	}
-	_, prefixHash, err := visibleContextBytes(messages[:anchor.MessageCount], tools, allDeferred, nil, &schema.AgenticToolChoice{Type: schema.ToolChoiceAllowed})
+	_, prefixHash, err := visibleContextBytes(stripHumanPresenceV3TailAnchors(messages[:anchor.MessageCount]), tools, allDeferred, nil, &schema.AgenticToolChoice{Type: schema.ToolChoiceAllowed})
 	if err != nil || prefixHash != anchor.PrefixHash {
 		return base, nil
 	}
@@ -183,7 +216,7 @@ func (b ContextBudgetSnapshot) measureCalibratedRequest(anchor *contextUsageAnch
 	if isSummaryModelOptions(&opts) || len(messages) < anchor.MessageCount {
 		return base, nil
 	}
-	_, prefixHash, err := visibleContextBytes(messages[:anchor.MessageCount], opts.Tools, opts.DeferredTools, opts.Stop, opts.AgenticToolChoice)
+	_, prefixHash, err := visibleContextBytes(stripHumanPresenceV3TailAnchors(messages[:anchor.MessageCount]), opts.Tools, opts.DeferredTools, opts.Stop, opts.AgenticToolChoice)
 	if err != nil || prefixHash != anchor.PrefixHash {
 		return base, nil
 	}

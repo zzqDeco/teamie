@@ -134,8 +134,8 @@ func TestHumanPresenceV2WorkerDefaultAdmissionAndFallbackGate(t *testing.T) {
 	s := testStore(t)
 	e, f, base, _ := fixtureEngine(t, s)
 	flagsPath := filepath.Join(t.TempDir(), "flags.json")
-	// Production flag shape: im.dm.create=true, agents.style.human_presence.v2 omitted -> defaults to true.
-	if err := os.WriteFile(flagsPath, []byte(`{"revision":"v2-default-on","flags":{"agents.runtime.v3":true,"agents.tasks.execute":true,"agents.context.v1":true,"agents.files.deliver.v1":true,"agents.mentions.v1":true,"agents.web.v1":true,"agents.schedule.v1":true,"im.dm.create":true,"im.marketplace.enabled":true}}`), 0600); err != nil {
+	// Production flag shape for v2 when human_presence.v3 is explicitly disabled: im.dm.create=true, agents.style.human_presence.v2 omitted -> defaults to true.
+	if err := os.WriteFile(flagsPath, []byte(`{"revision":"v2-default-on","flags":{"agents.runtime.v3":true,"agents.tasks.execute":true,"agents.context.v1":true,"agents.files.deliver.v1":true,"agents.mentions.v1":true,"agents.web.v1":true,"agents.schedule.v1":true,"im.dm.create":true,"im.marketplace.enabled":true,"agents.style.human_presence.v3":false}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	e.Config.FlagsFile = flagsPath

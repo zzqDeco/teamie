@@ -22,11 +22,27 @@ func newRunContextBudget(window int, files, mentions bool, webSearch ...bool) (j
 	budget.ScheduledWakeups = len(webSearch) > 1 && webSearch[1]
 	budget.DirectMessages = len(webSearch) > 2 && webSearch[2]
 	budget.ConversationalStyle = len(webSearch) > 3 && webSearch[3]
-	budget.HumanPresenceV2 = len(webSearch) > 4 && webSearch[4]
+	if len(webSearch) > 4 && webSearch[4] {
+		budget.HumanPresenceV2 = budget.DirectMessages && budget.ConversationalStyle
+	}
+	if len(webSearch) > 5 && webSearch[5] {
+		budget.HumanPresenceV3 = budget.HumanPresenceV2
+	}
 	return json.Marshal(budget)
 }
 
+func humanPresenceV3ForRun(r *Run) bool {
+	if r == nil || r.ContextProfile != contextProfileV1 {
+		return false
+	}
+	budget, err := ParseContextBudgetSnapshot(r.ContextBudget)
+	return err == nil && budget.HumanPresenceV3
+}
+
 func contextInstruction(def *wire.AgentDefinition, budget ContextBudgetSnapshot) string {
+	if budget.HumanPresenceV3 {
+		return humanPresenceV3Instruction(def, budget, false, false)
+	}
 	if budget.HumanPresenceV2 {
 		return humanPresenceV2Instruction(def, budget, false, false)
 	}
@@ -122,6 +138,9 @@ var eventDrivenDescriptions = map[string]string{
 }
 
 func contextToolInfos(infos []*schema.ToolInfo, budget ContextBudgetSnapshot) []*schema.ToolInfo {
+	if budget.HumanPresenceV3 {
+		return humanPresenceV3ToolInfos(infos, budget)
+	}
 	out := contextV1ToolInfos(infos)
 	if budget.EventDrivenInputs {
 		for _, info := range out {
@@ -157,7 +176,7 @@ func contextSummaryInstruction(budget ContextBudgetSnapshot) string {
 		text += `
 Preserve settled facts and their source references, relevant history already inspected and its coverage, which requested fields are resolved, and any specific unresolved fact, conflicting evidence, unread required page or original passage still needed. Do not turn completed checks into new work or invent a need to reconfirm them. Final/latest/confirm wording alone is not an unresolved gap after a sufficient conflict-free lookup. Preserve explicit requests to verify an original and concrete evidence of relevant changes. Runtime delivers new messages through its durable inbox and serial TurnLoop; do not create a follow-up task to poll, refresh or scan for new IM inputs before starting, during work or before finishing. Sufficient existing context supports continuing and delivering the current work, then ending the turn for Runtime to wake on later input.`
 	}
-	if budget.HumanPresenceV2 {
+	if budget.HumanPresenceV2 || budget.HumanPresenceV3 {
 		text += humanPresenceV2SummaryGuidance
 	}
 	return text

@@ -140,7 +140,12 @@ func (w *agentWorker) makeAgent(ctx context.Context) (adk.TypedAgent[*schema.Age
 		} else {
 			activeTools = append(activeTools, mcpTools...)
 		}
-		pipeline, err := NewContextPipeline(ctx, ContextPipelineConfig{Model: w.gatewayModel, Budget: budget, Backend: archive, ArchivePath: archive.Path, ArchiveToolPath: archive.ArchiveToolPath, ArchiveTranscript: archive.ArchiveTranscript})
+		var agentName, agentDesc string
+		if w.def != nil {
+			agentName = w.def.Name
+			agentDesc = w.def.Description
+		}
+		pipeline, err := NewContextPipeline(ctx, ContextPipelineConfig{Model: w.gatewayModel, Budget: budget, Backend: archive, ArchivePath: archive.Path, ArchiveToolPath: archive.ArchiveToolPath, ArchiveTranscript: archive.ArchiveTranscript, AgentName: agentName, AgentDescription: agentDesc})
 		if err != nil {
 			return nil, err
 		}
@@ -151,7 +156,9 @@ func (w *agentWorker) makeAgent(ctx context.Context) (adk.TypedAgent[*schema.Age
 		handlers = append(handlers, pipeline)
 		handlers = append(handlers, w.tasks.handlers...)
 		var instruction string
-		if budget.HumanPresenceV2 {
+		if budget.HumanPresenceV3 {
+			instruction = humanPresenceV3Instruction(w.def, budget, presenceActive, len(mcpTools) > 0, run.isMarketplaceDisabled())
+		} else if budget.HumanPresenceV2 {
 			instruction = humanPresenceV2Instruction(w.def, budget, presenceActive, len(mcpTools) > 0, run.isMarketplaceDisabled())
 		} else {
 			instruction = contextInstruction(w.def, budget)
@@ -382,7 +389,9 @@ func (w *agentWorker) prepare(ctx context.Context, items []Input, resume *checkp
 	if w.engine.Config.FlagsFile != "" && runtimeFlag(w.engine.Config.FlagsFile, "agents.context.v1") {
 		profile = contextProfileV1
 		dmEnabled := runtimeFlag(w.engine.Config.FlagsFile, "im.dm.create")
-		budget, err = newRunContextBudget(int(w.contextWindow.Load()), runtimeFlag(w.engine.Config.FlagsFile, "agents.files.deliver.v1"), runtimeFlag(w.engine.Config.FlagsFile, "agents.mentions.v1"), runtimeFlag(w.engine.Config.FlagsFile, "agents.web.v1"), runtimeFlag(w.engine.Config.FlagsFile, "agents.schedule.v1"), dmEnabled, runtimeFlagDefault(w.engine.Config.FlagsFile, "agents.style.conversational.v1", true), dmEnabled && runtimeFlagDefault(w.engine.Config.FlagsFile, "agents.style.human_presence.v2", true))
+		v2Enabled := dmEnabled && runtimeFlagDefault(w.engine.Config.FlagsFile, "agents.style.human_presence.v2", true)
+		v3Enabled := v2Enabled && runtimeFlagDefault(w.engine.Config.FlagsFile, "agents.style.human_presence.v3", true)
+		budget, err = newRunContextBudget(int(w.contextWindow.Load()), runtimeFlag(w.engine.Config.FlagsFile, "agents.files.deliver.v1"), runtimeFlag(w.engine.Config.FlagsFile, "agents.mentions.v1"), runtimeFlag(w.engine.Config.FlagsFile, "agents.web.v1"), runtimeFlag(w.engine.Config.FlagsFile, "agents.schedule.v1"), dmEnabled, runtimeFlagDefault(w.engine.Config.FlagsFile, "agents.style.conversational.v1", true), v2Enabled, v3Enabled)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -531,7 +540,7 @@ func (w *agentWorker) makeInput(ctx context.Context, _ *adk.TurnLoop[Input, *sch
 	if err != nil {
 		return nil, err
 	}
-	return &adk.GenInputResult[Input, *schema.AgenticMessage]{RunCtx: runctx, Input: &adk.TypedAgentInput[*schema.AgenticMessage]{Messages: inputMessages(run.Inputs), EnableStreaming: w.engine.Config.GatewayStreamURL != ""}, Consumed: run.Inputs, Remaining: remaining}, nil
+	return &adk.GenInputResult[Input, *schema.AgenticMessage]{RunCtx: runctx, Input: &adk.TypedAgentInput[*schema.AgenticMessage]{Messages: inputMessagesForRun(run), EnableStreaming: w.engine.Config.GatewayStreamURL != ""}, Consumed: run.Inputs, Remaining: remaining}, nil
 }
 
 func (w *agentWorker) onAgentEvents(ctx context.Context, tc *adk.TurnContext[Input, *schema.AgenticMessage], events *adk.AsyncIterator[*adk.TypedAgentEvent[*schema.AgenticMessage]]) (eventFailure error) {

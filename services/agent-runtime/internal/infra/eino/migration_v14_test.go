@@ -62,7 +62,7 @@ func TestRuntimeV14PreservesV13ExecutionAndRejectsV13Startup(t *testing.T) {
 		t.Fatal("schema 14 migration changed old Run, input, receipt or checkpoint bytes")
 	}
 	var ledger, protocol string
-	if err = current.DB.QueryRow(ctx, `SELECT string_agg(version::text,',' ORDER BY version),current_setting('teamie.runtime_writer_schema') FROM agent_runtime_schema_migrations`).Scan(&ledger, &protocol); err != nil || ledger != "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15" || protocol != "15" {
+	if err = current.DB.QueryRow(ctx, `SELECT string_agg(version::text,',' ORDER BY version),current_setting('teamie.runtime_writer_schema') FROM agent_runtime_schema_migrations`).Scan(&ledger, &protocol); err != nil || ledger != "1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16" || protocol != "16" {
 		t.Fatal("schema-13 reader was not fenced by the new ledger/protocol", ledger, protocol, err)
 	}
 	oldRun := &Run{ID: runID, toolProfile: currentToolProfile, ContextProfile: contextProfileV1, ContextBudget: canonical}

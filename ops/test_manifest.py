@@ -549,8 +549,27 @@ class AgentManifestTest(unittest.TestCase):
         curr = copy.deepcopy(prev)
         curr["version"] = "v0.4.7"
         curr["source"]["ref"] = "refs/heads/release/v0.4.7"
+        curr["schema"] = {"identity": 3, "chat": 12, "marketplace": 1, "agent_control": 3, "agent_runtime": 15, "gateway": 7}
+        manifest.validate(prev)
+        manifest.validate(curr)
+        manifest.check_transition(curr, prev, prev)
+        with self.assertRaisesRegex(ValueError, "identical schema versions"):
+            manifest.check_transition(prev, curr, rollback=True)
+        with self.assertRaisesRegex(ValueError, "lower database schema"):
+            manifest.check_transition(prev, curr)
+
+    def test_v3_human_presence_v3_runtime_16_forward_upgrade_and_rollback_guard(self):
+        prev = self.modern()
+        prev["manifestVersion"] = 3
+        prev["version"] = "v0.4.7"
+        prev["source"]["ref"] = "refs/heads/release/v0.4.7"
+        prev["schema"] = {"identity": 3, "chat": 12, "marketplace": 1, "agent_control": 3, "agent_runtime": 15, "gateway": 7}
+        prev["images"]["marketplace"] = "ghcr.io/zzqdeco/teamie-marketplace@sha256:" + "2" * 64
+        curr = copy.deepcopy(prev)
+        curr["version"] = "v0.4.8"
+        curr["source"]["ref"] = "refs/heads/release/v0.4.8"
         curr["schema"] = dict(manifest.SCHEMA_V3)
-        self.assertEqual(curr["schema"], {"identity": 3, "chat": 12, "marketplace": 1, "agent_control": 3, "agent_runtime": 15, "gateway": 7})
+        self.assertEqual(curr["schema"], {"identity": 3, "chat": 12, "marketplace": 1, "agent_control": 3, "agent_runtime": 16, "gateway": 7})
         manifest.validate(prev)
         manifest.validate(curr)
         manifest.check_transition(curr, prev, prev)

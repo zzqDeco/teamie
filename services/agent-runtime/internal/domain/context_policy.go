@@ -51,6 +51,7 @@ type ContextBudgetSnapshot struct {
 	DirectMessages       bool   `json:"directMessages,omitempty"`
 	ConversationalStyle  bool   `json:"conversationalStyle,omitempty"`
 	HumanPresenceV2      bool   `json:"humanPresenceV2,omitempty"`
+	HumanPresenceV3      bool   `json:"humanPresenceV3,omitempty"`
 }
 
 // MakeContextBudgetSnapshot creates a new ContextBudgetSnapshot for the current budget version.
@@ -118,6 +119,7 @@ func ParseContextBudgetSnapshot(raw json.RawMessage) (ContextBudgetSnapshot, err
 	expected.DirectMessages = budget.DirectMessages
 	expected.ConversationalStyle = budget.ConversationalStyle
 	expected.HumanPresenceV2 = budget.HumanPresenceV2
+	expected.HumanPresenceV3 = budget.HumanPresenceV3
 	if err != nil || budget != expected {
 		return budget, errors.New("unsupported context budget snapshot")
 	}

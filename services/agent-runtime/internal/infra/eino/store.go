@@ -241,7 +241,7 @@ func (r *Run) computeRequestUsageAnchor(step int, request []byte, result *schema
 	if isSummaryModelOptions(&opts) || len(messages) == 0 {
 		return nil
 	}
-	visibleBytes, prefixHash, err := visibleContextBytes(messages, opts.Tools, opts.DeferredTools, opts.Stop, opts.AgenticToolChoice)
+	visibleBytes, prefixHash, err := visibleContextBytes(stripHumanPresenceV3TailAnchors(messages), opts.Tools, opts.DeferredTools, opts.Stop, opts.AgenticToolChoice)
 	if err != nil {
 		return nil
 	}
