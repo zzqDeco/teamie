@@ -66,10 +66,11 @@ func main() {
 	if err != nil {
 		observability.Fatal("Service initialization failed", err)
 	}
-	rpcSrv := identityservice.NewServer(&rpcadapter.Server{App: appSvc}, rpcx.ServerOptions(addr, 0)...)
+	rpcDrain := rpcx.NewDrainState()
+	rpcSrv := identityservice.NewServer(&rpcadapter.Server{App: appSvc}, rpcx.ServerOptions(addr, 0, rpcDrain.ServerOption())...)
 	defer rpcSrv.Stop()
 	go func() {
-		if err := rpcSrv.Run(); err != nil {
+		if err := rpcSrv.Run(); err != nil && !rpcDrain.Draining() {
 			observability.Fatal("Service initialization failed", err)
 		}
 	}()
@@ -79,5 +80,10 @@ func main() {
 		Origin: origin,
 		Secure: httpx.Env("COOKIE_SECURE", "true") == "true",
 	}).Routes()
-	httpx.Serve(httpx.Env("HTTP_ADDR", ":8081"), httpHandler)
+	httpx.ServeLifecycle(
+		httpx.Env("HTTP_ADDR", ":8081"),
+		httpHandler,
+		httpx.OnDrainStart(rpcDrain.MarkDraining),
+		httpx.OnShutdown(func(context.Context) { _ = rpcSrv.Stop() }),
+	)
 }

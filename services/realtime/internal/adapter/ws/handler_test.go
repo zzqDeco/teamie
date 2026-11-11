@@ -3,9 +3,12 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -560,4 +563,234 @@ func TestTypingFrameStrictValidationAndCoalescing(t *testing.T) {
 		t.Fatal(err)
 	}
 	readTyping(true)
+}
+
+func TestGracefulDrainSendsGoingAwayAndReconnectCatchesUpCursor(t *testing.T) {
+	const origin = "https://teamie.example"
+	aliceToken := strings.Repeat("a", 64)
+	bobToken := strings.Repeat("b", 64)
+
+	validator := &stubValidator{
+		sessions: map[string]domain.User{
+			aliceToken: {ID: "alice", DisplayName: "Alice", Kind: "human"},
+			bobToken:   {ID: "bob", DisplayName: "Bob", Kind: "human"},
+		},
+	}
+	access := &stubAccess{members: []string{"alice", "bob"}}
+
+	// Simulated durable sync log backing GET /api/v1/workspaces/{id}/sync?after=<cursor>.
+	type syncEvent struct {
+		Cursor int    `json:"cursor"`
+		Body   string `json:"body"`
+	}
+	var (
+		syncMu     sync.Mutex
+		syncEvents = []syncEvent{{Cursor: 1, Body: "msg-before-cutover"}}
+	)
+	appendSyncEvent := func(body string) int {
+		syncMu.Lock()
+		defer syncMu.Unlock()
+		next := len(syncEvents) + 1
+		syncEvents = append(syncEvents, syncEvent{Cursor: next, Body: body})
+		return next
+	}
+	syncServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		after, _ := strconv.Atoi(r.URL.Query().Get("after"))
+		syncMu.Lock()
+		var delta []syncEvent
+		for _, ev := range syncEvents {
+			if ev.Cursor > after {
+				delta = append(delta, ev)
+			}
+		}
+		syncMu.Unlock()
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"events": delta})
+	}))
+	defer syncServer.Close()
+
+	fetchSyncSince := func(cursor int) ([]string, int) {
+		t.Helper()
+		resp, err := http.Get(fmt.Sprintf("%s/sync?after=%d", syncServer.URL, cursor))
+		if err != nil {
+			t.Fatalf("sync GET failed: %v", err)
+		}
+		defer resp.Body.Close()
+		var payload struct {
+			Events []syncEvent `json:"events"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode sync payload: %v", err)
+		}
+		bodies := make([]string, 0, len(payload.Events))
+		newCursor := cursor
+		for _, ev := range payload.Events {
+			if ev.Cursor != newCursor+1 {
+				t.Fatalf("non-contiguous cursor %d after %d", ev.Cursor, newCursor)
+			}
+			newCursor = ev.Cursor
+			bodies = append(bodies, ev.Body)
+		}
+		return bodies, newCursor
+	}
+
+	startSlot := func(grace time.Duration) (string, *Adapter, *httpx.DrainController, chan struct{}) {
+		t.Helper()
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("net.Listen: %v", err)
+		}
+		addr := ln.Addr().String()
+		_ = ln.Close()
+
+		var policy domain.TypingTracker
+		streamApp := &app.StreamApp{
+			Identity: validator,
+			Chat:     access,
+			Policy:   &policy,
+		}
+		adapter := &Adapter{
+			App:    streamApp,
+			Origin: origin,
+		}
+		streamApp.Clients = adapter.ActiveClients
+
+		h := httpx.NewServer(addr, adapter.Routes())
+		ctrl := httpx.DrainControllerFor(h)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			httpx.RunServer(h,
+				httpx.WithDrainGrace(grace),
+				httpx.WithShutdownTimeout(3*time.Second),
+				httpx.OnPreShutdown(adapter.Drain),
+			)
+		}()
+
+		httpClient := &http.Client{
+			Timeout:   time.Second,
+			Transport: &http.Transport{DisableKeepAlives: true},
+		}
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			resp, err := httpClient.Get("http://" + addr + "/readyz")
+			if err == nil {
+				_ = resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					return addr, adapter, ctrl, done
+				}
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("slot on %s did not become ready", addr)
+		return "", nil, nil, nil
+	}
+
+	addrA, _, ctrlA, doneA := startSlot(40 * time.Millisecond)
+	headersBob := http.Header{
+		"Origin": {origin},
+		"Cookie": {httpx.CookieName + "=" + bobToken},
+	}
+
+	wsConnA, _, err := websocket.DefaultDialer.Dial("ws://"+addrA+"/api/v1/ws", headersBob)
+	if err != nil {
+		t.Fatalf("dial slot A ws: %v", err)
+	}
+	defer wsConnA.Close()
+	readInitialWSFrames(t, wsConnA)
+
+	gotBodies, cursor := fetchSyncSince(0)
+	if len(gotBodies) != 1 || gotBodies[0] != "msg-before-cutover" || cursor != 1 {
+		t.Fatalf("initial sync = %v (cursor=%d), want [msg-before-cutover] (1)", gotBodies, cursor)
+	}
+
+	// Start replacement canary Slot B before draining Slot A.
+	addrB, _, ctrlB, doneB := startSlot(10 * time.Millisecond)
+	defer func() {
+		ctrlB.BeginDrain()
+		<-doneB
+	}()
+
+	// Begin graceful drain on Slot A: /readyz must immediately flip to 503 while /healthz stays 200.
+	ctrlA.BeginDrain()
+	probeClient := &http.Client{
+		Timeout:   time.Second,
+		Transport: &http.Transport{DisableKeepAlives: true},
+	}
+	readyResp, err := probeClient.Get("http://" + addrA + "/readyz")
+	if err != nil {
+		t.Fatalf("GET slot A /readyz: %v", err)
+	}
+	_ = readyResp.Body.Close()
+	if readyResp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("draining slot A /readyz status = %d, want 503", readyResp.StatusCode)
+	}
+	healthResp, err := probeClient.Get("http://" + addrA + "/healthz")
+	if err != nil {
+		t.Fatalf("GET slot A /healthz: %v", err)
+	}
+	_ = healthResp.Body.Close()
+	if healthResp.StatusCode != http.StatusOK {
+		t.Fatalf("draining slot A /healthz status = %d, want 200", healthResp.StatusCode)
+	}
+
+	// Persist messages while Slot A drains and closes Bob's WebSocket.
+	appendSyncEvent("msg-during-drain-1")
+	appendSyncEvent("msg-during-drain-2")
+
+	// Bob's WebSocket on Slot A must receive RFC 6455 1001 Going Away.
+	_ = wsConnA.SetReadDeadline(time.Now().Add(2 * time.Second))
+	for {
+		var frame map[string]any
+		err = wsConnA.ReadJSON(&frame)
+		if err != nil {
+			break
+		}
+	}
+	var closeErr *websocket.CloseError
+	if !errors.As(err, &closeErr) || closeErr.Code != websocket.CloseGoingAway {
+		t.Fatalf("expected WebSocket CloseGoingAway (1001) on drain, got err=%v", err)
+	}
+
+	select {
+	case <-doneA:
+	case <-time.After(3 * time.Second):
+		t.Fatal("slot A did not finish graceful shutdown within 3s")
+	}
+
+	// Bob reconnects to Slot B, receives sync.required, and catches up from durable cursor=1 without loss.
+	wsConnB, _, err := websocket.DefaultDialer.Dial("ws://"+addrB+"/api/v1/ws", headersBob)
+	if err != nil {
+		t.Fatalf("dial slot B ws: %v", err)
+	}
+	defer wsConnB.Close()
+	readInitialWSFrames(t, wsConnB)
+
+	caughtUp, newCursor := fetchSyncSince(cursor)
+	if newCursor != 3 || len(caughtUp) != 2 || caughtUp[0] != "msg-during-drain-1" || caughtUp[1] != "msg-during-drain-2" {
+		t.Fatalf("cursor catch-up after reconnect = %v (cursor=%d), want [msg-during-drain-1 msg-during-drain-2] (3)", caughtUp, newCursor)
+	}
+
+	// Verify live WebSocket frames work immediately on Slot B after reconnect.
+	headersAlice := http.Header{
+		"Origin": {origin},
+		"Cookie": {httpx.CookieName + "=" + aliceToken},
+	}
+	aliceConnB, _, err := websocket.DefaultDialer.Dial("ws://"+addrB+"/api/v1/ws", headersAlice)
+	if err != nil {
+		t.Fatalf("dial alice slot B ws: %v", err)
+	}
+	defer aliceConnB.Close()
+	readInitialWSFrames(t, aliceConnB)
+
+	if err := aliceConnB.WriteMessage(websocket.TextMessage, []byte(`{"type":"typing","conversationId":"conv-1","isTyping":true}`)); err != nil {
+		t.Fatalf("write typing on slot B: %v", err)
+	}
+	_ = wsConnB.SetReadDeadline(time.Now().Add(time.Second))
+	var liveEv map[string]any
+	if err := wsConnB.ReadJSON(&liveEv); err != nil {
+		t.Fatalf("read live typing frame on slot B: %v", err)
+	}
+	if liveEv["type"] != "typing" || liveEv["userId"] != "alice" {
+		t.Fatalf("unexpected live frame on slot B: %#v", liveEv)
+	}
 }

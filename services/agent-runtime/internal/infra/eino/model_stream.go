@@ -8,12 +8,12 @@ import (
 	"errors"
 	"go.uber.org/zap"
 	"io"
-	"net"
 	"net/http"
 	"runtime"
 	"sort"
 	"strings"
 	"sync"
+	"teamie/pkg/httpx"
 	"teamie/pkg/observability"
 	"time"
 
@@ -505,7 +505,7 @@ func safeGatewayCode(code string) string {
 	return "gateway_error"
 }
 
-var gatewayStreamHTTP = &http.Client{Transport: &http.Transport{Proxy: nil, DialContext: (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext, IdleConnTimeout: 30 * time.Second, TLSHandshakeTimeout: 10 * time.Second, MaxIdleConns: 8, MaxIdleConnsPerHost: 2}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+var gatewayStreamHTTP = &http.Client{Transport: &http.Transport{Proxy: nil, DialContext: httpx.DualSlotDialContext(5*time.Second, 30*time.Second), IdleConnTimeout: 30 * time.Second, TLSHandshakeTimeout: 10 * time.Second, MaxIdleConns: 8, MaxIdleConnsPerHost: 2}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
 // Eino .35's Pipe has no Close hook. A private pulse source makes consumer Close
 // observable even while the HTTP producer is waiting on a silent upstream. No

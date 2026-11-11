@@ -4,8 +4,6 @@ import (
 	"context"
 	"net"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/app/server"
@@ -34,7 +32,7 @@ func main() {
 			observability.Fatal(k+" is required", nil)
 		}
 	}
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	startup, done := context.WithTimeout(ctx, 30*time.Second)
 	repo, err := pg.OpenRepository(startup, os.Getenv("DATABASE_URL"))
@@ -84,13 +82,9 @@ func main() {
 	if err != nil {
 		observability.Fatal("invalid runtime RPC address", err)
 	}
-	rpc := agentruntimeservice.NewServer(&rpcadapter.Server{App: appSvc}, rpcx.ServerOptions(rpcAddr, 0)...)
-	go func() {
-		if err := rpc.Run(); err != nil {
-			observability.L(ctx).Error("Runtime RPC stopped", zap.Error(err))
-			cancel()
-		}
-	}()
+	rpcDrain := rpcx.NewDrainState()
+	rpc := agentruntimeservice.NewServer(&rpcadapter.Server{App: appSvc}, rpcx.ServerOptions(rpcAddr, 0, rpcDrain.ServerOption())...)
+	defer rpc.Stop()
 
 	h := server.Default(server.WithHostPorts(httpx.Env("HTTP_ADDR", ":8085")), server.WithMaxRequestBodySize(16384))
 	(&httpadapter.Handler{
@@ -98,24 +92,33 @@ func main() {
 		Version: BuildVersion,
 		SHA:     BuildSHA,
 	}).RegisterRoutes(h)
+	ctrl := httpx.DrainControllerFor(h)
+
+	go func() {
+		if err := rpc.Run(); err != nil && !rpcDrain.Draining() {
+			observability.L(ctx).Error("Runtime RPC stopped", zap.Error(err))
+			ctrl.BeginDrain()
+		}
+	}()
 
 	stopped := make(chan struct{})
 	runtimeWorker := worker.New(appSvc)
 	go func() { defer close(stopped); runtimeWorker.Run(ctx) }()
-	go func() {
-		if err := h.Run(); err != nil {
-			observability.L(ctx).Error("Runtime HTTP stopped", zap.Error(err))
+
+	httpx.RunServer(
+		h,
+		httpx.WithShutdownTimeout(25*time.Second),
+		httpx.OnDrainStart(func() {
+			rpcDrain.MarkDraining()
 			cancel()
-		}
-	}()
-	<-ctx.Done()
-	shutdown, stop := context.WithTimeout(context.Background(), 25*time.Second)
-	defer stop()
-	_ = h.Shutdown(shutdown)
-	_ = rpc.Stop()
-	select {
-	case <-stopped:
-	case <-shutdown.Done():
-		observability.L(ctx).Warn("Runtime shutdown deadline exceeded")
-	}
+		}),
+		httpx.OnShutdown(func(shutdownCtx context.Context) {
+			_ = rpc.Stop()
+			select {
+			case <-stopped:
+			case <-shutdownCtx.Done():
+				observability.L(ctx).Warn("Runtime shutdown deadline exceeded")
+			}
+		}),
+	)
 }

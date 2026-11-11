@@ -65,15 +65,24 @@ func main() {
 	if err != nil {
 		observability.Fatal("Service initialization failed", err)
 	}
-	rpcSrv := agentcontrolservice.NewServer(&rpcadapter.Server{App: appSvc}, rpcx.ServerOptions(addr, 0)...)
+	rpcDrain := rpcx.NewDrainState()
+	rpcSrv := agentcontrolservice.NewServer(&rpcadapter.Server{App: appSvc}, rpcx.ServerOptions(addr, 0, rpcDrain.ServerOption())...)
 	defer rpcSrv.Stop()
 	go func() {
-		if err := rpcSrv.Run(); err != nil {
+		if err := rpcSrv.Run(); err != nil && !rpcDrain.Draining() {
 			observability.Fatal("Service initialization failed", err)
 		}
 	}()
 
-	go appSvc.Run(ctx)
+	runDone := make(chan struct{})
+	defer func() {
+		cancel()
+		<-runDone
+	}()
+	go func() {
+		defer close(runDone)
+		appSvc.Run(ctx)
+	}()
 
 	httpHandler := (&httpadapter.Adapter{
 		App:     appSvc,
@@ -81,5 +90,10 @@ func main() {
 		Version: httpx.BuildVersion,
 		SHA:     httpx.BuildSHA,
 	}).Routes()
-	httpadapter.Serve(httpx.Env("HTTP_ADDR", ":8084"), httpHandler)
+	httpadapter.Serve(
+		httpx.Env("HTTP_ADDR", ":8084"),
+		httpHandler,
+		httpx.OnDrainStart(rpcDrain.MarkDraining),
+		httpx.OnShutdown(func(context.Context) { _ = rpcSrv.Stop() }),
+	)
 }

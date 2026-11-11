@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -349,4 +350,41 @@ func OperationsContext(m *http.ServeMux, ready func(context.Context) error) {
 		defer cancel()
 		return ready(ctx)
 	})
+}
+
+// DualSlotDialContext returns an http.Transport DialContext function that dials the
+// primary <host>:<port> first and, if TCP connect / DNS resolution fails before any
+// HTTP request bytes are sent, falls back to the transient <host>-canary:<port> slot.
+// IP literals, localhost, and addresses already ending in -canary are dialed once.
+func DualSlotDialContext(timeout, keepAlive time.Duration) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialer := &net.Dialer{Timeout: timeout, KeepAlive: keepAlive}
+	return dualSlotDialContextWith(dialer.DialContext)
+}
+
+func dualSlotDialContextWith(dialFn func(ctx context.Context, network, addr string) (net.Conn, error)) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		conn, err := dialFn(ctx, network, addr)
+		if err == nil || ctx.Err() != nil {
+			return conn, err
+		}
+		canaryAddr, ok := canarySiblingAddr(addr)
+		if !ok {
+			return nil, err
+		}
+		if fallbackConn, fallbackErr := dialFn(ctx, network, canaryAddr); fallbackErr == nil {
+			return fallbackConn, nil
+		}
+		return nil, err
+	}
+}
+
+func canarySiblingAddr(addr string) (string, bool) {
+	host, port, err := net.SplitHostPort(strings.TrimSpace(addr))
+	if err != nil || host == "" || port == "" {
+		return "", false
+	}
+	if net.ParseIP(host) != nil || strings.EqualFold(host, "localhost") || strings.HasSuffix(host, "-canary") || strings.Contains(host, ".") {
+		return "", false
+	}
+	return net.JoinHostPort(host+"-canary", port), true
 }

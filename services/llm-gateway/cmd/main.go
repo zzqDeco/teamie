@@ -78,25 +78,42 @@ func main() {
 	if err != nil {
 		observability.Fatal("invalid RPC_ADDR", err)
 	}
-	rpc := modelgatewayservice.NewServer(rpcSrv, rpcx.ServerOptions(addr, 0)...)
+	rpcDrain := rpcx.NewDrainState()
+	rpc := modelgatewayservice.NewServer(rpcSrv, rpcx.ServerOptions(addr, 0, rpcDrain.ServerOption())...)
 	defer rpc.Stop()
 	go func() {
-		if err := rpc.Run(); err != nil {
+		if err := rpc.Run(); err != nil && !rpcDrain.Draining() {
 			observability.Fatal("gateway RPC stopped", err)
 		}
 	}()
+	bgCtx, stopBG := context.WithCancel(context.Background())
+	pruneDone := make(chan struct{})
+	defer func() {
+		stopBG()
+		<-pruneDone
+	}()
 	go func() {
+		defer close(pruneDone)
 		ticker := time.NewTicker(time.Hour)
 		defer ticker.Stop()
-		for range ticker.C {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_ = store.Prune(ctx)
-			cancel()
+		for {
+			select {
+			case <-bgCtx.Done():
+				return
+			case <-ticker.C:
+				pruneCtx, pruneCancel := context.WithTimeout(bgCtx, 5*time.Second)
+				_ = store.Prune(pruneCtx)
+				pruneCancel()
+			}
 		}
 	}()
-	httpx.ServeWithOptions(
+	httpx.ServeWithOptionsLifecycle(
 		httpx.Env("HTTP_ADDR", ":8086"),
 		httpHandler.Routes(auth),
+		[]httpx.LifecycleOption{
+			httpx.OnDrainStart(rpcDrain.MarkDraining),
+			httpx.OnShutdown(func(context.Context) { _ = rpc.Stop() }),
+		},
 		hertzserver.WithWriteTimeout(0),
 		hertzserver.WithMaxRequestBodySize(2*modeltransport.MaxRequestBytes+4096),
 	)

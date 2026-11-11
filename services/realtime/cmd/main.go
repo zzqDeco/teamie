@@ -76,17 +76,24 @@ func main() {
 	if err != nil {
 		observability.Fatal("Service initialization failed", err)
 	}
+	rpcDrain := rpcx.NewDrainState()
 	rpcSrv := realtimeservice.NewServer(&rpcadapter.Server{
 		App:          streamApp,
 		Clients:      adapter.ActiveClients,
 		ServiceToken: httpx.Env("REALTIME_RPC_TOKEN", ""),
-	}, rpcx.ServerOptions(rpcAddr, 0)...)
+	}, rpcx.ServerOptions(rpcAddr, 0, rpcDrain.ServerOption())...)
 	defer rpcSrv.Stop()
 	go func() {
-		if err := rpcSrv.Run(); err != nil {
+		if err := rpcSrv.Run(); err != nil && !rpcDrain.Draining() {
 			observability.Fatal("Service initialization failed", err)
 		}
 	}()
 
-	httpx.Serve(httpx.Env("HTTP_ADDR", ":8083"), adapter.Routes())
+	httpx.ServeLifecycle(
+		httpx.Env("HTTP_ADDR", ":8083"),
+		adapter.Routes(),
+		httpx.OnDrainStart(rpcDrain.MarkDraining),
+		httpx.OnPreShutdown(adapter.Drain),
+		httpx.OnShutdown(func(context.Context) { _ = rpcSrv.Stop() }),
+	)
 }

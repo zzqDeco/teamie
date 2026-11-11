@@ -8,9 +8,7 @@ import (
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/app/server"
-	"github.com/cloudwego/hertz/pkg/common/adaptor"
 	"teamie/pkg/httpx"
-	"teamie/pkg/observability"
 	"teamie/services/agent-runtime/internal/app"
 )
 
@@ -35,5 +33,5 @@ func (h *Handler) RegisterRoutes(srv *server.Hertz) {
 		defer cancel()
 		return h.App.Ready(pc)
 	})
-	srv.Any("/*path", adaptor.HertzHandler(observability.HTTP(mux)))
+	httpx.MountHertz(srv, mux)
 }

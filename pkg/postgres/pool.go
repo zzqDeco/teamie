@@ -6,12 +6,21 @@ package postgres
 
 import (
 	"context"
+	"fmt"
+	"net/url"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// DefaultMaxConns bounds each service pool so steady-state plus one transient A/B
+// canary slot stays comfortably within PostgreSQL max_connections=40.
+const DefaultMaxConns int32 = 4
 
 // Option customizes a pgxpool.Config after default UTC and timeout rules are applied.
 type Option func(*pgxpool.Config)
@@ -36,12 +45,40 @@ func WithRuntimeParam(key, value string) Option {
 	return func(cfg *pgxpool.Config) { cfg.ConnConfig.RuntimeParams[key] = value }
 }
 
-// OpenPool creates only the caller service's configured pool. It never selects a
-// foreign schema or database. Wire timestamps remain UTC on every host.
-func OpenPool(ctx context.Context, url string, opts ...Option) (*pgxpool.Pool, error) {
-	cfg, err := pgxpool.ParseConfig(url)
+func hasConnSetting(connString, key string) bool {
+	if u, err := url.Parse(connString); err == nil && u.Scheme != "" {
+		if u.Query().Has(key) {
+			return true
+		}
+	}
+	for _, token := range strings.Fields(connString) {
+		if strings.HasPrefix(token, key+"=") {
+			return true
+		}
+	}
+	return false
+}
+
+func buildPoolConfig(connString string, opts ...Option) (*pgxpool.Config, error) {
+	cfg, err := pgxpool.ParseConfig(connString)
 	if err != nil {
 		return nil, err
+	}
+	if !hasConnSetting(connString, "pool_max_conns") {
+		cfg.MaxConns = DefaultMaxConns
+	}
+	if !hasConnSetting(connString, "pool_min_conns") {
+		cfg.MinConns = 0
+	}
+	if !hasConnSetting(connString, "pool_max_conn_idle_time") {
+		cfg.MaxConnIdleTime = time.Minute
+	}
+	if raw := strings.TrimSpace(os.Getenv("PGPOOL_MAX_CONNS")); raw != "" {
+		n, parseErr := strconv.ParseInt(raw, 10, 32)
+		if parseErr != nil || n <= 0 {
+			return nil, fmt.Errorf("invalid PGPOOL_MAX_CONNS %q", raw)
+		}
+		cfg.MaxConns = int32(n)
 	}
 	cfg.ConnConfig.RuntimeParams["timezone"] = "UTC"
 	cfg.ConnConfig.ConnectTimeout = 5 * time.Second
@@ -57,6 +94,19 @@ func OpenPool(ctx context.Context, url string, opts ...Option) (*pgxpool.Pool, e
 		if opt != nil {
 			opt(cfg)
 		}
+	}
+	if cfg.MinConns > cfg.MaxConns {
+		cfg.MinConns = cfg.MaxConns
+	}
+	return cfg, nil
+}
+
+// OpenPool creates only the caller service's configured pool. It never selects a
+// foreign schema or database. Wire timestamps remain UTC on every host.
+func OpenPool(ctx context.Context, url string, opts ...Option) (*pgxpool.Pool, error) {
+	cfg, err := buildPoolConfig(url, opts...)
+	if err != nil {
+		return nil, err
 	}
 	return pgxpool.NewWithConfig(ctx, cfg)
 }

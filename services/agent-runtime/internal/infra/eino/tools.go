@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"teamie/pkg/httpx"
 	"teamie/pkg/observability"
 	"time"
 
@@ -28,6 +29,18 @@ import (
 type APIError struct {
 	Status int
 	Code   string
+}
+
+var defaultIMHTTPClient = &http.Client{
+	Timeout: 15 * time.Second,
+	Transport: &http.Transport{
+		Proxy:               nil,
+		DialContext:         httpx.DualSlotDialContext(5*time.Second, 30*time.Second),
+		IdleConnTimeout:     30 * time.Second,
+		MaxIdleConns:        16,
+		MaxIdleConnsPerHost: 4,
+	},
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }
 
 func (e *APIError) Error() string { return "im: " + e.Code }
@@ -156,7 +169,7 @@ func (imc *IM) request(ctx context.Context, baseURL, method, path string, body i
 	}
 	client := imc.HTTP
 	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		client = defaultIMHTTPClient
 	}
 	peer := "teamie.chat"
 	if baseURL == imc.RealtimeURL {
