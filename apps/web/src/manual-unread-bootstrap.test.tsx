@@ -273,7 +273,7 @@ describe("Authoritative bootstrap & manual unread concurrency (#129)", () => {
     await settle(() => staleBootstrap.resolve(makeBootstrap([{ ...baseConversation }])));
     expect(chatStore.getSnapshot().conversations[baseConversation.id].manualUnreadSeq).toBe(3);
     expect(chatStore.getSnapshot().manualUnreadByConversation[baseConversation.id]).toBe(3);
-    expect(api.bootstrap).toHaveBeenCalledTimes(3);
+    await vi.waitFor(() => expect(api.bootstrap).toHaveBeenCalledTimes(3));
 
     // Fresh bootstrap #3 resolves with the committed server state.
     await settle(() => freshBootstrap.resolve(makeBootstrap([{ ...baseConversation, manualUnreadSeq: 3 }])));
