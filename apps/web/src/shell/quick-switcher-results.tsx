@@ -120,6 +120,21 @@ export function QuickSwitcherMessageResults({
                   >
                     {group.options.map((opt) => {
                       const selected = opt.id === activeItemId;
+                      const queryLower = trimmedQuery.toLowerCase();
+                      const forwarded = opt.message.forwarded;
+                      const bodyMatches = Boolean(
+                        opt.message.body &&
+                          (!queryLower ||
+                            opt.message.body.toLowerCase().includes(queryLower)),
+                      );
+                      const forwardedMatches = Boolean(
+                        forwarded?.body &&
+                          (!queryLower ||
+                            forwarded.body.toLowerCase().includes(queryLower)),
+                      );
+                      const showForwarded = Boolean(
+                        forwarded?.body && (forwardedMatches || !bodyMatches),
+                      );
                       return (
                         <li
                           key={opt.id}
@@ -140,12 +155,23 @@ export function QuickSwitcherMessageResults({
                                 {time(opt.message.createdAt)}
                               </time>
                             </div>
-                            <p className="quick-switcher-message-snippet">
-                              <Highlight
-                                text={opt.message.body}
-                                query={trimmedQuery}
-                              />
-                            </p>
+                            {(opt.message.body || !showForwarded) && (
+                              <p className="quick-switcher-message-snippet">
+                                <Highlight
+                                  text={opt.message.body}
+                                  query={trimmedQuery}
+                                />
+                              </p>
+                            )}
+                            {showForwarded && forwarded && (
+                              <p className="quick-switcher-message-snippet">
+                                转发自 {forwarded.senderName}：
+                                <Highlight
+                                  text={forwarded.body}
+                                  query={trimmedQuery}
+                                />
+                              </p>
+                            )}
                         </li>
                       );
                     })}

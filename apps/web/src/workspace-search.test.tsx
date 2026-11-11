@@ -497,4 +497,150 @@ describe("PR-8 workspace-wide message search in QuickSwitcher and API client", (
     expect(host.querySelectorAll('[role="option"]')).toHaveLength(1);
     expect(host.textContent).toContain("INPUT 历史定稿");
   });
+
+  it("renders forwarded snapshot matches in QuickSwitcher, preserves snapshot-matched forwards across comment edits, and drops non-matching edits or retractions", async () => {
+    const commentlessForward = makeMsg("m-fwd-empty", "c-chan", 40, "", {
+      forwarded: {
+        sourceConversationId: "c-private",
+        sourceMessageId: "src-1",
+        senderId: "u-1",
+        senderName: "林舟",
+        senderKind: "human",
+        createdAt: "2026-10-18T09:00:00Z",
+        body: "归档 Gamma 规范 <img src=x onerror=alert(1)>",
+      },
+    });
+    const commentedSnapshotForward = makeMsg(
+      "m-fwd-comment",
+      "c-chan",
+      41,
+      "请大家查阅",
+      {
+        forwarded: {
+          sourceConversationId: "c-private",
+          sourceMessageId: "src-2",
+          senderId: "u-1",
+          senderName: "林舟",
+          senderKind: "human",
+          createdAt: "2026-10-18T09:30:00Z",
+          body: "Gamma 核心决议草案",
+        },
+      },
+    );
+    const commentOnlyForward = makeMsg(
+      "m-fwd-only-comment",
+      "c-group",
+      42,
+      "跟进 gamma 排期",
+      {
+        forwarded: {
+          sourceConversationId: "c-private",
+          sourceMessageId: "src-3",
+          senderId: "u-1",
+          senderName: "林舟",
+          senderKind: "human",
+          createdAt: "2026-10-18T09:45:00Z",
+          body: "原始背景不含关键词",
+        },
+      },
+    );
+
+    vi.spyOn(api, "searchWorkspaceMessages").mockResolvedValue({
+      items: [
+        {
+          message: commentOnlyForward,
+          conversation: {
+            id: groupConv.id,
+            workspaceId: groupConv.workspaceId,
+            name: groupConv.name,
+            type: groupConv.type,
+          },
+        },
+        {
+          message: commentedSnapshotForward,
+          conversation: {
+            id: channelConv.id,
+            workspaceId: channelConv.workspaceId,
+            name: channelConv.name,
+            type: channelConv.type,
+          },
+        },
+        {
+          message: commentlessForward,
+          conversation: {
+            id: channelConv.id,
+            workspaceId: channelConv.workspaceId,
+            name: channelConv.name,
+            type: channelConv.type,
+          },
+        },
+      ],
+    });
+
+    await renderSwitcher();
+    await act(async () => {
+      host
+        .querySelectorAll<HTMLButtonElement>(".quick-switcher-modes button")[1]
+        .click();
+    });
+
+    await typeQuery("Gamma");
+    await tick(300);
+
+    const options = host.querySelectorAll('[role="option"]');
+    expect(options).toHaveLength(3);
+    expect(host.querySelector("img")).toBeNull();
+    // Commentless forward renders forwarded snippet directly with zero empty <p>
+    const emptyForwardSnippets = options[2].querySelectorAll(
+      ".quick-switcher-message-snippet",
+    );
+    expect(emptyForwardSnippets).toHaveLength(1);
+    expect(emptyForwardSnippets[0].textContent).toBe(
+      "转发自 林舟：归档 Gamma 规范 <img src=x onerror=alert(1)>",
+    );
+    // Commented snapshot forward renders both comment and forwarded snippet
+    expect(options[1].textContent).toContain("请大家查阅");
+    expect(options[1].textContent).toContain("转发自 林舟：Gamma 核心决议草案");
+    expect(
+      Array.from(host.querySelectorAll("mark")).map((m) => m.textContent),
+    ).toEqual(["gamma", "Gamma", "Gamma"]);
+
+    // Live sync:
+    // - editing comment on commentedSnapshotForward keeps it (forwarded.body still matches!)
+    // - editing comment on commentOnlyForward drops it (neither body nor forwarded.body matches)
+    // - retracting commentlessForward removes it immediately
+    await act(async () => {
+      chatStore.merge([
+        {
+          ...commentedSnapshotForward,
+          body: "已补充评审意见",
+          editedAt: "2026-10-18T12:10:00Z",
+        },
+        {
+          ...commentOnlyForward,
+          body: "跟进排期（已改）",
+          editedAt: "2026-10-18T12:11:00Z",
+        },
+        {
+          ...commentlessForward,
+          body: "",
+          forwarded: undefined,
+          retractedAt: "2026-10-18T12:12:00Z",
+        },
+      ]);
+    });
+
+    const remaining = host.querySelectorAll('[role="option"]');
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].textContent).toContain("已补充评审意见");
+    expect(remaining[0].textContent).toContain("转发自 林舟：Gamma 核心决议草案");
+
+    // Clicking navigates to target conversation + forwarded message ID, not sourceConversationId
+    await act(async () => {
+      (remaining[0] as HTMLElement).click();
+    });
+    expect(onSelect).toHaveBeenCalledWith(
+      "/app/w/ws-1/c/c-chan?message=m-fwd-comment",
+    );
+  });
 });

@@ -447,4 +447,274 @@ describe("conversation search", () => {
     await tick(650);
     expect(api.read).toHaveBeenCalledWith("channel", 90);
   });
+  it("lists, filters, downloads, locates, and reconciles forwarded attachments in files mode under target conversation ACLs", async () => {
+    const forwardedFileMsg: Message = {
+      ...message(70, ""),
+      attachments: [],
+      forwarded: {
+        sourceConversationId: "inaccessible-private-conv",
+        sourceMessageId: "source-msg-1",
+        senderId: "other-user",
+        senderName: "外部门同事",
+        senderKind: "human",
+        createdAt: "2026-10-16T08:00:00Z",
+        body: "",
+        attachments: [
+          {
+            id: "copied-spec-70",
+            filename: "Architecture Spec.pdf",
+            mediaType: "application/pdf",
+            sha256: "fixture-spec",
+            sizeBytes: 1024,
+          },
+          {
+            id: "copied-notes-70",
+            filename: "Meeting Notes.txt",
+            mediaType: "text/plain",
+            sha256: "fixture-notes",
+            sizeBytes: 512,
+          },
+        ],
+      },
+    };
+    const olderForwardedFileMsg: Message = {
+      ...message(20, "归档附件"),
+      forwarded: {
+        sourceConversationId: "inaccessible-private-conv",
+        sourceMessageId: "source-msg-0",
+        senderId: "other-user",
+        senderName: "外部门同事",
+        senderKind: "human",
+        createdAt: "2026-10-15T08:00:00Z",
+        body: "附带历史表格",
+        attachments: [
+          {
+            id: "copied-sheet-20",
+            filename: "Q4 Budget.csv",
+            mediaType: "text/csv",
+            sha256: "fixture-csv",
+            sizeBytes: 256,
+          },
+        ],
+      },
+    };
+    vi.mocked(api.searchMessages)
+      .mockResolvedValueOnce({
+        messages: [fileMessage(65), forwardedFileMsg],
+        hasMore: true,
+      })
+      .mockResolvedValueOnce({
+        messages: [olderForwardedFileMsg],
+        hasMore: false,
+      });
+
+    await render(view());
+    await click(".search-modes button:last-child");
+    await tick();
+
+    // Empty query in files mode lists both forwarded.attachments and ordinary attachments (newest first)
+    expect(host.querySelectorAll(".search-result-list > li")).toHaveLength(2);
+    expect(host.querySelectorAll(".message-attachments li")).toHaveLength(4);
+    expect(host.textContent).toContain("Architecture Spec.pdf");
+    expect(host.textContent).toContain("Report 10%_.txt");
+
+    // Pagination via beforeSeq loads older forwarded file message without polluting chatStore or marking read
+    await click(".search-more");
+    expect(api.searchMessages).toHaveBeenLastCalledWith(
+      "channel",
+      { q: "", content: "files", beforeSeq: 65 },
+      expect.any(AbortSignal),
+    );
+    expect(host.querySelectorAll(".search-result-list > li")).toHaveLength(3);
+    expect(host.textContent).toContain("Q4 Budget.csv");
+    expect(chatStore.getSnapshot().messages.channel).toBeUndefined();
+    expect(api.read).not.toHaveBeenCalled();
+
+    // Case-insensitive filename search matches forwarded.attachments and filters out non-matching attachments
+    vi.mocked(api.searchMessages).mockResolvedValue({
+      messages: [forwardedFileMsg],
+      hasMore: false,
+    });
+    await type("spec");
+    await tick();
+    expect(api.searchMessages).toHaveBeenLastCalledWith(
+      "channel",
+      { q: "spec", content: "files" },
+      expect.any(AbortSignal),
+    );
+    expect(host.querySelectorAll(".message-attachments li")).toHaveLength(1);
+    expect(host.textContent).toContain("Architecture Spec.pdf");
+    expect(host.textContent).not.toContain("Meeting Notes.txt");
+
+    // Downloading uses target conversation ("channel") + copied attachment ID, never sourceConversationId
+    const download = vi
+      .spyOn(api, "attachmentContent")
+      .mockResolvedValue(new Blob([new Uint8Array([1, 2, 3])]));
+    const create = vi.fn(() => "blob:copied-spec");
+    const revoke = vi.fn();
+    vi.stubGlobal(
+      "URL",
+      class extends URL {
+        static createObjectURL = create;
+        static revokeObjectURL = revoke;
+      },
+    );
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    await click('[aria-label="下载文件 Architecture Spec.pdf"]');
+    expect(download).toHaveBeenCalledWith("channel", "copied-spec-70");
+    await tick(1100);
+
+    // Clicking 查看消息 locates the forwarded message in target conversation
+    await click(".search-source");
+    expect(onLocate).toHaveBeenCalledWith("message-70");
+
+    // Live retraction immediately removes the forwarded file result
+    await act(async () => {
+      chatStore.merge([
+        { ...forwardedFileMsg, retractedAt: "2026-10-17T00:05:00Z" },
+      ]);
+    });
+    expect(host.querySelectorAll(".search-result-list > li")).toHaveLength(0);
+    expect(host.textContent).toContain("没有找到文件");
+  });
+  it("matches forwarded snapshot bodies and comments, reconciles comment edits and retractions, and supports locating and pagination", async () => {
+    const commentlessForward: Message = {
+      ...message(40, ""),
+      forwarded: {
+        sourceConversationId: "private-source-conv",
+        sourceMessageId: "src-40",
+        senderId: "u-author",
+        senderName: "陈工",
+        senderKind: "human",
+        createdAt: "2026-10-16T09:00:00Z",
+        body: "快照正文 SnapshotKey <script>alert(1)</script>",
+      },
+    };
+    const commentedSnapshotForward: Message = {
+      ...message(50, "请大家评估这条方案"),
+      forwarded: {
+        sourceConversationId: "private-source-conv",
+        sourceMessageId: "src-50",
+        senderId: "u-author",
+        senderName: "陈工",
+        senderKind: "human",
+        createdAt: "2026-10-16T10:00:00Z",
+        body: "核心结论包含 snapshotkey 指标",
+      },
+    };
+    const commentOnlyForward: Message = {
+      ...message(60, "转发说明里提到 SnapshotKey"),
+      forwarded: {
+        sourceConversationId: "private-source-conv",
+        sourceMessageId: "src-60",
+        senderId: "u-author",
+        senderName: "陈工",
+        senderKind: "human",
+        createdAt: "2026-10-16T11:00:00Z",
+        body: "这段原消息不含搜索词",
+      },
+    };
+    const olderForward: Message = {
+      ...message(12, ""),
+      forwarded: {
+        sourceConversationId: "private-source-conv",
+        sourceMessageId: "src-12",
+        senderId: "u-old",
+        senderName: "王敏",
+        senderKind: "human",
+        createdAt: "2026-10-15T11:00:00Z",
+        body: "更早期的 SnapshotKey 会议纪要",
+      },
+    };
+
+    vi.mocked(api.searchMessages)
+      .mockResolvedValueOnce({
+        messages: [
+          commentlessForward,
+          commentedSnapshotForward,
+          commentOnlyForward,
+        ],
+        hasMore: true,
+      })
+      .mockResolvedValueOnce({
+        messages: [olderForward],
+        hasMore: false,
+      });
+
+    await render(view());
+    await type("SnapshotKey");
+    await tick();
+
+    // Newest first: seq 60, seq 50, seq 40
+    const items = host.querySelectorAll(".search-result-list > li");
+    expect(items).toHaveLength(3);
+    expect(host.querySelectorAll(".search-message-result")).toHaveLength(3);
+    expect(host.querySelector("script")).toBeNull();
+    expect(items[2].textContent).toContain("转发自 陈工：");
+    expect(items[2].textContent).toContain("<script>alert(1)</script>");
+    expect(items[2].querySelector(".search-comment-snippet")).toBeNull();
+    expect(items[1].textContent).toContain("请大家评估这条方案");
+    expect(items[1].textContent).toContain("转发自 陈工：");
+    const marks = Array.from(host.querySelectorAll("mark")).map(
+      (el) => el.textContent,
+    );
+    expect(marks).toEqual(["SnapshotKey", "snapshotkey", "SnapshotKey"]);
+
+    // Clicking result button locates target message ID in the current conversation
+    const buttons = host.querySelectorAll<HTMLButtonElement>(
+      ".search-message-result",
+    );
+    await act(async () => {
+      buttons[2].click();
+    });
+    expect(onLocate).toHaveBeenCalledWith("message-40");
+
+    // Pagination loads older forwarded match without touching timeline or read cursor
+    expect(chatStore.getSnapshot().messages.channel).toBeUndefined();
+    await click(".search-more");
+    expect(api.searchMessages).toHaveBeenLastCalledWith(
+      "channel",
+      { q: "SnapshotKey", beforeSeq: 40 },
+      expect.any(AbortSignal),
+    );
+    expect(host.querySelectorAll(".search-result-list > li")).toHaveLength(4);
+    expect(host.textContent).toContain("转发自 王敏：");
+    expect(chatStore.getSnapshot().messages.channel).toBeUndefined();
+    expect(api.read).not.toHaveBeenCalled();
+
+    // Editing comment:
+    // - commentOnlyForward (seq 60) loses keyword -> drops out because forwarded.body doesn't match
+    // - commentedSnapshotForward (seq 50) updates comment -> stays because forwarded.body still matches
+    await act(async () => {
+      chatStore.merge([
+        {
+          ...commentOnlyForward,
+          body: "已移除该词的转发说明",
+          editedAt: "2026-10-17T00:02:00Z",
+        },
+        {
+          ...commentedSnapshotForward,
+          body: "更新后的转发留言",
+          editedAt: "2026-10-17T00:02:30Z",
+        },
+      ]);
+    });
+    expect(host.querySelectorAll(".search-result-list > li")).toHaveLength(3);
+    expect(host.textContent).not.toContain("已移除该词的转发说明");
+    expect(host.textContent).toContain("更新后的转发留言");
+
+    // Retracting commentlessForward (seq 40) removes it immediately
+    await act(async () => {
+      chatStore.merge([
+        {
+          ...commentlessForward,
+          body: "",
+          forwarded: undefined,
+          retractedAt: "2026-10-17T00:03:00Z",
+        },
+      ]);
+    });
+    expect(host.querySelectorAll(".search-result-list > li")).toHaveLength(2);
+    expect(host.textContent).not.toContain("<script>alert(1)</script>");
+  });
 });

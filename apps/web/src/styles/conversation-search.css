@@ -124,6 +124,25 @@
     color: inherit;
     border-radius: var(--r-xs);
   }
+  .search-comment-snippet {
+    display: block;
+  }
+  .search-forwarded-snippet {
+    display: block;
+    padding: var(--space-1) var(--space-3);
+    border-left: 2px solid var(--brand);
+    border-radius: var(--r-xs);
+    background: var(--surface-sunken);
+    color: var(--text-muted);
+    font-size: var(--font-base);
+  }
+  .search-comment-snippet + .search-forwarded-snippet {
+    margin-top: var(--space-2);
+  }
+  .search-forwarded-label {
+    color: var(--text-subtle);
+    font-weight: 600;
+  }
   .search-source {
     display: flex;
     align-items: center;
