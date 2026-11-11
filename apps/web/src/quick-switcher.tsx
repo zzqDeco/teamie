@@ -345,13 +345,19 @@ export function QuickSwitcher({
       const cached = (snapshot.messages[rawItem.conversation.id] || []).filter(
         (m) => m.id === rawItem.message.id,
       );
-      const [message] = reconcileMessages([rawItem.message], cached);
-      const bodyChanged = message?.body !== rawItem.message.body;
-      if (
-        !message ||
-        message.retractedAt ||
-        (bodyChanged && !message.body.toLowerCase().includes(queryLower))
-      ) {
+      const [reconciled] = reconcileMessages([rawItem.message], cached);
+      if (!reconciled || reconciled.retractedAt) {
+        continue;
+      }
+      const message =
+        reconciled.forwarded || !rawItem.message.forwarded
+          ? reconciled
+          : { ...reconciled, forwarded: rawItem.message.forwarded };
+      const bodyChanged = message.body !== rawItem.message.body;
+      const matchesQuery =
+        message.body.toLowerCase().includes(queryLower) ||
+        (message.forwarded?.body || "").toLowerCase().includes(queryLower);
+      if (bodyChanged && !matchesQuery) {
         continue;
       }
       const convForName: Conversation = liveConv || {

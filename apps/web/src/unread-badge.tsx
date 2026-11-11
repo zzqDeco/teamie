@@ -55,12 +55,12 @@ export function UnreadBadge({
       </span>
     );
   }
-  if (summary.muted)
-    return showLevelIcons ? (
+  const mutedIcon =
+    summary.muted && showLevelIcons ? (
       <BellOff size={ICON.xs} className="conversation-muted-icon" aria-label="已静音" role="img" />
     ) : null;
-  if (summary.badgeCount > 0)
-    return (
+  if (summary.badgeCount > 0) {
+    const badge = (
       <span
         className={`unread-badge ${summary.badgePrefix ? "mention-badge" : ""}`}
         aria-label={`${summary.badgeCount} 条未读`}
@@ -74,11 +74,31 @@ export function UnreadBadge({
         {summary.badgeCount > 99 ? "99+" : summary.badgeCount}
       </span>
     );
-  if (summary.level === "mentions")
-    return showLevelIcons ? (
+    return mutedIcon ? (
+      <>
+        {mutedIcon}
+        {badge}
+      </>
+    ) : (
+      badge
+    );
+  }
+  const levelIcon =
+    mutedIcon ||
+    (summary.level === "mentions" && showLevelIcons ? (
       <AtSign size={ICON.xs} className="conversation-mentions-icon" aria-label="仅提及通知" role="img" />
+    ) : null);
+  const dot =
+    summary.hasUnread && showDot ? (
+      <i className="unread-dot" role="img" aria-label="有未读消息" />
     ) : null;
-  if (summary.hasUnread && showDot)
-    return <i className="unread-dot" role="img" aria-label="有未读消息" />;
-  return null;
+  if (levelIcon && dot) {
+    return (
+      <>
+        {levelIcon}
+        {dot}
+      </>
+    );
+  }
+  return levelIcon || dot;
 }

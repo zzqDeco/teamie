@@ -4,12 +4,12 @@ import type {
 import {
   applyPinUpdated, applyReadUpdated, applySavedUpdated, pinMessageId,
   pruneCollaborationForConversations, pruneRetractedCollaborationState,
-  savedItemConversationId, savedItemMessageId, serializeSnapshot,
+  reconcileConversationsSnapshot, savedItemConversationId, savedItemMessageId, serializeSnapshot,
   setConversationPinsState, setConversationSavedState,
   setManualUnreadState, setSavedMessagesState, withSnapshotDefaults,
 } from "./collaboration-store";
 import type {
-  ChatSnapshot, ChatState, LocalMessage, PinnedMessage,
+  ChatSnapshot, ChatState, LocalMessage, PendingManualUnreadWrite, PinnedMessage,
   PinUpdatedEvent, ReadUpdatedEvent, SavedMessage, SavedUpdatedEvent,
 } from "./collaboration-store";
 import {
@@ -192,6 +192,8 @@ export class ChatStore {
   private schedule?: PersistScheduler;
   private cancelPersist?: () => void;
   private reactionAccessEpochs = new Map<string, number>();
+  private manualUnreadWrites = new Map<string, PendingManualUnreadWrite>();
+  private nextManualWriteToken = 0;
   generation = 0;
   notificationEpoch = 0;
   conversationVersion = 0;
@@ -324,6 +326,7 @@ export class ChatStore {
   }
   clear() {
     this.reactionAccessEpochs.clear();
+    this.manualUnreadWrites.clear();
     this.generation += 1;
     this.notificationEpoch += 1;
     this.conversationVersion += 1;
@@ -343,6 +346,7 @@ export class ChatStore {
   }
   revoke() {
     this.reactionAccessEpochs.clear();
+    this.manualUnreadWrites.clear();
     this.generation += 1;
     this.conversationVersion += 1;
     this.hasAuthoritativeConversations = false;
@@ -401,32 +405,13 @@ export class ChatStore {
     for (const id of Object.keys(this.snapshot.conversations)) {
       if (!allowed.has(id)) this.reactionAccessEpochs.set(id, (this.reactionAccessEpochs.get(id) || 0) + 1);
     }
+    const next = reconcileConversationsSnapshot(this.snapshot, conversations, allowed, this.manualUnreadWrites, newerTimestamp);
     this.commit({
-      ...this.snapshot,
-      ...pruneCollaborationForConversations(this.snapshot, allowed),
+      ...next,
       reactionStates: this.snapshot.reactionStates
         ? Object.fromEntries(Object.entries(this.snapshot.reactionStates).filter(([id]) => allowed.has(id)))
         : undefined,
-      messages: Object.fromEntries(
-        Object.entries(this.snapshot.messages).filter(([id]) => allowed.has(id)),
-      ),
-      conversations: Object.fromEntries(
-        conversations.map((c) => {
-          const old = this.snapshot.conversations[c.id];
-          const manualSeq = c.manualUnreadSeq ?? old?.manualUnreadSeq;
-          return [
-            c.id,
-            {
-              ...c,
-              lastSeq: Math.max(c.lastSeq, old?.lastSeq ?? 0),
-              readSeq: manualSeq ? c.readSeq : Math.max(c.readSeq, old?.readSeq ?? 0),
-              ...(manualSeq ? { manualUnreadSeq: manualSeq } : {}),
-              updatedAt: newerTimestamp(old?.updatedAt, c.updatedAt),
-              notificationLevel: c.notificationLevel ?? old?.notificationLevel ?? "all",
-            },
-          ];
-        }),
-      ),
+      messages: Object.fromEntries(Object.entries(this.snapshot.messages).filter(([id]) => allowed.has(id))),
     });
     return true;
   }
@@ -438,26 +423,15 @@ export class ChatStore {
     });
   }
   markRead(id: string, seq: number, manualUnreadSeq?: number | null) {
-    const conversation = this.snapshot.conversations[id] as
-      | (Conversation & { unreadCount?: number })
-      | undefined;
+    const conversation = this.snapshot.conversations[id] as (Conversation & { unreadCount?: number }) | undefined;
     if (!conversation) return;
     const currentManual = this.snapshot.manualUnreadByConversation[id] ?? conversation.manualUnreadSeq;
-    const nextManual =
-      manualUnreadSeq !== undefined
-        ? manualUnreadSeq && manualUnreadSeq > 0
-          ? manualUnreadSeq
-          : undefined
-        : currentManual && seq >= currentManual
-          ? undefined
-          : currentManual;
+    const nextManual = manualUnreadSeq !== undefined
+      ? (manualUnreadSeq && manualUnreadSeq > 0 ? manualUnreadSeq : undefined)
+      : (currentManual && seq >= currentManual ? undefined : currentManual);
     const manualChanged = nextManual !== currentManual || nextManual !== conversation.manualUnreadSeq;
     const nextReadSeq = Math.max(conversation.readSeq, seq);
-    const nextUnreadCount = Math.max(
-      0,
-      conversation.lastSeq - nextReadSeq,
-      nextManual && nextManual > 0 ? conversation.lastSeq - nextManual + 1 : 0,
-    );
+    const nextUnreadCount = Math.max(0, conversation.lastSeq - nextReadSeq, nextManual && nextManual > 0 ? conversation.lastSeq - nextManual + 1 : 0);
     if (seq > conversation.readSeq || manualChanged || conversation.unreadCount !== nextUnreadCount) {
       const nextManualMap = { ...this.snapshot.manualUnreadByConversation };
       if (nextManual && nextManual > 0) nextManualMap[id] = nextManual;
@@ -499,11 +473,40 @@ export class ChatStore {
   }
   applyReadUpdated(event: ReadUpdatedEvent, currentUserId?: string) {
     const next = applyReadUpdated(this.snapshot, event, currentUserId);
-    if (next !== this.snapshot) this.commit(next);
+    if (next !== this.snapshot) {
+      if (next.conversations !== this.snapshot.conversations || next.manualUnreadByConversation !== this.snapshot.manualUnreadByConversation)
+        this.conversationVersion += 1;
+      this.commit(next);
+    }
   }
   setManualUnread(conversationId: string, seq: number | undefined) {
     const next = setManualUnreadState(this.snapshot, conversationId, seq);
-    if (next !== this.snapshot) this.commit(next);
+    if (next !== this.snapshot) {
+      this.conversationVersion += 1;
+      this.commit(next);
+    }
+  }
+  beginManualUnreadWrite(conversationId: string) {
+    const gen = this.generation, token = ++this.nextManualWriteToken;
+    const prev = this.manualUnreadWrites.get(conversationId);
+    this.manualUnreadWrites.set(conversationId, { token, active: (prev?.active || 0) + 1 });
+    this.conversationVersion += 1;
+    let done = false;
+    return {
+      isLatest: () => gen === this.generation && this.manualUnreadWrites.get(conversationId)?.token === token,
+      rollbackSeq: (fallback: number | undefined) => {
+        const cur = this.manualUnreadWrites.get(conversationId);
+        return cur?.token === token && cur.hasServerSeq ? cur.serverSeq : fallback;
+      },
+      end: () => {
+        if (done || gen !== this.generation) return;
+        done = true;
+        const cur = this.manualUnreadWrites.get(conversationId);
+        if (cur && cur.active <= 1) this.manualUnreadWrites.delete(conversationId);
+        else if (cur) cur.active -= 1;
+        this.conversationVersion += 1;
+      },
+    };
   }
   applyRealtimeEvent(event: SyncEvent) {
     this.apply({
@@ -571,7 +574,8 @@ export class ChatStore {
       page.events.every((event) => olderOrEqual(event.id, this.snapshot.cursor))
     )
       return;
-    if (page.events.some((event) => event.conversation || event.type === "membership.changed"))
+    if (page.events.some((event) => !olderOrEqual(event.id, this.snapshot.cursor) &&
+      (event.conversation || event.type === "membership.changed" || event.type === "read.updated" || event.type === "preference.updated")))
       this.conversationVersion += 1;
     // Entity changes and cursor are persisted together, after every event is reconciled.
     let next: ChatSnapshot = {
@@ -601,35 +605,31 @@ export class ChatStore {
       }
       if (event.conversation) {
         const old = next.conversations[event.conversation.id];
-        next.conversations[event.conversation.id] = {
+        const manualSeq = event.conversation.manualUnreadSeq ?? next.manualUnreadByConversation?.[event.conversation.id] ?? old?.manualUnreadSeq;
+        const merged: Conversation = {
           ...event.conversation,
           readSeq: Math.max(old?.readSeq || 0, event.conversation.readSeq),
           lastSeq: Math.max(old?.lastSeq || 0, event.conversation.lastSeq),
-          updatedAt: newerTimestamp(
-            old?.updatedAt,
-            event.conversation.updatedAt,
-          ),
+          updatedAt: newerTimestamp(old?.updatedAt, event.conversation.updatedAt),
+          notificationLevel: old?.notificationLevel && (!event.conversation.notificationLevel || event.conversation.notificationLevel === "all")
+            ? old.notificationLevel : (event.conversation.notificationLevel ?? "all"),
         };
+        if (manualSeq && manualSeq > 0) merged.manualUnreadSeq = manualSeq;
+        else delete merged.manualUnreadSeq;
+        next.conversations[event.conversation.id] = merged;
       }
       if (event.type === "read.updated" && event.conversationId) {
         const readEvt = event as SyncEvent & { userId?: string; unreadCount?: number };
         next = applyReadUpdated(next, {
-          conversationId: event.conversationId,
-          userId: readEvt.userId,
-          readSeq: event.readSeq,
-          manualUnreadSeq: event.manualUnreadSeq,
-          unreadCount: readEvt.unreadCount,
+          conversationId: event.conversationId, userId: readEvt.userId,
+          readSeq: event.readSeq, manualUnreadSeq: event.manualUnreadSeq, unreadCount: readEvt.unreadCount,
         }, next.userId);
       }
       if (event.type === "pin.updated" && event.conversationId && event.messageId) {
         const pinEvt = event as SyncEvent & { action?: "pinned" | "unpinned"; pin?: PinnedMessage };
         next = applyPinUpdated(next, {
-          conversationId: event.conversationId,
-          messageId: event.messageId,
-          action: pinEvt.action,
-          pinned: event.pinned,
-          pin: pinEvt.pin,
-          pinsVersion: event.pinsVersion,
+          conversationId: event.conversationId, messageId: event.messageId,
+          action: pinEvt.action, pinned: event.pinned, pin: pinEvt.pin, pinsVersion: event.pinsVersion,
         });
       }
       if (event.type === "saved.updated" && event.messageId) {

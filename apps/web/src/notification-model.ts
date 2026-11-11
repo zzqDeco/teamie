@@ -67,27 +67,66 @@ export function ordinaryUnreadCount(
 
 export function summarizeConversationUnread(
   conversation: Conversation,
-  snapshot: { notificationProjection?: NotificationProjection },
+  snapshot: {
+    notificationProjection?: NotificationProjection;
+    manualUnreadByConversation?: Record<string, number>;
+  },
   _userId: string,
   projection?: ReadonlyArray<AttentionUnreadDTO | AttentionItem>,
 ): ConversationUnreadSummary {
-  const level = effectiveNotificationLevel(conversation);
-  const manualSeq = conversation.manualUnreadSeq && conversation.manualUnreadSeq > 0 ? conversation.manualUnreadSeq : 0;
-  const rawUnread = ordinaryUnreadCount(conversation);
-  const supplied = projection?.find((item): item is AttentionUnreadDTO => "unreadCount" in item && item.conversationId === conversation.id);
-  const count = supplied?.unreadCount ?? snapshot.notificationProjection?.byConversation[conversation.id];
-  const mentionUnread = rawUnread === 0 ? 0 : Math.max(0, count ?? 0);
-  const relevantUnread = conversation.type === "channel" ? mentionUnread : rawUnread;
+  const fallbackManual = snapshot.manualUnreadByConversation?.[conversation.id];
+  const effective =
+    !conversation.manualUnreadSeq &&
+    typeof fallbackManual === "number" &&
+    fallbackManual > 0
+      ? { ...conversation, manualUnreadSeq: fallbackManual }
+      : conversation;
+  const level = effectiveNotificationLevel(effective);
+  const manualSeq =
+    effective.manualUnreadSeq && effective.manualUnreadSeq > 0
+      ? effective.manualUnreadSeq
+      : 0;
+  const hasManual = manualSeq > 0;
+  const rawUnread = ordinaryUnreadCount(effective);
+  const cursorUnread =
+    typeof effective.readSeq === "number"
+      ? Math.max(0, effective.lastSeq - effective.readSeq)
+      : rawUnread;
+  const supplied = projection?.find(
+    (item): item is AttentionUnreadDTO =>
+      "unreadCount" in item && item.conversationId === effective.id,
+  );
+  const count =
+    supplied?.unreadCount ??
+    snapshot.notificationProjection?.byConversation[effective.id];
+  const mentionUnread = cursorUnread === 0 ? 0 : Math.max(0, count ?? 0);
+  const relevantUnread =
+    effective.type === "channel" ? mentionUnread : rawUnread;
   const muted = level === "none";
-  const hasUnread = !muted && (manualSeq > 0 || (level === "all" ? rawUnread > 0 : relevantUnread > 0));
-  const badgeCount = muted ? 0 : relevantUnread;
+  const hasUnread =
+    hasManual ||
+    (!muted && (level === "all" ? rawUnread > 0 : relevantUnread > 0));
+  const badgeCount =
+    hasManual && effective.type !== "channel"
+      ? rawUnread
+      : muted
+        ? 0
+        : relevantUnread;
   return {
-    level, muted, rawUnread, mentionUnread, hasUnread, badgeCount,
-    badgePrefix: conversation.type === "channel" && badgeCount > 0 ? "@ " : "",
+    level,
+    muted,
+    rawUnread,
+    mentionUnread,
+    hasUnread,
+    badgeCount,
+    badgePrefix: effective.type === "channel" && badgeCount > 0 ? "@ " : "",
     contributesToWorkspaceDot: hasUnread,
-    contributesToUrgentCount: badgeCount,
-    contributesToChannelUnreadDot: !muted && conversation.type === "channel" && (manualSeq > 0 || (level === "all" && rawUnread > 0)),
-    projectionKnown: rawUnread === 0 || count !== undefined,
+    contributesToUrgentCount: muted ? 0 : relevantUnread,
+    contributesToChannelUnreadDot:
+      !muted &&
+      effective.type === "channel" &&
+      (hasManual || (level === "all" && rawUnread > 0)),
+    projectionKnown: cursorUnread === 0 || count !== undefined,
     projectionStale: !supplied && Boolean(snapshot.notificationProjection?.stale),
   };
 }

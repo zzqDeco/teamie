@@ -300,13 +300,22 @@ export function useConversationReadTracking({
     );
     if (!hasManualUnread && (!latest || latest <= readSeq)) return;
     const token = chatStore.generation;
+    const unreadWrite = hasManualUnread
+      ? chatStore.beginManualUnreadWrite(conversation.id)
+      : null;
     chatStore.setManualUnread(conversation.id, undefined);
     if (hasManualUnread && typeof api.clearConversationUnread === "function") {
-      void Promise.resolve(api.clearConversationUnread(conversation.id)).catch(
-        () => {
+      void (async () => {
+        try {
+          await api.clearConversationUnread(conversation.id);
+        } catch {
           /* Best-effort clear alongside read */
-        },
-      );
+        } finally {
+          unreadWrite?.end();
+        }
+      })();
+    } else {
+      unreadWrite?.end();
     }
     const targetSeq = Math.max(latest, readSeq);
     if (!targetSeq) return;

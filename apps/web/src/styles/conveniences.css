@@ -169,7 +169,7 @@
   }
 }
 
-  .conversation-link.is-muted {
+  .conversation-link.is-muted:not(.has-unread):not(.active):not(:hover) {
     color: var(--text-subtle);
   }
 
@@ -178,6 +178,11 @@
     margin-left: auto;
     color: var(--text-subtle);
     flex-shrink: 0;
+  }
+
+  .conversation-muted-icon + .unread-dot,
+  .conversation-mentions-icon + .unread-dot {
+    margin-left: 0;
   }
 
   .unread-badge.mention-badge {

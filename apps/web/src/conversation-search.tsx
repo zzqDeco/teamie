@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { CornerUpLeft, LoaderCircle, Search } from "lucide-react";
 import { api } from "@teamie/api-client";
-import type { MessagePage } from "@teamie/api-client";
+import type { Attachment, Message, MessagePage } from "@teamie/api-client";
 import { MessageAttachments } from "./attachments";
 import { useChatState } from "./chat";
 import { errorText } from "./errors";
@@ -23,6 +23,27 @@ function Highlight({ text, query }: { text: string; query: string }) {
   return text
     .split(new RegExp(`(${literal})`, "giu"))
     .map((part, i) => (i % 2 ? <mark key={i}>{part}</mark> : part));
+}
+
+function matchingAttachments(
+  message: Message,
+  termLower: string,
+): Attachment[] {
+  const files = [
+    ...(message.attachments || []),
+    ...(message.forwarded?.attachments || []),
+  ];
+  return termLower
+    ? files.filter((file) => file.filename.toLowerCase().includes(termLower))
+    : files;
+}
+
+function matchesMessageBody(message: Message, termLower: string): boolean {
+  return (
+    Boolean(termLower) &&
+    (message.body.toLowerCase().includes(termLower) ||
+      Boolean(message.forwarded?.body.toLowerCase().includes(termLower)))
+  );
 }
 
 export function ConversationSearch({
@@ -157,21 +178,28 @@ export function ConversationSearch({
 
   // Search pages stay local. Only matching cached versions can update them, so
   // locating/searching history cannot pollute the normal timeline or read cursor.
+  const termLower = term.toLowerCase();
+  const pageById = new Map((page?.messages || []).map((p) => [p.id, p]));
   const messages = page
     ? reconcileMessages(
         page.messages,
         (snapshot.messages[conversationId] || []).filter((m) =>
-          page.messages.some((p) => p.id === m.id),
+          pageById.has(m.id),
         ),
       )
+        .map((message) => {
+          if (message.retractedAt || message.forwarded) return message;
+          const fromPage = pageById.get(message.id);
+          return fromPage?.forwarded
+            ? { ...message, forwarded: fromPage.forwarded }
+            : message;
+        })
         .filter(
           (message) =>
             !message.retractedAt &&
             (mode === "files"
-              ? message.attachments?.some((file) =>
-                  file.filename.toLowerCase().includes(term.toLowerCase()),
-                )
-              : message.body.toLowerCase().includes(term.toLowerCase())),
+              ? matchingAttachments(message, termLower).length > 0
+              : matchesMessageBody(message, termLower)),
         )
         .reverse()
     : [];
@@ -234,41 +262,63 @@ export function ConversationSearch({
           </p>
         )}
         <ol className="search-result-list" aria-label="搜索结果">
-          {messages.map((message) => (
-            <li key={message.id}>
-              <div className="search-result-meta">
-                <b>{message.senderName}</b>
-                {message.senderKind === "agent" && <AgentBadge />}
-                <time dateTime={message.createdAt}>
-                  {date(message.createdAt)} {time(message.createdAt)}
-                </time>
-              </div>
-              {mode === "messages" ? (
-                <button
-                  className="search-message-result"
-                  onClick={() => onLocate(message.id)}
-                  aria-label={`定位消息：${message.body}`}
-                >
-                  <Highlight text={message.body} query={term} />
-                </button>
-              ) : (
-                <MessageAttachments
-                  conversationId={conversationId}
-                  attachments={(message.attachments || []).filter((file) =>
-                    file.filename.toLowerCase().includes(term.toLowerCase()),
-                  )}
-                />
-              )}
-              {mode === "files" && (
-                <button
-                  className="search-source"
-                  onClick={() => onLocate(message.id)}
-                >
-                  <CornerUpLeft size={ICON.xs} /> 查看消息
-                </button>
-              )}
-            </li>
-          ))}
+          {messages.map((message) => {
+            const forwarded = message.forwarded;
+            const forwardedMatches = Boolean(
+              forwarded?.body &&
+                forwarded.body.toLowerCase().includes(termLower),
+            );
+            const ariaSummary =
+              message.body ||
+              (forwarded
+                ? `转发自 ${forwarded.senderName}：${forwarded.body}`
+                : "");
+            return (
+              <li key={message.id}>
+                <div className="search-result-meta">
+                  <b>{message.senderName}</b>
+                  {message.senderKind === "agent" && <AgentBadge />}
+                  <time dateTime={message.createdAt}>
+                    {date(message.createdAt)} {time(message.createdAt)}
+                  </time>
+                </div>
+                {mode === "messages" ? (
+                  <button
+                    className="search-message-result"
+                    onClick={() => onLocate(message.id)}
+                    aria-label={`定位消息：${ariaSummary}`}
+                  >
+                    {(message.body || !forwardedMatches) && (
+                      <span className="search-comment-snippet">
+                        <Highlight text={message.body} query={term} />
+                      </span>
+                    )}
+                    {forwardedMatches && forwarded && (
+                      <span className="search-forwarded-snippet">
+                        <span className="search-forwarded-label">
+                          转发自 {forwarded.senderName}：
+                        </span>
+                        <Highlight text={forwarded.body} query={term} />
+                      </span>
+                    )}
+                  </button>
+                ) : (
+                  <MessageAttachments
+                    conversationId={conversationId}
+                    attachments={matchingAttachments(message, termLower)}
+                  />
+                )}
+                {mode === "files" && (
+                  <button
+                    className="search-source"
+                    onClick={() => onLocate(message.id)}
+                  >
+                    <CornerUpLeft size={ICON.xs} /> 查看消息
+                  </button>
+                )}
+              </li>
+            );
+          })}
         </ol>
         {page?.hasMore && (
           <Button

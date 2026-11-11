@@ -428,7 +428,7 @@ export function applyReadUpdated(
   const prevReadSeq = conv.readSeq;
   const nextReadSeq = typeof event.readSeq === "number" ? Math.max(prevReadSeq, event.readSeq) : prevReadSeq;
 
-  let nextManualSeq = conv.manualUnreadSeq;
+  let nextManualSeq: number | undefined = state.manualUnreadByConversation?.[conversationId] ?? conv.manualUnreadSeq;
   const hadManualMap = Object.hasOwn(state, "manualUnreadByConversation");
   const nextManualMap = { ...state.manualUnreadByConversation };
   let manualChanged = false;
@@ -521,29 +521,42 @@ export function pruneCollaborationForConversations(state: ChatSnapshot, allowed:
     rec ? Object.fromEntries(Object.entries(rec).filter(([id]) => allowed.has(id))) : undefined;
   return {
     ...(Object.hasOwn(state, "pinsByConversation") ? { pinsByConversation: filterRec(state.pinsByConversation) || EMPTY_PINS } : {}),
-    ...(Object.hasOwn(state, "pinsVersionByConversation") && state.pinsVersionByConversation
-      ? { pinsVersionByConversation: filterRec(state.pinsVersionByConversation) }
-      : {}),
-    ...(Object.hasOwn(state, "pinsInitializedByConversation") && state.pinsInitializedByConversation
-      ? { pinsInitializedByConversation: filterRec(state.pinsInitializedByConversation) }
-      : {}),
-    ...(Object.hasOwn(state, "pinsNeedsRefreshByConversation") && state.pinsNeedsRefreshByConversation
-      ? { pinsNeedsRefreshByConversation: filterRec(state.pinsNeedsRefreshByConversation) }
-      : {}),
-    ...(Object.hasOwn(state, "pinsPendingDeltaByConversation") && state.pinsPendingDeltaByConversation
-      ? { pinsPendingDeltaByConversation: filterRec(state.pinsPendingDeltaByConversation) }
-      : {}),
-    ...(Object.hasOwn(state, "savedByConversation")
-      ? { savedByConversation: filterRec(state.savedByConversation) || EMPTY_SAVED_BY_CONV }
-      : {}),
-    ...(Object.hasOwn(state, "savedMessages")
-      ? { savedMessages: (state.savedMessages || []).filter((item) => allowed.has(savedItemConversationId(item))) }
-      : {}),
+    ...(Object.hasOwn(state, "pinsVersionByConversation") && state.pinsVersionByConversation ? { pinsVersionByConversation: filterRec(state.pinsVersionByConversation) } : {}),
+    ...(Object.hasOwn(state, "pinsInitializedByConversation") && state.pinsInitializedByConversation ? { pinsInitializedByConversation: filterRec(state.pinsInitializedByConversation) } : {}),
+    ...(Object.hasOwn(state, "pinsNeedsRefreshByConversation") && state.pinsNeedsRefreshByConversation ? { pinsNeedsRefreshByConversation: filterRec(state.pinsNeedsRefreshByConversation) } : {}),
+    ...(Object.hasOwn(state, "pinsPendingDeltaByConversation") && state.pinsPendingDeltaByConversation ? { pinsPendingDeltaByConversation: filterRec(state.pinsPendingDeltaByConversation) } : {}),
+    ...(Object.hasOwn(state, "savedByConversation") ? { savedByConversation: filterRec(state.savedByConversation) || EMPTY_SAVED_BY_CONV } : {}),
+    ...(Object.hasOwn(state, "savedMessages") ? { savedMessages: (state.savedMessages || []).filter((item) => allowed.has(savedItemConversationId(item))) } : {}),
     ...(Object.hasOwn(state, "readReceipts") ? { readReceipts: filterRec(state.readReceipts) || EMPTY_RECEIPTS } : {}),
-    ...(Object.hasOwn(state, "manualUnreadByConversation")
-      ? { manualUnreadByConversation: filterRec(state.manualUnreadByConversation) || EMPTY_MANUAL_UNREAD }
-      : {}),
+    ...(Object.hasOwn(state, "manualUnreadByConversation") ? { manualUnreadByConversation: filterRec(state.manualUnreadByConversation) || EMPTY_MANUAL_UNREAD } : {}),
   };
+}
+
+export type PendingManualUnreadWrite = { token: number; active: number; serverSeq?: number; hasServerSeq?: boolean };
+export function reconcileConversationsSnapshot(
+  state: ChatSnapshot, conversations: ReadonlyArray<Conversation>, allowed: ReadonlySet<string>,
+  pendingWrites: Map<string, PendingManualUnreadWrite>, mergeUpdatedAt: (a?: string, b?: string) => string,
+): ChatSnapshot {
+  for (const id of pendingWrites.keys()) if (!allowed.has(id)) pendingWrites.delete(id);
+  const nextManual: Record<string, number> = {};
+  const nextConvs = Object.fromEntries(conversations.map((c) => {
+    const old = state.conversations[c.id], pending = pendingWrites.get(c.id);
+    const serverSeq = c.manualUnreadSeq && c.manualUnreadSeq > 0 ? c.manualUnreadSeq : undefined;
+    if (pending) { pending.hasServerSeq = true; pending.serverSeq = serverSeq; }
+    const manualSeq = pending ? (state.manualUnreadByConversation?.[c.id] ?? old?.manualUnreadSeq) : serverSeq;
+    if (manualSeq && manualSeq > 0) nextManual[c.id] = manualSeq;
+    const merged: Conversation & { unreadCount?: number } = {
+      ...c, lastSeq: Math.max(c.lastSeq, old?.lastSeq ?? 0), readSeq: Math.max(c.readSeq, old?.readSeq ?? 0),
+      updatedAt: mergeUpdatedAt(old?.updatedAt, c.updatedAt), notificationLevel: c.notificationLevel ?? old?.notificationLevel ?? "all",
+    };
+    if (manualSeq && manualSeq > 0) merged.manualUnreadSeq = manualSeq; else delete merged.manualUnreadSeq;
+    if ("unreadCount" in merged) merged.unreadCount = Math.max(0, merged.lastSeq - merged.readSeq, manualSeq && manualSeq > 0 ? Math.max(1, merged.lastSeq - manualSeq + 1) : 0);
+    return [c.id, merged as Conversation];
+  }));
+  const next: ChatSnapshot = { ...state, ...pruneCollaborationForConversations(state, allowed), conversations: nextConvs };
+  if (Object.keys(nextManual).length > 0) next.manualUnreadByConversation = nextManual;
+  else delete (next as Partial<ChatSnapshot>).manualUnreadByConversation;
+  return next;
 }
 
 export function pruneRetractedCollaborationState(state: ChatSnapshot, messages: LocalMessage[]): ChatSnapshot {
