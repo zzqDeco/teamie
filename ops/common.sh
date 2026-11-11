@@ -2,6 +2,7 @@
 # Shared host paths. Callers set umask 077 before sourcing.
 TEAMIE_ROOT=${TEAMIE_ROOT:-/srv/teamie}
 [[ $TEAMIE_ROOT =~ ^(/[a-zA-Z0-9._-]+)+$ && ! "$TEAMIE_ROOT/" =~ /\.\.?/ ]] || { echo 'Invalid TEAMIE_ROOT' >&2; exit 1; }
+export TEAMIE_ROOT
 HOST_ENV="$TEAMIE_ROOT/config/production.env"
 export COMPOSE_PARALLEL_LIMIT=1
 
@@ -79,6 +80,7 @@ cutover_service_ab() {
 }
 
 rollout_fenced() {
+  local compose_json=${1:-} manifest_tool=${2:-}
   # Every service migration is forward-only and runs before its /readyz is healthy.
   "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 postgres redis || return
   local services
@@ -114,14 +116,24 @@ rollout_fenced() {
     "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 agent-control llm-gateway sandbox || return
     "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 agent-runtime || return
   fi
-  "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 caddy || return
+  if [[ -n $compose_json && -f $compose_json && -n $manifest_tool ]]; then
+    if ! python3 "$manifest_tool" service-up-to-date "$compose_json" caddy; then
+      "${COMPOSE[@]}" up -d --no-deps --force-recreate --wait --wait-timeout 180 caddy || return
+    else
+      "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 caddy || return
+    fi
+    python3 "$manifest_tool" record-caddy-tls "$compose_json" || return
+  else
+    "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 caddy || return
+  fi
 }
 
 rollout_online() {
   local compose_json=$1 manifest_tool=$2 services=$3
   cleanup_canary_containers
   if ! python3 "$manifest_tool" service-up-to-date "$compose_json" caddy; then
-    "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 caddy || { cleanup_canary_containers; return 1; }
+    "${COMPOSE[@]}" up -d --no-deps --force-recreate --wait --wait-timeout 180 caddy || { cleanup_canary_containers; return 1; }
+    python3 "$manifest_tool" record-caddy-tls "$compose_json" || { cleanup_canary_containers; return 1; }
   fi
   local service_list
   # shellcheck disable=SC2086
@@ -153,7 +165,8 @@ rollout() {
   if [[ -n $target_manifest && -f $target_manifest && -n $current_manifest && -f $current_manifest && -n $compose_json && -f $compose_json ]] &&
      python3 "$manifest_tool" online-compatible "$target_manifest" "$current_manifest" &&
      python3 "$manifest_tool" service-up-to-date "$compose_json" postgres &&
-     python3 "$manifest_tool" service-up-to-date "$compose_json" redis; then
+     python3 "$manifest_tool" service-up-to-date "$compose_json" redis &&
+     python3 "$manifest_tool" online-memory-ready "$compose_json"; then
     local services
     services=$("${COMPOSE[@]}" config --services) || return
     if [[ $services == *llm-gateway* || $services == *marketplace* ]]; then
@@ -172,5 +185,5 @@ rollout() {
   fi
 
   cleanup_canary_containers
-  rollout_fenced
+  rollout_fenced "$compose_json" "$manifest_tool"
 }

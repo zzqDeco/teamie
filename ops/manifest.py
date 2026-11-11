@@ -19,6 +19,8 @@ SERVICES = LEGACY_SERVICES + ("agent-control", "agent-runtime", "llm-gateway", "
 SERVICES_V3 = SERVICES + ("marketplace",)
 ONLINE_AB_SERVICES = ("identity", "chat", "marketplace", "realtime", "web", "agent-control", "llm-gateway")
 SINGLE_INSTANCE_SERVICES = ("postgres", "redis", "sandbox", "agent-runtime")
+MAX_CONTAINER_BUDGET_BYTES = 1600 * 1024 * 1024
+SANDBOX_CHILD_RESERVE_BYTES = 128 * 1024 * 1024
 SCHEMA_V2 = {"identity": 3, "chat": 9, "agent_control": 3, "agent_runtime": 15, "gateway": 6}
 SCHEMA_V3 = {"identity": 3, "chat": 12, "marketplace": 1, "agent_control": 3, "agent_runtime": 16, "gateway": 7}
 VERSION = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
@@ -157,6 +159,11 @@ def validate(data):
         require(isinstance(data["minCompatibleVersion"], str), "minCompatibleVersion must be a semantic version string")
         require(version(data["minCompatibleVersion"]) <= version(data["version"]),
                 "minCompatibleVersion cannot exceed manifest version")
+    if "onlineRollout" in data:
+        require(
+            data["manifestVersion"] == 3 and data["onlineRollout"] is True,
+            "onlineRollout capability requires manifestVersion 3 and boolean true",
+        )
     return data
 
 
@@ -186,6 +193,10 @@ def online_compatible(target, current=None):
         validate(current)
         require(target["manifestVersion"] == current["manifestVersion"],
                 "online A/B rollout requires identical manifestVersion")
+        require(
+            target.get("onlineRollout") is True and current.get("onlineRollout") is True,
+            "online A/B rollout requires dual-slot capability in both current and target releases",
+        )
         compatible(target, current)
         compatible(current, target)
     except (ValueError, KeyError, TypeError):
@@ -210,7 +221,8 @@ def check_transition(candidate, current=None, highwater=None, rollback=False):
         require(new >= previous, "release version is lower than the highest deployed version")
         if new == previous:
             require(candidate["source"] == highwater["source"] and candidate["images"] == highwater["images"] and
-                    candidate.get("registry") == highwater.get("registry"),
+                    candidate.get("registry") == highwater.get("registry") and
+                    candidate.get("onlineRollout") == highwater.get("onlineRollout"),
                     "an already deployed release is immutable; create a new version")
     if current:
         validate(current)
@@ -416,6 +428,131 @@ def _same_mount_source(expected_source, mounted_source):
     return os.path.realpath(expected_abs) == os.path.realpath(mounted_abs)
 
 
+def _parse_mem_bytes(value):
+    if value is None or value == "":
+        return 0
+    if isinstance(value, (int, float)):
+        return max(0, int(value))
+    raw = str(value).strip().lower()
+    if not raw:
+        return 0
+    if raw.isdigit():
+        return int(raw)
+    match = re.fullmatch(r"([0-9]+)\s*(b|k|kb|kib|m|mb|mib|g|gb|gib)", raw)
+    require(match is not None, f"invalid memory limit value {value!r}")
+    amount = int(match.group(1))
+    unit = match.group(2)
+    if unit == "b":
+        return amount
+    if unit in ("k", "kb", "kib"):
+        return amount * 1024
+    if unit in ("m", "mb", "mib"):
+        return amount * 1024 * 1024
+    return amount * 1024 * 1024 * 1024
+
+
+def _caddy_tls_state_path():
+    root = os.environ.get("TEAMIE_ROOT", "/srv/teamie")
+    return Path(root) / "state" / "caddy-tls-loaded.json"
+
+
+def _caddy_tls_fingerprint(config, container_id=None):
+    services = config.get("services") or {}
+    spec = services.get("caddy") or {}
+    issuer_source = None
+    tls_dir_source = None
+    for vol in spec.get("volumes") or []:
+        if not isinstance(vol, dict) or vol.get("type") != "bind":
+            continue
+        if vol.get("target") == "/etc/caddy/issuer.caddy":
+            issuer_source = vol.get("source")
+        elif vol.get("target") == "/run/tls":
+            tls_dir_source = vol.get("source")
+    if not issuer_source:
+        return None
+    issuer_bytes = Path(issuer_source).read_bytes()
+    issuer_sha = hashlib.sha256(issuer_bytes).hexdigest()
+    issuer_text = issuer_bytes.decode("utf-8", errors="replace")
+    if "/run/tls/" not in issuer_text:
+        return {"issuerSha256": issuer_sha, "tlsFilesSha256": "acme"}
+    require(bool(tls_dir_source), "missing /run/tls mount for file-based TLS")
+    try:
+        fc_sha = hashlib.sha256((Path(tls_dir_source) / "fullchain.pem").read_bytes()).hexdigest()
+        pk_sha = hashlib.sha256((Path(tls_dir_source) / "privkey.pem").read_bytes()).hexdigest()
+    except PermissionError:
+        require(bool(container_id), "running caddy container required to hash root-owned /run/tls files")
+        out = subprocess.check_output(
+            ["docker", "exec", str(container_id), "sha256sum", "/run/tls/fullchain.pem", "/run/tls/privkey.pem"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+        lines = [ln.strip().split()[0] for ln in out.splitlines() if ln.strip()]
+        require(
+            len(lines) == 2 and all(re.fullmatch(r"[0-9a-f]{64}", d) for d in lines),
+            "unexpected sha256sum output for /run/tls certificate files",
+        )
+        fc_sha, pk_sha = lines[0], lines[1]
+    combined = hashlib.sha256(f"fullchain:{fc_sha}\nprivkey:{pk_sha}\n".encode("utf-8")).hexdigest()
+    return {"issuerSha256": issuer_sha, "tlsFilesSha256": combined}
+
+
+def record_caddy_tls(config):
+    """Record the exact TLS snippet and certificate digests loaded by the running Caddy container."""
+    services = config.get("services") or {}
+    require("caddy" in services, "caddy service missing from compose config")
+    project = config.get("name") or "teamie"
+    ps = subprocess.run(
+        [
+            "docker",
+            "ps",
+            "--filter",
+            f"label=com.docker.compose.project={project}",
+            "--filter",
+            "label=com.docker.compose.service=caddy",
+            "--format",
+            "{{.ID}}",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    ids = ps.stdout.split()
+    require(len(ids) == 1, "expected exactly one running caddy container")
+    inspected = json.loads(subprocess.check_output(["docker", "inspect", ids[0]], text=True, stderr=subprocess.DEVNULL))
+    require(bool(inspected), "unable to inspect running caddy container")
+    info = inspected[0]
+    state = info.get("State") or {}
+    require(bool(state.get("Running")), "caddy container is not running")
+    health = state.get("Health")
+    if isinstance(health, dict):
+        require(health.get("Status") == "healthy", "caddy container is not healthy")
+    fp = _caddy_tls_fingerprint(config, info.get("Id") or ids[0])
+    if fp is None:
+        return
+    stamp_path = _caddy_tls_state_path()
+    stamp_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "containerId": info.get("Id") or ids[0],
+        "startedAt": state.get("StartedAt") or "",
+        "issuerSha256": fp["issuerSha256"],
+        "tlsFilesSha256": fp["tlsFilesSha256"],
+    }
+    fd, tmp_name = tempfile.mkstemp(prefix=".caddy-tls-", dir=str(stamp_path.parent))
+    try:
+        os.chmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+        os.replace(tmp_name, stamp_path)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
 def service_up_to_date(config, service_name):
     """Return True when exactly one healthy canonical container matches the target spec."""
     services = config.get("services") or {}
@@ -498,6 +635,81 @@ def service_up_to_date(config, service_name):
                 return False
         elif not _same_mount_source(target_source, mounted_source):
             return False
+    if service_name == "caddy":
+        try:
+            expected_tls = _caddy_tls_fingerprint(config, info.get("Id") or ids[0])
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return False
+        if expected_tls is not None:
+            stamp_path = _caddy_tls_state_path()
+            try:
+                stamp = json.loads(stamp_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return False
+            if (
+                not isinstance(stamp, dict)
+                or stamp.get("containerId") != (info.get("Id") or ids[0])
+                or stamp.get("startedAt") != (state.get("StartedAt") or "")
+                or stamp.get("issuerSha256") != expected_tls["issuerSha256"]
+                or stamp.get("tlsFilesSha256") != expected_tls["tlsFilesSha256"]
+            ):
+                return False
+    return True
+
+
+def check_canary_memory_budget(config, canary_bytes, ignore_existing_canaries=False):
+    """Ensure active containers + Sandbox execution child reservation + canary stay within 1,600 MiB."""
+    services = config.get("services") or {}
+    ps = subprocess.run(["docker", "ps", "-q"], check=True, capture_output=True, text=True)
+    ids = ps.stdout.split()
+    other_running_bytes = 0
+    sandbox_child_bytes = 0
+    sandbox_supervisor_running = False
+    if ids:
+        inspected = json.loads(subprocess.check_output(["docker", "inspect", *ids], text=True, stderr=subprocess.DEVNULL))
+        for info in inspected:
+            state = info.get("State") or {}
+            if not state.get("Running"):
+                continue
+            labels = (info.get("Config") or {}).get("Labels") or {}
+            host_mem = _parse_mem_bytes((info.get("HostConfig") or {}).get("Memory") or 0)
+            if labels.get("io.teamie.canary") == "true":
+                if ignore_existing_canaries:
+                    continue
+                if host_mem <= 0:
+                    canary_svc = labels.get("io.teamie.canary.service", "")
+                    host_mem = _parse_mem_bytes((services.get(canary_svc) or {}).get("mem_limit", 0))
+                other_running_bytes += host_mem
+            elif labels.get("io.teamie.sandbox") == "true":
+                sandbox_child_bytes += host_mem if host_mem > 0 else SANDBOX_CHILD_RESERVE_BYTES
+            else:
+                compose_svc = labels.get("com.docker.compose.service", "")
+                if compose_svc == "sandbox":
+                    sandbox_supervisor_running = True
+                if host_mem <= 0 and compose_svc in services:
+                    host_mem = _parse_mem_bytes((services.get(compose_svc) or {}).get("mem_limit", 0))
+                other_running_bytes += host_mem
+    reserve_sandbox = sandbox_supervisor_running or ("sandbox" in services)
+    effective_sandbox_bytes = max(sandbox_child_bytes, SANDBOX_CHILD_RESERVE_BYTES if reserve_sandbox else 0)
+    projected = other_running_bytes + effective_sandbox_bytes + max(0, int(canary_bytes))
+    require(
+        projected <= MAX_CONTAINER_BUDGET_BYTES,
+        f"online canary exceeds {MAX_CONTAINER_BUDGET_BYTES // (1024 * 1024)} MiB container memory budget ({projected} bytes projected)",
+    )
+    return projected
+
+
+def online_memory_ready(config):
+    """Return True when all pending online canary cutovers fit within the 1,600 MiB budget alongside Sandbox child reservation."""
+    services = config.get("services") or {}
+    peak_canary_bytes = 0
+    try:
+        for svc in ONLINE_AB_SERVICES:
+            if svc in services and not service_up_to_date(config, svc):
+                peak_canary_bytes = max(peak_canary_bytes, _parse_mem_bytes((services.get(svc) or {}).get("mem_limit", 0)))
+        check_canary_memory_budget(config, peak_canary_bytes, ignore_existing_canaries=True)
+    except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError):
+        return False
     return True
 
 
@@ -633,6 +845,8 @@ def canary_launch(config, service_name):
     plan = build_canary_plan(config, service_name)
     container_name = plan["container_name"]
     subprocess.run(["docker", "rm", "-f", container_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    canary_bytes = _parse_mem_bytes(((config.get("services") or {}).get(service_name) or {}).get("mem_limit", 0))
+    check_canary_memory_budget(config, canary_bytes, ignore_existing_canaries=False)
     fd, env_file = tempfile.mkstemp(prefix=f".teamie-canary-{service_name}-")
     created = False
     try:
@@ -688,6 +902,10 @@ def main():
     up_to_date = sub.add_parser("service-up-to-date")
     up_to_date.add_argument("config")
     up_to_date.add_argument("service")
+    mem_ready = sub.add_parser("online-memory-ready")
+    mem_ready.add_argument("config")
+    rec_tls = sub.add_parser("record-caddy-tls")
+    rec_tls.add_argument("config")
     canary = sub.add_parser("canary-launch")
     canary.add_argument("config")
     canary.add_argument("service")
@@ -716,6 +934,8 @@ def main():
                         schema=schema_for_manifest_version(args.manifest_version), storage=dict(postgresMajor=17),
                         featureFlags=dict(revision=flags["revision"], sha256=hashlib.sha256(flags_path.read_bytes()).hexdigest()),
                         images=images)
+            if args.manifest_version == 3:
+                data["onlineRollout"] = True
             if args.min_compatible_version is not None:
                 data["minCompatibleVersion"] = args.min_compatible_version
             supplied = (args.registry_public_host, args.registry_pull_host, args.registry_namespace)
@@ -745,6 +965,10 @@ def main():
             return 0 if online_compatible(read(args.manifest), read(args.current)) else 1
         elif args.command == "service-up-to-date":
             return 0 if service_up_to_date(read(args.config), args.service) else 1
+        elif args.command == "online-memory-ready":
+            return 0 if online_memory_ready(read(args.config)) else 1
+        elif args.command == "record-caddy-tls":
+            record_caddy_tls(read(args.config))
         elif args.command == "canary-launch":
             canary_launch(read(args.config), args.service)
         elif args.command == "env":

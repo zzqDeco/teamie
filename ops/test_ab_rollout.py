@@ -28,10 +28,10 @@ SERVICE_MEM_MIB = {
     "caddy": 64,
     "web": 32,
     "identity": 96,
-    "chat": 128,
+    "chat": 96,
     "marketplace": 64,
-    "realtime": 128,
-    "postgres": 384,
+    "realtime": 96,
+    "postgres": 320,
     "redis": 64,
     "agent-control": 64,
     "agent-runtime": 256,
@@ -40,7 +40,12 @@ SERVICE_MEM_MIB = {
 }
 
 
-def make_v3_manifest(ver: str, sha_char: str, unchanged_infra_from: dict | None = None) -> dict:
+def make_v3_manifest(
+    ver: str,
+    sha_char: str,
+    unchanged_infra_from: dict | None = None,
+    online_rollout: bool = True,
+) -> dict:
     sha = sha_char * 40
     images = {
         svc: f"ghcr.io/zzqdeco/teamie-{svc}@sha256:" + sha_char * 64
@@ -49,7 +54,7 @@ def make_v3_manifest(ver: str, sha_char: str, unchanged_infra_from: dict | None 
     if unchanged_infra_from is not None:
         for keep in ("postgres", "redis", "caddy", "web"):
             images[keep] = unchanged_infra_from["images"][keep]
-    return {
+    data = {
         "manifestVersion": 3,
         "version": ver,
         "source": {
@@ -64,6 +69,9 @@ def make_v3_manifest(ver: str, sha_char: str, unchanged_infra_from: dict | None 
         "featureFlags": {"revision": "context-engineering-v1", "sha256": "f" * 64},
         "images": images,
     }
+    if online_rollout:
+        data["onlineRollout"] = True
+    return data
 
 
 def make_compose_json(
@@ -268,6 +276,7 @@ def main():
             with_state(do_stop)
             return 0
         if sub == "up":
+            force_recreate = "--force-recreate" in rest
             svcs = [tok for tok in rest[1:] if not tok.startswith("-") and not tok.isdigit()]
             caddyfile = str(Path(compose_file).parent / "Caddyfile") if compose_file else ""
             def do_up(st):
@@ -276,6 +285,10 @@ def main():
                 tls_dir_source = os.environ.get("MOCK_TLS_CERT_DIR") or st.get("tls_cert_dir", "")
                 for svc in svcs:
                     st["events"].append(f"canonical_up:{svc}")
+                    if force_recreate:
+                        st["events"].append(f"canonical_force_recreate:{svc}")
+                    seq = int(st.get("start_seq", 0)) + 1
+                    st["start_seq"] = seq
                     cid = f"canonical-{svc}"
                     img = images.get(svc, st["service_defaults"][svc]["image"])
                     mem = st["service_defaults"][svc]["mem_limit"]
@@ -299,6 +312,11 @@ def main():
                         ]
                         if svc != "llm-gateway" and flags_source:
                             mounts = [{"Destination": "/etc/teamie/feature-flags.json", "Source": flags_source}]
+                    prev_started = (st["containers"].get(cid) or {}).get("started_at", "2026-11-11T00:00:00Z")
+                    prev_img = (st["containers"].get(cid) or {}).get("image")
+                    prev_mounts = (st["containers"].get(cid) or {}).get("mounts")
+                    recreated = force_recreate or cid not in st["containers"] or prev_img != img or prev_mounts != mounts or not st["containers"][cid]["running"]
+                    started_at = f"2026-11-11T00:00:{seq:02d}Z" if recreated else prev_started
                     st["containers"][cid] = {
                         "id": cid,
                         "name": f"teamie-{svc}-1",
@@ -308,6 +326,7 @@ def main():
                         },
                         "image": img,
                         "running": True,
+                        "started_at": started_at,
                         "health": "healthy",
                         "mem_limit": mem,
                         "env": env_list,
@@ -401,6 +420,7 @@ def main():
                 "Name": "/" + c["name"],
                 "State": {
                     "Running": c["running"],
+                    "StartedAt": c.get("started_at", "2026-11-11T00:00:00Z"),
                     "Health": {"Status": c.get("health", "healthy")},
                 },
                 "Config": {
@@ -408,10 +428,36 @@ def main():
                     "Labels": c["labels"],
                     "Env": c.get("env", []),
                 },
+                "HostConfig": {
+                    "Memory": int(c.get("mem_limit", 0)),
+                },
                 "Mounts": c.get("mounts", []),
             })
         print(json.dumps(payload))
         return 0
+
+    if args[0] == "exec":
+        import hashlib as _hl
+        cid = args[1]
+        cmd_rest = args[2:]
+        if cmd_rest and cmd_rest[0] == "sha256sum":
+            def get_tls_mount(st):
+                c = st["containers"].get(cid)
+                if not c or not c.get("running"):
+                    return None
+                for m in c.get("mounts", []):
+                    if m.get("Destination") == "/run/tls":
+                        return m.get("Source")
+                return None
+            src_dir = os.environ.get("MOCK_ROOT_TLS_SHADOW_DIR") or with_state(get_tls_mount)
+            if not src_dir:
+                return 1
+            for target_file in cmd_rest[1:]:
+                rel = Path(target_file).name
+                digest = _hl.sha256((Path(src_dir) / rel).read_bytes()).hexdigest()
+                print(f"{digest}  {target_file}")
+            return 0
+        return 1
 
     if args[0] == "create":
         raw_joined = " ".join(args)
@@ -605,6 +651,7 @@ class ABRolloutOrchestrationTests(unittest.TestCase):
                 },
                 "image": img,
                 "running": True,
+                "started_at": "2026-11-11T00:00:00Z",
                 "health": "healthy",
                 "mem_limit": mem_bytes,
                 "env": env_list,
@@ -617,12 +664,28 @@ class ABRolloutOrchestrationTests(unittest.TestCase):
             "flags_file": str(self.flags_file),
             "tls_config_file": str(self.tls_config_file),
             "tls_cert_dir": str(self.tls_cert_dir),
+            "start_seq": 0,
             "max_concurrent_canaries": 0,
             "max_total_mem_bytes": sum(c["mem_limit"] for c in containers.values()),
             "secret_leak_detected": False,
             "events": [],
         }
         self.state_path.write_text(json.dumps(state, indent=2))
+        state_dir = self.root / "state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        issuer_sha = hashlib.sha256(self.tls_config_file.read_bytes()).hexdigest()
+        (state_dir / "caddy-tls-loaded.json").write_text(
+            json.dumps(
+                {
+                    "containerId": "canonical-caddy",
+                    "startedAt": "2026-11-11T00:00:00Z",
+                    "issuerSha256": issuer_sha,
+                    "tlsFilesSha256": "acme",
+                },
+                sort_keys=True,
+            )
+            + "\n"
+        )
 
     def _run_rollout(
         self,
@@ -835,6 +898,119 @@ class ABRolloutOrchestrationTests(unittest.TestCase):
             m["Destination"]: m["Source"] for m in state_certs["containers"]["canonical-caddy"]["mounts"]
         }
         self.assertEqual(caddy_mounts_v2["/run/tls"], str(alt_certs))
+
+    def test_parent_release_without_online_rollout_capability_uses_fenced_upgrade(self):
+        parent_v048 = make_v3_manifest("v0.4.8", "0", unchanged_infra_from=self.manifest_v1, online_rollout=False)
+        self.assertNotIn("onlineRollout", parent_v048)
+        self.assertFalse(manifest_mod.online_compatible(self.manifest_v1, parent_v048))
+        self.assertFalse(manifest_mod.online_compatible(parent_v048, self.manifest_v1))
+        # Rollback compatibility itself remains intact across identical schema/storage/flags.
+        manifest_mod.compatible(self.manifest_v1, parent_v048)
+
+        self._seed_running_stack(parent_v048, self.recipe_v1)
+        res = self._run_rollout(self.manifest_v1, parent_v048, self.recipe_v1)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        state = json.loads(self.state_path.read_text())
+        self.assertEqual(state["max_concurrent_canaries"], 0)
+        events = state["events"]
+        # Fenced rollout stops agent-runtime BEFORE replacing llm-gateway so pre-dual-slot clients never hit a dead canonical gateway!
+        self.assertLess(events.index("canonical_stop:agent-runtime"), events.index("canonical_up:llm-gateway"))
+
+    def test_caddy_in_place_tls_config_and_cert_edits_force_recreate_caddy(self):
+        # 1. Edit issuer.caddy IN PLACE at the exact same path to switch from ACME to file-based TLS.
+        (self.tls_cert_dir / "fullchain.pem").write_text("CERT-V1\n")
+        (self.tls_cert_dir / "privkey.pem").write_text("KEY-V1\n")
+        self.tls_config_file.write_text("tls /run/tls/fullchain.pem /run/tls/privkey.pem\n")
+
+        res_edit = self._run_rollout(self.manifest_v1, self.manifest_v1, self.recipe_v1)
+        self.assertEqual(res_edit.returncode, 0, res_edit.stderr)
+        state_edit = json.loads(self.state_path.read_text())
+        self.assertIn("canonical_force_recreate:caddy", state_edit["events"])
+        first_started = state_edit["containers"]["canonical-caddy"]["started_at"]
+        self.assertNotEqual(first_started, "2026-11-11T00:00:00Z")
+
+        # 2. Re-running with unchanged issuer.caddy and cert files skips caddy completely.
+        state_edit["events"] = []
+        self.state_path.write_text(json.dumps(state_edit, indent=2))
+        res_noop = self._run_rollout(self.manifest_v1, self.manifest_v1, self.recipe_v1)
+        self.assertEqual(res_noop.returncode, 0, res_noop.stderr)
+        state_noop = json.loads(self.state_path.read_text())
+        self.assertNotIn("canonical_up:caddy", state_noop["events"])
+
+        # 3. Rotate fullchain.pem IN PLACE at the unchanged /run/tls directory -> must force-recreate caddy!
+        (self.tls_cert_dir / "fullchain.pem").write_text("CERT-V2-ROTATED\n")
+        res_rot = self._run_rollout(self.manifest_v1, self.manifest_v1, self.recipe_v1)
+        self.assertEqual(res_rot.returncode, 0, res_rot.stderr)
+        state_rot = json.loads(self.state_path.read_text())
+        self.assertIn("canonical_force_recreate:caddy", state_rot["events"])
+        self.assertNotEqual(state_rot["containers"]["canonical-caddy"]["started_at"], first_started)
+
+        # 4. Missing TLS state stamp conservatively force-recreates caddy and re-records the stamp.
+        stamp_file = self.root / "state" / "caddy-tls-loaded.json"
+        stamp_file.unlink()
+        state_rot["events"] = []
+        self.state_path.write_text(json.dumps(state_rot, indent=2))
+        res_missing = self._run_rollout(self.manifest_v1, self.manifest_v1, self.recipe_v1)
+        self.assertEqual(res_missing.returncode, 0, res_missing.stderr)
+        state_missing = json.loads(self.state_path.read_text())
+        self.assertIn("canonical_force_recreate:caddy", state_missing["events"])
+        self.assertTrue(stamp_file.is_file())
+
+    def test_online_rollout_with_running_sandbox_child_stays_within_1600mib_and_fences_overbudget(self):
+        # 1. Seed one active 128 MiB Sandbox execution child (io.teamie.sandbox=true) running throughout rollout_online.
+        state = json.loads(self.state_path.read_text())
+        state["containers"]["sandbox-exec-1"] = {
+            "id": "sandbox-exec-1",
+            "name": "teamie-sbx-1",
+            "labels": {"io.teamie.sandbox": "true", "io.teamie.agent": "a1", "io.teamie.task": "t1"},
+            "image": self.manifest_v1["images"]["sandbox-runner"],
+            "running": True,
+            "started_at": "2026-11-11T00:00:00Z",
+            "health": "healthy",
+            "mem_limit": 128 * 1024 * 1024,
+            "env": [],
+            "mounts": [],
+            "networks": [],
+        }
+        state["max_total_mem_bytes"] = sum(c["mem_limit"] for c in state["containers"].values())
+        self.state_path.write_text(json.dumps(state, indent=2))
+
+        res = self._run_rollout(self.manifest_v2, self.manifest_v1, self.recipe_v2)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        after = json.loads(self.state_path.read_text())
+        # Online rollout ran with 1 canary AND peak memory across 12 services + 1 Sandbox child + 128 MiB canary == 1,600 MiB!
+        self.assertEqual(after["max_concurrent_canaries"], 1)
+        self.assertEqual(after["max_total_mem_bytes"], 1600 * 1024 * 1024)
+        self.assertTrue(after["containers"]["sandbox-exec-1"]["running"])
+
+        # 2. If anomalous extra Sandbox/host containers push projected memory above 1,600 MiB,
+        # online-memory-ready rejects online cutover and rollout safely falls back to fenced rollout!
+        self._seed_running_stack(self.manifest_v1, self.recipe_v1)
+        over_state = json.loads(self.state_path.read_text())
+        for idx in (1, 2):
+            over_state["containers"][f"sandbox-exec-{idx}"] = {
+                "id": f"sandbox-exec-{idx}",
+                "name": f"teamie-sbx-{idx}",
+                "labels": {"io.teamie.sandbox": "true"},
+                "image": self.manifest_v1["images"]["sandbox-runner"],
+                "running": True,
+                "started_at": "2026-11-11T00:00:00Z",
+                "health": "healthy",
+                "mem_limit": 128 * 1024 * 1024,
+                "env": [],
+                "mounts": [],
+                "networks": [],
+            }
+        self.state_path.write_text(json.dumps(over_state, indent=2))
+
+        res_over = self._run_rollout(self.manifest_v2, self.manifest_v1, self.recipe_v2)
+        self.assertEqual(res_over.returncode, 0, res_over.stderr)
+        after_over = json.loads(self.state_path.read_text())
+        self.assertEqual(after_over["max_concurrent_canaries"], 0)
+        self.assertLess(
+            after_over["events"].index("canonical_stop:agent-runtime"),
+            after_over["events"].index("canonical_up:llm-gateway"),
+        )
 
 
 # --- Live Caddy v2.11.7 HTTP + WebSocket Dual-Slot Cutover Harness ---

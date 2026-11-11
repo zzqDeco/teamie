@@ -17,7 +17,8 @@ for name,service in config['services'].items():
     for mount in service.get('tmpfs',[]):
         assert mount.startswith('/'), 'tmpfs entries must preserve their quoted comma-separated options'
     assert int(service['mem_limit'])>0
-assert sum(int(s['mem_limit']) for s in config['services'].values())==1472*1024*1024
+assert sum(int(s['mem_limit']) for s in config['services'].values())==1344*1024*1024
+assert max(int(config['services'][s]['mem_limit']) for s in ('identity','chat','marketplace','realtime','web','agent-control','llm-gateway'))==128*1024*1024
 assert int(config['services']['agent-runtime']['mem_limit'])==256*1024*1024
 assert int(config['services']['llm-gateway']['mem_limit'])==128*1024*1024
 assert config['networks']['private']['internal'] is True

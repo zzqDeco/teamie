@@ -31,6 +31,10 @@ type attachmentSandboxFixture struct {
 	loseFirstResponse bool
 }
 
+func (*attachmentSandboxFixture) Cancel(context.Context, *wire.CancelRequest, ...callopt.Option) (*wire.Ack, error) {
+	return &wire.Ack{Ok: true}, nil
+}
+
 func (s *attachmentSandboxFixture) ImportFile(_ context.Context, r *wire.SandboxImportRequest, _ ...callopt.Option) (*wire.SandboxWorkspaceResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

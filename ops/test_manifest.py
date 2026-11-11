@@ -794,6 +794,7 @@ class OnlineCompatibilityAndCanaryPlanTest(unittest.TestCase):
         sha = sha_char * 40
         return {
             "manifestVersion": 3,
+            "onlineRollout": True,
             "version": ver,
             "source": {
                 "repository": "zzqDeco/teamie",
@@ -817,6 +818,20 @@ class OnlineCompatibilityAndCanaryPlanTest(unittest.TestCase):
         self.assertFalse(manifest.online_compatible(nxt, None))
         self.assertTrue(manifest.online_compatible(nxt, cur))
         self.assertTrue(manifest.online_compatible(cur, nxt))
+
+        # Pre-dual-slot v3 release (e.g. v0.4.8) passes check_transition/rollback,
+        # while online_compatible fences both upgrade and rollback.
+        legacy_v3 = self._v3_manifest("v0.4.8", "0")
+        legacy_v3.pop("onlineRollout")
+        manifest.check_transition(cur, legacy_v3, legacy_v3)
+        manifest.check_transition(legacy_v3, cur, rollback=True)
+        self.assertFalse(manifest.online_compatible(cur, legacy_v3))
+        self.assertFalse(manifest.online_compatible(legacy_v3, cur))
+
+        invalid_rollout_flag = copy.deepcopy(nxt)
+        invalid_rollout_flag["onlineRollout"] = False
+        with self.assertRaisesRegex(ValueError, "onlineRollout"):
+            manifest.validate(invalid_rollout_flag)
 
         # Forward-only schema epoch bump is valid for check_transition, NOT online_compatible.
         schema_bump = copy.deepcopy(nxt)
