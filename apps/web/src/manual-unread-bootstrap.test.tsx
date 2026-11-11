@@ -341,7 +341,7 @@ describe("Authoritative bootstrap & manual unread concurrency (#129)", () => {
     await settle(() => preCommitBootstrapB.resolve(makeBootstrap([{ ...baseConversation, manualUnreadSeq: 3 }])));
     expect(chatStore.getSnapshot().conversations[baseConversation.id].manualUnreadSeq).toBe(2);
     expect(chatStore.getSnapshot().manualUnreadByConversation[baseConversation.id]).toBe(2);
-    expect(vi.mocked(api.bootstrap).mock.calls.length).toBe(callsBeforeSettle + 1);
+    await vi.waitFor(() => expect(vi.mocked(api.bootstrap).mock.calls.length).toBe(callsBeforeSettle + 1));
 
     await settle(() => postCommitBootstrapB.resolve(makeBootstrap([{ ...baseConversation, manualUnreadSeq: 2 }])));
     await settle();
