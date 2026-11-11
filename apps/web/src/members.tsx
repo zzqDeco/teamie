@@ -2,7 +2,6 @@ import { useCallback, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowRight,
-  Blocks,
   LoaderCircle,
   MessageCircle,
   Search,
@@ -13,10 +12,10 @@ import { api } from "@teamie/api-client";
 import type { Agent, Workspace } from "@teamie/api-client";
 import { useAuth } from "./auth";
 import { canManageAgent } from "./agent-management";
+import { AgentAvailability } from "./agent-ui";
 import { useChat } from "./chat";
 import { errorText } from "./errors";
 import { WorkspaceDialog } from "./dialogs";
-import { WorkspaceMarketplaceModal } from "./marketplace";
 import {
   AddParticipantToGroupDialog,
   ParticipantIdentity,
@@ -56,11 +55,9 @@ export function WorkspaceMembers({
   const [busyId, setBusyId] = useState("");
   const [error, setError] = useState("");
   const [inviting, setInviting] = useState(false);
-  const [managingApps, setManagingApps] = useState(false);
   const [groupMemberId, setGroupMemberId] = useState("");
   const [newGroupMemberId, setNewGroupMemberId] = useState("");
   const closeInviting = useCallback(() => setInviting(false), []);
-  const closeManagingApps = useCallback(() => setManagingApps(false), []);
   const closeGroup = useCallback(() => setGroupMemberId(""), []);
   const closeNewGroup = useCallback(() => setNewGroupMemberId(""), []);
   const eligibleMember = (id: string) =>
@@ -106,28 +103,20 @@ export function WorkspaceMembers({
 
   return (
     <div className="members-view">
-      <header className="members-heading">
+      <div className="members-heading">
         <div>
-          <h1>
-            成员 <span>{members.length}</span>
-          </h1>
-          <p>{workspace.name}</p>
+          <p className="members-summary">
+            <b>{workspace.name}</b> · 共 {members.length} 位成员
+          </p>
         </div>
         {owner ? (
-          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-            {data?.capabilities["im.marketplace.enabled"] !== false && (
-              <Button className="secondary" onClick={() => setManagingApps(true)}>
-                <Blocks size={ICON.sm} /> 工作区应用
-              </Button>
-            )}
-            <Button onClick={() => setInviting(true)}>
-              <UserPlus size={ICON.sm} /> 邀请成员
-            </Button>
-          </div>
+          <Button onClick={() => setInviting(true)}>
+            <UserPlus size={ICON.sm} /> 邀请成员
+          </Button>
         ) : (
           <span className="members-invite-hint">请联系空间创建者邀请</span>
         )}
-      </header>
+      </div>
       <label className="member-search">
         <Search size={ICON.md} aria-hidden="true" />
         <span className="sr-only">搜索成员</span>
@@ -188,10 +177,13 @@ export function WorkspaceMembers({
                             {formatPresenceLabel(humanPresence)}
                           </BadgePill>
                         )}
+                        {member.kind === "agent" && (
+                          <AgentAvailability enabled={member.agentEnabled} />
+                        )}
                         {member.kind === "agent" &&
-                          member.selectable === false && (
+                          member.agentEnabled === undefined && (
                             <BadgePill className="member-unavailable">
-                              {agent && !agent.enabled ? "已停用" : "暂不可添加"}
+                              暂不可添加
                             </BadgePill>
                           )}
                       </>
@@ -265,13 +257,6 @@ export function WorkspaceMembers({
           kind="invite"
           workspace={workspace}
           onClose={closeInviting}
-        />
-      )}
-      {managingApps && owner && (
-        <WorkspaceMarketplaceModal
-          workspace={workspace}
-          isOwner={owner}
-          onClose={closeManagingApps}
         />
       )}
     </div>

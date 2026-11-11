@@ -410,13 +410,46 @@ describe("member and account navigation", () => {
     expect(find(".workspace-title").tagName).toBe("DIV");
     expect(navigation.querySelector('a[href^="/app/admin"]')).toBeNull();
     await click(".account-trigger");
-    expect(find(".account-menu").textContent).not.toContain("个人 Agent");
-    expect(find(".account-menu").textContent).toContain("账号设置");
-    expect(find(".account-menu").textContent).not.toContain("平台管理");
+    const menu = find(".account-menu");
+    expect(menu.textContent).not.toContain("个人 Agent");
+    expect(menu.textContent).toContain("账号设置");
+    // Human platform administrators reach 平台管理 from the avatar menu only.
+    expect(menu.querySelector('a[href="/app/admin"]')?.textContent).toContain("平台管理");
+    const separators = menu.querySelectorAll('[role="separator"]');
+    expect(separators).toHaveLength(1);
+    expect(separators[0].nextElementSibling?.textContent).toContain("退出登录");
     await click('.account-menu a[href="/app/settings"]');
     expect(find('a[href="/app/admin"]').textContent).toContain("平台管理");
+    expect(navigation.querySelector('a[href^="/app/admin"]')).toBeNull();
     expect(api.modelGateway).not.toHaveBeenCalled();
     expect(api.registrationInvites).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["ordinary", { platformRole: "user" as const, kind: "human" as const }],
+    ["agent principal", { platformRole: "admin" as const, kind: "agent" as const }],
+  ])("keeps 平台管理 out of the avatar menu for %s accounts", async (_label, patch) => {
+    Object.assign(activeUser, patch);
+    await mount("/app/w/team/c/general");
+    await click(".account-trigger");
+    expect(find(".account-menu").textContent).not.toContain("平台管理");
+    expect(find(".account-menu").querySelector('a[href^="/app/admin"]')).toBeNull();
+  });
+
+  it("marks the avatar as the current destination on account pages and clears the rail workspace highlight", async () => {
+    activeUser.platformRole = "admin";
+    for (const path of ["/app/settings", "/app/developers", "/app/admin/users"]) {
+      await mount(path);
+      expect(find(".account-trigger").getAttribute("aria-current"), path).toBe("page");
+      expect(find(".account-trigger").classList.contains("selected")).toBe(true);
+      expect(container.querySelector(".workspace-button.selected"), path).toBeNull();
+      expect(container.querySelectorAll("h1"), path).toHaveLength(1);
+      await settle(() => root.unmount());
+      root = createRoot(container);
+    }
+    await mount("/app/w/team/c/general");
+    expect(find(".account-trigger").hasAttribute("aria-current")).toBe(false);
+    expect(find(".workspace-button.selected").getAttribute("aria-current")).toBe("true");
   });
 
   it("hides platform management from ordinary accounts, including direct admin routes", async () => {
@@ -431,7 +464,7 @@ describe("member and account navigation", () => {
 
   it("dismisses the mobile account menu with Escape/outside click and closes the drawer on navigation", async () => {
     await mount("/app/w/team/members", true);
-    await click('[aria-label="打开频道列表"]');
+    await click('[aria-label="打开导航"]');
     await click(".account-trigger");
     expect(document.activeElement).toBe(find(".account-menu a"));
     await escape();
@@ -451,8 +484,8 @@ describe("member and account navigation", () => {
     expect(find("[data-location]").textContent).toBe("/app/settings");
     expect(container.querySelector(".account-menu")).toBeNull();
     expect(find(".app-shell").classList.contains("sidebar-open")).toBe(false);
-    expect(document.activeElement).toBe(find('[aria-label="打开频道列表"]'));
-    await click('[aria-label="打开频道列表"]');
+    expect(document.activeElement).toBe(find('[aria-label="打开导航"]'));
+    await click('[aria-label="打开导航"]');
     expect(container.querySelector(".account-menu")).toBeNull();
   });
 
@@ -461,13 +494,13 @@ describe("member and account navigation", () => {
       bootstrap.capabilities[capability] = false;
     }
     await mount("/app/w/team/c/general", true);
-    await click('[aria-label="打开对话列表"]');
+    await click('[aria-label="打开导航"]');
     await click(".rail-agents");
     await settle();
     expect(find("[data-location]").textContent).toBe("/app/agents");
     expect(find(".rail-agents").getAttribute("aria-current")).toBe("page");
     expect(find(".app-shell").classList.contains("sidebar-open")).toBe(false);
-    expect(document.activeElement).toBe(find('[aria-label="打开频道列表"]'));
+    expect(document.activeElement).toBe(find('[aria-label="打开导航"]'));
     expect(find(".agent-card").textContent).toContain(agent.name);
     await click(`a.agent-card[href="/app/agents/${agent.id}"]`);
     await settle();
@@ -502,7 +535,7 @@ describe("member and account navigation", () => {
     "dismisses conversation actions on Escape, outside click and focus leaving (mobile=%s)",
     async (mobile) => {
       await mount("/app/w/team/c/general", mobile);
-      if (mobile) await click('[aria-label="打开对话列表"]');
+      if (mobile) await click('[aria-label="打开导航"]');
       await click(".conversation-actions-trigger");
       await escape();
       expect(container.querySelector(".conversation-actions-menu")).toBeNull();
@@ -520,7 +553,7 @@ describe("member and account navigation", () => {
       if (mobile) {
         await escape();
         expect(find(".app-shell").classList.contains("sidebar-open")).toBe(false);
-        expect(document.activeElement).toBe(find('[aria-label="打开对话列表"]'));
+        expect(document.activeElement).toBe(find('[aria-label="打开导航"]'));
       }
     },
   );
@@ -534,7 +567,7 @@ describe("member and account navigation", () => {
     "opens the selected dialog and restores focus after closing (mobile=%s, action=%s)",
     async (mobile, kind) => {
       await mount("/app/w/team/c/general", mobile);
-      if (mobile) await click('[aria-label="打开对话列表"]');
+      if (mobile) await click('[aria-label="打开导航"]');
       await click(".conversation-actions-trigger");
       await click(`.conversation-actions-menu button:${kind === "direct" ? "first" : "last"}-child`);
       expect(container.querySelector(".conversation-actions-menu")).toBeNull();
@@ -544,7 +577,7 @@ describe("member and account navigation", () => {
       expect(modal.contains(document.activeElement)).toBe(true);
       await click('[aria-label="关闭弹窗"]');
       expect(container.querySelector(".modal")).toBeNull();
-      expect(document.activeElement).toBe(find(mobile ? '[aria-label="打开对话列表"]' : ".conversation-actions-trigger"));
+      expect(document.activeElement).toBe(find(mobile ? '[aria-label="打开导航"]' : ".conversation-actions-trigger"));
     },
   );
 
@@ -812,7 +845,7 @@ describe("member and account navigation", () => {
     vi.mocked(api.agent).mockResolvedValue({ agent: renamed });
     await click('.modal-actions .button[type="submit"]');
     expect(update).toHaveBeenLastCalledWith(agent.id, { name: "新的伙伴名称" });
-    expect(find(".agent-detail-heading h1").textContent).toBe("新的伙伴名称");
+    expect(find(".agent-detail-heading h2").textContent).toBe("新的伙伴名称");
     await click(".agent-delete-section .button");
     vi.mocked(api.agents).mockResolvedValue({ agents: [] });
     await click(".modal-actions .button.danger");
@@ -858,7 +891,7 @@ describe("member and account navigation", () => {
   it("does not open private workspace directories or let a platform admin manage another owner's Agent", async () => {
     activeUser = { ...owner, id: "platform-admin", platformRole: "admin" };
     await mount("/app/w/private/members");
-    expect(container.textContent).toContain("无法访问这个工作空间");
+    expect(container.textContent).toContain("页面不存在");
     expect(api.members).not.toHaveBeenCalled();
     expect(api.workspaceAgents).not.toHaveBeenCalled();
     await settle(() => root.unmount());
@@ -1109,13 +1142,20 @@ describe("member and account navigation", () => {
     );
   });
 
-  it("redirects unknown app routes and bare workspace URLs to a real view", async () => {
+  it("redirects bare workspace URLs and renders unknown app routes as an in-shell 404", async () => {
     await mount("/app/w/team");
     expect(find("[data-location]").textContent).toBe("/app/w/team/c/general");
-    await settle(() => root.unmount());
-    root = createRoot(container);
-    await mount("/app/does-not-exist");
-    expect(find("[data-location]").textContent).toBe("/app/w/team/c/general");
+    for (const path of ["/app/does-not-exist", "/app/w/team/c/general/extra", "/app/w/missing/apps"]) {
+      await settle(() => root.unmount());
+      root = createRoot(container);
+      await mount(path, true);
+      expect(find("[data-location]").textContent).toBe(path);
+      expect(find(".not-found-view h1").textContent).toBe("页面不存在");
+      // The shell stays usable: navigation and the mobile drawer button remain.
+      expect(find(".workspace-rail")).toBeTruthy();
+      expect(find('.not-found-view [aria-label="打开导航"]')).toBeTruthy();
+      expect(document.title).toContain("页面不存在");
+    }
   });
 
   it("explains an expired session once on the login page", async () => {

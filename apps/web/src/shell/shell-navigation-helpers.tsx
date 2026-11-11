@@ -1,18 +1,5 @@
 import { useEffect, useRef } from "react";
 import type { RefObject } from "react";
-import { Link } from "react-router-dom";
-import {
-  ArrowLeft,
-  Blocks,
-  Bot,
-  Code2,
-  KeyRound,
-  Megaphone,
-  Menu,
-  Settings,
-  ShieldCheck,
-  Users,
-} from "lucide-react";
 import type {
   Agent,
   AttentionUnreadDTO,
@@ -21,18 +8,20 @@ import type {
   User,
   Workspace,
 } from "@teamie/api-client";
+import { canConfigureModelGateway } from "../agent-management";
 import { ProfileSettings } from "../dialogs";
 import { lazyView } from "../lazy-view";
 import { RouteBoundary } from "../route-boundary";
+// Static: the in-context apps modal already bundles this module with the shell.
+import { WorkspaceAppsPage } from "../marketplace/workspace-apps";
 import type { Participant } from "../participants";
 import { conversationName } from "../messages";
-import {
-  effectiveNotificationLevel,
-  summarizeConversationUnread,
-} from "../store";
+import { summarizeConversationUnread } from "../store";
 import type { ChatSnapshot } from "../store";
-import { IconButton, useOverlayFocus } from "../ui";
-import { ICON } from "../icons";
+import { useOverlayFocus } from "../ui";
+import { conversationPathWorkspaceId } from "./current-workspace";
+import { managementPageMeta, NotFoundView, PageHeader } from "./page-header";
+import type { ShellRoutes } from "./shell-routes";
 
 const PlatformInvitations = lazyView(() =>
   import("../admin").then((m) => ({ default: m.PlatformInvitations })),
@@ -66,21 +55,13 @@ const WorkspaceMembers = lazyView(() =>
   import("../members").then((m) => ({ default: m.WorkspaceMembers })),
 );
 
+
 export function ShellManagementView({
   user,
-  isGatewayPage,
-  isUsersPage,
-  isMarketplacePage = false,
-  isAnnouncementsAdminPage = false,
+  routes,
   announcementsPublishEnabled = true,
-  isDevelopersPage = false,
-  isDeveloperDocsPage = false,
-  developerAppId,
+  marketplaceEnabled = true,
   workspaces,
-  isAdminPage,
-  isAgentsPage,
-  isDirectoryPage,
-  agentId,
   backChatRoute,
   workspace,
   members,
@@ -91,19 +72,10 @@ export function ShellManagementView({
   onRetryMembers,
 }: {
   user: User;
-  isGatewayPage: boolean;
-  isUsersPage: boolean;
-  isMarketplacePage?: boolean;
-  isAnnouncementsAdminPage?: boolean;
+  routes: ShellRoutes;
   announcementsPublishEnabled?: boolean;
-  isDevelopersPage?: boolean;
-  isDeveloperDocsPage?: boolean;
-  developerAppId?: string;
+  marketplaceEnabled?: boolean;
   workspaces?: Workspace[];
-  isAdminPage: boolean;
-  isAgentsPage: boolean;
-  isDirectoryPage: boolean;
-  agentId?: string;
   backChatRoute: string;
   workspace?: Workspace;
   members: Participant[];
@@ -113,147 +85,69 @@ export function ShellManagementView({
   onOpenSidebar: () => void;
   onRetryMembers: () => void;
 }) {
+  const workspaceScoped = routes.isDirectoryPage || routes.isAppsPage;
+  if (workspaceScoped && !workspace)
+    return <NotFoundView onOpenNavigation={onOpenSidebar} />;
+  const meta = managementPageMeta(routes, {
+    workspace,
+    isPlatformAdmin: canConfigureModelGateway(user),
+  });
   return (
     <>
-      <header className="settings-header">
-        <IconButton
-          label="打开频道列表"
-          className="mobile-menu"
-          onClick={onOpenSidebar}
-        >
-          <Menu size={ICON.lg} />
-        </IconButton>
-        {isGatewayPage ? (
-          <KeyRound size={ICON.md} />
-        ) : isMarketplacePage ? (
-          <Blocks size={ICON.md} />
-        ) : isAnnouncementsAdminPage ? (
-          <Megaphone size={ICON.md} />
-        ) : isDevelopersPage ? (
-          <Code2 size={ICON.md} />
-        ) : isDirectoryPage || isUsersPage ? (
-          <Users size={ICON.md} />
-        ) : isAgentsPage ? (
-          <Bot size={ICON.md} />
-        ) : isAdminPage ? (
-          <ShieldCheck size={ICON.md} />
-        ) : (
-          <Settings size={ICON.md} />
-        )}
-        <span>
-          {isGatewayPage
-            ? "模型网关"
-            : isMarketplacePage
-              ? "应用市场"
-              : isAnnouncementsAdminPage
-                ? "平台公告"
-                : isDevelopersPage
-                  ? "开发者平台"
-                  : isUsersPage
-                    ? "用户管理"
-                    : isAdminPage
-                      ? "注册邀请"
-                      : isAgentsPage
-                        ? "个人 Agent"
-                        : isDirectoryPage
-                          ? "成员"
-                          : "账号设置"}
-        </span>
-        <Link to={backChatRoute}>
-          <ArrowLeft size={ICON.sm} />
-          <span>对话</span>
-        </Link>
-      </header>
-      {(isAdminPage ||
-        isGatewayPage ||
-        isUsersPage ||
-        isMarketplacePage ||
-        isAnnouncementsAdminPage) &&
-        user.platformRole === "admin" && (
-          <nav className="admin-section-nav">
-            <Link to="/app/admin" className={isAdminPage ? "active" : ""}>
-              <ShieldCheck size={ICON.xs} />
-              注册邀请
-            </Link>
-            <Link
-              to="/app/admin/users"
-              className={isUsersPage ? "active" : ""}
-            >
-              <Users size={ICON.xs} />
-              用户管理
-            </Link>
-            <Link
-              to="/app/admin/gateway"
-              className={isGatewayPage ? "active" : ""}
-            >
-              <KeyRound size={ICON.xs} />
-              模型网关
-            </Link>
-            <Link
-              to="/app/admin/marketplace"
-              className={isMarketplacePage ? "active" : ""}
-            >
-              <Blocks size={ICON.xs} />
-              应用市场
-            </Link>
-            <Link
-              to="/app/admin/announcements"
-              className={isAnnouncementsAdminPage ? "active" : ""}
-            >
-              <Megaphone size={ICON.xs} />
-              平台公告
-            </Link>
-          </nav>
-        )}
+      <PageHeader
+        icon={meta.icon}
+        title={meta.title}
+        tabs={meta.tabs}
+        tabsLabel={meta.tabsLabel}
+        back={{ to: backChatRoute, label: "对话" }}
+        onOpenNavigation={onOpenSidebar}
+      />
       <RouteBoundary>
-      {isUsersPage ? (
+      {routes.isUsersPage ? (
         <PlatformUsers />
-      ) : isMarketplacePage ? (
+      ) : routes.isMarketplacePage ? (
         <PlatformMarketplace />
-      ) : isAnnouncementsAdminPage ? (
+      ) : routes.isAnnouncementsAdminPage ? (
         <PlatformAnnouncementsAdmin
           publishEnabled={announcementsPublishEnabled}
         />
-      ) : isDevelopersPage ? (
+      ) : routes.isDevelopersPage ? (
         <DeveloperPortal
-          key={`${user.id}:${developerAppId || ""}:${isDeveloperDocsPage ? "docs" : "apps"}`}
-          appId={developerAppId}
-          isDocsPage={isDeveloperDocsPage}
+          key={`${user.id}:${routes.developerAppId || ""}:${routes.isDeveloperDocsPage ? "docs" : "apps"}`}
+          appId={routes.developerAppId}
+          isDocsPage={routes.isDeveloperDocsPage}
           workspaces={workspaces}
         />
-      ) : isGatewayPage ? (
+      ) : routes.isGatewayPage ? (
         <ModelGatewaySettings key={user.id} />
-      ) : isAdminPage ? (
+      ) : routes.isAdminPage ? (
         <PlatformInvitations key={user.id} />
-      ) : isAgentsPage ? (
-        agentId ? (
-          <AgentDetail key={`${user.id}:${agentId}`} agentId={agentId} />
+      ) : routes.isAgentsPage ? (
+        routes.agentId ? (
+          <AgentDetail key={`${user.id}:${routes.agentId}`} agentId={routes.agentId} />
         ) : (
           <MyAgents
             key={user.id}
             lastWorkspaceId={routeWorkspaceId(backChatRoute)}
           />
         )
-      ) : isDirectoryPage ? (
-        workspace ? (
-          <WorkspaceMembers
-            key={`${user.id}:${workspace.id}`}
-            workspace={workspace}
-            members={members}
-            agents={workspaceAgents}
-            loading={membersLoading}
-            loadError={membersLoadError}
-            onRetry={onRetryMembers}
-          />
-        ) : (
-          <div className="unavailable-view">
-            <h2>无法访问这个工作空间</h2>
-            <p>查看成员需要当前空间成员权限。</p>
-            <Link className="button" to="/app">
-              返回对话
-            </Link>
-          </div>
-        )
+      ) : workspace && routes.isAppsPage ? (
+        <WorkspaceAppsPage
+          key={`${user.id}:${workspace.id}`}
+          workspace={workspace}
+          isOwner={workspace.createdBy === user.id}
+          marketplaceEnabled={marketplaceEnabled}
+        />
+      ) : workspace && routes.isDirectoryPage ? (
+        <WorkspaceMembers
+          key={`${user.id}:${workspace.id}`}
+          workspace={workspace}
+          members={members}
+          agents={workspaceAgents}
+          loading={membersLoading}
+          loadError={membersLoadError}
+          onRetry={onRetryMembers}
+        />
       ) : (
         <ProfileSettings />
       )}
@@ -321,65 +215,35 @@ export function resolveWorkspaceTarget({
 }
 
 export function computePageTitle({
-  isAttentionPage,
-  isGatewayPage,
-  isUsersPage,
-  isMarketplacePage = false,
-  isAnnouncementsAdminPage = false,
-  isDevelopersPage = false,
-  isAdminPage,
-  isAgentsPage,
-  isDirectoryPage,
-  isSettings,
+  routes,
+  titleDetail = "",
   workspace,
   conversation,
   userId,
   members,
 }: {
-  isAttentionPage: boolean;
-  isGatewayPage: boolean;
-  isUsersPage: boolean;
-  isMarketplacePage?: boolean;
-  isAnnouncementsAdminPage?: boolean;
-  isDevelopersPage?: boolean;
-  isAdminPage: boolean;
-  isAgentsPage: boolean;
-  isDirectoryPage: boolean;
-  isSettings: boolean;
+  routes: ShellRoutes;
+  /** Entity name of a detail page (Agent, developer app), if known. */
+  titleDetail?: string;
   workspace?: Workspace;
   conversation?: Conversation;
   userId: string;
   members: Member[];
 }) {
-  return isAttentionPage
-    ? "提及与回复"
-    : isGatewayPage
-      ? "模型网关"
-      : isMarketplacePage
-        ? "应用市场"
-        : isAnnouncementsAdminPage
-          ? "平台公告"
-          : isDevelopersPage
-          ? "开发者平台"
-          : isUsersPage
-        ? "用户管理"
-        : isAdminPage
-          ? "注册邀请"
-          : isAgentsPage
-            ? "个人 Agent"
-            : isDirectoryPage
-              ? workspace
-                ? `${workspace.name} · 成员`
-                : "成员"
-              : isSettings
-                ? "账号设置"
-                : conversation &&
-                    workspace &&
-                    conversation.workspaceId === workspace.id
-                  ? conversation.type === "channel"
-                    ? `# ${conversationName(conversation, userId, members)}`
-                    : conversationName(conversation, userId, members)
-                  : workspace?.name || "";
+  if (routes.isNotFound) return "页面不存在";
+  if (routes.isAttentionPage) return "提及与回复";
+  if (routes.isManagement) {
+    const { title } = managementPageMeta(routes, { workspace, isPlatformAdmin: false });
+    if (routes.isDirectoryPage || routes.isAppsPage)
+      return workspace ? `${workspace.name} · ${title}` : "页面不存在";
+    if (routes.isDeveloperDocsPage) return `开发者手册 · ${title}`;
+    return titleDetail ? `${titleDetail} · ${title}` : title;
+  }
+  if (conversation && workspace && conversation.workspaceId === workspace.id)
+    return conversation.type === "channel"
+      ? `# ${conversationName(conversation, userId, members)}`
+      : conversationName(conversation, userId, members);
+  return workspace?.name || "";
 }
 
 export function useShellViewportAndFocus({
@@ -466,14 +330,22 @@ export function route(conversation: Conversation) {
 
 /** Workspace ID of a `route()` path, or "" for non-conversation paths. */
 export function routeWorkspaceId(path: string) {
-  return /^\/app\/w\/([^/]+)\/c\//.exec(path)?.[1] || "";
+  return conversationPathWorkspaceId(path);
 }
 
+const hasSummaryUnread = (conversation: Conversation) =>
+  summarizeConversationUnread(conversation, {}, "").hasUnread;
+
+/**
+ * Next/previous conversation in `list`. With `unreadOnly` it uses the same
+ * unread judgement as the sidebar (`summary.hasUnread`, passed as `isUnread`).
+ */
 export function pickAdjacentConversation(
   list: Conversation[],
   currentId: string | undefined,
   direction: -1 | 1,
   unreadOnly: boolean,
+  isUnread: (conversation: Conversation) => boolean = hasSummaryUnread,
 ) {
   if (!list.length) return undefined;
   const currentIndex = currentId
@@ -489,10 +361,7 @@ export function pickAdjacentConversation(
     const candidate = list[index];
     if (
       candidate &&
-      (!unreadOnly ||
-        (effectiveNotificationLevel(candidate) !== "none" &&
-          candidate.lastSeq > candidate.readSeq &&
-          candidate.id !== currentId))
+      (!unreadOnly || (candidate.id !== currentId && isUnread(candidate)))
     ) {
       return candidate;
     }

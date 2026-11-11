@@ -1,7 +1,15 @@
 import { Link } from "react-router-dom";
-import { Code2, Keyboard, LogOut, Megaphone, Settings } from "lucide-react";
+import {
+  Code2,
+  Keyboard,
+  LogOut,
+  Megaphone,
+  Settings,
+  ShieldCheck,
+} from "lucide-react";
 import type { User } from "@teamie/api-client";
 import type { Connection } from "./chat";
+import { canConfigureModelGateway } from "./agent-management";
 import { Avatar } from "./ui";
 import { usePopover } from "./popover";
 import { ICON } from "./icons";
@@ -10,6 +18,7 @@ export function AccountMenu({
   user,
   busy,
   active,
+  selected = false,
   connection,
   connectionLabel,
   onSignOut,
@@ -21,6 +30,8 @@ export function AccountMenu({
   user: User;
   busy: boolean;
   active: boolean;
+  /** The current page is one of the menu's destinations. */
+  selected?: boolean;
   connection: Connection;
   connectionLabel: string;
   onSignOut: () => void;
@@ -37,25 +48,29 @@ export function AccountMenu({
     onNavigate();
   }
 
+  function runAction(action: () => void) {
+    trigger.current?.focus({ preventScroll: true });
+    setOpen(false);
+    onNavigate();
+    action();
+  }
+
   return (
     <div className="account-panel" ref={panel} onBlur={onBlur}>
       <button
         ref={trigger}
-        className="account-trigger"
+        className={`account-trigger ${selected ? "selected" : ""}`}
         aria-label={`账号菜单：${user.displayName}`}
+        aria-current={selected ? "page" : undefined}
         title={`${user.displayName} · ${connectionLabel}`}
         aria-expanded={expanded}
         aria-controls={id}
         onClick={() => setOpen(!expanded)}
       >
         <Avatar name={user.displayName} seed={user.id} />
-        <span
-          className={`rail-connection-status ${connection}`}
-          role="status"
-          aria-label={connectionLabel}
-        >
-          <span className="status-dot" aria-hidden="true" />
-          <span className="sr-only">{connectionLabel}</span>
+        {/* Connection changes are announced by the shell's live region. */}
+        <span className={`rail-connection-status ${connection}`} aria-hidden="true">
+          <span className="status-dot" />
         </span>
       </button>
       {expanded && (
@@ -73,16 +88,20 @@ export function AccountMenu({
             <Code2 size={ICON.md} aria-hidden="true" />
             开发者平台
           </Link>
+          {canConfigureModelGateway(user) && (
+            <Link to="/app/admin" onClick={navigate}>
+              <ShieldCheck size={ICON.md} aria-hidden="true" />
+              平台管理
+            </Link>
+          )}
+          {onShortcuts && (
+            <button type="button" onClick={() => runAction(onShortcuts)}>
+              <Keyboard size={ICON.md} aria-hidden="true" />
+              键盘快捷键
+            </button>
+          )}
           {onAnnouncements && (
-            <button
-              type="button"
-              onClick={() => {
-                trigger.current?.focus({ preventScroll: true });
-                setOpen(false);
-                onNavigate();
-                onAnnouncements();
-              }}
-            >
+            <button type="button" onClick={() => runAction(onAnnouncements)}>
               <Megaphone size={ICON.md} aria-hidden="true" />
               平台公告
               {hasUnreadAnnouncement && (
@@ -90,21 +109,9 @@ export function AccountMenu({
               )}
             </button>
           )}
-          {onShortcuts && (
-            <button
-              type="button"
-              onClick={() => {
-                trigger.current?.focus({ preventScroll: true });
-                setOpen(false);
-                onNavigate();
-                onShortcuts();
-              }}
-            >
-              <Keyboard size={ICON.md} aria-hidden="true" />
-              键盘快捷键
-            </button>
-          )}
+          <div className="account-menu-separator" role="separator" />
           <button
+            type="button"
             className="danger-text"
             disabled={busy}
             onClick={() => {

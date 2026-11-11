@@ -313,7 +313,7 @@
     list-style: none;
     margin: 0;
     padding: 0;
-    max-height: 300px;
+    max-height: min(60dvh, 420px);
     overflow-y: auto;
     display: flex;
     flex-direction: column;
@@ -558,6 +558,34 @@
   .notification-enable-switch,
   .notification-preview-switch {
     width: 100%;
+  }
+  .page-header {
+    min-width: 0;
+  }
+  .page-header-title {
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--font-md);
+    font-weight: 600;
+    color: var(--text-strong);
+  }
+  .page-header-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-left: auto;
+  }
+  .page-header-actions + .page-header-back {
+    margin-left: var(--space-3);
+  }
+  .page-header-back {
+    white-space: nowrap;
+  }
+  .page-tabs > a[aria-current="page"] {
+    font-weight: 600;
   }
   .quick-switcher-search-body,
   .quick-switcher-message-groups {

@@ -1,9 +1,27 @@
 import type { RefObject } from "react";
-import { Hash, MessageCircle, Users } from "lucide-react";
+import {
+  AtSign,
+  Bell,
+  Blocks,
+  Bookmark,
+  Bot,
+  Building2,
+  Code2,
+  Hash,
+  Keyboard,
+  MessageCircle,
+  Settings,
+  ShieldCheck,
+  Users,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import type { Conversation, Message, WorkspaceSearchItem } from "@teamie/api-client";
 import { AgentBadge } from "../agent-ui";
 import { ICON } from "../icons";
 import { Button, date, Modal, Notice, time } from "../ui";
+import type { ConversationUnreadSummary } from "../notification-model";
+import { UnreadBadge } from "../unread-badge";
+import type { QuickGroup, QuickItem } from "./quick-switcher-items";
 
 export type MessageOption = {
   id: string;
@@ -108,13 +126,10 @@ export function QuickSwitcherMessageResults({
                           id={`quick-switcher-opt-${opt.id}`}
                           role="option"
                           aria-selected={selected}
+                          className={`quick-switcher-option quick-switcher-message-option ${selected ? "selected" : ""}`}
+                          onMouseMove={() => { if (!selected) setActiveId(opt.id); }}
+                          onClick={() => onSelect(opt.path)}
                         >
-                          <button
-                            type="button"
-                            className={`quick-switcher-option quick-switcher-message-option ${selected ? "selected" : ""}`}
-                            onMouseEnter={() => setActiveId(opt.id)}
-                            onClick={() => onSelect(opt.path)}
-                          >
                             <div className="quick-switcher-message-meta">
                               <b>{opt.message.senderName}</b>
                               {opt.message.senderKind === "agent" && (
@@ -131,7 +146,6 @@ export function QuickSwitcherMessageResults({
                                 query={trimmedQuery}
                               />
                             </p>
-                          </button>
                         </li>
                       );
                     })}
@@ -168,6 +182,107 @@ export function QuickSwitcherMessageResults({
         </>
       )}
     </div>
+  );
+}
+
+const PAGE_ICONS: Record<string, LucideIcon> = {
+  members: Users,
+  apps: Blocks,
+  attention: AtSign,
+  saved: Bookmark,
+  agents: Bot,
+  settings: Settings,
+  developers: Code2,
+  shortcuts: Keyboard,
+};
+
+function QuickItemIcon({ item }: { item: QuickItem }) {
+  const Icon =
+    item.kind === "channel"
+      ? Hash
+      : item.kind === "group"
+        ? Users
+        : item.kind === "direct"
+          ? MessageCircle
+          : item.kind === "workspace"
+            ? Building2
+            : PAGE_ICONS[item.page || ""] || (item.page?.startsWith("admin") ? ShieldCheck : Bell);
+  return <Icon size={ICON.sm} />;
+}
+
+/**
+ * Jump results as a listbox: grouped (with headers) for the empty query,
+ * otherwise one ranked group. Each `li[role=option]` handles its own click;
+ * options contain no nested interactive controls.
+ */
+export function QuickSwitcherJumpResults({
+  groups,
+  listRef,
+  activeItemId,
+  setActiveId,
+  onSelect,
+  summaryOf,
+}: {
+  groups: QuickGroup[];
+  listRef: RefObject<HTMLUListElement | null>;
+  activeItemId?: string;
+  setActiveId: (id: string) => void;
+  onSelect: (path: string) => void;
+  summaryOf: (conversation: Conversation) => ConversationUnreadSummary;
+}) {
+  const option = (item: QuickItem) => {
+    const selected = item.id === activeItemId;
+    return (
+      <li
+        key={item.id}
+        id={`quick-switcher-opt-${item.id}`}
+        role="option"
+        aria-selected={selected}
+        className={`quick-switcher-option ${selected ? "selected" : ""}`}
+        onMouseMove={() => { if (!selected) setActiveId(item.id); }}
+        onClick={() => onSelect(item.path)}
+      >
+        <span className={`quick-switcher-icon ${item.kind}`} aria-hidden="true">
+          <QuickItemIcon item={item} />
+        </span>
+        <span className="quick-switcher-text">
+          <b>{item.label}</b>
+          <small>{item.subtitle}</small>
+        </span>
+        {item.conversation && (
+          <UnreadBadge
+            summary={summaryOf(item.conversation)}
+            conversationType={item.conversation.type}
+            showLevelIcons={false}
+            showDot
+          />
+        )}
+      </li>
+    );
+  };
+  return (
+    <ul
+      id="quick-switcher-listbox"
+      ref={listRef}
+      className="quick-switcher-list"
+      role="listbox"
+      aria-label="跳转结果"
+    >
+      {groups.map((group) =>
+        group.label ? (
+          <li key={group.id} role="presentation" className="quick-switcher-group">
+            <div className="quick-switcher-group-header" id={`quick-switcher-group-${group.id}`}>
+              {group.label}
+            </div>
+            <ul className="quick-switcher-group-items" role="group" aria-labelledby={`quick-switcher-group-${group.id}`}>
+              {group.items.map(option)}
+            </ul>
+          </li>
+        ) : (
+          group.items.map(option)
+        ),
+      )}
+    </ul>
   );
 }
 

@@ -54,6 +54,10 @@ export function buildMentionSpans(body: string, mentions: Mention[]): Mention[] 
   return trimMentionDraft(body, mentions).mentions;
 }
 
+function isDisabledAgent(member: Member & { agentEnabled?: boolean }) {
+  return member.kind === "agent" && member.agentEnabled === false;
+}
+
 // Safari dispatches the candidate-confirming keydown after compositionend with
 // isComposing=false but keyCode 229, so both signals mark an IME keystroke.
 export function isComposingKey(event: KeyboardEvent<HTMLElement>) {
@@ -104,7 +108,7 @@ export function MentionText({
 }
 
 type MentionCandidate =
-  | { type: "member"; member: Member }
+  | { type: "member"; member: Member & { agentEnabled?: boolean } }
   | { type: "broadcast"; kind: "all" | "here"; token: string; subtitle: string };
 
 export function MentionInput({
@@ -124,7 +128,8 @@ export function MentionInput({
   value: string;
   mentions: Mention[];
   onChange: (body: string, mentions: Mention[]) => void;
-  members: Member[];
+  /** `agentEnabled` comes from Agent discovery (see `Participant`). */
+  members: Array<Member & { agentEnabled?: boolean }>;
   enabled: boolean;
   allowBroadcastMentions?: boolean;
   showBroadcastOnEmptyQuery?: boolean;
@@ -198,6 +203,8 @@ export function MentionInput({
           .filter((m) =>
             m.displayName.toLocaleLowerCase().includes(activeQuery),
           )
+          // Disabled Agents stay mentionable but rank last: they will not respond.
+          .sort((a, b) => Number(isDisabledAgent(a)) - Number(isDisabledAgent(b)))
           .slice(0, 12)
           .map((member) => ({ type: "member" as const, member }))
       : [];
@@ -339,6 +346,11 @@ export function MentionInput({
                 )}
                 <span>{candidate.member.displayName}</span>
                 {candidate.member.kind === "agent" && <AgentBadge />}
+                {isDisabledAgent(candidate.member) && (
+                  <span className="agent-availability disabled mention-agent-disabled">
+                    已停用，不会回应
+                  </span>
+                )}
               </button>
             ) : (
               <button

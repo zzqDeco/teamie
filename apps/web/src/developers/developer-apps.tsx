@@ -108,13 +108,10 @@ export function DeveloperAppsList() {
     <div className="admin-view">
       <div className="admin-heading">
         <div>
-          <h1>
-            开发者平台
-            <span className="platform-role-badge">
-              <Code2 size={ICON.xs} />
-              开放生态
-            </span>
-          </h1>
+          <span className="platform-role-badge">
+            <Code2 size={ICON.xs} aria-hidden="true" />
+            开放生态
+          </span>
           <p>
             使用你的 Teamie 账号接入自部署的外部群聊应用（Web UI + Streamable HTTP MCP Server），支持人类成员与 Agent 在群聊中同场协作或同台博弈。
           </p>

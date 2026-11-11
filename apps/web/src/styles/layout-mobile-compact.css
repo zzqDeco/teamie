@@ -290,7 +290,7 @@
     .agent-detail-summary {
       flex-basis: calc(100% - 70px);
     }
-    .agent-detail-heading h1 {
+    .agent-detail-heading h2 {
       font-size: var(--font-3xl);
       margin-top: 5px;
     }

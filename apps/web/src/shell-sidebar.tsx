@@ -1,10 +1,9 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 import { Link } from "react-router-dom";
 import {
-  AtSign,
   Bell,
-  BellOff,
+  Blocks,
   Bot,
   ChevronDown,
   Hash,
@@ -28,10 +27,8 @@ import { ConversationActions } from "./conversation-actions";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
 import type { DialogKind } from "./dialogs";
 import { conversationName } from "./messages";
-import {
-  chatStore,
-  summarizeConversationUnread,
-} from "./store";
+import { chatStore } from "./store";
+import { conversationUnreadSummary, UnreadBadge } from "./unread-badge";
 import type { ChatSnapshot } from "./store";
 import {
   formatPresenceLabel,
@@ -78,7 +75,7 @@ function ConversationItem({
 }) {
   const { user } = useAuth();
   const activeSnapshot = snapshot || chatStore.getSnapshot();
-  const summary = summarizeConversationUnread(
+  const summary = conversationUnreadSummary(
     conversation,
     activeSnapshot,
     user!.id,
@@ -133,34 +130,35 @@ function ConversationItem({
       {conversation.type === "direct" && otherMember?.kind === "agent" && (
         <AgentBadge compact ownerName={otherMember.ownerName} />
       )}
-      {summary.muted ? (
-        <BellOff
-          size={ICON.xs}
-          className="conversation-muted-icon"
-          aria-label="已静音"
-        />
-      ) : summary.badgeCount > 0 ? (
-        <span
-          className={`unread-badge ${summary.badgePrefix ? "mention-badge" : ""}`}
-          aria-label={`${summary.badgeCount} 条未读`}
-          title={conversation.type === "channel" && summary.projectionStale ? "截至最近同步的未读提醒" : undefined}
-        >
-          {summary.badgePrefix}
-          {summary.badgeCount > 99 ? "99+" : summary.badgeCount}
-        </span>
-      ) : summary.level === "mentions" ? (
-        <AtSign
-          size={ICON.xs}
-          className="conversation-mentions-icon"
-          aria-label="仅提及通知"
-        />
-      ) : null}
+      <UnreadBadge summary={summary} conversationType={conversation.type} />
     </Link>
   );
 }
 
+const sectionStorageKey = (userId: string) => `teamie.sidebarSections.${userId}`;
+
+function readCollapsedSections(userId: string): Record<string, boolean> {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(sectionStorageKey(userId)) || "{}");
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, boolean>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeCollapsedSection(userId: string, section: string, collapsed: boolean) {
+  try {
+    const next = { ...readCollapsedSections(userId), [section]: collapsed };
+    localStorage.setItem(sectionStorageKey(userId), JSON.stringify(next));
+  } catch {
+    /* Ignore storage access errors. */
+  }
+}
+
 function ConversationSection({
   title,
+  sectionId,
+  userId,
   count,
   hasUnread,
   selectedConversationId,
@@ -168,13 +166,17 @@ function ConversationSection({
   children,
 }: {
   title: string;
+  sectionId: string;
+  userId: string;
   count: number;
   hasUnread: boolean;
   selectedConversationId?: string;
   action?: ReactNode;
   children: ReactNode;
 }) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(
+    () => readCollapsedSections(userId)[sectionId] !== true,
+  );
   const id = useId();
 
   useEffect(() => {
@@ -190,7 +192,10 @@ function ConversationSection({
           aria-label={`${title}${hasUnread ? "（有未读消息）" : ""}`}
           aria-expanded={expanded}
           aria-controls={id}
-          onClick={() => setExpanded((value) => !value)}
+          onClick={() => {
+            writeCollapsedSection(userId, sectionId, expanded);
+            setExpanded(!expanded);
+          }}
         >
           <ChevronDown size={ICON.xs} aria-hidden="true" />
           <span>{title}</span>
@@ -204,6 +209,52 @@ function ConversationSection({
   );
 }
 
+/**
+ * Number of visible unread conversation rows scrolled below the sidebar's
+ * viewport, re-measured on scroll/resize and whenever `signature` changes.
+ */
+function useUnreadBelow(scrollRef: RefObject<HTMLDivElement | null>, signature: string) {
+  const [below, setBelow] = useState(0);
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    const measure = () => {
+      if (!scroller.clientHeight) {
+        setBelow(0);
+        return;
+      }
+      const bottom = scroller.getBoundingClientRect().bottom;
+      const hidden = Array.from(
+        scroller.querySelectorAll<HTMLElement>(".conversation-link.has-unread"),
+      ).filter(
+        (link) => !link.closest("[hidden]") && link.getBoundingClientRect().top >= bottom - 4,
+      );
+      setBelow(hidden.length);
+    };
+    measure();
+    scroller.addEventListener("scroll", measure, { passive: true });
+    window.addEventListener("resize", measure);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(scroller);
+    return () => {
+      scroller.removeEventListener("scroll", measure);
+      window.removeEventListener("resize", measure);
+      observer?.disconnect();
+    };
+  }, [scrollRef, signature]);
+  return below;
+}
+
+function scrollToNextUnread(scroller: HTMLDivElement | null) {
+  if (!scroller) return;
+  const bottom = scroller.getBoundingClientRect().bottom;
+  const next = Array.from(
+    scroller.querySelectorAll<HTMLElement>(".conversation-link.has-unread"),
+  ).find((link) => !link.closest("[hidden]") && link.getBoundingClientRect().top >= bottom - 4);
+  next?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+  next?.focus({ preventScroll: true });
+}
+
 export function ShellSidebar({
   navigationRef,
   mobile,
@@ -215,6 +266,8 @@ export function ShellSidebar({
   connectionLabel,
   isAttentionPage,
   isAgentsPage,
+  isAccountPage = false,
+  isAppsPage = false,
   attentionUnreadCount,
   attentionProjection,
   snapshot,
@@ -246,6 +299,9 @@ export function ShellSidebar({
   connectionLabel: string;
   isAttentionPage: boolean;
   isAgentsPage: boolean;
+  /** Settings, developer platform and admin pages (reached from the avatar menu). */
+  isAccountPage?: boolean;
+  isAppsPage?: boolean;
   attentionUnreadCount?: number;
   attentionProjection?: ReadonlyArray<AttentionUnreadDTO>;
   snapshot?: ChatSnapshot;
@@ -269,6 +325,14 @@ export function ShellSidebar({
 }) {
   const activeSnapshot = snapshot || chatStore.getSnapshot();
   const presenceEnabled = !!caps["im.presence.publish"];
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const unreadOf = (item: Conversation) =>
+    conversationUnreadSummary(item, activeSnapshot, user.id, attentionProjection).hasUnread;
+  const unreadSignature = [...channels, ...direct]
+    .filter(unreadOf)
+    .map((item) => item.id)
+    .join("|");
+  const unreadBelow = useUnreadBelow(scrollRef, `${workspace?.id}:${unreadSignature}`);
   return (
     <div
       className="app-navigation"
@@ -313,17 +377,21 @@ export function ShellSidebar({
             const hasUnread = allAuthorizedConversations.some(
               (c) =>
                 c.workspaceId === space.id &&
-                summarizeConversationUnread(
+                conversationUnreadSummary(
                   c,
                   activeSnapshot,
                   user.id,
                   attentionProjection,
                 ).contributesToWorkspaceDot,
             );
+            // Account pages own the selection; the sidebar still shows the
+            // current workspace so returning keeps its context.
+            const selected = space.id === workspace?.id && !isAccountPage;
             return (
               <button
                 key={space.id}
-                className={`workspace-button ${space.id === workspace?.id ? "selected" : ""}`}
+                className={`workspace-button ${selected ? "selected" : ""}`}
+                aria-current={selected ? "true" : undefined}
                 title={hasUnread ? `${space.name}（有未读消息）` : space.name}
                 aria-label={
                   hasUnread
@@ -333,7 +401,7 @@ export function ShellSidebar({
                 onClick={() => onSelectWorkspace(space)}
               >
                 <span>{Array.from(space.name).slice(0, 2).join("")}</span>
-                {space.id === workspace?.id && <i />}
+                {selected && <i />}
                 {hasUnread && (
                   <em className="workspace-unread-dot" aria-hidden="true" />
                 )}
@@ -382,6 +450,7 @@ export function ShellSidebar({
           user={user}
           busy={busy}
           active={(!mobile || sidebar) && !hasOverlayModal}
+          selected={isAccountPage}
           connection={connection}
           connectionLabel={connectionLabel}
           onSignOut={onSignOut}
@@ -425,12 +494,25 @@ export function ShellSidebar({
           <span>搜索与切换</span>
           <kbd aria-hidden="true">{/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘ K" : "Ctrl K"}</kbd>
         </button>
-        <div className="sidebar-scroll">
+        {workspace && (
+          <Link
+            to={`/app/w/${workspace.id}/apps`}
+            className={`sidebar-page-link ${isAppsPage ? "active" : ""}`}
+            aria-current={isAppsPage ? "page" : undefined}
+            onClick={onCloseSidebar}
+          >
+            <Blocks size={ICON.sm} aria-hidden="true" />
+            <span>应用</span>
+          </Link>
+        )}
+        <div className="sidebar-scroll" ref={scrollRef}>
           <ConversationSection
             key={`${user.id}:${workspace?.id}:channels`}
             title="团队频道"
+            sectionId="channels"
+            userId={user.id}
             count={channels.length}
-            hasUnread={channels.some((item) => summarizeConversationUnread(item, activeSnapshot, user.id, attentionProjection).contributesToWorkspaceDot)}
+            hasUnread={channels.some(unreadOf)}
             selectedConversationId={channels.find((item) => item.id === conversationId)?.id}
             action={workspace && owner && caps["im.channel.create"] && (
               <IconButton label="创建频道" onClick={() => onOpenDialog("channel")}>
@@ -459,8 +541,10 @@ export function ShellSidebar({
           <ConversationSection
             key={`${user.id}:${workspace?.id}:direct`}
             title="私信与小组"
+            sectionId="direct"
+            userId={user.id}
             count={direct.length}
-            hasUnread={direct.some((item) => summarizeConversationUnread(item, activeSnapshot, user.id, attentionProjection).contributesToWorkspaceDot)}
+            hasUnread={direct.some(unreadOf)}
             selectedConversationId={direct.find((item) => item.id === conversationId)?.id}
           >
             {direct.map((c) => (
@@ -491,6 +575,16 @@ export function ShellSidebar({
               </div>
             )}
           </ConversationSection>
+          {unreadBelow > 0 && (
+            <button
+              type="button"
+              className="sidebar-unread-below"
+              onClick={() => scrollToNextUnread(scrollRef.current)}
+            >
+              <ChevronDown size={ICON.xs} aria-hidden="true" />
+              下方有 {unreadBelow} 个未读
+            </button>
+          )}
         </div>
       </aside>
     </div>

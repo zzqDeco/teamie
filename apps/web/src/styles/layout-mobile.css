@@ -295,7 +295,7 @@
     .admin-view {
       padding: 24px 18px max(28px, env(safe-area-inset-bottom));
     }
-    .admin-heading h1 {
+    .admin-heading h2 {
       flex-wrap: wrap;
       gap: 10px;
       font-size: var(--font-3xl);
@@ -392,9 +392,6 @@
       margin-bottom: 23px;
       flex-wrap: wrap;
       gap: 16px;
-    }
-    .agents-heading h1 {
-      font-size: var(--font-3xl);
     }
     .agents-heading > .button {
       padding: 10px 13px;

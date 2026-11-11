@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
-import { Hash, Menu } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Hash } from "lucide-react";
 import type { Conversation, Workspace } from "@teamie/api-client";
 import { chatStore, compareTimestampsDesc } from "../store";
-import { Button, IconButton } from "../ui";
+import { Button } from "../ui";
+import { MobileNavButton } from "./page-header";
 import { ICON } from "../icons";
 import { pickAdjacentConversation, route } from "../shell-sidebar";
 
@@ -143,13 +144,7 @@ export function UnavailableConversationView({
 }) {
   return (
     <div className="unavailable-view">
-      <IconButton
-        label="打开频道列表"
-        className="mobile-menu"
-        onClick={onOpenSidebar}
-      >
-        <Menu size={ICON.lg} />
-      </IconButton>
+      <MobileNavButton onClick={onOpenSidebar} />
       <span className="large-symbol">
         <Hash size={ICON.xl} />
       </span>
@@ -157,7 +152,7 @@ export function UnavailableConversationView({
       <p>
         {hasMatch
           ? "你可能已离开工作空间，或尚未加入这个对话。"
-          : "打开对话列表，选择频道或私信。"}
+          : "打开导航，选择频道或私信。"}
       </p>
       <Button onClick={onBack}>返回对话</Button>
     </div>
@@ -167,7 +162,7 @@ export function UnavailableConversationView({
 export function useShellKeyboardShortcuts({
   channels, direct, workspace, conversationsById, workspaces, conversationId,
   hasOverlayModal, quickSwitcherOpen, shortcutsOpen,
-  setShortcutsOpen, setQuickSwitcherOpen, navigate,
+  setShortcutsOpen, setQuickSwitcherOpen, navigate, isUnread,
 }: {
   channels: Conversation[]; direct: Conversation[]; workspace?: Workspace;
   conversationsById: Record<string, Conversation>; workspaces?: Workspace[];
@@ -176,7 +171,13 @@ export function useShellKeyboardShortcuts({
   setShortcutsOpen: (value: boolean | ((open: boolean) => boolean)) => void;
   setQuickSwitcherOpen: (value: boolean | ((open: boolean) => boolean)) => void;
   navigate: (to: string) => void;
+  /** Sidebar unread judgement (`summary.hasUnread`) for Alt+Shift+↑/↓. */
+  isUnread?: (conversation: Conversation) => boolean;
 }) {
+  const isUnreadRef = useRef(isUnread);
+  useEffect(() => {
+    isUnreadRef.current = isUnread;
+  });
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.isComposing || event.keyCode === 229) return;
@@ -235,7 +236,9 @@ export function useShellKeyboardShortcuts({
           ];
         });
         const pool = event.shiftKey || ordered.length === 0 ? allOrdered : ordered;
-        const next = pickAdjacentConversation(pool, conversationId, direction, event.shiftKey);
+        const next = pickAdjacentConversation(
+          pool, conversationId, direction, event.shiftKey, isUnreadRef.current,
+        );
         if (next) {
           event.preventDefault();
           navigate(route(next));

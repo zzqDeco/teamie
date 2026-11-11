@@ -377,13 +377,10 @@ export function ModelGatewaySettings() {
     <div className="admin-view gateway-view">
       <div className="admin-heading">
         <div>
-          <h1>
-            模型网关{" "}
-            <span className="platform-role-badge">
-              <ShieldCheck size={ICON.xs} />
-              平台管理员
-            </span>
-          </h1>
+          <span className="platform-role-badge">
+            <ShieldCheck size={ICON.xs} aria-hidden="true" />
+            平台管理员
+          </span>
           <p>所有 Agent 共用的服务商连接与多模型目录。</p>
         </div>
         <span className="admin-heading-icon">

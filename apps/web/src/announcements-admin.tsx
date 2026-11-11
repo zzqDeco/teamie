@@ -161,13 +161,10 @@ function AdminAnnouncementsManager({
     <div className="admin-view platform-announcements-view">
       <div className="admin-heading">
         <div>
-          <h1>
-            平台公告
-            <span className="platform-role-badge">
-              <ShieldCheck size={ICON.xs} />
-              平台管理员
-            </span>
-          </h1>
+          <span className="platform-role-badge">
+            <ShieldCheck size={ICON.xs} aria-hidden="true" />
+            平台管理员
+          </span>
           <p>
             面向全体人类用户（弹窗 + 历史回看）与已启用 Agent 发布版本更新或平台行为通知。
           </p>
