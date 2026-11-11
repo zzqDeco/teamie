@@ -142,25 +142,126 @@ def make_compose_json(
                 )
         services[svc] = {
             "image": release_manifest["images"][svc],
+            "restart": "unless-stopped",
             "init": svc not in ("caddy", "web", "postgres", "redis"),
             "read_only": svc != "postgres",
             "mem_limit": mem_bytes,
             "memswap_limit": mem_bytes,
-            "pids_limit": 128,
+            "pids_limit": 32 if svc == "redis" else (64 if svc in ("caddy", "web") else 128),
             "security_opt": ["no-new-privileges:true"],
             "cap_drop": ["ALL"] if svc != "postgres" else [],
-            "tmpfs": ["/tmp:size=16m,mode=1777"] if svc != "postgres" else [],
+            "cap_add": ["NET_BIND_SERVICE"] if svc in ("caddy", "web") else [],
+            "tmpfs": (
+                ["/data:size=1m,mode=1777"]
+                if svc == "redis"
+                else (["/tmp:size=16m,mode=1777"] if svc != "postgres" else [])
+            ),
             "networks": nets,
             "environment": env,
             "volumes": vols,
+            "logging": {"driver": "json-file", "options": {"max-size": "10m", "max-file": "3"}},
             "healthcheck": {
-                "test": ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/readyz"]
+                "test": ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/readyz"],
+                "interval": "10s",
+                "timeout": "3s",
+                "retries": 6,
             },
         }
+        if svc == "postgres":
+            services[svc]["shm_size"] = 64 * 1024 * 1024
+            services[svc]["command"] = [
+                "postgres",
+                "-c",
+                "shared_buffers=64MB",
+                "-c",
+                "work_mem=2MB",
+                "-c",
+                "maintenance_work_mem=32MB",
+                "-c",
+                "max_connections=40",
+            ]
+        elif svc == "redis":
+            services[svc]["user"] = "redis"
+            services[svc]["command"] = [
+                "redis-server",
+                "--save",
+                "",
+                "--appendonly",
+                "no",
+                "--maxmemory",
+                "40mb",
+                "--maxmemory-policy",
+                "allkeys-lru",
+            ]
     return {
         "name": "teamie",
         "networks": {"private": {"internal": True}, "egress": {}, "edge": {}},
         "services": services,
+    }
+
+
+def _container_from_service_spec(cid: str, name: str, labels: dict, spec: dict, started_at: str) -> dict:
+    mem_bytes = int(spec.get("mem_limit") or 0)
+    memswap_bytes = int(spec["memswap_limit"]) if spec.get("memswap_limit") is not None else mem_bytes
+    tmpfs_map = {}
+    for entry in spec.get("tmpfs") or []:
+        path, opts = entry.split(":", 1) if ":" in entry else (entry, "")
+        tmpfs_map[path] = opts
+    raw_nets = spec.get("networks") or {"private": None}
+    net_keys = list(raw_nets.keys()) if isinstance(raw_nets, dict) else [str(n) for n in raw_nets]
+    hc = spec.get("healthcheck") or {}
+    hc_inspect = None
+    if hc:
+        hc_inspect = {"Test": list(hc.get("test") or [])}
+        if hc.get("interval") == "10s":
+            hc_inspect["Interval"] = 10_000_000_000
+        if hc.get("timeout") == "3s":
+            hc_inspect["Timeout"] = 3_000_000_000
+        if hc.get("retries") is not None:
+            hc_inspect["Retries"] = int(hc["retries"])
+    log_spec = spec.get("logging") or {}
+    return {
+        "id": cid,
+        "name": name,
+        "labels": labels,
+        "image": spec["image"],
+        "running": True,
+        "started_at": started_at,
+        "health": "healthy",
+        "mem_limit": mem_bytes,
+        "memswap_limit": memswap_bytes,
+        "shm_size": int(spec.get("shm_size") or 0),
+        "pids_limit": int(spec.get("pids_limit") or 0),
+        "nano_cpus": int(round(float(spec["cpus"]) * 1_000_000_000)) if spec.get("cpus") is not None else int(spec.get("nano_cpus") or 0),
+        "cpuset": str(spec.get("cpuset") or ""),
+        "read_only": bool(spec.get("read_only") or False),
+        "init": bool(spec.get("init") or False),
+        "security_opt": list(spec.get("security_opt") or []),
+        "cap_drop": list(spec.get("cap_drop") or []),
+        "cap_add": list(spec.get("cap_add") or []),
+        "tmpfs": tmpfs_map,
+        "restart": str(spec.get("restart") or ""),
+        "log_config": {
+            "Type": str(log_spec.get("driver") or "json-file"),
+            "Config": {str(k): str(v) for k, v in (log_spec.get("options") or {}).items()},
+        },
+        "cmd": list(spec["command"]) if spec.get("command") is not None else None,
+        "entrypoint": list(spec["entrypoint"]) if spec.get("entrypoint") is not None else None,
+        "user": str(spec.get("user") or ""),
+        "working_dir": str(spec.get("working_dir") or ""),
+        "healthcheck": hc_inspect,
+        "env": [f"{k}={v}" for k, v in (spec.get("environment") or {}).items() if v is not None],
+        "mounts": [
+            {
+                "Destination": v["target"],
+                "Source": v["source"],
+                "Type": v.get("type", "bind"),
+                "RW": not bool(v.get("read_only", False)),
+            }
+            for v in (spec.get("volumes") or [])
+            if isinstance(v, dict)
+        ],
+        "networks": [f"teamie_{n}" for n in net_keys],
     }
 
 
@@ -279,6 +380,10 @@ def main():
             force_recreate = "--force-recreate" in rest
             svcs = [tok for tok in rest[1:] if not tok.startswith("-") and not tok.isdigit()]
             caddyfile = str(Path(compose_file).parent / "Caddyfile") if compose_file else ""
+            compose_json_env = os.environ.get("TEAMIE_COMPOSE_JSON", "")
+            compose_services = {}
+            if compose_json_env and Path(compose_json_env).is_file():
+                compose_services = json.loads(Path(compose_json_env).read_text()).get("services") or {}
             def do_up(st):
                 flags_source = st.get("flags_file", "")
                 tls_cfg_source = os.environ.get("MOCK_TLS_CONFIG_FILE") or st.get("tls_config_file", "")
@@ -290,34 +395,54 @@ def main():
                     seq = int(st.get("start_seq", 0)) + 1
                     st["start_seq"] = seq
                     cid = f"canonical-{svc}"
-                    img = images.get(svc, st["service_defaults"][svc]["image"])
-                    mem = st["service_defaults"][svc]["mem_limit"]
-                    mounts = []
-                    env_list = ["LOG_LEVEL=info"]
+                    spec = json.loads(json.dumps(compose_services.get(svc) or st["service_defaults"][svc]))
+                    img = images.get(svc, spec["image"])
+                    spec["image"] = img
+                    if svc == "sandbox" and "sandbox-runner" in images:
+                        spec.setdefault("environment", {})["SANDBOX_RUNNER_IMAGE"] = images["sandbox-runner"]
                     if svc == "caddy":
-                        mounts = [{"Destination": "/etc/caddy/Caddyfile", "Source": caddyfile}]
+                        vols = []
+                        if caddyfile:
+                            vols.append({"type": "bind", "source": caddyfile, "target": "/etc/caddy/Caddyfile", "read_only": True})
                         if tls_cfg_source:
-                            mounts.append({"Destination": "/etc/caddy/issuer.caddy", "Source": tls_cfg_source})
+                            vols.append({"type": "bind", "source": tls_cfg_source, "target": "/etc/caddy/issuer.caddy", "read_only": True})
                         if tls_dir_source:
-                            mounts.append({"Destination": "/run/tls", "Source": tls_dir_source})
-                        env_list += ["SITE_ADDRESS=https://192.0.2.1", "TLS_SERVER_NAME=192.0.2.1"]
-                    elif svc == "sandbox":
-                        runner_img = images.get("sandbox-runner", st["service_defaults"][svc].get("runner_image", ""))
-                        env_list += [f"SANDBOX_RUNNER_IMAGE={runner_img}"]
-                    elif svc not in ("postgres", "redis", "web"):
-                        env_list += [
-                            "APP_ORIGIN=https://192.0.2.1",
-                            "COOKIE_SECURE=true",
-                            f"DATABASE_URL=postgres://teamie_{svc}:secret_{svc}_0123456789abcdef@postgres:5432/teamie_{svc}",
-                        ]
-                        if svc != "llm-gateway" and flags_source:
-                            mounts = [{"Destination": "/etc/teamie/feature-flags.json", "Source": flags_source}]
-                    prev_started = (st["containers"].get(cid) or {}).get("started_at", "2026-11-11T00:00:00Z")
-                    prev_img = (st["containers"].get(cid) or {}).get("image")
-                    prev_mounts = (st["containers"].get(cid) or {}).get("mounts")
-                    recreated = force_recreate or cid not in st["containers"] or prev_img != img or prev_mounts != mounts or not st["containers"][cid]["running"]
-                    started_at = f"2026-11-11T00:00:{seq:02d}Z" if recreated else prev_started
-                    st["containers"][cid] = {
+                            vols.append({"type": "bind", "source": tls_dir_source, "target": "/run/tls", "read_only": True})
+                        if vols:
+                            spec["volumes"] = vols
+                    elif svc not in ("postgres", "redis", "web", "sandbox", "llm-gateway") and flags_source and not spec.get("volumes"):
+                        spec["volumes"] = [{"type": "bind", "source": flags_source, "target": "/etc/teamie/feature-flags.json", "read_only": True}]
+                    mem_bytes = int(spec.get("mem_limit") or 0)
+                    memswap_bytes = int(spec["memswap_limit"]) if spec.get("memswap_limit") is not None else mem_bytes
+                    tmpfs_map = {}
+                    for entry in spec.get("tmpfs") or []:
+                        path, opts = entry.split(":", 1) if ":" in entry else (entry, "")
+                        tmpfs_map[path] = opts
+                    raw_nets = spec.get("networks") or {"private": None}
+                    net_keys = list(raw_nets.keys()) if isinstance(raw_nets, dict) else [str(n) for n in raw_nets]
+                    hc = spec.get("healthcheck") or {}
+                    hc_inspect = None
+                    if hc:
+                        hc_inspect = {"Test": list(hc.get("test") or [])}
+                        if hc.get("interval") == "10s":
+                            hc_inspect["Interval"] = 10_000_000_000
+                        if hc.get("timeout") == "3s":
+                            hc_inspect["Timeout"] = 3_000_000_000
+                        if hc.get("retries") is not None:
+                            hc_inspect["Retries"] = int(hc["retries"])
+                    log_spec = spec.get("logging") or {}
+                    mounts = [
+                        {
+                            "Destination": v["target"],
+                            "Source": v["source"],
+                            "Type": v.get("type", "bind"),
+                            "RW": not bool(v.get("read_only", False)),
+                        }
+                        for v in (spec.get("volumes") or [])
+                        if isinstance(v, dict)
+                    ]
+                    env_list = [f"{k}={v}" for k, v in (spec.get("environment") or {}).items() if v is not None]
+                    new_rec = {
                         "id": cid,
                         "name": f"teamie-{svc}-1",
                         "labels": {
@@ -326,13 +451,52 @@ def main():
                         },
                         "image": img,
                         "running": True,
-                        "started_at": started_at,
+                        "started_at": "2026-11-11T00:00:00Z",
                         "health": "healthy",
-                        "mem_limit": mem,
+                        "mem_limit": mem_bytes,
+                        "memswap_limit": memswap_bytes,
+                        "shm_size": int(spec.get("shm_size") or 0),
+                        "pids_limit": int(spec.get("pids_limit") or 0),
+                        "nano_cpus": int(round(float(spec["cpus"]) * 1_000_000_000)) if spec.get("cpus") is not None else int(spec.get("nano_cpus") or 0),
+                        "cpuset": str(spec.get("cpuset") or ""),
+                        "read_only": bool(spec.get("read_only") or False),
+                        "init": bool(spec.get("init") or False),
+                        "security_opt": list(spec.get("security_opt") or []),
+                        "cap_drop": list(spec.get("cap_drop") or []),
+                        "cap_add": list(spec.get("cap_add") or []),
+                        "tmpfs": tmpfs_map,
+                        "restart": str(spec.get("restart") or ""),
+                        "log_config": {
+                            "Type": str(log_spec.get("driver") or "json-file"),
+                            "Config": {str(k): str(v) for k, v in (log_spec.get("options") or {}).items()},
+                        },
+                        "cmd": list(spec["command"]) if spec.get("command") is not None else None,
+                        "entrypoint": list(spec["entrypoint"]) if spec.get("entrypoint") is not None else None,
+                        "user": str(spec.get("user") or ""),
+                        "working_dir": str(spec.get("working_dir") or ""),
+                        "healthcheck": hc_inspect,
                         "env": env_list,
                         "mounts": mounts,
-                        "networks": ["teamie_private"],
+                        "networks": [f"teamie_{n}" for n in net_keys],
                     }
+                    prev = st["containers"].get(cid)
+                    spec_keys = (
+                        "image", "mem_limit", "memswap_limit", "shm_size", "pids_limit",
+                        "nano_cpus", "cpuset", "read_only", "init", "security_opt",
+                        "cap_drop", "cap_add", "tmpfs", "restart", "log_config",
+                        "cmd", "entrypoint", "user", "working_dir", "healthcheck",
+                        "env", "mounts", "networks",
+                    )
+                    spec_changed = prev is None or any(prev.get(k) != new_rec.get(k) for k in spec_keys)
+                    recreated = force_recreate or spec_changed or not prev["running"]
+                    new_rec["started_at"] = (
+                        f"2026-11-11T00:00:{seq:02d}Z"
+                        if recreated
+                        else prev.get("started_at", "2026-11-11T00:00:00Z")
+                    )
+                    if recreated:
+                        st["events"].append(f"canonical_recreated:{svc}")
+                    st["containers"][cid] = new_rec
             with_state(do_up)
             return 0
         return 1
@@ -427,11 +591,37 @@ def main():
                     "Image": c["image"],
                     "Labels": c["labels"],
                     "Env": c.get("env", []),
+                    "Cmd": c.get("cmd"),
+                    "Entrypoint": c.get("entrypoint"),
+                    "User": c.get("user", ""),
+                    "WorkingDir": c.get("working_dir", ""),
+                    "Healthcheck": c.get("healthcheck"),
                 },
                 "HostConfig": {
                     "Memory": int(c.get("mem_limit", 0)),
+                    "MemorySwap": int(c.get("memswap_limit", c.get("mem_limit", 0))),
+                    "ShmSize": int(c.get("shm_size", 0)),
+                    "PidsLimit": int(c.get("pids_limit", 0)),
+                    "NanoCpus": int(c.get("nano_cpus", 0)),
+                    "CpuShares": int(c.get("cpu_shares", 0)),
+                    "CpuQuota": int(c.get("cpu_quota", 0)),
+                    "CpuPeriod": int(c.get("cpu_period", 0)),
+                    "CpusetCpus": c.get("cpuset", ""),
+                    "ReadonlyRootfs": bool(c.get("read_only", False)),
+                    "Init": bool(c.get("init", False)),
+                    "Privileged": bool(c.get("privileged", False)),
+                    "SecurityOpt": c.get("security_opt", []),
+                    "CapDrop": c.get("cap_drop", []),
+                    "CapAdd": c.get("cap_add", []),
+                    "Tmpfs": c.get("tmpfs", {}),
+                    "PortBindings": c.get("port_bindings", {}),
+                    "RestartPolicy": {"Name": c.get("restart", ""), "MaximumRetryCount": 0},
+                    "LogConfig": c.get("log_config", {"Type": "json-file", "Config": {}}),
                 },
                 "Mounts": c.get("mounts", []),
+                "NetworkSettings": {
+                    "Networks": {net: {} for net in c.get("networks", [])},
+                },
             })
         print(json.dumps(payload))
         return 0
@@ -612,52 +802,27 @@ class ABRolloutOrchestrationTests(unittest.TestCase):
         return recipe
 
     def _seed_running_stack(self, manifest_data: dict, recipe: Path):
-        caddyfile = str(recipe / "deploy" / "Caddyfile")
+        compose_spec = make_compose_json(
+            manifest_data,
+            recipe / "deploy" / "Caddyfile",
+            self.flags_file,
+            tls_config_path=self.tls_config_file,
+            tls_cert_dir=self.tls_cert_dir,
+        )
         containers = {}
         defaults = {}
-        for svc, mem_mib in SERVICE_MEM_MIB.items():
-            mem_bytes = mem_mib * 1024 * 1024
-            img = manifest_data["images"][svc]
-            defaults[svc] = {
-                "image": img,
-                "mem_limit": mem_bytes,
-                "runner_image": manifest_data["images"].get("sandbox-runner", ""),
-            }
-            mounts = []
-            env_list = ["LOG_LEVEL=info"]
-            if svc == "caddy":
-                mounts = [
-                    {"Destination": "/etc/caddy/Caddyfile", "Source": caddyfile},
-                    {"Destination": "/etc/caddy/issuer.caddy", "Source": str(self.tls_config_file)},
-                    {"Destination": "/run/tls", "Source": str(self.tls_cert_dir)},
-                ]
-                env_list += ["SITE_ADDRESS=https://192.0.2.1", "TLS_SERVER_NAME=192.0.2.1"]
-            elif svc == "sandbox":
-                env_list += [f"SANDBOX_RUNNER_IMAGE={manifest_data['images']['sandbox-runner']}"]
-            elif svc not in ("postgres", "redis", "web"):
-                env_list += [
-                    "APP_ORIGIN=https://192.0.2.1",
-                    "COOKIE_SECURE=true",
-                    f"DATABASE_URL=postgres://teamie_{svc}:secret_{svc}_0123456789abcdef@postgres:5432/teamie_{svc}",
-                ]
-                if svc != "llm-gateway":
-                    mounts = [{"Destination": "/etc/teamie/feature-flags.json", "Source": str(self.flags_file)}]
-            containers[f"canonical-{svc}"] = {
-                "id": f"canonical-{svc}",
-                "name": f"teamie-{svc}-1",
-                "labels": {
+        for svc, spec in compose_spec["services"].items():
+            defaults[svc] = copy.deepcopy(spec)
+            containers[f"canonical-{svc}"] = _container_from_service_spec(
+                cid=f"canonical-{svc}",
+                name=f"teamie-{svc}-1",
+                labels={
                     "com.docker.compose.project": "teamie",
                     "com.docker.compose.service": svc,
                 },
-                "image": img,
-                "running": True,
-                "started_at": "2026-11-11T00:00:00Z",
-                "health": "healthy",
-                "mem_limit": mem_bytes,
-                "env": env_list,
-                "mounts": mounts,
-                "networks": ["teamie_private"],
-            }
+                spec=spec,
+                started_at="2026-11-11T00:00:00Z",
+            )
         state = {
             "containers": containers,
             "service_defaults": defaults,
@@ -695,6 +860,7 @@ class ABRolloutOrchestrationTests(unittest.TestCase):
         extra_env: dict | None = None,
         tls_config_path: Path | None = None,
         tls_cert_dir: Path | None = None,
+        compose_mutator=None,
     ):
         target_path = self.root / "target-manifest.json"
         target_path.write_text(json.dumps(target_manifest))
@@ -702,18 +868,17 @@ class ABRolloutOrchestrationTests(unittest.TestCase):
         images_env.write_text(manifest_mod.image_env(target_manifest))
         eff_tls_cfg = tls_config_path if tls_config_path is not None else self.tls_config_file
         eff_tls_dir = tls_cert_dir if tls_cert_dir is not None else self.tls_cert_dir
-        compose_json = self.root / "compose.json"
-        compose_json.write_text(
-            json.dumps(
-                make_compose_json(
-                    target_manifest,
-                    recipe / "deploy" / "Caddyfile",
-                    self.flags_file,
-                    tls_config_path=eff_tls_cfg,
-                    tls_cert_dir=eff_tls_dir,
-                )
-            )
+        compose_data = make_compose_json(
+            target_manifest,
+            recipe / "deploy" / "Caddyfile",
+            self.flags_file,
+            tls_config_path=eff_tls_cfg,
+            tls_cert_dir=eff_tls_dir,
         )
+        if compose_mutator is not None:
+            compose_mutator(compose_data)
+        compose_json = self.root / "compose.json"
+        compose_json.write_text(json.dumps(compose_data))
 
         env = {
             **os.environ,
@@ -1011,6 +1176,65 @@ class ABRolloutOrchestrationTests(unittest.TestCase):
             after_over["events"].index("canonical_stop:agent-runtime"),
             after_over["events"].index("canonical_up:llm-gateway"),
         )
+
+    def test_runtime_settings_changes_without_image_bump_trigger_rollout(self):
+        # 1. Redis command + mem_limit change with identical image digests must gate out online rollout
+        # and run rollout_fenced so canonical-redis is recreated with the new command and 32 MiB cap!
+        def mutate_redis(cfg: dict):
+            redis_spec = cfg["services"]["redis"]
+            redis_spec["mem_limit"] = 32 * 1024 * 1024
+            redis_spec["memswap_limit"] = 32 * 1024 * 1024
+            redis_spec["command"] = [
+                "redis-server",
+                "--save",
+                "",
+                "--appendonly",
+                "no",
+                "--maxmemory",
+                "20mb",
+                "--maxmemory-policy",
+                "allkeys-lru",
+            ]
+
+        res_redis = self._run_rollout(
+            self.manifest_v1,
+            self.manifest_v1,
+            self.recipe_v1,
+            compose_mutator=mutate_redis,
+        )
+        self.assertEqual(res_redis.returncode, 0, res_redis.stderr)
+        state_redis = json.loads(self.state_path.read_text())
+        self.assertEqual(state_redis["max_concurrent_canaries"], 0)
+        self.assertIn("canonical_recreated:redis", state_redis["events"])
+        self.assertNotIn("canonical_recreated:postgres", state_redis["events"])
+        self.assertEqual(state_redis["containers"]["canonical-redis"]["mem_limit"], 32 * 1024 * 1024)
+        self.assertIn("20mb", state_redis["containers"]["canonical-redis"]["cmd"])
+
+        # 2. Stateless web resource change + single-writer sandbox pids_limit change with identical image digests
+        # must run online canary cutover for web and stop-then-recreate for sandbox (never skipping them)!
+        self._seed_running_stack(self.manifest_v1, self.recipe_v1)
+
+        def mutate_web_and_sandbox(cfg: dict):
+            cfg["services"]["web"]["pids_limit"] = 96
+            cfg["services"]["sandbox"]["pids_limit"] = 192
+
+        res_online = self._run_rollout(
+            self.manifest_v1,
+            self.manifest_v1,
+            self.recipe_v1,
+            compose_mutator=mutate_web_and_sandbox,
+        )
+        self.assertEqual(res_online.returncode, 0, res_online.stderr)
+        state_online = json.loads(self.state_path.read_text())
+        self.assertEqual(state_online["max_concurrent_canaries"], 1)
+        events = state_online["events"]
+        self.assertIn("canary_create:web", events)
+        self.assertIn("canonical_force_recreate:web", events)
+        self.assertIn("canonical_stop:sandbox", events)
+        self.assertIn("canonical_force_recreate:sandbox", events)
+        self.assertNotIn("canary_create:chat", events)
+        self.assertEqual(state_online["containers"]["canonical-web"]["pids_limit"], 96)
+        self.assertEqual(state_online["containers"]["canonical-sandbox"]["pids_limit"], 192)
 
 
 # --- Live Caddy v2.11.7 HTTP + WebSocket Dual-Slot Cutover Harness ---

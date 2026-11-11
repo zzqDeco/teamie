@@ -944,4 +944,155 @@ class OnlineCompatibilityAndCanaryPlanTest(unittest.TestCase):
                 manifest.build_canary_plan(compose_cfg, forbidden)
 
 
+class ServiceUpToDateRuntimeSettingsTest(unittest.TestCase):
+    def _redis_base(self):
+        image = "ghcr.io/zzqdeco/teamie-redis@sha256:" + "r" * 64
+        config = {
+            "name": "teamie",
+            "networks": {"private": {"internal": True}},
+            "volumes": {"redis_state": {}},
+            "services": {
+                "redis": {
+                    "image": image,
+                    "restart": "unless-stopped",
+                    "read_only": True,
+                    "init": False,
+                    "mem_limit": 64 * 1024 * 1024,
+                    "memswap_limit": 64 * 1024 * 1024,
+                    "shm_size": 64 * 1024 * 1024,
+                    "pids_limit": 32,
+                    "cpus": 0.5,
+                    "cpuset": "0",
+                    "security_opt": ["no-new-privileges:true"],
+                    "cap_drop": ["ALL"],
+                    "cap_add": [],
+                    "user": "redis",
+                    "command": ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "40mb"],
+                    "tmpfs": ["/data:size=1m,mode=1777"],
+                    "networks": {"private": None},
+                    "environment": {"LOG_LEVEL": "info"},
+                    "volumes": [{"type": "volume", "source": "redis_state", "target": "/var/lib/redis"}],
+                    "logging": {"driver": "json-file", "options": {"max-size": "10m", "max-file": "3"}},
+                    "healthcheck": {
+                        "test": ["CMD", "redis-cli", "ping"],
+                        "interval": "10s",
+                        "timeout": "3s",
+                        "retries": 6,
+                    },
+                }
+            },
+        }
+        inspected = {
+            "Id": "cid-redis",
+            "State": {"Running": True, "Health": {"Status": "healthy"}},
+            "Config": {
+                "Image": image,
+                "Env": ["PATH=/usr/local/bin:/usr/bin", "LOG_LEVEL=info"],
+                "Entrypoint": ["docker-entrypoint.sh"],
+                "Cmd": ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "40mb"],
+                "User": "redis",
+                "WorkingDir": "/data",
+                "Healthcheck": {
+                    "Test": ["CMD", "redis-cli", "ping"],
+                    "Interval": 10_000_000_000,
+                    "Timeout": 3_000_000_000,
+                    "Retries": 6,
+                },
+            },
+            "HostConfig": {
+                "Memory": 64 * 1024 * 1024,
+                "MemorySwap": 64 * 1024 * 1024,
+                "ShmSize": 64 * 1024 * 1024,
+                "PidsLimit": 32,
+                "NanoCpus": 500_000_000,
+                "CpusetCpus": "0",
+                "ReadonlyRootfs": True,
+                "Init": False,
+                "Privileged": False,
+                "SecurityOpt": ["no-new-privileges:true"],
+                "CapDrop": ["ALL"],
+                "CapAdd": [],
+                "Tmpfs": {"/data": "size=1m,mode=1777"},
+                "PortBindings": {},
+                "RestartPolicy": {"Name": "unless-stopped", "MaximumRetryCount": 0},
+                "LogConfig": {"Type": "json-file", "Config": {"max-size": "10m", "max-file": "3"}},
+            },
+            "Mounts": [
+                {"Type": "volume", "Name": "teamie_redis_state", "Destination": "/var/lib/redis", "RW": True}
+            ],
+            "NetworkSettings": {"Networks": {"teamie_private": {}}},
+        }
+        image_inspect = {
+            "Config": {
+                "Env": ["PATH=/usr/local/bin:/usr/bin"],
+                "Entrypoint": ["docker-entrypoint.sh"],
+                "Cmd": ["redis-server"],
+                "User": "",
+                "WorkingDir": "/data",
+            }
+        }
+        return config, inspected, image_inspect
+
+    def _eval_up_to_date(self, config, container_info, image_info):
+        import json as _json
+        from unittest import mock
+
+        def fake_run(cmd, **kwargs):
+            self.assertEqual(cmd[:2], ["docker", "ps"])
+            return subprocess.CompletedProcess(cmd, 0, stdout="cid-redis\n", stderr="")
+
+        def fake_check_output(cmd, **kwargs):
+            if cmd[:3] == ["docker", "image", "inspect"]:
+                return _json.dumps([image_info])
+            if cmd[:2] == ["docker", "inspect"]:
+                return _json.dumps([container_info])
+            raise AssertionError(f"unexpected command {cmd}")
+
+        with mock.patch.object(manifest.subprocess, "run", side_effect=fake_run), mock.patch.object(
+            manifest.subprocess, "check_output", side_effect=fake_check_output
+        ):
+            return manifest.service_up_to_date(config, "redis")
+
+    def test_detects_command_memory_and_runtime_setting_drifts(self):
+        cfg, info, img_info = self._redis_base()
+        self.assertTrue(self._eval_up_to_date(cfg, info, img_info))
+
+        mutations = [
+            ("command_changed", lambda s: s.update(command=["redis-server", "--maxmemory", "20mb"])),
+            ("command_removed_to_image_default", lambda s: s.pop("command")),
+            ("entrypoint_changed", lambda s: s.update(entrypoint=["/custom-entrypoint.sh"])),
+            ("user_changed", lambda s: s.update(user="nobody")),
+            ("user_removed_to_image_default", lambda s: s.pop("user")),
+            ("mem_limit_changed", lambda s: s.update(mem_limit=32 * 1024 * 1024, memswap_limit=32 * 1024 * 1024)),
+            ("memswap_changed", lambda s: s.update(memswap_limit=128 * 1024 * 1024)),
+            ("memswap_removed", lambda s: s.pop("memswap_limit")),
+            ("shm_size_changed", lambda s: s.update(shm_size=128 * 1024 * 1024)),
+            ("pids_limit_changed", lambda s: s.update(pids_limit=64)),
+            ("cpus_changed", lambda s: s.update(cpus=1.0)),
+            ("cpuset_changed", lambda s: s.update(cpuset="0-1")),
+            ("read_only_changed", lambda s: s.update(read_only=False)),
+            ("init_changed", lambda s: s.update(init=True)),
+            ("security_opt_changed", lambda s: s.update(security_opt=[])),
+            ("cap_drop_changed", lambda s: s.update(cap_drop=[])),
+            ("cap_add_changed", lambda s: s.update(cap_add=["NET_BIND_SERVICE"])),
+            ("tmpfs_changed", lambda s: s.update(tmpfs=["/data:size=4m,mode=1777"])),
+            ("ports_added", lambda s: s.update(ports=[{"target": 6379, "published": "6379", "protocol": "tcp"}])),
+            ("restart_changed", lambda s: s.update(restart="always")),
+            ("logging_changed", lambda s: s.update(logging={"driver": "json-file", "options": {"max-size": "50m"}})),
+            ("healthcheck_test_changed", lambda s: s["healthcheck"].update(test=["CMD", "redis-cli", "info"])),
+            ("healthcheck_interval_changed", lambda s: s["healthcheck"].update(interval="30s")),
+            ("network_added", lambda s: s.update(networks={"private": None, "egress": None})),
+            ("volume_ro_changed", lambda s: s.update(volumes=[{"type": "volume", "source": "redis_state", "target": "/var/lib/redis", "read_only": True}])),
+            ("env_removed", lambda s: s.update(environment={})),
+        ]
+        for label, mut in mutations:
+            with self.subTest(mutation=label):
+                target_cfg = copy.deepcopy(cfg)
+                mut(target_cfg["services"]["redis"])
+                self.assertFalse(
+                    self._eval_up_to_date(target_cfg, info, img_info),
+                    f"expected service_up_to_date=False on {label}",
+                )
+
+
 if __name__ == "__main__": unittest.main()

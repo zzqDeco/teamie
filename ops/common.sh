@@ -69,7 +69,7 @@ cutover_service_ab() {
     cleanup_canary_containers
     return 1
   fi
-  if ! "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 "$svc"; then
+  if ! "${COMPOSE[@]}" up -d --no-deps --force-recreate --wait --wait-timeout 180 "$svc"; then
     cleanup_canary_containers
     return 1
   fi
@@ -148,7 +148,7 @@ rollout_online() {
   for single_svc in sandbox agent-runtime; do
     if [[ $service_list == *" $single_svc "* ]] && ! python3 "$manifest_tool" service-up-to-date "$compose_json" "$single_svc"; then
       "${COMPOSE[@]}" stop --timeout 30 "$single_svc" || { cleanup_canary_containers; return 1; }
-      "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 "$single_svc" || { cleanup_canary_containers; return 1; }
+      "${COMPOSE[@]}" up -d --no-deps --force-recreate --wait --wait-timeout 180 "$single_svc" || { cleanup_canary_containers; return 1; }
     fi
   done
   cleanup_canary_containers

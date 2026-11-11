@@ -428,6 +428,19 @@ def _same_mount_source(expected_source, mounted_source):
     return os.path.realpath(expected_abs) == os.path.realpath(mounted_abs)
 
 
+_DURATION_TOKEN_RE = re.compile(r"(\d+(?:\.\d+)?)(ns|us|µs|μs|ms|s|m|h)")
+_DURATION_UNITS_NS = {
+    "ns": 1,
+    "us": 1_000,
+    "µs": 1_000,
+    "μs": 1_000,
+    "ms": 1_000_000,
+    "s": 1_000_000_000,
+    "m": 60 * 1_000_000_000,
+    "h": 3600 * 1_000_000_000,
+}
+
+
 def _parse_mem_bytes(value):
     if value is None or value == "":
         return 0
@@ -449,6 +462,205 @@ def _parse_mem_bytes(value):
     if unit in ("m", "mb", "mib"):
         return amount * 1024 * 1024
     return amount * 1024 * 1024 * 1024
+
+
+def _parse_signed_mem_bytes(value):
+    if value is None or value == "":
+        return 0
+    if isinstance(value, int):
+        return value
+    text = str(value).strip()
+    if text == "-1":
+        return -1
+    return _parse_mem_bytes(text)
+
+
+def _parse_duration_ns(value):
+    if value is None or value == "":
+        return 0
+    if isinstance(value, (int, float)):
+        return int(value)
+    text = str(value).strip()
+    if not text:
+        return 0
+    if text.isdigit():
+        return int(text)
+    pos = 0
+    total = 0
+    for match in _DURATION_TOKEN_RE.finditer(text):
+        if match.start() != pos:
+            raise ValueError(f"invalid duration {value!r}")
+        total += int(round(float(match.group(1)) * _DURATION_UNITS_NS[match.group(2)]))
+        pos = match.end()
+    if pos != len(text):
+        raise ValueError(f"invalid duration {value!r}")
+    return total
+
+
+def _normalize_argv(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return shlex.split(value) if value else []
+    if isinstance(value, (list, tuple)):
+        return [str(x) for x in value]
+    raise ValueError(f"invalid argv specification {value!r}")
+
+
+def _normalize_pids_limit(value):
+    if value in (None, "", 0, -1, "0", "-1"):
+        return 0
+    return int(value)
+
+
+def _normalize_caps(items):
+    out = []
+    for raw in items or []:
+        cap = str(raw).strip().upper()
+        if cap.startswith("CAP_") and cap != "ALL":
+            cap = cap[4:]
+        if cap:
+            out.append(cap)
+    return sorted(out)
+
+
+def _normalize_security_opts(items):
+    out = []
+    for raw in items or []:
+        opt = str(raw).strip()
+        if opt.startswith("no-new-privileges="):
+            opt = "no-new-privileges:" + opt.split("=", 1)[1]
+        if opt:
+            out.append(opt)
+    return sorted(out)
+
+
+def _normalize_spec_tmpfs(spec):
+    result = {}
+    for entry in spec.get("tmpfs") or []:
+        if isinstance(entry, str) and entry:
+            path, opts = entry.split(":", 1) if ":" in entry else (entry, "")
+            result[path] = opts
+    for vol in spec.get("volumes") or []:
+        if isinstance(vol, dict) and vol.get("type") == "tmpfs" and vol.get("target"):
+            tmpfs_opts = vol.get("tmpfs") or {}
+            parts = []
+            if tmpfs_opts.get("size") is not None:
+                parts.append(f"size={_parse_mem_bytes(tmpfs_opts['size'])}")
+            if tmpfs_opts.get("mode") is not None:
+                parts.append(f"mode={oct(int(tmpfs_opts['mode']))[2:]}")
+            result[str(vol["target"])] = ",".join(parts)
+    return result
+
+
+def _normalize_host_tmpfs(raw):
+    if isinstance(raw, dict):
+        return {str(k): str(v or "") for k, v in raw.items()}
+    if isinstance(raw, list):
+        result = {}
+        for entry in raw:
+            if isinstance(entry, str) and entry:
+                path, opts = entry.split(":", 1) if ":" in entry else (entry, "")
+                result[path] = opts
+        return result
+    return {}
+
+
+def _normalize_spec_ports(spec):
+    bindings = set()
+    for p in spec.get("ports") or []:
+        if isinstance(p, dict):
+            proto = str(p.get("protocol") or "tcp").lower()
+            target = str(p.get("target") or "")
+            published = str(p.get("published") or "")
+            host_ip = str(p.get("host_ip") or "")
+            if host_ip == "0.0.0.0":
+                host_ip = ""
+            bindings.add((f"{target}/{proto}", host_ip, published))
+        elif isinstance(p, str) and p:
+            raw = p
+            proto = "tcp"
+            if "/" in raw:
+                raw, proto = raw.rsplit("/", 1)
+                proto = proto.lower()
+            parts = raw.split(":")
+            if len(parts) == 3:
+                host_ip, published, target = parts
+            elif len(parts) == 2:
+                host_ip, published, target = "", parts[0], parts[1]
+            else:
+                host_ip, published, target = "", "", parts[0]
+            if host_ip == "0.0.0.0":
+                host_ip = ""
+            bindings.add((f"{target}/{proto}", host_ip, published))
+    return bindings
+
+
+def _normalize_host_ports(port_bindings):
+    bindings = set()
+    if not isinstance(port_bindings, dict):
+        return bindings
+    for key, entries in port_bindings.items():
+        key_norm = str(key).lower()
+        if "/" not in key_norm:
+            key_norm += "/tcp"
+        for item in entries or []:
+            if isinstance(item, dict):
+                host_ip = str(item.get("HostIp") or "")
+                if host_ip == "0.0.0.0":
+                    host_ip = ""
+                host_port = str(item.get("HostPort") or "")
+                bindings.add((key_norm, host_ip, host_port))
+    return bindings
+
+
+def _normalize_spec_restart(value):
+    if not value or value == "no":
+        return ("no", 0)
+    raw = str(value).strip()
+    if ":" in raw:
+        name, count = raw.split(":", 1)
+        return (name or "no", int(count or 0))
+    return (raw, 0)
+
+
+def _normalize_host_restart(restart_policy):
+    if not isinstance(restart_policy, dict):
+        return ("no", 0)
+    name = str(restart_policy.get("Name") or "").strip() or "no"
+    count = int(restart_policy.get("MaximumRetryCount") or 0)
+    return (name, count)
+
+
+def _normalize_ulimits(raw):
+    out = {}
+    if isinstance(raw, dict):
+        for name, val in raw.items():
+            if isinstance(val, dict):
+                out[str(name).lower()] = (int(val.get("soft", 0)), int(val.get("hard", 0)))
+            else:
+                iv = int(val)
+                out[str(name).lower()] = (iv, iv)
+    elif isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict) and item.get("Name"):
+                out[str(item["Name"]).lower()] = (int(item.get("Soft", 0)), int(item.get("Hard", 0)))
+    return out
+
+
+def _inspect_image_config(image):
+    if not image:
+        return None
+    try:
+        inspected = json.loads(
+            subprocess.check_output(["docker", "image", "inspect", str(image)], text=True, stderr=subprocess.DEVNULL)
+        )
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    if not isinstance(inspected, list) or not inspected or not isinstance(inspected[0], dict):
+        return None
+    cfg = inspected[0].get("Config")
+    return cfg if isinstance(cfg, dict) else None
 
 
 def _caddy_tls_state_path():
@@ -553,6 +765,216 @@ def record_caddy_tls(config):
         raise
 
 
+def _runtime_settings_match(config, spec, info):
+    container_cfg = info.get("Config") or {}
+    host_cfg = info.get("HostConfig") or {}
+
+    image_cfg_loaded = False
+    image_cfg = None
+
+    def get_image_cfg():
+        nonlocal image_cfg_loaded, image_cfg
+        if not image_cfg_loaded:
+            image_cfg = _inspect_image_config(spec.get("image"))
+            image_cfg_loaded = True
+        return image_cfg
+
+    # 1. Environment variables (target keys must match, and any extra container keys must match image defaults).
+    actual_env = {}
+    for item in container_cfg.get("Env") or []:
+        if isinstance(item, str) and "=" in item:
+            k, v = item.split("=", 1)
+            actual_env[k] = v
+    raw_target_env = spec.get("environment")
+    expected_env = {}
+    if isinstance(raw_target_env, dict):
+        for key, value in raw_target_env.items():
+            if value is None:
+                continue
+            expected_env[str(key)] = str(value)
+    elif isinstance(raw_target_env, list):
+        for item in raw_target_env:
+            if isinstance(item, str) and "=" in item:
+                k, v = item.split("=", 1)
+                expected_env[k] = v
+    for key, expected_val in expected_env.items():
+        if actual_env.get(key) != expected_val:
+            return False
+    extra_env_keys = set(actual_env) - set(expected_env)
+    if extra_env_keys:
+        img_cfg = get_image_cfg()
+        if img_cfg is None:
+            return False
+        image_env = {}
+        for item in img_cfg.get("Env") or []:
+            if isinstance(item, str) and "=" in item:
+                k, v = item.split("=", 1)
+                image_env[k] = v
+        for key in extra_env_keys:
+            if image_env.get(key) != actual_env[key]:
+                return False
+
+    # 2. Entrypoint, command, user, working_dir.
+    actual_ep = list(container_cfg.get("Entrypoint") or [])
+    if spec.get("entrypoint") is not None:
+        if actual_ep != _normalize_argv(spec["entrypoint"]):
+            return False
+    elif actual_ep:
+        img_cfg = get_image_cfg()
+        if img_cfg is None or actual_ep != list(img_cfg.get("Entrypoint") or []):
+            return False
+
+    actual_cmd = list(container_cfg.get("Cmd") or [])
+    if spec.get("command") is not None:
+        if actual_cmd != _normalize_argv(spec["command"]):
+            return False
+    elif actual_cmd:
+        if spec.get("entrypoint") is not None:
+            return False
+        img_cfg = get_image_cfg()
+        if img_cfg is None or actual_cmd != list(img_cfg.get("Cmd") or []):
+            return False
+
+    actual_user = str(container_cfg.get("User") or "")
+    if spec.get("user") is not None:
+        if actual_user != str(spec["user"]):
+            return False
+    elif actual_user:
+        img_cfg = get_image_cfg()
+        if img_cfg is None or actual_user != str(img_cfg.get("User") or ""):
+            return False
+
+    actual_wd = str(container_cfg.get("WorkingDir") or "")
+    if spec.get("working_dir") is not None:
+        if actual_wd != str(spec["working_dir"]):
+            return False
+    elif actual_wd:
+        img_cfg = get_image_cfg()
+        if img_cfg is None or actual_wd != str(img_cfg.get("WorkingDir") or ""):
+            return False
+
+    # 3. Memory, swap, shm, PIDs, and CPU resource settings.
+    expected_mem = _parse_mem_bytes(spec.get("mem_limit") or 0)
+    actual_mem = _parse_mem_bytes(host_cfg.get("Memory") or 0)
+    if actual_mem != expected_mem:
+        return False
+
+    actual_swap = _parse_signed_mem_bytes(host_cfg.get("MemorySwap") or 0)
+    if spec.get("memswap_limit") is not None:
+        if actual_swap != _parse_signed_mem_bytes(spec["memswap_limit"]):
+            return False
+    else:
+        allowed_swaps = {0, 2 * expected_mem} if expected_mem > 0 else {0}
+        if actual_swap not in allowed_swaps:
+            return False
+
+    if _parse_mem_bytes(host_cfg.get("MemoryReservation") or 0) != _parse_mem_bytes(spec.get("mem_reservation") or 0):
+        return False
+
+    actual_shm = _parse_mem_bytes(host_cfg.get("ShmSize") or 0)
+    if spec.get("shm_size") is not None:
+        if actual_shm != _parse_mem_bytes(spec["shm_size"]):
+            return False
+    elif actual_shm not in (0, 64 * 1024 * 1024):
+        return False
+
+    if _normalize_pids_limit(host_cfg.get("PidsLimit")) != _normalize_pids_limit(spec.get("pids_limit")):
+        return False
+
+    expected_nano = (
+        int(round(float(spec["cpus"]) * 1_000_000_000))
+        if spec.get("cpus") is not None
+        else int(spec.get("nano_cpus") or 0)
+    )
+    if int(host_cfg.get("NanoCpus") or 0) != expected_nano:
+        return False
+    if int(host_cfg.get("CpuShares") or 0) != int(spec.get("cpu_shares") or 0):
+        return False
+    if int(host_cfg.get("CpuQuota") or 0) != int(spec.get("cpu_quota") or 0):
+        return False
+    if int(host_cfg.get("CpuPeriod") or 0) != int(spec.get("cpu_period") or 0):
+        return False
+    if str(host_cfg.get("CpusetCpus") or "") != str(spec.get("cpuset") or ""):
+        return False
+
+    # 4. Filesystem isolation, init, privileges, capabilities, security options, tmpfs, ports, restart, logging, sysctls, ulimits.
+    if bool(host_cfg.get("ReadonlyRootfs") or False) != bool(spec.get("read_only") or False):
+        return False
+    if bool(host_cfg.get("Init") or False) != bool(spec.get("init") or False):
+        return False
+    if bool(host_cfg.get("Privileged") or False) != bool(spec.get("privileged") or False):
+        return False
+    if _normalize_security_opts(host_cfg.get("SecurityOpt")) != _normalize_security_opts(spec.get("security_opt")):
+        return False
+    if _normalize_caps(host_cfg.get("CapDrop")) != _normalize_caps(spec.get("cap_drop")):
+        return False
+    if _normalize_caps(host_cfg.get("CapAdd")) != _normalize_caps(spec.get("cap_add")):
+        return False
+    if _normalize_host_tmpfs(host_cfg.get("Tmpfs")) != _normalize_spec_tmpfs(spec):
+        return False
+    if _normalize_host_ports(host_cfg.get("PortBindings")) != _normalize_spec_ports(spec):
+        return False
+    if _normalize_host_restart(host_cfg.get("RestartPolicy")) != _normalize_spec_restart(spec.get("restart")):
+        return False
+
+    logging_spec = spec.get("logging")
+    if isinstance(logging_spec, dict):
+        actual_log = host_cfg.get("LogConfig") or {}
+        if logging_spec.get("driver") and str(actual_log.get("Type") or "") != str(logging_spec["driver"]):
+            return False
+        expected_log_opts = {str(k): str(v) for k, v in (logging_spec.get("options") or {}).items()}
+        actual_log_opts = {str(k): str(v) for k, v in (actual_log.get("Config") or {}).items()}
+        if actual_log_opts != expected_log_opts:
+            return False
+
+    expected_sysctls = {str(k): str(v) for k, v in (spec.get("sysctls") or {}).items()}
+    actual_sysctls = {str(k): str(v) for k, v in (host_cfg.get("Sysctls") or {}).items()}
+    if actual_sysctls != expected_sysctls:
+        return False
+
+    if _normalize_ulimits(host_cfg.get("Ulimits")) != _normalize_ulimits(spec.get("ulimits")):
+        return False
+
+    # 5. Healthcheck configuration.
+    hc = spec.get("healthcheck")
+    if isinstance(hc, dict):
+        actual_hc = container_cfg.get("Healthcheck") or {}
+        if hc.get("disable"):
+            expected_hc_test = ["NONE"]
+        elif hc.get("test"):
+            raw_test = hc["test"]
+            expected_hc_test = ["CMD-SHELL", raw_test] if isinstance(raw_test, str) else [str(x) for x in raw_test]
+        else:
+            expected_hc_test = None
+        if expected_hc_test is not None and list(actual_hc.get("Test") or []) != expected_hc_test:
+            return False
+        for spec_key, inspect_key in (
+            ("interval", "Interval"),
+            ("timeout", "Timeout"),
+            ("start_period", "StartPeriod"),
+            ("start_interval", "StartInterval"),
+        ):
+            if hc.get(spec_key) is not None:
+                if _parse_duration_ns(hc[spec_key]) != _parse_duration_ns(actual_hc.get(inspect_key) or 0):
+                    return False
+        if hc.get("retries") is not None and int(hc["retries"]) != int(actual_hc.get("Retries") or 0):
+            return False
+
+    # 6. Attached networks.
+    raw_nets = spec.get("networks")
+    if raw_nets:
+        net_keys = list(raw_nets.keys()) if isinstance(raw_nets, dict) else [str(n) for n in raw_nets]
+        expected_nets = {_compose_network_name(config, n) for n in net_keys}
+        net_settings = info.get("NetworkSettings")
+        if not isinstance(net_settings, dict):
+            return False
+        actual_nets = set((net_settings.get("Networks") or {}).keys())
+        if actual_nets != expected_nets:
+            return False
+
+    return True
+
+
 def service_up_to_date(config, service_name):
     """Return True when exactly one healthy canonical container matches the target spec."""
     services = config.get("services") or {}
@@ -599,42 +1021,51 @@ def service_up_to_date(config, service_name):
     container_cfg = info.get("Config") or {}
     if container_cfg.get("Image") != spec.get("image"):
         return False
-    target_env = spec.get("environment") or {}
-    if target_env:
-        actual_env = {}
-        for item in container_cfg.get("Env") or []:
-            if "=" in item:
-                k, v = item.split("=", 1)
-                actual_env[k] = v
-        for key, value in target_env.items():
-            if value is None:
-                continue
-            if actual_env.get(key) != str(value):
-                return False
+    try:
+        if not _runtime_settings_match(config, spec, info):
+            return False
+    except (ValueError, TypeError, KeyError):
+        return False
     actual_mounts = {
-        m.get("Destination"): m.get("Source")
+        m.get("Destination"): m
         for m in (info.get("Mounts") or [])
         if isinstance(m, dict) and m.get("Destination")
     }
     for vol in spec.get("volumes") or []:
-        if not isinstance(vol, dict) or vol.get("type") != "bind":
+        if not isinstance(vol, dict):
+            continue
+        vtype = vol.get("type", "bind")
+        if vtype not in ("bind", "volume"):
             continue
         target = vol.get("target")
         target_source = vol.get("source")
-        mounted_source = actual_mounts.get(target)
-        if not target or not target_source or not mounted_source:
+        mount_info = actual_mounts.get(target)
+        if not target or not target_source or not isinstance(mount_info, dict):
             return False
-        if target in _RECIPE_CONTENT_MOUNT_TARGETS:
-            try:
-                if (
-                    hashlib.sha256(Path(target_source).read_bytes()).hexdigest()
-                    != hashlib.sha256(Path(mounted_source).read_bytes()).hexdigest()
-                ):
-                    return False
-            except OSError:
+        if "RW" in mount_info:
+            expected_rw = not bool(vol.get("read_only", False))
+            if bool(mount_info.get("RW")) != expected_rw:
                 return False
-        elif not _same_mount_source(target_source, mounted_source):
-            return False
+        if vtype == "volume":
+            expected_vol_name = _compose_volume_name(config, str(target_source))
+            actual_vol_name = mount_info.get("Name") or mount_info.get("Source")
+            if mount_info.get("Type", "volume") != "volume" or actual_vol_name != expected_vol_name:
+                return False
+        else:
+            mounted_source = mount_info.get("Source")
+            if not mounted_source or mount_info.get("Type", "bind") != "bind":
+                return False
+            if target in _RECIPE_CONTENT_MOUNT_TARGETS:
+                try:
+                    if (
+                        hashlib.sha256(Path(target_source).read_bytes()).hexdigest()
+                        != hashlib.sha256(Path(mounted_source).read_bytes()).hexdigest()
+                    ):
+                        return False
+                except OSError:
+                    return False
+            elif not _same_mount_source(target_source, mounted_source):
+                return False
     if service_name == "caddy":
         try:
             expected_tls = _caddy_tls_fingerprint(config, info.get("Id") or ids[0])
@@ -754,12 +1185,20 @@ def build_canary_plan(config, service_name):
         create_args.append("--read-only")
     if spec.get("user"):
         create_args += ["--user", str(spec["user"])]
+    if spec.get("working_dir"):
+        create_args += ["--workdir", str(spec["working_dir"])]
     if spec.get("mem_limit"):
         create_args += ["--memory", str(spec["mem_limit"])]
     if spec.get("memswap_limit"):
         create_args += ["--memory-swap", str(spec["memswap_limit"])]
+    if spec.get("shm_size"):
+        create_args += ["--shm-size", str(spec["shm_size"])]
     if spec.get("pids_limit"):
         create_args += ["--pids-limit", str(spec["pids_limit"])]
+    if spec.get("cpus") is not None:
+        create_args += ["--cpus", str(spec["cpus"])]
+    if spec.get("cpuset"):
+        create_args += ["--cpuset-cpus", str(spec["cpuset"])]
     for sec_opt in spec.get("security_opt") or []:
         create_args += ["--security-opt", str(sec_opt)]
     for cap in spec.get("cap_drop") or []:
