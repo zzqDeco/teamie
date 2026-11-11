@@ -27,6 +27,7 @@ import {
   trimMentionDraft,
 } from "./mentions";
 import { ConversationView } from "./messages";
+import { ShellSidebar } from "./shell-sidebar";
 import {
   isRelevantMessage,
   isUserMentioned,
@@ -745,7 +746,9 @@ describe("#119 IM Collaboration Web UI", () => {
       store.getSnapshot(),
       owner.id,
     );
-    expect(mutedSummary.hasUnread).toBe(false);
+    expect(mutedSummary.hasUnread).toBe(true);
+    expect(mutedSummary.badgeCount).toBe(0);
+    expect(mutedSummary.contributesToUrgentCount).toBe(0);
     expect(mutedSummary.contributesToChannelUnreadDot).toBe(false);
 
     // Reconciles manualUnreadSeq explicitly when readSeq is already ahead of manualUnreadSeq
@@ -757,6 +760,133 @@ describe("#119 IM Collaboration Web UI", () => {
     store.markRead(channelA.id, 10, null);
     expect(store.getSnapshot().conversations[channelA.id].manualUnreadSeq).toBeUndefined();
     expect(ordinaryUnreadCount(store.getSnapshot().conversations[channelA.id])).toBe(0);
+
+    // Sidebar UI: muted conversations render bold when marked unread, direct/group show
+    // muted icon + effective count, channel adds no @ count, and clearing restores muted state
+    const mutedChan: Conversation = {
+      ...channelA,
+      id: "conv-muted-chan",
+      name: "muted-chan",
+      readSeq: 5,
+      lastSeq: 5,
+      notificationLevel: "none",
+    };
+    const mutedGrp: Conversation = {
+      ...channelB,
+      id: "conv-muted-grp",
+      name: "muted-grp",
+      readSeq: 5,
+      lastSeq: 6,
+      notificationLevel: "none",
+    };
+    const mutedDm: Conversation = {
+      id: "conv-muted-dm",
+      workspaceId: workspace.id,
+      type: "direct",
+      name: "",
+      memberIds: [owner.id, peer.id],
+      readSeq: 2,
+      lastSeq: 5,
+      updatedAt: "2026-10-20T01:10:00Z",
+      notificationLevel: "none",
+    };
+    const allMuted = [mutedChan, mutedGrp, mutedDm];
+    await act(async () => {
+      chatStore.replaceConversations(allMuted);
+    });
+
+    const renderSidebar = async () => {
+      const snap = chatStore.getSnapshot();
+      const convs = allMuted.map((c) => snap.conversations[c.id]);
+      await act(async () => {
+        root.render(
+          <MemoryRouter>
+            <ShellSidebar
+              navigationRef={{ current: null }}
+              mobile={false}
+              sidebar={false}
+              hasOverlayModal={false}
+              user={owner}
+              busy={false}
+              connection="connected"
+              connectionLabel="消息已连接"
+              isAttentionPage={false}
+              isAgentsPage={false}
+              snapshot={snap}
+              workspaces={[workspace]}
+              workspace={workspace}
+              owner
+              caps={bootstrap.capabilities}
+              allAuthorizedConversations={convs}
+              channels={[convs[0]]}
+              direct={[convs[1], convs[2]]}
+              members={members}
+              onCloseSidebar={() => {}}
+              onSelectWorkspace={() => {}}
+              onOpenDialog={() => {}}
+              onSignOut={() => {}}
+              onShortcuts={() => {}}
+              onOpenQuickSwitcher={() => {}}
+            />
+          </MemoryRouter>,
+        );
+      });
+    };
+
+    const linkFor = (id: string) =>
+      host.querySelector<HTMLAnchorElement>(
+        `a.conversation-link[href="/app/w/${workspace.id}/c/${id}"]`,
+      )!;
+
+    await renderSidebar();
+    for (const c of allMuted) {
+      const link = linkFor(c.id);
+      expect(link.classList.contains("is-muted")).toBe(true);
+      expect(link.classList.contains("has-unread")).toBe(false);
+      expect(link.querySelector(".conversation-muted-icon")).not.toBeNull();
+      expect(link.querySelector(".unread-badge")).toBeNull();
+    }
+
+    await act(async () => {
+      chatStore.setManualUnread(mutedChan.id, 3); // effective count 3, channel shows bold without count
+      chatStore.setManualUnread(mutedGrp.id, 3); // effective count max(6-5, 6-3+1) = 4
+      chatStore.setManualUnread(mutedDm.id, 4); // effective count max(5-2, 5-4+1) = 3
+    });
+    await renderSidebar();
+
+    const chanLink = linkFor(mutedChan.id);
+    expect(chanLink.classList.contains("is-muted")).toBe(true);
+    expect(chanLink.classList.contains("has-unread")).toBe(true);
+    expect(chanLink.querySelector(".conversation-muted-icon")).not.toBeNull();
+    expect(chanLink.querySelector(".unread-badge")).toBeNull();
+
+    const grpLink = linkFor(mutedGrp.id);
+    expect(grpLink.classList.contains("is-muted")).toBe(true);
+    expect(grpLink.classList.contains("has-unread")).toBe(true);
+    expect(grpLink.querySelector(".conversation-muted-icon")).not.toBeNull();
+    expect(grpLink.querySelector(".unread-badge")?.textContent).toBe("4");
+
+    const dmLink = linkFor(mutedDm.id);
+    expect(dmLink.classList.contains("is-muted")).toBe(true);
+    expect(dmLink.classList.contains("has-unread")).toBe(true);
+    expect(dmLink.querySelector(".conversation-muted-icon")).not.toBeNull();
+    expect(dmLink.querySelector(".unread-badge")?.textContent).toBe("3");
+
+    // Clearing markers restores normal dimmed muted presentation without badges
+    await act(async () => {
+      chatStore.markRead(mutedChan.id, mutedChan.lastSeq, null);
+      chatStore.markRead(mutedGrp.id, mutedGrp.lastSeq, null);
+      chatStore.markRead(mutedDm.id, mutedDm.lastSeq, null);
+    });
+    await renderSidebar();
+
+    for (const c of allMuted) {
+      const link = linkFor(c.id);
+      expect(link.classList.contains("is-muted")).toBe(true);
+      expect(link.classList.contains("has-unread")).toBe(false);
+      expect(link.querySelector(".conversation-muted-icon")).not.toBeNull();
+      expect(link.querySelector(".unread-badge")).toBeNull();
+    }
   });
 
   it("6. Supports @all and @here broadcast mentions autocomplete, spans, and mention detection", async () => {

@@ -1,9 +1,15 @@
 // @vitest-environment jsdom
+import { act } from "react";
+import { createRoot } from "react-dom/client";
 import { describe, expect, it } from "vitest";
 import type { AttentionItem, Conversation, Message, Workspace } from "@teamie/api-client";
 import { ChatStore, summarizeConversationUnread } from "./store";
 import { computeMessageReadSummary } from "./engagement-store";
 import { computeShellAttention } from "./shell-sidebar";
+import { UnreadBadge } from "./unread-badge";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+  true;
 
 const userId = "self";
 const workspace: Workspace = { id: "w", name: "W", createdBy: userId, createdAt: "2026-10-27T00:00:00Z" };
@@ -86,5 +92,176 @@ describe("notification contract regressions", () => {
     const result = computeShellAttention({ workspaces: [workspace], snapshot: store.getSnapshot(), userId, attentionData: { unreadCount: 3, channelUnreadCount: 3, items: [item] } });
     expect(result.urgentCount).toBe(0);
   });
+
+  it.each(
+    (["direct", "group", "channel"] as const).flatMap((type) =>
+      (["all", "mentions", "none"] as const).map((level) => [type, level] as const),
+    ),
+  )(
+    "honors manualUnreadSeq across %s / %s and restores muted/quiet state once cleared",
+    async (type, level) => {
+      const base: Conversation = {
+        ...conversation(type, level),
+        lastSeq: 6,
+        readSeq: 6,
+      };
+      const store = storeFor(base);
+      // Seed a stale mention count from before readSeq caught up to ensure manual
+      // markers on a fully-read channel never resurrect or invent @ counts.
+      store.setAttentionProjection(
+        [{ conversationId: base.id, unreadCount: 2 }],
+        {
+          userId,
+          generation: store.generation,
+          epoch: store.notificationEpoch,
+        },
+      );
+      store.setManualUnread(base.id, 3); // effective ordinary unread = 6 - 3 + 1 = 4
+
+      const snap = store.getSnapshot();
+      const marked = snap.conversations[base.id];
+      const summary = summarizeConversationUnread(marked, snap, userId);
+
+      expect(summary.rawUnread).toBe(4);
+      expect(summary.hasUnread).toBe(true);
+      expect(summary.contributesToWorkspaceDot).toBe(true);
+      expect(summary.badgeCount).toBe(type === "channel" ? 0 : 4);
+      expect(summary.badgePrefix).toBe("");
+      expect(summary.contributesToUrgentCount).toBe(
+        level === "none" || type === "channel" ? 0 : 4,
+      );
+      expect(summary.contributesToChannelUnreadDot).toBe(
+        type === "channel" && level !== "none",
+      );
+
+      const shellAttention = computeShellAttention({
+        workspaces: [workspace],
+        snapshot: snap,
+        userId,
+      });
+      expect(shellAttention.urgentCount).toBe(
+        level === "none" || type === "channel" ? 0 : 4,
+      );
+      expect(shellAttention.hasChannelUnread).toBe(
+        type === "channel" && level !== "none",
+      );
+
+      // Verify UnreadBadge in sidebar mode (showLevelIcons=true, showDot=false)
+      // and quick-switcher mode (showLevelIcons=false, showDot=true).
+      const host = document.createElement("div");
+      const root = createRoot(host);
+      try {
+        await act(async () => {
+          root.render(
+            <div>
+              <div data-testid="sidebar">
+                <UnreadBadge summary={summary} conversationType={type} />
+              </div>
+              <div data-testid="switcher">
+                <UnreadBadge
+                  summary={summary}
+                  conversationType={type}
+                  showLevelIcons={false}
+                  showDot
+                />
+              </div>
+            </div>,
+          );
+        });
+        const sidebarEl = host.querySelector('[data-testid="sidebar"]')!;
+        const switcherEl = host.querySelector('[data-testid="switcher"]')!;
+
+        if (type === "channel") {
+          expect(sidebarEl.querySelector(".unread-badge")).toBeNull();
+          expect(
+            Boolean(sidebarEl.querySelector(".conversation-muted-icon")),
+          ).toBe(level === "none");
+          expect(
+            Boolean(sidebarEl.querySelector(".conversation-mentions-icon")),
+          ).toBe(level === "mentions");
+          expect(switcherEl.querySelector(".unread-badge")).toBeNull();
+          expect(switcherEl.querySelector(".unread-dot")).not.toBeNull();
+        } else {
+          expect(sidebarEl.querySelector(".unread-badge")?.textContent).toBe("4");
+          expect(
+            Boolean(sidebarEl.querySelector(".conversation-muted-icon")),
+          ).toBe(level === "none");
+          expect(switcherEl.querySelector(".unread-badge")?.textContent).toBe("4");
+          expect(switcherEl.querySelector(".unread-dot")).toBeNull();
+        }
+
+        // Clearing the marker restores normal notification-level state.
+        store.markRead(base.id, base.lastSeq, null);
+        const clearedSnap = store.getSnapshot();
+        const clearedSummary = summarizeConversationUnread(
+          clearedSnap.conversations[base.id],
+          clearedSnap,
+          userId,
+        );
+        expect(clearedSummary.rawUnread).toBe(0);
+        expect(clearedSummary.hasUnread).toBe(false);
+        expect(clearedSummary.badgeCount).toBe(0);
+        expect(clearedSummary.contributesToWorkspaceDot).toBe(false);
+        expect(clearedSummary.contributesToUrgentCount).toBe(0);
+        expect(clearedSummary.contributesToChannelUnreadDot).toBe(false);
+
+        await act(async () => {
+          root.render(
+            <div data-testid="switcher-cleared">
+              <UnreadBadge
+                summary={clearedSummary}
+                conversationType={type}
+                showLevelIcons={false}
+                showDot
+              />
+            </div>,
+          );
+        });
+        expect(
+          host.querySelector('[data-testid="switcher-cleared"]')!.innerHTML,
+        ).toBe("");
+      } finally {
+        await act(async () => root.unmount());
+      }
+    },
+  );
+
+  it.each(
+    (["direct", "group", "channel"] as const).flatMap((type) =>
+      (["all", "mentions", "none"] as const).map((level) => [type, level] as const),
+    ),
+  )(
+    "combines manualUnreadSeq with unread cursor messages in %s / %s without inflating channel @ counts",
+    (type, level) => {
+      const base: Conversation = {
+        ...conversation(type, level),
+        lastSeq: 8,
+        readSeq: 5,
+      };
+      const store = storeFor(base);
+      store.setManualUnread(base.id, 3); // effective U = max(8-5, 8-3+1) = 6
+      const snap = store.getSnapshot();
+      const projection = [{ conversationId: base.id, unreadCount: 2 }];
+      const summary = summarizeConversationUnread(
+        snap.conversations[base.id],
+        snap,
+        userId,
+        projection,
+      );
+
+      expect(summary.hasUnread).toBe(true);
+      if (type === "channel") {
+        expect(summary.badgeCount).toBe(level === "none" ? 0 : 2);
+        expect(summary.badgePrefix).toBe(level === "none" ? "" : "@ ");
+        expect(summary.contributesToUrgentCount).toBe(level === "none" ? 0 : 2);
+        expect(summary.contributesToChannelUnreadDot).toBe(level !== "none");
+      } else {
+        expect(summary.badgeCount).toBe(6);
+        expect(summary.badgePrefix).toBe("");
+        expect(summary.contributesToUrgentCount).toBe(level === "none" ? 0 : 6);
+        expect(summary.contributesToChannelUnreadDot).toBe(false);
+      }
+    },
+  );
 
 });
