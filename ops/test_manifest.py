@@ -789,4 +789,144 @@ class ProductionConfigTest(unittest.TestCase):
                 self.assertIn("Invalid TEAMIE_ROOT", res.stderr)
 
 
+class OnlineCompatibilityAndCanaryPlanTest(unittest.TestCase):
+    def _v3_manifest(self, ver="v0.5.0", sha_char="a"):
+        sha = sha_char * 40
+        return {
+            "manifestVersion": 3,
+            "version": ver,
+            "source": {
+                "repository": "zzqDeco/teamie",
+                "sha": sha,
+                "mainSha": sha,
+                "ref": "refs/heads/release/" + ver,
+            },
+            "createdAt": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "schema": dict(manifest.SCHEMA_V3),
+            "storage": {"postgresMajor": 17},
+            "featureFlags": {"revision": "context-engineering-v1", "sha256": "f" * 64},
+            "images": {
+                service: f"ghcr.io/zzqdeco/teamie-{service}@sha256:" + sha_char * 64
+                for service in manifest.SERVICES_V3
+            },
+        }
+
+    def test_online_compatible_requires_bidirectional_schema_flags_and_min_version(self):
+        cur = self._v3_manifest("v0.5.0", "a")
+        nxt = self._v3_manifest("v0.5.1", "b")
+        self.assertFalse(manifest.online_compatible(nxt, None))
+        self.assertTrue(manifest.online_compatible(nxt, cur))
+        self.assertTrue(manifest.online_compatible(cur, nxt))
+
+        # Forward-only schema epoch bump is valid for check_transition, NOT online_compatible.
+        schema_bump = copy.deepcopy(nxt)
+        schema_bump["schema"]["chat"] += 1
+        manifest.check_transition(schema_bump, cur, cur)
+        self.assertFalse(manifest.online_compatible(schema_bump, cur))
+
+        # Feature flag revision change requires fenced rollout.
+        flag_bump = copy.deepcopy(nxt)
+        flag_bump["featureFlags"] = {"revision": "next-v2", "sha256": "e" * 64}
+        self.assertFalse(manifest.online_compatible(flag_bump, cur))
+
+        # Optional minCompatibleVersion bounds are enforced bidirectionally.
+        bounded_ok = copy.deepcopy(nxt)
+        bounded_ok["minCompatibleVersion"] = "v0.5.0"
+        self.assertTrue(manifest.online_compatible(bounded_ok, cur))
+
+        bounded_fence = copy.deepcopy(nxt)
+        bounded_fence["minCompatibleVersion"] = "v0.5.1"
+        self.assertFalse(manifest.online_compatible(bounded_fence, cur))
+        with self.assertRaisesRegex(ValueError, "minCompatibleVersion"):
+            manifest.check_transition(cur, bounded_fence, rollback=True)
+
+        invalid_min = copy.deepcopy(nxt)
+        invalid_min["minCompatibleVersion"] = "v0.6.0"
+        with self.assertRaisesRegex(ValueError, "minCompatibleVersion"):
+            manifest.validate(invalid_min)
+
+    def test_online_compatible_cli_exit_codes(self):
+        script = str(Path(__file__).with_name("manifest.py"))
+        cur = self._v3_manifest("v0.5.0", "a")
+        nxt = self._v3_manifest("v0.5.1", "b")
+        bumped = copy.deepcopy(nxt)
+        bumped["schema"]["gateway"] += 1
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cur_p = root / "cur.json"
+            nxt_p = root / "nxt.json"
+            bump_p = root / "bump.json"
+            import json as _json
+            cur_p.write_text(_json.dumps(cur))
+            nxt_p.write_text(_json.dumps(nxt))
+            bump_p.write_text(_json.dumps(bumped))
+
+            ok = subprocess.run(["python3", script, "online-compatible", str(nxt_p), str(cur_p)], capture_output=True)
+            self.assertEqual(ok.returncode, 0, ok.stderr)
+
+            missing = subprocess.run(["python3", script, "online-compatible", str(nxt_p), str(root / "missing.json")], capture_output=True)
+            self.assertEqual(missing.returncode, 1)
+
+            fenced = subprocess.run(["python3", script, "online-compatible", str(bump_p), str(cur_p)], capture_output=True)
+            self.assertEqual(fenced.returncode, 1)
+
+    def test_build_canary_plan_enforces_stateless_allowlist_and_isolation(self):
+        compose_cfg = {
+            "name": "teamie",
+            "networks": {"private": {"internal": True}, "egress": {}},
+            "services": {
+                "marketplace": {
+                    "image": "ghcr.io/zzqdeco/teamie-marketplace@sha256:" + "1" * 64,
+                    "init": True,
+                    "read_only": True,
+                    "mem_limit": 67108864,
+                    "memswap_limit": 67108864,
+                    "pids_limit": 128,
+                    "security_opt": ["no-new-privileges:true"],
+                    "cap_drop": ["ALL"],
+                    "tmpfs": ["/tmp:size=16m,mode=1777"],
+                    "networks": {"private": None, "egress": None},
+                    "environment": {
+                        "HTTP_ADDR": ":8088",
+                        "DATABASE_URL": "postgres://teamie_marketplace:" + "s" * 32 + "@postgres:5432/teamie_marketplace",
+                    },
+                    "volumes": [
+                        {
+                            "type": "bind",
+                            "source": "/srv/teamie/config/feature-flags.json",
+                            "target": "/etc/teamie/feature-flags.json",
+                            "read_only": True,
+                        }
+                    ],
+                    "healthcheck": {
+                        "test": ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8088/readyz"]
+                    },
+                },
+                "agent-runtime": {
+                    "image": "ghcr.io/zzqdeco/teamie-agent-runtime@sha256:" + "2" * 64,
+                    "networks": ["private", "egress"],
+                },
+                "sandbox": {
+                    "image": "ghcr.io/zzqdeco/teamie-sandbox@sha256:" + "3" * 64,
+                    "networks": ["private"],
+                    "volumes": [{"type": "bind", "source": "/var/run/docker.sock", "target": "/var/run/docker.sock"}],
+                },
+            },
+        }
+        plan = manifest.build_canary_plan(compose_cfg, "marketplace")
+        self.assertEqual(plan["container_name"], "teamie-marketplace-canary")
+        self.assertEqual(plan["alias"], "marketplace-canary")
+        self.assertEqual(plan["extra_networks"], ["teamie_egress"])
+        self.assertIn("--read-only", plan["create_args"])
+        self.assertIn("io.teamie.canary=true", plan["create_args"])
+        self.assertNotIn("com.docker.compose.project=teamie", " ".join(plan["create_args"]))
+        # Secrets must live in env_content, NEVER in create_args.
+        self.assertNotIn("DATABASE_URL", " ".join(plan["create_args"]))
+        self.assertIn("DATABASE_URL=", plan["env_content"])
+
+        for forbidden in ("agent-runtime", "sandbox", "postgres", "redis", "caddy"):
+            with self.subTest(forbidden=forbidden), self.assertRaises(ValueError):
+                manifest.build_canary_plan(compose_cfg, forbidden)
+
+
 if __name__ == "__main__": unittest.main()

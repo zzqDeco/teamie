@@ -38,7 +38,7 @@ if [[ $mode == apply ]]; then
   python3 "$manifest_tool" ensure-host-env "$HOST_ENV" "$manifest"
 fi
 scratch=$(mktemp -d "$TEAMIE_ROOT/state/deploy-XXXXXX")
-trap 'rm -rf -- "$scratch"' EXIT
+trap 'cleanup_canary_containers; rm -rf -- "$scratch"' EXIT
 python3 "$manifest_tool" env "$manifest" > "$scratch/images.env"
 compose_for "$recipe" "$scratch/images.env"
 # Render secrets only to this private temporary file, never to action logs.
@@ -93,6 +93,7 @@ if [[ -f $current/release-manifest.json ]]; then
 fi
 
 restore_previous() {
+  cleanup_canary_containers
   if [[ -f $current/release-manifest.json ]] && python3 - "$manifest" "$current/release-manifest.json" "$manifest_tool" <<'PY'
 import importlib.util,json,sys
 s=importlib.util.spec_from_file_location("manifest",sys.argv[3]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m)
@@ -101,13 +102,21 @@ PY
   then
     echo 'Rollout failed; restoring the previous compatible container images.' >&2
     compose_for "$(realpath "$current/recipe")" "$current/images.env"
-    rollout || echo 'Automatic image restoration failed; production needs operator attention.' >&2
+    "${COMPOSE[@]}" config --format json > "$scratch/restore-compose.json"
+    TEAMIE_TARGET_MANIFEST="$current/release-manifest.json" \
+      TEAMIE_CURRENT_MANIFEST="$manifest" \
+      TEAMIE_COMPOSE_JSON="$scratch/restore-compose.json" \
+      rollout || echo 'Automatic image restoration failed; production needs operator attention.' >&2
   else
     echo 'Rollout failed. Current manifest remains unchanged; schema compatibility prevents automatic image restoration.' >&2
   fi
 }
 
-if ! rollout; then restore_previous; exit 1; fi
+current_manifest=""
+if [[ -f $current/release-manifest.json ]]; then
+  current_manifest="$current/release-manifest.json"
+fi
+if ! TEAMIE_TARGET_MANIFEST="$manifest" TEAMIE_CURRENT_MANIFEST="$current_manifest" TEAMIE_COMPOSE_JSON="$scratch/compose.json" rollout; then restore_previous; exit 1; fi
 # Check the migration ledgers against release metadata before considering rollback safe.
 for database in $(python3 -c 'import json,sys; print(" ".join(json.load(open(sys.argv[1]))["schema"]))' "$manifest"); do
   expected_schema=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["schema"][sys.argv[2]])' "$manifest" "$database")

@@ -48,30 +48,62 @@ def caddy_match_single_path(pattern: str, req_path: str) -> bool:
     return bool(caddy_glob_to_regex(pat).match(target))
 
 
-def parse_caddy_site_routes(caddyfile_text: str) -> list[tuple[list[str] | None, str]]:
-    """Parse ordered (path_patterns_or_None, action_target) rules from {$SITE_ADDRESS}."""
-    site_match = re.search(
-        r"^\{\$SITE_ADDRESS\}\s*\{(.*?)^\}",
-        caddyfile_text,
-        flags=re.MULTILINE | re.DOTALL,
-    )
+def _consume_balanced_block(text: str, open_brace_idx: int) -> int:
+    if text[open_brace_idx] != "{":
+        raise AssertionError(f"expected '{{' at index {open_brace_idx}")
+    depth = 0
+    in_quotes = False
+    i = open_brace_idx
+    while i < len(text):
+        ch = text[i]
+        if ch == '"' and (i == 0 or text[i - 1] != "\\"):
+            in_quotes = not in_quotes
+        elif not in_quotes:
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return i + 1
+        i += 1
+    raise AssertionError("unclosed '{' in deploy/Caddyfile")
+
+
+def _extract_site_body(caddyfile_text: str) -> str:
+    site_match = re.search(r"^\{\$SITE_ADDRESS\}\s*\{", caddyfile_text, flags=re.MULTILINE)
     if not site_match:
         raise AssertionError("deploy/Caddyfile missing {$SITE_ADDRESS} block")
-    body = site_match.group(1)
+    open_idx = site_match.end() - 1
+    close_idx = _consume_balanced_block(caddyfile_text, open_idx)
+    return caddyfile_text[open_idx + 1 : close_idx - 1]
+
+
+def _iter_handle_blocks(site_body: str) -> list[tuple[str | None, str]]:
+    handles: list[tuple[str | None, str]] = []
+    handle_re = re.compile(r"^\s*handle(?:\s+([^\s{]+))?\s*\{", flags=re.MULTILINE)
+    pos = 0
+    while True:
+        m = handle_re.search(site_body, pos)
+        if not m:
+            break
+        open_idx = m.end() - 1
+        close_idx = _consume_balanced_block(site_body, open_idx)
+        handles.append((m.group(1), site_body[open_idx + 1 : close_idx - 1].strip()))
+        pos = close_idx
+    return handles
+
+
+def parse_caddy_site_routes(caddyfile_text: str) -> list[tuple[list[str] | None, str]]:
+    """Parse ordered (path_patterns_or_None, action_target) rules from {$SITE_ADDRESS}."""
+    body = _extract_site_body(caddyfile_text)
 
     named_matchers: dict[str, list[str]] = {}
     for m in re.finditer(r"^\s*(@[A-Za-z0-9_-]+)\s+path\s+(.+)$", body, flags=re.MULTILINE):
         named_matchers[m.group(1)] = m.group(2).split()
 
     rules: list[tuple[list[str] | None, str]] = []
-    for m in re.finditer(
-        r"^\s*handle(?:\s+([^\s{]+))?\s*\{(.*?)^\s*\}",
-        body,
-        flags=re.MULTILINE | re.DOTALL,
-    ):
-        selector = m.group(1)
-        inner = m.group(2).strip()
-        rp = re.search(r"reverse_proxy\s+([^\s]+)", inner)
+    for selector, inner in _iter_handle_blocks(body):
+        rp = re.search(r"reverse_proxy\s+([^\s{]+)", inner)
         resp = re.search(r"respond\s+(?:\"[^\"]*\"\s+)?(\d{3})", inner)
         if rp:
             target = rp.group(1)
@@ -176,6 +208,29 @@ class CaddyRouteCoverageTests(unittest.TestCase):
         for upstream in EXPECTED_ROUTER_UPSTREAMS.values():
             self.assertIn(f'respond "{upstream}" 200', probe_block)
         self.assertIn("/api/v1/conversations/*/apps/*/session", probe_block)
+
+    def test_every_reverse_proxy_declares_dual_slot_canary_and_readiness_check(self):
+        site_body = _extract_site_body(CADDYFILE.read_text())
+        seen_primaries: set[str] = set()
+        for _selector, inner in _iter_handle_blocks(site_body):
+            if "reverse_proxy" not in inner:
+                continue
+            header_match = re.search(r"reverse_proxy\s+([^{]+)\{", inner)
+            self.assertIsNotNone(header_match, f"reverse_proxy must use a block: {inner!r}")
+            upstreams = header_match.group(1).split()
+            self.assertEqual(len(upstreams), 2, f"expected primary + canary upstreams, got {upstreams}")
+            primary, canary = upstreams
+            host, port = primary.split(":", 1)
+            self.assertEqual(canary, f"{host}-canary:{port}")
+            seen_primaries.add(primary)
+            self.assertIn("lb_policy first", inner)
+            self.assertIn("lb_try_duration", inner)
+            self.assertIn("fail_duration", inner)
+            expected_health = "/healthz" if host == "web" else "/readyz"
+            self.assertIn(f"health_uri {expected_health}", inner)
+
+        expected_all = set(EXPECTED_ROUTER_UPSTREAMS.values()) | {"web:80"}
+        self.assertEqual(seen_primaries, expected_all)
 
 
 if __name__ == "__main__":
