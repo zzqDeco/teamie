@@ -74,15 +74,18 @@ export async function markMessageAsUnread(conversationId: string, message: Messa
   const prevManualSeq =
     prevSnap.manualUnreadByConversation?.[conversationId] ??
     prevSnap.conversations[conversationId]?.manualUnreadSeq;
+  const write = chatStore.beginManualUnreadWrite(conversationId);
   chatStore.setManualUnread(conversationId, message.seq);
   try {
     const res = await api.markConversationUnread(conversationId, message.seq);
-    if (!chatStore.reactionScopeCurrent(scope)) return;
+    if (!chatStore.reactionScopeCurrent(scope) || !write.isLatest()) return;
     chatStore.setManualUnread(conversationId, res?.manualUnreadSeq ?? message.seq);
   } catch (e) {
-    if (!chatStore.reactionScopeCurrent(scope)) return;
-    chatStore.setManualUnread(conversationId, prevManualSeq);
+    if (!chatStore.reactionScopeCurrent(scope) || !write.isLatest()) return;
+    chatStore.setManualUnread(conversationId, write.rollbackSeq(prevManualSeq));
     toast.error(`标为未读失败：${errorText(e)}`);
+  } finally {
+    write.end();
   }
 }
 

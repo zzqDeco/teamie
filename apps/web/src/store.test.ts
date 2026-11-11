@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ChatStore,
   idlePersistScheduler,
+  ordinaryUnreadCount,
   reconcileMessages,
   serializeSnapshot,
 } from "./store";
@@ -61,21 +62,32 @@ describe("durable message reconciliation", () => {
     expect(store.getSnapshot().messages[created.id]).toHaveLength(1);
     expect(store.getSnapshot().cursor).toBe("8");
   });
-  it("accepts a bootstrap across ordinary message/read arrivals while preserving newer sequence numbers", () => {
+  it("accepts a bootstrap across ordinary message arrivals while rejecting pre-read/preference snapshots and preserving newer sequence numbers", () => {
     const store = new ChatStore();
     store.begin("u1");
     store.replaceConversations([conversation]);
     const observed = { generation: store.generation, conversationVersion: store.conversationVersion };
-    store.apply({ events: [
-      { id: "7", type: "message.created", message: message({ seq: 5 }), createdAt: conversation.updatedAt },
-      { id: "8", type: "read.updated", conversationId: conversation.id, readSeq: 4, createdAt: conversation.updatedAt },
-    ], cursor: "8", hasMore: false });
+    store.apply({
+      events: [{ id: "7", type: "message.created", message: message({ seq: 5 }), createdAt: conversation.updatedAt }],
+      cursor: "7", hasMore: false,
+    });
     expect(store.replaceConversations([conversation], observed)).toBe(true);
+    expect(store.getSnapshot().conversations.c1).toMatchObject({ lastSeq: 5, readSeq: 0 });
+    const preReadObserved = { generation: store.generation, conversationVersion: store.conversationVersion };
+    store.apply({
+      events: [{ id: "8", type: "read.updated", conversationId: conversation.id, readSeq: 4, manualUnreadSeq: 0, createdAt: conversation.updatedAt }],
+      cursor: "8", hasMore: false,
+    });
+    expect(store.replaceConversations([{ ...conversation, manualUnreadSeq: 2 }], preReadObserved)).toBe(false);
+    const postReadObserved = { generation: store.generation, conversationVersion: store.conversationVersion };
+    expect(store.replaceConversations([conversation], postReadObserved)).toBe(true);
     expect(store.getSnapshot().conversations.c1).toMatchObject({ lastSeq: 5, readSeq: 4 });
+    expect(store.getSnapshot().conversations.c1.manualUnreadSeq).toBeUndefined();
     expect(store.getSnapshot().messages.c1).toHaveLength(1);
     expect(store.getSnapshot().cursor).toBe("8");
+    const postAcceptObserved = { generation: store.generation, conversationVersion: store.conversationVersion };
     store.revoke();
-    expect(store.replaceConversations([conversation], observed)).toBe(false);
+    expect(store.replaceConversations([conversation], postAcceptObserved)).toBe(false);
     expect(store.getSnapshot().conversations).toEqual({});
   });
   it("deduplicates optimistic send, HTTP acknowledgement, and duplicate sync delivery using sender + client id", () => {
@@ -444,5 +456,133 @@ describe("deferred snapshot persistence", () => {
     expect((shardWrites[0][0] as LocalMessage[]).map((m) => m.id)).toEqual(["m1", "m3"]);
     stringify.mockRestore();
     expect(serializeSnapshot(store.getSnapshot())).toBe(legacy(store.getSnapshot()));
+  });
+});
+
+describe("authoritative manual unread reconciliation (#129)", () => {
+  it("clears stale manualUnreadSeq and manualUnreadByConversation when an authoritative snapshot omits manualUnreadSeq, including across reload", () => {
+    const disk = storage();
+    const store = new ChatStore(disk);
+    store.begin("u1");
+    store.replaceConversations([{ ...conversation, lastSeq: 5, readSeq: 5, manualUnreadSeq: 3 }]);
+    expect(store.getSnapshot().conversations.c1.manualUnreadSeq).toBe(3);
+    expect(store.getSnapshot().manualUnreadByConversation.c1).toBe(3);
+    expect(ordinaryUnreadCount(store.getSnapshot().conversations.c1)).toBe(3);
+
+    // Authoritative refresh omitting manualUnreadSeq clears both conversation field and map entry.
+    store.replaceConversations([{ ...conversation, lastSeq: 5, readSeq: 5 }]);
+    expect(store.getSnapshot().conversations.c1.manualUnreadSeq).toBeUndefined();
+    expect(Object.hasOwn(store.getSnapshot().conversations.c1, "manualUnreadSeq")).toBe(false);
+    expect(store.getSnapshot().manualUnreadByConversation.c1).toBeUndefined();
+    expect(ordinaryUnreadCount(store.getSnapshot().conversations.c1)).toBe(0);
+
+    // Persist a marker, reload in a new ChatStore, then reconcile with an authoritative snapshot omitting it.
+    store.setManualUnread("c1", 2);
+    store.flush();
+    const reloaded = new ChatStore(disk);
+    reloaded.begin("u1");
+    expect(reloaded.getSnapshot().conversations.c1.manualUnreadSeq).toBe(2);
+    reloaded.replaceConversations([{ ...conversation, lastSeq: 5, readSeq: 5 }]);
+    expect(reloaded.getSnapshot().conversations.c1.manualUnreadSeq).toBeUndefined();
+    expect(reloaded.getSnapshot().manualUnreadByConversation.c1).toBeUndefined();
+    expect(ordinaryUnreadCount(reloaded.getSnapshot().conversations.c1)).toBe(0);
+    expect(JSON.parse(disk.getItem("teamie.sync.v1.u1") || "{}").conversations?.c1?.manualUnreadSeq).toBeUndefined();
+  });
+
+  it("reconciles manualUnreadSeq to a new authoritative value while keeping readSeq strictly monotonic", () => {
+    const store = new ChatStore();
+    store.begin("u1");
+    store.replaceConversations([{ ...conversation, lastSeq: 10, readSeq: 10, manualUnreadSeq: 2 }]);
+    expect(store.getSnapshot().conversations.c1).toMatchObject({ lastSeq: 10, readSeq: 10, manualUnreadSeq: 2 });
+    expect(store.getSnapshot().manualUnreadByConversation.c1).toBe(2);
+
+    // Server snapshot carries an updated marker (8) and an older readSeq (6): marker updates to 8, readSeq stays 10.
+    store.replaceConversations([{ ...conversation, lastSeq: 10, readSeq: 6, manualUnreadSeq: 8 }]);
+    expect(store.getSnapshot().conversations.c1).toMatchObject({ lastSeq: 10, readSeq: 10, manualUnreadSeq: 8 });
+    expect(store.getSnapshot().manualUnreadByConversation.c1).toBe(8);
+    expect(ordinaryUnreadCount(store.getSnapshot().conversations.c1)).toBe(3);
+  });
+
+  it("preserves viewer-specific manualUnreadSeq and notificationLevel across shared conversation sync events", () => {
+    const store = new ChatStore();
+    store.begin("u1");
+    store.replaceConversations([
+      { ...conversation, lastSeq: 5, readSeq: 5, manualUnreadSeq: 3, notificationLevel: "none" },
+    ]);
+    store.apply({
+      events: [
+        {
+          id: "9",
+          type: "conversation.created",
+          conversation: { ...conversation, name: "renamed", lastSeq: 6, readSeq: 0, notificationLevel: "all" },
+          createdAt: "2026-10-16T02:00:00Z",
+        },
+      ],
+      cursor: "9",
+      hasMore: false,
+    });
+    expect(store.getSnapshot().conversations.c1).toMatchObject({
+      name: "renamed",
+      lastSeq: 6,
+      readSeq: 5,
+      manualUnreadSeq: 3,
+      notificationLevel: "none",
+    });
+  });
+
+  it("rejects stale observed bootstrap snapshots across setManualUnread, applyReadUpdated, and preference.updated", () => {
+    const store = new ChatStore();
+    store.begin("u1");
+    store.replaceConversations([{ ...conversation, lastSeq: 10, readSeq: 10 }]);
+
+    const beforeSet = { generation: store.generation, conversationVersion: store.conversationVersion };
+    store.setManualUnread("c1", 6);
+    expect(store.replaceConversations([{ ...conversation, lastSeq: 10, readSeq: 10 }], beforeSet)).toBe(false);
+    expect(store.getSnapshot().conversations.c1.manualUnreadSeq).toBe(6);
+    expect(store.getSnapshot().manualUnreadByConversation.c1).toBe(6);
+
+    const beforeApplyRead = { generation: store.generation, conversationVersion: store.conversationVersion };
+    store.applyReadUpdated({ conversationId: "c1", readSeq: 10, manualUnreadSeq: 4 });
+    expect(store.replaceConversations([{ ...conversation, lastSeq: 10, readSeq: 10, manualUnreadSeq: 6 }], beforeApplyRead)).toBe(false);
+    expect(store.getSnapshot().conversations.c1.manualUnreadSeq).toBe(4);
+    expect(store.getSnapshot().manualUnreadByConversation.c1).toBe(4);
+
+    const beforeClear = { generation: store.generation, conversationVersion: store.conversationVersion };
+    store.setManualUnread("c1", undefined);
+    expect(store.replaceConversations([{ ...conversation, lastSeq: 10, readSeq: 10, manualUnreadSeq: 4 }], beforeClear)).toBe(false);
+    expect(store.getSnapshot().conversations.c1.manualUnreadSeq).toBeUndefined();
+    expect(store.getSnapshot().manualUnreadByConversation.c1).toBeUndefined();
+
+    const beforePref = { generation: store.generation, conversationVersion: store.conversationVersion };
+    store.apply({
+      events: [{ id: "11", type: "preference.updated", conversationId: "c1", notificationLevel: "mentions", createdAt: conversation.updatedAt }],
+      cursor: "11",
+      hasMore: false,
+    });
+    expect(store.replaceConversations([{ ...conversation, notificationLevel: "all" }], beforePref)).toBe(false);
+    expect(store.getSnapshot().conversations.c1.notificationLevel).toBe("mentions");
+  });
+
+  it("protects an in-flight manual unread write from an overlapping bootstrap and bumps conversationVersion on settle", () => {
+    const store = new ChatStore();
+    store.begin("u1");
+    store.replaceConversations([{ ...conversation, lastSeq: 10, readSeq: 10, manualUnreadSeq: 3 }]);
+
+    const write = store.beginManualUnreadWrite("c1");
+    store.setManualUnread("c1", 7);
+
+    // Bootstrap starts AFTER optimistic setManualUnread while the HTTP write is still in flight.
+    const duringFlightObserved = { generation: store.generation, conversationVersion: store.conversationVersion };
+    expect(store.replaceConversations([{ ...conversation, lastSeq: 10, readSeq: 10 }], duringFlightObserved)).toBe(true);
+    expect(store.getSnapshot().conversations.c1.manualUnreadSeq).toBe(7);
+    expect(store.getSnapshot().manualUnreadByConversation.c1).toBe(7);
+    // If the write later fails, rollbackSeq reflects the authoritative server state observed during flight (undefined).
+    expect(write.rollbackSeq(3)).toBeUndefined();
+
+    // Another bootstrap starts during the flight window, then the write settles BEFORE that bootstrap resolves.
+    const preSettleObserved = { generation: store.generation, conversationVersion: store.conversationVersion };
+    write.end();
+    expect(store.replaceConversations([{ ...conversation, lastSeq: 10, readSeq: 10 }], preSettleObserved)).toBe(false);
+    expect(store.getSnapshot().conversations.c1.manualUnreadSeq).toBe(7);
   });
 });
