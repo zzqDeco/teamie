@@ -90,6 +90,10 @@ type pingConfigLoader interface {
 	LoadForPing(ctx context.Context) (domain.Config, error)
 }
 
+type pingCacheInvalidator interface {
+	InvalidatePingCache()
+}
+
 // Ping checks service token and returns current gateway configuration readiness for the requested model (or default fallback).
 func (s *Service) Ping(ctx context.Context, serviceToken string, modelIDs ...string) PingStatus {
 	if !domain.EqualSecret(serviceToken, s.Token) {
@@ -165,7 +169,6 @@ func (s *Service) CreateModelProfile(ctx context.Context, in CreateModelProfileI
 		cw = *in.ContextWindowTokens
 	}
 	s.modelConfigMu.Lock()
-	defer s.modelConfigMu.Unlock()
 	saved, err := s.Store.UpdateCatalog(ctx, func(providers []domain.ProviderProfile, models []domain.ModelProfile) ([]domain.ProviderProfile, []domain.ModelProfile, error) {
 		if !providerExists(providers, in.ProviderID) {
 			return nil, nil, domain.Err(404, "not_found", "Model provider not found")
@@ -199,9 +202,12 @@ func (s *Service) CreateModelProfile(ctx context.Context, in CreateModelProfileI
 		return providers, append(models, profile), nil
 	})
 	if err != nil {
+		s.modelConfigMu.Unlock()
 		return domain.Config{}, err
 	}
 	s.cancelUnavailableModels(saved)
+	s.modelConfigMu.Unlock()
+	s.broadcastReconcile(ctx, "")
 	return saved, nil
 }
 
@@ -244,7 +250,6 @@ func (s *Service) UpdateModelProfile(ctx context.Context, in UpdateModelProfileI
 		return domain.Config{}, domain.Err(400, "invalid_request", "Context window must be between 4096 and 2000000 tokens")
 	}
 	s.modelConfigMu.Lock()
-	defer s.modelConfigMu.Unlock()
 	saved, err := s.Store.UpdateCatalog(ctx, func(providers []domain.ProviderProfile, models []domain.ModelProfile) ([]domain.ProviderProfile, []domain.ModelProfile, error) {
 		idx := -1
 		for i, m := range models {
@@ -298,9 +303,12 @@ func (s *Service) UpdateModelProfile(ctx context.Context, in UpdateModelProfileI
 		return providers, models, nil
 	})
 	if err != nil {
+		s.modelConfigMu.Unlock()
 		return domain.Config{}, err
 	}
 	s.cancelUnavailableModels(saved)
+	s.modelConfigMu.Unlock()
+	s.broadcastReconcile(ctx, "")
 	return saved, nil
 }
 
@@ -312,7 +320,6 @@ func (s *Service) DeleteModelProfile(ctx context.Context, id string) (domain.Con
 		return domain.Config{}, domain.Err(400, "invalid_request", "Invalid model ID")
 	}
 	s.modelConfigMu.Lock()
-	defer s.modelConfigMu.Unlock()
 	saved, err := s.Store.UpdateCatalog(ctx, func(providers []domain.ProviderProfile, models []domain.ModelProfile) ([]domain.ProviderProfile, []domain.ModelProfile, error) {
 		filtered := make([]domain.ModelProfile, 0, len(models))
 		found := false
@@ -329,9 +336,12 @@ func (s *Service) DeleteModelProfile(ctx context.Context, id string) (domain.Con
 		return providers, filtered, nil
 	})
 	if err != nil {
+		s.modelConfigMu.Unlock()
 		return domain.Config{}, err
 	}
 	s.cancelUnavailableModels(saved)
+	s.modelConfigMu.Unlock()
+	s.broadcastReconcile(ctx, "")
 	return saved, nil
 }
 
@@ -367,7 +377,12 @@ func (s *Service) UpdateRouting(ctx context.Context, id string) (domain.Config, 
 	if id != "" && !domain.ValidModelID(id) {
 		return domain.Config{}, domain.Err(400, "invalid_request", "Invalid model ID")
 	}
-	return s.Store.UpdateRouting(ctx, domain.ModelRoutingConfig{DefaultModelID: id})
+	saved, err := s.Store.UpdateRouting(ctx, domain.ModelRoutingConfig{DefaultModelID: id})
+	if err != nil {
+		return domain.Config{}, err
+	}
+	s.broadcastReconcile(ctx, "")
+	return saved, nil
 }
 
 type UpdateWebSearchInput struct {
@@ -378,9 +393,11 @@ type UpdateWebSearchInput struct {
 
 // UpdateWebSearch mutates only search settings; the returned snapshot is read-only.
 func (s *Service) UpdateWebSearch(ctx context.Context, in UpdateWebSearchInput) (domain.Config, error) {
+	s.ensureInit()
 	if in.APIKey != nil && (in.ClearAPIKey || len(*in.APIKey) == 0 || len(*in.APIKey) > 16384 || strings.ContainsAny(*in.APIKey, "\r\n\x00")) {
 		return domain.Config{}, domain.Err(400, "invalid_request", "Invalid web search API key")
 	}
+	s.modelConfigMu.Lock()
 	saved, err := s.Store.UpdateWebSearch(ctx, func(old domain.WebSearchConfig) (domain.WebSearchConfig, error) {
 		if in.Enabled != nil {
 			old.Enabled = *in.Enabled
@@ -398,12 +415,43 @@ func (s *Service) UpdateWebSearch(ctx context.Context, in UpdateWebSearchInput) 
 		return old, nil
 	})
 	if err != nil {
+		s.modelConfigMu.Unlock()
 		return domain.Config{}, err
 	}
 	if !saved.WebSearch.Enabled || !saved.WebSearch.Configured() {
 		s.cancelActiveCalls(true)
 	}
+	s.modelConfigMu.Unlock()
+	s.broadcastReconcile(ctx, "")
 	return saved, nil
+}
+
+// ReconcileConfig reloads persisted configuration on this gateway slot, invalidates
+// any cached ping snapshot, resets optional provider cooldown state, and cancels
+// active model or web-search calls whose backing catalog/search configuration was
+// disabled or deleted on a sibling slot. Never re-broadcasts.
+func (s *Service) ReconcileConfig(ctx context.Context, resetProviderID string) error {
+	s.ensureInit()
+	if s.Store == nil {
+		return nil
+	}
+	if inv, ok := s.Store.(pingCacheInvalidator); ok {
+		inv.InvalidatePingCache()
+	}
+	if id := strings.TrimSpace(resetProviderID); id != "" {
+		s.resetProviderCooldown(id)
+	}
+	s.modelConfigMu.Lock()
+	defer s.modelConfigMu.Unlock()
+	c, err := s.Store.Load(ctx)
+	if err != nil {
+		return err
+	}
+	s.cancelUnavailableModels(c)
+	if !c.WebSearch.Enabled || !c.WebSearch.Configured() {
+		s.cancelActiveCalls(true)
+	}
+	return nil
 }
 
 func (s *Service) cancelUnavailableModels(c domain.Config) {

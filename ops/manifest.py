@@ -398,6 +398,24 @@ def _compose_volume_name(config, vol_key):
     return f"{project}_{vol_key}"
 
 
+_RECIPE_CONTENT_MOUNT_TARGETS = frozenset(
+    {
+        "/etc/caddy/Caddyfile",
+        "/docker-entrypoint-initdb.d/01-databases.sh",
+    }
+)
+
+
+def _same_mount_source(expected_source, mounted_source):
+    if not expected_source or not mounted_source:
+        return False
+    expected_abs = os.path.abspath(str(expected_source))
+    mounted_abs = os.path.abspath(str(mounted_source))
+    if expected_abs != mounted_abs:
+        return False
+    return os.path.realpath(expected_abs) == os.path.realpath(mounted_abs)
+
+
 def service_up_to_date(config, service_name):
     """Return True when exactly one healthy canonical container matches the target spec."""
     services = config.get("services") or {}
@@ -456,21 +474,29 @@ def service_up_to_date(config, service_name):
                 continue
             if actual_env.get(key) != str(value):
                 return False
-    if service_name == "caddy":
-        target_caddyfile = next(
-            (v.get("source") for v in (spec.get("volumes") or []) if isinstance(v, dict) and v.get("target") == "/etc/caddy/Caddyfile"),
-            None,
-        )
-        mounted_caddyfile = next(
-            (m.get("Source") for m in (info.get("Mounts") or []) if isinstance(m, dict) and m.get("Destination") == "/etc/caddy/Caddyfile"),
-            None,
-        )
-        if not target_caddyfile or not mounted_caddyfile:
+    actual_mounts = {
+        m.get("Destination"): m.get("Source")
+        for m in (info.get("Mounts") or [])
+        if isinstance(m, dict) and m.get("Destination")
+    }
+    for vol in spec.get("volumes") or []:
+        if not isinstance(vol, dict) or vol.get("type") != "bind":
+            continue
+        target = vol.get("target")
+        target_source = vol.get("source")
+        mounted_source = actual_mounts.get(target)
+        if not target or not target_source or not mounted_source:
             return False
-        try:
-            if hashlib.sha256(Path(target_caddyfile).read_bytes()).hexdigest() != hashlib.sha256(Path(mounted_caddyfile).read_bytes()).hexdigest():
+        if target in _RECIPE_CONTENT_MOUNT_TARGETS:
+            try:
+                if (
+                    hashlib.sha256(Path(target_source).read_bytes()).hexdigest()
+                    != hashlib.sha256(Path(mounted_source).read_bytes()).hexdigest()
+                ):
+                    return False
+            except OSError:
                 return False
-        except OSError:
+        elif not _same_mount_source(target_source, mounted_source):
             return False
     return True
 

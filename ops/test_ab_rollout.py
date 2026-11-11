@@ -66,7 +66,13 @@ def make_v3_manifest(ver: str, sha_char: str, unchanged_infra_from: dict | None 
     }
 
 
-def make_compose_json(release_manifest: dict, caddyfile_path: Path, flags_path: Path) -> dict:
+def make_compose_json(
+    release_manifest: dict,
+    caddyfile_path: Path,
+    flags_path: Path,
+    tls_config_path: Path | None = None,
+    tls_cert_dir: Path | None = None,
+) -> dict:
     services = {}
     for svc in manifest_mod.SERVICES_V3:
         if svc == "sandbox-runner":
@@ -89,6 +95,24 @@ def make_compose_json(release_manifest: dict, caddyfile_path: Path, flags_path: 
                     "read_only": True,
                 }
             )
+            if tls_config_path is not None:
+                vols.append(
+                    {
+                        "type": "bind",
+                        "source": str(tls_config_path),
+                        "target": "/etc/caddy/issuer.caddy",
+                        "read_only": True,
+                    }
+                )
+            if tls_cert_dir is not None:
+                vols.append(
+                    {
+                        "type": "bind",
+                        "source": str(tls_cert_dir),
+                        "target": "/run/tls",
+                        "read_only": True,
+                    }
+                )
         elif svc == "sandbox":
             env.update({"SANDBOX_RUNNER_IMAGE": release_manifest["images"]["sandbox-runner"]})
         elif svc not in ("postgres", "redis", "web"):
@@ -99,14 +123,15 @@ def make_compose_json(release_manifest: dict, caddyfile_path: Path, flags_path: 
                     "DATABASE_URL": f"postgres://teamie_{svc}:secret_{svc}_0123456789abcdef@postgres:5432/teamie_{svc}",
                 }
             )
-            vols.append(
-                {
-                    "type": "bind",
-                    "source": str(flags_path),
-                    "target": "/etc/teamie/feature-flags.json",
-                    "read_only": True,
-                }
-            )
+            if svc != "llm-gateway":
+                vols.append(
+                    {
+                        "type": "bind",
+                        "source": str(flags_path),
+                        "target": "/etc/teamie/feature-flags.json",
+                        "read_only": True,
+                    }
+                )
         services[svc] = {
             "image": release_manifest["images"][svc],
             "init": svc not in ("caddy", "web", "postgres", "redis"),
@@ -246,6 +271,9 @@ def main():
             svcs = [tok for tok in rest[1:] if not tok.startswith("-") and not tok.isdigit()]
             caddyfile = str(Path(compose_file).parent / "Caddyfile") if compose_file else ""
             def do_up(st):
+                flags_source = st.get("flags_file", "")
+                tls_cfg_source = os.environ.get("MOCK_TLS_CONFIG_FILE") or st.get("tls_config_file", "")
+                tls_dir_source = os.environ.get("MOCK_TLS_CERT_DIR") or st.get("tls_cert_dir", "")
                 for svc in svcs:
                     st["events"].append(f"canonical_up:{svc}")
                     cid = f"canonical-{svc}"
@@ -255,6 +283,10 @@ def main():
                     env_list = ["LOG_LEVEL=info"]
                     if svc == "caddy":
                         mounts = [{"Destination": "/etc/caddy/Caddyfile", "Source": caddyfile}]
+                        if tls_cfg_source:
+                            mounts.append({"Destination": "/etc/caddy/issuer.caddy", "Source": tls_cfg_source})
+                        if tls_dir_source:
+                            mounts.append({"Destination": "/run/tls", "Source": tls_dir_source})
                         env_list += ["SITE_ADDRESS=https://192.0.2.1", "TLS_SERVER_NAME=192.0.2.1"]
                     elif svc == "sandbox":
                         runner_img = images.get("sandbox-runner", st["service_defaults"][svc].get("runner_image", ""))
@@ -265,6 +297,8 @@ def main():
                             "COOKIE_SECURE=true",
                             f"DATABASE_URL=postgres://teamie_{svc}:secret_{svc}_0123456789abcdef@postgres:5432/teamie_{svc}",
                         ]
+                        if svc != "llm-gateway" and flags_source:
+                            mounts = [{"Destination": "/etc/teamie/feature-flags.json", "Source": flags_source}]
                     st["containers"][cid] = {
                         "id": cid,
                         "name": f"teamie-{svc}-1",
@@ -501,6 +535,10 @@ class ABRolloutOrchestrationTests(unittest.TestCase):
         self.host_env.chmod(0o600)
         self.flags_file = self.root / "config" / "feature-flags.json"
         self.flags_file.write_text('{"revision":"context-engineering-v1","flags":{}}\n')
+        (self.root / "tls" / "certs-v1").mkdir(parents=True)
+        self.tls_config_file = self.root / "tls" / "issuer.caddy"
+        self.tls_config_file.write_text("tls internal\n")
+        self.tls_cert_dir = self.root / "tls" / "certs-v1"
 
         # Create recipe v0.5.0 and v0.5.1 directories with deploy/Caddyfile and postgres scripts.
         self.recipe_v1 = self._create_recipe("v0.5.0")
@@ -542,7 +580,11 @@ class ABRolloutOrchestrationTests(unittest.TestCase):
             mounts = []
             env_list = ["LOG_LEVEL=info"]
             if svc == "caddy":
-                mounts = [{"Destination": "/etc/caddy/Caddyfile", "Source": caddyfile}]
+                mounts = [
+                    {"Destination": "/etc/caddy/Caddyfile", "Source": caddyfile},
+                    {"Destination": "/etc/caddy/issuer.caddy", "Source": str(self.tls_config_file)},
+                    {"Destination": "/run/tls", "Source": str(self.tls_cert_dir)},
+                ]
                 env_list += ["SITE_ADDRESS=https://192.0.2.1", "TLS_SERVER_NAME=192.0.2.1"]
             elif svc == "sandbox":
                 env_list += [f"SANDBOX_RUNNER_IMAGE={manifest_data['images']['sandbox-runner']}"]
@@ -552,6 +594,8 @@ class ABRolloutOrchestrationTests(unittest.TestCase):
                     "COOKIE_SECURE=true",
                     f"DATABASE_URL=postgres://teamie_{svc}:secret_{svc}_0123456789abcdef@postgres:5432/teamie_{svc}",
                 ]
+                if svc != "llm-gateway":
+                    mounts = [{"Destination": "/etc/teamie/feature-flags.json", "Source": str(self.flags_file)}]
             containers[f"canonical-{svc}"] = {
                 "id": f"canonical-{svc}",
                 "name": f"teamie-{svc}-1",
@@ -570,6 +614,9 @@ class ABRolloutOrchestrationTests(unittest.TestCase):
         state = {
             "containers": containers,
             "service_defaults": defaults,
+            "flags_file": str(self.flags_file),
+            "tls_config_file": str(self.tls_config_file),
+            "tls_cert_dir": str(self.tls_cert_dir),
             "max_concurrent_canaries": 0,
             "max_total_mem_bytes": sum(c["mem_limit"] for c in containers.values()),
             "secret_leak_detected": False,
@@ -577,14 +624,32 @@ class ABRolloutOrchestrationTests(unittest.TestCase):
         }
         self.state_path.write_text(json.dumps(state, indent=2))
 
-    def _run_rollout(self, target_manifest: dict, current_manifest: dict | None, recipe: Path, extra_env: dict | None = None):
+    def _run_rollout(
+        self,
+        target_manifest: dict,
+        current_manifest: dict | None,
+        recipe: Path,
+        extra_env: dict | None = None,
+        tls_config_path: Path | None = None,
+        tls_cert_dir: Path | None = None,
+    ):
         target_path = self.root / "target-manifest.json"
         target_path.write_text(json.dumps(target_manifest))
         images_env = self.root / "images.env"
         images_env.write_text(manifest_mod.image_env(target_manifest))
+        eff_tls_cfg = tls_config_path if tls_config_path is not None else self.tls_config_file
+        eff_tls_dir = tls_cert_dir if tls_cert_dir is not None else self.tls_cert_dir
         compose_json = self.root / "compose.json"
         compose_json.write_text(
-            json.dumps(make_compose_json(target_manifest, recipe / "deploy" / "Caddyfile", self.flags_file))
+            json.dumps(
+                make_compose_json(
+                    target_manifest,
+                    recipe / "deploy" / "Caddyfile",
+                    self.flags_file,
+                    tls_config_path=eff_tls_cfg,
+                    tls_cert_dir=eff_tls_dir,
+                )
+            )
         )
 
         env = {
@@ -713,6 +778,63 @@ class ABRolloutOrchestrationTests(unittest.TestCase):
             c = final_state["containers"][f"canonical-{svc}"]
             self.assertTrue(c["running"])
             self.assertEqual(c["image"], self.manifest_v1["images"][svc])
+
+    def test_caddy_tls_mount_source_changes_trigger_online_caddy_recreate(self):
+        # 1. Changing TLS_CONFIG_FILE (/etc/caddy/issuer.caddy source) with identical Caddy image/env/Caddyfile
+        # must mark caddy out-of-date and recreate canonical caddy during online rollout.
+        alt_issuer = self.root / "tls" / "issuer-acme.caddy"
+        alt_issuer.write_text("tls internal\n")
+        res_issuer = self._run_rollout(
+            self.manifest_v1,
+            self.manifest_v1,
+            self.recipe_v1,
+            extra_env={"MOCK_TLS_CONFIG_FILE": str(alt_issuer)},
+            tls_config_path=alt_issuer,
+        )
+        self.assertEqual(res_issuer.returncode, 0, res_issuer.stderr)
+        state_issuer = json.loads(self.state_path.read_text())
+        self.assertIn("canonical_up:caddy", state_issuer["events"])
+        caddy_mounts = {
+            m["Destination"]: m["Source"] for m in state_issuer["containers"]["canonical-caddy"]["mounts"]
+        }
+        self.assertEqual(caddy_mounts["/etc/caddy/issuer.caddy"], str(alt_issuer))
+
+        # 2. Re-running with the same alt_issuer and tls_cert_dir skips caddy cleanly.
+        state_issuer["events"] = []
+        self.state_path.write_text(json.dumps(state_issuer, indent=2))
+        res_noop = self._run_rollout(
+            self.manifest_v1,
+            self.manifest_v1,
+            self.recipe_v1,
+            extra_env={"MOCK_TLS_CONFIG_FILE": str(alt_issuer)},
+            tls_config_path=alt_issuer,
+        )
+        self.assertEqual(res_noop.returncode, 0, res_noop.stderr)
+        state_noop = json.loads(self.state_path.read_text())
+        self.assertNotIn("canonical_up:caddy", state_noop["events"])
+
+        # 3. Changing TLS_CERT_DIR (/run/tls source) with identical Caddy image/env/Caddyfile
+        # must also mark caddy out-of-date and recreate canonical caddy.
+        alt_certs = self.root / "tls" / "certs-v2"
+        alt_certs.mkdir(parents=True)
+        res_certs = self._run_rollout(
+            self.manifest_v1,
+            self.manifest_v1,
+            self.recipe_v1,
+            extra_env={
+                "MOCK_TLS_CONFIG_FILE": str(alt_issuer),
+                "MOCK_TLS_CERT_DIR": str(alt_certs),
+            },
+            tls_config_path=alt_issuer,
+            tls_cert_dir=alt_certs,
+        )
+        self.assertEqual(res_certs.returncode, 0, res_certs.stderr)
+        state_certs = json.loads(self.state_path.read_text())
+        self.assertIn("canonical_up:caddy", state_certs["events"])
+        caddy_mounts_v2 = {
+            m["Destination"]: m["Source"] for m in state_certs["containers"]["canonical-caddy"]["mounts"]
+        }
+        self.assertEqual(caddy_mounts_v2["/run/tls"], str(alt_certs))
 
 
 # --- Live Caddy v2.11.7 HTTP + WebSocket Dual-Slot Cutover Harness ---

@@ -57,12 +57,26 @@ func nextMemoryTimestamp(prev time.Time) time.Time {
 	return now
 }
 
+func (m *memoryStore) cloneConfigLocked() Config {
+	cp := m.c
+	if cp.Providers != nil {
+		cp.Providers = append([]ProviderProfile(nil), cp.Providers...)
+	}
+	if cp.Models != nil {
+		cp.Models = append([]ModelProfile(nil), cp.Models...)
+	}
+	if cp.WebSearch.CipherKey != nil {
+		cp.WebSearch.CipherKey = append([]byte(nil), cp.WebSearch.CipherKey...)
+	}
+	return cp
+}
+
 func (m *memoryStore) Ready(context.Context) error { return nil }
 func (m *memoryStore) Load(context.Context) (Config, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.ensureCatalogTimestampsLocked()
-	return m.c, nil
+	return m.cloneConfigLocked(), nil
 }
 func (m *memoryStore) UpdateCatalog(_ context.Context, change func([]ProviderProfile, []ModelProfile) ([]ProviderProfile, []ModelProfile, error)) (Config, error) {
 	m.mu.Lock()
@@ -132,13 +146,13 @@ func (m *memoryStore) UpdateCatalog(_ context.Context, change func([]ProviderPro
 	}
 	m.c.Providers = providers
 	m.c.Models = models
-	return m.c, nil
+	return m.cloneConfigLocked(), nil
 }
 func (m *memoryStore) UpdateRouting(_ context.Context, routing ModelRoutingConfig) (Config, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.c.Routing = routing
-	return m.c, nil
+	return m.cloneConfigLocked(), nil
 }
 func (m *memoryStore) UpdateWebSearch(_ context.Context, change func(WebSearchConfig) (WebSearchConfig, error)) (Config, error) {
 	m.mu.Lock()
@@ -148,7 +162,7 @@ func (m *memoryStore) UpdateWebSearch(_ context.Context, change func(WebSearchCo
 		return Config{}, err
 	}
 	m.c.WebSearch = c
-	return m.c, nil
+	return m.cloneConfigLocked(), nil
 }
 func (m *memoryStore) Record(_ context.Context, u Usage) error {
 	m.mu.Lock()

@@ -284,6 +284,8 @@ func (gr gatewayResponder) WrapRoute(route gatewaygen.RouteSpec, next http.Handl
 func (a *Adapter) Routes(auth AdminAuthorizer) http.Handler {
 	m := http.NewServeMux()
 	httpx.OperationsContext(m, a.App.Store.Ready)
+	m.HandleFunc("POST "+peerCancelPath, a.handlePeerCancel)
+	m.HandleFunc("POST "+peerReconcilePath, a.handlePeerReconcile)
 	resp := gatewayResponder{
 		adapter:    a,
 		auth:       auth,
@@ -294,5 +296,7 @@ func (a *Adapter) Routes(auth AdminAuthorizer) http.Handler {
 	})
 	return httpx.WrapHertzRouter(m, func(r *route.RouterGroup) {
 		gatewaygen.RegisterModelGatewayHTTPServiceHertzServer(r, a, resp)
+		r.POST(peerCancelPath, resp.muxHandler)
+		r.POST(peerReconcilePath, resp.muxHandler)
 	})
 }

@@ -48,7 +48,6 @@ func (s *Service) CreateModelProvider(ctx context.Context, in CreateModelProvide
 		return domain.Config{}, err
 	}
 	s.modelConfigMu.Lock()
-	defer s.modelConfigMu.Unlock()
 	saved, err := s.Store.UpdateCatalog(validateCtx, func(providers []domain.ProviderProfile, models []domain.ModelProfile) ([]domain.ProviderProfile, []domain.ModelProfile, error) {
 		id := in.ID
 		if id == "" {
@@ -85,9 +84,12 @@ func (s *Service) CreateModelProvider(ctx context.Context, in CreateModelProvide
 		return append(providers, provider), models, nil
 	})
 	if err != nil {
+		s.modelConfigMu.Unlock()
 		return domain.Config{}, err
 	}
 	s.cancelUnavailableModels(saved)
+	s.modelConfigMu.Unlock()
+	s.broadcastReconcile(ctx, "")
 	return saved, nil
 }
 
@@ -118,7 +120,6 @@ func (s *Service) UpdateModelProvider(ctx context.Context, in UpdateModelProvide
 		in.BaseURL = &trimmed
 	}
 	s.modelConfigMu.Lock()
-	defer s.modelConfigMu.Unlock()
 	saved, err := s.Store.UpdateCatalog(validateCtx, func(providers []domain.ProviderProfile, models []domain.ModelProfile) ([]domain.ProviderProfile, []domain.ModelProfile, error) {
 		idx := -1
 		for i, p := range providers {
@@ -141,7 +142,7 @@ func (s *Service) UpdateModelProvider(ctx context.Context, in UpdateModelProvide
 			if nextName == "" {
 				nextName = p.ID
 			}
-			if p.DisplayName != nextName {
+			if m := p.DisplayName; m != nextName {
 				p.DisplayName = nextName
 				changed = true
 			}
@@ -169,10 +170,13 @@ func (s *Service) UpdateModelProvider(ctx context.Context, in UpdateModelProvide
 		return providers, models, nil
 	})
 	if err != nil {
+		s.modelConfigMu.Unlock()
 		return domain.Config{}, err
 	}
 	s.resetProviderCooldown(in.ID)
 	s.cancelUnavailableModels(saved)
+	s.modelConfigMu.Unlock()
+	s.broadcastReconcile(ctx, in.ID)
 	return saved, nil
 }
 
@@ -185,7 +189,6 @@ func (s *Service) DeleteModelProvider(ctx context.Context, id string) (domain.Co
 		return domain.Config{}, domain.Err(400, "invalid_request", "Invalid provider ID")
 	}
 	s.modelConfigMu.Lock()
-	defer s.modelConfigMu.Unlock()
 	saved, err := s.Store.UpdateCatalog(ctx, func(providers []domain.ProviderProfile, models []domain.ModelProfile) ([]domain.ProviderProfile, []domain.ModelProfile, error) {
 		filtered := make([]domain.ProviderProfile, 0, len(providers))
 		found := false
@@ -207,9 +210,12 @@ func (s *Service) DeleteModelProvider(ctx context.Context, id string) (domain.Co
 		return filtered, models, nil
 	})
 	if err != nil {
+		s.modelConfigMu.Unlock()
 		return domain.Config{}, err
 	}
 	s.resetProviderCooldown(id)
 	s.cancelUnavailableModels(saved)
+	s.modelConfigMu.Unlock()
+	s.broadcastReconcile(ctx, id)
 	return saved, nil
 }

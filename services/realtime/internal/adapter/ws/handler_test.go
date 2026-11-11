@@ -794,3 +794,163 @@ func TestGracefulDrainSendsGoingAwayAndReconnectCatchesUpCursor(t *testing.T) {
 		t.Fatalf("unexpected live frame on slot B: %#v", liveEv)
 	}
 }
+
+func TestDrainSynchronizesAdmissionDuringValidateAndUpgrade(t *testing.T) {
+	const origin = "https://teamie.example"
+	aliceToken := strings.Repeat("a", 64)
+
+	t.Run("rejects with 503 when Drain starts during Identity.Validate", func(t *testing.T) {
+		inValidate := make(chan struct{})
+		releaseValidate := make(chan struct{})
+		var once sync.Once
+
+		validator := &stubValidator{
+			sessions: map[string]domain.User{
+				aliceToken: {ID: "alice", DisplayName: "Alice", Kind: "human"},
+			},
+			onValid: func(string) {
+				once.Do(func() {
+					close(inValidate)
+					<-releaseValidate
+				})
+			},
+		}
+		var policy domain.TypingTracker
+		adapter := &Adapter{
+			App: &app.StreamApp{
+				Identity: validator,
+				Chat:     &stubAccess{members: []string{"alice"}},
+				Policy:   &policy,
+			},
+			Origin: origin,
+		}
+		adapter.App.Clients = adapter.ActiveClients
+
+		srv := httptest.NewServer(adapter.Routes())
+		defer srv.Close()
+
+		wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/api/v1/ws"
+		headers := http.Header{
+			"Origin": {origin},
+			"Cookie": {httpx.CookieName + "=" + aliceToken},
+		}
+
+		type dialResult struct {
+			conn *websocket.Conn
+			resp *http.Response
+			err  error
+		}
+		dialCh := make(chan dialResult, 1)
+		go func() {
+			conn, resp, err := websocket.DefaultDialer.Dial(wsURL, headers)
+			dialCh <- dialResult{conn: conn, resp: resp, err: err}
+		}()
+
+		<-inValidate
+		// Drain finishes its snapshot while handleWS is still blocked in Identity.Validate.
+		adapter.Drain(context.Background())
+		close(releaseValidate)
+
+		res := <-dialCh
+		if res.conn != nil {
+			_ = res.conn.Close()
+		}
+		if res.err == nil {
+			t.Fatal("expected WebSocket upgrade to be rejected once draining")
+		}
+		if res.resp == nil || res.resp.StatusCode != http.StatusServiceUnavailable {
+			status := 0
+			if res.resp != nil {
+				status = res.resp.StatusCode
+			}
+			t.Fatalf("upgrade status = %d, want 503 Service Unavailable (err=%v)", status, res.err)
+		}
+	})
+
+	t.Run("immediately sends GoingAway when Drain starts between reservation and registerPeer", func(t *testing.T) {
+		validator := &stubValidator{
+			sessions: map[string]domain.User{
+				aliceToken: {ID: "alice", DisplayName: "Alice", Kind: "human"},
+			},
+		}
+		var policy domain.TypingTracker
+		adapter := &Adapter{
+			App: &app.StreamApp{
+				Identity: validator,
+				Chat:     &stubAccess{members: []string{"alice"}},
+				Policy:   &policy,
+			},
+			Origin: origin,
+		}
+		adapter.App.Clients = adapter.ActiveClients
+
+		// Simulate a peer that already passed tryReservePeer right before Drain started,
+		// and finishes upgrader.Upgrade + registerPeer while Drain is waiting on reservedTotal.
+		if err := adapter.tryReservePeer("alice"); err != nil {
+			t.Fatalf("tryReservePeer before drain: %v", err)
+		}
+
+		var serverConn *websocket.Conn
+		connReady := make(chan struct{})
+		upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+		rawSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			c, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				return
+			}
+			serverConn = c
+			close(connReady)
+		}))
+		defer rawSrv.Close()
+
+		clientConn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(rawSrv.URL, "http"), nil)
+		if err != nil {
+			t.Fatalf("dial raw ws: %v", err)
+		}
+		defer clientConn.Close()
+		<-connReady
+
+		drainDone := make(chan time.Duration, 1)
+		go func() {
+			start := time.Now()
+			adapter.Drain(context.Background())
+			drainDone <- time.Since(start)
+		}()
+
+		// Wait until Drain has set draining=true and is waiting on the in-flight reservation.
+		deadline := time.Now().Add(time.Second)
+		for !adapter.draining.Load() && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+		}
+		if !adapter.draining.Load() {
+			t.Fatal("Drain did not mark adapter as draining")
+		}
+
+		client, queue, done := adapter.registerPeer("alice", aliceToken, serverConn)
+		defer adapter.unregisterPeer(client)
+		go adapter.writeLoop(client, serverConn, queue, done)
+
+		_ = clientConn.SetReadDeadline(time.Now().Add(time.Second))
+		var readErr error
+		for {
+			var frame map[string]any
+			readErr = clientConn.ReadJSON(&frame)
+			if readErr != nil {
+				break
+			}
+		}
+		var closeErr *websocket.CloseError
+		if !errors.As(readErr, &closeErr) || closeErr.Code != websocket.CloseGoingAway {
+			t.Fatalf("expected CloseGoingAway (1001) for peer registered during drain, got %v", readErr)
+		}
+
+		select {
+		case elapsed := <-drainDone:
+			if elapsed > 1500*time.Millisecond {
+				t.Fatalf("Drain stalled (%v) instead of completing promptly after writeLoop exit", elapsed)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("Drain did not complete")
+		}
+	})
+}

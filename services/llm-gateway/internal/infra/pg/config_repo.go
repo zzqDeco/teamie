@@ -276,6 +276,17 @@ func (s *PGStore) endConfigWrite() {
 	s.cacheMu.Unlock()
 }
 
+// InvalidatePingCache drops any cached LoadForPing configuration snapshot so
+// subsequent readiness pings re-read authoritative PostgreSQL state immediately.
+func (s *PGStore) InvalidatePingCache() {
+	s.cacheMu.Lock()
+	s.writeGen++
+	s.cachedValid = false
+	s.cachedCfg = domain.Config{}
+	s.inFlight = nil
+	s.cacheMu.Unlock()
+}
+
 func (s *PGStore) loadProviders(ctx context.Context, forUpdate bool) ([]domain.ProviderProfile, error) {
 	query := `SELECT id,display_name,base_url,encrypted_key,enabled,created_at,updated_at FROM gateway_providers ORDER BY created_at ASC, id ASC`
 	if forUpdate {
