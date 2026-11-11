@@ -169,13 +169,13 @@ export function DeveloperHandbook() {
     <div className="admin-view">
       <div className="admin-heading">
         <div>
-          <h1>
+          <h2>
             开发者接入与提审手册
             <span className="platform-role-badge">
               <BookOpen size={ICON.xs} />
               协议 v1
             </span>
-          </h1>
+          </h2>
           <p>
             本手册面向第三方应用开发者，完整说明如何自部署符合 Teamie 平台协议的外部 Web UI 与 Streamable HTTP MCP Server，并通过四阶段拨测上架应用市场。
           </p>

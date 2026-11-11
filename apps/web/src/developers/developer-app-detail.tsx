@@ -22,6 +22,7 @@ import type {
 } from "@teamie/api-client";
 import { canConfigureModelGateway } from "../agent-management";
 import { useAuth } from "../auth";
+import { usePageTitleDetail } from "../shell/page-title";
 import { errorText } from "../errors";
 import {
   probeStageLabel,
@@ -50,6 +51,9 @@ export function DeveloperAppDetail({
     queryKey: ["developerMarketplaceApp", appId],
     queryFn: () => api.developerMarketplaceApp(appId),
   });
+
+  const detailApp = detailQuery.data?.app;
+  usePageTitleDetail(detailApp ? detailApp.draftName || detailApp.name : undefined);
 
   const fallbackBootstrap = useQuery({
     queryKey: ["developerBootstrapWorkspaces", user!.id],
@@ -205,7 +209,7 @@ export function DeveloperAppDetail({
 
       <div className="admin-heading">
         <div>
-          <h1>{app.draftName || app.name}</h1>
+          <h2>{app.draftName || app.name}</h2>
           <p>
             Slug：<code>{app.slug}</code> · Agent 工具前缀：{" "}
             <code>mcp__{sanitizeMcpToolSegment(app.slug)}__*</code>

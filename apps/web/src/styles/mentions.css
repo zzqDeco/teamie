@@ -123,4 +123,7 @@
     gap: var(--space-3);
     flex-shrink: 0;
   }
+  .mention-agent-disabled {
+    margin-left: auto;
+  }
 }

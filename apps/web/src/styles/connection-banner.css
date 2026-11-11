@@ -1,25 +1,37 @@
 @layer features {
+  /* Overlay inside .app-main (position: relative) so it never shifts layout. */
   .connection-banner {
+    position: absolute;
+    top: calc(var(--header-h) + var(--space-2));
+    left: 50%;
+    z-index: var(--z-banner);
+    transform: translateX(-50%);
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    padding: var(--space-2) var(--space-5);
+    width: max-content;
+    max-width: calc(100% - var(--space-8));
+    padding: var(--space-2) var(--space-4);
     font-size: var(--font-base);
     line-height: 1.5;
-    flex-shrink: 0;
-    border-bottom: 1px solid var(--border);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
     background: var(--lavender);
     color: var(--text);
+    box-shadow: var(--shadow-md);
   }
   .connection-banner.offline {
     background: var(--warning-bg);
-    border-bottom-color: var(--warning-border);
+    border-color: var(--warning-border);
     color: var(--warning-text);
   }
   .connection-banner.restored {
     background: var(--success-bg);
-    border-bottom-color: var(--success-border);
+    border-color: var(--success-border);
     color: var(--success-text);
+  }
+  .connection-live-region {
+    pointer-events: none;
   }
   .connection-banner button {
     margin-left: auto;
@@ -36,6 +48,7 @@
 @layer layout {
   @media (max-width: 780px) {
     .connection-banner {
+      top: calc(var(--header-h-mobile) + env(safe-area-inset-top) + var(--space-2));
       padding: var(--space-2) 14px;
     }
   }

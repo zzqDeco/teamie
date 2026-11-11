@@ -28,6 +28,9 @@
     background: var(--lavender);
     font-weight: 600;
   }
+  .attention-filters button .unread-badge {
+    margin-left: var(--space-2);
+  }
   .attention-mark-all-read {
     gap: 6px;
   }

@@ -491,5 +491,27 @@
     background: var(--warning-bg);
     color: var(--warning-text);
   }
-
+  /* Saved Agent configuration only — never online or runtime state. */
+  .agent-availability {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    padding: 1px 7px;
+    border: 1px solid transparent;
+    border-radius: var(--r-pill);
+    font-size: var(--font-xs);
+    font-weight: 500;
+    line-height: 1.6;
+    white-space: nowrap;
+  }
+  .agent-availability.available {
+    background: var(--success-bg);
+    border-color: var(--success-border);
+    color: var(--success-text);
+  }
+  .agent-availability.disabled {
+    background: var(--surface-sunken);
+    border-color: var(--border);
+    color: var(--text-subtle);
+  }
 }

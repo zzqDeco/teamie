@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Navigate, useLocation, useMatch, useNavigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@teamie/api-client";
 import type { Member, Workspace } from "@teamie/api-client";
@@ -11,7 +11,7 @@ import { ConnectionBanner } from "./connection-banner";
 import { GroupMembersDialog } from "./group-members";
 import { enrichParticipants } from "./participants";
 import type { Participant } from "./participants";
-import { KeyboardShortcutsModal, QuickSwitcher } from "./quick-switcher";
+import { KeyboardShortcutsModal, QuickSwitcher, SHORTCUTS_ENTRY } from "./quick-switcher";
 import { chatStore, compareTimestampsDesc } from "./store";
 import { presenceStore } from "./engagement-store";
 import { setActiveNotificationContext } from "./notifications";
@@ -19,6 +19,12 @@ import type { DialogKind } from "./dialogs";
 import { ConversationView } from "./messages";
 import { AttentionInbox, useAttentionCount } from "./attention";
 import { Button, Loading, Logo, Notice } from "./ui";
+import { conversationUnreadSummary } from "./unread-badge";
+import { canConfigureModelGateway } from "./agent-management";
+import { useCurrentWorkspace } from "./shell/current-workspace";
+import { NotFoundView } from "./shell/page-header";
+import { PageTitleProvider } from "./shell/page-title";
+import { useShellRoutes } from "./shell/shell-routes";
 import {
   computePageTitle,
   computeShellAttention,
@@ -54,17 +60,16 @@ export function Shell() {
     snapshot = useChatState();
   const client = useQueryClient();
   const attentionCount = useAttentionCount();
-  const match = useMatch("/app/w/:workspaceId/c/:conversationId"),
-    directoryMatch = useMatch("/app/w/:workspaceId/members"),
-    legacyDirectoryMatch = useMatch("/app/w/:workspaceId/agents"),
-    agentMatch = useMatch("/app/agents/:agentId"),
-    developerAppMatch = useMatch("/app/developers/apps/:appId"),
-    workspaceRootMatch = useMatch("/app/w/:workspaceId"),
-    location = useLocation(),
-    navigate = useNavigate();
+  const routes = useShellRoutes();
+  const { match, legacyDirectoryMatch, workspaceRootMatch, location, pathname } = routes;
+  const navigate = useNavigate();
   const [initialNav] = useState(() => readPersistedShellNav(user?.id));
   const navUserIdRef = useRef(user?.id);
   const lastConversationByWorkspace = useRef<Record<string, string>>(
+    initialNav.lastConversationByWorkspace,
+  );
+  // Render-safe copy of the map above for current-workspace resolution.
+  const [rememberedByWorkspace, setRememberedByWorkspace] = useState(
     initialNav.lastConversationByWorkspace,
   );
   const lastChatRoute = useRef<string>(initialNav.lastChatPath);
@@ -92,15 +97,18 @@ export function Shell() {
   // overlay, <main> is inert and a shell-level notice would be invisible.
   const [directError, setDirectError] = useState(""),
     [directBusyId, setDirectBusyId] = useState<string | null>(null);
-  const workspace =
-    chat.data?.workspaces.find(
-      (w) =>
-        w.id ===
-        (match?.params.workspaceId ||
-          directoryMatch?.params.workspaceId ||
-          legacyDirectoryMatch?.params.workspaceId),
-    ) ||
-    (match || directoryMatch || legacyDirectoryMatch ? undefined : chat.data?.workspaces[0]);
+  const [titleDetail, setTitleDetailState] = useState({ path: "", detail: "" });
+  const setTitleDetail = useCallback((path: string, detail: string) => {
+    setTitleDetailState((prev) =>
+      detail ? { path, detail } : prev.path === path ? { path: "", detail: "" } : prev,
+    );
+  }, []);
+  const workspace = useCurrentWorkspace({
+    workspaces: chat.data?.workspaces || [],
+    lastChatPath,
+    lastConversationByWorkspace: rememberedByWorkspace,
+    conversations: snapshot.conversations,
+  });
   const owner = workspace?.createdBy === user!.id;
   const conversation = match?.params.conversationId
     ? snapshot.conversations[match.params.conversationId]
@@ -112,6 +120,7 @@ export function Shell() {
     navUserIdRef.current = user?.id;
     const restored = readPersistedShellNav(user?.id);
     lastConversationByWorkspace.current = restored.lastConversationByWorkspace;
+    setRememberedByWorkspace(restored.lastConversationByWorkspace);
     lastChatRoute.current = restored.lastChatPath;
     setLastChatPath(restored.lastChatPath);
     setRecentConversationIds(restored.recentConversationIds);
@@ -128,6 +137,9 @@ export function Shell() {
     ) {
       const nextRoute = route(conversation);
       lastConversationByWorkspace.current[workspace.id] = conversation.id;
+      setRememberedByWorkspace((prev) =>
+        prev[workspace.id] === conversation.id ? prev : { ...lastConversationByWorkspace.current },
+      );
       lastChatRoute.current = nextRoute;
       setLastChatPath(nextRoute);
       setRecentConversationIds((prev) => {
@@ -236,16 +248,10 @@ export function Shell() {
   }, []);
   const baseOverlayModal =
     !!dialog || quickSwitcherOpen || shortcutsOpen || managingGroup || managingWorkspaceApps || !!removing;
-  const pathname = location.pathname.replace(/\/+$/, "") || "/app";
   const caps = chat.data?.capabilities || {};
   const marketplaceEnabled = caps["im.marketplace.enabled"] !== false;
   const announcementsPublishEnabled = caps["im.announcements.publish"] !== false;
-  const isSettings = ["/app/settings", "/app/profile"].includes(pathname);
-  const isAdminPage = pathname === "/app/admin";
-  const isGatewayPage = pathname === "/app/admin/gateway";
-  const isUsersPage = pathname === "/app/admin/users";
-  const isMarketplacePage = pathname === "/app/admin/marketplace";
-  const isAnnouncementsAdminPage = pathname === "/app/admin/announcements";
+  const { isAnnouncementsAdminPage, isAttentionPage, isAgentsPage, isManagement } = routes;
   const announcementPopupVisible =
     !announcementsHistoryOpen &&
     !baseOverlayModal &&
@@ -253,12 +259,6 @@ export function Shell() {
     announcements.hasUnread;
   const hasOverlayModal =
     baseOverlayModal || announcementsHistoryOpen || announcementPopupVisible;
-  const isDeveloperDocsPage = pathname === "/app/developers/docs";
-  const isDevelopersPage =
-    pathname === "/app/developers" || isDeveloperDocsPage || !!developerAppMatch;
-  const isAgentsPage = pathname === "/app/agents" || !!agentMatch;
-  const isDirectoryPage = !!directoryMatch;
-  const isAttentionPage = pathname === "/app/attention";
   const { allAuthorizedConversations, urgentCount, hasChannelUnread } =
     computeShellAttention({
       workspaces: chat.data?.workspaces || [],
@@ -267,8 +267,8 @@ export function Shell() {
       attentionData: attentionCount.data,
     });
   const pageTitle = computePageTitle({
-    isAttentionPage, isGatewayPage, isUsersPage, isMarketplacePage, isAnnouncementsAdminPage, isDevelopersPage, isAdminPage, isAgentsPage,
-    isDirectoryPage, isSettings, workspace, conversation, userId: user!.id, members,
+    routes, workspace, conversation, userId: user!.id, members,
+    titleDetail: titleDetail.path === location.pathname ? titleDetail.detail : "",
   });
   useDocumentTitle(pageTitle, urgentCount, hasChannelUnread);
   useShellKeyboardShortcuts({
@@ -276,6 +276,8 @@ export function Shell() {
     workspaces: chat.data?.workspaces, conversationId: conversation?.id,
     hasOverlayModal, quickSwitcherOpen, shortcutsOpen,
     setShortcutsOpen, setQuickSwitcherOpen, navigate,
+    isUnread: (c) =>
+      conversationUnreadSummary(c, snapshot, user!.id, attentionCount.data?.attentionUnreadByConversation).hasUnread,
   });
   const messageTarget = new URLSearchParams(location.search).get("message") || "";
   const initialMessageId = messageTarget.length <= 128 ? messageTarget : "";
@@ -286,11 +288,9 @@ export function Shell() {
     (initialMessageId && initialMessageId !== viewKey.target)
   )
     setViewKey({ conversation: viewConversationId, target: initialMessageId });
-  const isManagement =
-    isSettings || isAdminPage || isGatewayPage || isUsersPage || isMarketplacePage || isAnnouncementsAdminPage || isDevelopersPage || isAgentsPage || isDirectoryPage;
-  const appsAvailable = marketplaceEnabled && !isManagement && !!workspace && conversation?.type === "group";
+  const appsAvailable = marketplaceEnabled && !isManagement && !routes.isNotFound && !!workspace && conversation?.type === "group";
   const appsVisible = appsOpen && !details && appsAvailable;
-  const membersVisible = details && !isManagement && !!workspace && !!conversation;
+  const membersVisible = details && !isManagement && !routes.isNotFound && !!workspace && !!conversation;
   const rightPaneVisible = appsVisible || membersVisible;
   useEffect(() => {
     if (!appsAvailable) {
@@ -371,6 +371,7 @@ export function Shell() {
       if (!api.csrfToken) {
         clearPersistedShellNav(currentUserId);
         lastConversationByWorkspace.current = {};
+        setRememberedByWorkspace({});
         lastChatRoute.current = "";
         setLastChatPath("");
         setRecentConversationIds([]);
@@ -428,21 +429,15 @@ export function Shell() {
     const first = inWorkspace.find((c) => c.type === "channel") || inWorkspace[0];
     return <Navigate to={first ? route(first) : `/app/w/${id}/members`} replace />;
   }
-  if (
-    chat.data && !match && !directoryMatch && !legacyDirectoryMatch && !agentMatch && !developerAppMatch &&
-    ![
-      "/app", "/app/agents", "/app/developers", "/app/developers/docs", "/app/settings", "/app/profile",
-      "/app/admin", "/app/admin/gateway", "/app/admin/users", "/app/admin/marketplace", "/app/admin/announcements", "/app/attention",
-    ].includes(pathname)
-  )
-    return <Navigate to="/app" replace />;
   return (
+    <PageTitleProvider value={setTitleDetail}>
     <div className={`app-shell ${sidebar ? "sidebar-open" : ""} ${rightPaneVisible ? "details-open" : ""}`}>
       <ShellSidebar
         navigationRef={navigationRef} mobile={mobile} sidebar={sidebar}
         hasOverlayModal={hasOverlayModal} user={user!} busy={busy}
         connection={chat.connection} connectionLabel={connectionLabel}
         isAttentionPage={isAttentionPage} isAgentsPage={isAgentsPage}
+        isAccountPage={routes.isAccountPage} isAppsPage={routes.isAppsPage}
         attentionUnreadCount={attentionCount.data?.unreadCount}
         attentionProjection={attentionCount.data?.attentionUnreadByConversation}
         snapshot={snapshot}
@@ -466,24 +461,20 @@ export function Shell() {
       >
         <ConnectionBanner
           connection={chat.connection} syncError={chat.syncError}
-          showSyncError={!conversation || isManagement || isAttentionPage}
+          showSyncError={!conversation || isManagement || isAttentionPage || routes.isNotFound}
           onRetry={chat.reconnect ?? chat.sync}
         />
         {error && !removing && <Notice>{error}</Notice>}
-        {isAttentionPage ? (
+        {routes.isNotFound ? (
+          <NotFoundView onOpenNavigation={() => setSidebar(true)} />
+        ) : isAttentionPage ? (
           <AttentionInbox key={user!.id} onMenu={() => setSidebar(true)} />
         ) : isManagement ? (
           <ShellManagementView
-            user={user!} isGatewayPage={isGatewayPage} isUsersPage={isUsersPage}
-            isMarketplacePage={isMarketplacePage}
-            isAnnouncementsAdminPage={isAnnouncementsAdminPage}
+            user={user!} routes={routes}
             announcementsPublishEnabled={announcementsPublishEnabled}
-            isDevelopersPage={isDevelopersPage}
-            isDeveloperDocsPage={isDeveloperDocsPage}
-            developerAppId={developerAppMatch?.params.appId}
+            marketplaceEnabled={marketplaceEnabled}
             workspaces={chat.data?.workspaces || []}
-            isAdminPage={isAdminPage} isAgentsPage={isAgentsPage}
-            isDirectoryPage={isDirectoryPage} agentId={agentMatch?.params.agentId}
             backChatRoute={backChatRoute} workspace={workspace} members={members}
             workspaceAgents={workspaceAgents}
             membersLoading={
@@ -589,11 +580,17 @@ export function Shell() {
           discoveryAllowed={discoveryAllowed}
           members={members} userId={user!.id}
           recentConversationIds={recentConversationIds}
+          isPlatformAdmin={canConfigureModelGateway(user)}
+          attentionProjection={attentionCount.data?.attentionUnreadByConversation}
           onSelect={(path) => {
             setQuickSwitcherOpen(false);
             setSidebar(false);
+            if (path === SHORTCUTS_ENTRY) {
+              setShortcutsOpen(true);
+              return;
+            }
             const wsPrefix = "/app/w/";
-            if (path.startsWith(wsPrefix) && !path.includes("/c/")) {
+            if (path.startsWith(wsPrefix) && !path.slice(wsPrefix.length).includes("/")) {
               const targetWs = chat.data?.workspaces.find(
                 (w) => w.id === path.slice(wsPrefix.length),
               );
@@ -635,6 +632,7 @@ export function Shell() {
         onDismissOptimistic={announcements.applyLocalReadSeq}
       />
     </div>
+    </PageTitleProvider>
   );
 }
 

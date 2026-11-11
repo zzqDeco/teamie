@@ -178,13 +178,13 @@ function AdminMarketplaceCatalog({ user }: { user: User }) {
     <div className="admin-view">
       <div className="admin-heading">
         <div>
-          <h1>
+          <h2>
             应用市场与提审治理
             <span className="platform-role-badge">
-              <ShieldCheck size={ICON.xs} />
+              <ShieldCheck size={ICON.xs} aria-hidden="true" />
               平台管理员
             </span>
-          </h1>
+          </h2>
           <p>
             管理官方直发应用并审核社区开发者提审的外部 Web + MCP 服务。通过审核后，工作空间所有者即可安装至群聊。
           </p>

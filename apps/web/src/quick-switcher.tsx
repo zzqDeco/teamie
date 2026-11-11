@@ -1,18 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { useQueries } from "@tanstack/react-query";
-import {
-  Bell,
-  Bot,
-  Hash,
-  LoaderCircle,
-  MessageCircle,
-  Search,
-  Settings,
-  Users,
-} from "lucide-react";
+import { LoaderCircle, Search } from "lucide-react";
 import { api } from "@teamie/api-client";
 import type {
+  AttentionUnreadDTO,
   Conversation,
   Member,
   Workspace,
@@ -27,23 +19,25 @@ import { chatStore, compareTimestampsDesc, reconcileMessages } from "./store";
 import { Modal, Notice } from "./ui";
 import {
   KeyboardShortcutsModal,
+  QuickSwitcherJumpResults,
   QuickSwitcherMessageResults,
 } from "./shell/quick-switcher-results";
+import {
+  buildPageItems,
+  groupEmptyState,
+  rankItems,
+  SHORTCUTS_ENTRY,
+} from "./shell/quick-switcher-items";
+import type { QuickGroup, QuickItem } from "./shell/quick-switcher-items";
+import { usePinyin } from "./shell/pinyin-match";
+import { conversationUnreadSummary } from "./unread-badge";
 import type {
   GroupedMessageResult,
   MessageOption,
   WorkspaceSearchState,
 } from "./shell/quick-switcher-results";
-export { KeyboardShortcutsModal };
+export { KeyboardShortcutsModal, SHORTCUTS_ENTRY };
 
-type QuickItem = {
-  id: string;
-  label: string;
-  subtitle: string;
-  path: string;
-  kind: "channel" | "direct" | "group" | "workspace" | "page";
-  unread: number;
-};
 
 export function QuickSwitcher({
   workspaces,
@@ -53,6 +47,8 @@ export function QuickSwitcher({
   members,
   userId,
   recentConversationIds,
+  isPlatformAdmin = false,
+  attentionProjection,
   onSelect,
   onClose,
 }: {
@@ -63,6 +59,9 @@ export function QuickSwitcher({
   members: Member[];
   userId: string;
   recentConversationIds: string[];
+  /** Human platform administrators also get administrator page entries. */
+  isPlatformAdmin?: boolean;
+  attentionProjection?: ReadonlyArray<AttentionUnreadDTO>;
   onSelect: (path: string) => void;
   onClose: () => void;
 }) {
@@ -78,6 +77,7 @@ export function QuickSwitcher({
   const sequence = useRef(0);
   const snapshot = useChatState();
   const generation = chatStore.generation;
+  const toPinyin = usePinyin();
 
   useEffect(() => {
     inputRef.current?.focus({ preventScroll: true });
@@ -179,56 +179,22 @@ export function QuickSwitcher({
       return compareTimestampsDesc(a.updatedAt, b.updatedAt);
     });
 
-  const allItems: QuickItem[] = [
-    ...sortedConversations.map((c) => {
-      const space = workspaceMap.get(c.workspaceId);
-      const label = conversationName(
-        c,
-        userId,
-        membersByWorkspace.get(c.workspaceId) || [],
-      );
-      return {
-        id: `conv:${c.id}`,
-        label,
-        subtitle: space?.name || "工作空间",
-        path: `/app/w/${c.workspaceId}/c/${c.id}`,
-        kind: c.type,
-        unread: Math.max(0, c.lastSeq - c.readSeq),
-      };
-    }),
-    ...workspaces.map((space) => ({
-      id: `ws:${space.id}`,
-      label: space.name,
-      subtitle: "工作空间",
-      path: `/app/w/${space.id}`,
-      kind: "workspace" as const,
-      unread: 0,
-    })),
-    {
-      id: "page:attention",
-      label: "提及与回复",
-      subtitle: "收件箱",
-      path: "/app/attention",
-      kind: "page",
-      unread: 0,
-    },
-    {
-      id: "page:agents",
-      label: "个人 Agent",
-      subtitle: "管理你的 Agent",
-      path: "/app/agents",
-      kind: "page",
-      unread: 0,
-    },
-    {
-      id: "page:settings",
-      label: "账号设置",
-      subtitle: "个人资料与密码",
-      path: "/app/settings",
-      kind: "page",
-      unread: 0,
-    },
-  ];
+  const conversationItems: QuickItem[] = sortedConversations.map((c) => ({
+    id: `conv:${c.id}`,
+    label: conversationName(c, userId, membersByWorkspace.get(c.workspaceId) || []),
+    subtitle: workspaceMap.get(c.workspaceId)?.name || "工作空间",
+    path: `/app/w/${c.workspaceId}/c/${c.id}`,
+    kind: c.type,
+    conversation: c,
+  }));
+  const workspaceItems: QuickItem[] = workspaces.map((space) => ({
+    id: `ws:${space.id}`,
+    label: space.name,
+    subtitle: "工作空间",
+    path: `/app/w/${space.id}`,
+    kind: "workspace",
+  }));
+  const pageItems = buildPageItems({ workspace: targetWorkspace, isPlatformAdmin });
 
   const trimmedQuery = query.trim();
   const termLower = trimmedQuery.toLocaleLowerCase();
@@ -433,11 +399,19 @@ export function QuickSwitcher({
     group.options.push(opt);
   }
 
-  const jumpItems = termLower
-    ? allItems.filter((item) =>
-        `${item.label} ${item.subtitle}`.toLocaleLowerCase().includes(termLower),
-      )
-    : allItems;
+  const jumpGroups: QuickGroup[] = termLower
+    ? [{
+        id: "results",
+        label: "",
+        items: rankItems([...conversationItems, ...workspaceItems, ...pageItems], trimmedQuery, toPinyin),
+      }].filter((group) => group.items.length > 0)
+    : groupEmptyState({
+        conversations: conversationItems,
+        recentConversationIds,
+        workspaces: workspaceItems,
+        pages: pageItems,
+      });
+  const jumpItems = jumpGroups.flatMap((group) => group.items);
 
   const selectableOptions: Array<{ id: string; path: string }> =
     mode === "jump"
@@ -563,7 +537,7 @@ export function QuickSwitcher({
                 ? targetWorkspace
                   ? `在 ${targetWorkspace.name} 中搜索消息关键词…`
                   : "当前没有可搜索的工作空间"
-                : "输入频道、私信或工作空间名称…"
+                : "输入名称、拼音或首字母…"
             }
             aria-label={mode === "messages" ? "搜索工作空间消息" : "快速跳转搜索"}
           />
@@ -573,58 +547,16 @@ export function QuickSwitcher({
         )}
         {mode === "jump" ? (
           jumpItems.length ? (
-            <ul
-              id="quick-switcher-listbox"
-              ref={listRef}
-              className="quick-switcher-list"
-              role="listbox"
-              aria-label="跳转结果"
-            >
-              {jumpItems.map((item, index) => {
-                const selected = index === boundedIndex;
-                return (
-                  <li
-                    key={item.id}
-                    id={`quick-switcher-opt-${item.id}`}
-                    role="option"
-                    aria-selected={selected}
-                  >
-                    <button
-                      type="button"
-                      className={`quick-switcher-option ${selected ? "selected" : ""}`}
-                      onMouseEnter={() => setActiveId(item.id)}
-                      onClick={() => onSelect(item.path)}
-                    >
-                      <span className="quick-switcher-icon" aria-hidden="true">
-                        {item.kind === "channel" ? (
-                          <Hash size={ICON.sm} />
-                        ) : item.kind === "group" ||
-                          item.kind === "workspace" ? (
-                          <Users size={ICON.sm} />
-                        ) : item.kind === "direct" ? (
-                          <MessageCircle size={ICON.sm} />
-                        ) : item.id === "page:attention" ? (
-                          <Bell size={ICON.sm} />
-                        ) : item.id === "page:agents" ? (
-                          <Bot size={ICON.sm} />
-                        ) : (
-                          <Settings size={ICON.sm} />
-                        )}
-                      </span>
-                      <span className="quick-switcher-text">
-                        <b>{item.label}</b>
-                        <small>{item.subtitle}</small>
-                      </span>
-                      {item.unread > 0 && (
-                        <span className="unread-badge">
-                          {item.unread > 99 ? "99+" : item.unread}
-                        </span>
-                      )}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+            <QuickSwitcherJumpResults
+              groups={jumpGroups}
+              listRef={listRef}
+              activeItemId={activeItemId}
+              setActiveId={setActiveId}
+              onSelect={onSelect}
+              summaryOf={(conversation) =>
+                conversationUnreadSummary(conversation, snapshot, userId, attentionProjection)
+              }
+            />
           ) : (
             <div className="quick-switcher-empty" role="status">
               没有匹配的对话或页面

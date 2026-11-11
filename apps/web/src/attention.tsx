@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router-dom";
-import { ArrowLeft, Bell, CheckCheck, RefreshCw } from "lucide-react";
+import { Bell, CheckCheck, RefreshCw } from "lucide-react";
 import { api, ApiError } from "@teamie/api-client";
 import type { AttentionItem } from "@teamie/api-client";
 import { useAuth } from "./auth";
@@ -21,6 +21,8 @@ import { AgentAvatar, AgentBadge } from "./agent-ui";
 import { MentionText } from "./mentions";
 import { Avatar, Button, date, IconButton, Notice, time } from "./ui";
 import { ICON } from "./icons";
+import { MobileNavButton } from "./shell/page-header";
+import { UnreadBadge } from "./unread-badge";
 import "./styles/attention.css";
 
 export { SavedMessagesList };
@@ -53,20 +55,30 @@ const retry = (count: number, error: Error) =>
 
 export function useAttentionCount() {
   const scope = useAttentionScope();
+  const client = useQueryClient();
+  const scopeKey = ["attention", scope.userId, scope.generation, scope.access, "count"] as const;
+  // Read-cursor changes refresh the count in place instead of switching to a
+  // new (empty) query, so the rail badge never blinks out while refetching.
+  const lastReads = useRef(scope.reads);
+  useEffect(() => {
+    if (lastReads.current === scope.reads) return;
+    lastReads.current = scope.reads;
+    void client.invalidateQueries({
+      queryKey: ["attention", scope.userId, scope.generation, scope.access, "count"],
+    });
+  }, [client, scope.reads, scope.userId, scope.generation, scope.access]);
   return useQuery({
-    queryKey: [
-      "attention",
-      scope.userId,
-      scope.generation,
-      scope.access,
-      "count",
-      scope.reads,
-      scope.epoch,
-    ],
+    queryKey: [...scopeKey, scope.epoch],
     queryFn: ({ signal }) => fetchAttentionCount(signal),
     enabled: scope.enabled,
     staleTime: 5_000,
     refetchInterval: 30_000,
+    // Only bridge refetches within the same account session.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === scope.userId &&
+      previousQuery.queryKey[2] === scope.generation
+        ? previous
+        : undefined,
     retry,
   });
 }
@@ -459,13 +471,7 @@ export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
   return (
     <section className="attention-view">
       <header className="conversation-header">
-        <IconButton
-          label="打开对话列表"
-          className="mobile-menu"
-          onClick={onMenu}
-        >
-          <ArrowLeft size={ICON.lg} />
-        </IconButton>
+        <MobileNavButton onClick={onMenu} />
         <span className="conversation-symbol">
           <Bell size={ICON.lg} />
         </span>
@@ -512,6 +518,7 @@ export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
           onClick={() => setTab("unread")}
         >
           未读
+          <UnreadBadge count={serverUnread} />
         </button>
       </div>
       {isSavedTab ? (

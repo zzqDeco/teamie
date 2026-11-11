@@ -153,13 +153,10 @@ export function PlatformInvitations() {
     <div className="admin-view">
       <div className="admin-heading">
         <div>
-          <h1>
-            注册邀请{" "}
-            <span className="platform-role-badge">
-              <ShieldCheck size={ICON.xs} />
-              平台管理员
-            </span>
-          </h1>
+          <span className="platform-role-badge">
+            <ShieldCheck size={ICON.xs} aria-hidden="true" />
+            平台管理员
+          </span>
           <p>一次性邀请码，7 天内有效。</p>
         </div>
         <span className="admin-heading-icon">

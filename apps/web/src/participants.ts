@@ -1,5 +1,12 @@
 import type { Agent, Member } from "@teamie/api-client";
-export type Participant = Member & { selectable?: boolean };
+export type Participant = Member & {
+  selectable?: boolean;
+  /**
+   * Public `enabled` flag of an Agent member's discovery profile; undefined for
+   * humans and for Agents absent from discovery (which show no availability).
+   */
+  agentEnabled?: boolean;
+};
 export function enrichParticipants(
   members: Member[],
   agents: Agent[],
@@ -13,6 +20,7 @@ export function enrichParticipants(
           ownerId: agent?.ownerId || member.ownerId,
           ownerName: agent?.ownerName || member.ownerName,
           selectable: !!agent && agent.enabled,
+          ...(agent ? { agentEnabled: agent.enabled } : {}),
         }
       : { ...member, selectable: true };
   });
@@ -27,6 +35,7 @@ export function enrichParticipants(
         ownerId: agent.ownerId,
         ownerName: agent.ownerName,
         selectable: agent.enabled,
+        agentEnabled: agent.enabled,
       });
   return result;
 }

@@ -15,6 +15,7 @@ import {
 import { api, ApiError } from "@teamie/api-client";
 import type { ModelCatalog } from "@teamie/api-client";
 import { useAuth } from "./auth";
+import { usePageTitleDetail } from "./shell/page-title";
 import { useChat } from "./chat";
 import {
   AgentAvatar,
@@ -77,9 +78,7 @@ export function MyAgents({
     <div className="agents-view">
       <div className="agents-heading">
         <div>
-          <h1>
-            个人 Agent <span>{agents.length}</span>
-          </h1>
+          <p className="agents-summary">共 {agents.length} 个 Agent</p>
         </div>
         {canCreate && (
           <Button onClick={() => setCreating(true)}>
@@ -191,6 +190,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         ?.displayName || agent.modelId.trim()
     : "";
   const allowed = !!agent && canManageAgent(user, agent);
+  usePageTitleDetail(allowed ? agent.name : undefined);
   const editable = !!data?.capabilities["agents.update"];
   const deletable = !!data?.capabilities["agents.delete"];
   const canEnable = !!data?.capabilities["agents.enabled"];
@@ -301,7 +301,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
               </BadgePill>
             )}
           </div>
-          <h1>{agent.name}</h1>
+          <h2>{agent.name}</h2>
           {agent.description && <p>{agent.description}</p>}
         </div>
         <div className="agent-detail-actions">

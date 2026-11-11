@@ -1,8 +1,9 @@
 import { useId, useState } from "react";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { Home, Menu, Plus } from "lucide-react";
-import { Button, IconButton } from "./ui";
+import { Home, Plus } from "lucide-react";
+import { Button } from "./ui";
+import { MobileNavButton } from "./shell/page-header";
 import { FieldError } from "./password-field";
 import { ICON } from "./icons";
 
@@ -44,9 +45,7 @@ export function Welcome({
   return (
     <div className="welcome-view">
       <header>
-        <IconButton label="打开侧栏" className="mobile-menu" onClick={onMenu}>
-          <Menu size={ICON.lg} />
-        </IconButton>
+        <MobileNavButton onClick={onMenu} />
         <span>
           <Home size={ICON.sm} />
           你的起点

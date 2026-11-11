@@ -414,7 +414,6 @@ export function ProfileSettings() {
   }
   return (
     <div className="settings-view">
-      <h1>账号设置</h1>
       <div className="profile-card">
         <div className="profile-banner"></div>
         <div className="profile-content">

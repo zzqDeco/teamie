@@ -134,7 +134,7 @@ function AdminUsers({ user }: { user: User }) {
     <div className="admin-view platform-users-view">
       <div className="admin-heading">
         <div>
-          <h1>用户管理<span className="platform-role-badge"><ShieldCheck size={ICON.xs} />平台管理员</span></h1>
+          <span className="platform-role-badge"><ShieldCheck size={ICON.xs} aria-hidden="true" />平台管理员</span>
           <p>为已核实身份的用户提供一次性密码重置链接。</p>
         </div>
         <span className="admin-heading-icon"><Users size={ICON.xl} /></span>

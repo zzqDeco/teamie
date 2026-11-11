@@ -109,6 +109,23 @@ export function AgentEnabledStatus({ enabled }: { enabled: boolean }) {
     </span>
   );
 }
+/**
+ * Public availability of an Agent participant, derived only from the saved
+ * `enabled` field of its discovery profile. It never reflects online or
+ * runtime state; Agents absent from discovery (`enabled` undefined) get no
+ * label at all.
+ */
+export function AgentAvailability({ enabled }: { enabled?: boolean }) {
+  if (enabled === undefined) return null;
+  return (
+    <span
+      className={`agent-availability ${enabled ? "available" : "disabled"}`}
+      title={enabled ? "Agent 已启用" : "Agent 已被创建者停用，不会回应"}
+    >
+      {enabled ? "可用" : "已停用"}
+    </span>
+  );
+}
 export type WebSearchFormValue = {
   enabled: boolean;
   apiKey: string;

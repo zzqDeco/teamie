@@ -138,7 +138,7 @@
       padding-top: 0;
       align-self: auto;
     }
-    .agent-detail-heading h1 {
+    .agent-detail-heading h2 {
       font-size: var(--font-3xl);
     }
     .agent-card {
@@ -306,7 +306,7 @@
       padding-left: 15px;
       padding-right: 15px;
     }
-    .admin-heading h1 {
+    .admin-heading h2 {
       font-size: var(--font-3xl);
       gap: 8px;
     }
@@ -324,9 +324,6 @@
       align-items: flex-start;
       flex-direction: column;
       gap: 16px;
-    }
-    .agents-heading h1 {
-      font-size: var(--font-3xl);
     }
     .agent-detail-heading > .avatar {
       width: 61px;

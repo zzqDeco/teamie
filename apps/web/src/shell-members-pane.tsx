@@ -11,7 +11,7 @@ import {
   X,
 } from "lucide-react";
 import type { Conversation, Member, Workspace } from "@teamie/api-client";
-import { AgentAvatar, AgentBadge } from "./agent-ui";
+import { AgentAvatar, AgentAvailability, AgentBadge } from "./agent-ui";
 import type { Participant } from "./participants";
 import { conversationName } from "./messages";
 import {
@@ -148,6 +148,9 @@ export function ShellMembersPane({
                   {member.userId === userId && <small>你</small>}
                   {member.kind === "agent" && (
                     <AgentBadge compact ownerName={member.ownerName} />
+                  )}
+                  {member.kind === "agent" && (
+                    <AgentAvailability enabled={member.agentEnabled} />
                   )}
                 </b>
                 <span>

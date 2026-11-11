@@ -1,7 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import {
-  ArrowLeft,
   ArrowUp,
   AtSign,
   Bell,
@@ -38,6 +37,9 @@ import { sameMentions } from "../composer-drafts";
 import { Button, IconButton, Modal, Notice } from "../ui";
 import { ICON } from "../icons";
 import { toast } from "../toast";
+import { AgentAvailability } from "../agent-ui";
+import type { Participant } from "../participants";
+import { MobileNavButton } from "../shell/page-header";
 export function useMessageActions(conversationId: string) {
   const editPending = useRef(false);
   const [actionMessageId, setActionMessageId] = useState("");
@@ -211,7 +213,7 @@ export function ConversationHeader({
   onSearchOpen: () => void;
   onMembers: () => void;
   onApps?: () => void;
-  members?: Member[];
+  members?: Participant[];
   userId?: string;
   canConfigureNotifications?: boolean;
   presenceEnabled?: boolean;
@@ -285,13 +287,7 @@ export function ConversationHeader({
 
   return (
     <header className="conversation-header">
-      <IconButton
-        label="打开对话列表"
-        className="mobile-menu"
-        onClick={onMenu}
-      >
-        <ArrowLeft size={ICON.lg} />
-      </IconButton>
+      <MobileNavButton onClick={onMenu} />
       <span className="conversation-symbol">
         {conversation.type === "channel" ? (
           <Hash size={ICON.xl} />
@@ -326,6 +322,7 @@ export function ConversationHeader({
               </span>
             </>
           )}
+          {otherMember?.kind === "agent" && <AgentAvailability enabled={otherMember.agentEnabled} />}
         </span>
       </div>
       <div className="conversation-header-actions">

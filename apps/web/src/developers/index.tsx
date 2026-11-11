@@ -36,17 +36,25 @@ export function DeveloperPortal({
   return (
     <>
       <nav className="admin-section-nav" aria-label="开发者平台导航">
-        <Link to="/app/developers" className={isAppsSection ? "active" : ""}>
-          <Code2 size={ICON.xs} />
+        <Link
+          to="/app/developers"
+          className={isAppsSection ? "active" : ""}
+          aria-current={isAppsSection ? "page" : undefined}
+        >
+          <Code2 size={ICON.xs} aria-hidden="true" />
           我的应用
         </Link>
-        <Link to="/app/developers/docs" className={isDocsPage ? "active" : ""}>
-          <BookOpen size={ICON.xs} />
+        <Link
+          to="/app/developers/docs"
+          className={isDocsPage ? "active" : ""}
+          aria-current={isDocsPage ? "page" : undefined}
+        >
+          <BookOpen size={ICON.xs} aria-hidden="true" />
           开发者手册
         </Link>
         {canConfigureModelGateway(user) && (
           <Link to="/app/admin/marketplace">
-            <ShieldCheck size={ICON.xs} />
+            <ShieldCheck size={ICON.xs} aria-hidden="true" />
             平台审核队列
           </Link>
         )}
