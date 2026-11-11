@@ -35,7 +35,10 @@ import {
   useShellViewportAndFocus,
 } from "./shell-sidebar";
 import { RemoveMemberModal, ShellMembersPane } from "./shell-members-pane";
-import { ConversationAppsPane } from "./marketplace/conversation-apps";
+import {
+  clearPersistedAppPaneWidth,
+  ConversationAppsPane,
+} from "./marketplace/conversation-apps";
 import { WorkspaceMarketplaceModal } from "./marketplace/workspace-modal";
 import { AnnouncementModals, usePlatformAnnouncements } from "./announcements";
 import { parseInviteCode, Welcome } from "./shell-welcome";
@@ -116,6 +119,7 @@ export function Shell() {
   useEffect(() => {
     if (navUserIdRef.current && navUserIdRef.current !== user?.id) {
       clearPersistedShellNav(navUserIdRef.current);
+      clearPersistedAppPaneWidth(navUserIdRef.current);
     }
     navUserIdRef.current = user?.id;
     const restored = readPersistedShellNav(user?.id);
@@ -370,6 +374,7 @@ export function Shell() {
       await logout();
       if (!api.csrfToken) {
         clearPersistedShellNav(currentUserId);
+        clearPersistedAppPaneWidth(currentUserId);
         lastConversationByWorkspace.current = {};
         setRememberedByWorkspace({});
         lastChatRoute.current = "";
