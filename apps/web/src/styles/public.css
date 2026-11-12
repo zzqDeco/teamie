@@ -115,14 +115,12 @@
   .hero {
     max-width: 1260px;
     margin: 0 auto;
-    padding: 60px var(--space-8) 75px;
+    padding: var(--space-14) var(--space-8) var(--space-21);
     display: grid;
     grid-template-columns: 1fr 1.1fr;
     align-items: center;
     min-height: 0;
     width: 100%;
-    padding-top: 56px;
-    padding-bottom: 84px;
     gap: var(--space-12);
   }
   .hero-copy {
@@ -446,7 +444,7 @@
     padding: 0 var(--space-8);
     display: grid;
     grid-template-columns: 0.96fr 1.04fr;
-    gap: 64px;
+    gap: var(--space-16);
     align-items: center;
   }
   .story-copy-column {

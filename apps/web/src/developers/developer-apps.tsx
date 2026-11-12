@@ -160,7 +160,7 @@ export function DeveloperAppsList({
         </Notice>
       )}
 
-      <div className="dev-steps" aria-label="接入与提审四步流程">
+      <section className="dev-steps" aria-label="接入与提审四步流程">
         <div className="dev-step-card">
           <span className="dev-step-num">步骤 1 · 注册草稿</span>
           <b>获取 App ID 与密钥</b>
@@ -189,7 +189,7 @@ export function DeveloperAppsList({
             提交审核说明，通过后应用进入全站应用市场目录；后续升级草稿不影响线上版本。
           </small>
         </div>
-      </div>
+      </section>
 
       <Notice>{confirmingDelete ? "" : error}</Notice>
 

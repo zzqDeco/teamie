@@ -244,7 +244,7 @@ export function ConversationSearch({
     event.preventDefault();
     first.focus();
   }
-  function onResultKey(event: KeyboardEvent<HTMLOListElement>) {
+  function onResultKey(event: KeyboardEvent<HTMLButtonElement>) {
     const buttons = resultButtons();
     const index = buttons.indexOf(event.target as HTMLButtonElement);
     if (index < 0) return;
@@ -355,7 +355,6 @@ export function ConversationSearch({
           ref={list}
           className="search-result-list"
           aria-label="搜索结果"
-          onKeyDown={onResultKey}
         >
           {messages.map((message) => {
             const sent = formatDateTime(message.createdAt, "datetime");
@@ -382,6 +381,7 @@ export function ConversationSearch({
                     data-search-result=""
                     className="search-message-result"
                     onClick={() => onLocate(message.id)}
+                    onKeyDown={onResultKey}
                     aria-label={`${message.senderName} · ${sent}`}
                   >
                     {(message.body || !forwardedMatches) && (
@@ -410,6 +410,7 @@ export function ConversationSearch({
                     data-search-result=""
                     className="search-source"
                     onClick={() => onLocate(message.id)}
+                    onKeyDown={onResultKey}
                   >
                     <CornerUpLeft size={ICON.xs} /> 查看消息
                   </button>

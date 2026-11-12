@@ -1,6 +1,27 @@
 /* Components layer: shared UI primitives (icons, brand, avatars, notices, modals, pills, empty states, tables). */
 
 @layer components {
+  .skip-link {
+    position: fixed;
+    top: var(--space-3);
+    left: var(--space-3);
+    z-index: var(--z-toast);
+    padding: var(--space-2_5) var(--space-4);
+    border-radius: var(--r-md);
+    background: var(--brand);
+    color: var(--on-brand);
+    font-size: var(--font-base);
+    font-weight: 600;
+    box-shadow: var(--shadow-lg);
+    transform: translateY(-200%);
+    transition: transform var(--dur-fast) var(--ease-standard);
+  }
+  .skip-link:focus,
+  .skip-link:focus-visible {
+    transform: translateY(0);
+    outline: var(--focus-ring);
+    outline-offset: var(--focus-ring-offset);
+  }
   .icon-button {
     width: 32px;
     height: 32px;

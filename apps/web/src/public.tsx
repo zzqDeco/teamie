@@ -1,4 +1,4 @@
-import { useLayoutEffect } from "react";
+import { useEffect, useLayoutEffect } from "react";
 import { Link, Navigate } from "react-router-dom";
 import {
   ArrowRight,
@@ -24,6 +24,10 @@ export function Landing() {
     resetPageScroll();
   }, []);
 
+  useEffect(() => {
+    document.title = "Teamie — 人与 Agent 同席的团队协作空间";
+  }, []);
+
   if (user && !loading) return <Navigate to="/app" replace />;
 
   return (
@@ -38,23 +42,23 @@ export function Landing() {
               在同一个空间
               <span className="hero-title-ending">
                 <span className="hand-underline">做成事</span>
-                <span className="purple">。</span>
+                <span className="purple" aria-hidden="true">。</span>
               </span>
             </h1>
             <p>频道、小组与专属 Agent，在 Teamie 自然配合。</p>
             <div className="hero-actions">
               <Link to="/login" className="button">
                 登录 Teamie
-                <ArrowRight size={ICON.md} />
+                <ArrowRight size={ICON.md} aria-hidden="true" />
               </Link>
               <Link className="landing-register" to="/login?mode=register">
-                凭邀请码注册 <ChevronRight size={ICON.sm} />
+                凭邀请码注册 <ChevronRight size={ICON.sm} aria-hidden="true" />
               </Link>
             </div>
           </div>
           <div className="hero-visual" role="img" aria-label="Teamie 团队沟通界面示意">
-            <div className="visual-grid" />
-            <div className="demo-window">
+            <div className="visual-grid" aria-hidden="true" />
+            <div className="demo-window" aria-hidden="true">
               <div className="demo-title">
                 <Logo />
                 <span>
@@ -134,9 +138,9 @@ export function Landing() {
               </div>
               <div className="demo-label">Teamie 实时会话示意</div>
             </div>
-            <div className="floating-note">
+            <div className="floating-note" aria-hidden="true">
               <div className="floating-icon">
-                <Sparkles size={ICON.md} />
+                <Sparkles size={ICON.md} aria-hidden="true" />
               </div>
               <span>
                 想法，接住了。
@@ -157,10 +161,10 @@ export function Landing() {
           <div className="landing-cta-actions">
             <Link to="/login" className="button">
               进入 Teamie
-              <ArrowRight size={ICON.md} />
+              <ArrowRight size={ICON.md} aria-hidden="true" />
             </Link>
             <Link to="/login?mode=register" className="landing-register">
-              凭邀请码注册 <ChevronRight size={ICON.sm} />
+              凭邀请码注册 <ChevronRight size={ICON.sm} aria-hidden="true" />
             </Link>
           </div>
           <Asterisk className="cta-decoration" size={ICON.xl} aria-hidden="true" />

@@ -421,7 +421,7 @@ export function ConversationView({
   return (
     <section
       className="conversation-view"
-      onKeyDown={(event) => { if (event.key === "Escape") setActionMessageId(""); }}
+      aria-label={name}
       onDragEnter={(event) => {
         if (!uploadsEnabled || !hasFileTransfer(event)) return;
         event.preventDefault();
@@ -503,6 +503,11 @@ export function ConversationView({
       <div
         className="message-scroll"
         ref={scrollRef}
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions"
+        aria-label="消息历史"
+        aria-busy={loading || loadingOlder || undefined}
         onScroll={(event) => {
           const el = event.currentTarget;
           const bottom = !located && el.scrollHeight - el.scrollTop - el.clientHeight < 80;

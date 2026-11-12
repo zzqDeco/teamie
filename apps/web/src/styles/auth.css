@@ -228,7 +228,7 @@
     width: calc(100% - 72px);
     background: var(--hover-bg);
     border-radius: var(--r-lg);
-    margin: var(--space-2) auto 76px;
+    margin: var(--space-2) auto var(--space-19);
     padding: var(--space-10) var(--space-12);
     display: flex;
     align-items: center;
@@ -305,7 +305,7 @@
     background: var(--hover-bg);
     display: flex;
     flex-direction: column;
-    padding: var(--space-12) 60px var(--space-8);
+    padding: var(--space-12) var(--space-15) var(--space-8);
     position: relative;
     overflow: hidden;
     justify-content: space-between;
@@ -349,14 +349,12 @@
   }
   .auth-content {
     position: relative;
-    padding: var(--space-7) 60px;
+    padding: var(--space-20) var(--space-15) var(--space-16);
     display: flex;
     align-items: center;
     justify-content: center;
     min-height: 100dvh;
     min-width: 0;
-    padding-top: 80px;
-    padding-bottom: 64px;
   }
   .back-link {
     position: absolute;
@@ -434,7 +432,7 @@
   }
   .join-card {
     background: var(--surface);
-    margin: var(--space-12) auto 60px;
+    margin: var(--space-12) auto var(--space-15);
     border: 1px solid var(--border);
     border-radius: var(--r-xl);
     text-align: center;
@@ -547,7 +545,7 @@
   }
   .auth-story > div {
     margin: auto 0;
-    padding: 64px 0;
+    padding: var(--space-16) 0;
   }
   .auth-content > .back-link {
     display: inline-flex;

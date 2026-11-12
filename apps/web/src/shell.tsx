@@ -443,6 +443,16 @@ export function Shell() {
   return (
     <PageTitleProvider value={setTitleDetail}>
     <div className={`app-shell ${sidebar ? "sidebar-open" : ""} ${rightPaneVisible ? "details-open" : ""}`}>
+      <a
+        href="#main-content"
+        className="skip-link"
+        onClick={(event) => {
+          event.preventDefault();
+          document.getElementById("main-content")?.focus({ preventScroll: true });
+        }}
+      >
+        跳到主内容
+      </a>
       <ShellSidebar
         navigationRef={navigationRef} mobile={mobile} sidebar={sidebar}
         hasOverlayModal={hasOverlayModal} user={user!} busy={busy}
@@ -463,11 +473,20 @@ export function Shell() {
         onOpenAnnouncements={() => setAnnouncementsHistoryOpen(true)}
         hasUnreadAnnouncement={announcements.hasUnread}
       />
-      {sidebar && mobile && (
-        <button className="sidebar-shade" onClick={() => setSidebar(false)} aria-label="关闭侧栏" />
+      {mobile && (
+        <button
+          type="button"
+          className="sidebar-shade"
+          onClick={() => setSidebar(false)}
+          aria-label="关闭侧栏"
+          inert={!sidebar}
+          tabIndex={-1}
+        />
       )}
       <main
+        id="main-content"
         className="app-main"
+        tabIndex={-1}
         inert={(mobile && sidebar) || (overlayMembers && rightPaneVisible)}
       >
         <ConnectionBanner

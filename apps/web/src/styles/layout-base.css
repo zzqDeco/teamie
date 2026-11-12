@@ -42,6 +42,24 @@
     inset: 0;
     z-index: var(--z-members-shade);
     background: var(--backdrop);
+    opacity: 1;
+    visibility: visible;
+    transition:
+      opacity var(--dur-base) var(--ease-standard),
+      visibility 0s;
+  }
+  @starting-style {
+    .members-shade {
+      opacity: 0;
+    }
+  }
+  .app-shell:not(.details-open) .members-shade {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition:
+      opacity var(--dur-base) var(--ease-standard),
+      visibility 0s linear var(--dur-base);
   }
   .admin-table-wrap {
     overflow: auto;
@@ -199,7 +217,7 @@
     min-height: 0;
     overflow: auto;
     width: 100%;
-    padding: 32px clamp(20px, 4vw, 48px) 48px;
+    padding: var(--space-8) clamp(20px, 4vw, 48px) var(--space-12);
     scrollbar-width: thin;
   }
   .members-heading {
@@ -255,7 +273,7 @@
     flex-direction: column;
     align-items: center;
     gap: var(--space-3);
-    padding: 65px var(--space-2_5);
+    padding: var(--space-16) var(--space-2_5);
     text-align: center;
     color: var(--text-muted);
   }

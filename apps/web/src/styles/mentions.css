@@ -92,7 +92,10 @@
   }
   .app-shell .message.located {
     background: var(--lavender);
-    outline: none;
+  }
+  .app-shell .message.located:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: -2px;
   }
   .located-banner,
   .unread-jump-banner {

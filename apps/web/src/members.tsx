@@ -168,7 +168,6 @@ export function WorkspaceMembers({
                         {humanPresence && (
                           <BadgePill
                             className={`member-presence-badge ${presenceClassName(humanPresence)}`}
-                            ariaLabel={`在线状态：${formatPresenceLabel(humanPresence)}`}
                           >
                             <i
                               className={`presence-dot ${presenceClassName(humanPresence)}`}

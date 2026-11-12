@@ -143,7 +143,7 @@ export function ShellMembersPane({
                   <i
                     className={`presence-dot ${presenceClassName(humanPresence)}`}
                     title={formatPresenceLabel(humanPresence)}
-                    aria-label={formatPresenceLabel(humanPresence)}
+                    aria-hidden="true"
                   />
                 </div>
               ) : (

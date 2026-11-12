@@ -273,6 +273,7 @@ export function useShellViewportAndFocus({
   closeDetails: () => void;
 }) {
   const sidebarFocus = useRef({ open: false, pathname });
+  const justClosedMobileDrawer = useRef(false);
   useOverlayFocus(
     navigationRef,
     mobile && sidebar && !hasOverlayModal,
@@ -281,20 +282,40 @@ export function useShellViewportAndFocus({
   useEffect(() => {
     const previous = sidebarFocus.current;
     sidebarFocus.current = { open: sidebar, pathname };
-    if (
-      sidebar ||
-      !mobile ||
-      hasOverlayModal ||
-      (!previous.open && previous.pathname === pathname)
-    )
+    const closedMobileDrawer = mobile && previous.open && !sidebar;
+    if (closedMobileDrawer && !hasOverlayModal) {
+      const focused = document.activeElement;
+      if (focused === document.body || navigationRef.current?.contains(focused)) {
+        navigationRef.current?.parentElement
+          ?.querySelector<HTMLElement>(".app-main .mobile-menu")
+          ?.focus({ preventScroll: true });
+      }
+      if (previous.pathname === pathname) {
+        justClosedMobileDrawer.current = true;
+        const timer = window.setTimeout(() => {
+          justClosedMobileDrawer.current = false;
+        }, 0);
+        return () => window.clearTimeout(timer);
+      }
       return;
-    const focused = document.activeElement;
-    if (focused === document.body || navigationRef.current?.contains(focused)) {
-      navigationRef.current?.parentElement
-        ?.querySelector<HTMLElement>(".app-main .mobile-menu")
-        ?.focus({ preventScroll: true });
     }
-  }, [sidebar, mobile, hasOverlayModal, pathname, navigationRef]);
+    if (previous.pathname !== pathname && !hasOverlayModal) {
+      if (mobile && justClosedMobileDrawer.current) {
+        justClosedMobileDrawer.current = false;
+        navigationRef.current?.parentElement
+          ?.querySelector<HTMLElement>(".app-main .mobile-menu")
+          ?.focus({ preventScroll: true });
+        return;
+      }
+      if (!hasConversation && !(mobile && sidebar)) {
+        const root = navigationRef.current?.parentElement;
+        const target =
+          root?.querySelector<HTMLElement>('.app-main h1[tabindex="-1"]') ||
+          root?.querySelector<HTMLElement>(".app-main");
+        target?.focus({ preventScroll: true });
+      }
+    }
+  }, [sidebar, mobile, hasOverlayModal, hasConversation, pathname, navigationRef]);
   useOverlayFocus(
     membersRef,
     overlayMembers &&

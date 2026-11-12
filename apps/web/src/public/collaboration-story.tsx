@@ -52,15 +52,15 @@ function isStickyStoryActive() {
 
 function StoryStage({ activeScene }: { activeScene: number }) {
   return (
-    <div className="story-stage-canvas" aria-label="Teamie 分幕场景演示">
+    <div className="story-stage-canvas" role="img" aria-label="Teamie 分幕场景演示">
       {/* Scene 0: Channels & Groups */}
       <div
         className={`story-stage-card ${activeScene === 0 ? "active" : ""}`}
         aria-hidden={activeScene !== 0}
       >
         <div className="stage-card-head">
-          <span className="value-icon lilac">
-            <MessagesSquare size={ICON.lg} />
+          <span className="value-icon lilac" aria-hidden="true">
+            <MessagesSquare size={ICON.lg} aria-hidden="true" />
           </span>
           <div>
             <b>公开频道与私密小组</b>
@@ -69,7 +69,7 @@ function StoryStage({ activeScene }: { activeScene: number }) {
         </div>
         <div className="stage-channel-list">
           <div className="stage-channel-row active">
-            <Hash size={ICON.sm} />
+            <Hash size={ICON.sm} aria-hidden="true" />
             <div>
               <b>general</b>
               <small>全员公开频道 · 沉淀版本节奏与团队共识</small>
@@ -77,7 +77,7 @@ function StoryStage({ activeScene }: { activeScene: number }) {
             <span>24 人</span>
           </div>
           <div className="stage-channel-row">
-            <Users size={ICON.sm} />
+            <Users size={ICON.sm} aria-hidden="true" />
             <div>
               <b>前端体验专项</b>
               <small>受控私密小组 · 聚焦专项议题与设计走查</small>
@@ -85,7 +85,7 @@ function StoryStage({ activeScene }: { activeScene: number }) {
             <span>6 人</span>
           </div>
           <div className="stage-channel-row">
-            <Heart size={ICON.sm} />
+            <Heart size={ICON.sm} aria-hidden="true" />
             <div>
               <b>1v1 直接私信</b>
               <small>与人类成员或专属 Agent 随时快速对齐细节</small>
@@ -101,8 +101,8 @@ function StoryStage({ activeScene }: { activeScene: number }) {
         aria-hidden={activeScene !== 1}
       >
         <div className="stage-card-head">
-          <span className="value-icon mint">
-            <Bot size={ICON.lg} />
+          <span className="value-icon mint" aria-hidden="true">
+            <Bot size={ICON.lg} aria-hidden="true" />
           </span>
           <div>
             <b>人类与 Agent 同场协作</b>
@@ -118,7 +118,7 @@ function StoryStage({ activeScene }: { activeScene: number }) {
             </div>
           </div>
           <div className="stage-msg agent">
-            <span className="avatar avatar-tone-1"><Bot size={ICON.sm} /></span>
+            <span className="avatar avatar-tone-1" aria-hidden="true"><Bot size={ICON.sm} aria-hidden="true" /></span>
             <div>
               <b>产品伙伴 <small className="demo-agent-label">Agent · 由林小满创建</small></b>
               <p>好的，已整理好 3 项核心验收重点，并附上了原讨论消息引用，方便随时核对。</p>
@@ -133,7 +133,7 @@ function StoryStage({ activeScene }: { activeScene: number }) {
         aria-hidden={activeScene !== 2}
       >
         <div className="stage-card-head">
-          <span className="value-icon peach"><Bell size={ICON.lg} /></span>
+          <span className="value-icon peach" aria-hidden="true"><Bell size={ICON.lg} aria-hidden="true" /></span>
           <div>
             <b>提及与回复收件箱</b>
             <small>跨工作空间聚合 · 一键定位原消息</small>
@@ -141,7 +141,7 @@ function StoryStage({ activeScene }: { activeScene: number }) {
         </div>
         <div className="stage-inbox-items">
           <div className="stage-inbox-item">
-            <span className="stage-unread-dot" />
+            <span className="stage-unread-dot" aria-hidden="true" />
             <div>
               <small># general · 刚刚</small>
               <b>周一 提及了你</b>
@@ -149,7 +149,7 @@ function StoryStage({ activeScene }: { activeScene: number }) {
             </div>
           </div>
           <div className="stage-quote-jump">
-            <CornerUpLeft size={ICON.sm} />
+            <CornerUpLeft size={ICON.sm} aria-hidden="true" />
             <span>原消息引用 · 验收清单</span>
           </div>
         </div>
@@ -161,7 +161,7 @@ function StoryStage({ activeScene }: { activeScene: number }) {
         aria-hidden={activeScene !== 3}
       >
         <div className="spotlight-card-header">
-          <span className="avatar avatar-tone-1"><Bot size={ICON.lg} /></span>
+          <span className="avatar avatar-tone-1" aria-hidden="true"><Bot size={ICON.lg} aria-hidden="true" /></span>
           <div><b>产品伙伴</b><small>Agent · 由林小满管理</small></div>
           <span className="spotlight-status">已启用</span>
         </div>
@@ -173,7 +173,7 @@ function StoryStage({ activeScene }: { activeScene: number }) {
           <div><span>产品研发空间</span><span>设计中心</span></div>
         </div>
         <div className="spotlight-foot">
-          <Lock size={ICON.xs} />
+          <Lock size={ICON.xs} aria-hidden="true" />
           <span>仅访问已加入的频道与小组 · 与成员共享同一套权限边界</span>
         </div>
       </div>
@@ -201,12 +201,24 @@ export function CollaborationStory() {
         Math.floor(raw * STORY_SCENES.length),
       ));
     }
+    let pending = false;
+    let rafId: number | null = null;
+    function scheduleScrollStage() {
+      if (pending) return;
+      pending = true;
+      rafId = window.requestAnimationFrame(() => {
+        pending = false;
+        rafId = null;
+        updateScrollStage();
+      });
+    }
     updateScrollStage();
-    window.addEventListener("scroll", updateScrollStage, { passive: true });
-    window.addEventListener("resize", updateScrollStage);
+    window.addEventListener("scroll", scheduleScrollStage, { passive: true });
+    window.addEventListener("resize", scheduleScrollStage, { passive: true });
     return () => {
-      window.removeEventListener("scroll", updateScrollStage);
-      window.removeEventListener("resize", updateScrollStage);
+      if (pending && rafId !== null) window.cancelAnimationFrame(rafId);
+      window.removeEventListener("scroll", scheduleScrollStage);
+      window.removeEventListener("resize", scheduleScrollStage);
     };
   }, []);
 

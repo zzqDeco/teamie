@@ -17,13 +17,13 @@ function RecoveryFrame({ children }: { children: ReactNode }) {
       <div className="auth-story">
         <Link to="/" aria-label="Teamie 首页"><Logo /></Link>
         <div>
-          <h1>回到团队，<br />接着聊<span>。</span></h1>
+          <h1>回到团队，<br />接着聊<span aria-hidden="true">。</span></h1>
           <p>找回你的账户，继续一起做成事。</p>
         </div>
         <span className="story-bottom">TEAMIE © {new Date().getFullYear()}</span>
       </div>
       <main className="auth-content">
-        <Link to="/login" className="back-link"><ArrowLeft size={ICON.sm} />返回登录</Link>
+        <Link to="/login" className="back-link"><ArrowLeft size={ICON.sm} aria-hidden="true" />返回登录</Link>
         <div className="auth-form recovery-form">
           <Link to="/" className="auth-mobile-brand" aria-label="Teamie 首页"><Logo /></Link>
           {children}
@@ -34,9 +34,12 @@ function RecoveryFrame({ children }: { children: ReactNode }) {
 }
 
 export function ForgotPassword() {
+  useEffect(() => {
+    document.title = "找回密码 — Teamie";
+  }, []);
   return (
     <RecoveryFrame>
-      <span className="recovery-symbol"><KeyRound size={ICON.xl} /></span>
+      <span className="recovery-symbol" aria-hidden="true"><KeyRound size={ICON.xl} aria-hidden="true" /></span>
       <h2>忘记密码</h2>
       <p>请联系平台管理员，核实身份后获取一次性密码重置链接。</p>
       <div className="recovery-instructions">
@@ -48,7 +51,7 @@ export function ForgotPassword() {
         </ol>
         <small>链接 1 小时内有效，仅可使用一次。管理员也无法登录时，请联系服务器维护者。</small>
       </div>
-      <Link to="/login" className="button full-width">返回登录<ArrowRight size={ICON.md} /></Link>
+      <Link to="/login" className="button full-width">返回登录<ArrowRight size={ICON.md} aria-hidden="true" /></Link>
     </RecoveryFrame>
   );
 }
@@ -74,6 +77,9 @@ export function ResetPassword() {
   const [entry, setEntry] = useState({ location, fragment: location.hash, revision: 0 });
   if (entry.location !== location)
     setEntry({ location, fragment: location.hash, revision: entry.revision + 1 });
+  useEffect(() => {
+    document.title = "重置密码 — Teamie";
+  }, []);
   useEffect(() => {
     // Browser hash-only navigation can emit hashchange without a router
     // popstate. Read newURL because a layout Effect may already have removed
@@ -202,16 +208,16 @@ function ResetPasswordForm({ fragment }: { fragment: string }) {
 
   return (
     <RecoveryFrame>
-      <span className={`recovery-symbol ${state === "success" ? "success" : ""}`}>
-        {state === "success" ? <Check size={ICON.xl} /> : <KeyRound size={ICON.xl} />}
+      <span className={`recovery-symbol ${state === "success" ? "success" : ""}`} aria-hidden="true">
+        {state === "success" ? <Check size={ICON.xl} aria-hidden="true" /> : <KeyRound size={ICON.xl} aria-hidden="true" />}
       </span>
       <h2>{state === "success" ? "密码已重置" : state === "expired" ? "链接已过期" : state === "invalid" ? "链接无法使用" : "设置新密码"}</h2>
       {state === "checking" ? (
-        <div className="recovery-loading" role="status"><LoaderCircle className="spin" size={ICON.lg} />正在验证重置链接…</div>
+        <div className="recovery-loading" role="status"><LoaderCircle className="spin" size={ICON.lg} aria-hidden="true" />正在验证重置链接…</div>
       ) : state === "invalid" || state === "expired" ? (
         <>
           <p>{state === "expired" ? "重置链接的有效期已结束。" : "链接可能已过期、已使用，或被新链接替代。"}请联系平台管理员获取新链接。</p>
-          <Link to="/forgot-password" className="button full-width">联系管理员<ArrowRight size={ICON.md} /></Link>
+          <Link to="/forgot-password" className="button full-width">联系管理员<ArrowRight size={ICON.md} aria-hidden="true" /></Link>
         </>
       ) : state === "error" ? (
         <>
@@ -224,9 +230,9 @@ function ResetPasswordForm({ fragment }: { fragment: string }) {
           {user ? (
             <>
               <Notice kind="info">当前账号仍保持登录。切换账号时，请先从账号设置退出。</Notice>
-              <Link to="/app" className="button full-width">返回当前账号<ArrowRight size={ICON.md} /></Link>
+              <Link to="/app" className="button full-width">返回当前账号<ArrowRight size={ICON.md} aria-hidden="true" /></Link>
             </>
-          ) : <Link to="/login" className="button full-width">使用新密码登录<ArrowRight size={ICON.md} /></Link>}
+          ) : <Link to="/login" className="button full-width">使用新密码登录<ArrowRight size={ICON.md} aria-hidden="true" /></Link>}
         </>
       ) : inspection && (
         <>
@@ -237,7 +243,7 @@ function ResetPasswordForm({ fragment }: { fragment: string }) {
             <PasswordField name="newPassword" label="新密码" autoComplete="new-password" placeholder="至少 12 个字符" readOnly={busy} error={invalidField === "newPassword" ? error : undefined} showRules />
             <PasswordField name="confirmPassword" label="确认新密码" autoComplete="new-password" placeholder="再次输入新密码" readOnly={busy} error={invalidField === "confirmPassword" ? error : undefined} confirmOf="newPassword" mismatchMessage="两次输入的新密码不一致。" />
             <small className="field-help reset-session-help">重置后，该账号原有的登录会话将失效。</small>
-            <Button type="submit" className="full-width" busy={busy} disabled={loading}>重置密码<ArrowRight size={ICON.md} /></Button>
+            <Button type="submit" className="full-width" busy={busy} disabled={loading}>重置密码<ArrowRight size={ICON.md} aria-hidden="true" /></Button>
           </form>
         </>
       )}

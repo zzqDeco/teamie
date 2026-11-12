@@ -18,9 +18,12 @@
   .quick-switcher-input:focus-within {
     border-color: var(--brand-text);
     box-shadow: var(--focus-halo);
+    outline: var(--focus-ring);
+    outline-offset: -1px;
   }
   .quick-switcher-input input,
-  .quick-switcher-input input:focus {
+  .quick-switcher-input input:focus,
+  .quick-switcher-input input:focus-visible {
     flex: 1;
     border: 0;
     box-shadow: none;

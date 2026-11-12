@@ -165,7 +165,7 @@
     color: var(--text-muted);
   }
   .members-directory-link + .members-invite {
-    margin-top: -6px;
+    margin-top: calc(var(--space-1_5) * -1);
   }
   .members-invite > svg:last-child {
     margin-left: auto;

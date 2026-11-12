@@ -58,13 +58,19 @@ export function OwnMessageReadReceipt({
           triggerRef.current?.focus({ preventScroll: true });
       }
     };
+    const node = popoverRef.current;
+    const onRovingKeyDown = (event: KeyboardEvent) => {
+      handleRovingKeys(event, "li[tabindex]", { wrap: false });
+    };
     // Move focus into the list so long lists can be read and scrolled by keyboard.
-    popoverRef.current
+    node
       ?.querySelector<HTMLElement>("li[tabindex]")
       ?.focus({ preventScroll: true });
+    node?.addEventListener("keydown", onRovingKeyDown);
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown, true);
     return () => {
+      node?.removeEventListener("keydown", onRovingKeyDown);
       document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown, true);
     };
@@ -102,9 +108,6 @@ export function OwnMessageReadReceipt({
             className="read-receipt-popover"
             role="dialog"
             aria-label="小组已读详情"
-            onKeyDown={(event) => {
-              handleRovingKeys(event, "li[tabindex]", { wrap: false });
-            }}
           >
             <div className="read-receipt-section">
               <b>已读 ({summary.readMembers.length})</b>
@@ -137,17 +140,20 @@ export function OwnMessageReadReceipt({
   }
 
   return (
-    <span
-      className={`message-read-receipt ${visibilityClass} ${statusClass}`}
-      aria-label={`已读状态：${summary.label}`}
-    >
-      {summary.readCount > 0 ? (
-        <CheckCheck size={ICON.xs} aria-hidden="true" />
-      ) : (
-        <Check size={ICON.xs} aria-hidden="true" />
-      )}
-      {summary.label}
-    </span>
+    <>
+      <span className="sr-only">{`已读状态：${summary.label}`}</span>
+      <span
+        className={`message-read-receipt ${visibilityClass} ${statusClass}`}
+        aria-hidden="true"
+      >
+        {summary.readCount > 0 ? (
+          <CheckCheck size={ICON.xs} aria-hidden="true" />
+        ) : (
+          <Check size={ICON.xs} aria-hidden="true" />
+        )}
+        {summary.label}
+      </span>
+    </>
   );
 }
 

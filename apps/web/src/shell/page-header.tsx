@@ -62,7 +62,7 @@ export function PageHeader({
       <header className="settings-header page-header">
         <MobileNavButton onClick={onOpenNavigation} />
         <Icon size={ICON.md} aria-hidden="true" />
-        <h1 className="page-header-title">{title}</h1>
+        <h1 className="page-header-title" tabIndex={-1}>{title}</h1>
         {actions && <div className="page-header-actions">{actions}</div>}
         {back && (
           <Link to={back.to} className="page-header-back">
@@ -146,10 +146,10 @@ export function NotFoundView({
   return (
     <div className="unavailable-view not-found-view">
       <MobileNavButton onClick={onOpenNavigation} />
-      <span className="large-symbol">
+      <span className="large-symbol" aria-hidden="true">
         <Compass size={ICON.xl} aria-hidden="true" />
       </span>
-      <h1>{title}</h1>
+      <h1 tabIndex={-1}>{title}</h1>
       <p>{description}</p>
       <Link className="button" to="/app">
         返回对话
