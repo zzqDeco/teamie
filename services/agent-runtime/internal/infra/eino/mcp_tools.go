@@ -408,6 +408,14 @@ func (p *conversationPresenceState) ReconcileUnread(conversations []Conversation
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	changed, dirty := false, false
+	if p.activeConversationID != "" {
+		if ws, ok := allowed[p.activeConversationID]; !ok || (p.activeWorkspaceID != "" && ws != p.activeWorkspaceID) {
+			p.activeWorkspaceID = ""
+			p.activeConversationID = ""
+			p.activeConvType = ""
+			changed = true
+		}
+	}
 	for id, entry := range p.unread {
 		if ws, ok := allowed[id]; !ok || ws != entry.workspaceID {
 			delete(p.unread, id)

@@ -155,6 +155,24 @@ func (r *Repository) DeleteConversationMember(ctx context.Context, conversationI
 	return err
 }
 
+func (r *Repository) DeleteConversationCascade(ctx context.Context, conversationID string) error {
+	conn := r.DB.Conn(ctx)
+	if _, err := conn.Exec(ctx, "DELETE FROM attachments WHERE conversation_id=$1", conversationID); err != nil {
+		return err
+	}
+	if _, err := conn.Exec(ctx, "DELETE FROM messages WHERE conversation_id=$1", conversationID); err != nil {
+		return err
+	}
+	if _, err := conn.Exec(ctx, "DELETE FROM read_cursors WHERE conversation_id=$1", conversationID); err != nil {
+		return err
+	}
+	if _, err := conn.Exec(ctx, "DELETE FROM conversation_members WHERE conversation_id=$1", conversationID); err != nil {
+		return err
+	}
+	_, err := conn.Exec(ctx, "DELETE FROM conversations WHERE id=$1", conversationID)
+	return err
+}
+
 func (r *Repository) LockConversationWithActorRole(ctx context.Context, conversationID, actorID string) (domain.Conversation, string, error) {
 	var c domain.Conversation
 	var role string

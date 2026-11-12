@@ -157,6 +157,17 @@ func (a *Adapter) RemoveConversationMember(ctx context.Context, req *chatgen.Rem
 	return &chatgen.ConversationResp{Conversation: toConversationDTO(c)}, nil
 }
 
+func (a *Adapter) DeleteConversation(ctx context.Context, req *chatgen.DeleteConversationReq) (*chatgen.EmptyResp, error) {
+	user, ok := actorFromContext(ctx)
+	if !ok {
+		return nil, domain.Err(401, "unauthenticated", "Sign in to continue")
+	}
+	if err := a.App.DeleteConversation(ctx, user.ID, req.ID); err != nil {
+		return nil, err
+	}
+	return &chatgen.EmptyResp{}, nil
+}
+
 func (a *Adapter) MarkRead(ctx context.Context, req *chatgen.MarkReadReq) (*chatgen.MarkReadResp, error) {
 	user, ok := actorFromContext(ctx)
 	if !ok {
