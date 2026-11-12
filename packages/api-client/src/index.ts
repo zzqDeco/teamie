@@ -229,6 +229,11 @@ export class TeamieClient {
       routePath(IDL_ROUTES.RemoveConversationMember, { id, userId }),
       { method: IDL_ROUTES.RemoveConversationMember.method },
     );
+  deleteConversation = (id: string) =>
+    this.#request<void>(
+      routePath(IDL_ROUTES.DeleteConversation, { id }),
+      { method: IDL_ROUTES.DeleteConversation.method },
+    );
   createConversation = (
     id: string,
     data: { type: Conversation["type"]; name?: string; memberIds?: string[] },

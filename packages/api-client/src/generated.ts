@@ -400,6 +400,10 @@ export interface RemoveConversationMemberReq {
   userId: string;
 }
 
+export interface DeleteConversationReq {
+  id: string;
+}
+
 export interface ListMessagesReq {
   id: string;
   beforeSeq?: string;
@@ -1440,6 +1444,15 @@ export const IDL_ROUTES = {
     clientPath: "/conversations/:id/members/:userId",
     requestType: "RemoveConversationMemberReq",
     responseType: "ConversationResp",
+  },
+  DeleteConversation: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "DELETE",
+    path: "/api/v1/conversations/:id",
+    clientPath: "/conversations/:id",
+    requestType: "DeleteConversationReq",
+    responseType: "EmptyResp",
   },
   ListMessages: {
     service: "ChatHTTPService",

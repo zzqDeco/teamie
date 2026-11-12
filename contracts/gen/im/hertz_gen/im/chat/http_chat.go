@@ -1787,6 +1787,28 @@ func (p *RemoveConversationMemberReq) String() string {
 	return fmt.Sprintf("RemoveConversationMemberReq(%+v)", *p)
 }
 
+type DeleteConversationReq struct {
+	ID string `thrift:"id,1,required" json:"id"`
+}
+
+func NewDeleteConversationReq() *DeleteConversationReq {
+	return &DeleteConversationReq{}
+}
+
+func (p *DeleteConversationReq) InitDefault() {
+}
+
+func (p *DeleteConversationReq) GetID() (v string) {
+	return p.ID
+}
+
+func (p *DeleteConversationReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("DeleteConversationReq(%+v)", *p)
+}
+
 type ListMessagesReq struct {
 	ID        string  `thrift:"id,1,required" json:"id"`
 	BeforeSeq *string `thrift:"beforeSeq,2,optional" json:"beforeSeq,omitempty"`
@@ -3873,6 +3895,8 @@ type ChatHTTPService interface {
 	AddConversationMember(ctx context.Context, req *AddConversationMemberReq) (r *ConversationResp, err error)
 
 	RemoveConversationMember(ctx context.Context, req *RemoveConversationMemberReq) (r *ConversationResp, err error)
+
+	DeleteConversation(ctx context.Context, req *DeleteConversationReq) (r *EmptyResp, err error)
 
 	ListMessages(ctx context.Context, req *ListMessagesReq) (r *ListMessagesResp, err error)
 

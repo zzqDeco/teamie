@@ -58,6 +58,7 @@ const (
 	PatternCreateConversation = "POST /api/v1/workspaces/{id}/conversations"
 	PatternAddConversationMember = "POST /api/v1/conversations/{id}/members"
 	PatternRemoveConversationMember = "DELETE /api/v1/conversations/{id}/members/{userId}"
+	PatternDeleteConversation = "DELETE /api/v1/conversations/{id}"
 	PatternListMessages = "GET /api/v1/conversations/{id}/messages"
 	PatternGetMessage = "GET /api/v1/conversations/{id}/messages/{messageId}"
 	PatternSendMessage = "POST /api/v1/conversations/{id}/messages"
@@ -91,7 +92,7 @@ const (
 	PatternDeleteAnnouncement = "DELETE /api/v1/admin/announcements/{id}"
 )
 
-// ChatHTTPServiceRoutes lists all 42 route specifications declared on ChatHTTPService.
+// ChatHTTPServiceRoutes lists all 43 route specifications declared on ChatHTTPService.
 var ChatHTTPServiceRoutes = []RouteSpec{
 	{Name: "GetBootstrap", Method: "GET", Path: "/api/v1/bootstrap", MuxPattern: PatternGetBootstrap, RequestType: "GetBootstrapReq", ResponseType: "BootstrapResp"},
 	{Name: "CreateWorkspace", Method: "POST", Path: "/api/v1/workspaces", MuxPattern: PatternCreateWorkspace, RequestType: "CreateWorkspaceReq", ResponseType: "CreateWorkspaceResp"},
@@ -104,6 +105,7 @@ var ChatHTTPServiceRoutes = []RouteSpec{
 	{Name: "CreateConversation", Method: "POST", Path: "/api/v1/workspaces/:id/conversations", MuxPattern: PatternCreateConversation, RequestType: "CreateConversationReq", ResponseType: "ConversationResp"},
 	{Name: "AddConversationMember", Method: "POST", Path: "/api/v1/conversations/:id/members", MuxPattern: PatternAddConversationMember, RequestType: "AddConversationMemberReq", ResponseType: "ConversationResp"},
 	{Name: "RemoveConversationMember", Method: "DELETE", Path: "/api/v1/conversations/:id/members/:userId", MuxPattern: PatternRemoveConversationMember, RequestType: "RemoveConversationMemberReq", ResponseType: "ConversationResp"},
+	{Name: "DeleteConversation", Method: "DELETE", Path: "/api/v1/conversations/:id", MuxPattern: PatternDeleteConversation, RequestType: "DeleteConversationReq", ResponseType: "EmptyResp"},
 	{Name: "ListMessages", Method: "GET", Path: "/api/v1/conversations/:id/messages", MuxPattern: PatternListMessages, RequestType: "ListMessagesReq", ResponseType: "ListMessagesResp"},
 	{Name: "GetMessage", Method: "GET", Path: "/api/v1/conversations/:id/messages/:messageId", MuxPattern: PatternGetMessage, RequestType: "GetMessageReq", ResponseType: "MessageResp"},
 	{Name: "SendMessage", Method: "POST", Path: "/api/v1/conversations/:id/messages", MuxPattern: PatternSendMessage, RequestType: "SendMessageReq", ResponseType: "MessageResp"},
@@ -150,6 +152,7 @@ type ChatHTTPServiceRouteHandlers struct {
 	CreateConversation http.HandlerFunc
 	AddConversationMember http.HandlerFunc
 	RemoveConversationMember http.HandlerFunc
+	DeleteConversation http.HandlerFunc
 	ListMessages http.HandlerFunc
 	GetMessage http.HandlerFunc
 	SendMessage http.HandlerFunc
@@ -229,6 +232,10 @@ func RegisterChatHTTPServiceRoutes(mux *http.ServeMux, h ChatHTTPServiceRouteHan
 		panic("ChatHTTPServiceRouteHandlers.RemoveConversationMember (" + PatternRemoveConversationMember + ") is nil")
 	}
 	mux.HandleFunc(PatternRemoveConversationMember, h.RemoveConversationMember)
+	if h.DeleteConversation == nil {
+		panic("ChatHTTPServiceRouteHandlers.DeleteConversation (" + PatternDeleteConversation + ") is nil")
+	}
+	mux.HandleFunc(PatternDeleteConversation, h.DeleteConversation)
 	if h.ListMessages == nil {
 		panic("ChatHTTPServiceRouteHandlers.ListMessages (" + PatternListMessages + ") is nil")
 	}
@@ -792,6 +799,45 @@ func RegisterChatHTTPServiceHertzServer(r *route.RouterGroup, srv ChatHTTPServer
 				req.UserId = c.Param("userId")
 			}
 			resp, err := srv.RemoveConversationMember(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "DeleteConversation", Method: "DELETE", Path: "/api/v1/conversations/:id", MuxPattern: PatternDeleteConversation, RequestType: "DeleteConversationReq", ResponseType: "EmptyResp"}); hfn != nil {
+			r.DELETE("/api/v1/conversations/:id", hfn)
+		} else {
+			r.DELETE("/api/v1/conversations/:id", func(ctx context.Context, c *app.RequestContext) {
+				var req DeleteConversationReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				resp, err := srv.DeleteConversation(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.DELETE("/api/v1/conversations/:id", func(ctx context.Context, c *app.RequestContext) {
+			var req DeleteConversationReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			resp, err := srv.DeleteConversation(ctx, &req)
 			if err != nil {
 				m.WriteDomainError(ctx, c, err)
 				return
@@ -2378,6 +2424,22 @@ func RegisterChatHTTPServer(mux *http.ServeMux, srv ChatHTTPServer, m HTTPRespon
 			fn = mw.WrapRoute(RouteSpec{Name: "RemoveConversationMember", Method: "DELETE", Path: "/api/v1/conversations/:id/members/:userId", MuxPattern: PatternRemoveConversationMember, RequestType: "RemoveConversationMemberReq", ResponseType: "ConversationResp"}, fn)
 		}
 		h.RemoveConversationMember = fn
+	}
+	if h.DeleteConversation == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req DeleteConversationReq
+			req.ID = r.PathValue("id")
+			_, err := srv.DeleteConversation(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusNoContent, nil)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "DeleteConversation", Method: "DELETE", Path: "/api/v1/conversations/:id", MuxPattern: PatternDeleteConversation, RequestType: "DeleteConversationReq", ResponseType: "EmptyResp"}, fn)
+		}
+		h.DeleteConversation = fn
 	}
 	if h.ListMessages == nil {
 		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

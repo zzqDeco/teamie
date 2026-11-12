@@ -254,6 +254,10 @@ struct RemoveConversationMemberReq {
   2: required string userId (api.path="userId")
 }
 
+struct DeleteConversationReq {
+  1: required string id (api.path="id")
+}
+
 struct ListMessagesReq {
   1: required string id (api.path="id")
   2: optional string beforeSeq (api.query="beforeSeq")
@@ -585,6 +589,7 @@ service ChatHTTPService {
   ConversationResp CreateConversation(1: CreateConversationReq req) (api.post="/api/v1/workspaces/:id/conversations", api.status="201")
   ConversationResp AddConversationMember(1: AddConversationMemberReq req) (api.post="/api/v1/conversations/:id/members")
   ConversationResp RemoveConversationMember(1: RemoveConversationMemberReq req) (api.delete="/api/v1/conversations/:id/members/:userId")
+  EmptyResp DeleteConversation(1: DeleteConversationReq req) (api.delete="/api/v1/conversations/:id")
   ListMessagesResp ListMessages(1: ListMessagesReq req) (api.get="/api/v1/conversations/:id/messages")
   MessageResp GetMessage(1: GetMessageReq req) (api.get="/api/v1/conversations/:id/messages/:messageId")
   MessageResp SendMessage(1: SendMessageReq req) (api.post="/api/v1/conversations/:id/messages", api.status="201")
