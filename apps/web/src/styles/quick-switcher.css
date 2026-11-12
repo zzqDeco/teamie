@@ -18,8 +18,6 @@
   .quick-switcher-input:focus-within {
     border-color: var(--brand-text);
     box-shadow: var(--focus-halo);
-    outline: var(--focus-ring);
-    outline-offset: -1px;
   }
   .quick-switcher-input input,
   .quick-switcher-input input:focus,
@@ -34,7 +32,7 @@
   .quick-switcher-list {
     list-style: none;
     margin: 0;
-    padding: 0;
+    padding: 0 0 var(--space-1);
     max-height: min(60dvh, 420px);
     overflow-y: auto;
     display: flex;
