@@ -29,7 +29,8 @@ const composerDrafts = new Map<string, ComposerDraft>();
 const draftListeners = new Set<() => void>();
 const notifyDrafts = () => draftListeners.forEach((listener) => listener());
 // Composer keystrokes update the in-memory draft immediately (so remounts read
-// the latest text) but serialize to sessionStorage only after typing pauses.
+// the latest text) but serialize to localStorage (per user, so drafts survive
+// closing the tab) only after typing pauses.
 // Every reset path cancels the pending write so a previous account's or a
 // revoked conversation's draft can never be persisted afterwards.
 const DRAFT_PERSIST_DELAY_MS = 300;
@@ -54,25 +55,72 @@ export const subscribeDrafts = (listener: () => void) => {
   };
 };
 
+// Conversations whose draft has text: drives the sidebar 「草稿」 marker. It
+// has its own listeners so keystrokes never notify timeline subscribers; it
+// only changes when a draft becomes empty/non-empty.
+let draftPresence: ReadonlySet<string> = new Set();
+const presenceListeners = new Set<() => void>();
+function refreshDraftPresence() {
+  const next = new Set<string>();
+  for (const [id, draft] of composerDrafts) if (draft.body.trim()) next.add(id);
+  if (next.size === draftPresence.size && [...next].every((id) => draftPresence.has(id))) return;
+  draftPresence = next;
+  presenceListeners.forEach((listener) => listener());
+}
+export function subscribeDraftPresence(listener: () => void) {
+  presenceListeners.add(listener);
+  return () => {
+    presenceListeners.delete(listener);
+  };
+}
+/** Stable snapshot of conversation ids that currently hold draft text. */
+export const readDraftPresence = () => draftPresence;
+
+function removeStoredDrafts(userId: string) {
+  try {
+    localStorage.removeItem(draftStorageKey(userId));
+    sessionStorage.removeItem(draftStorageKey(userId));
+  } catch {
+    /* Ignore storage access errors. */
+  }
+}
+
 function persistSessionDrafts(userId: string) {
   if (!userId) return;
   try {
     if (composerDrafts.size === 0)
-      sessionStorage.removeItem(draftStorageKey(userId));
+      localStorage.removeItem(draftStorageKey(userId));
     else
-      sessionStorage.setItem(
+      localStorage.setItem(
         draftStorageKey(userId),
         JSON.stringify(Object.fromEntries(composerDrafts)),
       );
   } catch {
-    /* Drafts remain usable in memory when sessionStorage is full or blocked. */
+    /* Drafts remain usable in memory when localStorage is full or blocked. */
   }
+}
+
+/** Reads the user's drafts; one-time migration from the old sessionStorage key. */
+function readStoredDrafts(userId: string) {
+  const key = draftStorageKey(userId);
+  const stored = localStorage.getItem(key);
+  if (stored) return stored;
+  const legacy = sessionStorage.getItem(key);
+  if (legacy) {
+    try {
+      localStorage.setItem(key, legacy);
+    } catch {
+      /* Still usable in memory for this tab. */
+    }
+    sessionStorage.removeItem(key);
+  }
+  return legacy;
 }
 
 function loadSessionDrafts(userId: string) {
   if (!userId) return;
   try {
-    const raw = sessionStorage.getItem(draftStorageKey(userId));
+    const raw = readStoredDrafts(userId);
     if (!raw) return;
     const parsed = JSON.parse(raw) as Record<string, ComposerDraft>;
     if (!parsed || typeof parsed !== "object") return;
@@ -92,13 +140,14 @@ function loadSessionDrafts(userId: string) {
       }
     }
   } catch {
-    /* Corrupted or unavailable sessionStorage falls back to in-memory drafts. */
+    /* Corrupted or unavailable storage falls back to in-memory drafts. */
   }
 }
 
 if (draftUserId) loadSessionDrafts(draftUserId);
+refreshDraftPresence();
 
-/** Writes any debounced composer text to sessionStorage now. */
+/** Writes any debounced composer text to localStorage now. */
 export function flushComposerDrafts() {
   if (persistTimer === undefined) return;
   cancelPendingPersist();
@@ -118,14 +167,11 @@ export function clearComposerDrafts() {
   cancelPendingPersist();
   draftEpoch++;
   conversationEpochs.clear();
-  try {
-    if (previousUser) sessionStorage.removeItem(draftStorageKey(previousUser));
-    if (currentUser) sessionStorage.removeItem(draftStorageKey(currentUser));
-  } catch {
-    /* Ignore storage access errors. */
-  }
+  if (previousUser) removeStoredDrafts(previousUser);
+  if (currentUser) removeStoredDrafts(currentUser);
   draftUserId = currentUser;
   composerDrafts.clear();
+  refreshDraftPresence();
   notifyDrafts();
 }
 
@@ -136,11 +182,8 @@ chatStore.subscribe(() => {
     cancelPendingPersist();
     draftEpoch++;
     conversationEpochs.clear();
-    try {
-      if (draftUserId) sessionStorage.removeItem(draftStorageKey(draftUserId));
-    } catch {
-      /* Ignore storage access errors. */
-    }
+    // Account isolation: another account never sees (or inherits) these drafts.
+    if (draftUserId) removeStoredDrafts(draftUserId);
     draftUserId = snap.userId;
     composerDrafts.clear();
     if (draftUserId) loadSessionDrafts(draftUserId);
@@ -160,7 +203,10 @@ chatStore.subscribe(() => {
       persistSessionDrafts(draftUserId);
     }
   }
-  if (userChanged || pruned) notifyDrafts();
+  if (userChanged || pruned) {
+    refreshDraftPresence();
+    notifyDrafts();
+  }
 });
 
 export function readComposerDraft(conversationId: string): ComposerDraft {
@@ -209,6 +255,7 @@ export function writeComposerDraft(
   }
   cancelPendingPersist();
   persistSessionDrafts(snap.userId);
+  refreshDraftPresence();
   notifyDrafts();
 }
 
@@ -245,7 +292,7 @@ export function restoreComposerDraft(
 /**
  * Records composer text typed under `epoch`. The in-memory draft updates
  * immediately without notifying subscribers (only the owning composer shows
- * the text); sessionStorage is written once typing pauses or on flush.
+ * the text); localStorage is written once typing pauses or on flush.
  */
 export function writeComposerText(
   conversationId: string,
@@ -261,6 +308,7 @@ export function writeComposerText(
   };
   if (!draftAllowed(conversationId, draft)) composerDrafts.delete(conversationId);
   else composerDrafts.set(conversationId, { ...draft, mentions: [...mentions] });
+  refreshDraftPresence();
   cancelPendingPersist();
   persistTimer = setTimeout(() => {
     persistTimer = undefined;

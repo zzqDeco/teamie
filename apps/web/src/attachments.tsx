@@ -189,11 +189,25 @@ export function AttachmentDraft({
                   role={file.state === "failed" ? "alert" : "status"}
                 >
                   {file.state === "uploading"
-                    ? "正在上传…"
+                    ? file.progress === undefined
+                      ? "正在上传…"
+                      : `正在上传… ${file.progress}%`
                     : file.state === "ready"
                       ? `${fileSize(file.file.size)} · 已就绪`
                       : file.error || "上传失败"}
                 </span>
+                {file.state === "uploading" && (
+                  <span
+                    className="attachment-progress"
+                    role="progressbar"
+                    aria-label={`${file.file.name} 上传进度`}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={file.progress ?? 0}
+                  >
+                    <span style={{ width: `${file.progress ?? 0}%` }} />
+                  </span>
+                )}
               </span>
               {file.state === "uploading" && (
                 <LoaderCircle size={ICON.sm} className="spin" />
@@ -225,6 +239,21 @@ export function AttachmentDraft({
       )}
     </>
   );
+}
+
+export const THUMBNAIL_MAX_WIDTH = 320;
+export const THUMBNAIL_MAX_HEIGHT = 220;
+/** Reserved display box for a thumbnail from the descriptor's `image` size. */
+export function thumbnailBox(width: number, height: number) {
+  const safeWidth = Math.max(1, width);
+  const safeHeight = Math.max(1, height);
+  const displayWidth = Math.max(
+    1,
+    Math.round(
+      Math.min(THUMBNAIL_MAX_WIDTH, safeWidth, (THUMBNAIL_MAX_HEIGHT * safeWidth) / safeHeight),
+    ),
+  );
+  return { width: `${displayWidth}px`, aspectRatio: `${safeWidth} / ${safeHeight}` };
 }
 
 function AttachmentThumbnailPreview({
@@ -272,8 +301,10 @@ function AttachmentThumbnailPreview({
   return (
     <button
       type="button"
-      className="attachment-thumbnail-button"
-      style={{ aspectRatio: `${width} / ${height}` }}
+      className="attachment-thumbnail-button reserved"
+      // Server dimensions reserve the final box before the blob loads, so
+      // rows never change height when thumbnails arrive.
+      style={thumbnailBox(width, height)}
       disabled={!blobUrl}
       onClick={() => {
         if (blobUrl) onOpenPreview(item);
@@ -354,7 +385,9 @@ export function MessageAttachments({
           setPreviewUrls((previous) => { const next = { ...previous }; delete next[id]; return next; });
         }
       }
-    }, { rootMargin: "200px" });
+    // Only previews about three screens away are released (and cached by
+    // the preview LRU), so ordinary scrolling never unloads/refetches them.
+    }, { rootMargin: "300% 0px" });
     for (const element of listRef.current?.querySelectorAll<HTMLElement>("[data-preview-id]") ?? []) {
       if (observer) observer.observe(element); else start(element.dataset.previewId!);
     }

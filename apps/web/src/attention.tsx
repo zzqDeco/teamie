@@ -562,7 +562,7 @@ export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
                   to={`/app/w/${encodeURIComponent(conversation.workspaceId)}/c/${encodeURIComponent(conversation.id)}?message=${encodeURIComponent(message.id)}`}
                 >
                   {message.senderKind === "agent" ? (
-                    <AgentAvatar />
+                    <AgentAvatar seed={message.senderId} />
                   ) : (
                     <Avatar name={message.senderName} seed={message.senderId} />
                   )}

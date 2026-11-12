@@ -107,6 +107,37 @@ export function MentionText({
   );
 }
 
+/**
+ * @ candidate order: prefix match, then word-start match, then substring;
+ * ties keep member order. Disabled Agents stay mentionable but always rank
+ * after everyone else (they will not respond). The current user is excluded.
+ */
+export function rankMentionMembers<T extends Member & { agentEnabled?: boolean }>(
+  members: T[],
+  query: string,
+  currentUserId = "",
+  limit = 12,
+): T[] {
+  const needle = query.toLocaleLowerCase();
+  const rank = (name: string) => {
+    const lower = name.toLocaleLowerCase();
+    if (lower.startsWith(needle)) return 0;
+    if (lower.split(/[\s\-_.·・,，、()（）]+/u).some((part) => part.startsWith(needle))) return 1;
+    return lower.includes(needle) ? 2 : -1;
+  };
+  return members
+    .map((member, index) => ({ member, index, rank: rank(member.displayName) }))
+    .filter((item) => item.rank >= 0 && (!currentUserId || item.member.userId !== currentUserId))
+    .sort(
+      (a, b) =>
+        Number(isDisabledAgent(a.member)) - Number(isDisabledAgent(b.member)) ||
+        a.rank - b.rank ||
+        a.index - b.index,
+    )
+    .slice(0, limit)
+    .map((item) => item.member);
+}
+
 type MentionCandidate =
   | { type: "member"; member: Member & { agentEnabled?: boolean } }
   | { type: "broadcast"; kind: "all" | "here"; token: string; subtitle: string };
@@ -123,6 +154,7 @@ export function MentionInput({
   inputRef,
   onKeyDown,
   onTyping,
+  currentUserId = "",
   ...props
 }: {
   value: string;
@@ -138,6 +170,8 @@ export function MentionInput({
   onKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onPaste?: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
   onTyping?: (body: string) => void;
+  /** Excluded from @ candidates (you cannot mention yourself). */
+  currentUserId?: string;
   placeholder?: string;
   autoFocus?: boolean;
   required?: boolean;
@@ -199,14 +233,10 @@ export function MentionInput({
       : [];
   const memberCandidates: MentionCandidate[] =
     activeQuery !== null
-      ? members
-          .filter((m) =>
-            m.displayName.toLocaleLowerCase().includes(activeQuery),
-          )
-          // Disabled Agents stay mentionable but rank last: they will not respond.
-          .sort((a, b) => Number(isDisabledAgent(a)) - Number(isDisabledAgent(b)))
-          .slice(0, 12)
-          .map((member) => ({ type: "member" as const, member }))
+      ? rankMentionMembers(members, activeQuery, currentUserId).map((member) => ({
+          type: "member" as const,
+          member,
+        }))
       : [];
   const candidates: MentionCandidate[] = [
     ...memberCandidates,
@@ -337,7 +367,7 @@ export function MentionInput({
                 onClick={() => choose(candidate)}
               >
                 {candidate.member.kind === "agent" ? (
-                  <AgentAvatar />
+                  <AgentAvatar seed={candidate.member.userId} />
                 ) : (
                   <Avatar
                     name={candidate.member.displayName}

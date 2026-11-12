@@ -12,10 +12,58 @@ type Entry = {
   controller: AbortController;
   listeners: Set<Listener>;
   preview: Preview;
+  bytes?: number;
 };
 const entries = new Map<string, Entry>();
 const queue: Entry[] = [];
 let running = false;
+
+/**
+ * Loaded previews whose last subscriber left (row unmounted, conversation
+ * switched, far off-screen) stay cached in a small LRU, so scrolling or
+ * switching back shows them instantly without a refetch. Map order is the
+ * recency order. Failed loads are never cached.
+ */
+const RETAIN_LIMITS = {
+  thumbnail: { count: 96, bytes: 24 * 1024 * 1024 },
+  content: { count: 12, bytes: 32 * 1024 * 1024 },
+} as const;
+const retained = new Map<string, Entry>();
+function retainedUsage(kind: "content" | "thumbnail") {
+  let count = 0;
+  let bytes = 0;
+  for (const entry of retained.values()) {
+    if ((entry.kind ?? "content") !== kind) continue;
+    count++;
+    bytes += entry.bytes ?? 0;
+  }
+  return { count, bytes };
+}
+function retain(entry: Entry) {
+  const kind = entry.kind ?? "content";
+  retained.delete(entry.key);
+  retained.set(entry.key, entry);
+  const limit = RETAIN_LIMITS[kind];
+  let usage = retainedUsage(kind);
+  for (const candidate of [...retained.values()]) {
+    if (usage.count <= limit.count && usage.bytes <= limit.bytes) break;
+    if ((candidate.kind ?? "content") !== kind || candidate === entry) continue;
+    retained.delete(candidate.key);
+    dispose(candidate);
+    usage = retainedUsage(kind);
+  }
+}
+function release(entry: Entry) {
+  // Keep successfully loaded blobs of the current session; abort the rest.
+  if (entry.preview.url && entry.session === api.csrfToken && entries.get(entry.key) === entry) {
+    retain(entry);
+  } else {
+    dispose(entry);
+  }
+}
+function revive(entry: Entry) {
+  retained.delete(entry.key);
+}
 
 function publish(entry: Entry, preview: Preview) {
   entry.preview = preview;
@@ -29,8 +77,11 @@ function dispose(entry: Entry) {
 }
 export function clearAttachmentPreviews() {
   for (const entry of entries.values()) dispose(entry);
+  retained.clear();
   queue.length = 0;
 }
+/** Test/diagnostic hook: number of loaded previews cached without subscribers. */
+export const retainedPreviewCount = () => retained.size;
 function delay(ms: number, signal: AbortSignal) {
   return new Promise<void>((resolve, reject) => {
     const abort = () => {
@@ -60,6 +111,7 @@ async function load(entry: Entry) {
           ? raw
           : new Blob([raw as BlobPart], { type: entry.mediaType || "application/octet-stream" });
       if (!signal.aborted && entry.session === api.csrfToken && entry.listeners.size) {
+        entry.bytes = blob.size;
         publish(entry, { url: URL.createObjectURL(blob) });
       }
       return;
@@ -94,12 +146,13 @@ export function subscribeAttachmentPreview(conversationId: string, attachmentId:
     entries.set(key, entry);
     queue.push(entry);
   }
+  revive(entry);
   entry.listeners.add(listener);
   listener(entry.preview);
   pump();
   return () => {
     entry.listeners.delete(listener);
-    if (!entry.listeners.size) dispose(entry);
+    if (!entry.listeners.size) release(entry);
   };
 }
 export function subscribeAttachmentThumbnail(
@@ -125,11 +178,12 @@ export function subscribeAttachmentThumbnail(
     entries.set(key, entry);
     queue.push(entry);
   }
+  revive(entry);
   entry.listeners.add(listener);
   listener(entry.preview);
   pump();
   return () => {
     entry.listeners.delete(listener);
-    if (!entry.listeners.size) dispose(entry);
+    if (!entry.listeners.size) release(entry);
   };
 }

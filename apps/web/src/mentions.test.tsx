@@ -224,9 +224,12 @@ describe("structured mention composing", () => {
       />,
     );
     await type("@");
-    expect(host.querySelectorAll('[role="option"]')).toHaveLength(3);
+    // The sender is never offered as a candidate (you cannot @ yourself).
+    const options = [...host.querySelectorAll('[role="option"]')];
+    expect(options).toHaveLength(2);
+    // Self and the other "伙伴" share a display name; only the other member remains.
+    expect(options.filter((option) => option.textContent?.includes(user.displayName))).toHaveLength(1);
     expect(host.textContent).not.toContain("私密成员");
-    await key("ArrowDown");
     await key("ArrowDown");
     await key("Enter");
     await act(async () =>

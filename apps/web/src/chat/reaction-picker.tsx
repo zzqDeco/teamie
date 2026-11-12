@@ -1,8 +1,12 @@
-import { useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { createPortal } from "react-dom";
+import { Plus } from "lucide-react";
 import type { Message } from "@teamie/api-client";
 import { COMMON_REACTION_EMOJIS } from "../engagement-store";
+import { ICON } from "../icons";
+import { EmojiPanel } from "./emoji-panel";
+import { loadEmojiCatalog, loadedEmojiCatalog, validRecentReactions } from "./emoji-recent";
 
 export function ReactionPicker({
   anchorRef,
@@ -18,6 +22,32 @@ export function ReactionPicker({
   onClose: () => void;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [catalog, setCatalog] = useState(loadedEmojiCatalog);
+  useEffect(() => {
+    if (catalog) return;
+    let active = true;
+    // Recents are validated against the pinned allowlist before display.
+    loadEmojiCatalog().then(
+      (module) => {
+        if (active) setCatalog(module);
+      },
+      () => {},
+    );
+    return () => {
+      active = false;
+    };
+  }, [catalog]);
+  const quick = [
+    ...COMMON_REACTION_EMOJIS,
+    ...validRecentReactions(userId, catalog)
+      .filter((emoji) => !(COMMON_REACTION_EMOJIS as readonly string[]).includes(emoji))
+      .slice(0, 8),
+  ];
+  const select = (emoji: string) => {
+    anchorRef.current?.querySelector("button")?.focus({ preventScroll: true });
+    onSelect(emoji);
+  };
 
   useLayoutEffect(() => {
     const anchor = anchorRef.current;
@@ -89,13 +119,22 @@ export function ReactionPicker({
   return createPortal(
     <div
       ref={menuRef}
-      className="reaction-picker-popover"
-      role="menu"
+      className={`reaction-picker-popover ${expanded ? "expanded" : ""}`}
+      role={expanded ? "dialog" : "menu"}
       aria-label="选择表情回应"
       onKeyDown={(event) => {
         // Portal events still bubble through the message's React tree.
         event.stopPropagation();
         const buttons = Array.from(event.currentTarget.querySelectorAll("button"));
+        if ((event.target as HTMLElement).tagName === "INPUT") {
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            event.currentTarget
+              .querySelector<HTMLButtonElement>(".emoji-panel-grid button")
+              ?.focus({ preventScroll: true });
+          }
+          return;
+        }
         const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
         let next: number;
         switch (event.key) {
@@ -104,6 +143,7 @@ export function ReactionPicker({
           case "Home": next = 0; break;
           case "End": next = buttons.length - 1; break;
           case "Tab":
+            if (expanded) return;
             anchorRef.current?.querySelector("button")?.focus({ preventScroll: true });
             onClose();
             return;
@@ -113,24 +153,43 @@ export function ReactionPicker({
         buttons[next]?.focus({ preventScroll: true });
       }}
     >
-      {COMMON_REACTION_EMOJIS.map((emoji) => {
-        const active = !!reactions?.find((item) => item.emoji === emoji)?.userIds.includes(userId);
-        return (
+      <div className="reaction-picker-quick" role="none">
+        {quick.map((emoji) => {
+          const active = !!reactions?.find((item) => item.emoji === emoji)?.userIds.includes(userId);
+          return (
+            <button
+              key={emoji}
+              type="button"
+              role={expanded ? undefined : "menuitem"}
+              className={`reaction-picker-emoji ${active ? "active" : ""}`}
+              aria-label={`表情回应 ${emoji}`}
+              onClick={() => select(emoji)}
+            >
+              {emoji}
+            </button>
+          );
+        })}
+        {!expanded && (
           <button
-            key={emoji}
             type="button"
             role="menuitem"
-            className={`reaction-picker-emoji ${active ? "active" : ""}`}
-            aria-label={`表情回应 ${emoji}`}
+            className="reaction-picker-emoji reaction-picker-more"
+            aria-label="更多表情"
+            title="更多表情"
             onClick={() => {
-              anchorRef.current?.querySelector("button")?.focus({ preventScroll: true });
-              onSelect(emoji);
+              setExpanded(true);
+              requestAnimationFrame(() =>
+                menuRef.current
+                  ?.querySelector<HTMLInputElement>(".emoji-panel-search, .emoji-panel button")
+                  ?.focus({ preventScroll: true }),
+              );
             }}
           >
-            {emoji}
+            <Plus size={ICON.sm} />
           </button>
-        );
-      })}
+        )}
+      </div>
+      {expanded && <EmojiPanel userId={userId} reactions={reactions} onSelect={select} />}
     </div>,
     document.body,
   );

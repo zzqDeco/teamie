@@ -350,12 +350,21 @@
   .conversation-link > svg {
     color: var(--text-muted);
   }
-  .conversation-link > span:not(.avatar):not(.group-avatar):not(.unread-badge):not(.agent-badge) {
+  .conversation-link > span:not(.avatar):not(.group-avatar):not(.unread-badge):not(.agent-badge):not(.conversation-draft-marker) {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     line-height: 1.5;
     flex: 1;
+  }
+  .conversation-draft-marker {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+    color: var(--warning-text);
+    font-size: var(--font-xs);
+    font-weight: 500;
   }
   .conversation-link:hover {
     background: var(--lavender);

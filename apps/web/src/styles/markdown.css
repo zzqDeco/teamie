@@ -241,4 +241,79 @@
   .message-body .mention-pill {
     font-weight: 500;
   }
+  .message-body .markdown-code-copy.failed {
+    color: var(--danger-text);
+    border-color: var(--danger-border);
+    background: var(--danger-bg);
+  }
+  .message-body .markdown-code-copy-error {
+    margin: 0;
+    padding: var(--space-1) var(--space-3);
+    color: var(--danger-text);
+    background: var(--danger-bg);
+    font-size: var(--font-sm);
+  }
+  /* 20 lines of code (font-base × line-height 1.55) plus vertical padding. */
+  .message-body .markdown-code-block.collapsed {
+    max-height: calc(var(--font-base) * 1.55 * 20 + 24px);
+    overflow-y: hidden;
+    mask-image: linear-gradient(to bottom, black 75%, transparent);
+  }
+  .message-body .markdown-code-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-1);
+    width: 100%;
+    min-height: 32px;
+    border: 0;
+    border-top: 1px solid var(--border);
+    background: var(--surface-sunken);
+    color: var(--brand-text);
+    font: inherit;
+    font-size: var(--font-sm);
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .message-body .markdown-code-toggle:hover {
+    color: var(--brand-strong);
+    background: var(--hover-bg);
+  }
+  .message-body .markdown-code-toggle:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: calc(var(--focus-ring-offset) * -1);
+  }
+  .message-body .code-token-keyword {
+    color: var(--brand-text);
+    font-weight: 600;
+  }
+  .message-body .code-token-string {
+    color: var(--success-text);
+  }
+  .message-body .code-token-number {
+    color: var(--warning-text);
+  }
+  .message-body .code-token-comment {
+    color: var(--text-subtle);
+    font-style: italic;
+  }
+  .message-body .code-token-title {
+    color: var(--brand-strong);
+  }
+  .message-body .code-token-attr,
+  .message-body .code-token-deletion {
+    color: var(--danger-text);
+  }
+  .message-body .markdown-link-host {
+    margin-left: var(--space-1);
+    color: var(--text-muted);
+    font-size: var(--font-sm);
+    font-weight: 400;
+    text-decoration: none;
+  }
+  @media (pointer: coarse) {
+    .message-body .markdown-code-toggle {
+      min-height: 44px;
+    }
+  }
 }

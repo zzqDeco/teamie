@@ -590,7 +590,7 @@ describe("PR-3 navigation & notification ergonomics", () => {
     );
   });
 
-  it("persists composer drafts in sessionStorage by pagehide, retains drafts across stale localStorage restore, and clears them on logout", async () => {
+  it("persists composer drafts in localStorage by pagehide, migrates legacy sessionStorage drafts, retains drafts across stale sync restore, and clears them on logout", async () => {
     await mount("/app/w/team/c/general");
     const textarea = container.querySelector<HTMLTextAreaElement>(
       'textarea[aria-label="消息内容"]',
@@ -608,12 +608,13 @@ describe("PR-3 navigation & notification ergonomics", () => {
     });
     // Keystrokes persist debounced; leaving the page writes them immediately.
     window.dispatchEvent(new Event("pagehide"));
-    expect(sessionStorage.getItem("teamie.drafts.v1:owner")).toContain(
+    expect(localStorage.getItem("teamie.drafts.v1:owner")).toContain(
       "未发送的草稿内容",
     );
 
-    // Simulate reload where sessionStorage has a draft for a newer conversation (dm-2)
-    // not yet present in a stale non-empty localStorage snapshot
+    // Simulate reload from an older build: drafts still live in the legacy
+    // sessionStorage key (and include a newer conversation, dm-2, not yet in
+    // the stale non-empty sync snapshot). They migrate into localStorage.
     act(() => {
       chatStore.clear();
     });
@@ -642,16 +643,17 @@ describe("PR-3 navigation & notification ergonomics", () => {
       "general",
     ]);
     // Before replaceConversations runs, dm-2 draft must NOT be pruned by stale localStorage
-    expect(sessionStorage.getItem("teamie.drafts.v1:owner")).toContain(
+    expect(sessionStorage.getItem("teamie.drafts.v1:owner")).toBeNull();
+    expect(localStorage.getItem("teamie.drafts.v1:owner")).toContain(
       "新会话草稿",
     );
     act(() => {
       chatStore.replaceConversations([channel, dmOne, dmTwo]);
     });
-    expect(sessionStorage.getItem("teamie.drafts.v1:owner")).toContain(
+    expect(localStorage.getItem("teamie.drafts.v1:owner")).toContain(
       "新会话草稿",
     );
-    expect(sessionStorage.getItem("teamie.drafts.v1:owner")).not.toContain(
+    expect(localStorage.getItem("teamie.drafts.v1:owner")).not.toContain(
       "已移除会话草稿",
     );
 
@@ -659,14 +661,31 @@ describe("PR-3 navigation & notification ergonomics", () => {
     act(() => {
       chatStore.revoke();
     });
-    expect(sessionStorage.getItem("teamie.drafts.v1:owner")).toContain(
+    expect(localStorage.getItem("teamie.drafts.v1:owner")).toContain(
       "新会话草稿",
     );
 
     act(() => {
       chatStore.clear();
     });
-    expect(sessionStorage.getItem("teamie.drafts.v1:owner")).toBeNull();
+    expect(localStorage.getItem("teamie.drafts.v1:owner")).toBeNull();
+  });
+
+  it("marks sidebar rows that hold an unsent draft with 「草稿」 (not the open conversation)", async () => {
+    await mount("/app/w/team/c/general");
+    const textarea = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="消息内容"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(textarea, "还没发");
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const link = (id: string) =>
+      [...container.querySelectorAll<HTMLAnchorElement>("a.conversation-link")].find((a) =>
+        a.getAttribute("href")?.endsWith(`/c/${id}`),
+      )!;
+    expect(link("general").querySelector(".conversation-draft-marker")).toBeNull();
+    await act(async () => link("dm-1").click());
+    expect(link("general").querySelector(".conversation-draft-marker")?.textContent).toBe("草稿");
+    expect(link("dm-1").querySelector(".conversation-draft-marker")).toBeNull();
   });
 
   it("implements roving tabindex and keyboard navigation on message list", async () => {

@@ -177,19 +177,19 @@ describe("debounced composer draft persistence", () => {
   it("persists after typing pauses and flushes on blur and conversation switch", async () => {
     await show(conversationWith(5, 5));
     await type("draft one");
-    expect(sessionStorage.getItem(draftKey)).toBeNull();
+    expect(localStorage.getItem(draftKey)).toBeNull();
     await elapse(299);
-    expect(sessionStorage.getItem(draftKey)).toBeNull();
+    expect(localStorage.getItem(draftKey)).toBeNull();
     await elapse(1);
-    expect(sessionStorage.getItem(draftKey)).toContain("draft one");
+    expect(localStorage.getItem(draftKey)).toContain("draft one");
 
     await type("draft two");
     await act(async () => { composer().dispatchEvent(new FocusEvent("focusout", { bubbles: true })); });
-    expect(sessionStorage.getItem(draftKey)).toContain("draft two");
+    expect(localStorage.getItem(draftKey)).toContain("draft two");
 
     await type("draft three");
     await show(conversationWith(0, 0, "other"));
-    expect(sessionStorage.getItem(draftKey)).toContain("draft three");
+    expect(localStorage.getItem(draftKey)).toContain("draft three");
     await show(conversationWith(5, 5));
     expect(composer().value).toBe("draft three");
   });
@@ -217,8 +217,8 @@ describe("debounced composer draft persistence", () => {
       else chatStore.begin("another-account");
     });
     await elapse(1000);
-    expect(sessionStorage.getItem(draftKey)).toBeNull();
-    expect(sessionStorage.getItem("teamie.drafts.v1:another-account")).toBeNull();
+    expect(localStorage.getItem(draftKey)).toBeNull();
+    expect(localStorage.getItem("teamie.drafts.v1:another-account")).toBeNull();
     expect(composer().value).toBe("");
   });
 });

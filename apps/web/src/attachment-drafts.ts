@@ -2,6 +2,10 @@ import { api } from "@teamie/api-client";
 import type { Attachment } from "@teamie/api-client";
 import { errorText } from "./errors";
 import { chatStore } from "./store";
+import { attachmentTransport } from "./chat/attachment-upload";
+
+/** Uploads run at most this many at a time per conversation (FIFO). */
+export const UPLOAD_CONCURRENCY = 2;
 
 export type DraftFile = {
   id: string;
@@ -12,6 +16,8 @@ export type DraftFile = {
   error?: string;
   /** Epoch ms when the server accepted the upload (pending files expire). */
   uploadedAt?: number;
+  /** Upload progress 0–100 while `uploading` (undefined until bytes flow). */
+  progress?: number;
 };
 
 /**
@@ -29,7 +35,8 @@ type Entry = {
   session: string;
   files: DraftFile[];
   controllers: Map<string, AbortController>;
-  queue: Promise<void>;
+  /** File ids waiting for an upload slot, in FIFO order. */
+  waiting: string[];
 };
 
 // Module-level so pending files survive conversation switches and remounts
@@ -56,7 +63,7 @@ function entryFor(conversationId: string) {
       session: api.csrfToken,
       files: [],
       controllers: new Map(),
-      queue: Promise.resolve(),
+      waiting: [],
     };
     entries.set(key, entry);
   }
@@ -84,6 +91,7 @@ function dropEntry(entry: Entry, remote: boolean) {
   entries.delete(entry.key);
   entry.controllers.forEach((controller) => controller.abort());
   entry.controllers.clear();
+  entry.waiting = [];
   return remote
     ? entry.files.flatMap((file) =>
         file.attachment ? [deleteRemote(entry, file.attachment.id)] : [],
@@ -130,15 +138,26 @@ async function upload(entry: Entry, id: string) {
   update(
     entry,
     entry.files.map((f) =>
-      f.id === id ? { ...f, state: "uploading", error: undefined } : f,
+      f.id === id ? { ...f, state: "uploading", error: undefined, progress: undefined } : f,
     ),
   );
+  let lastPercent = -1;
+  const onProgress = (fraction: number) => {
+    const percent = Math.round(fraction * 100);
+    if (percent === lastPercent || !live(entry) || controller.signal.aborted) return;
+    lastPercent = percent;
+    update(
+      entry,
+      entry.files.map((f) => (f.id === id && f.state === "uploading" ? { ...f, progress: percent } : f)),
+    );
+  };
   try {
-    const result = await api.uploadAttachment(
+    const result = await attachmentTransport.upload(
       entry.conversationId,
       file.file,
       controller.signal,
       file.uploadKey,
+      onProgress,
     );
     if (!live(entry) || !entry.files.some((f) => f.id === id)) {
       // Removed or cleared while in flight: the late upload is orphaned.
@@ -154,6 +173,7 @@ async function upload(entry: Entry, id: string) {
               state: "ready",
               attachment: result.attachment,
               uploadedAt: Date.now(),
+              progress: undefined,
             }
           : f,
       ),
@@ -163,27 +183,34 @@ async function upload(entry: Entry, id: string) {
       update(
         entry,
         entry.files.map((f) =>
-          f.id === id ? { ...f, state: "failed", error: errorText(e) } : f,
+          f.id === id ? { ...f, state: "failed", error: errorText(e), progress: undefined } : f,
         ),
       );
   } finally {
     entry.controllers.delete(id);
     if (live(entry) && entry.files.length === 0 && entry.controllers.size === 0)
       entries.delete(entry.key);
+    pumpUploads(entry);
+  }
+}
+
+function pumpUploads(entry: Entry) {
+  while (live(entry) && entry.controllers.size < UPLOAD_CONCURRENCY && entry.waiting.length) {
+    const id = entry.waiting.shift()!;
+    if (entry.files.some((f) => f.id === id) && !entry.controllers.has(id)) void upload(entry, id);
   }
 }
 
 /**
- * Uploads run serially per conversation and keep going after the composer
- * unmounts; their results land in the store and reappear on return.
+ * Uploads run up to UPLOAD_CONCURRENCY at a time per conversation and keep
+ * going after the composer unmounts; their results land in the store and
+ * reappear on return.
  */
 export function queueAttachmentUpload(conversationId: string, id: string) {
   const entry = entries.get(keyFor(conversationId));
-  if (!entry) return;
-  entry.queue = entry.queue.then(async () => {
-    if (live(entry) && entry.files.some((f) => f.id === id))
-      await upload(entry, id);
-  });
+  if (!entry || entry.waiting.includes(id) || entry.controllers.has(id)) return;
+  entry.waiting.push(id);
+  pumpUploads(entry);
 }
 
 export function addAttachmentDraftFiles(
@@ -202,6 +229,7 @@ export function removeAttachmentDraftFile(conversationId: string, id: string) {
   if (!entry) return;
   const file = entry.files.find((f) => f.id === id);
   entry.controllers.get(id)?.abort();
+  entry.waiting = entry.waiting.filter((waiting) => waiting !== id);
   update(
     entry,
     entry.files.filter((f) => f.id !== id),

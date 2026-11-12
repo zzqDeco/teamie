@@ -369,6 +369,22 @@
     position: relative;
     border: 1px solid var(--border-strong);
   }
+  .avatar.agent-avatar.mint {
+    background: var(--success-bg);
+    color: var(--success-text);
+  }
+  .avatar.agent-avatar.peach {
+    background: var(--warning-bg);
+    color: var(--warning-text);
+  }
+  .avatar.agent-avatar.blue {
+    background: var(--hover-bg);
+    color: var(--text-muted);
+  }
+  .avatar.agent-avatar.rose {
+    background: var(--rail);
+    color: var(--danger-text);
+  }
   .avatar.agent-avatar i {
     width: 5px;
     height: 5px;

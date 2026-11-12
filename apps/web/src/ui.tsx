@@ -12,6 +12,7 @@ import type { ButtonHTMLAttributes, ReactNode, RefObject } from "react";
 import { LoaderCircle, X } from "lucide-react";
 import { Link } from "react-router-dom";
 import { ICON } from "./icons";
+import { formatDateTime } from "./format-datetime";
 export function Logo({ compact = false }: { compact?: boolean }) {
   return (
     <span className="brand">
@@ -596,20 +597,11 @@ export function PublicHeader() {
     </header>
   );
 }
+/** Message time (10:35); see `formatDateTime` for every other kind. */
 export function time(value: string) {
-  return new Date(value).toLocaleTimeString("zh-CN", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return formatDateTime(value, "time");
 }
+/** Date separator label: 今天 / 昨天 / weekday date / cross-year date. */
 export function date(value: string) {
-  const d = new Date(value);
-  const today = new Date();
-  return d.toDateString() === today.toDateString()
-    ? "今天"
-    : d.toLocaleDateString("zh-CN", {
-        month: "long",
-        day: "numeric",
-        weekday: "long",
-      });
+  return formatDateTime(value, "day");
 }

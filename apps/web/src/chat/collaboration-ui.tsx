@@ -318,6 +318,7 @@ export function ForwardMessageModal({
               setMentions(nextMentions);
             }}
             members={targetMembers}
+            currentUserId={userId}
             enabled={mentionsEnabled}
             allowBroadcastMentions={
               allowBroadcastMentions &&
@@ -621,7 +622,7 @@ export function SavedMessagesList({
                 to={`/app/w/${encodeURIComponent(workspaceId)}/c/${encodeURIComponent(convId)}?message=${encodeURIComponent(msgId)}`}
               >
                 {msg?.senderKind === "agent" ? (
-                  <AgentAvatar />
+                  <AgentAvatar seed={msg.senderId} />
                 ) : (
                   <Avatar name={msg?.senderName || "成员"} seed={msg?.senderId || msgId} />
                 )}

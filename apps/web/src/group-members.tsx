@@ -23,7 +23,7 @@ export function ParticipantIdentity({
   return (
     <>
       {member.kind === "agent" ? (
-        <AgentAvatar />
+        <AgentAvatar seed={member.userId} />
       ) : (
         <Avatar name={member.displayName} seed={member.userId} />
       )}

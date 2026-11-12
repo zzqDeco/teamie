@@ -313,7 +313,8 @@ export function computeMessageReadSummary({
       if (entry.userId === senderId) continue;
       const member = memberById.get(entry.userId) || {
         userId: entry.userId,
-        displayName: entry.userId.slice(0, 8),
+        // Never expose opaque IDs; members missing from the directory stay anonymous.
+        displayName: "未知成员",
         role: "member",
         kind: "human",
       };

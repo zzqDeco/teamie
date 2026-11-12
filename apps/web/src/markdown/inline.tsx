@@ -15,6 +15,16 @@ import {
   sanitizeLinkUrl,
 } from "./tokens";
 import type { ParseContext, ValidMention } from "./tokens";
+import { linkPresentation } from "./links";
+import type { LinkPresentation } from "./links";
+import { plainPreview } from "../chat/plain-preview";
+
+/** Same-origin `/app/` links stay in this tab (SPA navigation); others open safely in a new tab. */
+function linkTargetProps(link: LinkPresentation) {
+  return link.appPath
+    ? { "data-app-link": link.appPath }
+    : { target: "_blank", rel: "noopener noreferrer" };
+}
 
 function isSelfMention(mention: ValidMention, currentUserId: string): boolean {
   if (!currentUserId) return false;
@@ -180,16 +190,22 @@ export function renderInline(
           ctx.inLink = true;
           const label = renderInline(linkMatch.label, ctx, depth + 1);
           ctx.inLink = wasInLink;
+          const link = linkPresentation(
+            safeUrl,
+            plainPreview(restoreMentionsText(linkMatch.label, ctx)),
+          );
           nodes.push(
             <a
               key={ctx.nextKey()}
               className="markdown-link"
-              href={safeUrl}
-              title={safeUrl}
-              target="_blank"
-              rel="noopener noreferrer"
+              href={link.href}
+              title={link.href}
+              {...linkTargetProps(link)}
             >
               {label}
+              {link.hostSuffix && (
+                <span className="markdown-link-host">（{link.hostSuffix}）</span>
+              )}
             </a>,
           );
         } else {
@@ -214,14 +230,14 @@ export function renderInline(
         const safeUrl = sanitizeLinkUrl(rawUrl);
         if (safeUrl) {
           flushText();
+          const link = linkPresentation(safeUrl);
           nodes.push(
             <a
               key={ctx.nextKey()}
               className="markdown-link"
-              href={safeUrl}
-              title={safeUrl}
-              target="_blank"
-              rel="noopener noreferrer"
+              href={link.href}
+              title={link.href}
+              {...linkTargetProps(link)}
             >
               {rawUrl}
             </a>,
@@ -238,14 +254,14 @@ export function renderInline(
       const safeUrl = bareUrl ? sanitizeLinkUrl(bareUrl) : null;
       if (bareUrl && safeUrl) {
         flushText();
+        const link = linkPresentation(safeUrl);
         nodes.push(
           <a
             key={ctx.nextKey()}
             className="markdown-link"
-            href={safeUrl}
-            title={safeUrl}
-            target="_blank"
-            rel="noopener noreferrer"
+            href={link.href}
+            title={link.href}
+            {...linkTargetProps(link)}
           >
             {bareUrl}
           </a>,

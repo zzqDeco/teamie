@@ -19,6 +19,7 @@ import { ProfileSettings } from "./dialogs";
 import { passwordPolicyError } from "./password-policy";
 import { Login } from "./public/auth-views";
 import { chatStore } from "./store";
+import { attachmentTransport } from "./chat/attachment-upload";
 
 const user: User = {
   id: "password-test-user",
@@ -473,7 +474,7 @@ describe("account changes with pending requests", () => {
 
   it("rechecks the captured session after pending attachment cleanup before calling logout", async () => {
     const pendingDelete = deferred<void>();
-    vi.spyOn(api, "uploadAttachment").mockResolvedValue({
+    vi.spyOn(attachmentTransport, "upload").mockResolvedValue({
       attachment: {
         id: "pending-file-1",
         filename: "draft.txt",

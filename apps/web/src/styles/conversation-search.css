@@ -101,11 +101,10 @@
     font-size: var(--font-xs);
     color: var(--text-muted);
   }
+  /* The body is a plain-text snippet centred on the match, so it wraps
+     freely instead of clamping (a clamp could hide the match). */
   .search-message-result {
-    display: -webkit-box;
-    -webkit-line-clamp: 4;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
+    display: block;
     width: 100%;
     border: 0;
     padding: var(--space-3) 0 5px;
@@ -114,7 +113,7 @@
     font: inherit;
     font-size: var(--font-md);
     line-height: 1.65;
-    white-space: pre-wrap;
+    white-space: normal;
     overflow-wrap: anywhere;
     text-align: left;
     cursor: pointer;

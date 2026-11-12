@@ -316,7 +316,9 @@ describe("Markdown message rendering", () => {
     expect(links[0].getAttribute("href")).toBe("https://teamie.example/docs");
     expect(links[0].getAttribute("target")).toBe("_blank");
     expect(links[0].getAttribute("rel")).toBe("noopener noreferrer");
-    expect(links[0].textContent).toBe("官方文档");
+    // Labels that do not name the destination host show it as a suffix.
+    expect(links[0].textContent).toBe("官方文档（teamie.example）");
+    expect(links[0].querySelector(".markdown-link-host")?.textContent).toBe("（teamie.example）");
 
     expect(links[1].getAttribute("href")).toBe("mailto:hi@teamie.example");
     expect(links[1].getAttribute("target")).toBe("_blank");
@@ -352,10 +354,11 @@ describe("Markdown message rendering", () => {
     expect(links.map((link) => link.getAttribute("href"))).toEqual([
       "https://teamie.example/docs?q=1&lang=zh",
       "https://teamie.example/a_(b)",
-      "HTTP://Teamie.Example/Upper",
+      // Hrefs/titles use the URL serializer (lower-cased scheme/host, punycode).
+      "http://teamie.example/Upper",
       "https://teamie.example/path",
-      "https://label.example",
-      "https://evil.example",
+      "https://label.example/",
+      "https://evil.example/",
     ]);
     for (const link of links) {
       expect(link.getAttribute("title")).toBe(link.getAttribute("href"));
@@ -363,7 +366,8 @@ describe("Markdown message rendering", () => {
       expect(link.getAttribute("rel")).toBe("noopener noreferrer");
     }
     expect(links[0].textContent).toBe("https://teamie.example/docs?q=1&lang=zh");
-    expect(links[5].textContent).toBe("https://safe.example");
+    // A URL-looking label for another host is exposed by the real host suffix.
+    expect(links[5].textContent).toBe("https://safe.example（evil.example）");
     expect(links[5].querySelector("a")).toBeNull();
     expect(host.querySelector("code")?.textContent).toBe(
       "https://code.example/inside",
