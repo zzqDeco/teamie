@@ -422,6 +422,12 @@ export class ChatStore {
       conversations: { ...this.snapshot.conversations, [conversation.id]: conversation },
     });
   }
+  removeConversation(conversationId: string) {
+    if (!this.snapshot.conversations[conversationId]) return;
+    const wasAuthoritative = this.hasAuthoritativeConversations;
+    this.replaceConversations(Object.values(this.snapshot.conversations).filter((c) => c.id !== conversationId));
+    this.hasAuthoritativeConversations = wasAuthoritative;
+  }
   markRead(id: string, seq: number, manualUnreadSeq?: number | null) {
     const conversation = this.snapshot.conversations[id] as (Conversation & { unreadCount?: number }) | undefined;
     if (!conversation) return;

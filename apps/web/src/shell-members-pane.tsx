@@ -2,9 +2,11 @@ import type { RefObject } from "react";
 import { Link } from "react-router-dom";
 import {
   LoaderCircle,
+  LogOut,
   MessageCircle,
   Plus,
   ShieldCheck,
+  Trash2,
   UserMinus,
   UserPlus,
   Users,
@@ -50,6 +52,8 @@ export function ShellMembersPane({
   onStartDirect,
   onRequestRemove,
   onManageGroup,
+  onLeaveGroup,
+  onDissolveGroup,
   onInvite,
 }: {
   membersRef: RefObject<HTMLElement | null>;
@@ -74,6 +78,8 @@ export function ShellMembersPane({
   onStartDirect: (member: Participant) => void;
   onRequestRemove: (member: Member, fromGroup: boolean) => void;
   onManageGroup: () => void;
+  onLeaveGroup?: () => void;
+  onDissolveGroup?: () => void;
   onInvite: () => void;
 }) {
   const presenceEnabled = !!caps["im.presence.publish"];
@@ -223,6 +229,32 @@ export function ShellMembersPane({
             <Plus size={ICON.xs} />
           </button>
         )}
+        {conversation.type === "group" &&
+          conversation.memberIds.includes(userId) &&
+          onLeaveGroup && (
+            <button
+              type="button"
+              className="members-danger-action"
+              disabled={busy}
+              onClick={onLeaveGroup}
+            >
+              <LogOut size={ICON.sm} />
+              退出小组
+            </button>
+          )}
+        {conversation.type === "group" &&
+          conversation.canManageMembers &&
+          onDissolveGroup && (
+            <button
+              type="button"
+              className="members-danger-action"
+              disabled={busy}
+              onClick={onDissolveGroup}
+            >
+              <Trash2 size={ICON.sm} />
+              解散小组
+            </button>
+          )}
         {owner && conversation.type === "channel" && (
           <button className="members-invite" onClick={onInvite}>
             <UserPlus size={ICON.sm} />

@@ -8,7 +8,7 @@ import { useChat, useChatState } from "./chat";
 import { errorText } from "./errors";
 import { WorkspaceDialog } from "./dialogs";
 import { ConnectionBanner } from "./connection-banner";
-import { GroupMembersDialog } from "./group-members";
+import { GroupExitModal, GroupMembersDialog } from "./group-members";
 import { enrichParticipants } from "./participants";
 import type { Participant } from "./participants";
 import { KeyboardShortcutsModal, QuickSwitcher, SHORTCUTS_ENTRY } from "./quick-switcher";
@@ -19,6 +19,7 @@ import type { DialogKind } from "./dialogs";
 import { ConversationView } from "./messages";
 import { AttentionInbox, useAttentionCount } from "./attention";
 import { Button, Loading, Logo, Notice } from "./ui";
+import { toast } from "./toast";
 import { conversationUnreadSummary } from "./unread-badge";
 import { canConfigureModelGateway } from "./agent-management";
 import { useCurrentWorkspace } from "./shell/current-workspace";
@@ -44,12 +45,12 @@ import { AnnouncementModals, usePlatformAnnouncements } from "./announcements";
 import { parseInviteCode, Welcome } from "./shell-welcome";
 import {
   clearPersistedShellNav,
-  readPersistedShellNav,
   UnavailableConversationView,
   useDocumentTitle,
   useMediaQuery,
   useShellKeyboardShortcuts,
-  writePersistedShellNav,
+  useShellPersistedNav,
+  useSyncShellPersistedNav,
 } from "./shell/shell-hooks";
 import { MAX_WIDTH_QUERY } from "./breakpoints";
 export { parseInviteCode, clearPersistedShellNav };
@@ -67,22 +68,8 @@ export function Shell() {
   const routes = useShellRoutes();
   const { match, legacyDirectoryMatch, workspaceRootMatch, location, pathname } = routes;
   const navigate = useNavigate();
-  const [initialNav] = useState(() => readPersistedShellNav(user?.id));
-  const navUserIdRef = useRef(user?.id);
-  const lastConversationByWorkspace = useRef<Record<string, string>>(
-    initialNav.lastConversationByWorkspace,
-  );
-  // Render-safe copy of the map above for current-workspace resolution.
-  const [rememberedByWorkspace, setRememberedByWorkspace] = useState(
-    initialNav.lastConversationByWorkspace,
-  );
-  const lastChatRoute = useRef<string>(initialNav.lastChatPath);
-  const [lastChatPath, setLastChatPath] = useState(
-    initialNav.lastChatPath,
-  );
-  const [recentConversationIds, setRecentConversationIds] = useState<string[]>(
-    initialNav.recentConversationIds,
-  );
+  const nav = useShellPersistedNav(user?.id, clearPersistedAppPaneWidth);
+  const { lastChatPath, rememberedByWorkspace, recentConversationIds } = nav;
   const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [announcementsHistoryOpen, setAnnouncementsHistoryOpen] = useState(false);
@@ -93,6 +80,7 @@ export function Shell() {
     [appsOpen, setAppsOpen] = useState(false),
     [managingWorkspaceApps, setManagingWorkspaceApps] = useState(false),
     [managingGroup, setManagingGroup] = useState(false),
+    [groupExit, setGroupExit] = useState<"leave" | "dissolve" | null>(null),
     [removingFromGroup, setRemovingFromGroup] = useState(false);
   const [removing, setRemoving] = useState<Member | null>(null),
     [busy, setBusy] = useState(false),
@@ -118,54 +106,16 @@ export function Shell() {
     ? snapshot.conversations[match.params.conversationId]
     : undefined;
   useEffect(() => {
-    if (navUserIdRef.current && navUserIdRef.current !== user?.id) {
-      clearPersistedShellNav(navUserIdRef.current);
-      clearPersistedAppPaneWidth(navUserIdRef.current);
-    }
-    navUserIdRef.current = user?.id;
-    const restored = readPersistedShellNav(user?.id);
-    lastConversationByWorkspace.current = restored.lastConversationByWorkspace;
-    setRememberedByWorkspace(restored.lastConversationByWorkspace);
-    lastChatRoute.current = restored.lastChatPath;
-    setLastChatPath(restored.lastChatPath);
-    setRecentConversationIds(restored.recentConversationIds);
     setQuickSwitcherOpen(false);
     setShortcutsOpen(false);
     setAnnouncementsHistoryOpen(false);
   }, [user?.id]);
-  useEffect(() => {
-    if (
-      conversation &&
-      workspace &&
-      conversation.workspaceId === workspace.id &&
-      user?.id
-    ) {
-      const nextRoute = route(conversation);
-      lastConversationByWorkspace.current[workspace.id] = conversation.id;
-      setRememberedByWorkspace((prev) =>
-        prev[workspace.id] === conversation.id ? prev : { ...lastConversationByWorkspace.current },
-      );
-      lastChatRoute.current = nextRoute;
-      setLastChatPath(nextRoute);
-      setRecentConversationIds((prev) => {
-        const nextRecent =
-          prev[0] === conversation.id
-            ? prev
-            : [
-                conversation.id,
-                ...prev.filter((id) => id !== conversation.id),
-              ].slice(0, 20);
-        writePersistedShellNav(user.id, {
-          lastChatPath: nextRoute,
-          lastConversationByWorkspace: {
-            ...lastConversationByWorkspace.current,
-          },
-          recentConversationIds: nextRecent,
-        });
-        return nextRecent;
-      });
-    }
-  }, [conversation, workspace, user?.id]);
+  useSyncShellPersistedNav(nav, {
+    userId: user?.id,
+    workspace,
+    conversation,
+    conversations: snapshot.conversations,
+  });
   useEffect(() => {
     const activeId =
       conversation && workspace && conversation.workspaceId === workspace.id
@@ -236,6 +186,7 @@ export function Shell() {
   useEffect(() => {
     setSidebar(false);
     setManagingGroup(false);
+    setGroupExit(null);
     setAppsOpen(false);
     setError("");
     setDirectError("");
@@ -252,7 +203,7 @@ export function Shell() {
     setDirectError("");
   }, []);
   const baseOverlayModal =
-    !!dialog || quickSwitcherOpen || shortcutsOpen || managingGroup || managingWorkspaceApps || !!removing;
+    !!dialog || quickSwitcherOpen || shortcutsOpen || managingGroup || !!groupExit || managingWorkspaceApps || !!removing;
   const caps = chat.data?.capabilities || {};
   const marketplaceEnabled = caps["im.marketplace.enabled"] !== false;
   const announcementsPublishEnabled = caps["im.announcements.publish"] !== false;
@@ -371,6 +322,23 @@ export function Shell() {
       setBusy(false);
     }
   }
+  async function completeGroupExit(kind: "leave" | "dissolve", removedId: string) {
+    const fallbackConv = channels.find((c) => c.id !== removedId) || conversations.find((c) => c.id !== removedId);
+    const fallbackTarget = workspace ? (fallbackConv ? route(fallbackConv) : `/app/w/${workspace.id}/members`) : "/app";
+    nav.pruneConversation(removedId, fallbackConv ? route(fallbackConv) : "");
+    setGroupExit(null);
+    setManagingGroup(false);
+    setDetails(false);
+    setAppsOpen(false);
+    chatStore.removeConversation(removedId);
+    navigate(fallbackTarget, { replace: true });
+    toast.success(kind === "dissolve" ? "已解散小组" : "已退出小组");
+    await Promise.all([
+      chat.refresh(),
+      client.invalidateQueries({ queryKey: ["attention"] }),
+      client.invalidateQueries({ queryKey: ["members"] }),
+    ]);
+  }
   async function signOut() {
     const sessionToken = api.csrfToken;
     const currentUserId = user?.id;
@@ -379,13 +347,8 @@ export function Shell() {
     try {
       await logout();
       if (!api.csrfToken) {
-        clearPersistedShellNav(currentUserId);
+        nav.clearForUser(currentUserId);
         clearPersistedAppPaneWidth(currentUserId);
-        lastConversationByWorkspace.current = {};
-        setRememberedByWorkspace({});
-        lastChatRoute.current = "";
-        setLastChatPath("");
-        setRecentConversationIds([]);
         navigate("/login");
       }
     } catch (e) {
@@ -397,7 +360,7 @@ export function Shell() {
   function selectWorkspace(space: Workspace) {
     const target = resolveWorkspaceTarget({
       space,
-      rememberedId: lastConversationByWorkspace.current[space.id],
+      rememberedId: nav.lastConversationByWorkspace.current[space.id],
       conversations: snapshot.conversations,
       isManagement,
       currentWorkspaceId: workspace?.id,
@@ -577,6 +540,8 @@ export function Shell() {
             setError("");
           }}
           onManageGroup={() => setManagingGroup(true)}
+          onLeaveGroup={() => setGroupExit("leave")}
+          onDissolveGroup={() => setGroupExit("dissolve")}
           onInvite={() => setDialog("invite")}
         />
       )}
@@ -637,7 +602,20 @@ export function Shell() {
       {shortcutsOpen && <KeyboardShortcutsModal onClose={closeShortcuts} />}
       {managingGroup && conversation?.type === "group" && conversation.canManageMembers && (
         <GroupMembersDialog
-          conversation={conversation} members={members} onClose={closeGroupManager}
+          conversation={conversation}
+          members={members}
+          onClose={closeGroupManager}
+          onDissolved={(id) => completeGroupExit("dissolve", id)}
+        />
+      )}
+      {groupExit && conversation?.type === "group" && (
+        <GroupExitModal
+          kind={groupExit}
+          conversation={conversation}
+          userId={user!.id}
+          isWorkspaceOwner={owner}
+          onClose={() => setGroupExit(null)}
+          onCompleted={completeGroupExit}
         />
       )}
       {removing && (
