@@ -296,7 +296,7 @@
     flex: 1;
     overflow: auto;
     width: 100%;
-    max-width: 1160px;
+    max-width: 960px;
     margin: 0 auto;
     scrollbar-width: thin;
     scrollbar-color: var(--scrollbar-thumb) transparent;
@@ -468,22 +468,6 @@
     color: var(--text-subtle);
     min-height: 280px;
     gap: 16px;
-  }
-  .agents-empty-icon {
-    width: 77px;
-    height: 77px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: var(--r-xl);
-    background: var(--lavender);
-    border: 1px solid var(--border-strong);
-    transform: rotate(-6deg);
-    color: var(--text-subtle);
-    margin-bottom: 3px;
-  }
-  .agents-empty-icon > svg {
-    transform: rotate(6deg);
   }
   .agents-empty > h2 {
     font-weight: 600;
@@ -673,5 +657,32 @@
   .agent-detail-view {
     display: flex;
     flex-direction: column;
+  }
+
+  .agent-catalog-notice {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: -6px 0 14px;
+    padding: 9px 12px;
+    border-radius: var(--r-sm);
+    border: 1px solid var(--border-strong);
+    background: var(--lavender);
+    color: var(--brand-text);
+    font-size: var(--font-sm);
+    line-height: 1.5;
+  }
+
+  .agent-catalog-notice a {
+    font-weight: 600;
+    text-decoration: underline;
+  }
+
+  .agent-catalog-notice.error {
+    border-color: var(--danger-border);
+    background: var(--danger-bg);
+    color: var(--danger-text);
   }
 }

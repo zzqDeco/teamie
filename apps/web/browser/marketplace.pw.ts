@@ -37,23 +37,29 @@ test("keyboard enters and leaves the cross-origin app, then closes the pane", as
   expect(state.errors).toEqual([]);
 });
 
-test("capability refresh closes the pane and never leaves chat inert or reopens it", async ({ page }) => {
+test("capability refresh degrades active app to read-only list and never leaves chat inert", async ({ page }) => {
   const state = await marketplaceFixture(page);
+  const overlay = page.viewportSize()!.width < 1250;
   const open = page.getByRole("button", { name: "群聊应用", exact: true });
   await open.click();
+  const pane = page.locator('aside[aria-label="群聊应用"]');
   await page.frameLocator("iframe").locator("#app-input").focus();
   state.enabled = false;
   await page.clock.fastForward(61000);
-  await expect(page.locator('aside[aria-label="群聊应用"]')).toHaveCount(0);
+  await expect(page.locator("iframe")).toHaveCount(0);
+  await expect(pane.getByRole("list", { name: "已安装群聊应用只读列表" })).toBeVisible();
+  await expect(pane.getByRole("button", { name: "管理工作区应用", exact: true })).toHaveCount(0);
+  if (overlay) {
+    await pane.getByRole("button", { name: "关闭群聊应用面板", exact: true }).click();
+    await expect(pane).toHaveCount(0);
+  }
   await expect(page.locator("main")).not.toHaveAttribute("inert");
-  await expect(page.locator(".app-shell")).not.toHaveClass(/details-open/);
-  await expect(open).toHaveCount(0);
   await page.locator("main textarea").fill("chat works with apps disabled");
   state.enabled = true;
   await page.clock.fastForward(61000);
-  await expect(open).toBeVisible();
-  await expect(page.locator("iframe")).toHaveCount(0);
-  await open.click();
+  if (overlay) {
+    await open.click();
+  }
   await expect(page.frameLocator("iframe").locator("#app-input")).toBeVisible();
   expect(state.errors).toEqual([]);
 });

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { CheckCheck, Copy } from "lucide-react";
+import { copyToClipboard } from "../clipboard";
 import { Button, ConfirmDialog, Modal, Notice } from "../ui";
 import { ICON } from "../icons";
 
@@ -59,7 +60,7 @@ export function IssuedSecretDialog({
   const [copyError, setCopyError] = useState("");
   async function copy() {
     try {
-      await navigator.clipboard.writeText(secret);
+      await copyToClipboard(secret);
       setCopied(true);
       setCopyError("");
     } catch {

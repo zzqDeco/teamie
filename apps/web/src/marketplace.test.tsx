@@ -196,6 +196,11 @@ describe("Marketplace platform admin catalog", () => {
     expect(document.body.textContent).toContain("协作棋盘");
     expect(document.body.textContent).toContain("board-room");
 
+    const openOfficialModalBtn = [...document.body.querySelectorAll<HTMLButtonElement>("button")].find(
+      (b) => b.textContent?.includes("上架官方应用"),
+    )!;
+    await press(openOfficialModalBtn);
+
     const inputs = [...document.body.querySelectorAll<HTMLInputElement>("form input")];
     await typeInput(inputs[0], "群聊竞答");
     await typeInput(inputs[1], "quiz-hub");

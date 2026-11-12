@@ -27,7 +27,7 @@ import {
   presenceClassName,
   usePresenceMap,
 } from "./engagement-store";
-import { BadgePill, Button, Notice } from "./ui";
+import { BadgePill, Button, DataList, EmptyState, Notice } from "./ui";
 import { ICON } from "./icons";
 
 export function WorkspaceMembers({
@@ -143,7 +143,7 @@ export function WorkspaceMembers({
           <p>正在加载成员…</p>
         </div>
       ) : filtered.length ? (
-        <ul className="member-directory-list" aria-label="团队成员">
+        <DataList label="团队成员" className="member-directory-list">
           {filtered.map((member) => {
             const agent = agents.find(
               (item) => item.principalId === member.userId,
@@ -225,13 +225,15 @@ export function WorkspaceMembers({
               </li>
             );
           })}
-        </ul>
+        </DataList>
       ) : (
-        <div className="members-empty" role="status">
-          <Users size={ICON.xl} />
-          <h2>{search ? "没有找到成员" : "暂无成员"}</h2>
-          {search && <p>试试其他名称或 Agent 创建者。</p>}
-        </div>
+        <EmptyState
+          role="status"
+          headingLevel="h2"
+          icon={<Users size={ICON.xl} />}
+          title={search ? "没有找到成员" : "暂无成员"}
+          description={search ? "试试其他名称或 Agent 创建者。" : undefined}
+        />
       )}
       {groupMember && data?.capabilities["im.group.create"] && (
         <AddParticipantToGroupDialog

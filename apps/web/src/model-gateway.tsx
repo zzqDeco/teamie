@@ -6,11 +6,9 @@ import {
   Clock3,
   KeyRound,
   LoaderCircle,
-  Pencil,
   Plus,
   Server,
   ShieldCheck,
-  Trash2,
 } from "lucide-react";
 import { api, ApiError } from "@teamie/api-client";
 import type {
@@ -31,13 +29,12 @@ import type {
   ModelProfileFormValue,
   ProviderProfileFormValue,
 } from "./agent-management";
-import { AgentEnabledStatus, WebSearchConfigurationFields } from "./agent-ui";
+import { WebSearchConfigurationFields } from "./agent-ui";
 import type { WebSearchFormValue } from "./agent-ui";
-import { Button, Notice } from "./ui";
+import { Button, EmptyState, Notice } from "./ui";
 import { ICON } from "./icons";
 import {
   clearModelsLastTest,
-  GatewayModelCard,
   resolveModelLastTest,
 } from "./admin/model-last-test";
 import type { ModelTestOutcome } from "./admin/model-last-test";
@@ -45,6 +42,8 @@ import { ModelProfileDialog } from "./admin/model-profile-dialog";
 import { ProviderProfileDialog } from "./admin/provider-profile-dialog";
 import { GatewayConfirmDialog } from "./admin/gateway-confirm";
 import type { GatewayConfirmation } from "./admin/gateway-confirm";
+import { GatewayProviderCard } from "./admin/gateway-provider-card";
+import { GatewayRoutingSummary } from "./admin/gateway-routing-summary";
 
 export function ModelGatewaySettings() {
   const { user } = useAuth();
@@ -52,6 +51,7 @@ export function ModelGatewaySettings() {
   const admin = canConfigureModelGateway(user);
   const [denied, setDenied] = useState(false),
     [searchBusy, setSearchBusy] = useState(false),
+    [searchError, setSearchError] = useState(""),
     [testing, setTesting] = useState(false),
     [providerBusyId, setProviderBusyId] = useState<string | null>(null),
     [modelBusyId, setModelBusyId] = useState<string | null>(null),
@@ -108,7 +108,7 @@ export function ModelGatewaySettings() {
   async function save(value: WebSearchFormValue): Promise<boolean> {
     const sessionToken = api.csrfToken;
     setSearchBusy(true);
-    setError("");
+    setSearchError("");
     setSaved(false);
     try {
       const response = await api.saveWebSearch(webSearchInput(value));
@@ -119,7 +119,7 @@ export function ModelGatewaySettings() {
     } catch (e) {
       if (sessionToken === api.csrfToken) {
         if (e instanceof ApiError && e.status === 403) setDenied(true);
-        setError(gatewayFailureText(e));
+        setSearchError(gatewayFailureText(e));
       }
       return false;
     } finally {
@@ -237,6 +237,7 @@ export function ModelGatewaySettings() {
         defaultModelId: profileId,
       });
       if (sessionToken === api.csrfToken) {
+        setConfirmation(null);
         invalidateTests([]);
         await syncGatewayResponse(response);
         setSaved(true);
@@ -246,6 +247,16 @@ export function ModelGatewaySettings() {
     } finally {
       setModelBusyId(null);
     }
+  }
+  function requestSetDefaultModel(item: AdminModelProfile, provider: AdminModelProvider) {
+    const effectiveEnabled =
+      item.effectiveEnabled ?? (item.enabled && provider.enabled);
+    if (!item.configured || !effectiveEnabled) {
+      setError("");
+      setConfirmation({ kind: "setUnavailableDefault", model: item });
+      return;
+    }
+    void handleSetDefaultModel(item.id);
   }
   async function handleDeleteModel(profileId: string) {
     const sessionToken = api.csrfToken;
@@ -426,6 +437,11 @@ export function ModelGatewaySettings() {
               </p>
             </div>
           </div>
+          <GatewayRoutingSummary
+            routing={query.data.routing}
+            defaultModelId={query.data.defaultModelId}
+            models={models}
+          />
           <Notice>{confirmation ? "" : error}</Notice>
           <Notice kind="success">{saved ? "配置已保存。" : ""}</Notice>
           <Notice kind={test?.ok ? "success" : "error"}>
@@ -466,10 +482,11 @@ export function ModelGatewaySettings() {
               </div>
             </div>
             {providers.length === 0 ? (
-              <div className="gateway-provider-empty">
-                <Server size={ICON.xl} />
-                <p>暂未配置模型服务商。请先添加服务商连接，再在其下添加多个可用模型。</p>
-              </div>
+              <EmptyState
+                icon={<Server size={ICON.xl} />}
+                title="暂未配置模型服务商"
+                description="请先添加服务商连接，再在其下添加多个可用模型。"
+              />
             ) : (
               <div className="gateway-providers-list">
                 {providers.map((provider) => {
@@ -477,99 +494,30 @@ export function ModelGatewaySettings() {
                     (m) => (m.providerId || m.id) === provider.id,
                   );
                   return (
-                    <div key={provider.id} className="gateway-provider-card">
-                      <div className="gateway-provider-header">
-                        <div className="gateway-provider-info">
-                          <div className="gateway-provider-title">
-                            <Server size={ICON.xs} />
-                            <b>{provider.displayName}</b>
-                            <code>{provider.id}</code>
-                            <AgentEnabledStatus enabled={provider.enabled} />
-                            <span
-                              className={`gateway-key-badge ${provider.hasApiKey ? "configured" : "missing"}`}
-                            >
-                              {provider.hasApiKey ? "已配置密钥" : "缺少密钥"}
-                            </span>
-                          </div>
-                          <small>
-                            地址：{provider.baseUrl || "未配置"} · 关联模型：
-                            {providerModels.length} 个
-                          </small>
-                        </div>
-                        <div className="gateway-provider-actions">
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            onClick={() =>
-                              setCreatingForProviderId(provider.id)
-                            }
-                          >
-                            <Plus size={ICON.xs} />
-                            添加模型
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            disabled={providerBusyId === provider.id}
-                            onClick={() => setEditingProvider(provider)}
-                          >
-                            <Pencil size={ICON.xs} />
-                            编辑服务商
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            className="danger-text"
-                            disabled={
-                              providerBusyId === provider.id ||
-                              providerModels.length > 0
-                            }
-                            title={
-                              providerModels.length > 0
-                                ? "请先迁移或移除该服务商下的模型后再删除"
-                                : "删除服务商"
-                            }
-                            onClick={() => {
-                              setError("");
-                              setConfirmation({ kind: "deleteProvider", provider });
-                            }}
-                          >
-                            <Trash2 size={ICON.xs} />
-                            删除服务商
-                          </Button>
-                        </div>
-                      </div>
-                      {providerModels.length === 0 ? (
-                        <p className="gateway-provider-models-empty">
-                          该服务商暂未添加模型，点击「添加模型」即可直接复用连接与密钥。
-                        </p>
-                      ) : (
-                        <div className="gateway-models-list">
-                          {providerModels.map((item) => (
-                            <GatewayModelCard
-                              key={item.id}
-                              item={item}
-                              provider={provider}
-                              inMemoryTest={modelTests[item.id]}
-                              busy={modelBusyId === item.id}
-                              testing={Boolean(testingModels[item.id])}
-                              onSetDefault={() =>
-                                void handleSetDefaultModel(item.id)
-                              }
-                              onTest={() => void handleTestModel(item.id)}
-                              onEdit={() => setEditingModel(item)}
-                              onDelete={() => {
-                                setError("");
-                                setConfirmation({
-                                  kind: "deleteModel",
-                                  model: item,
-                                });
-                              }}
-                            />
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                    <GatewayProviderCard
+                      key={provider.id}
+                      provider={provider}
+                      models={providerModels}
+                      providerBusy={providerBusyId === provider.id}
+                      modelBusyId={modelBusyId}
+                      modelTests={modelTests}
+                      testingModels={testingModels}
+                      onAddModel={() => setCreatingForProviderId(provider.id)}
+                      onEditProvider={() => setEditingProvider(provider)}
+                      onDeleteProvider={() => {
+                        setError("");
+                        setConfirmation({ kind: "deleteProvider", provider });
+                      }}
+                      onRequestSetDefaultModel={(item) =>
+                        requestSetDefaultModel(item, provider)
+                      }
+                      onTestModel={(id) => void handleTestModel(id)}
+                      onEditModel={(item) => setEditingModel(item)}
+                      onDeleteModel={(item) => {
+                        setError("");
+                        setConfirmation({ kind: "deleteModel", model: item });
+                      }}
+                    />
                   );
                 })}
               </div>
@@ -579,7 +527,7 @@ export function ModelGatewaySettings() {
             key={`${user!.id}:${query.data.webSearch.updatedAt}`}
             initial={query.data.webSearch}
             onSave={save}
-            error={error}
+            error={searchError}
             busy={searchBusy}
           />
           <div className="gateway-test-panel">
@@ -625,14 +573,20 @@ export function ModelGatewaySettings() {
           {confirmation && (
             <GatewayConfirmDialog
               confirmation={confirmation}
-              busy={confirmation.kind === "deleteProvider"
-                ? providerBusyId === confirmation.provider.id
-                : modelBusyId === confirmation.model.id}
+              busy={
+                confirmation.kind === "deleteProvider"
+                  ? providerBusyId === confirmation.provider.id
+                  : modelBusyId === confirmation.model.id
+              }
               error={error}
               onCancel={() => setConfirmation(null)}
-              onConfirm={() => void (confirmation.kind === "deleteProvider"
-                ? handleDeleteProvider(confirmation.provider.id)
-                : handleDeleteModel(confirmation.model.id))}
+              onConfirm={() =>
+                void (confirmation.kind === "deleteProvider"
+                  ? handleDeleteProvider(confirmation.provider.id)
+                  : confirmation.kind === "setUnavailableDefault"
+                    ? handleSetDefaultModel(confirmation.model.id)
+                    : handleDeleteModel(confirmation.model.id))
+              }
             />
           )}
           {editingModel && (

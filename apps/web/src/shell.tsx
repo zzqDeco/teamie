@@ -292,16 +292,21 @@ export function Shell() {
     (initialMessageId && initialMessageId !== viewKey.target)
   )
     setViewKey({ conversation: viewConversationId, target: initialMessageId });
-  const appsAvailable = marketplaceEnabled && !isManagement && !routes.isNotFound && !!workspace && conversation?.type === "group";
+  const appsAvailable = !isManagement && !routes.isNotFound && !!workspace && conversation?.type === "group";
   const appsVisible = appsOpen && !details && appsAvailable;
   const membersVisible = details && !isManagement && !routes.isNotFound && !!workspace && !!conversation;
   const rightPaneVisible = appsVisible || membersVisible;
   useEffect(() => {
+    if (user) {
+      client.setQueryData(["capability", "im.marketplace.enabled", user.id], marketplaceEnabled);
+    }
     if (!appsAvailable) {
       setAppsOpen(false);
       setManagingWorkspaceApps(false);
+    } else if (!marketplaceEnabled) {
+      setManagingWorkspaceApps(false);
     }
-  }, [appsAvailable]);
+  }, [appsAvailable, client, marketplaceEnabled, user]);
   useShellViewportAndFocus({
     navigationRef, membersRef, mobile, overlayMembers, sidebar, details: rightPaneVisible,
     hasOverlayModal, hasConversation: !!conversation, pathname: location.pathname,
@@ -509,7 +514,7 @@ export function Shell() {
             membersOpen={details}
                 appsOpen={appsVisible}
             onApps={
-              conversation.type === "group" && marketplaceEnabled
+              conversation.type === "group"
                 ? () => {
                     setSidebar(false);
                     setDetails(false);
@@ -569,7 +574,7 @@ export function Shell() {
           onOpenWorkspaceApps={() => setManagingWorkspaceApps(true)}
         />
       )}
-      {managingWorkspaceApps && appsAvailable && workspace && (
+      {managingWorkspaceApps && marketplaceEnabled && appsAvailable && workspace && (
         <WorkspaceMarketplaceModal
           workspace={workspace}
           isOwner={owner}

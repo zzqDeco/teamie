@@ -8,7 +8,7 @@ import type { Announcement, User } from "@teamie/api-client";
 import { useAuth } from "./auth";
 import { errorText } from "./errors";
 import { MessageBody } from "./markdown";
-import { BadgePill, Button, Modal, Notice } from "./ui";
+import { BadgePill, Button, EmptyState, Modal, Notice } from "./ui";
 import { ICON } from "./icons";
 import {
   announcementsHistoryQueryKey,
@@ -295,11 +295,11 @@ function AdminAnnouncementsManager({
             </Button>
           </div>
         ) : items.length === 0 ? (
-          <div className="admin-empty">
-            <Megaphone size={ICON.xl} />
-            <h3>暂无历史公告</h3>
-            <p>发布第一条平台公告后，所有成员与已启用 Agent 都会收到通知。</p>
-          </div>
+          <EmptyState
+            icon={<Megaphone size={ICON.xl} />}
+            title="暂无历史公告"
+            description="发布第一条平台公告后，所有成员与已启用 Agent 都会收到通知。"
+          />
         ) : (
           <>
             {items.map((item, idx) => (

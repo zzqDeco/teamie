@@ -20,7 +20,7 @@ import type {
 } from "@teamie/api-client";
 import { useAuth } from "./auth";
 import { errorText } from "./errors";
-import { Button, ConfirmDialog, IconButton, Notice } from "./ui";
+import { Button, ConfirmDialog, EmptyState, IconButton, Notice } from "./ui";
 import { toast } from "./toast";
 import { ICON } from "./icons";
 export type InviteStatus = "available" | "used" | "revoked" | "expired";
@@ -287,16 +287,14 @@ export function PlatformInvitations() {
             </Button>
           </div>
         ) : invites.length === 0 ? (
-          <div className="admin-empty">
-            <span>
-              <UserPlus size={ICON.xl} />
-            </span>
-            <h3>暂无邀请码</h3>
-            <p>点击上方按钮创建注册邀请。</p>
-          </div>
+          <EmptyState
+            icon={<UserPlus size={ICON.xl} />}
+            title="暂无邀请码"
+            description="点击上方按钮创建注册邀请。"
+          />
         ) : (
           <div className="admin-table-wrap">
-            <table className="admin-invites-table">
+            <table className="admin-invites-table data-table">
               <thead>
                 <tr>
                   <th>创建时间 / 编号</th>

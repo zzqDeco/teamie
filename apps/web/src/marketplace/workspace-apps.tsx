@@ -5,7 +5,7 @@ import { Blocks, Code2 } from "lucide-react";
 import { api } from "@teamie/api-client";
 import type { DeveloperMarketplaceApp, MarketplaceApp, Workspace } from "@teamie/api-client";
 import { errorText } from "../errors";
-import { BadgePill, Button, ConfirmDialog, Notice } from "../ui";
+import { BadgePill, Button, ConfirmDialog, DataList, EmptyState, Notice } from "../ui";
 import { toast } from "../toast";
 import { ICON } from "../icons";
 
@@ -177,7 +177,9 @@ export function WorkspaceAppsPanel({
   return (
     <div className="workspace-apps">
       {!marketplaceEnabled && (
-        <Notice kind="info">应用市场已由平台关闭，已安装的应用仅供查看。</Notice>
+        <Notice kind="info">
+          应用市场已由平台关闭（平台当前已暂停应用写入与新会话），已安装的应用仅供只读查看。
+        </Notice>
       )}
       {marketplaceEnabled && !isOwner && (
         <p className="field-help workspace-apps-hint">
@@ -194,14 +196,15 @@ export function WorkspaceAppsPanel({
             {retryButton(() => void installedQuery.refetch())}
           </div>
         ) : installedApps.length === 0 ? (
-          <div className="workspace-apps-empty">
-            <Blocks size={ICON.lg} aria-hidden="true" />
-            <p className="muted">「{workspace.name}」尚未安装应用。</p>
-          </div>
+          <EmptyState
+            icon={<Blocks size={ICON.lg} />}
+            title="尚未安装应用"
+            description={`「${workspace.name}」尚未安装应用。`}
+          />
         ) : (
-          <ul className="member-directory-list" aria-label="已安装的应用">
+          <DataList label="已安装的应用" className="member-directory-list">
             {installedApps.map((app) => renderAppRow(app, { installed: true }))}
-          </ul>
+          </DataList>
         )}
       </section>
       {canManage && (
@@ -215,13 +218,15 @@ export function WorkspaceAppsPanel({
               {retryButton(() => void catalogQuery.refetch())}
             </div>
           ) : installableApps.length === 0 ? (
-            <p className="muted">
-              {catalogApps.length ? "目录中的应用都已安装。" : "平台目录中暂无可用应用。"}
-            </p>
+            <EmptyState
+              icon={<Blocks size={ICON.lg} />}
+              title={catalogApps.length ? "目录应用均已安装" : "暂无可选应用"}
+              description={catalogApps.length ? "目录中的应用都已安装。" : "平台目录中暂无可用应用。"}
+            />
           ) : (
-            <ul className="member-directory-list" aria-label="工作空间可选应用">
+            <DataList label="工作空间可选应用" className="member-directory-list">
               {installableApps.map((app) => renderAppRow(app, { installed: false }))}
-            </ul>
+            </DataList>
           )}
         </section>
       )}
@@ -231,9 +236,9 @@ export function WorkspaceAppsPanel({
             <b>我的待测草稿应用</b>
             <small className="muted">仅在你创建的工作空间内可安装自测</small>
           </div>
-          <ul className="member-directory-list" aria-label="我的待测草稿应用">
+          <DataList label="我的待测草稿应用" className="member-directory-list">
             {testableDraftApps.map((app) => renderAppRow(app, { installed: false, isDraftOnly: true }))}
-          </ul>
+          </DataList>
         </section>
       )}
       {canManage && (

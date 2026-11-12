@@ -106,7 +106,7 @@ export function ShellManagementView({
       {routes.isUsersPage ? (
         <PlatformUsers />
       ) : routes.isMarketplacePage ? (
-        <PlatformMarketplace />
+        <PlatformMarketplace marketplaceEnabled={marketplaceEnabled} />
       ) : routes.isAnnouncementsAdminPage ? (
         <PlatformAnnouncementsAdmin
           publishEnabled={announcementsPublishEnabled}
@@ -117,6 +117,7 @@ export function ShellManagementView({
           appId={routes.developerAppId}
           isDocsPage={routes.isDeveloperDocsPage}
           workspaces={workspaces}
+          marketplaceEnabled={marketplaceEnabled}
         />
       ) : routes.isGatewayPage ? (
         <ModelGatewaySettings key={user.id} />

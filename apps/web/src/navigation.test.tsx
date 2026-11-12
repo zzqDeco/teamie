@@ -293,14 +293,19 @@ describe("member and account navigation", () => {
     expect(document.activeElement).toBe(launcher);
   });
 
-  it("closes an unavailable apps pane, clears inert, and does not reopen it on enable", async () => {
+  it("switches an open apps pane to read-only on disable and clears inert on close", async () => {
     vi.spyOn(api, "conversationApps").mockResolvedValue({ apps: [] });
     bootstrap.capabilities["im.marketplace.enabled"] = true;
     await mount("/app/w/team/c/group");
     await click('[aria-label="群聊应用"]');
     expect(find("main.app-main").hasAttribute("inert")).toBe(true);
+    expect(container.querySelector('aside [aria-label="管理工作区应用"]')).not.toBeNull();
     bootstrap = { ...bootstrap, capabilities: { ...bootstrap.capabilities, "im.marketplace.enabled": false } };
     await mount("/app/w/team/c/group");
+    const readonlyPane = find('aside[aria-label="群聊应用"]');
+    expect(readonlyPane.textContent).toContain("平台当前已关闭应用功能，已安装应用仅展示只读信息。");
+    expect(container.querySelector('aside [aria-label="管理工作区应用"]')).toBeNull();
+    await click('aside [aria-label="关闭群聊应用面板"]');
     expect(container.querySelector('aside[aria-label="群聊应用"]')).toBeNull();
     expect(find("main.app-main").hasAttribute("inert")).toBe(false);
     expect(find(".app-shell").classList.contains("details-open")).toBe(false);
@@ -313,7 +318,7 @@ describe("member and account navigation", () => {
     expect(find("main.app-main").hasAttribute("inert")).toBe(false);
   });
 
-  it("dismisses workspace app management when capability is revoked without closing members", async () => {
+  it("dismisses workspace app management when capability is revoked without breaking members", async () => {
     vi.spyOn(api, "conversationApps").mockResolvedValue({ apps: [] });
     vi.spyOn(api, "marketplaceCatalog").mockResolvedValue({ apps: [] });
     vi.spyOn(api, "workspaceApps").mockResolvedValue({ apps: [] });
@@ -325,6 +330,8 @@ describe("member and account navigation", () => {
     bootstrap = { ...bootstrap, capabilities: { ...bootstrap.capabilities, "im.marketplace.enabled": false } };
     await mount("/app/w/team/c/group");
     expect(container.querySelector(".modal")).toBeNull();
+    expect(container.querySelector('aside [aria-label="管理工作区应用"]')).toBeNull();
+    await click('aside [aria-label="关闭群聊应用面板"]');
     expect(find("main.app-main").hasAttribute("inert")).toBe(false);
     await click('[aria-label="查看会话成员"]');
     expect(find("main.app-main").hasAttribute("inert")).toBe(true);

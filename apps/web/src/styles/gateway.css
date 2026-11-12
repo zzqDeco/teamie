@@ -2,7 +2,49 @@
 
 @layer features {
   .gateway-view {
-    max-width: 840px;
+    max-width: 960px;
+  }
+  .gateway-routing-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-top: 12px;
+    padding: 12px 16px;
+    border-radius: var(--r-md);
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--text-muted);
+    font-size: var(--font-sm);
+    line-height: 1.65;
+  }
+  .gateway-routing-banner > svg {
+    margin-top: 2px;
+    flex-shrink: 0;
+  }
+  .gateway-routing-banner b {
+    display: block;
+    color: var(--text-strong);
+    font-weight: 600;
+  }
+  .gateway-routing-banner p {
+    margin: 2px 0 0;
+    overflow-wrap: anywhere;
+  }
+  .gateway-routing-banner.warning {
+    border-color: var(--warning-border);
+    background: var(--warning-bg);
+    color: var(--warning-text);
+  }
+  .gateway-routing-banner.warning b {
+    color: var(--warning-text);
+  }
+  .gateway-routing-banner.ok {
+    border-color: var(--success-border);
+    background: var(--surface);
+    color: var(--success-text);
+  }
+  .gateway-routing-banner.ok b {
+    color: var(--success-text);
   }
   .gateway-saved-state {
     display: flex;
@@ -138,18 +180,6 @@
     flex-wrap: wrap;
     gap: 8px;
     flex-shrink: 0;
-  }
-
-  .gateway-provider-empty {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 20px;
-    border: 1px dashed var(--border-strong);
-    border-radius: var(--r-md);
-    background: var(--surface);
-    color: var(--text-muted);
-    font-size: var(--font-base);
   }
 
   .gateway-providers-list {
@@ -459,5 +489,16 @@
 
   .gateway-configuration-form input {
     color: var(--text);
+  }
+
+  @media (pointer: coarse) {
+    .gateway-header-actions > .button,
+    .gateway-provider-actions > .button,
+    .gateway-model-actions > .button,
+    .gateway-test-panel > .button {
+      min-height: 44px;
+      min-width: 44px;
+      padding: 10px 14px;
+    }
   }
 }
