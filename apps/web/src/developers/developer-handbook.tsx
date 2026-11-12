@@ -1,11 +1,10 @@
-import { useRef, useState } from "react";
-import type { KeyboardEvent } from "react";
+import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { BookOpen, CheckCheck, Code2, Copy } from "lucide-react";
 import { copyToClipboard } from "../clipboard";
 import { ICON } from "../icons";
 import { toast } from "../toast";
-import { Button } from "../ui";
+import { Button, Tabs } from "../ui";
 
 type HandbookTopicId =
   | "architecture"
@@ -180,9 +179,8 @@ function SnippetBlock({ snippet }: { snippet: CodeSnippet }) {
 export function DeveloperHandbook() {
   const [searchParams, setSearchParams] = useSearchParams();
   const topic = resolveTopicId(searchParams.get("tab"));
-  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
-  function selectTopic(nextId: HandbookTopicId, focusIndex?: number) {
+  function selectTopic(nextId: HandbookTopicId) {
     const nextParams = new URLSearchParams(searchParams);
     if (nextId === "architecture") {
       nextParams.delete("tab");
@@ -190,29 +188,6 @@ export function DeveloperHandbook() {
       nextParams.set("tab", nextId);
     }
     setSearchParams(nextParams, { replace: true });
-    if (focusIndex !== undefined) {
-      tabRefs.current[focusIndex]?.focus();
-    }
-  }
-
-  function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
-    let targetIndex = -1;
-    if (event.key === "ArrowRight") {
-      targetIndex = (index + 1) % HANDBOOK_TABS.length;
-    } else if (event.key === "ArrowLeft") {
-      targetIndex = (index - 1 + HANDBOOK_TABS.length) % HANDBOOK_TABS.length;
-    } else if (event.key === "Home") {
-      targetIndex = 0;
-    } else if (event.key === "End") {
-      targetIndex = HANDBOOK_TABS.length - 1;
-    }
-    if (targetIndex !== -1) {
-      event.preventDefault();
-      const targetTab = HANDBOOK_TABS[targetIndex];
-      if (targetTab) {
-        selectTopic(targetTab.id, targetIndex);
-      }
-    }
   }
 
   return (
@@ -232,30 +207,19 @@ export function DeveloperHandbook() {
         </span>
       </div>
 
-      <div className="dev-handbook-nav" role="tablist" aria-label="手册章节切换">
-        {HANDBOOK_TABS.map((item, idx) => {
-          const selected = topic === item.id;
-          return (
-            <button
-              key={item.id}
-              ref={(el) => {
-                tabRefs.current[idx] = el;
-              }}
-              id={`handbook-tab-${item.id}`}
-              type="button"
-              role="tab"
-              aria-selected={selected}
-              aria-controls={`handbook-panel-${item.id}`}
-              tabIndex={selected ? 0 : -1}
-              className={`theme-option ${selected ? "active" : ""}`}
-              onClick={() => selectTopic(item.id)}
-              onKeyDown={(e) => handleTabKeyDown(e, idx)}
-            >
-              {item.label}
-            </button>
-          );
-        })}
-      </div>
+      <Tabs
+        className="dev-handbook-nav"
+        tabClassName="theme-option"
+        ariaLabel="手册章节切换"
+        value={topic}
+        onChange={selectTopic}
+        items={HANDBOOK_TABS.map((item) => ({
+          value: item.id,
+          label: item.label,
+          id: `handbook-tab-${item.id}`,
+          controlsId: `handbook-panel-${item.id}`,
+        }))}
+      />
 
       <section
         id={`handbook-panel-${topic}`}
@@ -267,16 +231,16 @@ export function DeveloperHandbook() {
           <>
             <h3>人类 Web UI + Agent MCP 对称双通道架构</h3>
             <p>
-              在 Teamie 群聊（小组对话）中，每个已安装的外部市场应用由你自行部署的<strong>同一后端状态机</strong>同时服务两类参与者：
+              在 Teamie 小组对话中，每个已安装的外部市场应用由你自行部署的<strong>同一后端状态机</strong>同时服务两类参与者：
             </p>
             <ul className="dev-handbook-list">
               <li>
-                <strong>人类成员通道（Web UI）：</strong>群聊右侧抽屉以跨源沙箱{" "}
+                <strong>人类成员通道（Web UI）：</strong>小组右侧抽屉以跨源沙箱{" "}
                 <code>iframe</code> 加载你的 <code>webUrl</code>，并通过{" "}
                 <code>postMessage</code> 注入短期签名的 <code>Context Token</code>。
               </li>
               <li>
-                <strong>Agent 成员通道（MCP Server）：</strong>群聊内的 Teamie Agent 自动以{" "}
+                <strong>Agent 成员通道（MCP Server）：</strong>小组内的 Teamie Agent 自动以{" "}
                 <code>Authorization: Bearer &lt;Context Token&gt;</code> 连接你的{" "}
                 <code>mcpUrl</code>（MCP Streamable HTTP <code>2025-03-26</code>），发现并调用{" "}
                 <code>mcp__&lt;slug&gt;__&lt;tool&gt;</code> 工具。
@@ -337,7 +301,7 @@ export function DeveloperHandbook() {
                 <code>displayName</code>：当前调用者在 Teamie 中的显示名称。
               </li>
               <li>
-                <code>workspaceId</code> / <code>conversationId</code>：所属工作空间 ID 与当前群聊会话 ID。
+                <code>workspaceId</code> / <code>conversationId</code>：所属工作空间 ID 与当前小组会话 ID。
               </li>
             </ul>
             <SnippetBlock snippet={SNIPPETS.jwtNode} />
@@ -349,7 +313,7 @@ export function DeveloperHandbook() {
           <>
             <h3>Web UI iframe 握手与无刷新凭证续期</h3>
             <p>
-              群聊右侧面板挂载你的 <code>webUrl</code> 后，遵循以下三类{" "}
+              小组右侧面板挂载你的 <code>webUrl</code> 后，遵循以下三类{" "}
               <code>window.postMessage</code> 标准事件：
             </p>
             <ul className="dev-handbook-list">
@@ -402,7 +366,7 @@ export function DeveloperHandbook() {
           <>
             <h3>多玩家/多 Agent 博弈的迷雾隔离（Fog-of-War）</h3>
             <p>
-              以「狼人杀」等非对称信息应用为例，群聊公屏是所有人类与 Agent 共享的公开讨论区，而<strong>底牌、夜间行动与阵营私密信息必须完全托管在你的外部应用状态机中</strong>：
+              以「狼人杀」等非对称信息应用为例，小组公屏是所有人类与 Agent 共享的公开讨论区，而<strong>底牌、夜间行动与阵营私密信息必须完全托管在你的外部应用状态机中</strong>：
             </p>
             <ul className="dev-handbook-list">
               <li>
@@ -411,7 +375,7 @@ export function DeveloperHandbook() {
                 <code>sub</code> 返回该玩家有权知晓的身份、队友与夜间结果，绝不返回上帝视角全量状态。
               </li>
               <li>
-                <strong>阶段锁与动作幂等：</strong>发言讨论走 Teamie 群聊消息；夜间行动、警长竞选投票、白天放逐投票全部走你的 Web UI 按钮或 MCP 工具，并在服务端校验当前阶段合法性。
+                <strong>阶段锁与动作幂等：</strong>发言讨论走 Teamie 小组消息；夜间行动、警长竞选投票、白天放逐投票全部走你的 Web UI 按钮或 MCP 工具，并在服务端校验当前阶段合法性。
               </li>
             </ul>
           </>
@@ -444,7 +408,7 @@ export function DeveloperHandbook() {
                 <code>initialize</code> 与 <code>tools/list</code>，且至少返回 1 个有效工具且无破坏状态副作用。
               </li>
               <li>
-                <strong>6. 自有空间实测闭环：</strong>已在你创建的工作空间群聊内完成人类 Web UI + Agent 同台联调，确认完结后前往{" "}
+                <strong>6. 自有空间实测闭环：</strong>已在你创建的工作空间小组内完成人类 Web UI + Agent 同台联调，确认完结后前往{" "}
                 <Link to="/app/developers">「我的应用」</Link> 点击提交审核。
               </li>
             </ul>

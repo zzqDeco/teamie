@@ -21,6 +21,7 @@ import type {
 import { canConfigureModelGateway } from "../agent-management";
 import { copyToClipboard } from "../clipboard";
 import { ICON } from "../icons";
+import { formatDateTime } from "../format-datetime";
 import {
   probeStageLabel,
   reviewActionLabel,
@@ -317,7 +318,7 @@ export function DeveloperAppSandboxSection({
     <section className="settings-form" aria-label="自有工作空间联调自测">
       <h3>步骤 3B · 安装到自有工作空间实测</h3>
       <p className="field-help">
-        无需等待审核，你可将当前草稿直接安装到自己创建的工作空间，在真实群聊中验证人类 Web UI 面板与 Agent MCP 工具同场交互。
+        无需等待审核，你可将当前草稿直接安装到自己创建的工作空间，在真实小组中验证人类 Web UI 面板与 Agent MCP 工具同场交互。
       </p>
       {ownedWorkspaces.length === 0 ? (
         <p className="muted">你尚未创建工作空间，请先在左侧栏创建一个用于联调的工作空间。</p>
@@ -436,7 +437,7 @@ export function DeveloperAppSubmissionSection({
             {reviews.map((item) => (
               <li key={item.id} className="dev-timeline-item">
                 <b>{reviewActionLabel(item.action)}</b> ·{" "}
-                <small>{new Date(item.createdAt).toLocaleString("zh-CN")}</small>
+                <small>{formatDateTime(item.createdAt, "stamp")}</small>
                 {item.note && <p className="field-help">{item.note}</p>}
               </li>
             ))}

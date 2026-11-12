@@ -682,7 +682,8 @@ export function SavedMessagesList({
       </ol>
       {hasMore && onLoadMore && (
         <Button
-          className="secondary attention-more"
+          variant="secondary"
+          className="attention-more"
           busy={loadingMore}
           disabled={loading || loadingMore}
           onClick={onLoadMore}

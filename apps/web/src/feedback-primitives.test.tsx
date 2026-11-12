@@ -9,10 +9,10 @@ import { api, ApiError } from "@teamie/api-client";
 import type { Session, User } from "@teamie/api-client";
 import { AuthProvider } from "./auth";
 import { PasswordField } from "./password-field";
-import { Join, Login } from "./public/auth-views";
+import { Join, Login, normalizeInviteInput } from "./public/auth-views";
 import { chatStore } from "./store";
 import { TOAST_DURATION, Toaster, toast } from "./toast";
-import { Button, Modal } from "./ui";
+import { Button, Field, Loading, Modal, Notice, SwitchField, Tabs } from "./ui";
 
 let host: HTMLDivElement;
 let root: Root;
@@ -145,6 +145,29 @@ describe("Toaster", () => {
     );
     expect(host.querySelectorAll(".toast")).toHaveLength(2);
   });
+
+  it("deduplicates identical active toast messages, supports persistent duration: 0, and keeps button text out of live regions", async () => {
+    vi.useFakeTimers();
+    await render(<Toaster />);
+    await act(async () => {
+      toast.error("网络异常", { duration: 0 });
+      toast.error("网络异常", { duration: 0 });
+      toast.success("已复制", { action: { label: "查看", onClick: () => {} } });
+    });
+    expect(host.querySelectorAll(".toast.error")).toHaveLength(1);
+    const assertive = find('[role="alert"]');
+    const polite = find('[role="status"]');
+    expect(assertive.textContent).toBe("网络异常");
+    expect(assertive.textContent).not.toContain("关闭通知");
+    expect(polite.textContent).toBe("已复制");
+    expect(polite.textContent).not.toContain("查看");
+    expect(polite.textContent).not.toContain("关闭通知");
+
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(host.querySelectorAll(".toast.error")).toHaveLength(1);
+  });
 });
 
 describe("Modal dismissal", () => {
@@ -258,9 +281,10 @@ describe("Button", () => {
       <>
         <Button busy variant="danger" size="sm" className="extra">删除</Button>
         <Button variant="ghost">更多</Button>
+        <Button size="lg">主行动</Button>
       </>,
     );
-    const [busy, ghost] = Array.from(host.querySelectorAll("button"));
+    const [busy, ghost, large] = Array.from(host.querySelectorAll("button"));
     expect(busy.getAttribute("aria-busy")).toBe("true");
     expect(busy.disabled).toBe(true);
     expect(busy.querySelector(".sr-only")?.textContent).toBe("处理中…");
@@ -270,6 +294,49 @@ describe("Button", () => {
     );
     expect(ghost.hasAttribute("aria-busy")).toBe(false);
     expect(ghost.className.split(" ")).toEqual(["button", "ghost"]);
+    expect(large.className.split(" ")).toEqual(["button", "large-button"]);
+  });
+
+  it("renders accessible Field, Tabs (arrow-key roving focus), SwitchField (role=switch), Notice (warning + dismiss), and Loading (role=status)", async () => {
+    const onTab = vi.fn();
+    const onSwitch = vi.fn();
+    const onDismiss = vi.fn();
+    await render(
+      <>
+        <Field label="空间名称" hint="最多 40 个字" error="请填写空间名称。" htmlFor="ws-name">
+          <input id="ws-name" />
+        </Field>
+        <Tabs
+          ariaLabel="管理分区"
+          value="a"
+          onChange={onTab}
+          items={[
+            { value: "a", label: "分区一" },
+            { value: "b", label: "分区二" },
+          ]}
+        />
+        <SwitchField checked={false} title="桌面通知" onChange={onSwitch} />
+        <Notice tone="warning" onDismiss={onDismiss}>请注意保存密钥</Notice>
+        <Loading label="正在准备…" />
+      </>,
+    );
+    expect(find(".field .field-error").getAttribute("role")).toBe("alert");
+    const tabs = Array.from(host.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+    expect(tabs[0].getAttribute("aria-selected")).toBe("true");
+    expect(tabs[0].tabIndex).toBe(0);
+    expect(tabs[1].tabIndex).toBe(-1);
+    await act(async () => {
+      tabs[0].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    });
+    expect(onTab).toHaveBeenCalledWith("b");
+    expect(document.activeElement).toBe(tabs[1]);
+
+    const sw = find<HTMLInputElement>('input[role="switch"]');
+    expect(sw.type).toBe("checkbox");
+    expect(find(".notice.warning").textContent).toContain("请注意保存密钥");
+    await act(async () => find<HTMLButtonElement>(".notice-dismiss").click());
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    expect(find(".loading-screen").getAttribute("role")).toBe("status");
   });
 });
 
@@ -293,8 +360,12 @@ describe("PasswordField", () => {
     const rules = find(".password-rules");
     expect(rules.getAttribute("aria-live")).toBe("polite");
     expect(input.getAttribute("aria-describedby")).toContain(rules.id);
-    await typeInto(input, "🔑".repeat(12));
+    // Empty input stays neutral ("待输入") rather than falsely marking <= 72 bytes as met.
     let items = Array.from(rules.querySelectorAll("li"));
+    expect(items.map((item) => item.classList.contains("met"))).toEqual([false, false]);
+    expect(items[1].textContent).toContain("待输入");
+    await typeInto(input, "🔑".repeat(12));
+    items = Array.from(rules.querySelectorAll("li"));
     expect(items.map((item) => item.classList.contains("met"))).toEqual([true, true]);
     await typeInto(input, "密".repeat(25));
     items = Array.from(rules.querySelectorAll("li"));
@@ -427,6 +498,18 @@ describe("auth forms", () => {
     expect(editable.type).toBe("text");
     expect(editable.value).toBe("example-url-invite");
     expect(document.activeElement).toBe(editable);
+
+    expect(
+      normalizeInviteInput("https://teamie.example/login?mode=register&inviteCode=extracted-code"),
+    ).toEqual({ code: "extracted-code", isWorkspaceJoinLink: false });
+    expect(
+      normalizeInviteInput("https://teamie.example/join/workspace-token"),
+    ).toEqual({
+      code: "https://teamie.example/join/workspace-token",
+      isWorkspaceJoinLink: true,
+    });
+    await typeInto(editable, "https://teamie.example/join/workspace-token");
+    expect(host.textContent).toContain("这是工作空间邀请链接");
   });
 
   it("keeps inputs focusable but read-only while submitting", async () => {

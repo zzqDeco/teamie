@@ -5,21 +5,21 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 6px;
-    margin-top: 6px;
+    gap: var(--space-1_5);
+    margin-top: var(--space-1_5);
   }
 
   .reaction-chip {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: var(--space-1_5);
     height: 24px;
-    padding: 0 8px;
+    padding: 0 var(--space-2);
     border-radius: var(--r-pill);
     border: 1px solid var(--border);
     background: var(--surface-sunken);
     color: var(--text-muted);
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     font-weight: 600;
     cursor: pointer;
     transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
@@ -53,8 +53,8 @@
     flex-wrap: wrap;
     width: max-content;
     align-items: center;
-    gap: 2px;
-    padding: 4px;
+    gap: var(--space-0_5);
+    padding: var(--space-1);
     border-radius: var(--r-md);
     background: var(--surface);
     border: 1px solid var(--border-strong);
@@ -85,15 +85,15 @@
     position: relative;
     display: inline-flex;
     align-items: center;
-    margin-top: 6px;
+    margin-top: var(--space-1_5);
   }
 
   .message-read-receipt {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    margin-top: 6px;
-    font-size: var(--font-xs);
+    gap: var(--space-1);
+    margin-top: var(--space-1_5);
+    font-size: var(--font-sm);
     font-weight: 500;
     color: var(--text-subtle);
     line-height: 1.4;
@@ -108,7 +108,7 @@
   }
 
   .message-read-receipt.is-interactive {
-    padding: 2px 8px;
+    padding: var(--space-0_5) var(--space-2);
     margin-left: -2px;
     border-radius: var(--r-xs);
     border: 1px solid transparent;
@@ -143,7 +143,7 @@
     left: 0;
     min-width: 230px;
     max-width: 300px;
-    padding: 12px 14px;
+    padding: var(--space-3) var(--space-3_5);
     border-radius: var(--r-md);
     background: var(--surface);
     border: 1px solid var(--border-strong);
@@ -151,28 +151,28 @@
     z-index: var(--z-popover);
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: var(--space-2_5);
   }
 
   .read-receipt-section {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--space-1_5);
   }
 
   .read-receipt-section + .read-receipt-section {
-    padding-top: 10px;
+    padding-top: var(--space-2_5);
     border-top: 1px solid var(--border);
   }
 
   .read-receipt-section > b {
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     font-weight: 600;
     color: var(--text-strong);
   }
 
   .read-receipt-section > span {
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     color: var(--text-subtle);
   }
 
@@ -182,14 +182,14 @@
     padding: 0;
     display: flex;
     flex-wrap: wrap;
-    gap: 5px;
+    gap: var(--space-1_5);
   }
 
   .read-receipt-section > ul > li {
-    padding: 3px 8px;
+    padding: var(--space-1) var(--space-2);
     border-radius: var(--r-xs);
     background: var(--lavender);
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     font-weight: 500;
     color: var(--brand-text);
   }
@@ -213,7 +213,7 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 2px;
+    gap: var(--space-0_5);
   }
   .reaction-picker-popover.expanded {
     flex-direction: column;
@@ -244,7 +244,7 @@
   }
   .emoji-panel-tabs {
     display: flex;
-    gap: 2px;
+    gap: var(--space-0_5);
     overflow-x: auto;
     border-bottom: 1px solid var(--border);
     padding-bottom: var(--space-1);
@@ -266,7 +266,7 @@
   .emoji-panel-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(32px, 1fr));
-    gap: 2px;
+    gap: var(--space-0_5);
     max-height: 232px;
     overflow-y: auto;
     overscroll-behavior: contain;

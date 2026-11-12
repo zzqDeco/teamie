@@ -34,14 +34,17 @@
     -webkit-tap-highlight-color: transparent;
     outline: none;
     color: var(--text);
-    border: 1px solid var(--border-strong);
+    border: 1px solid var(--field-border);
     background: var(--surface);
     border-radius: var(--r-md);
     width: 100%;
-    padding: 12px 14px;
+    padding: var(--space-3) var(--space-3_5);
     display: block;
-    transition: border-color 0.15s, box-shadow 0.15s;
+    transition:
+      border-color var(--dur-fast) var(--ease-standard),
+      box-shadow var(--dur-fast) var(--ease-standard);
     font-size: var(--font-base);
+    line-height: var(--lh-ui);
     min-width: 0;
   }
   select {
@@ -51,20 +54,29 @@
     appearance: none;
     -webkit-appearance: none;
     outline: none;
-    border: 1px solid var(--border-strong);
+    border: 1px solid var(--field-border);
     background-color: var(--surface);
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www%2Ew3%2Eorg/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23787282' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-image:
+      linear-gradient(45deg, transparent 50%, var(--text-subtle) 50%),
+      linear-gradient(135deg, var(--text-subtle) 50%, transparent 50%);
     background-repeat: no-repeat;
-    background-position: right 13px center;
-    background-size: 16px 16px;
+    background-position:
+      calc(100% - 19px) 50%,
+      calc(100% - 14px) 50%;
+    background-size:
+      5px 5px,
+      5px 5px;
     border-radius: var(--r-md);
     width: 100%;
     min-height: 44px;
-    padding: 10px 38px 10px 14px;
+    padding: var(--space-2_5) var(--space-10) var(--space-2_5) var(--space-3_5);
     display: block;
     cursor: pointer;
-    transition: border-color 0.15s, box-shadow 0.15s;
+    transition:
+      border-color var(--dur-fast) var(--ease-standard),
+      box-shadow var(--dur-fast) var(--ease-standard);
     font-size: var(--font-base);
+    line-height: var(--lh-ui);
     min-width: 0;
   }
   a {
@@ -89,7 +101,10 @@
   h1,
   h2,
   h3,
-  h4,
+  h4 {
+    margin: 0;
+    color: var(--text-strong);
+  }
   p {
     margin: 0;
   }
@@ -101,31 +116,35 @@
     vertical-align: middle;
   }
   small {
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
   }
   label {
     display: block;
     font-size: var(--font-sm);
     font-weight: 600;
-    margin-bottom: 20px;
-    line-height: 1.5;
+    color: var(--text-strong);
+    margin-bottom: var(--space-5);
+    line-height: var(--lh-ui);
   }
   input:not([type="checkbox"]) {
-    border: 1px solid var(--border-strong);
+    border: 1px solid var(--field-border);
     background: var(--surface);
     border-radius: var(--r-md);
     width: 100%;
-    padding: 12px 14px;
+    padding: var(--space-3) var(--space-3_5);
     display: block;
-    transition: border-color 0.15s, box-shadow 0.15s;
+    transition:
+      border-color var(--dur-fast) var(--ease-standard),
+      box-shadow var(--dur-fast) var(--ease-standard);
     font-size: var(--font-base);
+    line-height: var(--lh-ui);
   }
   label > input,
   label > select,
   label > textarea,
   label > .input-icon,
   label > .copy-input {
-    margin-top: 9px;
+    margin-top: var(--space-2);
   }
   html,
   #root {
@@ -140,15 +159,15 @@
   }
   @keyframes spin {
     to {
-        transform: rotate(360deg);
-      }
+      transform: rotate(360deg);
+    }
   }
   @keyframes fade-in {
     from {
-        opacity: 0;
-      }
-      to {
-        opacity: 1;
-      }
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
   }
 }

@@ -132,7 +132,7 @@ export function WorkspaceMembers({
       {loadError && (
         <div className="member-load-error">
           <Notice>部分成员暂时无法加载，请重试。</Notice>
-          <Button className="secondary" onClick={onRetry}>
+          <Button variant="secondary" onClick={onRetry}>
             重新加载
           </Button>
         </div>
@@ -143,7 +143,7 @@ export function WorkspaceMembers({
           <p>正在加载成员…</p>
         </div>
       ) : filtered.length ? (
-        <DataList label="团队成员" className="member-directory-list">
+        <DataList label="工作空间成员" className="member-directory-list">
           {filtered.map((member) => {
             const agent = agents.find(
               (item) => item.principalId === member.userId,
@@ -193,18 +193,18 @@ export function WorkspaceMembers({
                 <div className="member-directory-actions">
                   {!self && data?.capabilities["im.dm.create"] && (
                     <Button
-                      className="secondary"
+                      variant="secondary"
                       disabled={member.selectable === false || !!busyId}
                       busy={busyId === member.userId}
-                      aria-label={`与 ${member.displayName} 发起私聊`}
+                      aria-label={`与 ${member.displayName} 发起私信`}
                       onClick={() => void direct(member)}
                     >
-                      <MessageCircle size={ICON.sm} /> 私聊
+                      <MessageCircle size={ICON.sm} /> 私信
                     </Button>
                   )}
                   {!self && data?.capabilities["im.group.create"] && (
                     <Button
-                      className="secondary"
+                      variant="secondary"
                       disabled={member.selectable === false || !!busyId}
                       aria-label={`将 ${member.displayName} 添加到小组`}
                       onClick={() => setGroupMemberId(member.userId)}

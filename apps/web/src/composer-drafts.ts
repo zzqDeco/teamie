@@ -339,9 +339,9 @@ export function conversationName(
     conversation.memberIds
       .filter((id) => id !== userId)
       .map(
-        (id) => members.find((m) => m.userId === id)?.displayName || "团队伙伴",
+        (id) => members.find((m) => m.userId === id)?.displayName || "成员",
       )
-      .join("、") || "私聊"
+      .join("、") || "私信"
   );
 }
 

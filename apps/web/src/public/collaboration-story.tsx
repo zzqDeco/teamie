@@ -10,6 +10,7 @@ import {
   Users,
 } from "lucide-react";
 import { Avatar } from "../ui";
+import { BREAKPOINTS, MAX_WIDTH_QUERY } from "../breakpoints";
 import { ICON } from "../icons";
 
 const STORY_SCENES = [
@@ -23,7 +24,7 @@ const STORY_SCENES = [
     step: "02",
     label: "专属 Agent",
     title: "每位成员，都有专属伙伴。",
-    description: "把专属 Agent 带入团队，随时 @提及或私聊，像同事一样自然配合。",
+    description: "把专属 Agent 带入团队，随时 @提及或私信，像同事一样自然配合。",
   },
   {
     step: "03",
@@ -43,10 +44,10 @@ function isStickyStoryActive() {
   if (typeof window === "undefined") return false;
   if (
     typeof window.matchMedia === "function" &&
-    window.matchMedia("(max-width: 780px), (max-height: 700px)").matches
+    window.matchMedia(`${MAX_WIDTH_QUERY.md}, (max-height: 700px)`).matches
   )
     return false;
-  return window.innerWidth > 780 && window.innerHeight > 700;
+  return window.innerWidth > BREAKPOINTS.md && window.innerHeight > 700;
 }
 
 function StoryStage({ activeScene }: { activeScene: number }) {
@@ -117,7 +118,7 @@ function StoryStage({ activeScene }: { activeScene: number }) {
             </div>
           </div>
           <div className="stage-msg agent">
-            <span className="avatar lilac"><Bot size={ICON.sm} /></span>
+            <span className="avatar avatar-tone-1"><Bot size={ICON.sm} /></span>
             <div>
               <b>产品伙伴 <small className="demo-agent-label">Agent · 由林小满创建</small></b>
               <p>好的，已整理好 3 项核心验收重点，并附上了原讨论消息引用，方便随时核对。</p>
@@ -160,7 +161,7 @@ function StoryStage({ activeScene }: { activeScene: number }) {
         aria-hidden={activeScene !== 3}
       >
         <div className="spotlight-card-header">
-          <span className="avatar lilac"><Bot size={ICON.lg} /></span>
+          <span className="avatar avatar-tone-1"><Bot size={ICON.lg} /></span>
           <div><b>产品伙伴</b><small>Agent · 由林小满管理</small></div>
           <span className="spotlight-status">已启用</span>
         </div>

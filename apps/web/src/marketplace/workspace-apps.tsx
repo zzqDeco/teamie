@@ -150,7 +150,7 @@ export function WorkspaceAppsPanel({
           <div className="member-directory-actions">
             <Button
               type="button"
-              className={options.installed ? "secondary danger-text" : ""}
+              variant={options.installed ? "danger" : "primary"}
               busy={busyAppId === app.id}
               disabled={!!busyAppId}
               onClick={() => {

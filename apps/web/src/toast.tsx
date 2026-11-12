@@ -7,8 +7,10 @@ export type ToastKind = "success" | "error" | "info";
 export type ToastAction = { label: string; onClick: () => void };
 export type ToastOptions = {
   kind?: ToastKind;
-  /** Milliseconds before auto-dismissal. Defaults depend on kind. */
+  /** Milliseconds before auto-dismissal (`0` keeps it persistent). Defaults depend on kind. */
   duration?: number;
+  /** Alias for `duration`. */
+  durationMs?: number;
   action?: ToastAction;
 };
 export type ToastItem = {
@@ -17,6 +19,7 @@ export type ToastItem = {
   message: ReactNode;
   duration: number;
   action?: ToastAction;
+  revision: number;
 };
 
 /** Visible toast limit; the oldest toast is dropped when a new one arrives. */
@@ -24,7 +27,7 @@ export const TOAST_LIMIT = 3;
 export const TOAST_DURATION: Record<ToastKind, number> = {
   success: 4000,
   info: 4000,
-  error: 8000,
+  error: 16000,
 };
 const ACTION_MIN_DURATION = 6000;
 
@@ -45,15 +48,37 @@ function snapshot() {
 }
 function show(message: ReactNode, options: ToastOptions = {}) {
   const kind = options.kind || "info";
+  const explicitDuration = options.durationMs ?? options.duration;
   const duration =
-    options.duration ??
+    explicitDuration ??
     Math.max(
       TOAST_DURATION[kind],
       options.action ? ACTION_MIN_DURATION : 0,
     );
+  if (typeof message === "string") {
+    const existing = items.find(
+      (item) => item.kind === kind && item.message === message,
+    );
+    if (existing) {
+      items = items.map((item) =>
+        item.id === existing.id
+          ? {
+              ...item,
+              duration,
+              action: options.action ?? item.action,
+              revision: item.revision + 1,
+            }
+          : item,
+      );
+      emit();
+      return existing.id;
+    }
+  }
   const id = nextId++;
-  items = [...items, { id, kind, message, duration, action: options.action }]
-    .slice(-TOAST_LIMIT);
+  items = [
+    ...items,
+    { id, kind, message, duration, action: options.action, revision: 1 },
+  ].slice(-TOAST_LIMIT);
   emit();
   return id;
 }
@@ -111,6 +136,7 @@ function ToastCard({ item }: { item: ToastItem }) {
   const timer = useRef<number | undefined>(undefined);
   const hovered = useRef(false);
   const focused = useRef(false);
+  const persistent = item.duration <= 0 || !Number.isFinite(item.duration);
   const pause = useCallback(() => {
     if (timer.current === undefined) return;
     window.clearTimeout(timer.current);
@@ -121,21 +147,31 @@ function ToastCard({ item }: { item: ToastItem }) {
     );
   }, []);
   const resume = useCallback(() => {
-    if (timer.current !== undefined || hovered.current || focused.current)
+    if (
+      persistent ||
+      timer.current !== undefined ||
+      hovered.current ||
+      focused.current
+    )
       return;
     startedAt.current = Date.now();
     timer.current = window.setTimeout(
       () => dismiss(item.id),
       remaining.current,
     );
-  }, [item.id]);
+  }, [item.id, persistent]);
   useEffect(() => {
+    if (timer.current !== undefined) {
+      window.clearTimeout(timer.current);
+      timer.current = undefined;
+    }
+    remaining.current = item.duration;
     resume();
     return () => {
       if (timer.current !== undefined) window.clearTimeout(timer.current);
       timer.current = undefined;
     };
-  }, [resume]);
+  }, [item.duration, item.revision, resume]);
   const Icon = icons[item.kind];
   return (
     <div
@@ -188,9 +224,9 @@ function ToastCard({ item }: { item: ToastItem }) {
 }
 
 /**
- * Mount once near the root. The live regions are always present so that
- * assistive technology observes insertions: errors use role=alert, other
- * kinds a polite status region.
+ * Mount once near the root. Dedicated sr-only live regions announce only the
+ * toast message text (excluding interactive action/close buttons): errors use
+ * role=alert, other kinds a polite status region.
  */
 export function Toaster() {
   const current = useSyncExternalStore(subscribe, snapshot, snapshot);
@@ -198,16 +234,23 @@ export function Toaster() {
   const assertive = current.filter((item) => item.kind === "error");
   return (
     <section className="toaster" aria-label="通知">
-      <div className="toast-region" role="alert">
+      <div className="sr-only" role="alert">
         {assertive.map((item) => (
-          <ToastCard key={item.id} item={item} />
+          <span key={`${item.id}-${item.revision}`}>{item.message}</span>
         ))}
       </div>
-      <div className="toast-region" role="status" aria-live="polite">
+      <div className="sr-only" role="status" aria-live="polite">
         {polite.map((item) => (
-          <ToastCard key={item.id} item={item} />
+          <span key={`${item.id}-${item.revision}`}>{item.message}</span>
         ))}
       </div>
+      {current.length > 0 && (
+        <div className="toast-region">
+          {current.map((item) => (
+            <ToastCard key={item.id} item={item} />
+          ))}
+        </div>
+      )}
     </section>
   );
 }

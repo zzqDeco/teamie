@@ -137,7 +137,7 @@ export function MyAgents({
           headingLevel="h2"
           icon={<Bot size={ICON.xl} />}
           title="还没有 Agent"
-          description="创建 Agent，让它加入你的团队。"
+          description="创建 Agent，让它加入你的工作空间。"
           action={
             canCreate ? (
               <Button onClick={() => setCreating(true)}>
@@ -343,7 +343,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
       </Notice>
       <section className="agent-profile-section">
         <header>
-          <h2>团队可见范围</h2>
+          <h2>工作空间可见范围</h2>
           {editable && (
             <button onClick={() => setEditing(true)}>
               调整可见工作空间 <Pencil size={ICON.xs} />
@@ -362,11 +362,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
             <h3>删除 Agent</h3>
             <p>删除后停止工作，保留已有消息。</p>
           </div>
-          <Button
-            variant="secondary"
-            className="danger-text"
-            onClick={() => setDeleting(true)}
-          >
+          <Button variant="danger" onClick={() => setDeleting(true)}>
             <Trash2 size={ICON.xs} />
             删除 Agent
           </Button>

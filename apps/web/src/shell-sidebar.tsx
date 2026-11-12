@@ -350,7 +350,7 @@ export function ShellSidebar({
       ref={navigationRef}
       role={mobile && sidebar ? "dialog" : undefined}
       aria-modal={mobile && sidebar ? true : undefined}
-      aria-label={mobile ? "对话与团队导航" : undefined}
+      aria-label={mobile ? "对话与工作空间导航" : undefined}
       tabIndex={-1}
       inert={mobile && !sidebar}
     >
@@ -519,7 +519,7 @@ export function ShellSidebar({
         <div className="sidebar-scroll" ref={scrollRef}>
           <ConversationSection
             key={`${user.id}:${workspace?.id}:channels`}
-            title="团队频道"
+            title="频道"
             sectionId="channels"
             userId={user.id}
             count={channels.length}
@@ -545,7 +545,7 @@ export function ShellSidebar({
             ))}
             {channels.length === 0 && (
               <div className="sidebar-empty">
-                {workspace ? "暂无频道" : "暂无团队"}
+                {workspace ? "暂无频道" : "暂无工作空间"}
               </div>
             )}
           </ConversationSection>

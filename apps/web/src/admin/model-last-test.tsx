@@ -250,8 +250,7 @@ export function GatewayModelCard({
         </Button>
         <Button
           type="button"
-          variant="secondary"
-          className="danger-text"
+          variant="danger"
           disabled={busy}
           onClick={onDelete}
         >

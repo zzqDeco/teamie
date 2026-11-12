@@ -7,7 +7,7 @@
     align-items: center;
     justify-content: center;
     flex-direction: column;
-    gap: 24px;
+    gap: var(--space-6);
     background: var(--bg);
     color: var(--brand-text);
   }
@@ -19,7 +19,7 @@
     max-width: 440px;
   }
   .loading-screen > .brand {
-    margin-bottom: 22px;
+    margin-bottom: var(--space-5);
   }
   .loading-screen > .button {
     min-width: 160px;
@@ -30,9 +30,9 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 16px;
+    gap: var(--space-4);
     min-height: 240px;
-    padding: 32px;
+    padding: var(--space-8);
     text-align: center;
     color: var(--text-muted);
   }
@@ -51,9 +51,9 @@
   .route-loading-lines {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: var(--space-2_5);
     width: min(360px, 100%);
-    margin-top: 8px;
+    margin-top: var(--space-2);
   }
   .route-loading-lines span {
     display: block;
@@ -73,7 +73,7 @@
     align-items: center;
     justify-content: center;
     flex-direction: column;
-    gap: 25px;
+    gap: var(--space-6);
   }
   .not-found h1 {
     font-size: var(--font-5xl);
@@ -90,7 +90,7 @@
   }
   .public-header {
     height: 100px;
-    padding: 0 36px;
+    padding: 0 var(--space-8);
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -104,18 +104,18 @@
     align-items: center;
     font-size: var(--font-sm);
     color: var(--text-muted);
-    gap: 24px;
+    gap: var(--space-6);
   }
   .public-header nav > a:not(.button):hover {
     color: var(--purple);
   }
   .public-header .button {
-    margin-left: 2px;
+    margin-left: var(--space-0_5);
   }
   .hero {
     max-width: 1260px;
     margin: 0 auto;
-    padding: 60px 36px 75px;
+    padding: 60px var(--space-8) 75px;
     display: grid;
     grid-template-columns: 1fr 1.1fr;
     align-items: center;
@@ -123,22 +123,21 @@
     width: 100%;
     padding-top: 56px;
     padding-bottom: 84px;
-    gap: 52px;
+    gap: var(--space-12);
   }
   .hero-copy {
     position: relative;
     z-index: 1;
-    padding-bottom: 7px;
+    padding-bottom: var(--space-1_5);
     min-width: 0;
     padding-top: 0;
   }
   .hero h1 {
     font-weight: 700;
-    margin: 21px 0 21px;
+    margin: var(--space-4) 0 var(--space-5);
     font-size: clamp(34px, 4.5vw, 60px);
     line-height: 1.46;
-    letter-spacing: -1.6px;
-    margin-top: 15px;
+    letter-spacing: 0;
   }
   .hero-title-ending {
     display: inline-block;
@@ -165,17 +164,17 @@
     letter-spacing: 0.2px;
     font-size: var(--font-subhead);
     color: var(--text);
-    margin-top: 22px;
+    margin-top: var(--space-5);
   }
   .hero-actions {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 24px;
-    margin-top: 30px;
+    gap: var(--space-6);
+    margin-top: var(--space-7);
   }
   .hero-actions .button {
-    padding: 15px 23px;
+    padding: var(--space-3_5) var(--space-6);
     font-size: var(--font-base);
     min-height: 48px;
   }
@@ -187,7 +186,7 @@
     position: relative;
     isolation: isolate;
     min-width: 0;
-    padding: 24px 0 36px 12px;
+    padding: var(--space-6) 0 var(--space-8) var(--space-3);
     margin: 0;
   }
   .visual-grid {
@@ -214,13 +213,13 @@
     height: 47px;
     display: flex;
     align-items: center;
-    padding: 0 17px;
+    padding: 0 var(--space-4);
     border-bottom: 1px solid var(--border);
     justify-content: space-between;
   }
   .demo-title .brand {
-    gap: 5px;
-    letter-spacing: -1px;
+    gap: var(--space-1);
+    letter-spacing: -0.01em;
     font-size: var(--font-2xl);
   }
   .demo-title .brand-icon {
@@ -235,8 +234,8 @@
   .demo-title > span {
     display: flex;
     align-items: center;
-    gap: 6px;
-    font-size: var(--font-xs);
+    gap: var(--space-1_5);
+    font-size: var(--font-sm);
     color: var(--text-muted);
   }
   .demo-title .tiny-dot {
@@ -249,35 +248,35 @@
   }
   .demo-sidebar {
     background: var(--lavender);
-    padding: 16px 10px;
+    padding: var(--space-4) var(--space-2_5);
     border-right: 1px solid var(--border);
     width: 146px;
     flex-shrink: 0;
   }
   .demo-workspace {
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     font-weight: 600;
     color: var(--text-strong);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin: 0 3px 16px;
+    margin: 0 var(--space-1) var(--space-4);
   }
   .demo-sidebar > small {
     display: block;
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     font-weight: 600;
     color: var(--text-muted);
-    margin: 15px 7px 6px;
+    margin: var(--space-3_5) var(--space-1_5) var(--space-1_5);
   }
   .demo-channel {
-    padding: 7px 9px;
+    padding: var(--space-1_5) var(--space-2);
     display: flex;
     align-items: center;
-    gap: 7px;
+    gap: var(--space-1_5);
     color: var(--text);
-    font-size: var(--font-xs);
-    margin: 2px 0;
+    font-size: var(--font-sm);
+    margin: var(--space-0_5) 0;
     border-radius: var(--r-sm);
   }
   .demo-channel.selected {
@@ -289,20 +288,20 @@
     width: 17px;
     height: 17px;
     border-radius: var(--r-xs);
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
   }
   .demo-chat-heading {
     height: 44px;
     display: flex;
     align-items: center;
-    gap: 7px;
+    gap: var(--space-1_5);
     border-bottom: 1px solid var(--border);
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     color: var(--text);
-    margin-bottom: 14px;
+    margin-bottom: var(--space-3_5);
   }
   .demo-topic {
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     color: var(--text-muted);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -315,55 +314,55 @@
   .demo-message {
     display: flex;
     align-items: flex-start;
-    gap: 9px;
-    margin: 15px 0;
+    gap: var(--space-2);
+    margin: var(--space-3_5) 0;
   }
   .demo-message > .avatar {
     width: 26px;
     height: 26px;
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     border-radius: var(--r-md);
   }
   .demo-message b {
     display: block;
     font-weight: 600;
     color: var(--text-strong);
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
   }
   .demo-message b small {
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     color: var(--text-muted);
     font-weight: 500;
-    margin-left: 5px;
+    margin-left: var(--space-1_5);
   }
   .demo-message p {
-    margin-top: 4px;
+    margin-top: var(--space-1);
     color: var(--text);
     overflow-wrap: anywhere;
     line-height: 1.7;
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
   }
   .demo-input {
     color: var(--text-muted);
     border: 1px solid var(--border-strong);
     border-radius: var(--r-sm);
-    padding: 11px 12px;
-    margin: 20px 0 14px;
+    padding: var(--space-2_5) var(--space-3);
+    margin: var(--space-5) 0 var(--space-3_5);
     display: flex;
     align-items: center;
     justify-content: space-between;
     background: var(--surface);
-    gap: 10px;
-    font-size: var(--font-xs);
-    margin-top: 18px;
+    gap: var(--space-2_5);
+    font-size: var(--font-sm);
+    margin-top: var(--space-4);
   }
   .demo-label {
     text-align: center;
     color: var(--text-muted);
-    padding: 7px;
+    padding: var(--space-1_5);
     border-top: 1px solid var(--border);
     letter-spacing: 0.3px;
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
   }
   .floating-note {
     position: absolute;
@@ -371,8 +370,8 @@
     right: 6px;
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 13px 16px;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
     background: var(--surface);
     box-shadow: var(--shadow-md);
     border: 1px solid var(--warning-border);
@@ -396,15 +395,15 @@
   }
   .floating-note small {
     display: block;
-    margin-top: 3px;
+    margin-top: var(--space-1);
     color: var(--text-muted);
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     font-weight: 500;
   }
   .note-spark {
     font-size: var(--font-2xl);
     color: var(--warning-text);
-    margin-left: 6px;
+    margin-left: var(--space-1_5);
   }
   .hero-asterisk {
     position: absolute;
@@ -444,7 +443,7 @@
     max-width: 1188px;
     width: 100%;
     margin: 0 auto;
-    padding: 0 36px;
+    padding: 0 var(--space-8);
     display: grid;
     grid-template-columns: 0.96fr 1.04fr;
     gap: 64px;
@@ -475,9 +474,9 @@
     font-size: clamp(28px, 3.2vw, 38px);
     font-weight: 700;
     color: var(--text-strong);
-    letter-spacing: -1px;
-    line-height: 1.32;
-    margin-bottom: 16px;
+    letter-spacing: 0;
+    line-height: 1.35;
+    margin-bottom: var(--space-4);
   }
   .story-scene-item p {
     font-size: var(--font-lg);
@@ -488,14 +487,14 @@
   .story-controls {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 30px;
+    gap: var(--space-2);
+    margin-top: var(--space-7);
   }
   .story-step-pill {
     display: inline-flex;
     align-items: center;
-    gap: 7px;
-    padding: 8px 13px;
+    gap: var(--space-1_5);
+    padding: var(--space-2) var(--space-3);
     border-radius: var(--r-pill);
     border: 1px solid var(--border);
     background: var(--surface);
@@ -504,7 +503,7 @@
     transition: background 0.2s, color 0.2s, border-color 0.2s;
   }
   .story-step-pill b {
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     font-weight: 700;
     color: var(--text-muted);
   }
@@ -518,7 +517,7 @@
     color: var(--purple);
   }
   .story-progress-bar {
-    margin-top: 18px;
+    margin-top: var(--space-4);
     height: 3px;
     width: 100%;
     max-width: 440px;
@@ -536,7 +535,7 @@
   .story-stage-canvas {
     position: relative;
     min-height: 380px;
-    padding: 34px;
+    padding: var(--space-8);
     background: var(--lavender);
     border-radius: var(--r-xl);
     display: flex;
@@ -550,7 +549,7 @@
     background: var(--surface);
     border: 1px solid var(--border-strong);
     border-radius: var(--r-xl);
-    padding: 28px 30px;
+    padding: var(--space-7) var(--space-7);
     box-shadow: var(--shadow-lg);
     opacity: 0;
     transform: translate3d(0, 26px, 0) scale(0.97);

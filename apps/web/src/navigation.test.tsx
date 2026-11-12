@@ -254,7 +254,7 @@ describe("member and account navigation", () => {
       group,
     ]);
     await mount("/app/w/team/c/general");
-    const toggle = find<HTMLButtonElement>('.nav-section-toggle[aria-label^="团队频道"]');
+    const toggle = find<HTMLButtonElement>('.nav-section-toggle[aria-label^="频道"]');
     const content = document.getElementById(toggle.getAttribute("aria-controls")!)!;
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(toggle.getAttribute("aria-label")).toContain("有未读消息");
@@ -297,14 +297,14 @@ describe("member and account navigation", () => {
     vi.spyOn(api, "conversationApps").mockResolvedValue({ apps: [] });
     bootstrap.capabilities["im.marketplace.enabled"] = true;
     await mount("/app/w/team/c/group");
-    await click('[aria-label="群聊应用"]');
+    await click('[aria-label="小组应用"]');
     expect(find("main.app-main").hasAttribute("inert")).toBe(true);
-    expect(container.querySelector('aside [aria-label="管理工作区应用"]')).not.toBeNull();
+    expect(container.querySelector('aside [aria-label="管理工作空间应用"]')).not.toBeNull();
     bootstrap = { ...bootstrap, capabilities: { ...bootstrap.capabilities, "im.marketplace.enabled": false } };
     await mount("/app/w/team/c/group");
     const readonlyPane = find('aside[aria-label="群聊应用"]');
     expect(readonlyPane.textContent).toContain("平台当前已关闭应用功能，已安装应用仅展示只读信息。");
-    expect(container.querySelector('aside [aria-label="管理工作区应用"]')).toBeNull();
+    expect(container.querySelector('aside [aria-label="管理工作空间应用"]')).toBeNull();
     await click('aside [aria-label="关闭群聊应用面板"]');
     expect(container.querySelector('aside[aria-label="群聊应用"]')).toBeNull();
     expect(find("main.app-main").hasAttribute("inert")).toBe(false);
@@ -312,7 +312,7 @@ describe("member and account navigation", () => {
     bootstrap = { ...bootstrap, capabilities: { ...bootstrap.capabilities, "im.marketplace.enabled": true } };
     await mount("/app/w/team/c/group");
     expect(container.querySelector('aside[aria-label="群聊应用"]')).toBeNull();
-    await click('[aria-label="群聊应用"]');
+    await click('[aria-label="小组应用"]');
     expect(container.querySelector('aside[aria-label="群聊应用"]')).not.toBeNull();
     await click('aside [aria-label="关闭群聊应用面板"]');
     expect(find("main.app-main").hasAttribute("inert")).toBe(false);
@@ -324,13 +324,13 @@ describe("member and account navigation", () => {
     vi.spyOn(api, "workspaceApps").mockResolvedValue({ apps: [] });
     bootstrap.capabilities["im.marketplace.enabled"] = true;
     await mount("/app/w/team/c/group");
-    await click('[aria-label="群聊应用"]');
-    await click('aside [aria-label="管理工作区应用"]');
+    await click('[aria-label="小组应用"]');
+    await click('aside [aria-label="管理工作空间应用"]');
     expect(container.querySelector(".modal")).not.toBeNull();
     bootstrap = { ...bootstrap, capabilities: { ...bootstrap.capabilities, "im.marketplace.enabled": false } };
     await mount("/app/w/team/c/group");
     expect(container.querySelector(".modal")).toBeNull();
-    expect(container.querySelector('aside [aria-label="管理工作区应用"]')).toBeNull();
+    expect(container.querySelector('aside [aria-label="管理工作空间应用"]')).toBeNull();
     await click('aside [aria-label="关闭群聊应用面板"]');
     expect(find("main.app-main").hasAttribute("inert")).toBe(false);
     await click('[aria-label="查看会话成员"]');
@@ -343,7 +343,7 @@ describe("member and account navigation", () => {
   it("discards the apps pane when leaving its conversation", async () => {
     vi.spyOn(api, "conversationApps").mockResolvedValue({ apps: [] });
     await mount("/app/w/team/c/group");
-    await click('[aria-label="群聊应用"]');
+    await click('[aria-label="小组应用"]');
     await click('.navigation-sidebar a[href="/app/w/team/c/general"]');
     expect(container.querySelector('aside[aria-label="群聊应用"]')).toBeNull();
     expect(find("main.app-main").hasAttribute("inert")).toBe(false);
@@ -356,7 +356,7 @@ describe("member and account navigation", () => {
     vi.mocked(api.agent).mockResolvedValue({ agent: { ...agent, enabled: false } });
     await mount();
     expect(api.workspaceAgents).toHaveBeenCalledWith(workspace.id);
-    expect(find('[aria-label="团队成员"]').textContent).toContain(agent.name);
+    expect(find('[aria-label="工作空间成员"]').textContent).toContain(agent.name);
     await click('[aria-label="管理 产品伙伴"]');
     await settle();
     expect(find(".agent-detail-actions").textContent).toContain("编辑资料");
@@ -516,8 +516,8 @@ describe("member and account navigation", () => {
   });
 
   it.each([
-    [true, true, ["发起私聊", "创建小组"]],
-    [true, false, ["发起私聊"]],
+    [true, true, ["发起私信", "创建小组"]],
+    [true, false, ["发起私信"]],
     [false, true, ["创建小组"]],
   ] as const)(
     "offers only allowed conversation actions (direct=%s, group=%s)",
@@ -616,7 +616,7 @@ describe("member and account navigation", () => {
       agents: [agent, otherAgent],
     });
     await mount();
-    expect(find('[aria-label="团队成员"]').querySelectorAll("li")).toHaveLength(
+    expect(find('[aria-label="工作空间成员"]').querySelectorAll("li")).toHaveLength(
       4,
     );
     expect(find('[aria-label="管理 产品伙伴"]')).toBeTruthy();
@@ -624,10 +624,10 @@ describe("member and account navigation", () => {
       container.querySelector('[aria-label="管理 其他 Agent"]'),
     ).toBeNull();
     await input('input[type="search"]', "另一位创建者");
-    expect(find('[aria-label="团队成员"]').querySelectorAll("li")).toHaveLength(
+    expect(find('[aria-label="工作空间成员"]').querySelectorAll("li")).toHaveLength(
       1,
     );
-    expect(find('[aria-label="团队成员"]').textContent).toContain("其他 Agent");
+    expect(find('[aria-label="工作空间成员"]').textContent).toContain("其他 Agent");
     await input('input[type="search"]', "不存在的成员");
     expect(container.textContent).toContain("没有找到成员");
     activeUser = { ...owner, id: "platform-admin", platformRole: "admin" };
@@ -659,11 +659,11 @@ describe("member and account navigation", () => {
     });
     await mount();
     expect(api.workspaceAgents).not.toHaveBeenCalled();
-    expect(find('[aria-label="团队成员"]').textContent).toContain(agent.name);
-    expect(find('[aria-label="团队成员"]').textContent).toContain("Agent");
+    expect(find('[aria-label="工作空间成员"]').textContent).toContain(agent.name);
+    expect(find('[aria-label="工作空间成员"]').textContent).toContain("Agent");
     expect(container.textContent).not.toContain("缓存的新 Agent");
     expect(
-      find<HTMLButtonElement>('[aria-label="与 产品伙伴 发起私聊"]').disabled,
+      find<HTMLButtonElement>('[aria-label="与 产品伙伴 发起私信"]').disabled,
     ).toBe(true);
     expect(
       find<HTMLButtonElement>('[aria-label="将 产品伙伴 添加到小组"]').disabled,
@@ -672,7 +672,7 @@ describe("member and account navigation", () => {
       agent.name,
     );
     expect(
-      find<HTMLButtonElement>('[aria-label="与 设计伙伴 发起私聊"]').disabled,
+      find<HTMLButtonElement>('[aria-label="与 设计伙伴 发起私信"]').disabled,
     ).toBe(false);
   });
 
@@ -690,7 +690,7 @@ describe("member and account navigation", () => {
         },
       });
       await mount();
-      await click(`[aria-label="与 ${name} 发起私聊"]`);
+      await click(`[aria-label="与 ${name} 发起私信"]`);
       expect(create).toHaveBeenCalledWith(workspace.id, {
         type: "direct",
         memberIds: [id],
@@ -754,7 +754,7 @@ describe("member and account navigation", () => {
     });
     await mount();
     expect(
-      find<HTMLButtonElement>('[aria-label="与 停用伙伴 发起私聊"]').disabled,
+      find<HTMLButtonElement>('[aria-label="与 停用伙伴 发起私信"]').disabled,
     ).toBe(true);
     await click('[aria-label="将 产品伙伴 添加到小组"]');
     await click(".create-agent-group-link");
@@ -789,7 +789,7 @@ describe("member and account navigation", () => {
     await mount(`/app/agents/${agent.id}`);
     expect(container.textContent).toContain("编辑资料");
     expect(container.textContent).toContain("已启用");
-    expect(container.textContent).toContain("团队可见范围");
+    expect(container.textContent).toContain("工作空间可见范围");
     expect(container.innerHTML).not.toMatch(
       /SENTINEL|运行与任务|最近活跃|Session|模型|在线/,
     );
@@ -912,10 +912,10 @@ describe("member and account navigation", () => {
     bootstrap.capabilities["im.dm.create"] = false;
     bootstrap.capabilities["im.group.create"] = false;
     await mount();
-    expect(find('[aria-label="团队成员"]').textContent).toContain("产品伙伴");
-    expect(find('[aria-label="团队成员"]').textContent).toContain("设计伙伴");
+    expect(find('[aria-label="工作空间成员"]').textContent).toContain("产品伙伴");
+    expect(find('[aria-label="工作空间成员"]').textContent).toContain("设计伙伴");
     expect(
-      container.querySelector('[aria-label="与 产品伙伴 发起私聊"]'),
+      container.querySelector('[aria-label="与 产品伙伴 发起私信"]'),
     ).toBeNull();
     expect(
       container.querySelector('[aria-label="将 产品伙伴 添加到小组"]'),
@@ -937,7 +937,7 @@ describe("member and account navigation", () => {
     });
     expect(container.querySelector('[role="dialog"]')).toBeNull();
     expect(add).not.toHaveBeenCalled();
-    expect(find('[aria-label="团队成员"]').textContent).not.toContain(
+    expect(find('[aria-label="工作空间成员"]').textContent).not.toContain(
       agent.name,
     );
   });
@@ -945,7 +945,7 @@ describe("member and account navigation", () => {
   it("redirects the old Agent directory to the unified member directory", async () => {
     await mount("/app/w/team/agents");
     expect(find("[data-location]").textContent).toBe("/app/w/team/members");
-    expect(find('[aria-label="团队成员"]').textContent).toContain("设计伙伴");
+    expect(find('[aria-label="工作空间成员"]').textContent).toContain("设计伙伴");
   });
 
   it("remembers the last visited conversation across management pages and workspace switches", async () => {
@@ -1019,9 +1019,9 @@ describe("member and account navigation", () => {
       "/app/w/team/members",
     );
     expect(
-      pane.querySelector('[aria-label="与 停用伙伴 发起私聊"]'),
+      pane.querySelector('[aria-label="与 停用伙伴 发起私信"]'),
     ).toBeNull();
-    await click('.members-pane [aria-label="与 产品伙伴 发起私聊"]');
+    await click('.members-pane [aria-label="与 产品伙伴 发起私信"]');
     expect(create).toHaveBeenCalledWith(workspace.id, {
       type: "direct",
       memberIds: [agent.id],
@@ -1046,14 +1046,14 @@ describe("member and account navigation", () => {
     await click('[aria-label="查看会话成员"]');
     // At overlay widths <main> is inert, so a shell-level notice is unreachable.
     expect(find("main.app-main").hasAttribute("inert")).toBe(true);
-    await click('.members-pane [aria-label="与 设计伙伴 发起私聊"]');
+    await click('.members-pane [aria-label="与 设计伙伴 发起私信"]');
     const clicked = find<HTMLButtonElement>(
-      '.members-pane [aria-label="与 设计伙伴 发起私聊"]',
+      '.members-pane [aria-label="与 设计伙伴 发起私信"]',
     );
     expect(clicked.getAttribute("aria-busy")).toBe("true");
     expect(clicked.querySelector(".spin")).not.toBeNull();
     const other = find<HTMLButtonElement>(
-      '.members-pane [aria-label="与 产品伙伴 发起私聊"]',
+      '.members-pane [aria-label="与 产品伙伴 发起私信"]',
     );
     expect(other.disabled).toBe(true);
     expect(other.getAttribute("aria-busy")).toBeNull();

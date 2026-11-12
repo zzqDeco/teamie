@@ -4,8 +4,8 @@
   .agent-badge {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 3px 6px;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-1_5);
     border: 1px solid var(--border-strong);
     background: var(--lavender);
     color: var(--brand-text);
@@ -13,30 +13,30 @@
     line-height: 1.35;
     font-weight: 500;
     white-space: nowrap;
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
   }
   .agent-badge > small {
     font-weight: 400;
     color: var(--text-subtle);
-    padding-left: 6px;
-    margin-left: 3px;
+    padding-left: var(--space-1_5);
+    margin-left: var(--space-1);
     border-left: 1px solid var(--border-strong);
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
   }
   .agent-badge.compact {
     font-size: var(--font-xs);
-    padding: 2px 4px;
-    gap: 3px;
+    padding: var(--space-0_5) var(--space-1);
+    gap: var(--space-1);
   }
   .agent-visibility {
     border: 0;
     padding: 0;
-    margin: 24px 0;
+    margin: var(--space-6) 0;
   }
   .agent-visibility legend {
     display: flex;
     align-items: center;
-    gap: 7px;
+    gap: var(--space-1_5);
     font-weight: 600;
     padding: 0;
     font-size: var(--font-md);
@@ -44,23 +44,23 @@
   }
   .agent-visibility > p {
     line-height: 1.9;
-    margin: 10px 0 14px;
+    margin: var(--space-2_5) 0 var(--space-3_5);
     font-size: var(--font-sm);
     color: var(--text-muted);
   }
   .visibility-options {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 9px;
+    gap: var(--space-2);
   }
   .visibility-option {
     display: flex;
     align-items: center;
-    gap: 9px;
+    gap: var(--space-2);
     border: 1px solid var(--border);
     border-radius: var(--r-md);
     background: var(--surface);
-    padding: 11px;
+    padding: var(--space-2_5);
     margin: 0;
     position: relative;
     cursor: pointer;
@@ -101,7 +101,7 @@
     border-radius: var(--r-md);
     background: var(--lavender);
     color: var(--text-subtle);
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     flex-shrink: 0;
   }
   .visibility-option > i {
@@ -122,19 +122,19 @@
   .agent-visibility > small {
     display: flex;
     align-items: flex-start;
-    gap: 6px;
+    gap: var(--space-1_5);
     line-height: 1.9;
-    margin-top: 13px;
+    margin-top: var(--space-3);
     font-size: var(--font-sm);
     color: var(--text-muted);
   }
   .agent-visibility > small > svg {
     flex-shrink: 0;
-    margin-top: 2px;
+    margin-top: var(--space-0_5);
   }
   .visibility-empty {
     font-size: var(--font-sm);
-    padding: 18px;
+    padding: var(--space-4);
     background: var(--surface);
     border: 1px dashed var(--border-strong);
     border-radius: var(--r-md);
@@ -144,9 +144,9 @@
   .agent-status {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: var(--space-1_5);
     line-height: 1.5;
-    padding: 4px 7px;
+    padding: var(--space-1) var(--space-1_5);
     border-radius: var(--r-xs);
     color: var(--text-subtle);
     background: var(--lavender);
@@ -162,12 +162,12 @@
     background: var(--lavender);
   }
   .gateway-configuration-form {
-    padding: 24px 0;
+    padding: var(--space-6) 0;
   }
   .gateway-configuration-form > label {
-    margin-bottom: 23px;
+    margin-bottom: var(--space-6);
     font-size: var(--font-base);
-    color: var(--text-muted);
+    color: var(--text-strong);
   }
   .gateway-configuration-form input:not([type="checkbox"]) {
     color: var(--text);
@@ -177,95 +177,30 @@
   .gateway-configuration-form .field-help {
     font-size: var(--font-sm);
     color: var(--text-subtle);
-    line-height: 1.9;
-  }
-  .agent-enabled-switch {
-    display: flex;
-    align-items: center;
-    gap: 13px;
-    position: relative;
-    cursor: pointer;
-    padding: 16px 17px;
-    border: 1px solid var(--border);
-    border-radius: var(--r-md);
-    background: var(--surface);
-  }
-  .agent-enabled-switch > input {
-    position: absolute;
-    opacity: 0;
-    width: 1px;
-    height: 1px;
-  }
-  .agent-enabled-switch:focus-within {
-    outline: var(--focus-ring);
-    outline-offset: var(--focus-ring-offset);
-  }
-  .agent-enabled-switch > span {
-    flex: 1;
-    min-width: 0;
-  }
-  .agent-enabled-switch b {
-    font-weight: 600;
-    display: block;
-    font-size: var(--font-md);
-    color: var(--text-strong);
-  }
-  .agent-enabled-switch small {
-    margin-top: 7px;
-    display: block;
-    line-height: 1.9;
-    font-size: var(--font-sm);
-    color: var(--text-muted);
-  }
-  .agent-enabled-switch > i {
-    width: 32px;
-    height: 18px;
-    border-radius: var(--r-md);
-    background: var(--switch-bg);
-    position: relative;
-    flex-shrink: 0;
-    transition: background 0.15s;
-  }
-  .agent-enabled-switch > i:after {
-    content: "";
-    width: 12px;
-    height: 12px;
-    background: var(--surface);
-    border-radius: 50%;
-    position: absolute;
-    left: 3px;
-    top: 3px;
-    transition: left 0.15s;
-    box-shadow: var(--shadow-sm);
-  }
-  .agent-enabled-switch:has(input:checked) > i {
-    background: var(--switch-on);
-  }
-  .agent-enabled-switch:has(input:checked) > i:after {
-    left: 17px;
+    line-height: var(--lh-body);
   }
   .gateway-form-actions {
     display: flex;
     justify-content: flex-end;
-    gap: 9px;
+    gap: var(--space-2);
     border-top: 1px solid var(--border);
-    margin-top: 27px;
-    padding-top: 21px;
+    margin-top: var(--space-6);
+    padding-top: var(--space-5);
   }
   .gateway-form-actions .button {
     font-size: var(--font-sm);
     min-height: 39px;
-    padding: 11px 17px;
+    padding: var(--space-2_5) var(--space-4);
   }
   .rail-agents {
-    margin-bottom: 8px;
+    margin-bottom: var(--space-2);
   }
   .admin-section-nav {
     display: flex;
     align-items: center;
-    gap: 23px;
+    gap: var(--space-6);
     border-bottom: 1px solid var(--border);
-    padding: 0 32px;
+    padding: 0 var(--space-8);
     min-height: 43px;
     flex-shrink: 0;
     background: var(--surface);
@@ -273,11 +208,11 @@
   .admin-section-nav > a {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-1_5);
     font-size: var(--font-base);
     color: var(--text-subtle);
     position: relative;
-    padding: 13px 2px;
+    padding: var(--space-3) var(--space-0_5);
   }
   .admin-section-nav > a.active {
     color: var(--brand-text);
@@ -302,22 +237,22 @@
     scrollbar-color: var(--scrollbar-thumb) transparent;
     min-height: 0;
     overscroll-behavior: contain;
-    padding: 30px;
+    padding: var(--space-7);
   }
   .agents-heading {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 20px;
-    margin-bottom: 24px;
+    gap: var(--space-5);
+    margin-bottom: var(--space-6);
   }
   .agents-heading .eyebrow {
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     letter-spacing: 1.7px;
     color: var(--text-subtle);
   }
   .agents-summary {
-    margin: 10px 0;
+    margin: var(--space-2_5) 0;
     color: var(--text-muted);
     font-size: var(--font-md);
   }
@@ -327,7 +262,7 @@
     font-size: var(--font-base);
   }
   .agents-heading > .button {
-    padding: 11px 15px;
+    padding: var(--space-2_5) var(--space-3_5);
     flex-shrink: 0;
     min-height: 40px;
     font-size: var(--font-base);
@@ -335,8 +270,8 @@
   .agent-card-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(min(100%, 248px), 1fr));
-    gap: 16px;
-    margin-top: 20px;
+    gap: var(--space-4);
+    margin-top: var(--space-5);
   }
   .agent-card {
     border: 1px solid var(--border-strong);
@@ -345,7 +280,7 @@
     flex-direction: column;
     background: var(--surface);
     transition: background 0.15s, box-shadow 0.15s, border 0.15s;
-    padding: 22px;
+    padding: var(--space-5);
     min-width: 0;
   }
   .agent-card:hover {
@@ -357,8 +292,8 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
-    margin-bottom: 18px;
+    gap: var(--space-2);
+    margin-bottom: var(--space-4);
   }
   .agent-card-top > .avatar {
     width: 43px;
@@ -369,7 +304,7 @@
     color: var(--text-strong);
     line-height: 1.6;
     font-weight: 600;
-    margin-bottom: 8px;
+    margin-bottom: var(--space-2);
     font-size: var(--font-2xl);
     overflow-wrap: anywhere;
   }
@@ -384,7 +319,7 @@
   }
   .agent-card > p {
     color: var(--text-subtle);
-    margin-top: 15px;
+    margin-top: var(--space-3_5);
     min-height: 42px;
     overflow-wrap: anywhere;
     display: -webkit-box;
@@ -397,33 +332,33 @@
   .agent-workspace-chips {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-1_5);
     flex-wrap: wrap;
-    margin: 17px 0 0;
+    margin: var(--space-4) 0 0;
   }
   .agent-workspace-chips > span {
     display: flex;
     align-items: center;
-    gap: 4px;
-    padding: 4px 6px;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-1_5);
     border-radius: var(--r-xs);
     background: var(--lavender);
     color: var(--text-subtle);
     line-height: 1.4;
     max-width: 100%;
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     overflow: hidden;
     text-overflow: ellipsis;
   }
   .agent-workspace-chips > a {
     display: flex;
     align-items: center;
-    gap: 4px;
-    padding: 4px 6px;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-1_5);
     border-radius: var(--r-xs);
     background: var(--lavender);
     color: var(--text-subtle);
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -440,21 +375,21 @@
   .agent-card-bottom {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-2_5);
     border-top: 1px solid var(--border);
-    margin-top: 20px;
-    padding-top: 14px;
-    font-size: var(--font-xs);
+    margin-top: var(--space-5);
+    padding-top: var(--space-3_5);
+    font-size: var(--font-sm);
     justify-content: flex-end;
   }
   .agent-card-bottom > span:first-child {
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     color: var(--text-subtle);
   }
   .agent-card-bottom > span:last-child {
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: var(--space-1_5);
     font-size: var(--font-base);
     color: var(--brand-text);
   }
@@ -464,10 +399,10 @@
     justify-content: center;
     flex-direction: column;
     text-align: center;
-    padding: 40px 20px;
+    padding: var(--space-10) var(--space-5);
     color: var(--text-subtle);
     min-height: 280px;
-    gap: 16px;
+    gap: var(--space-4);
   }
   .agents-empty > h2 {
     font-weight: 600;
@@ -484,17 +419,17 @@
   .agents-empty > .button {
     font-size: var(--font-sm);
     min-height: 39px;
-    padding: 11px 17px;
-    margin-top: 5px;
+    padding: var(--space-2_5) var(--space-4);
+    margin-top: var(--space-1_5);
   }
   .agent-back {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-1_5);
     color: var(--text-subtle);
     min-height: 36px;
     font-size: var(--font-base);
-    margin-bottom: 16px;
+    margin-bottom: var(--space-4);
   }
   .agent-back:hover {
     color: var(--text-muted);
@@ -502,9 +437,9 @@
   .agent-detail-heading {
     display: flex;
     align-items: center;
-    margin-bottom: 27px;
+    margin-bottom: var(--space-7);
     flex-wrap: wrap;
-    gap: 18px;
+    gap: var(--space-4);
   }
   .agent-detail-heading > .avatar {
     width: 73px;
@@ -520,7 +455,7 @@
     font-weight: 600;
     letter-spacing: -0.6px;
     line-height: 1.5;
-    margin: 10px 0 7px;
+    margin: var(--space-2_5) 0 var(--space-1_5);
     color: var(--text-strong);
     overflow-wrap: anywhere;
     font-size: var(--font-3xl);
@@ -535,14 +470,14 @@
   .agent-detail-actions {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
     flex-shrink: 0;
     align-self: flex-start;
-    padding-top: 13px;
+    padding-top: var(--space-3);
     margin-left: auto;
   }
   .agent-detail-actions > .button {
-    padding: 9px 12px;
+    padding: var(--space-2) var(--space-3);
     min-height: 40px;
     font-size: var(--font-base);
   }
@@ -554,20 +489,20 @@
   .agent-profile-section {
     border: 1px solid var(--border);
     border-radius: var(--r-md);
-    margin-bottom: 23px;
+    margin-bottom: var(--space-6);
     background: var(--surface);
-    padding: 20px;
+    padding: var(--space-5);
   }
   .agent-profile-section > header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 15px;
+    gap: var(--space-3_5);
   }
   .agent-profile-section > header > button {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-1_5);
     color: var(--text-muted);
     padding: 0;
     min-height: 36px;
@@ -577,38 +512,38 @@
     font-size: var(--font-base);
     line-height: 1.9;
     color: var(--text-subtle);
-    margin: 13px 0 2px;
+    margin: var(--space-3) 0 var(--space-0_5);
   }
   .agent-delete-section {
     border-top: 1px solid var(--border);
-    margin-top: 33px;
-    padding-top: 23px;
+    margin-top: var(--space-8);
+    padding-top: var(--space-6);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 20px;
+    gap: var(--space-5);
   }
   .agent-delete-section h3 {
-    color: var(--text-subtle);
+    color: var(--text-strong);
     font-weight: 600;
     font-size: var(--font-md);
   }
   .agent-delete-section p {
     color: var(--text-subtle);
     line-height: 1.9;
-    margin-top: 7px;
+    margin-top: var(--space-1_5);
     font-size: var(--font-base);
   }
   .agent-delete-section .button {
     font-size: var(--font-base);
     min-height: 35px;
-    padding: 10px 13px;
+    padding: var(--space-2_5) var(--space-3);
   }
   .message-meta:has(.agent-badge) {
     flex-wrap: wrap;
   }
   .message-meta > .agent-badge {
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     max-width: 230px;
     overflow: hidden;
   }
@@ -616,7 +551,7 @@
     max-width: 145px;
     overflow: hidden;
     text-overflow: ellipsis;
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
   }
   .visibility-option > span {
     overflow-wrap: anywhere;
@@ -626,21 +561,21 @@
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: var(--space-1_5);
   }
 
   .agent-detail-labels {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: var(--space-2);
   }
 
   .agent-model-chip {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 2px 7px;
+    gap: var(--space-1);
+    padding: var(--space-0_5) var(--space-1_5);
     border-radius: var(--r-xs);
     background: var(--surface-sunken);
     border: 1px solid var(--border);
@@ -664,9 +599,9 @@
     align-items: center;
     justify-content: space-between;
     flex-wrap: wrap;
-    gap: 8px;
-    margin: -6px 0 14px;
-    padding: 9px 12px;
+    gap: var(--space-2);
+    margin: -6px 0 var(--space-3_5);
+    padding: var(--space-2) var(--space-3);
     border-radius: var(--r-sm);
     border: 1px solid var(--border-strong);
     background: var(--lavender);

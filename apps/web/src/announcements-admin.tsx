@@ -8,7 +8,7 @@ import type { Announcement, User } from "@teamie/api-client";
 import { useAuth } from "./auth";
 import { errorText } from "./errors";
 import { MessageBody } from "./markdown";
-import { BadgePill, Button, EmptyState, Modal, Notice } from "./ui";
+import { BadgePill, Button, EmptyState, Modal, Notice, Tabs } from "./ui";
 import { ICON } from "./icons";
 import {
   announcementsHistoryQueryKey,
@@ -216,28 +216,16 @@ function AdminAnnouncementsManager({
               <span className="admin-announcement-counter">
                 {charCount(body)} / {BODY_MAX_CHARS}
               </span>
-              <div
+              <Tabs
                 className="admin-announcement-tabs"
-                role="tablist"
-                aria-label="编辑与预览切换"
-              >
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={mode === "write"}
-                  onClick={() => setMode("write")}
-                >
-                  编辑
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={mode === "preview"}
-                  onClick={() => setMode("preview")}
-                >
-                  预览
-                </button>
-              </div>
+                ariaLabel="编辑与预览切换"
+                value={mode}
+                onChange={setMode}
+                items={[
+                  { value: "write", label: "编辑" },
+                  { value: "preview", label: "预览" },
+                ]}
+              />
             </div>
           </div>
           {mode === "write" ? (

@@ -480,7 +480,9 @@ export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
         </div>
         <div className="conversation-header-actions">
           <Button
-            className="secondary small-button attention-mark-all-read"
+            variant="secondary"
+            size="sm"
+            className="attention-mark-all-read"
             busy={markingRead}
             disabled={markingRead || query.isPending || !hasUnread}
             title="将各会话标为已读至最新提及或回复位置，之后的普通消息仍保持未读"
@@ -608,7 +610,8 @@ export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
         </ol>
         {query.hasNextPage && (
           <Button
-            className="secondary attention-more"
+            variant="secondary"
+            className="attention-more"
             busy={query.isFetchingNextPage}
             disabled={query.isFetching}
             onClick={() => void query.fetchNextPage()}
@@ -618,7 +621,8 @@ export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
         )}
         {query.error && (
           <Button
-            className="secondary attention-more"
+            variant="secondary"
+            className="attention-more"
             onClick={() => void query.refetch()}
           >
             重试

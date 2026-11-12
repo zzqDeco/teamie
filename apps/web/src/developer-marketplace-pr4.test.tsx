@@ -473,7 +473,7 @@ describe("PR-4 admin marketplace governance, developer portal UX, and read-prese
     expect(host.textContent).toContain("平台当前已关闭应用功能，已安装应用仅展示只读信息。");
     expect(host.textContent).toContain("国际象棋");
     expect(host.textContent).toContain("群投票");
-    expect(host.querySelector('[aria-label="管理工作区应用"]')).toBeNull();
+    expect(host.querySelector('[aria-label="管理工作空间应用"]')).toBeNull();
     expect(sessionSpy).not.toHaveBeenCalled();
 
     // 2. Live capability flip to true -> shows 正在启动应用会话… while session is pending + arrow-key tabs

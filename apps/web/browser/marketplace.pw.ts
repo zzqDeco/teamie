@@ -4,7 +4,7 @@ import { marketplaceFixture } from "./marketplace-fixture";
 test("keyboard enters and leaves the cross-origin app, then closes the pane", async ({ page }) => {
   const state = await marketplaceFixture(page);
   const overlay = page.viewportSize()!.width < 1250;
-  const open = page.getByRole("button", { name: "群聊应用", exact: true });
+  const open = page.getByRole("button", { name: "小组应用", exact: true });
   await open.click();
   const pane = page.locator('aside[aria-label="群聊应用"]');
   const frame = page.frameLocator("iframe");
@@ -22,7 +22,7 @@ test("keyboard enters and leaves the cross-origin app, then closes the pane", as
   await expect(frame.locator("#app-save")).toBeFocused();
   await page.keyboard.press("Tab");
   if (overlay) {
-    await expect(pane.getByRole("button", { name: "管理工作区应用", exact: true })).toBeFocused();
+    await expect(pane.getByRole("button", { name: "管理工作空间应用", exact: true })).toBeFocused();
     await page.keyboard.press("Shift+Tab");
     await expect(page.locator("iframe")).toBeFocused();
     await pane.getByRole("button", { name: "关闭群聊应用面板", exact: true }).focus();
@@ -40,15 +40,15 @@ test("keyboard enters and leaves the cross-origin app, then closes the pane", as
 test("capability refresh degrades active app to read-only list and never leaves chat inert", async ({ page }) => {
   const state = await marketplaceFixture(page);
   const overlay = page.viewportSize()!.width < 1250;
-  const open = page.getByRole("button", { name: "群聊应用", exact: true });
+  const open = page.getByRole("button", { name: "小组应用", exact: true });
   await open.click();
   const pane = page.locator('aside[aria-label="群聊应用"]');
   await page.frameLocator("iframe").locator("#app-input").focus();
   state.enabled = false;
   await page.clock.fastForward(61000);
   await expect(page.locator("iframe")).toHaveCount(0);
-  await expect(pane.getByRole("list", { name: "已安装群聊应用只读列表" })).toBeVisible();
-  await expect(pane.getByRole("button", { name: "管理工作区应用", exact: true })).toHaveCount(0);
+  await expect(pane.getByRole("list", { name: "已安装小组应用只读列表" })).toBeVisible();
+  await expect(pane.getByRole("button", { name: "管理工作空间应用", exact: true })).toHaveCount(0);
   if (overlay) {
     await pane.getByRole("button", { name: "关闭群聊应用面板", exact: true }).click();
     await expect(pane).toHaveCount(0);
@@ -66,9 +66,9 @@ test("capability refresh degrades active app to read-only list and never leaves 
 
 test("nested management dialog and breakpoint changes preserve focus and chat access", async ({ page }) => {
   const state = await marketplaceFixture(page);
-  await page.getByRole("button", { name: "群聊应用", exact: true }).click();
+  await page.getByRole("button", { name: "小组应用", exact: true }).click();
   const pane = page.locator('aside[aria-label="群聊应用"]');
-  await pane.getByRole("button", { name: "管理工作区应用", exact: true }).click();
+  await pane.getByRole("button", { name: "管理工作空间应用", exact: true }).click();
   await expect(page.locator(".modal")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.locator(".modal")).toHaveCount(0);

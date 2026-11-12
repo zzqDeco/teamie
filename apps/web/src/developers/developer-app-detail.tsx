@@ -416,7 +416,7 @@ export function DeveloperAppDetail({
           tone="danger"
           title={`停用已上架应用「${app.name}」？`}
           impact={[
-            "所有已安装该应用的工作空间将立即暂停展示群聊 Web UI 面板，并停止向 Agent 暴露 MCP 工具。",
+            "所有已安装该应用的工作空间将立即暂停展示小组 Web UI 面板，并停止向 Agent 暴露 MCP 工具。",
             "工作空间中的已安装关系与配置会保留，重新启用后自动恢复。",
           ]}
           confirmLabel="确认停用"
@@ -455,7 +455,7 @@ export function DeveloperAppDetail({
           />
           <small className="field-help">
             {app.isPublished
-              ? "已发布应用的 Slug 保持恒定，确保已接入群聊中的 Agent 工具名稳定。"
+              ? "已发布应用的 Slug 保持恒定，确保已接入小组中的 Agent 工具名稳定。"
               : MARKETPLACE_SLUG_HELP}
           </small>
         </label>
@@ -533,7 +533,7 @@ export function DeveloperAppDetail({
             });
             await queryClient.invalidateQueries({ queryKey: ["conversationApps"] });
             const msg =
-              "已安装草稿到所选工作空间！进入该空间的任意小组对话点击右上角「群聊应用」即可联调。";
+              "已安装草稿到所选工作空间！进入该空间的任意小组对话点击右上角「小组应用」即可联调。";
             setSuccessMsg(msg);
             toast.success("已安装草稿到工作空间");
           })

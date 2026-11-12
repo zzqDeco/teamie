@@ -18,13 +18,13 @@
       padding: max(12px, env(safe-area-inset-top)) 20px 12px;
     }
     .public-header nav {
-      gap: 18px;
+      gap: var(--space-4);
       font-size: var(--font-base);
     }
     .public-header nav .button {
       font-size: var(--font-base);
       min-height: 40px;
-      padding: 10px 12px;
+      padding: var(--space-2_5) var(--space-3);
     }
     .public-header .brand {
       font-size: var(--font-3xl);
@@ -35,8 +35,8 @@
       line-height: 1.9;
     }
     .hero-actions {
-      margin-top: 25px;
-      gap: 18px;
+      margin-top: var(--space-6);
+      gap: var(--space-4);
     }
     .visual-grid {
       inset: -15px -8px;
@@ -48,22 +48,22 @@
       min-height: 300px;
     }
     .demo-chat {
-      padding: 0 16px 16px;
+      padding: 0 var(--space-4) var(--space-4);
     }
     .demo-chat-heading {
       font-size: var(--font-sm);
       height: 46px;
     }
     .demo-message {
-      margin-top: 16px;
-      gap: 10px;
+      margin-top: var(--space-4);
+      gap: var(--space-2_5);
     }
     .demo-message p,
     .demo-message b {
       font-size: var(--font-sm);
     }
     .demo-message small {
-      font-size: var(--font-xs);
+      font-size: var(--font-sm);
     }
     .scroll-story-track {
       height: auto;
@@ -72,12 +72,12 @@
       position: static;
       height: auto;
       min-height: 0;
-      padding: 48px 0;
+      padding: var(--space-12) 0;
     }
     .scroll-story-inner {
       grid-template-columns: 1fr;
-      gap: 24px;
-      padding: 0 24px;
+      gap: var(--space-6);
+      padding: 0 var(--space-6);
     }
     .story-scene-list {
       min-height: 170px;
@@ -87,16 +87,16 @@
     }
     .story-stage-canvas {
       min-height: 280px;
-      padding: 18px;
+      padding: var(--space-4);
     }
     .story-stage-card {
-      padding: 20px;
+      padding: var(--space-5);
     }
     .landing-cta h2 {
       font-size: var(--font-3xl);
     }
     .public-footer > small {
-      font-size: var(--font-xs);
+      font-size: var(--font-sm);
     }
     .auth-content > .back-link {
       position: absolute;
@@ -106,7 +106,7 @@
     }
     .auth-mobile-brand {
       display: inline-flex;
-      margin-bottom: 32px;
+      margin-bottom: var(--space-8);
     }
     .auth-form h2 {
       font-size: var(--font-4xl);
@@ -134,8 +134,8 @@
       flex: 0 0 64px;
       width: 64px;
       height: 100%;
-      padding-left: 8px;
-      padding-right: 8px;
+      padding-left: var(--space-2);
+      padding-right: var(--space-2);
     }
     .app-navigation .navigation-sidebar {
       flex: 1;
@@ -148,8 +148,8 @@
       min-height: 44px;
     }
     .workspace-header {
-      padding-left: 16px;
-      padding-right: 8px;
+      padding-left: var(--space-4);
+      padding-right: var(--space-2);
       min-height: calc(var(--header-h-mobile) + env(safe-area-inset-top));
       height: auto;
       padding-top: env(safe-area-inset-top);
@@ -164,7 +164,7 @@
       height: auto;
       min-height: calc(var(--header-h-mobile) + env(safe-area-inset-top));
       padding: env(safe-area-inset-top) 10px 0 6px;
-      gap: 8px;
+      gap: var(--space-2);
     }
     .conversation-header-actions > .icon-button {
       width: 44px;
@@ -174,18 +174,18 @@
       display: none;
     }
     .conversation-start {
-      padding: 40px 22px;
+      padding: var(--space-10) var(--space-5);
     }
     .conversation-start h2 {
       font-size: var(--font-3xl);
     }
     .message {
-      padding: 12px 48px 12px 14px;
-      gap: 10px;
+      padding: var(--space-3) var(--space-12) var(--space-3) var(--space-3_5);
+      gap: var(--space-2_5);
     }
     .message.compact {
-      padding-top: 4px;
-      padding-bottom: 8px;
+      padding-top: var(--space-1);
+      padding-bottom: var(--space-2);
     }
     .message-meta b {
       font-size: var(--font-base);
@@ -215,7 +215,7 @@
     .composer textarea {
       font-size: var(--font-subhead);
       max-height: min(140px, calc(var(--app-height, 100dvh) * 0.28));
-      padding: 12px;
+      padding: var(--space-3);
     }
     .send-button {
       width: 44px;
@@ -226,7 +226,7 @@
       padding-top: 0;
     }
     .composer-footer > span:first-child:not(:empty) {
-      padding-top: 7px;
+      padding-top: var(--space-1_5);
     }
     .composer-footer > span:last-child {
       display: none;
@@ -271,7 +271,7 @@
       display: none;
     }
     .agent-card {
-      padding: 20px;
+      padding: var(--space-5);
     }
     .agent-card > p {
       font-size: var(--font-md);
@@ -292,20 +292,20 @@
     }
     .agent-detail-heading h2 {
       font-size: var(--font-3xl);
-      margin-top: 5px;
+      margin-top: var(--space-1_5);
     }
     .agent-detail-heading p {
       font-size: var(--font-base);
     }
     .agent-profile-section {
-      padding: 17px;
+      padding: var(--space-4);
     }
     .agent-profile-section > header > button,
     .agent-delete-section p {
       font-size: var(--font-sm);
     }
     .admin-heading {
-      gap: 10px;
+      gap: var(--space-2_5);
     }
     .admin-heading-icon {
       display: none;
@@ -318,7 +318,7 @@
       font-size: var(--font-base);
     }
     .admin-invite-history > header {
-      padding: 18px 14px;
+      padding: var(--space-4) var(--space-3_5);
     }
     .gateway-configuration-form input:not([type="checkbox"]) {
       font-size: var(--font-subhead);
@@ -339,7 +339,7 @@
       font-size: var(--font-md);
     }
     .welcome-content {
-      padding: 40px 24px;
+      padding: var(--space-10) var(--space-6);
     }
     .welcome-content h1 {
       font-size: var(--font-4xl);
@@ -347,17 +347,17 @@
     }
     .welcome-content > p {
       font-size: var(--font-md);
-      margin-top: 16px;
+      margin-top: var(--space-4);
     }
     .welcome-content > .button {
       font-size: var(--font-md);
-      margin-top: 24px;
+      margin-top: var(--space-6);
     }
     .modal-backdrop {
       padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom));
     }
     .modal {
-      padding: 26px 20px 20px;
+      padding: var(--space-6) var(--space-5) var(--space-5);
       max-height: calc( var(--app-height, 100dvh) - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom) );
     }
     .modal textarea {
@@ -367,13 +367,13 @@
       font-size: var(--font-md);
     }
     .modal-actions {
-      gap: 10px;
+      gap: var(--space-2_5);
     }
     .modal-actions > .button {
       min-height: 44px;
       flex: 1;
       min-width: 0;
-      padding: 12px;
+      padding: var(--space-3);
       font-size: var(--font-md);
     }
     .group-member-row > .button {
@@ -410,8 +410,8 @@
     .admin-invites-table tr {
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
-      gap: 14px;
-      padding: 18px 14px;
+      gap: var(--space-3_5);
+      padding: var(--space-4) var(--space-3_5);
       border-bottom: 1px solid var(--border);
     }
     .admin-invites-table tr:last-child {
@@ -421,8 +421,8 @@
       content: attr(data-label);
       display: block;
       color: var(--text-muted);
-      font-size: var(--font-xs);
-      margin-bottom: 6px;
+      font-size: var(--font-sm);
+      margin-bottom: var(--space-1_5);
     }
     .admin-invites-table td:nth-child(1) {
       grid-area: 1 / 1;
@@ -438,7 +438,7 @@
       align-self: end;
     }
     .members-view {
-      padding: 24px 20px 40px;
+      padding: var(--space-6) var(--space-5) var(--space-10);
     }
     .member-search input {
       font-size: var(--font-subhead);
@@ -452,11 +452,11 @@
       white-space: nowrap;
     }
     .member-manage-link {
-      padding-left: 6px;
-      padding-right: 6px;
+      padding-left: var(--space-1_5);
+      padding-right: var(--space-1_5);
     }
     .member-directory-identity {
-      gap: 10px;
+      gap: var(--space-2_5);
     }
     .member-directory-identity .participant-identity > b {
       font-size: var(--font-lg);
@@ -465,44 +465,44 @@
       max-height: min(55dvh, 240px);
     }
   }
-  @media (max-width: 400px) {
+  @media (max-width: 600px) {
     .public-header {
-      padding-left: 21px;
-      padding-right: 21px;
+      padding-left: var(--space-5);
+      padding-right: var(--space-5);
     }
     .public-header nav {
-      gap: 16px;
+      gap: var(--space-4);
     }
     .demo-chat {
-      padding: 0 10px;
+      padding: 0 var(--space-2_5);
     }
     .demo-message p {
-      font-size: var(--font-xs);
+      font-size: var(--font-sm);
     }
     .demo-message > .avatar {
       width: 21px;
       height: 21px;
     }
     .demo-message b {
-      font-size: var(--font-xs);
+      font-size: var(--font-sm);
     }
     .demo-title {
-      padding: 0 12px;
+      padding: 0 var(--space-3);
     }
     .hero-visual {
-      padding-left: 5px;
+      padding-left: var(--space-1_5);
       padding-right: 0;
     }
     .hero {
-      padding-left: 25px;
-      padding-right: 25px;
+      padding-left: var(--space-6);
+      padding-right: var(--space-6);
     }
     .welcome-content > h1 {
       font-size: var(--font-3xl);
     }
     .welcome-content {
-      padding-left: 20px;
-      padding-right: 20px;
+      padding-left: var(--space-5);
+      padding-right: var(--space-5);
     }
     .auth-form h2 {
       font-size: var(--font-3xl);

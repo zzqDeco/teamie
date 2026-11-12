@@ -4,8 +4,8 @@
   .stage-card-head {
     display: flex;
     align-items: center;
-    gap: 13px;
-    padding-bottom: 18px;
+    gap: var(--space-3);
+    padding-bottom: var(--space-4);
     border-bottom: 1px solid var(--border);
   }
   .stage-card-head b {
@@ -18,19 +18,19 @@
     display: block;
     font-size: var(--font-sm);
     color: var(--text-muted);
-    margin-top: 3px;
+    margin-top: var(--space-1);
   }
   .stage-channel-list {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    margin-top: 18px;
+    gap: var(--space-2_5);
+    margin-top: var(--space-4);
   }
   .stage-channel-row {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 12px 14px;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-3_5);
     border-radius: var(--r-md);
     background: var(--surface);
     color: var(--text);
@@ -48,25 +48,25 @@
     display: block;
     font-size: var(--font-sm);
     color: var(--text-muted);
-    margin-top: 2px;
+    margin-top: var(--space-0_5);
   }
   .stage-channel-row > span {
     margin-left: auto;
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     color: var(--text-muted);
     flex-shrink: 0;
   }
   .stage-dialogue {
     display: flex;
     flex-direction: column;
-    gap: 14px;
-    margin-top: 18px;
+    gap: var(--space-3_5);
+    margin-top: var(--space-4);
   }
   .stage-msg {
     display: flex;
     align-items: flex-start;
-    gap: 11px;
-    padding: 12px 14px;
+    gap: var(--space-2_5);
+    padding: var(--space-3) var(--space-3_5);
     border-radius: var(--r-lg);
     background: var(--surface);
   }
@@ -86,28 +86,28 @@
     color: var(--text-strong);
   }
   .stage-msg b small {
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     font-weight: 500;
     color: var(--text-muted);
-    margin-left: 5px;
+    margin-left: var(--space-1_5);
   }
   .stage-msg p {
     font-size: var(--font-base);
     line-height: 1.75;
     color: var(--text);
-    margin-top: 4px;
+    margin-top: var(--space-1);
   }
   .stage-inbox-items {
     display: flex;
     flex-direction: column;
-    gap: 14px;
-    margin-top: 18px;
+    gap: var(--space-3_5);
+    margin-top: var(--space-4);
   }
   .stage-inbox-item {
     display: flex;
     align-items: flex-start;
-    gap: 12px;
-    padding: 15px 16px;
+    gap: var(--space-3);
+    padding: var(--space-3_5) var(--space-4);
     border-radius: var(--r-lg);
     background: var(--surface);
     border: 1px solid var(--warning-border);
@@ -117,12 +117,12 @@
     height: 8px;
     border-radius: 50%;
     background: var(--purple);
-    margin-top: 6px;
+    margin-top: var(--space-1_5);
     flex-shrink: 0;
   }
   .stage-inbox-item small {
     display: block;
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     color: var(--text-muted);
   }
   .stage-inbox-item b {
@@ -130,19 +130,19 @@
     font-size: var(--font-md);
     font-weight: 600;
     color: var(--text-strong);
-    margin-top: 3px;
+    margin-top: var(--space-1);
   }
   .stage-inbox-item p {
     font-size: var(--font-base);
     color: var(--text);
     line-height: 1.75;
-    margin-top: 5px;
+    margin-top: var(--space-1_5);
   }
   .stage-quote-jump {
     display: flex;
     align-items: center;
-    gap: 9px;
-    padding: 12px 14px;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-3_5);
     border-radius: var(--r-md);
     background: var(--lavender);
     color: var(--brand-text);
@@ -150,7 +150,7 @@
     font-weight: 600;
   }
   .stage-agent-bio {
-    margin-top: 18px;
+    margin-top: var(--space-4);
     font-size: var(--font-md);
     line-height: 1.85;
     color: var(--text);
@@ -158,7 +158,7 @@
   .spotlight-card-header {
     display: flex;
     align-items: center;
-    gap: 13px;
+    gap: var(--space-3);
   }
   .spotlight-card-header > .avatar {
     width: 44px;
@@ -175,25 +175,25 @@
     display: block;
     font-size: var(--font-sm);
     color: var(--text-muted);
-    margin-top: 3px;
+    margin-top: var(--space-1);
   }
   .spotlight-status {
     margin-left: auto;
-    padding: 4px 10px;
+    padding: var(--space-1) var(--space-2_5);
     border-radius: var(--r-pill);
     background: var(--success-bg);
     color: var(--success-text);
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     font-weight: 600;
   }
   .spotlight-spaces {
-    margin-top: 18px;
-    padding-top: 16px;
+    margin-top: var(--space-4);
+    padding-top: var(--space-4);
     border-top: 1px solid var(--border);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: var(--space-3);
     flex-wrap: wrap;
   }
   .spotlight-spaces > small {
@@ -202,24 +202,24 @@
   }
   .spotlight-spaces > div {
     display: flex;
-    gap: 8px;
+    gap: var(--space-2);
     flex-wrap: wrap;
   }
   .spotlight-spaces > div > span {
     font-size: var(--font-sm);
-    padding: 4px 10px;
+    padding: var(--space-1) var(--space-2_5);
     border-radius: var(--r-sm);
     background: var(--lavender);
     color: var(--brand-text);
     font-weight: 600;
   }
   .spotlight-foot {
-    margin-top: 16px;
-    padding-top: 14px;
+    margin-top: var(--space-4);
+    padding-top: var(--space-3_5);
     border-top: 1px solid var(--border);
     display: flex;
     align-items: center;
-    gap: 7px;
+    gap: var(--space-1_5);
     font-size: var(--font-sm);
     color: var(--text-muted);
   }
@@ -228,12 +228,12 @@
     width: calc(100% - 72px);
     background: var(--hover-bg);
     border-radius: var(--r-lg);
-    margin: 8px auto 76px;
-    padding: 44px 52px;
+    margin: var(--space-2) auto 76px;
+    padding: var(--space-10) var(--space-12);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 28px;
+    gap: var(--space-7);
     position: relative;
     overflow: hidden;
   }
@@ -241,12 +241,12 @@
     font-size: var(--font-4xl);
     font-weight: 600;
     color: var(--text-strong);
-    letter-spacing: -0.7px;
+    letter-spacing: 0;
   }
   .landing-cta-actions {
     display: flex;
     align-items: center;
-    gap: 20px;
+    gap: var(--space-5);
     flex-wrap: wrap;
     position: relative;
     z-index: 1;
@@ -265,12 +265,12 @@
     max-width: 1188px;
     margin: auto;
     border-top: 1px solid var(--border);
-    padding: 28px 36px 34px;
+    padding: var(--space-7) var(--space-8) var(--space-8);
     display: flex;
     align-items: center;
-    gap: 20px;
-    padding-top: 24px;
-    padding-bottom: 28px;
+    gap: var(--space-5);
+    padding-top: var(--space-6);
+    padding-bottom: var(--space-7);
     width: 100%;
     min-height: 78px;
   }
@@ -305,7 +305,7 @@
     background: var(--hover-bg);
     display: flex;
     flex-direction: column;
-    padding: 45px 60px 32px;
+    padding: var(--space-12) 60px var(--space-8);
     position: relative;
     overflow: hidden;
     justify-content: space-between;
@@ -315,16 +315,16 @@
     align-self: flex-start;
   }
   .auth-story .eyebrow {
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     color: var(--text-muted);
   }
   .auth-story h1 {
     font-weight: 600;
-    letter-spacing: -1.8px;
-    margin-top: 19px;
-    color: var(--text);
+    letter-spacing: 0;
+    margin-top: var(--space-5);
+    color: var(--text-strong);
     font-size: clamp(42px, 5vw, 68px);
-    line-height: 1.5;
+    line-height: var(--lh-ui);
   }
   .auth-story h1 > span {
     color: var(--purple);
@@ -333,10 +333,10 @@
     line-height: 2.1;
     color: var(--text-subtle);
     font-size: var(--font-subhead);
-    margin-top: 20px;
+    margin-top: var(--space-5);
   }
   .story-bottom {
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     color: var(--text-muted);
     display: flex;
     justify-content: space-between;
@@ -344,12 +344,12 @@
     letter-spacing: 0.3px;
   }
   .story-bottom > span {
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     letter-spacing: 1px;
   }
   .auth-content {
     position: relative;
-    padding: 30px 60px;
+    padding: var(--space-7) 60px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -366,7 +366,7 @@
     font-size: var(--font-base);
     display: flex;
     align-items: center;
-    gap: 3px;
+    gap: var(--space-1);
   }
   .auth-form {
     max-width: 352px;
@@ -376,7 +376,7 @@
   .auth-form h2 {
     font-weight: 600;
     line-height: 1.5;
-    margin: 14px 0 10px;
+    margin: var(--space-3_5) 0 var(--space-2_5);
     font-size: var(--font-4xl);
     letter-spacing: -0.5px;
   }
@@ -387,13 +387,13 @@
   }
   .auth-tabs {
     display: flex;
-    margin: 29px 0 25px;
+    margin: var(--space-7) 0 var(--space-6);
     border-bottom: 1px solid var(--border);
-    gap: 25px;
+    gap: var(--space-6);
   }
   .auth-tabs > button {
     font-weight: 500;
-    padding: 0 3px 12px;
+    padding: 0 var(--space-1) var(--space-3);
     color: var(--text-subtle);
     position: relative;
     min-height: 46px;
@@ -413,18 +413,18 @@
     border-radius: var(--r-xs);
   }
   .auth-form label {
-    margin-bottom: 18px;
+    margin-bottom: var(--space-4);
     font-size: var(--font-base);
     color: var(--text);
   }
   .auth-form input {
-    padding: 12px 13px;
+    padding: var(--space-3) var(--space-3);
     font-size: var(--font-lg);
     min-height: 46px;
     color: var(--text);
   }
   .auth-form .button {
-    margin-top: 6px;
+    margin-top: var(--space-1_5);
     font-size: var(--font-md);
     min-height: 46px;
   }
@@ -434,15 +434,15 @@
   }
   .join-card {
     background: var(--surface);
-    margin: 50px auto 60px;
+    margin: var(--space-12) auto 60px;
     border: 1px solid var(--border);
     border-radius: var(--r-xl);
     text-align: center;
     box-shadow: var(--shadow-pop);
     max-width: 460px;
     width: calc(100% - 32px);
-    margin-top: 48px;
-    padding: 36px;
+    margin-top: var(--space-12);
+    padding: var(--space-8);
   }
   .invitation-icon {
     display: inline-flex;
@@ -454,7 +454,7 @@
     color: var(--brand-text);
     background: var(--lavender);
     position: relative;
-    margin-bottom: 23px;
+    margin-bottom: var(--space-6);
     transform: rotate(-4deg);
   }
   .invitation-icon > span {
@@ -466,33 +466,33 @@
   }
   .join-card .eyebrow {
     display: block;
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     color: var(--text-subtle);
   }
   .join-card h1 {
     font-size: var(--font-3xl);
     font-weight: 600;
-    margin: 15px 0;
+    margin: var(--space-3_5) 0;
     line-height: 1.7;
     overflow-wrap: anywhere;
   }
   .join-card > p {
     line-height: 2;
     max-width: 340px;
-    margin: 0 auto 22px;
+    margin: 0 auto var(--space-5);
     font-size: var(--font-md);
     color: var(--text-muted);
   }
   .invite-identity {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 14px 13px;
+    gap: var(--space-3);
+    padding: var(--space-3_5) var(--space-3);
     border: 1px solid var(--border);
     border-radius: var(--r-md);
     background: var(--surface);
     text-align: left;
-    margin: 29px 0 16px;
+    margin: var(--space-7) 0 var(--space-4);
   }
   .invite-identity > span:nth-child(2) {
     font-size: var(--font-sm);
@@ -505,7 +505,7 @@
   .invite-identity small {
     display: block;
     color: var(--text-subtle);
-    margin-top: 4px;
+    margin-top: var(--space-1);
     font-size: var(--font-sm);
   }
   .invite-identity > svg {
@@ -515,7 +515,7 @@
   .invite-expiry {
     display: block;
     font-size: var(--font-sm);
-    margin-top: 17px;
+    margin-top: var(--space-4);
     color: var(--text-subtle);
   }
   .public-header nav > a:first-child {
@@ -530,7 +530,7 @@
   .demo-chat {
     flex: 1;
     min-width: 0;
-    padding: 0 18px 16px;
+    padding: 0 var(--space-4) var(--space-4);
   }
   .demo-message > div {
     min-width: 0;
@@ -553,7 +553,7 @@
     display: inline-flex;
     flex-direction: row;
     align-items: center;
-    gap: 5px;
+    gap: var(--space-1_5);
     font-size: var(--font-base);
   }
   .invite-identity > span {

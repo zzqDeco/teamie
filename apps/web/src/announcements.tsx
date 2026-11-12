@@ -12,6 +12,7 @@ import { errorText } from "./errors";
 import { MessageBody } from "./markdown";
 import { BadgePill, Button, Modal, Notice } from "./ui";
 import { ICON } from "./icons";
+import { formatDateTime } from "./format-datetime";
 import "./styles/announcements.css";
 
 export function announcementsQueryKey(userId: string) {
@@ -27,16 +28,8 @@ export function charCount(value: string) {
 }
 
 export function formatAnnouncementTime(iso: string) {
-  const ts = Date.parse(iso);
-  if (Number.isNaN(ts)) return iso;
-  return new Date(ts).toLocaleString("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
+  const formatted = formatDateTime(iso, "stamp");
+  return formatted || iso;
 }
 
 export function usePlatformAnnouncements(userId?: string) {

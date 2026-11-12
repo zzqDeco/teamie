@@ -113,7 +113,7 @@ function App() {
             <div className="not-found">
               <Logo />
               <h1>好像走岔了。</h1>
-              <p>这个页面不存在，回到你的团队继续聊吧。</p>
+              <p>这个页面不存在，回到你的工作空间继续聊吧。</p>
               <Link className="button" to="/app">
                 回到工作空间
               </Link>

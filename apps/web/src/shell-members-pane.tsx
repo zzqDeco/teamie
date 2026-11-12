@@ -19,7 +19,14 @@ import {
   presenceClassName,
   usePresenceMap,
 } from "./engagement-store";
-import { Avatar, Button, IconButton, Modal, Notice } from "./ui";
+import {
+  Avatar,
+  Button,
+  IconButton,
+  Modal,
+  ModalCloseButton,
+  Notice,
+} from "./ui";
 import { ICON } from "./icons";
 
 export function ShellMembersPane({
@@ -158,7 +165,7 @@ export function ShellMembersPane({
                     ? member.ownerName
                       ? `由 ${member.ownerName} 创建`
                       : "Agent"
-                    : `${member.role === "owner" ? "空间所有者" : "团队成员"}${humanPresence ? ` · ${formatPresenceLabel(humanPresence)}` : ""}`}
+                    : `${member.role === "owner" ? "空间所有者" : "成员"}${humanPresence ? ` · ${formatPresenceLabel(humanPresence)}` : ""}`}
                 </span>
               </div>
               {member.role === "owner" && (
@@ -169,7 +176,7 @@ export function ShellMembersPane({
                 member.selectable !== false && (
                   <IconButton
                     className="member-dm"
-                    label={`与 ${member.displayName} 发起私聊`}
+                    label={`与 ${member.displayName} 发起私信`}
                     disabled={busy}
                     aria-busy={directBusyId === member.userId || undefined}
                     onClick={() => onStartDirect(member)}
@@ -251,14 +258,13 @@ export function RemoveMemberModal({
           ? "该成员将无法继续访问这个小组对话。工作空间成员资格不受影响。"
           : "该成员将无法继续访问这个工作空间及其中的对话。可以通过新邀请重新加入。"
       }
+      busy={busy}
       onClose={onClose}
     >
       <Notice>{error}</Notice>
       <div className="modal-actions">
-        <Button className="secondary" onClick={onClose}>
-          取消
-        </Button>
-        <Button className="danger" busy={busy} onClick={onConfirm}>
+        <ModalCloseButton>取消</ModalCloseButton>
+        <Button variant="danger" busy={busy} onClick={onConfirm}>
           确认移除
         </Button>
       </div>

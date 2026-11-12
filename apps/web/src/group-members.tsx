@@ -44,7 +44,7 @@ export function ParticipantIdentity({
               : "Agent"
             : member.role === "owner"
               ? "空间所有者"
-              : "团队成员"}
+              : "成员"}
         </small>
       </span>
     </>
@@ -167,7 +167,8 @@ export function GroupMembersDialog({
               <div key={member.userId} className="group-member-row">
                 <ParticipantIdentity member={member} />
                 <Button
-                  className="secondary small-button"
+                  variant="secondary"
+                  size="sm"
                   busy={busyId === member.userId}
                   disabled={!!busyId}
                   onClick={() => void change(member)}

@@ -6,6 +6,7 @@ import { api, ApiError } from "@teamie/api-client";
 import type { PasswordResetInspection } from "@teamie/api-client";
 import { useAuth } from "./auth";
 import { passwordPolicyError } from "./password-policy";
+import { formatDateTime } from "./format-datetime";
 import { PasswordField } from "./password-field";
 import { Button, Logo, Notice } from "./ui";
 import { ICON } from "./icons";
@@ -230,9 +231,9 @@ function ResetPasswordForm({ fragment }: { fragment: string }) {
       ) : inspection && (
         <>
           <div className="reset-account"><b>{inspection.account.displayName}</b><span>{inspection.account.emailMasked}</span></div>
-          <p className="reset-expiry">链接有效期至 {new Date(inspection.expiresAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })}</p>
+          <p className="reset-expiry">链接有效期至 {formatDateTime(inspection.expiresAt, "stamp")}</p>
           <form ref={formRef} onSubmit={submit} onInput={revalidate} aria-busy={busy} noValidate>
-            <Notice id={errorId}>{error}</Notice>
+            <Notice id={errorId}>{invalidField ? "" : error}</Notice>
             <PasswordField name="newPassword" label="新密码" autoComplete="new-password" placeholder="至少 12 个字符" readOnly={busy} error={invalidField === "newPassword" ? error : undefined} showRules />
             <PasswordField name="confirmPassword" label="确认新密码" autoComplete="new-password" placeholder="再次输入新密码" readOnly={busy} error={invalidField === "confirmPassword" ? error : undefined} confirmOf="newPassword" mismatchMessage="两次输入的新密码不一致。" />
             <small className="field-help reset-session-help">重置后，该账号原有的登录会话将失效。</small>

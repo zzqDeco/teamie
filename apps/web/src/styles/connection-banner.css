@@ -49,7 +49,7 @@
   @media (max-width: 780px) {
     .connection-banner {
       top: calc(var(--header-h-mobile) + env(safe-area-inset-top) + var(--space-2));
-      padding: var(--space-2) 14px;
+      padding: var(--space-2) var(--space-3_5);
     }
   }
 }
