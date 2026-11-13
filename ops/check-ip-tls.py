@@ -14,15 +14,65 @@ import urllib.error
 import urllib.request
 
 
+def _consume_balanced_block(text: str, open_brace_idx: int) -> int:
+    assert text[open_brace_idx] == "{", f"expected '{{' at {open_brace_idx}"
+    depth = 0
+    in_quotes = False
+    i = open_brace_idx
+    while i < len(text):
+        ch = text[i]
+        if ch == '"' and (i == 0 or text[i - 1] != "\\"):
+            in_quotes = not in_quotes
+        elif not in_quotes:
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return i + 1
+        i += 1
+    raise AssertionError("unclosed '{' in Caddyfile")
+
+
+def _replace_reverse_proxies_with_probes(body: str) -> str:
+    out: list[str] = []
+    pos = 0
+    rp_re = re.compile(r"\breverse_proxy\b")
+    while True:
+        m = rp_re.search(body, pos)
+        if not m:
+            out.append(body[pos:])
+            break
+        out.append(body[pos : m.start()])
+        line_end = body.find("\n", m.end())
+        if line_end == -1:
+            line_end = len(body)
+        header = body[m.end() : line_end]
+        brace_rel = header.find("{")
+        if brace_rel != -1:
+            args = header[:brace_rel].split()
+            end_pos = _consume_balanced_block(body, m.end() + brace_rel)
+        else:
+            args = header.split()
+            end_pos = line_end
+        assert args, "reverse_proxy directive must declare at least one upstream"
+        out.append(f'respond "{args[0]}" 200')
+        pos = end_pos
+    return "".join(out)
+
+
 def build_route_probe_block(caddyfile_text: str, port: int = 9081) -> str:
     site_match = re.search(
-        r"^\{\$SITE_ADDRESS\}\s*\{(.*?)^\}",
+        r"^\{\$SITE_ADDRESS\}\s*\{",
         caddyfile_text,
-        flags=re.MULTILINE | re.DOTALL,
+        flags=re.MULTILINE,
     )
     assert site_match, "production Caddyfile must define {$SITE_ADDRESS} block"
-    body = re.sub(r"^\s*import\s+/etc/caddy/issuer\.caddy\s*$", "", site_match.group(1), flags=re.MULTILINE)
-    body = re.sub(r"\breverse_proxy\s+([^\s]+)", r'respond "\1" 200', body)
+    open_idx = site_match.end() - 1
+    close_idx = _consume_balanced_block(caddyfile_text, open_idx)
+    raw_site_body = caddyfile_text[open_idx + 1 : close_idx - 1]
+    body = re.sub(r"^\s*import\s+/etc/caddy/issuer\.caddy\s*$", "", raw_site_body, flags=re.MULTILINE)
+    body = _replace_reverse_proxies_with_probes(body)
     return f"http://127.0.0.1:{port} {{\n{body}\n}}\n"
 
 
@@ -68,8 +118,9 @@ def main():
     public_ip = "192.0.2.1"  # Documentation-only address; never contacted.
     source = Path(__file__).resolve().parent.parent / "deploy" / "Caddyfile"
     source_text = source.read_text()
-    global_block = re.match(r"\A(\{.*?^\})", source_text, re.MULTILINE | re.DOTALL)
-    assert global_block, "production Caddyfile must start with a global block"
+    assert source_text.startswith("{"), "production Caddyfile must start with a global block"
+    global_end = _consume_balanced_block(source_text, 0)
+    global_block_text = source_text[:global_end]
     with tempfile.TemporaryDirectory(prefix="teamie-ip-tls-") as directory:
         root = Path(directory)
         cert, key = root / "ip.crt", root / "ip.key"
@@ -78,7 +129,7 @@ def main():
                         "-addext", "subjectAltName=IP:" + public_ip, "-keyout", str(key), "-out", str(cert)],
                        check=True, capture_output=True)
         config = root / "Caddyfile"
-        config.write_text(global_block.group(1)[:-1] + "\n debug\n http_port 9080\n https_port 9443\n"
+        config.write_text(global_block_text[:-1] + "\n debug\n http_port 9080\n https_port 9443\n"
                           " default_bind 127.0.0.1\n skip_install_trust\n}\nhttp:// {\n}\n"
                           "https://" + public_ip + ":9443 {\n tls " + str(cert) + " " + str(key) +
                           '\n respond "ip-tls-preflight-ok" 200\n}\n' +

@@ -6,6 +6,8 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"os"
 	"strconv"
 	"strings"
@@ -20,6 +22,10 @@ import (
 // model calls across Agents. It is > 1 so concurrent Agents do not serialize on a
 // global 1-slot ceiling while still bounding gateway memory and upstream connections.
 const DefaultMaxConcurrentCalls = 16
+
+// DefaultActiveReconcileInterval bounds how long an in-flight call on a draining
+// gateway slot can outlive a catalog or web-search revocation persisted by a sibling slot.
+const DefaultActiveReconcileInterval = 250 * time.Millisecond
 
 // Option configures a gateway Service.
 type Option func(*Service)
@@ -36,6 +42,33 @@ func WithModelTestStore(store domain.ModelTestStore) Option {
 	return func(s *Service) {
 		s.ModelTests = store
 	}
+}
+
+// WithPeerBroadcaster configures cross-slot cancellation and configuration reconciliation fanout.
+func WithPeerBroadcaster(peers domain.PeerBroadcaster) Option {
+	return func(s *Service) {
+		s.Peers = peers
+		if !s.reconcileConfigured {
+			s.reconcileInterval = DefaultActiveReconcileInterval
+		}
+	}
+}
+
+// WithActiveReconcileInterval configures periodic store revalidation while calls are active.
+// Passing d <= 0 disables background active-call store polling.
+func WithActiveReconcileInterval(d time.Duration) Option {
+	return func(s *Service) {
+		s.reconcileConfigured = true
+		s.reconcileInterval = d
+	}
+}
+
+func newInstanceID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return strconv.FormatInt(time.Now().UnixNano(), 16)
+	}
+	return hex.EncodeToString(b[:])
 }
 
 // ParseMaxConcurrentCalls parses GATEWAY_MAX_CONCURRENT_CALLS.
@@ -63,24 +96,30 @@ func defaultSlotCap() int {
 
 // Service coordinates Model Gateway use cases, slot admission, and run cancellation.
 type Service struct {
-	Store         domain.ConfigStore
-	ModelTests    domain.ModelTestStore
-	Cipher        domain.Cipher
-	Model         domain.UpstreamModel
-	WebSearch     domain.WebSearchProvider
-	Token         string
-	WebSearchURL  string
-	slots         chan struct{}
-	inFlight      atomic.Int64
-	webSlots      chan struct{}
-	modelConfigMu sync.RWMutex // catalog writes exclude lookup-to-registration, never provider execution
-	mu            sync.Mutex
-	modelSeq      uint64
-	webSeq        uint64
-	active        map[string]activeCall
-	canceled      map[string]time.Time
-	pool          providerPoolConfig
-	providers     map[string]*providerGate
+	Store               domain.ConfigStore
+	ModelTests          domain.ModelTestStore
+	Cipher              domain.Cipher
+	Model               domain.UpstreamModel
+	WebSearch           domain.WebSearchProvider
+	Peers               domain.PeerBroadcaster
+	Token               string
+	WebSearchURL        string
+	instanceID          string
+	reconcileConfigured bool
+	reconcileInterval   time.Duration
+	slots               chan struct{}
+	inFlight            atomic.Int64
+	webSlots            chan struct{}
+	modelConfigMu       sync.RWMutex // catalog writes exclude lookup-to-registration, never provider execution
+	mu                  sync.Mutex
+	modelSeq            uint64
+	webSeq              uint64
+	active              map[string]activeCall
+	canceled            map[string]time.Time
+	recentBroadcasts    map[string]time.Time
+	watcherStop         chan struct{}
+	pool                providerPoolConfig
+	providers           map[string]*providerGate
 }
 
 type activeCall struct {
@@ -93,16 +132,18 @@ type activeCall struct {
 // New constructs a new gateway application Service.
 func New(store domain.ConfigStore, cipher domain.Cipher, model domain.UpstreamModel, webSearch domain.WebSearchProvider, token string, opts ...Option) *Service {
 	s := &Service{
-		Store:        store,
-		Cipher:       cipher,
-		Model:        model,
-		WebSearch:    webSearch,
-		Token:        token,
-		WebSearchURL: domain.DefaultTavilyBaseURL,
-		slots:        make(chan struct{}, defaultSlotCap()),
-		webSlots:     make(chan struct{}, 4),
-		active:       make(map[string]activeCall),
-		canceled:     make(map[string]time.Time),
+		Store:            store,
+		Cipher:           cipher,
+		Model:            model,
+		WebSearch:        webSearch,
+		Token:            token,
+		WebSearchURL:     domain.DefaultTavilyBaseURL,
+		instanceID:       newInstanceID(),
+		slots:            make(chan struct{}, defaultSlotCap()),
+		webSlots:         make(chan struct{}, 4),
+		active:           make(map[string]activeCall),
+		canceled:         make(map[string]time.Time),
+		recentBroadcasts: make(map[string]time.Time),
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -115,6 +156,14 @@ func New(store domain.ConfigStore, cipher domain.Cipher, model domain.UpstreamMo
 		}
 	}
 	return s
+}
+
+// InstanceID returns the unique process-local identifier of this gateway Service.
+func (s *Service) InstanceID() string {
+	s.ensureInit()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.instanceID
 }
 
 func (s *Service) modelTestStore() domain.ModelTestStore {
@@ -149,6 +198,9 @@ func (s *Service) MaxConcurrentCalls() int {
 func (s *Service) ensureInit() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.instanceID == "" {
+		s.instanceID = newInstanceID()
+	}
 	if s.slots == nil {
 		s.slots = make(chan struct{}, defaultSlotCap())
 	}
@@ -160,6 +212,41 @@ func (s *Service) ensureInit() {
 	}
 	if s.canceled == nil {
 		s.canceled = make(map[string]time.Time)
+	}
+	if s.recentBroadcasts == nil {
+		s.recentBroadcasts = make(map[string]time.Time)
+	}
+}
+
+func (s *Service) maybeStartActiveWatcherLocked() {
+	if s.watcherStop != nil || s.reconcileInterval <= 0 || s.Store == nil {
+		return
+	}
+	stopCh := make(chan struct{})
+	interval := s.reconcileInterval
+	s.watcherStop = stopCh
+	go s.runActiveWatcher(stopCh, interval)
+}
+
+func (s *Service) maybeStopActiveWatcherLocked() {
+	if len(s.active) == 0 && s.watcherStop != nil {
+		close(s.watcherStop)
+		s.watcherStop = nil
+	}
+}
+
+func (s *Service) runActiveWatcher(stopCh <-chan struct{}, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stopCh:
+			return
+		case <-ticker.C:
+			rCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_ = s.ReconcileConfig(rCtx, "")
+			cancel()
+		}
 	}
 }
 
@@ -246,12 +333,15 @@ func (s *Service) RegisterRunCancel(ctx context.Context, agentID, runID, modelID
 	s.active[modelKey] = activeCall{modelID: modelID, providerID: providerID, cancel: cancel}
 	if at, ok := s.canceled[index]; ok && time.Since(at) < 2*time.Minute {
 		cancel()
+	} else {
+		s.maybeStartActiveWatcherLocked()
 	}
 	s.mu.Unlock()
 	return ctx, func() {
 		cancel()
 		s.mu.Lock()
 		delete(s.active, modelKey)
+		s.maybeStopActiveWatcherLocked()
 		s.mu.Unlock()
 	}
 }
@@ -267,22 +357,20 @@ func (s *Service) RegisterWebCancel(ctx context.Context, agentID, runID string) 
 	s.active[webKey] = activeCall{web: true, cancel: cancel}
 	if at, ok := s.canceled[index]; ok && time.Since(at) < 2*time.Minute {
 		cancel()
+	} else {
+		s.maybeStartActiveWatcherLocked()
 	}
 	s.mu.Unlock()
 	return ctx, func() {
 		cancel()
 		s.mu.Lock()
 		delete(s.active, webKey)
+		s.maybeStopActiveWatcherLocked()
 		s.mu.Unlock()
 	}
 }
 
-// CancelRun cancels any active model or web-search call for the given agent and run.
-func (s *Service) CancelRun(agentID, runID string) {
-	s.ensureInit()
-	index := agentID + "/" + runID
-	s.mu.Lock()
-	now := time.Now()
+func (s *Service) cancelRunLocked(index string, now time.Time) []context.CancelFunc {
 	for key, at := range s.canceled {
 		if now.Sub(at) > 2*time.Minute {
 			delete(s.canceled, key)
@@ -308,17 +396,89 @@ func (s *Service) CancelRun(agentID, runID string) {
 			cancels = append(cancels, call.cancel)
 		}
 	}
+	return cancels
+}
+
+// CancelRunLocal cancels any active model or web-search call for the given agent and run
+// on this gateway instance only, without re-broadcasting to peer slots.
+func (s *Service) CancelRunLocal(agentID, runID string) {
+	s.ensureInit()
+	index := agentID + "/" + runID
+	s.mu.Lock()
+	cancels := s.cancelRunLocked(index, time.Now())
 	s.mu.Unlock()
 	for _, cancel := range cancels {
 		cancel()
 	}
 }
 
-// Cancel validates the service token and attribution IDs and cancels the run.
+// CancelRun cancels any active model or web-search call for the given agent and run
+// on this instance and synchronously fans out cancellation to sibling rollout slots.
+func (s *Service) CancelRun(agentID, runID string) {
+	s.ensureInit()
+	index := agentID + "/" + runID
+	now := time.Now()
+	s.mu.Lock()
+	cancels := s.cancelRunLocked(index, now)
+	peers := s.Peers
+	shouldBroadcast := false
+	if peers != nil {
+		for key, at := range s.recentBroadcasts {
+			if now.Sub(at) > 5*time.Second {
+				delete(s.recentBroadcasts, key)
+			}
+		}
+		if last, ok := s.recentBroadcasts[index]; !ok || now.Sub(last) > time.Second {
+			if len(s.recentBroadcasts) >= 256 {
+				for key := range s.recentBroadcasts {
+					delete(s.recentBroadcasts, key)
+					break
+				}
+			}
+			s.recentBroadcasts[index] = now
+			shouldBroadcast = true
+		}
+	}
+	s.mu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
+	if shouldBroadcast {
+		bCtx, bCancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+		_ = peers.BroadcastCancel(bCtx, agentID, runID)
+		bCancel()
+	}
+}
+
+// CancelLocal validates the service token and attribution IDs and cancels the run locally.
+func (s *Service) CancelLocal(serviceToken, agentID, runID string) bool {
+	if !domain.EqualSecret(serviceToken, s.Token) || !domain.ValidID(agentID) || !domain.ValidID(runID) {
+		return false
+	}
+	s.CancelRunLocal(agentID, runID)
+	return true
+}
+
+// Cancel validates the service token and attribution IDs and cancels the run across gateway slots.
 func (s *Service) Cancel(serviceToken, agentID, runID string) bool {
 	if !domain.EqualSecret(serviceToken, s.Token) || !domain.ValidID(agentID) || !domain.ValidID(runID) {
 		return false
 	}
 	s.CancelRun(agentID, runID)
 	return true
+}
+
+func (s *Service) broadcastReconcile(ctx context.Context, resetProviderID string) {
+	s.mu.Lock()
+	peers := s.Peers
+	s.mu.Unlock()
+	if peers == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	bCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 1500*time.Millisecond)
+	defer cancel()
+	_ = peers.BroadcastReconcile(bCtx, resetProviderID)
 }

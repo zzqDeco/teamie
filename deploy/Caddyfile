@@ -1,6 +1,13 @@
 {
 	admin off
 	default_sni {$TLS_SERVER_NAME}
+	log {
+		exclude http.handlers.reverse_proxy.health_checker.active
+	}
+	log healthcheck {
+		include http.handlers.reverse_proxy.health_checker.active
+		level ERROR
+	}
 }
 
 {$SITE_ADDRESS} {
@@ -16,29 +23,113 @@
 	}
 	@auth path /api/v1/auth/*
 	handle @auth {
-		reverse_proxy identity:8081
+		reverse_proxy identity:8081 identity-canary:8081 {
+			lb_policy first
+			lb_try_duration 5s
+			lb_try_interval 100ms
+			health_uri /readyz
+			health_interval 500ms
+			health_timeout 1s
+			fail_duration 5s
+			transport http {
+				dial_timeout 1s
+				keepalive 30s
+			}
+		}
 	}
 	@gateway path /api/v1/admin/model-gateway /api/v1/admin/model-gateway/* /api/v1/model-gateway /api/v1/model-gateway/*
 	handle @gateway {
-		reverse_proxy llm-gateway:8086
+		reverse_proxy llm-gateway:8086 llm-gateway-canary:8086 {
+			lb_policy first
+			lb_try_duration 5s
+			lb_try_interval 100ms
+			health_uri /readyz
+			health_interval 500ms
+			health_timeout 1s
+			fail_duration 5s
+			transport http {
+				dial_timeout 1s
+				keepalive 30s
+			}
+		}
 	}
 	@agents path /api/v1/agents /api/v1/agents/* /api/v1/workspaces/*/agents
 	handle @agents {
-		reverse_proxy agent-control:8084
+		reverse_proxy agent-control:8084 agent-control-canary:8084 {
+			lb_policy first
+			lb_try_duration 5s
+			lb_try_interval 100ms
+			health_uri /readyz
+			health_interval 500ms
+			health_timeout 1s
+			fail_duration 5s
+			transport http {
+				dial_timeout 1s
+				keepalive 30s
+			}
+		}
 	}
 	@realtime path /api/v1/ws /api/v1/conversations/*/typing /api/v1/workspaces/*/presence
 	handle @realtime {
-		reverse_proxy realtime:8083
+		reverse_proxy realtime:8083 realtime-canary:8083 {
+			lb_policy first
+			lb_try_duration 5s
+			lb_try_interval 100ms
+			health_uri /readyz
+			health_interval 500ms
+			health_timeout 1s
+			fail_duration 5s
+			transport http {
+				dial_timeout 1s
+				keepalive 30s
+			}
+		}
 	}
 	@marketplace path /api/v1/marketplace/* /api/v1/developer/* /api/v1/admin/marketplace/* /api/v1/workspaces/*/apps /api/v1/workspaces/*/apps/* /api/v1/conversations/*/apps /api/v1/conversations/*/apps/* /api/v1/conversations/*/apps/*/session
 	handle @marketplace {
-		reverse_proxy marketplace:8088
+		reverse_proxy marketplace:8088 marketplace-canary:8088 {
+			lb_policy first
+			lb_try_duration 5s
+			lb_try_interval 100ms
+			health_uri /readyz
+			health_interval 500ms
+			health_timeout 1s
+			fail_duration 5s
+			transport http {
+				dial_timeout 1s
+				keepalive 30s
+			}
+		}
 	}
 	handle /api/* {
-		reverse_proxy chat:8082
+		reverse_proxy chat:8082 chat-canary:8082 {
+			lb_policy first
+			lb_try_duration 5s
+			lb_try_interval 100ms
+			health_uri /readyz
+			health_interval 500ms
+			health_timeout 1s
+			fail_duration 5s
+			transport http {
+				dial_timeout 1s
+				keepalive 30s
+			}
+		}
 	}
 	handle {
-		reverse_proxy web:80
+		reverse_proxy web:80 web-canary:80 {
+			lb_policy first
+			lb_try_duration 5s
+			lb_try_interval 100ms
+			health_uri /healthz
+			health_interval 500ms
+			health_timeout 1s
+			fail_duration 5s
+			transport http {
+				dial_timeout 1s
+				keepalive 30s
+			}
+		}
 	}
 }
 

@@ -110,8 +110,8 @@ services:
   chat:
     <<: *app
     image: ${CHAT_IMAGE:?manifest image required}
-    mem_limit: 128m
-    memswap_limit: 128m
+    mem_limit: 96m
+    memswap_limit: 96m
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       PPROF_ADDR: ${PPROF_ADDR:-127.0.0.1:6060}
@@ -126,7 +126,7 @@ services:
       APP_ORIGIN: ${APP_ORIGIN:?HTTPS origin required}
       COOKIE_SECURE: "true"
       FEATURE_FLAGS_FILE: /etc/teamie/feature-flags.json
-      GOMEMLIMIT: 96MiB
+      GOMEMLIMIT: 72MiB
       GOMAXPROCS: "1"
     volumes:
       - ${FEATURE_FLAGS_PATH:-/srv/teamie/config/feature-flags.json}:/etc/teamie/feature-flags.json:ro
@@ -175,8 +175,8 @@ services:
   realtime:
     <<: *app
     image: ${REALTIME_IMAGE:?manifest image required}
-    mem_limit: 128m
-    memswap_limit: 128m
+    mem_limit: 96m
+    memswap_limit: 96m
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       PPROF_ADDR: ${PPROF_ADDR:-127.0.0.1:6060}
@@ -189,7 +189,7 @@ services:
       APP_ORIGIN: ${APP_ORIGIN:?HTTPS origin required}
       COOKIE_SECURE: "true"
       FEATURE_FLAGS_FILE: /etc/teamie/feature-flags.json
-      GOMEMLIMIT: 96MiB
+      GOMEMLIMIT: 72MiB
       GOMAXPROCS: "1"
     volumes:
       - ${FEATURE_FLAGS_PATH:-/srv/teamie/config/feature-flags.json}:/etc/teamie/feature-flags.json:ro
@@ -342,8 +342,8 @@ services:
   postgres:
     image: ${POSTGRES_IMAGE:?manifest image required}
     restart: unless-stopped
-    mem_limit: 384m
-    memswap_limit: 384m
+    mem_limit: 320m
+    memswap_limit: 320m
     shm_size: 64m
     pids_limit: 128
     security_opt: [no-new-privileges:true]

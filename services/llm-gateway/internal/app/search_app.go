@@ -70,6 +70,8 @@ func (s *Service) ExecuteWebSearch(ctx context.Context, in domain.WebSearchInput
 	if err != nil {
 		return fail(err)
 	}
+	unlockAdmission := s.lockModelAdmission()
+	defer unlockAdmission()
 	c, err := s.Store.Load(ctx)
 	if err != nil {
 		return fail(err)
@@ -91,6 +93,7 @@ func (s *Service) ExecuteWebSearch(ctx context.Context, in domain.WebSearchInput
 	}
 	callCtx, cleanup := s.RegisterWebCancel(ctx, in.AgentID, in.RunID)
 	defer cleanup()
+	unlockAdmission()
 
 	outcome.Phase = "provider-search"
 	payload := map[string]any{
@@ -137,6 +140,8 @@ func (s *Service) ExecuteWebExtract(ctx context.Context, in domain.WebExtractInp
 		return fail(err, nil)
 	}
 	outcome.URLCount = len(urls)
+	unlockAdmission := s.lockModelAdmission()
+	defer unlockAdmission()
 	c, err := s.Store.Load(ctx)
 	if err != nil {
 		return fail(err, nil)
@@ -158,6 +163,7 @@ func (s *Service) ExecuteWebExtract(ctx context.Context, in domain.WebExtractInp
 	}
 	callCtx, cleanup := s.RegisterWebCancel(ctx, in.AgentID, in.RunID)
 	defer cleanup()
+	unlockAdmission()
 
 	outcome.Phase = "provider-extract"
 	payload := map[string]any{

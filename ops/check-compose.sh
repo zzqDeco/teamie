@@ -17,7 +17,8 @@ for name,service in config['services'].items():
     for mount in service.get('tmpfs',[]):
         assert mount.startswith('/'), 'tmpfs entries must preserve their quoted comma-separated options'
     assert int(service['mem_limit'])>0
-assert sum(int(s['mem_limit']) for s in config['services'].values())==1472*1024*1024
+assert sum(int(s['mem_limit']) for s in config['services'].values())==1344*1024*1024
+assert max(int(config['services'][s]['mem_limit']) for s in ('identity','chat','marketplace','realtime','web','agent-control','llm-gateway'))==128*1024*1024
 assert int(config['services']['agent-runtime']['mem_limit'])==256*1024*1024
 assert int(config['services']['llm-gateway']['mem_limit'])==128*1024*1024
 assert config['networks']['private']['internal'] is True
@@ -111,6 +112,44 @@ for mutate in (
     try:m.validate_config(changed,sys.argv[2])
     except ValueError:pass
     else:raise AssertionError('unsafe Agent production configuration accepted')
+
+# Verify service_up_to_date against real docker compose JSON runtime settings.
+from unittest import mock
+redis_spec=c['services']['redis']
+redis_info={
+    'Id':'cid-redis',
+    'State':{'Running':True,'Health':{'Status':'healthy'}},
+    'Config':{
+        'Image':redis_spec['image'],
+        'Env':['PATH=/usr/local/bin']+[f'{k}={v}' for k,v in (redis_spec.get('environment') or {}).items() if v is not None],
+        'Cmd':list(redis_spec['command']),
+        'User':redis_spec['user'],
+        'Healthcheck':{'Test':list(redis_spec['healthcheck']['test']),'Interval':10_000_000_000,'Timeout':3_000_000_000,'Retries':6},
+    },
+    'HostConfig':{
+        'Memory':int(redis_spec['mem_limit']),
+        'MemorySwap':int(redis_spec['memswap_limit']),
+        'PidsLimit':int(redis_spec['pids_limit']),
+        'ReadonlyRootfs':bool(redis_spec.get('read_only',False)),
+        'Init':bool(redis_spec.get('init',False)),
+        'SecurityOpt':list(redis_spec.get('security_opt') or []),
+        'CapDrop':list(redis_spec.get('cap_drop') or []),
+        'CapAdd':list(redis_spec.get('cap_add') or []),
+        'Tmpfs':{'/data':'size=1m,mode=1777'},
+        'RestartPolicy':{'Name':redis_spec['restart'],'MaximumRetryCount':0},
+        'LogConfig':{'Type':redis_spec['logging']['driver'],'Config':dict(redis_spec['logging']['options'])},
+    },
+    'Mounts':[],
+    'NetworkSettings':{'Networks':{'teamie_private':{}}},
+}
+img_info=[{'Config':{'Env':['PATH=/usr/local/bin'],'Cmd':['redis-server']}}]
+with mock.patch.object(m.subprocess,'run',return_value=m.subprocess.CompletedProcess(['docker','ps'],0,stdout='cid-redis\n',stderr='')), \
+     mock.patch.object(m.subprocess,'check_output',side_effect=lambda cmd,**kw:json.dumps(img_info if cmd[:3]==['docker','image','inspect'] else [redis_info])):
+    assert m.service_up_to_date(c,'redis') is True
+    c_mem=copy.deepcopy(c); c_mem['services']['redis']['mem_limit']=32*1024*1024
+    assert m.service_up_to_date(c_mem,'redis') is False
+    c_cmd=copy.deepcopy(c); c_cmd['services']['redis']['command']=['redis-server','--maxmemory','20mb']
+    assert m.service_up_to_date(c_cmd,'redis') is False
 PY
 
 # Render the ACR production endpoint through the real Compose interpolation and

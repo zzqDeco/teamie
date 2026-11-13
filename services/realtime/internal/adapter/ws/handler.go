@@ -6,10 +6,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -33,18 +35,29 @@ func actorFromContext(ctx context.Context) (domain.User, bool) {
 }
 
 type peer struct {
-	user  string
-	token string
-	conn  *websocket.Conn
-	queue chan domain.Hint
-	done  chan struct{}
-	once  sync.Once
+	user      string
+	token     string
+	conn      *websocket.Conn
+	queue     chan domain.Hint
+	done      chan struct{}
+	drain     chan struct{}
+	writeDone chan struct{}
+	once      sync.Once
+	drainOnce sync.Once
 }
 
 func (p *peer) UserID() string     { return p.user }
 func (p *peer) Token() string      { return p.token }
 func (p *peer) Send(h domain.Hint) { p.enqueue(h) }
 func (p *peer) Close()             { p.close() }
+
+func (p *peer) beginDrain() {
+	p.drainOnce.Do(func() {
+		if p.drain != nil {
+			close(p.drain)
+		}
+	})
+}
 
 func (p *peer) close() {
 	p.once.Do(func() {
@@ -120,7 +133,11 @@ type Adapter struct {
 	peersByUser    map[string]int
 	reservedByUser map[string]int
 	reservedTotal  int
+	reserveWake    chan struct{}
+	draining       atomic.Bool
 }
+
+var errServiceDraining = errors.New("service draining")
 
 var _ realtimegen.RealtimeWSService = (*Adapter)(nil)
 
@@ -148,15 +165,93 @@ func (a *Adapter) ActiveClients() []domain.Client {
 // CloseAll closes all active WebSocket connections managed by this adapter.
 func (a *Adapter) CloseAll() {
 	a.mu.Lock()
-	defer a.mu.Unlock()
+	peers := make([]*peer, 0, len(a.peers))
 	for p := range a.peers {
+		peers = append(peers, p)
+	}
+	a.mu.Unlock()
+	for _, p := range peers {
 		p.close()
+	}
+}
+
+// Drain sends RFC 6455 1001 Going Away close frames to all active WebSocket peers
+// via their single-writer loops and waits up to ctx's deadline (capped at 2s) for
+// them to close cleanly so clients immediately reconnect and catch up via cursor.
+func (a *Adapter) Drain(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	drainCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	waited := make(map[*peer]struct{})
+	for {
+		a.mu.Lock()
+		a.draining.Store(true)
+		var pendingPeers []*peer
+		for p := range a.peers {
+			if _, seen := waited[p]; !seen {
+				waited[p] = struct{}{}
+				pendingPeers = append(pendingPeers, p)
+			}
+		}
+		reserved := a.reservedTotal
+		var resWake <-chan struct{}
+		if reserved > 0 && len(pendingPeers) == 0 {
+			if a.reserveWake == nil {
+				a.reserveWake = make(chan struct{})
+			}
+			resWake = a.reserveWake
+		}
+		a.mu.Unlock()
+
+		if len(pendingPeers) == 0 && reserved == 0 {
+			if len(waited) == 0 && a.Clients != nil {
+				for _, c := range a.Clients() {
+					c.Close()
+				}
+			}
+			return
+		}
+
+		var waitChs []<-chan struct{}
+		for _, p := range pendingPeers {
+			if p.writeDone != nil {
+				p.beginDrain()
+				waitChs = append(waitChs, p.writeDone)
+			} else {
+				p.close()
+			}
+		}
+
+		for _, ch := range waitChs {
+			select {
+			case <-ch:
+			case <-drainCtx.Done():
+				a.CloseAll()
+				return
+			}
+		}
+
+		if resWake != nil {
+			select {
+			case <-resWake:
+			case <-drainCtx.Done():
+				a.CloseAll()
+				return
+			}
+		}
 	}
 }
 
 func (a *Adapter) tryReservePeer(userID string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
+	if a.draining.Load() {
+		return errServiceDraining
+	}
 
 	userCount := a.reservedByUser[userID]
 	totalCount := a.reservedTotal
@@ -200,14 +295,23 @@ func (a *Adapter) consumeReservationLocked(userID string) {
 			a.reservedTotal--
 		}
 	}
+	if a.reservedTotal == 0 && a.reserveWake != nil {
+		close(a.reserveWake)
+		a.reserveWake = nil
+	}
 }
 
 func (a *Adapter) registerPeer(userID, token string, conn *websocket.Conn) (domain.Client, <-chan domain.Event, <-chan struct{}) {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	a.consumeReservationLocked(userID)
+	draining := a.draining.Load()
 	if a.RegisterPeer != nil {
-		return a.RegisterPeer(userID, token, conn)
+		c, q, d := a.RegisterPeer(userID, token, conn)
+		a.mu.Unlock()
+		if draining && c != nil {
+			c.Close()
+		}
+		return c, q, d
 	}
 	p := &peer{
 		user:  userID,
@@ -215,6 +319,13 @@ func (a *Adapter) registerPeer(userID, token string, conn *websocket.Conn) (doma
 		conn:  conn,
 		queue: make(chan domain.Hint, 16),
 		done:  make(chan struct{}),
+		drain: make(chan struct{}),
+	}
+	if conn != nil {
+		p.writeDone = make(chan struct{})
+	}
+	if draining {
+		p.beginDrain()
 	}
 	if a.peers == nil {
 		a.peers = map[*peer]struct{}{}
@@ -224,6 +335,7 @@ func (a *Adapter) registerPeer(userID, token string, conn *websocket.Conn) (doma
 	}
 	a.peers[p] = struct{}{}
 	a.peersByUser[userID]++
+	a.mu.Unlock()
 	return p, p.queue, p.done
 }
 
@@ -352,6 +464,10 @@ func (a *Adapter) handleTyping(w http.ResponseWriter, r *http.Request, s httpx.S
 }
 
 func (a *Adapter) handleWS(w http.ResponseWriter, r *http.Request) {
+	if a.draining.Load() {
+		httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "draining"})
+		return
+	}
 	origin := r.Header.Get("Origin")
 	if _, err := a.ConnectWS(r.Context(), &realtimegen.ConnectWSReq{Origin: &origin}); err != nil {
 		httpx.WriteError(w, err)
@@ -364,6 +480,10 @@ func (a *Adapter) handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.tryReservePeer(ss.User.ID); err != nil {
+		if errors.Is(err, errServiceDraining) {
+			httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "draining"})
+			return
+		}
 		httpx.WriteError(w, err)
 		return
 	}
@@ -443,7 +563,27 @@ func (a *Adapter) handleWS(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *Adapter) writeLoop(client domain.Client, conn *websocket.Conn, queue <-chan domain.Event, done <-chan struct{}) {
+	var drainCh <-chan struct{}
+	if p, ok := client.(*peer); ok {
+		drainCh = p.drain
+		if p.writeDone != nil {
+			defer close(p.writeDone)
+		}
+	}
 	defer client.Close()
+	writeGoingAway := func() {
+		_ = conn.WriteControl(
+			websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseGoingAway, "server draining"),
+			time.Now().Add(time.Second),
+		)
+	}
+	select {
+	case <-drainCh:
+		writeGoingAway()
+		return
+	default:
+	}
 	write := func(frame *realtimegen.RealtimeServerFrame) error {
 		_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 		return conn.WriteJSON(frame)
@@ -466,6 +606,9 @@ func (a *Adapter) writeLoop(client domain.Client, conn *websocket.Conn, queue <-
 	for {
 		select {
 		case <-done:
+			return
+		case <-drainCh:
+			writeGoingAway()
 			return
 		case hint := <-queue:
 			if write(ToServerFrame(hint)) != nil {

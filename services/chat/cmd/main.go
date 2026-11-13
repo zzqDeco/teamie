@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"net"
+	"sync"
 
 	goredis "github.com/redis/go-redis/v9"
 	"teamie/contracts/gen/im/kitex_gen/im/chatservice"
@@ -80,17 +81,31 @@ func main() {
 
 	rdb := goredis.NewClient(&goredis.Options{Addr: httpx.Env("REDIS_ADDR", "redis:6379")})
 	defer rdb.Close()
-	go redisinfra.RunOutbox(ctx, appSvc, rdb)
-	go redisinfra.RunAttachmentCleanup(ctx, appSvc)
+
+	var bgWG sync.WaitGroup
+	defer func() {
+		cancel()
+		bgWG.Wait()
+	}()
+	bgWG.Add(2)
+	go func() {
+		defer bgWG.Done()
+		redisinfra.RunOutbox(ctx, appSvc, rdb)
+	}()
+	go func() {
+		defer bgWG.Done()
+		redisinfra.RunAttachmentCleanup(ctx, appSvc)
+	}()
 
 	addr, err := net.ResolveTCPAddr("tcp", httpx.Env("RPC_ADDR", ":8882"))
 	if err != nil {
 		observability.Fatal("Service initialization failed", err)
 	}
-	rpcSrv := chatservice.NewServer(&rpcadapter.Server{App: appSvc}, rpcx.ServerOptions(addr, 0)...)
+	rpcDrain := rpcx.NewDrainState()
+	rpcSrv := chatservice.NewServer(&rpcadapter.Server{App: appSvc}, rpcx.ServerOptions(addr, 0, rpcDrain.ServerOption())...)
 	defer rpcSrv.Stop()
 	go func() {
-		if err := rpcSrv.Run(); err != nil {
+		if err := rpcSrv.Run(); err != nil && !rpcDrain.Draining() {
 			observability.Fatal("Service initialization failed", err)
 		}
 	}()
@@ -100,5 +115,10 @@ func main() {
 		Auth:   identityClient,
 		Origin: origin,
 	}).Routes()
-	httpx.Serve(httpx.Env("HTTP_ADDR", ":8082"), httpHandler)
+	httpx.ServeLifecycle(
+		httpx.Env("HTTP_ADDR", ":8082"),
+		httpHandler,
+		httpx.OnDrainStart(rpcDrain.MarkDraining),
+		httpx.OnShutdown(func(context.Context) { _ = rpcSrv.Stop() }),
+	)
 }

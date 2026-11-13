@@ -55,6 +55,15 @@ func main() {
 	if err != nil {
 		observability.Fatal("invalid GATEWAY_PROVIDER_MAX_WORKERS", err)
 	}
+	httpAddr := httpx.Env("HTTP_ADDR", ":8086")
+	rpcAddr := httpx.Env("RPC_ADDR", ":8886")
+	peerHTTPTargets, peerRPCTargets := rpcclient.DefaultPeerTargets(
+		httpAddr,
+		rpcAddr,
+		httpx.Env("GATEWAY_PEER_HTTP_ADDRS", ""),
+		httpx.Env("GATEWAY_PEER_RPC_ADDRS", ""),
+	)
+	peerBroadcaster := rpcclient.NewPeerBroadcaster(peerHTTPTargets, peerRPCTargets, token, "")
 	provider := upstream.Provider{HTTP: upstream.NewHTTPClient()}
 	svc := app.New(
 		store,
@@ -64,7 +73,9 @@ func main() {
 		token,
 		app.WithMaxConcurrentCalls(maxConcurrentCalls),
 		app.WithProviderWorkers(providerMaxWorkers, app.DefaultProviderMaxQueue),
+		app.WithPeerBroadcaster(peerBroadcaster),
 	)
+	peerBroadcaster.InstanceID = svc.InstanceID()
 	observability.L(nil).Info("Gateway concurrency configured",
 		zap.String("event.action", "gateway-concurrency-configured"),
 		zap.String("event.outcome", "success"),
@@ -74,29 +85,52 @@ func main() {
 	rpcSrv := rpcAdapter.New(svc)
 	httpHandler := httpAdapter.New(svc)
 
-	addr, err := net.ResolveTCPAddr("tcp", httpx.Env("RPC_ADDR", ":8886"))
+	addr, err := net.ResolveTCPAddr("tcp", rpcAddr)
 	if err != nil {
 		observability.Fatal("invalid RPC_ADDR", err)
 	}
-	rpc := modelgatewayservice.NewServer(rpcSrv, rpcx.ServerOptions(addr, 0)...)
-	defer rpc.Stop()
+	rpcDrain := rpcx.NewDrainState()
+	rpc := modelgatewayservice.NewServer(rpcSrv, rpcx.ServerOptions(addr, 0, rpcDrain.ServerOption())...)
+	defer func() {
+		rpcDrain.MarkDraining()
+		_ = rpc.Stop()
+	}()
 	go func() {
-		if err := rpc.Run(); err != nil {
+		if err := rpc.Run(); err != nil && !rpcDrain.Draining() {
 			observability.Fatal("gateway RPC stopped", err)
 		}
 	}()
+	bgCtx, stopBG := context.WithCancel(context.Background())
+	pruneDone := make(chan struct{})
+	defer func() {
+		stopBG()
+		<-pruneDone
+	}()
 	go func() {
+		defer close(pruneDone)
 		ticker := time.NewTicker(time.Hour)
 		defer ticker.Stop()
-		for range ticker.C {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_ = store.Prune(ctx)
-			cancel()
+		for {
+			select {
+			case <-bgCtx.Done():
+				return
+			case <-ticker.C:
+				pruneCtx, pruneCancel := context.WithTimeout(bgCtx, 5*time.Second)
+				_ = store.Prune(pruneCtx)
+				pruneCancel()
+			}
 		}
 	}()
-	httpx.ServeWithOptions(
-		httpx.Env("HTTP_ADDR", ":8086"),
+	// Keep the RPC server listening (with crrst=1 drain metadata) until ServeWithOptionsLifecycle
+	// finishes draining in-flight HTTP inference streams so peer cancellation fallback reaches
+	// streams running inside Hertz Shutdown.
+	httpx.ServeWithOptionsLifecycle(
+		httpAddr,
 		httpHandler.Routes(auth),
+		[]httpx.LifecycleOption{
+			httpx.OnDrainStart(rpcDrain.MarkDraining),
+			httpx.WithShutdownTimeout(20 * time.Second),
+		},
 		hertzserver.WithWriteTimeout(0),
 		hertzserver.WithMaxRequestBodySize(2*modeltransport.MaxRequestBytes+4096),
 	)

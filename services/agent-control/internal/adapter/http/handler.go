@@ -370,9 +370,10 @@ func (a *Adapter) Routes() http.Handler {
 	})
 }
 
-// Serve runs the Hertz HTTP server for the Agent Control Plane with a 64 KiB max request body.
-func Serve(addr string, h http.Handler) {
+// Serve runs the Hertz HTTP server for the Agent Control Plane with a 64 KiB max request body
+// and unified SIGTERM/SIGINT graceful draining.
+func Serve(addr string, h http.Handler, opts ...httpx.LifecycleOption) {
 	s := server.Default(server.WithHostPorts(addr), server.WithMaxRequestBodySize(65536))
 	httpx.MountHertz(s, h)
-	s.Spin()
+	httpx.RunServer(s, opts...)
 }

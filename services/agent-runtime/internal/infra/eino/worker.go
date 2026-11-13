@@ -113,6 +113,22 @@ func (e *Engine) report(ctx context.Context, id, state, code string, active bool
 	}
 	_, _ = e.Control.ReportRuntime(ctx, r)
 }
+func safeGatewayCancel(ctx context.Context, client modelgatewayservice.Client, req *wire.CancelRequest) {
+	if client == nil {
+		return
+	}
+	defer func() { _ = recover() }()
+	_, _ = client.Cancel(ctx, req)
+}
+
+func safeSandboxCancel(ctx context.Context, client sandboxservice.Client, req *wire.CancelRequest) {
+	if client == nil {
+		return
+	}
+	defer func() { _ = recover() }()
+	_, _ = client.Cancel(ctx, req)
+}
+
 func (e *Engine) cancelRun(id string, run *Run) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -120,11 +136,11 @@ func (e *Engine) cancelRun(id string, run *Run) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		_, _ = e.Gateway.Cancel(ctx, &wire.CancelRequest{ServiceToken: e.Config.GatewayToken, AgentId: id, RunId: executionID(run)})
+		safeGatewayCancel(ctx, e.Gateway, &wire.CancelRequest{ServiceToken: e.Config.GatewayToken, AgentId: id, RunId: executionID(run)})
 	}()
 	go func() {
 		defer wg.Done()
-		_, _ = e.Sandbox.Cancel(ctx, &wire.CancelRequest{ServiceToken: e.Config.SandboxToken, AgentId: id, RunId: executionID(run)})
+		safeSandboxCancel(ctx, e.Sandbox, &wire.CancelRequest{ServiceToken: e.Config.SandboxToken, AgentId: id, RunId: executionID(run)})
 	}()
 	wg.Wait()
 }

@@ -53,14 +53,22 @@ func main() {
 	if err != nil {
 		observability.Fatal("invalid RPC_ADDR", err)
 	}
-	rpc := sandboxservice.NewServer(rpcServer, rpcx.ServerOptions(addr, imlimits.AttachmentRequestBytes)...)
+	rpcDrain := rpcx.NewDrainState()
+	rpc := sandboxservice.NewServer(rpcServer, rpcx.ServerOptions(addr, imlimits.AttachmentRequestBytes, rpcDrain.ServerOption())...)
 	defer rpc.Stop()
 	go func() {
-		if err := rpc.Run(); err != nil {
+		if err := rpc.Run(); err != nil && !rpcDrain.Draining() {
 			observability.Fatal("sandbox RPC stopped", err)
 		}
 	}()
 
 	httpHandler := httpAdapter.New(appSvc)
-	httpx.ServeWithOptions(httpx.Env("HTTP_ADDR", ":8087"), httpHandler.Routes())
+	httpx.ServeWithOptionsLifecycle(
+		httpx.Env("HTTP_ADDR", ":8087"),
+		httpHandler.Routes(),
+		[]httpx.LifecycleOption{
+			httpx.OnDrainStart(rpcDrain.MarkDraining),
+			httpx.OnShutdown(func(context.Context) { _ = rpc.Stop() }),
+		},
+	)
 }

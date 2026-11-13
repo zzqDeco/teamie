@@ -789,4 +789,310 @@ class ProductionConfigTest(unittest.TestCase):
                 self.assertIn("Invalid TEAMIE_ROOT", res.stderr)
 
 
+class OnlineCompatibilityAndCanaryPlanTest(unittest.TestCase):
+    def _v3_manifest(self, ver="v0.5.0", sha_char="a"):
+        sha = sha_char * 40
+        return {
+            "manifestVersion": 3,
+            "onlineRollout": True,
+            "version": ver,
+            "source": {
+                "repository": "zzqDeco/teamie",
+                "sha": sha,
+                "mainSha": sha,
+                "ref": "refs/heads/release/" + ver,
+            },
+            "createdAt": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "schema": dict(manifest.SCHEMA_V3),
+            "storage": {"postgresMajor": 17},
+            "featureFlags": {"revision": "context-engineering-v1", "sha256": "f" * 64},
+            "images": {
+                service: f"ghcr.io/zzqdeco/teamie-{service}@sha256:" + sha_char * 64
+                for service in manifest.SERVICES_V3
+            },
+        }
+
+    def test_online_compatible_requires_bidirectional_schema_flags_and_min_version(self):
+        cur = self._v3_manifest("v0.5.0", "a")
+        nxt = self._v3_manifest("v0.5.1", "b")
+        self.assertFalse(manifest.online_compatible(nxt, None))
+        self.assertTrue(manifest.online_compatible(nxt, cur))
+        self.assertTrue(manifest.online_compatible(cur, nxt))
+
+        # Pre-dual-slot v3 release (e.g. v0.4.8) passes check_transition/rollback,
+        # while online_compatible fences both upgrade and rollback.
+        legacy_v3 = self._v3_manifest("v0.4.8", "0")
+        legacy_v3.pop("onlineRollout")
+        manifest.check_transition(cur, legacy_v3, legacy_v3)
+        manifest.check_transition(legacy_v3, cur, rollback=True)
+        self.assertFalse(manifest.online_compatible(cur, legacy_v3))
+        self.assertFalse(manifest.online_compatible(legacy_v3, cur))
+
+        invalid_rollout_flag = copy.deepcopy(nxt)
+        invalid_rollout_flag["onlineRollout"] = False
+        with self.assertRaisesRegex(ValueError, "onlineRollout"):
+            manifest.validate(invalid_rollout_flag)
+
+        # Forward-only schema epoch bump is valid for check_transition, NOT online_compatible.
+        schema_bump = copy.deepcopy(nxt)
+        schema_bump["schema"]["chat"] += 1
+        manifest.check_transition(schema_bump, cur, cur)
+        self.assertFalse(manifest.online_compatible(schema_bump, cur))
+
+        # Feature flag revision change requires fenced rollout.
+        flag_bump = copy.deepcopy(nxt)
+        flag_bump["featureFlags"] = {"revision": "next-v2", "sha256": "e" * 64}
+        self.assertFalse(manifest.online_compatible(flag_bump, cur))
+
+        # Optional minCompatibleVersion bounds are enforced bidirectionally.
+        bounded_ok = copy.deepcopy(nxt)
+        bounded_ok["minCompatibleVersion"] = "v0.5.0"
+        self.assertTrue(manifest.online_compatible(bounded_ok, cur))
+
+        bounded_fence = copy.deepcopy(nxt)
+        bounded_fence["minCompatibleVersion"] = "v0.5.1"
+        self.assertFalse(manifest.online_compatible(bounded_fence, cur))
+        with self.assertRaisesRegex(ValueError, "minCompatibleVersion"):
+            manifest.check_transition(cur, bounded_fence, rollback=True)
+
+        invalid_min = copy.deepcopy(nxt)
+        invalid_min["minCompatibleVersion"] = "v0.6.0"
+        with self.assertRaisesRegex(ValueError, "minCompatibleVersion"):
+            manifest.validate(invalid_min)
+
+    def test_online_compatible_cli_exit_codes(self):
+        script = str(Path(__file__).with_name("manifest.py"))
+        cur = self._v3_manifest("v0.5.0", "a")
+        nxt = self._v3_manifest("v0.5.1", "b")
+        bumped = copy.deepcopy(nxt)
+        bumped["schema"]["gateway"] += 1
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cur_p = root / "cur.json"
+            nxt_p = root / "nxt.json"
+            bump_p = root / "bump.json"
+            import json as _json
+            cur_p.write_text(_json.dumps(cur))
+            nxt_p.write_text(_json.dumps(nxt))
+            bump_p.write_text(_json.dumps(bumped))
+
+            ok = subprocess.run(["python3", script, "online-compatible", str(nxt_p), str(cur_p)], capture_output=True)
+            self.assertEqual(ok.returncode, 0, ok.stderr)
+
+            missing = subprocess.run(["python3", script, "online-compatible", str(nxt_p), str(root / "missing.json")], capture_output=True)
+            self.assertEqual(missing.returncode, 1)
+
+            fenced = subprocess.run(["python3", script, "online-compatible", str(bump_p), str(cur_p)], capture_output=True)
+            self.assertEqual(fenced.returncode, 1)
+
+    def test_build_canary_plan_enforces_stateless_allowlist_and_isolation(self):
+        compose_cfg = {
+            "name": "teamie",
+            "networks": {"private": {"internal": True}, "egress": {}},
+            "services": {
+                "marketplace": {
+                    "image": "ghcr.io/zzqdeco/teamie-marketplace@sha256:" + "1" * 64,
+                    "init": True,
+                    "read_only": True,
+                    "mem_limit": 67108864,
+                    "memswap_limit": 67108864,
+                    "pids_limit": 128,
+                    "security_opt": ["no-new-privileges:true"],
+                    "cap_drop": ["ALL"],
+                    "tmpfs": ["/tmp:size=16m,mode=1777"],
+                    "networks": {"private": None, "egress": None},
+                    "environment": {
+                        "HTTP_ADDR": ":8088",
+                        "DATABASE_URL": "postgres://teamie_marketplace:" + "s" * 32 + "@postgres:5432/teamie_marketplace",
+                    },
+                    "volumes": [
+                        {
+                            "type": "bind",
+                            "source": "/srv/teamie/config/feature-flags.json",
+                            "target": "/etc/teamie/feature-flags.json",
+                            "read_only": True,
+                        }
+                    ],
+                    "healthcheck": {
+                        "test": ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8088/readyz"]
+                    },
+                },
+                "agent-runtime": {
+                    "image": "ghcr.io/zzqdeco/teamie-agent-runtime@sha256:" + "2" * 64,
+                    "networks": ["private", "egress"],
+                },
+                "sandbox": {
+                    "image": "ghcr.io/zzqdeco/teamie-sandbox@sha256:" + "3" * 64,
+                    "networks": ["private"],
+                    "volumes": [{"type": "bind", "source": "/var/run/docker.sock", "target": "/var/run/docker.sock"}],
+                },
+            },
+        }
+        plan = manifest.build_canary_plan(compose_cfg, "marketplace")
+        self.assertEqual(plan["container_name"], "teamie-marketplace-canary")
+        self.assertEqual(plan["alias"], "marketplace-canary")
+        self.assertEqual(plan["extra_networks"], ["teamie_egress"])
+        self.assertIn("--read-only", plan["create_args"])
+        self.assertIn("io.teamie.canary=true", plan["create_args"])
+        self.assertNotIn("com.docker.compose.project=teamie", " ".join(plan["create_args"]))
+        # Secrets must live in env_content, NEVER in create_args.
+        self.assertNotIn("DATABASE_URL", " ".join(plan["create_args"]))
+        self.assertIn("DATABASE_URL=", plan["env_content"])
+
+        for forbidden in ("agent-runtime", "sandbox", "postgres", "redis", "caddy"):
+            with self.subTest(forbidden=forbidden), self.assertRaises(ValueError):
+                manifest.build_canary_plan(compose_cfg, forbidden)
+
+
+class ServiceUpToDateRuntimeSettingsTest(unittest.TestCase):
+    def _redis_base(self):
+        image = "ghcr.io/zzqdeco/teamie-redis@sha256:" + "r" * 64
+        config = {
+            "name": "teamie",
+            "networks": {"private": {"internal": True}},
+            "volumes": {"redis_state": {}},
+            "services": {
+                "redis": {
+                    "image": image,
+                    "restart": "unless-stopped",
+                    "read_only": True,
+                    "init": False,
+                    "mem_limit": 64 * 1024 * 1024,
+                    "memswap_limit": 64 * 1024 * 1024,
+                    "shm_size": 64 * 1024 * 1024,
+                    "pids_limit": 32,
+                    "cpus": 0.5,
+                    "cpuset": "0",
+                    "security_opt": ["no-new-privileges:true"],
+                    "cap_drop": ["ALL"],
+                    "cap_add": [],
+                    "user": "redis",
+                    "command": ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "40mb"],
+                    "tmpfs": ["/data:size=1m,mode=1777"],
+                    "networks": {"private": None},
+                    "environment": {"LOG_LEVEL": "info"},
+                    "volumes": [{"type": "volume", "source": "redis_state", "target": "/var/lib/redis"}],
+                    "logging": {"driver": "json-file", "options": {"max-size": "10m", "max-file": "3"}},
+                    "healthcheck": {
+                        "test": ["CMD", "redis-cli", "ping"],
+                        "interval": "10s",
+                        "timeout": "3s",
+                        "retries": 6,
+                    },
+                }
+            },
+        }
+        inspected = {
+            "Id": "cid-redis",
+            "State": {"Running": True, "Health": {"Status": "healthy"}},
+            "Config": {
+                "Image": image,
+                "Env": ["PATH=/usr/local/bin:/usr/bin", "LOG_LEVEL=info"],
+                "Entrypoint": ["docker-entrypoint.sh"],
+                "Cmd": ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "40mb"],
+                "User": "redis",
+                "WorkingDir": "/data",
+                "Healthcheck": {
+                    "Test": ["CMD", "redis-cli", "ping"],
+                    "Interval": 10_000_000_000,
+                    "Timeout": 3_000_000_000,
+                    "Retries": 6,
+                },
+            },
+            "HostConfig": {
+                "Memory": 64 * 1024 * 1024,
+                "MemorySwap": 64 * 1024 * 1024,
+                "ShmSize": 64 * 1024 * 1024,
+                "PidsLimit": 32,
+                "NanoCpus": 500_000_000,
+                "CpusetCpus": "0",
+                "ReadonlyRootfs": True,
+                "Init": False,
+                "Privileged": False,
+                "SecurityOpt": ["no-new-privileges:true"],
+                "CapDrop": ["ALL"],
+                "CapAdd": [],
+                "Tmpfs": {"/data": "size=1m,mode=1777"},
+                "PortBindings": {},
+                "RestartPolicy": {"Name": "unless-stopped", "MaximumRetryCount": 0},
+                "LogConfig": {"Type": "json-file", "Config": {"max-size": "10m", "max-file": "3"}},
+            },
+            "Mounts": [
+                {"Type": "volume", "Name": "teamie_redis_state", "Destination": "/var/lib/redis", "RW": True}
+            ],
+            "NetworkSettings": {"Networks": {"teamie_private": {}}},
+        }
+        image_inspect = {
+            "Config": {
+                "Env": ["PATH=/usr/local/bin:/usr/bin"],
+                "Entrypoint": ["docker-entrypoint.sh"],
+                "Cmd": ["redis-server"],
+                "User": "",
+                "WorkingDir": "/data",
+            }
+        }
+        return config, inspected, image_inspect
+
+    def _eval_up_to_date(self, config, container_info, image_info):
+        import json as _json
+        from unittest import mock
+
+        def fake_run(cmd, **kwargs):
+            self.assertEqual(cmd[:2], ["docker", "ps"])
+            return subprocess.CompletedProcess(cmd, 0, stdout="cid-redis\n", stderr="")
+
+        def fake_check_output(cmd, **kwargs):
+            if cmd[:3] == ["docker", "image", "inspect"]:
+                return _json.dumps([image_info])
+            if cmd[:2] == ["docker", "inspect"]:
+                return _json.dumps([container_info])
+            raise AssertionError(f"unexpected command {cmd}")
+
+        with mock.patch.object(manifest.subprocess, "run", side_effect=fake_run), mock.patch.object(
+            manifest.subprocess, "check_output", side_effect=fake_check_output
+        ):
+            return manifest.service_up_to_date(config, "redis")
+
+    def test_detects_command_memory_and_runtime_setting_drifts(self):
+        cfg, info, img_info = self._redis_base()
+        self.assertTrue(self._eval_up_to_date(cfg, info, img_info))
+
+        mutations = [
+            ("command_changed", lambda s: s.update(command=["redis-server", "--maxmemory", "20mb"])),
+            ("command_removed_to_image_default", lambda s: s.pop("command")),
+            ("entrypoint_changed", lambda s: s.update(entrypoint=["/custom-entrypoint.sh"])),
+            ("user_changed", lambda s: s.update(user="nobody")),
+            ("user_removed_to_image_default", lambda s: s.pop("user")),
+            ("mem_limit_changed", lambda s: s.update(mem_limit=32 * 1024 * 1024, memswap_limit=32 * 1024 * 1024)),
+            ("memswap_changed", lambda s: s.update(memswap_limit=128 * 1024 * 1024)),
+            ("memswap_removed", lambda s: s.pop("memswap_limit")),
+            ("shm_size_changed", lambda s: s.update(shm_size=128 * 1024 * 1024)),
+            ("pids_limit_changed", lambda s: s.update(pids_limit=64)),
+            ("cpus_changed", lambda s: s.update(cpus=1.0)),
+            ("cpuset_changed", lambda s: s.update(cpuset="0-1")),
+            ("read_only_changed", lambda s: s.update(read_only=False)),
+            ("init_changed", lambda s: s.update(init=True)),
+            ("security_opt_changed", lambda s: s.update(security_opt=[])),
+            ("cap_drop_changed", lambda s: s.update(cap_drop=[])),
+            ("cap_add_changed", lambda s: s.update(cap_add=["NET_BIND_SERVICE"])),
+            ("tmpfs_changed", lambda s: s.update(tmpfs=["/data:size=4m,mode=1777"])),
+            ("ports_added", lambda s: s.update(ports=[{"target": 6379, "published": "6379", "protocol": "tcp"}])),
+            ("restart_changed", lambda s: s.update(restart="always")),
+            ("logging_changed", lambda s: s.update(logging={"driver": "json-file", "options": {"max-size": "50m"}})),
+            ("healthcheck_test_changed", lambda s: s["healthcheck"].update(test=["CMD", "redis-cli", "info"])),
+            ("healthcheck_interval_changed", lambda s: s["healthcheck"].update(interval="30s")),
+            ("network_added", lambda s: s.update(networks={"private": None, "egress": None})),
+            ("volume_ro_changed", lambda s: s.update(volumes=[{"type": "volume", "source": "redis_state", "target": "/var/lib/redis", "read_only": True}])),
+            ("env_removed", lambda s: s.update(environment={})),
+        ]
+        for label, mut in mutations:
+            with self.subTest(mutation=label):
+                target_cfg = copy.deepcopy(cfg)
+                mut(target_cfg["services"]["redis"])
+                self.assertFalse(
+                    self._eval_up_to_date(target_cfg, info, img_info),
+                    f"expected service_up_to_date=False on {label}",
+                )
+
+
 if __name__ == "__main__": unittest.main()
