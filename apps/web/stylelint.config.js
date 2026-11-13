@@ -77,7 +77,7 @@ export default {
             ignoreValues: {
               "": [...cssKeywordValues, "transparent", "currentColor", "none"],
               "font-size": [...cssKeywordValues, "/^clamp\\(/", "/%$/", "/em$/"],
-              "z-index": [...cssKeywordValues, "auto", "0", "1", "2", "-1", "-2"],
+              "z-index": [...cssKeywordValues, "auto", "0", "1", "-1", "-2"],
               "/^(row-|column-)?gap$/": spacingAllowedValues,
               "/^padding(-(top|right|bottom|left|inline|block)(-start|-end)?)?$/":
                 spacingAllowedValues,

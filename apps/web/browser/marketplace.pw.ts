@@ -6,7 +6,7 @@ test("keyboard enters and leaves the cross-origin app, then closes the pane", as
   const overlay = page.viewportSize()!.width < 1250;
   const open = page.getByRole("button", { name: "小组应用", exact: true });
   await open.click();
-  const pane = page.locator('aside[aria-label="群聊应用"]');
+  const pane = page.locator('aside[aria-label="小组应用"]');
   const frame = page.frameLocator("iframe");
   await expect(frame.locator("#app-input")).toBeVisible();
   await expect(page.locator("iframe")).toHaveAttribute("sandbox", "allow-scripts allow-forms allow-same-origin");
@@ -25,11 +25,11 @@ test("keyboard enters and leaves the cross-origin app, then closes the pane", as
     await expect(pane.getByRole("button", { name: "管理工作空间应用", exact: true })).toBeFocused();
     await page.keyboard.press("Shift+Tab");
     await expect(page.locator("iframe")).toBeFocused();
-    await pane.getByRole("button", { name: "关闭群聊应用面板", exact: true }).focus();
+    await pane.getByRole("button", { name: "关闭小组应用面板", exact: true }).focus();
     await page.keyboard.press("Escape");
     await expect(open).toBeFocused();
   } else {
-    await pane.getByRole("button", { name: "关闭群聊应用面板", exact: true }).click();
+    await pane.getByRole("button", { name: "关闭小组应用面板", exact: true }).click();
   }
   await expect(pane).toHaveCount(0);
   await expect(page.locator("main")).not.toHaveAttribute("inert");
@@ -42,7 +42,7 @@ test("capability refresh degrades active app to read-only list and never leaves 
   const overlay = page.viewportSize()!.width < 1250;
   const open = page.getByRole("button", { name: "小组应用", exact: true });
   await open.click();
-  const pane = page.locator('aside[aria-label="群聊应用"]');
+  const pane = page.locator('aside[aria-label="小组应用"]');
   await page.frameLocator("iframe").locator("#app-input").focus();
   state.enabled = false;
   await page.clock.fastForward(61000);
@@ -50,7 +50,7 @@ test("capability refresh degrades active app to read-only list and never leaves 
   await expect(pane.getByRole("list", { name: "已安装小组应用只读列表" })).toBeVisible();
   await expect(pane.getByRole("button", { name: "管理工作空间应用", exact: true })).toHaveCount(0);
   if (overlay) {
-    await pane.getByRole("button", { name: "关闭群聊应用面板", exact: true }).click();
+    await pane.getByRole("button", { name: "关闭小组应用面板", exact: true }).click();
     await expect(pane).toHaveCount(0);
   }
   await expect(page.locator("main")).not.toHaveAttribute("inert");
@@ -67,7 +67,7 @@ test("capability refresh degrades active app to read-only list and never leaves 
 test("nested management dialog and breakpoint changes preserve focus and chat access", async ({ page }) => {
   const state = await marketplaceFixture(page);
   await page.getByRole("button", { name: "小组应用", exact: true }).click();
-  const pane = page.locator('aside[aria-label="群聊应用"]');
+  const pane = page.locator('aside[aria-label="小组应用"]');
   await pane.getByRole("button", { name: "管理工作空间应用", exact: true }).click();
   await expect(page.locator(".modal")).toBeVisible();
   await page.keyboard.press("Escape");
@@ -79,7 +79,7 @@ test("nested management dialog and breakpoint changes preserve focus and chat ac
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(pane).toHaveAttribute("role", "dialog");
   await expect(page.locator("main")).toHaveAttribute("inert");
-  await pane.getByRole("button", { name: "关闭群聊应用面板", exact: true }).click();
+  await pane.getByRole("button", { name: "关闭小组应用面板", exact: true }).click();
   await page.locator("main textarea").fill("usable after resize");
   expect(state.errors).toEqual([]);
 });

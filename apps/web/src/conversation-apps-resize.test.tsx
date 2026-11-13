@@ -173,7 +173,7 @@ async function renderAppsPane(
 }
 
 function getAppsAside() {
-  return host.querySelector<HTMLElement>('aside[aria-label="群聊应用"]')!;
+  return host.querySelector<HTMLElement>('aside[aria-label="小组应用"]')!;
 }
 
 function getSeparator() {
@@ -195,7 +195,7 @@ describe("ConversationAppsPane resizable desktop width & persistence (Issue #135
     const separator = getSeparator()!;
     expect(separator).not.toBeNull();
     expect(separator.getAttribute("aria-orientation")).toBe("vertical");
-    expect(separator.getAttribute("aria-label")).toBe("调节群聊应用面板宽度");
+    expect(separator.getAttribute("aria-label")).toBe("调节小组应用面板宽度");
     expect(separator.getAttribute("aria-valuenow")).toBe("400");
     expect(separator.getAttribute("aria-valuemin")).toBe(
       String(MIN_APP_PANE_WIDTH),

@@ -95,7 +95,7 @@ export function ConversationAppsPane(props: {
       {overlayMembers && !sidebar && (
         <button
           className="members-shade"
-          aria-label="关闭群聊应用面板"
+          aria-label="关闭小组应用面板"
           onClick={onClose}
         />
       )}
@@ -105,7 +105,7 @@ export function ConversationAppsPane(props: {
         style={desktopWidthStyle}
         role={overlayMembers ? "dialog" : undefined}
         aria-modal={overlayMembers ? true : undefined}
-        aria-label="群聊应用"
+        aria-label="小组应用"
         tabIndex={-1}
         inert={mobile && sidebar}
       >
@@ -114,7 +114,7 @@ export function ConversationAppsPane(props: {
             className="mp-resize-handle"
             role="separator"
             aria-orientation="vertical"
-            aria-label="调节群聊应用面板宽度"
+            aria-label="调节小组应用面板宽度"
             aria-valuenow={effectiveWidth}
             aria-valuemin={MIN_APP_PANE_WIDTH}
             aria-valuemax={maxWidth}
@@ -125,7 +125,7 @@ export function ConversationAppsPane(props: {
         {overlayMembers && !sidebar && <OverlayFocusBoundary edge="start" />}
         <header>
           <span>
-            群聊应用 <b>{apps.length}</b>
+            小组应用 <b>{apps.length}</b>
           </span>
           <div className="mp-header-actions">
             <ConversationAppsManageAction
@@ -133,7 +133,7 @@ export function ConversationAppsPane(props: {
               owner={owner}
               onOpenWorkspaceApps={onOpenWorkspaceApps}
             />
-            <IconButton label="关闭群聊应用面板" onClick={onClose}>
+            <IconButton label="关闭小组应用面板" onClick={onClose}>
               <X size={ICON.md} />
             </IconButton>
           </div>

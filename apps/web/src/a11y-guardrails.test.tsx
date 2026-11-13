@@ -647,7 +647,7 @@ describe("PR-6 automated ESLint and Stylelint guardrails", () => {
         "    color: var(--text);",
         "    font-size: var(--font-sm);",
         "    padding: var(--space-3);",
-        "    z-index: 2;",
+        "    z-index: var(--z-local);",
         "  }",
         "}",
       ].join("\n"),
