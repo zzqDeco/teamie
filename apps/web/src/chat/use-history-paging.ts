@@ -6,6 +6,7 @@ import { errorText } from "../errors";
 import { chatStore, reconcileMessages } from "../store";
 import type { LocalMessage } from "../store";
 import { extendHistoryBoundary } from "../composer-drafts";
+import { subscribeBodyCollapse } from "./collapsible-body";
 
 type Anchor = { height: number; top: number; token: number; operation: number };
 
@@ -59,20 +60,38 @@ export function useHistoryPaging({
   scrollRef: RefObject<HTMLDivElement | null>;
 }) {
   const [anchorTick, setAnchorTick] = useState(0);
+  const [olderFailedScope, setOlderFailedScope] = useState<string | null>(null);
   const anchor = useRef<Anchor | null>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
   // Navigation id of the in-flight older page; a navigation reset frees it.
   const busy = useRef<number | null>(null);
 
-  useLayoutEffect(() => {
+  const applyAnchor = useCallback(() => {
     const pending = anchor.current;
     const el = scrollRef.current;
     if (!pending) return;
-    anchor.current = null;
-    if (!el || pending.token !== chatStore.generation || pending.operation !== navigationRef.current)
+    if (
+      !el ||
+      pending.token !== chatStore.generation ||
+      pending.operation !== navigationRef.current
+    ) {
+      anchor.current = null;
       return;
-    el.scrollTop = pending.top + (el.scrollHeight - pending.height);
-  }, [messages, anchorTick, navigationRef, scrollRef]);
+    }
+    el.scrollTop = Math.max(0, pending.top + (el.scrollHeight - pending.height));
+  }, [navigationRef, scrollRef]);
+
+  useLayoutEffect(() => {
+    applyAnchor();
+    const settled = anchor.current;
+    if (!settled) return;
+    const timer = setTimeout(() => {
+      if (anchor.current === settled) anchor.current = null;
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [applyAnchor, messages, anchorTick]);
+
+  useLayoutEffect(() => subscribeBodyCollapse(applyAnchor), [applyAnchor]);
 
   async function older() {
     const boundary = historyBeforeRef.current;
@@ -86,8 +105,10 @@ export function useHistoryPaging({
     const token = chatStore.generation;
     const reactionScope = chatStore.reactionScope(conversation.id);
     const operation = navigationRef.current;
+    const scopeKey = `${token}:${operation}`;
     const current = () => token === chatStore.generation && operation === navigationRef.current;
     busy.current = operation;
+    setOlderFailedScope(null);
     setLoadingOlder(true);
     setError("");
     try {
@@ -106,7 +127,10 @@ export function useHistoryPaging({
       setHasMore(page.hasMore);
       setAnchorTick((value) => value + 1);
     } catch (e) {
-      if (current()) setError(errorText(e));
+      if (current()) {
+        setError(errorText(e));
+        setOlderFailedScope(scopeKey);
+      }
     } finally {
       if (current()) {
         busy.current = null;
@@ -147,14 +171,27 @@ export function useHistoryPaging({
     olderRef.current = older;
   });
   const loadOlder = useCallback(() => olderRef.current(), []);
-  const autoLoad = hasMore && !loading && !locating && !loadingOlder && !loadingNewer;
+  const autoLoad =
+    hasMore &&
+    !loading &&
+    !locating &&
+    !loadingOlder &&
+    !loadingNewer;
 
   // Re-created after each page so a sentinel that is still visible (short
   // pages) reports again and keeps filling the viewport until `hasMore` ends.
   useEffect(() => {
     const sentinel = sentinelRef.current;
     const root = scrollRef.current;
-    if (!autoLoad || !sentinel || !root || typeof IntersectionObserver === "undefined") return;
+    const currentScope = `${chatStore.generation}:${navigationRef.current}`;
+    if (
+      !autoLoad ||
+      olderFailedScope === currentScope ||
+      !sentinel ||
+      !root ||
+      typeof IntersectionObserver === "undefined"
+    )
+      return;
     const observer = new IntersectionObserver(
       (entries) => {
         // Never during the initial bottom anchoring of a freshly opened view.
@@ -165,7 +202,16 @@ export function useHistoryPaging({
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [autoLoad, initialScrollRef, loadOlder, scrollRef, messages.length]);
+  }, [
+    autoLoad,
+    conversation.id,
+    initialScrollRef,
+    loadOlder,
+    messages.length,
+    navigationRef,
+    olderFailedScope,
+    scrollRef,
+  ]);
 
   return { older: loadOlder, newer, sentinelRef };
 }

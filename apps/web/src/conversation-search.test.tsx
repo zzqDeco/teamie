@@ -720,21 +720,29 @@ describe("conversation search", () => {
 });
 
 describe("conversation search readability and keyboard (PR-3)", () => {
-  it("shows a Markdown-free snippet centred on a match deep in a long message, with a short aria-label", async () => {
+  it("shows a Markdown-free snippet centred on a match deep in a long message, with a bounded snippet aria-label", async () => {
     const lines = Array.from({ length: 12 }, (_, i) => `第 ${i + 1} 行 **很长的** 说明文字，用来把命中词推到很后面。`);
     lines.splice(9, 0, "这里有 [关键词](https://a.example) 出现");
-    vi.mocked(api.searchMessages).mockResolvedValue({ messages: [message(5, lines.join("\n"))], hasMore: false });
+    const first = message(5, lines.join("\n"));
+    const second = { ...message(6, "同一分钟的另一条关键词记录"), createdAt: first.createdAt };
+    vi.mocked(api.searchMessages).mockResolvedValue({ messages: [first, second], hasMore: false });
     await render(view());
     await type("关键词");
     await tick();
-    const result = host.querySelector<HTMLButtonElement>(".search-message-result")!;
+    const results = [...host.querySelectorAll<HTMLButtonElement>(".search-message-result")];
+    const [sibling, result] = results;
     expect(result.querySelector("mark")?.textContent).toBe("关键词");
     expect(result.textContent).not.toContain("**");
     expect(result.textContent).not.toContain("](");
     expect(result.textContent!.startsWith("…")).toBe(true);
     expect(Array.from(result.textContent!.replace(/…/g, "")).length).toBeLessThanOrEqual(120);
-    expect(result.getAttribute("aria-label")).toMatch(/^小助手 · .+\d{2}:\d{2}$/);
-    expect(result.getAttribute("aria-label")).not.toContain("关键词");
+    const label = result.getAttribute("aria-label")!;
+    expect(label).toMatch(/^小助手 · .+\d{2}:\d{2} · /);
+    expect(label).toContain("关键词");
+    expect(label).not.toContain("**");
+    expect(label).not.toContain("](");
+    expect(Array.from(label).length).toBeLessThan(160);
+    expect(label).not.toBe(sibling.getAttribute("aria-label"));
     expect(host.querySelector(".search-result-meta time")?.getAttribute("title")).toMatch(/\d{4}年/);
   });
 

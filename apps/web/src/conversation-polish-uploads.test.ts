@@ -9,7 +9,15 @@ import {
   removeAttachmentDraftFile,
   UPLOAD_CONCURRENCY,
 } from "./attachment-drafts";
-import { readDraftPresence, subscribeDraftPresence, writeComposerDraft, writeComposerText, composerDraftEpoch } from "./composer-drafts";
+import {
+  composerDraftEpoch,
+  flushComposerDrafts,
+  readComposerDraft,
+  readDraftPresence,
+  subscribeDraftPresence,
+  writeComposerDraft,
+  writeComposerText,
+} from "./composer-drafts";
 import { chatStore } from "./store";
 
 type FakeXhr = {
@@ -166,5 +174,113 @@ describe("draft presence for the sidebar marker", () => {
     expect(readDraftPresence().size).toBe(0);
     expect(localStorage.getItem("teamie.drafts.v1:writer")).toBeNull();
     expect(localStorage.getItem("teamie.drafts.v1:someone-else")).toBeNull();
+  });
+  it("merges per-tab draft writes without overwriting other open tabs and syncs storage events", () => {
+    localStorage.clear();
+    chatStore.begin("writer");
+    writeComposerDraft("a", { body: "初始本地草稿", mentions: [], replyToId: "" });
+
+    // Simulate another open tab persisting a draft for conversation "b".
+    localStorage.setItem(
+      "teamie.drafts.v1:writer",
+      JSON.stringify({
+        a: { body: "初始本地草稿", mentions: [], replyToId: "" },
+        b: { body: "另一标签页草稿", mentions: [], replyToId: "" },
+      }),
+    );
+
+    writeComposerDraft("a", { body: "更新后的本地草稿", mentions: [], replyToId: "" });
+    writeComposerText("c", composerDraftEpoch("c"), "输入中草稿", []);
+    flushComposerDrafts();
+
+    const merged = JSON.parse(localStorage.getItem("teamie.drafts.v1:writer") || "{}") as Record<
+      string,
+      { body: string }
+    >;
+    expect(merged.a?.body).toBe("更新后的本地草稿");
+    expect(merged.b?.body).toBe("另一标签页草稿");
+    expect(merged.c?.body).toBe("输入中草稿");
+
+    // Clearing local draft "a" removes only "a" and keeps "b" + "c".
+    writeComposerDraft("a", { body: "", mentions: [], replyToId: "" });
+    const afterClear = JSON.parse(localStorage.getItem("teamie.drafts.v1:writer") || "{}") as Record<
+      string,
+      { body: string }
+    >;
+    expect(afterClear.a).toBeUndefined();
+    expect(afterClear.b?.body).toBe("另一标签页草稿");
+    expect(afterClear.c?.body).toBe("输入中草稿");
+
+    // Cross-tab storage event updates live in-memory drafts and sidebar presence.
+    const nextRaw = JSON.stringify({
+      d: { body: "跨标签同步草稿", mentions: [], replyToId: "" },
+    });
+    localStorage.setItem("teamie.drafts.v1:writer", nextRaw);
+    window.dispatchEvent(
+      new StorageEvent("storage", {
+        key: "teamie.drafts.v1:writer",
+        newValue: nextRaw,
+      }),
+    );
+    expect(readDraftPresence().has("d")).toBe(true);
+    expect(readDraftPresence().has("c")).toBe(false);
+    expect(readComposerDraft("d").body).toBe("跨标签同步草稿");
+
+    // A queued storage event carrying a superseded newValue must not clobber a newer local persist.
+    writeComposerDraft("d", { body: "最新本地修改", mentions: [], replyToId: "" });
+    window.dispatchEvent(
+      new StorageEvent("storage", {
+        key: "teamie.drafts.v1:writer",
+        newValue: nextRaw,
+      }),
+    );
+    expect(readComposerDraft("d").body).toBe("最新本地修改");
+
+    // If setItem throws (e.g. quota exceeded), dirty IDs remain queued until storage recovers.
+    const setItemSpy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementationOnce(() => {
+        throw new DOMException("QuotaExceededError", "QuotaExceededError");
+      });
+    writeComposerDraft("e", { body: "暂存失败草稿", mentions: [], replyToId: "" });
+    window.dispatchEvent(
+      new StorageEvent("storage", {
+        key: "teamie.drafts.v1:writer",
+        newValue: localStorage.getItem("teamie.drafts.v1:writer"),
+      }),
+    );
+    expect(readComposerDraft("e").body).toBe("暂存失败草稿");
+    setItemSpy.mockRestore();
+
+    writeComposerDraft("f", { body: "恢复后新草稿", mentions: [], replyToId: "" });
+    const recovered = JSON.parse(localStorage.getItem("teamie.drafts.v1:writer") || "{}") as Record<
+      string,
+      { body: string }
+    >;
+    expect(recovered.e?.body).toBe("暂存失败草稿");
+    expect(recovered.f?.body).toBe("恢复后新草稿");
+
+    // Legacy sessionStorage migration keeps backup and retries when localStorage initially throws.
+    sessionStorage.setItem(
+      "teamie.drafts.v1:migrator",
+      JSON.stringify({ leg: { body: "旧版会话草稿", mentions: [], replyToId: "" } }),
+    );
+    const migrateFailSpy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementationOnce(() => {
+        throw new DOMException("QuotaExceededError", "QuotaExceededError");
+      });
+    chatStore.begin("migrator");
+    migrateFailSpy.mockRestore();
+    expect(readComposerDraft("leg").body).toBe("旧版会话草稿");
+    expect(sessionStorage.getItem("teamie.drafts.v1:migrator")).not.toBeNull();
+    writeComposerDraft("next", { body: "新草稿", mentions: [], replyToId: "" });
+    const migrated = JSON.parse(localStorage.getItem("teamie.drafts.v1:migrator") || "{}") as Record<
+      string,
+      { body: string }
+    >;
+    expect(migrated.leg?.body).toBe("旧版会话草稿");
+    expect(migrated.next?.body).toBe("新草稿");
+    expect(sessionStorage.getItem("teamie.drafts.v1:migrator")).toBeNull();
   });
 });

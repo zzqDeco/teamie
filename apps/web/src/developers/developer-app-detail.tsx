@@ -118,6 +118,18 @@ export function DeveloperAppDetail({
     setRemoteUpdated(false);
   }, []);
 
+  const writeCachedApp = useCallback(
+    (nextApp: DeveloperMarketplaceApp) => {
+      queryClient.setQueryData<{
+        app: DeveloperMarketplaceApp;
+        reviews: typeof reviews;
+      }>(["developerMarketplaceApp", appId], (prev) =>
+        prev ? { ...prev, app: nextApp } : { app: nextApp, reviews: [] },
+      );
+    },
+    [appId, queryClient],
+  );
+
   const isDraftDirty = Boolean(
     baseline &&
       app &&
@@ -204,6 +216,7 @@ export function DeveloperAppDetail({
         webUrl: webUrl.trim(),
         mcpUrl: mcpUrl.trim(),
       });
+      writeCachedApp(updated.app);
       syncDraftFromApp(updated.app);
       setSuccessMsg("草稿配置已保存。若修改了线上地址或工具定义，请重新执行协议检测。");
       toast.success("草稿配置已保存");
@@ -226,8 +239,10 @@ export function DeveloperAppDetail({
         webUrl: webUrl.trim(),
         mcpUrl: mcpUrl.trim(),
       });
+      writeCachedApp(updated.app);
       syncDraftFromApp(updated.app);
       const res = await api.verifyDeveloperMarketplaceApp(app.id);
+      writeCachedApp(res.app);
       setLiveReport(res.verification);
       if (res.verification.ok) {
         setSuccessMsg("草稿已保存，且四阶段线上协议检测全部通过！");
@@ -244,6 +259,7 @@ export function DeveloperAppDetail({
       const updated = await api.updateDeveloperMarketplaceApp(app.id, {
         enabled: nextEnabled,
       });
+      writeCachedApp(updated.app);
       setConfirmingDisablePublished(false);
       setBaseline((prev) =>
         prev && prev.id === updated.app.id

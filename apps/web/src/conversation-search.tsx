@@ -36,8 +36,7 @@ chatStore.subscribe(() => {
 const memoryKey = (userId: string, conversationId: string) =>
   `${userId}\u0000${conversationId}`;
 
-/** Plain-text window around the first match, with literal matches marked. */
-function Snippet({ body, query }: { body: string; query: string }) {
+function resolveSnippet(body: string, query: string) {
   const preview = plainPreview(body);
   const queryLower = query.toLowerCase();
   const source =
@@ -47,7 +46,17 @@ function Snippet({ body, query }: { body: string; query: string }) {
       !body.toLowerCase().includes(queryLower))
       ? preview
       : body;
-  const snippet = searchSnippet(source, query, 120);
+  return searchSnippet(source, query, 120);
+}
+
+function formatSnippetText(body: string, query: string): string {
+  const snippet = resolveSnippet(body, query);
+  return `${snippet.truncatedStart ? "…" : ""}${snippet.text}${snippet.truncatedEnd ? "…" : ""}`;
+}
+
+/** Plain-text window around the first match, with literal matches marked. */
+function Snippet({ body, query }: { body: string; query: string }) {
+  const snippet = resolveSnippet(body, query);
   const literal = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const parts = query
     ? snippet.text.split(new RegExp(`(${literal})`, "giu"))
@@ -363,6 +372,19 @@ export function ConversationSearch({
               forwarded?.body &&
                 forwarded.body.toLowerCase().includes(termLower),
             );
+            const snippetParts: string[] = [];
+            if (message.body || !forwardedMatches) {
+              const text = formatSnippetText(message.body, term);
+              if (text) snippetParts.push(text);
+            }
+            if (forwardedMatches && forwarded) {
+              snippetParts.push(
+                `转发自 ${forwarded.senderName}：${formatSnippetText(forwarded.body, term)}`,
+              );
+            }
+            const accessibleLabel = snippetParts.length
+              ? `${message.senderName} · ${sent} · ${snippetParts.join(" · ")}`
+              : `${message.senderName} · ${sent}`;
             return (
               <li key={message.id}>
                 <div className="search-result-meta">
@@ -382,7 +404,7 @@ export function ConversationSearch({
                     className="search-message-result"
                     onClick={() => onLocate(message.id)}
                     onKeyDown={onResultKey}
-                    aria-label={`${message.senderName} · ${sent}`}
+                    aria-label={accessibleLabel}
                   >
                     {(message.body || !forwardedMatches) && (
                       <span className="search-comment-snippet">

@@ -303,7 +303,14 @@ describe("PR-4 admin marketplace governance, developer portal UX, and read-prese
     expect(nameInput.value).toBe("我的未保存本地草稿");
     expect(host.textContent).toContain("服务端草稿已更新");
 
-    // Clicking 保存并检测 saves draft (without enabled) and runs live verification
+    // Clicking 保存并检测 updates cached app immediately so inputs never revert while verify is in-flight
+    let finishVerify!: (value: { app: DeveloperMarketplaceApp; verification: typeof sampleVerification }) => void;
+    verifySpy.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishVerify = resolve;
+        }),
+    );
     const saveVerifyBtn = [...host.querySelectorAll("button")].find((b) =>
       b.textContent?.includes("保存并检测"),
     )!;
@@ -319,6 +326,15 @@ describe("PR-4 admin marketplace governance, developer portal UX, and read-prese
       mcpUrl: "https://board.example.test/mcp",
     });
     expect(verifySpy).toHaveBeenCalledWith("app-1");
+    expect(nameInput.value).toBe("我的未保存本地草稿");
+    expect(webInput.value).toBe("https://next.example.test/ui");
+
+    await act(async () => {
+      finishVerify({ app: serverApp, verification: sampleVerification });
+    });
+    await flush();
+    expect(nameInput.value).toBe("我的未保存本地草稿");
+    expect(webInput.value).toBe("https://next.example.test/ui");
 
     // Disabling a published app requires ConfirmDialog and remains operable during pending_review
     serverApp = { ...serverApp, reviewStatus: "pending_review", updatedAt: "2026-10-30T06:00:00Z" };

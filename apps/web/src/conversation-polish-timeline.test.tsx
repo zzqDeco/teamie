@@ -133,6 +133,64 @@ describe("timeline history auto-load", () => {
     expect(host.querySelectorAll("article.message")).toHaveLength(100);
     expect(scroll.scrollTop).toBe(40 + 50 * 100);
   });
+
+  it("pauses sentinel auto-loading after an older-page failure until manual retry succeeds", async () => {
+    await mount();
+    expect(api.messages).toHaveBeenCalledTimes(1);
+    vi.mocked(api.messages).mockRejectedValueOnce(new Error("网络波动"));
+    const [io] = sentinelObservers();
+    const visible = [{ isIntersecting: true, target: io.targets[0] }] as unknown as IntersectionObserverEntry[];
+    await act(async () => io.callback(visible, {} as IntersectionObserver));
+    expect(api.messages).toHaveBeenCalledTimes(2);
+    expect(sentinelObservers()).toHaveLength(0);
+    expect(host.querySelector(".load-earlier")).not.toBeNull();
+
+    await act(async () => host.querySelector<HTMLButtonElement>(".load-earlier")!.click());
+    expect(api.messages).toHaveBeenCalledTimes(3);
+    expect(host.querySelectorAll("article.message")).toHaveLength(100);
+    expect(sentinelObservers()).toHaveLength(1);
+  });
+
+  it("re-adjusts scrollTop after prepended tall messages clamp to collapsed height", async () => {
+    history = Array.from({ length: 52 }, (_, i) =>
+      message(i + 1, i === 0 ? { body: "超长消息段落\n".repeat(120) } : {}),
+    );
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get(this: HTMLElement) {
+        if (this.classList.contains("message-body")) {
+          if (this.textContent?.includes("超长消息段落")) {
+            return this.classList.contains("collapsed") ? 600 : 1500;
+          }
+          return 80;
+        }
+        if (this.classList.contains("message-scroll")) {
+          return [...this.querySelectorAll<HTMLElement>(".message-body")].reduce(
+            (sum, body) => sum + body.scrollHeight,
+            0,
+          );
+        }
+        return 0;
+      },
+    });
+    try {
+      await mount();
+      const scroll = scroller();
+      expect(scroll.scrollHeight).toBe(50 * 80);
+      scroll.scrollTop = 40;
+      await act(async () => host.querySelector<HTMLButtonElement>(".load-earlier")!.click());
+      expect(host.querySelector("#message-m1 .message-body")?.classList.contains("collapsed")).toBe(true);
+      expect(scroll.scrollTop).toBe(40 + 600 + 80);
+
+      scroll.scrollTop = 120;
+      await act(async () => {
+        host.querySelector<HTMLButtonElement>("#message-m1 .message-expand-toggle")!.click();
+      });
+      expect(scroll.scrollTop).toBe(120);
+    } finally {
+      delete (HTMLElement.prototype as { scrollHeight?: number }).scrollHeight;
+    }
+  });
 });
 
 describe("message rows", () => {

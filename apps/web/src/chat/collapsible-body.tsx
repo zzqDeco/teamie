@@ -27,6 +27,16 @@ function subscribeWindowResize(listener: () => void) {
   };
 }
 
+const collapseListeners = new Set<() => void>();
+
+/** Notifies history scroll anchoring synchronously when a body clamps/expands in layout. */
+export function subscribeBodyCollapse(listener: () => void) {
+  collapseListeners.add(listener);
+  return () => {
+    collapseListeners.delete(listener);
+  };
+}
+
 /**
  * Message text container that collapses very tall bodies behind 「展开全文」.
  * The rule is purely visual and applies to every sender (human or Agent).
@@ -52,6 +62,17 @@ export function CollapsibleMessageBody({
     return subscribeWindowResize(measure);
   }, [contentKey]);
   const collapsed = overflowing && !expanded;
+  const prevCollapsedRef = useRef(false);
+  const manualToggleRef = useRef(false);
+  useLayoutEffect(() => {
+    if (prevCollapsedRef.current === collapsed) return;
+    prevCollapsedRef.current = collapsed;
+    if (manualToggleRef.current) {
+      manualToggleRef.current = false;
+      return;
+    }
+    for (const listener of collapseListeners) listener();
+  }, [collapsed]);
   return (
     <>
       <div
@@ -68,6 +89,7 @@ export function CollapsibleMessageBody({
           aria-expanded={expanded}
           aria-controls={id}
           onClick={() => {
+            manualToggleRef.current = true;
             setExpanded((value) => !value);
             if (expanded) {
               const article = ref.current?.closest("article");
