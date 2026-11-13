@@ -167,6 +167,48 @@ describe("Enter behaviour by keyboard source", () => {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab" }));
     expect(prefersEnterToSend(enter)).toBe(true);
   });
+  it("detects soft keyboards that shrink innerHeight and visualViewport together without breaking rotation or window resize", () => {
+    coarse(true);
+    vi.stubGlobal("innerWidth", 390);
+    vi.stubGlobal("innerHeight", 800);
+    vi.stubGlobal("outerHeight", 820);
+    vi.stubGlobal("visualViewport", { height: 800, scale: 1 });
+    window.dispatchEvent(new Event("resize"));
+    expect(prefersEnterToSend(enter)).toBe(true);
+
+    // Android Chrome interactive-widget=resizes-content shrinks innerHeight + visualViewport while outerHeight stays full-window.
+    vi.stubGlobal("innerHeight", 420);
+    vi.stubGlobal("visualViewport", { height: 420, scale: 1 });
+    expect(prefersEnterToSend(enter)).toBe(false);
+
+    // Same-width real browser window resize shrinks outerHeight alongside innerHeight and rebases cleanly.
+    vi.stubGlobal("innerWidth", 800);
+    vi.stubGlobal("innerHeight", 900);
+    vi.stubGlobal("outerHeight", 960);
+    vi.stubGlobal("visualViewport", { height: 900, scale: 1 });
+    window.dispatchEvent(new Event("resize"));
+    expect(prefersEnterToSend(enter)).toBe(true);
+
+    vi.stubGlobal("innerHeight", 600);
+    vi.stubGlobal("outerHeight", 660);
+    vi.stubGlobal("visualViewport", { height: 600, scale: 1 });
+    window.dispatchEvent(new Event("resize"));
+    expect(prefersEnterToSend(enter)).toBe(true);
+
+    // Even when outerHeight is unavailable (0), a hardware-only key rebases the shrunk viewport.
+    vi.stubGlobal("outerHeight", 0);
+    vi.stubGlobal("innerHeight", 450);
+    vi.stubGlobal("visualViewport", { height: 450, scale: 1 });
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab" }));
+    expect(prefersEnterToSend(enter)).toBe(true);
+
+    // Rotating to landscape changes width so portrait peak does not block hardware Enter.
+    vi.stubGlobal("innerWidth", 800);
+    vi.stubGlobal("innerHeight", 390);
+    vi.stubGlobal("outerHeight", 410);
+    vi.stubGlobal("visualViewport", { height: 390, scale: 1 });
+    expect(prefersEnterToSend(enter)).toBe(true);
+  });
 });
 
 describe("reaction emoji allowlist", () => {
@@ -180,6 +222,8 @@ describe("reaction emoji allowlist", () => {
     expect(isReactionEmoji(":smile:")).toBe(false);
     expect(isReactionEmoji("👍👍")).toBe(false);
     expect(searchEmojis("rocket")).toContain("🚀");
+    expect(searchEmojis("Japan")).toContain("🇯🇵");
+    expect(searchEmojis("United States")).toContain("🇺🇸");
     expect(searchEmojis("旗帜").length).toBeGreaterThan(100);
   });
 });

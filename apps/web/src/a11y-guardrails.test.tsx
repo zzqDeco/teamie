@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { act } from "react";
@@ -654,5 +655,15 @@ describe("PR-6 automated ESLint and Stylelint guardrails", () => {
     });
     expect(goodCss.errored).toBe(false);
     expect(goodCss.results[0]?.warnings ?? []).toHaveLength(0);
+  });
+
+  it("places coarse-pointer message action rules in @layer layout so touch tablets (> 780px) override layout-base", async () => {
+    const conveniences = await fs.promises.readFile(
+      path.join(WEB_ROOT, "src/styles/conveniences.css"),
+      "utf8",
+    );
+    expect(conveniences).toMatch(
+      /@layer\s+layout\s*\{\s*@media\s*\(hover:\s*none\),\s*\(pointer:\s*coarse\)\s*\{[\s\S]*?\.message-more-button\s*\{\s*display:\s*inline-flex;/,
+    );
   });
 });

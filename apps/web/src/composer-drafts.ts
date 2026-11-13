@@ -41,6 +41,9 @@ let persistTimer: ReturnType<typeof setTimeout> | undefined;
 let draftEpoch = 0;
 const conversationEpochs = new Map<string, number>();
 const textRevisions = new Map<string, number>();
+// Conversation IDs modified or removed in this tab since the last persist, so
+// writing to localStorage merges with other open tabs instead of overwriting them.
+const dirtyDraftIds = new Set<string>();
 
 function cancelPendingPersist() {
   if (persistTimer === undefined) return;
@@ -85,45 +88,12 @@ function removeStoredDrafts(userId: string) {
   }
 }
 
-function persistSessionDrafts(userId: string) {
-  if (!userId) return;
+function parseStoredDraftMap(raw: string | null): Record<string, ComposerDraft> {
+  if (!raw) return {};
   try {
-    if (composerDrafts.size === 0)
-      localStorage.removeItem(draftStorageKey(userId));
-    else
-      localStorage.setItem(
-        draftStorageKey(userId),
-        JSON.stringify(Object.fromEntries(composerDrafts)),
-      );
-  } catch {
-    /* Drafts remain usable in memory when localStorage is full or blocked. */
-  }
-}
-
-/** Reads the user's drafts; one-time migration from the old sessionStorage key. */
-function readStoredDrafts(userId: string) {
-  const key = draftStorageKey(userId);
-  const stored = localStorage.getItem(key);
-  if (stored) return stored;
-  const legacy = sessionStorage.getItem(key);
-  if (legacy) {
-    try {
-      localStorage.setItem(key, legacy);
-    } catch {
-      /* Still usable in memory for this tab. */
-    }
-    sessionStorage.removeItem(key);
-  }
-  return legacy;
-}
-
-function loadSessionDrafts(userId: string) {
-  if (!userId) return;
-  try {
-    const raw = readStoredDrafts(userId);
-    if (!raw) return;
     const parsed = JSON.parse(raw) as Record<string, ComposerDraft>;
-    if (!parsed || typeof parsed !== "object") return;
+    if (!parsed || typeof parsed !== "object") return {};
+    const valid: Record<string, ComposerDraft> = {};
     for (const [id, entry] of Object.entries(parsed)) {
       if (
         entry &&
@@ -132,15 +102,119 @@ function loadSessionDrafts(userId: string) {
         typeof entry.replyToId === "string" &&
         (entry.body || entry.mentions.length > 0 || entry.replyToId)
       ) {
-        composerDrafts.set(id, {
+        valid[id] = {
           body: entry.body,
           mentions: entry.mentions,
           replyToId: entry.replyToId,
-        });
+        };
       }
+    }
+    return valid;
+  } catch {
+    return {};
+  }
+}
+
+function persistSessionDrafts(userId: string) {
+  if (!userId) {
+    dirtyDraftIds.clear();
+    return;
+  }
+  try {
+    const key = draftStorageKey(userId);
+    const merged = parseStoredDraftMap(localStorage.getItem(key));
+    const snap = chatStore.getSnapshot();
+    const checkAccess =
+      chatStore.hasAuthoritativeConversations && snap.userId === userId;
+    if (checkAccess) {
+      for (const id of Object.keys(merged)) {
+        if (!snap.conversations[id]) delete merged[id];
+      }
+    }
+    for (const id of dirtyDraftIds) {
+      const local = composerDrafts.get(id);
+      if (local) merged[id] = local;
+      else delete merged[id];
+    }
+    if (Object.keys(merged).length === 0) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify(merged));
+    dirtyDraftIds.clear();
+    try {
+      sessionStorage.removeItem(key);
+    } catch {
+      /* Ignore sessionStorage cleanup errors once localStorage succeeded. */
+    }
+  } catch {
+    /* Drafts remain usable in memory when localStorage is full or blocked. */
+  }
+}
+
+/** Reads the user's drafts; one-time migration from the old sessionStorage key. */
+function readStoredDrafts(userId: string): Record<string, ComposerDraft> {
+  const key = draftStorageKey(userId);
+  const stored = parseStoredDraftMap(readCurrentStoredRaw(userId));
+  const legacyRaw = sessionStorage.getItem(key);
+  if (!legacyRaw) return stored;
+  const legacy = parseStoredDraftMap(legacyRaw);
+  const merged = { ...legacy, ...stored };
+  try {
+    if (Object.keys(merged).length > 0)
+      localStorage.setItem(key, JSON.stringify(merged));
+    sessionStorage.removeItem(key);
+  } catch {
+    // Keep legacy backup intact and mark unpersisted entries dirty so they
+    // survive storage events and retry on the next persist.
+    for (const id of Object.keys(legacy)) {
+      if (!(id in stored)) dirtyDraftIds.add(id);
+    }
+  }
+  return merged;
+}
+
+function loadSessionDrafts(userId: string) {
+  if (!userId) return;
+  try {
+    for (const [id, entry] of Object.entries(readStoredDrafts(userId))) {
+      composerDrafts.set(id, entry);
     }
   } catch {
     /* Corrupted or unavailable storage falls back to in-memory drafts. */
+  }
+}
+
+function reconcileFromStorage(raw: string | null) {
+  if (!draftUserId) return;
+  const incoming = parseStoredDraftMap(raw);
+  const snap = chatStore.getSnapshot();
+  const checkAccess =
+    chatStore.hasAuthoritativeConversations && snap.userId === draftUserId;
+  let changed = false;
+  for (const id of [...composerDrafts.keys()]) {
+    if (dirtyDraftIds.has(id)) continue;
+    if (!(id in incoming) || (checkAccess && !snap.conversations[id])) {
+      composerDrafts.delete(id);
+      textRevisions.set(id, (textRevisions.get(id) ?? 0) + 1);
+      changed = true;
+    }
+  }
+  for (const [id, next] of Object.entries(incoming)) {
+    if (dirtyDraftIds.has(id)) continue;
+    if (checkAccess && !snap.conversations[id]) continue;
+    const prev = composerDrafts.get(id);
+    if (
+      !prev ||
+      prev.body !== next.body ||
+      prev.replyToId !== next.replyToId ||
+      !sameMentions(prev.mentions, next.mentions)
+    ) {
+      composerDrafts.set(id, next);
+      textRevisions.set(id, (textRevisions.get(id) ?? 0) + 1);
+      changed = true;
+    }
+  }
+  if (changed) {
+    refreshDraftPresence();
+    notifyDrafts();
   }
 }
 
@@ -154,10 +228,25 @@ export function flushComposerDrafts() {
   persistSessionDrafts(draftUserId);
 }
 
+function readCurrentStoredRaw(userId: string): string | null {
+  try {
+    return localStorage.getItem(draftStorageKey(userId));
+  } catch {
+    return null;
+  }
+}
+
 if (typeof window !== "undefined") {
   window.addEventListener("pagehide", flushComposerDrafts);
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") flushComposerDrafts();
+  });
+  window.addEventListener("storage", (event) => {
+    if (!draftUserId) return;
+    if (event.key !== null && event.key !== draftStorageKey(draftUserId)) return;
+    // Read the current localStorage snapshot instead of event.newValue so a
+    // queued event from another tab never overwrites a newer local persist.
+    reconcileFromStorage(readCurrentStoredRaw(draftUserId));
   });
 }
 
@@ -165,6 +254,7 @@ export function clearComposerDrafts() {
   const previousUser = draftUserId;
   const currentUser = chatStore.getSnapshot().userId;
   cancelPendingPersist();
+  dirtyDraftIds.clear();
   draftEpoch++;
   conversationEpochs.clear();
   if (previousUser) removeStoredDrafts(previousUser);
@@ -180,6 +270,7 @@ chatStore.subscribe(() => {
   let userChanged = false;
   if (snap.userId !== draftUserId) {
     cancelPendingPersist();
+    dirtyDraftIds.clear();
     draftEpoch++;
     conversationEpochs.clear();
     // Account isolation: another account never sees (or inherits) these drafts.
@@ -195,6 +286,7 @@ chatStore.subscribe(() => {
     for (const id of composerDrafts.keys()) {
       if (!allowed[id] && composerDrafts.delete(id)) {
         pruned = true;
+        dirtyDraftIds.add(id);
         conversationEpochs.set(id, (conversationEpochs.get(id) ?? 0) + 1);
       }
     }
@@ -253,6 +345,7 @@ export function writeComposerDraft(
       replyToId: draft.replyToId,
     });
   }
+  dirtyDraftIds.add(conversationId);
   cancelPendingPersist();
   persistSessionDrafts(snap.userId);
   refreshDraftPresence();
@@ -308,6 +401,7 @@ export function writeComposerText(
   };
   if (!draftAllowed(conversationId, draft)) composerDrafts.delete(conversationId);
   else composerDrafts.set(conversationId, { ...draft, mentions: [...mentions] });
+  dirtyDraftIds.add(conversationId);
   refreshDraftPresence();
   cancelPendingPersist();
   persistTimer = setTimeout(() => {

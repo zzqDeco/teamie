@@ -22,15 +22,22 @@ export function isReactionEmoji(value: unknown): value is string {
 
 export const allowedEmojiCount = () => allowed.size;
 
+const SEARCH_GROUPS = EMOJI_GROUPS.map((group) => ({
+  labelLower: group.label.toLocaleLowerCase(),
+  entries: group.entries.map(
+    ([emoji, name]) => [emoji, name.toLocaleLowerCase()] as const,
+  ),
+}));
+
 /** Name/category search over picker entries (English CLDR names + Chinese group labels). */
 export function searchEmojis(query: string, limit = 160): string[] {
   const needle = query.trim().toLocaleLowerCase();
   if (!needle) return [];
   const results: string[] = [];
-  for (const group of EMOJI_GROUPS) {
-    const groupMatch = group.label.includes(needle);
-    for (const [emoji, name] of group.entries) {
-      if (groupMatch || name.includes(needle) || emoji === needle) {
+  for (const group of SEARCH_GROUPS) {
+    const groupMatch = group.labelLower.includes(needle);
+    for (const [emoji, nameLower] of group.entries) {
+      if (groupMatch || nameLower.includes(needle) || emoji === needle) {
         results.push(emoji);
         if (results.length >= limit) return results;
       }
