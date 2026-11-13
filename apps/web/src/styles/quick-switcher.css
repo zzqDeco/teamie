@@ -20,7 +20,8 @@
     box-shadow: var(--focus-halo);
   }
   .quick-switcher-input input,
-  .quick-switcher-input input:focus {
+  .quick-switcher-input input:focus,
+  .quick-switcher-input input:focus-visible {
     flex: 1;
     border: 0;
     box-shadow: none;
@@ -31,7 +32,7 @@
   .quick-switcher-list {
     list-style: none;
     margin: 0;
-    padding: 0;
+    padding: 0 0 var(--space-1);
     max-height: min(60dvh, 420px);
     overflow-y: auto;
     display: flex;

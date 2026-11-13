@@ -228,8 +228,12 @@ afterEach(async () => {
 describe("mentions and replies inbox", () => {
   it("shows one rail entry, public human/Agent messages and deduplicated reasons without marking the list read", async () => {
     await mount();
-    expect(host.querySelectorAll('a[aria-label="提及与回复"]')).toHaveLength(1);
-    expect(host.querySelector('[aria-label="3 条未读提醒"]')).not.toBeNull();
+    expect(
+      host.querySelectorAll('a[aria-label="提及与回复（3 条未读）"]'),
+    ).toHaveLength(1);
+    expect(
+      host.querySelector('.rail-attention-count[aria-hidden="true"]')?.textContent,
+    ).toBe("3");
     expect(host.querySelectorAll(".attention-item")).toHaveLength(3);
     expect(host.textContent).toContain("提及并回复了你");
     expect(host.textContent).toContain("回复了你");
@@ -306,7 +310,7 @@ describe("mentions and replies inbox", () => {
         retractedAt: "2026-10-17T00:01:00Z",
       },
     });
-    await click('a[aria-label="提及与回复"]');
+    await click("a.rail-attention");
     await settle();
     await click(".attention-item");
     expect(api.read).not.toHaveBeenCalled();
@@ -426,7 +430,7 @@ describe("mentions and replies inbox", () => {
     const around = vi.spyOn(api, "messagesAround");
     await mount();
     await click(".attention-item");
-    await click('a[aria-label="提及与回复"]');
+    await click("a.rail-attention");
     await settle();
     await settle(() => pending.resolve({ message: rows[0].message }));
     expect(api.read).not.toHaveBeenCalled();

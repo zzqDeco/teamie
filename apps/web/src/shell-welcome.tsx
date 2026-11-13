@@ -47,24 +47,24 @@ export function Welcome({
       <header>
         <MobileNavButton onClick={onMenu} />
         <span>
-          <Home size={ICON.sm} />
+          <Home size={ICON.sm} aria-hidden="true" />
           你的起点
         </span>
       </header>
       <div className="welcome-content">
-        <div className="welcome-illustration">
+        <div className="welcome-illustration" aria-hidden="true">
           <span className="welcome-bubble">
             <MessagesSquareIcon />
           </span>
         </div>
-        <h1>你好，{userName}</h1>
+        <h1 tabIndex={-1}>你好，{userName}</h1>
         <p>
           创建一个工作空间，开始协作。
           <br />
           已有工作空间邀请？粘贴工作空间邀请链接即可加入。
         </p>
         <Button onClick={onCreate}>
-          <Plus size={ICON.md} />
+          <Plus size={ICON.md} aria-hidden="true" />
           创建工作空间
         </Button>
         <form className="welcome-join-form" onSubmit={submitInvite}>

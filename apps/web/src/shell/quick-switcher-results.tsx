@@ -144,6 +144,12 @@ export function QuickSwitcherMessageResults({
                           className={`quick-switcher-option quick-switcher-message-option ${selected ? "selected" : ""}`}
                           onMouseMove={() => { if (!selected) setActiveId(opt.id); }}
                           onClick={() => onSelect(opt.path)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              onSelect(opt.path);
+                            }
+                          }}
                         >
                             <div className="quick-switcher-message-meta">
                               <b>{opt.message.senderName}</b>
@@ -269,6 +275,12 @@ export function QuickSwitcherJumpResults({
         className={`quick-switcher-option ${selected ? "selected" : ""}`}
         onMouseMove={() => { if (!selected) setActiveId(item.id); }}
         onClick={() => onSelect(item.path)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onSelect(item.path);
+          }
+        }}
       >
         <span className={`quick-switcher-icon ${item.kind}`} aria-hidden="true">
           <QuickItemIcon item={item} />

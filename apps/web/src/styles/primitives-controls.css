@@ -299,4 +299,17 @@
     background: var(--hover-bg);
     color: currentColor;
   }
+
+  .composer:focus-within {
+    border-color: var(--brand-text);
+    box-shadow: var(--focus-halo);
+  }
+  .composer textarea:focus,
+  .composer textarea:focus-visible,
+  .member-search input:focus-visible,
+  .mp-admin-search input:focus-visible,
+  .platform-user-search input:focus-visible,
+  .created-reset-link .copy-input input:focus-visible {
+    outline: none;
+  }
 }

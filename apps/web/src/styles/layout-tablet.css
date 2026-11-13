@@ -147,6 +147,25 @@
       height: var(--app-height, 100dvh);
       z-index: var(--z-members-pane);
       width: min(340px, 88vw);
+      visibility: visible;
+      pointer-events: auto;
+      transform: translateX(0);
+      transition:
+        transform var(--dur-base) var(--ease-standard),
+        visibility 0s;
+    }
+    @starting-style {
+      .members-pane {
+        transform: translateX(100%);
+      }
+    }
+    .app-shell:not(.details-open) .members-pane {
+      visibility: hidden;
+      pointer-events: none;
+      transform: translateX(100%);
+      transition:
+        transform var(--dur-base) var(--ease-standard),
+        visibility 0s linear var(--dur-base);
     }
     .navigation-sidebar {
       width: 224px;

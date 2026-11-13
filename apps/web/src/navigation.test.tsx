@@ -1244,6 +1244,10 @@ describe("member and account navigation", () => {
     signedOut = true;
     const scrollTo = vi.fn();
     vi.stubGlobal("scrollTo", scrollTo);
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      cb(0);
+      return 0;
+    });
     vi.stubGlobal("innerWidth", 1280);
     vi.stubGlobal("innerHeight", 800);
     vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
@@ -1298,6 +1302,10 @@ describe("member and account navigation", () => {
     signedOut = true;
     const scrollTo = vi.fn();
     vi.stubGlobal("scrollTo", scrollTo);
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      cb(0);
+      return 0;
+    });
     vi.stubGlobal("innerWidth", 1280);
     vi.stubGlobal("innerHeight", 800);
     vi.stubGlobal("matchMedia", vi.fn(() => ({

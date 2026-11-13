@@ -50,9 +50,12 @@ export function UnreadBadge({
   if (!summary) {
     if (!count || count <= 0) return null;
     return (
-      <span className="unread-badge" aria-label={`${count} 条未读`}>
-        {count > 99 ? "99+" : count}
-      </span>
+      <>
+        <span className="unread-badge" aria-hidden="true">
+          {count > 99 ? "99+" : count}
+        </span>
+        <em className="sr-only">{`（${count} 条未读）`}</em>
+      </>
     );
   }
   const mutedIcon =
@@ -61,18 +64,21 @@ export function UnreadBadge({
     ) : null;
   if (summary.badgeCount > 0) {
     const badge = (
-      <span
-        className={`unread-badge ${summary.badgePrefix ? "mention-badge" : ""}`}
-        aria-label={`${summary.badgeCount} 条未读`}
-        title={
-          conversationType === "channel" && summary.projectionStale
-            ? "截至最近同步的未读提醒"
-            : undefined
-        }
-      >
-        {summary.badgePrefix}
-        {summary.badgeCount > 99 ? "99+" : summary.badgeCount}
-      </span>
+      <>
+        <span
+          className={`unread-badge ${summary.badgePrefix ? "mention-badge" : ""}`}
+          aria-hidden="true"
+          title={
+            conversationType === "channel" && summary.projectionStale
+              ? "截至最近同步的未读提醒"
+              : undefined
+          }
+        >
+          {summary.badgePrefix}
+          {summary.badgeCount > 99 ? "99+" : summary.badgeCount}
+        </span>
+        <em className="sr-only">{`（${summary.badgeCount} 条未读）`}</em>
+      </>
     );
     return mutedIcon ? (
       <>
@@ -90,7 +96,10 @@ export function UnreadBadge({
     ) : null);
   const dot =
     summary.hasUnread && showDot ? (
-      <i className="unread-dot" role="img" aria-label="有未读消息" />
+      <>
+        <i className="unread-dot" aria-hidden="true" />
+        <em className="sr-only">（有未读消息）</em>
+      </>
     ) : null;
   if (levelIcon && dot) {
     return (

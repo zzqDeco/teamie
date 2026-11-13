@@ -1,16 +1,15 @@
-import type { KeyboardEvent } from "react";
-
 /**
  * Arrow-key navigation for menus/lists: ArrowUp/ArrowDown (and optionally
  * ArrowLeft/ArrowRight) move focus between `selector` matches inside the
  * container, Home/End jump to the ends. Returns true when it handled the key.
  */
 export function handleRovingKeys(
-  event: KeyboardEvent<HTMLElement>,
+  event: { key: string; currentTarget: EventTarget | null; preventDefault(): void },
   selector: string,
   { horizontal = false, wrap = true }: { horizontal?: boolean; wrap?: boolean } = {},
 ): boolean {
-  const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(selector));
+  const container = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+  const items = container ? Array.from(container.querySelectorAll<HTMLElement>(selector)) : [];
   if (!items.length) return false;
   const index = items.indexOf(document.activeElement as HTMLElement);
   const last = items.length - 1;

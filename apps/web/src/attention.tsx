@@ -472,11 +472,11 @@ export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
     <section className="attention-view">
       <header className="conversation-header">
         <MobileNavButton onClick={onMenu} />
-        <span className="conversation-symbol">
-          <Bell size={ICON.lg} />
+        <span className="conversation-symbol" aria-hidden="true">
+          <Bell size={ICON.lg} aria-hidden="true" />
         </span>
         <div>
-          <h1>提及与回复</h1>
+          <h1 tabIndex={-1}>提及与回复</h1>
         </div>
         <div className="conversation-header-actions">
           <Button
@@ -579,7 +579,12 @@ export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
                             ? "提及了你"
                             : "回复了你"}
                       </span>
-                      {!isRead && <i aria-label="未读" />}
+                      {!isRead && (
+                        <>
+                          <i aria-hidden="true" />
+                          <span className="sr-only">（未读）</span>
+                        </>
+                      )}
                       <time dateTime={message.createdAt}>
                         {date(message.createdAt)} {time(message.createdAt)}
                       </time>

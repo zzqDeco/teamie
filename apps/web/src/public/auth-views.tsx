@@ -138,6 +138,9 @@ export function Login() {
     resetPageScroll();
   }, [register]);
   useEffect(() => {
+    document.title = register ? "注册账号 — Teamie" : "登录 — Teamie";
+  }, [register]);
+  useEffect(() => {
     active.current = true;
     return () => {
       active.current = false;
@@ -231,7 +234,7 @@ export function Login() {
           <h1>
             在一起，
             <br />
-            做成事<span>。</span>
+            做成事<span aria-hidden="true">。</span>
           </h1>
           <p>你的团队，你们的空间。</p>
         </div>
@@ -241,7 +244,7 @@ export function Login() {
       </div>
       <main className="auth-content">
         <Link to="/" className="back-link">
-          <ArrowLeft size={ICON.sm} />
+          <ArrowLeft size={ICON.sm} aria-hidden="true" />
           首页
         </Link>
         <div className="auth-form">
@@ -407,7 +410,7 @@ export function Login() {
             {!register && <Link to="/forgot-password" className="forgot-password-link">忘记密码？</Link>}
             <Button type="submit" busy={busy} className="full-width">
               {register ? "创建账户" : "登录"}
-              <ArrowRight size={ICON.md} />
+              <ArrowRight size={ICON.md} aria-hidden="true" />
             </Button>
           </form>
         </div>
@@ -435,6 +438,9 @@ export function Join() {
   });
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
+  useEffect(() => {
+    document.title = "加入工作空间 — Teamie";
+  }, []);
   async function accept() {
     setBusy(true);
     setError("");
@@ -485,8 +491,8 @@ export function Join() {
     <div className="join-page">
       <PublicHeader />
       <main className="join-card">
-        <div className="invitation-icon">
-          <Users size={ICON.xl} />
+        <div className="invitation-icon" aria-hidden="true">
+          <Users size={ICON.xl} aria-hidden="true" />
         </div>
         <h1>
           {query.data
@@ -519,7 +525,7 @@ export function Join() {
                     以 <b>{user.displayName}</b> 的身份加入
                     <small>{user.email}</small>
                   </span>
-                  <Check size={ICON.md} />
+                  <Check size={ICON.md} aria-hidden="true" />
                 </div>
                 <Button
                   busy={busy || loading}
@@ -527,7 +533,7 @@ export function Join() {
                   className="full-width"
                 >
                   接受邀请
-                  <ArrowRight size={ICON.md} />
+                  <ArrowRight size={ICON.md} aria-hidden="true" />
                 </Button>
               </>
             ) : (
@@ -537,7 +543,7 @@ export function Join() {
                   to={`/login?next=${encodeURIComponent(joinPath)}`}
                 >
                   登录并接受邀请
-                  <ArrowRight size={ICON.md} />
+                  <ArrowRight size={ICON.md} aria-hidden="true" />
                 </Link>
                 <Link
                   className="join-register-link"

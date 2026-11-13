@@ -109,7 +109,7 @@
 
   .message-read-receipt.is-interactive {
     padding: var(--space-0_5) var(--space-2);
-    margin-left: -2px;
+    margin-left: calc(var(--space-0_5) * -1);
     border-radius: var(--r-xs);
     border: 1px solid transparent;
     background: transparent;
@@ -139,10 +139,13 @@
 
   .read-receipt-popover {
     position: absolute;
-    bottom: calc(100% + 6px);
+    bottom: calc(100% + var(--space-1_5));
     left: 0;
     min-width: 230px;
     max-width: 300px;
+    max-height: min(320px, 50vh);
+    overflow-y: auto;
+    overscroll-behavior: contain;
     padding: var(--space-3) var(--space-3_5);
     border-radius: var(--r-md);
     background: var(--surface);
@@ -199,11 +202,6 @@
   }
   .reaction-chip-count {
     font-variant-numeric: tabular-nums;
-  }
-  .read-receipt-popover {
-    max-height: min(320px, 50vh);
-    overflow-y: auto;
-    overscroll-behavior: contain;
   }
   .read-receipt-section > ul > li[tabindex]:focus-visible {
     outline: var(--focus-ring);

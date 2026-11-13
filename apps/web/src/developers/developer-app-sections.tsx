@@ -47,7 +47,7 @@ export function DeveloperAppSteps({
   statusLabel: string;
 }) {
   return (
-    <div className="dev-steps" aria-label="当前应用提审进度">
+    <section className="dev-steps" aria-label="当前应用提审进度">
       <div className="dev-step-card done">
         <span className="dev-step-num">1 · 凭证就绪</span>
         <b>App ID 已分配</b>
@@ -74,7 +74,7 @@ export function DeveloperAppSteps({
             : "审批通过后全站可安装"}
         </small>
       </div>
-    </div>
+    </section>
   );
 }
 

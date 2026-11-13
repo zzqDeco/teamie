@@ -159,7 +159,7 @@
   }
   .message-body .task-list-item {
     list-style: none;
-    margin-left: -18px;
+    margin-left: calc(var(--space-4_5) * -1);
     display: flex;
     align-items: baseline;
     gap: var(--space-2);

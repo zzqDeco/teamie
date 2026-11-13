@@ -107,7 +107,7 @@ export function MyAgents({
               className="agent-card"
             >
               <div className="agent-card-top">
-                <AgentAvatar disabled={!agent.enabled} />
+                <AgentAvatar seed={agent.id} disabled={!agent.enabled} />
                 <AgentEnabledStatus enabled={agent.enabled} />
               </div>
               <h2>{agent.name}</h2>
@@ -289,7 +289,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         个人 Agent
       </Link>
       <div className="agent-detail-heading">
-        <AgentAvatar size="large" disabled={!agent.enabled} />
+        <AgentAvatar size="large" seed={agent.id} disabled={!agent.enabled} />
         <div className="agent-detail-summary">
           <div className="agent-detail-labels">
             <AgentBadge compact />

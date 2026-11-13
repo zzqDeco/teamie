@@ -197,7 +197,13 @@ export const MessageItem = memo(function MessageItem({
     ignore: (el) => !!el.closest("a, button, input, textarea, [role='dialog'], .message-reactions"),
   });
   const pickerWrapRef = useRef<HTMLDivElement>(null);
+  const editInputRef = useRef<HTMLTextAreaElement>(null);
   const closePicker = useCallback(() => setPickerOpen(false), []);
+  const isEditingMessage = editing?.id === message.id;
+
+  useEffect(() => {
+    if (isEditingMessage) editInputRef.current?.focus();
+  }, [isEditingMessage]);
 
   useEffect(() => {
     if (!copyFeedback) return;
@@ -249,20 +255,23 @@ export const MessageItem = memo(function MessageItem({
       });
     }
   }
+  const senderElId = `message-sender-${message.id}`;
+  const timeElId = `message-time-${message.id}`;
   return (
     <Fragment>
       {showDate && (
-        <div className="date-divider">
+        <div className="date-divider" role="separator" aria-label={date(message.createdAt)}>
           <span>{date(message.createdAt)}</span>
         </div>
       )}
       {showUnreadDivider && (
-        <div className="unread-divider">
+        <div className="unread-divider" role="separator" aria-label="以下是新消息">
           <span>以下是新消息</span>
         </div>
       )}
       <article
         id={`message-${message.id}`}
+        aria-labelledby={`${senderElId} ${timeElId}`}
         data-seq={message.status ? undefined : message.seq}
         data-own={isOwn ? "true" : undefined}
         tabIndex={isRovingTarget ? 0 : -1}
@@ -327,6 +336,7 @@ export const MessageItem = memo(function MessageItem({
             )
           ) : (
             <time
+              id={timeElId}
               className="compact-time"
               dateTime={message.createdAt}
               title={formatDateTime(message.createdAt, "full")}
@@ -338,12 +348,13 @@ export const MessageItem = memo(function MessageItem({
         <div className="message-content">
           {!compact ? (
             <div className="message-meta">
-              <b>{message.senderName}</b>
+              <b id={senderElId}>{message.senderName}</b>
               {message.senderKind === "agent" && (
                 <AgentBadge ownerName={agentOwnerName} compact={!showOwner} />
               )}
               {isOwn && <span className="you-label">你</span>}
               <time
+                id={timeElId}
                 dateTime={message.createdAt}
                 title={formatDateTime(message.createdAt, "full")}
               >
@@ -355,14 +366,19 @@ export const MessageItem = memo(function MessageItem({
               />
             </div>
           ) : (
-            (isPinned || isSaved) && (
-              <div className="message-meta">
-                <MessageCollaborationIndicators
-                  isPinned={isPinned}
-                  isSaved={isSaved}
-                />
-              </div>
-            )
+            <>
+              <span id={senderElId} className="sr-only">
+                {message.senderName}
+              </span>
+              {(isPinned || isSaved) && (
+                <div className="message-meta">
+                  <MessageCollaborationIndicators
+                    isPinned={isPinned}
+                    isSaved={isSaved}
+                  />
+                </div>
+              )}
+            </>
           )}
           {!message.retractedAt && message.forwarded && (
             <ForwardedMessageCard
@@ -387,10 +403,10 @@ export const MessageItem = memo(function MessageItem({
               </span>
             </button>
           )}
-          {editing?.id === message.id ? (
+          {isEditingMessage ? (
             <form className="edit-message" onSubmit={onEditSubmit}>
               <MentionInput
-                autoFocus
+                inputRef={editInputRef}
                 value={editBody}
                 mentions={editMentions}
                 onChange={(value, mentions) => {

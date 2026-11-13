@@ -105,6 +105,15 @@
     margin: 0;
     color: var(--text-strong);
   }
+  main[tabindex="-1"]:focus,
+  h1[tabindex="-1"]:focus {
+    outline: none;
+  }
+  main[tabindex="-1"]:focus-visible,
+  h1[tabindex="-1"]:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: var(--focus-ring-offset);
+  }
   p {
     margin: 0;
   }

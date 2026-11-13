@@ -24,7 +24,7 @@ export function Logo({ compact = false }: { compact?: boolean }) {
       </span>
       {!compact && (
         <span>
-          teamie<span className="brand-period">.</span>
+          teamie<span className="brand-period" aria-hidden="true">.</span>
         </span>
       )}
     </span>
@@ -183,12 +183,15 @@ export function BadgePill({
   ariaLabel?: string;
 }) {
   return (
-    <span
-      className={`badge-pill ${className}`.trim()}
-      title={title}
-      aria-label={ariaLabel}
-    >
-      {children}
+    <span className={`badge-pill ${className}`.trim()} title={title}>
+      {ariaLabel ? (
+        <>
+          <span className="sr-only">{ariaLabel}</span>
+          <span aria-hidden="true">{children}</span>
+        </>
+      ) : (
+        children
+      )}
     </span>
   );
 }
@@ -292,6 +295,7 @@ function focusFirst(candidates: Iterable<HTMLElement | null | undefined>) {
   return false;
 }
 export function OverlayFocusBoundary({ edge }: { edge: "start" | "end" }) {
+  // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- focus-trap sentinel around cross-origin iframe
   return <span data-overlay-focus-boundary={edge} tabIndex={0}
     style={{ position: "fixed", width: 1, height: 1, opacity: 0, pointerEvents: "none" }} />;
 }
@@ -480,6 +484,7 @@ export function Modal({
   return (
     <div
       className="modal-backdrop"
+      role="presentation"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) requestClose();
       }}
@@ -621,7 +626,7 @@ export function PublicHeader() {
       <Link to="/" aria-label="Teamie 首页">
         <Logo />
       </Link>
-      <nav>
+      <nav aria-label="站点导航">
         <Link to="/login">登录</Link>
         <Link className="button small-button" to="/login?mode=register">
           受邀注册

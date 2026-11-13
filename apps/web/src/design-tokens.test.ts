@@ -547,6 +547,36 @@ describe("PR-5 CSS cleanup, unified focus, icon scale & self-hosted DM Sans", ()
       expect(content, `${file} should have no !important`).not.toContain(
         "!important",
       );
+
+      // Ban outline: none|0 inside @layer features, and require any file using
+      // outline: none|0 in base/layout/components to pair it with :focus-visible or :focus-within.
+      const featureBlocks: string[] = [];
+      const layerRe = /@layer\s+([a-z-]+)\s*\{/g;
+      let lm: RegExpExecArray | null;
+      while ((lm = layerRe.exec(content))) {
+        let depth = 1;
+        let idx = lm.index + lm[0].length;
+        while (idx < content.length && depth > 0) {
+          if (content[idx] === "{") depth++;
+          else if (content[idx] === "}") depth--;
+          idx++;
+        }
+        if (lm[1] === "features") {
+          featureBlocks.push(content.slice(lm.index + lm[0].length, idx - 1));
+        }
+      }
+      for (const block of featureBlocks) {
+        expect(
+          block,
+          `${file} must not declare outline: none/0 inside @layer features`,
+        ).not.toMatch(/outline\s*:\s*(none|0)\b/);
+      }
+      if (/outline\s*:\s*(none|0)\b/.test(content)) {
+        expect(
+          /:focus-(visible|within)/.test(content),
+          `${file} declares outline: none/0 without a paired :focus-visible or :focus-within rule`,
+        ).toBe(true);
+      }
     }
   });
 

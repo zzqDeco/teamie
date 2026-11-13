@@ -121,8 +121,9 @@ function ConversationItem({
           <i
             className={`presence-dot ${presenceClassName(presenceState)}`}
             title={formatPresenceLabel(presenceState)}
-            aria-label={formatPresenceLabel(presenceState)}
+            aria-hidden="true"
           />
+          <span className="sr-only">{`（${formatPresenceLabel(presenceState)}）`}</span>
         </div>
       ) : (
         <Avatar
@@ -224,7 +225,7 @@ function ConversationSection({
  * Number of visible unread conversation rows scrolled below the sidebar's
  * viewport, re-measured on scroll/resize and whenever `signature` changes.
  */
-function useUnreadBelow(scrollRef: RefObject<HTMLDivElement | null>, signature: string) {
+function useUnreadBelow(scrollRef: RefObject<HTMLElement | null>, signature: string) {
   const [below, setBelow] = useState(0);
   useEffect(() => {
     const scroller = scrollRef.current;
@@ -256,7 +257,7 @@ function useUnreadBelow(scrollRef: RefObject<HTMLDivElement | null>, signature: 
   return below;
 }
 
-function scrollToNextUnread(scroller: HTMLDivElement | null) {
+function scrollToNextUnread(scroller: HTMLElement | null) {
   if (!scroller) return;
   const bottom = scroller.getBoundingClientRect().bottom;
   const next = Array.from(
@@ -336,7 +337,7 @@ export function ShellSidebar({
 }) {
   const activeSnapshot = snapshot || chatStore.getSnapshot();
   const presenceEnabled = !!caps["im.presence.publish"];
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLElement>(null);
   const unreadOf = (item: Conversation) =>
     conversationUnreadSummary(item, activeSnapshot, user.id, attentionProjection).hasUnread;
   const unreadSignature = [...channels, ...direct]
@@ -350,7 +351,7 @@ export function ShellSidebar({
       ref={navigationRef}
       role={mobile && sidebar ? "dialog" : undefined}
       aria-modal={mobile && sidebar ? true : undefined}
-      aria-label={mobile ? "对话与工作空间导航" : undefined}
+      aria-label={mobile && sidebar ? "对话与工作空间导航" : undefined}
       tabIndex={-1}
       inert={mobile && !sidebar}
     >
@@ -369,16 +370,17 @@ export function ShellSidebar({
           to="/app/attention"
           className={`rail-attention ${isAttentionPage ? "selected" : ""}`}
           title="提及与回复"
-          aria-label="提及与回复"
+          aria-label={
+            attentionUnreadCount && attentionUnreadCount > 0
+              ? `提及与回复（${attentionUnreadCount} 条未读）`
+              : "提及与回复"
+          }
           aria-current={isAttentionPage ? "page" : undefined}
           onClick={onCloseSidebar}
         >
-          <Bell size={ICON.lg} />
+          <Bell size={ICON.lg} aria-hidden="true" />
           {!!attentionUnreadCount && (
-            <span
-              className="rail-attention-count"
-              aria-label={`${attentionUnreadCount} 条未读提醒`}
-            >
+            <span className="rail-attention-count" aria-hidden="true">
               {attentionUnreadCount > 99 ? "99+" : attentionUnreadCount}
             </span>
           )}
@@ -395,9 +397,10 @@ export function ShellSidebar({
                   attentionProjection,
                 ).contributesToWorkspaceDot,
             );
-            // Account pages own the selection; the sidebar still shows the
-            // current workspace so returning keeps its context.
-            const selected = space.id === workspace?.id && !isAccountPage;
+            // Account and personal-Agent pages own the selection; the sidebar
+            // still shows the current workspace so returning keeps its context.
+            const selected =
+              space.id === workspace?.id && !isAccountPage && !isAgentsPage;
             return (
               <button
                 key={space.id}
@@ -412,7 +415,7 @@ export function ShellSidebar({
                 onClick={() => onSelectWorkspace(space)}
               >
                 <span>{Array.from(space.name).slice(0, 2).join("")}</span>
-                {selected && <i />}
+                {selected && <i aria-hidden="true" />}
                 {hasUnread && (
                   <em className="workspace-unread-dot" aria-hidden="true" />
                 )}
@@ -516,7 +519,7 @@ export function ShellSidebar({
             <span>应用</span>
           </Link>
         )}
-        <div className="sidebar-scroll" ref={scrollRef}>
+        <nav className="sidebar-scroll" aria-label="对话" ref={scrollRef}>
           <ConversationSection
             key={`${user.id}:${workspace?.id}:channels`}
             title="频道"
@@ -596,7 +599,7 @@ export function ShellSidebar({
               下方有 {unreadBelow} 个未读
             </button>
           )}
-        </div>
+        </nav>
       </aside>
     </div>
   );

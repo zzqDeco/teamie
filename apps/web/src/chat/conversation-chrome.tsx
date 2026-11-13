@@ -120,6 +120,15 @@ export function useMessageActions(conversationId: string) {
     setActionError("");
   }, []);
 
+  useEffect(() => {
+    if (!actionMessageId) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setActionMessageId("");
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [actionMessageId]);
+
   return {
     actionMessageId,
     setActionMessageId,
@@ -314,12 +323,12 @@ export function ConversationHeader({
               </span>
               <span
                 className={`header-presence ${presenceClassName(peerPresence)}`}
-                aria-label={`对方状态：${formatPresenceLabel(peerPresence)}`}
               >
                 <i
                   className={`presence-dot ${presenceClassName(peerPresence)}`}
                   aria-hidden="true"
                 />
+                <span className="sr-only">对方状态：</span>
                 {formatPresenceLabel(peerPresence)}
               </span>
             </>
@@ -351,6 +360,7 @@ export function ConversationHeader({
                 className="notification-level-menu"
                 role="menu"
                 aria-label="会话通知级别"
+                tabIndex={-1}
                 onKeyDown={(event) => {
                   handleRovingKeys(event, '[role="menuitemradio"]');
                 }}
@@ -380,13 +390,14 @@ export function ConversationHeader({
         ) : level !== "all" ? (
           <span
             className="notification-level-readonly"
+            role="img"
             title={`会话通知：${notificationLevelLabel(level)}`}
             aria-label={`会话通知：${notificationLevelLabel(level)}`}
           >
             {level === "none" ? (
-              <BellOff size={ICON.sm} />
+              <BellOff size={ICON.sm} aria-hidden="true" />
             ) : (
-              <AtSign size={ICON.sm} />
+              <AtSign size={ICON.sm} aria-hidden="true" />
             )}
           </span>
         ) : null}
