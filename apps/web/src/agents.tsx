@@ -26,7 +26,7 @@ import {
   agentFailureText,
   canManageAgent,
 } from "./agent-management";
-import { BadgePill, Button, ConfirmDialog, Notice } from "./ui";
+import { BadgePill, Button, ConfirmDialog, EmptyState, Notice } from "./ui";
 import { toast } from "./toast";
 import { ICON } from "./icons";
 import {
@@ -58,8 +58,7 @@ export function MyAgents({
   );
   const catalogQuery = useQuery<ModelCatalog>({
     queryKey: ["modelCatalog", user!.id],
-    queryFn: () =>
-      api.modelCatalog().catch((): ModelCatalog => ({ models: [] })),
+    queryFn: () => api.modelCatalog(),
     enabled: agents.some((item) => Boolean(item.modelId?.trim())),
     retry: false,
   });
@@ -134,21 +133,22 @@ export function MyAgents({
           ))}
         </div>
       ) : (
-        <div className="agents-empty">
-          <span className="agents-empty-icon">
-            <Bot size={ICON.xl} />
-          </span>
-          <h2>还没有 Agent</h2>
-          <p>创建 Agent，让它加入你的团队。</p>
-          {canCreate ? (
-            <Button onClick={() => setCreating(true)}>
-              <Plus size={ICON.sm} />
-              创建 Agent
-            </Button>
-          ) : (
-            <Notice kind="info">当前无法创建 Agent。</Notice>
-          )}
-        </div>
+        <EmptyState
+          headingLevel="h2"
+          icon={<Bot size={ICON.xl} />}
+          title="还没有 Agent"
+          description="创建 Agent，让它加入你的团队。"
+          action={
+            canCreate ? (
+              <Button onClick={() => setCreating(true)}>
+                <Plus size={ICON.sm} />
+                创建 Agent
+              </Button>
+            ) : (
+              <Notice kind="info">当前无法创建 Agent。</Notice>
+            )
+          }
+        />
       )}
       {creating && (
         <AgentProfileDialog
@@ -179,8 +179,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
   const agent = query.data?.agent;
   const catalogQuery = useQuery<ModelCatalog>({
     queryKey: ["modelCatalog", user!.id],
-    queryFn: () =>
-      api.modelCatalog().catch((): ModelCatalog => ({ models: [] })),
+    queryFn: () => api.modelCatalog(),
     enabled: Boolean(agent?.modelId?.trim()),
     retry: false,
   });

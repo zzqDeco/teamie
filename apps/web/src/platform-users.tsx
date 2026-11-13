@@ -6,7 +6,7 @@ import { CheckCheck, Copy, KeyRound, LoaderCircle, Search, ShieldCheck, Users } 
 import { api, ApiError } from "@teamie/api-client";
 import type { CreatedPasswordResetLink, User } from "@teamie/api-client";
 import { useAuth } from "./auth";
-import { Avatar, Button, Modal, Notice } from "./ui";
+import { Avatar, Button, DataList, EmptyState, Modal, Notice } from "./ui";
 import { ICON } from "./icons";
 
 type SessionScope = ReturnType<ReturnType<typeof useAuth>["captureSession"]>;
@@ -147,11 +147,15 @@ function AdminUsers({ user }: { user: User }) {
         {query.isPending ? (
           <div className="admin-empty" role="status"><LoaderCircle className="spin" size={ICON.lg} /><p>正在加载用户…</p></div>
         ) : query.isError ? (
-          <div className="admin-empty"><Notice>用户加载失败，请重新加载。</Notice><Button className="secondary" onClick={() => void query.refetch()}>重新加载</Button></div>
+          <div className="admin-empty" role="alert"><Notice>用户加载失败，请重新加载。</Notice><Button className="secondary" onClick={() => void query.refetch()}>重新加载</Button></div>
         ) : users.length === 0 ? (
-          <div className="admin-empty"><Users size={ICON.xl} /><h3>{q ? "没有匹配的用户" : "暂无用户"}</h3><p>{q ? "试试其他名称或邮箱。" : "已注册的用户会显示在这里。"}</p></div>
+          <EmptyState
+            icon={<Users size={ICON.xl} />}
+            title={q ? "没有匹配的用户" : "暂无用户"}
+            description={q ? "试试其他名称或邮箱。" : "已注册的用户会显示在这里。"}
+          />
         ) : (
-          <ul>{users.map((account) => (
+          <DataList>{users.map((account) => (
             <li key={account.id} className="platform-user-row">
               <div className="platform-user-identity"><Avatar name={account.displayName} seed={account.id} /><div><b>{account.displayName}{account.id === user.id && <small>你</small>}</b><span>{account.email}</span></div></div>
               <div className="platform-user-actions"><span className="platform-user-role">{account.platformRole === "admin" ? "管理员" : "用户"}</span><Button className="secondary" aria-label={`为 ${account.displayName} 重置密码`} onClick={() => {
@@ -159,7 +163,7 @@ function AdminUsers({ user }: { user: User }) {
                 setDialog({ account, scope: captureSession(), busy: false, created: null, copied: false, error: "" });
               }}><KeyRound size={ICON.xs} />重置密码</Button></div>
             </li>
-          ))}</ul>
+          ))}</DataList>
         )}
       </section>
       {(pages.length > 0 || query.data?.cursor) && <nav className="platform-users-pagination" aria-label="用户列表分页"><Button className="secondary" disabled={!pages.length || query.isFetching} onClick={() => setPages((value) => value.slice(0, -1))}>上一页</Button><span>第 {pages.length + 1} 页</span><Button className="secondary" disabled={!query.data?.cursor || query.isFetching} onClick={() => { if (query.data?.cursor) setPages((value) => [...value, query.data!.cursor!]); }}>下一页</Button></nav>}

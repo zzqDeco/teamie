@@ -371,7 +371,8 @@ export function ProfileSettings() {
   const effectiveNotificationsEnabled =
     notificationPrefs.enabled && notificationPermission === "granted";
   const [name, setName] = useState(user!.displayName),
-    [busy, setBusy] = useState(false),
+    [saving, setSaving] = useState(false),
+    [signingOut, setSigningOut] = useState(false),
     [error, setError] = useState(""),
     [saved, setSaved] = useState(false);
   const themeOptions: { value: ThemePreference; label: string }[] = [
@@ -381,13 +382,18 @@ export function ProfileSettings() {
   ];
   async function save(event: FormEvent) {
     event.preventDefault();
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setError("请填写显示名称。");
+      return;
+    }
     const sessionToken = api.csrfToken;
     const subjectId = user!.id;
-    setBusy(true);
+    setSaving(true);
     setSaved(false);
     setError("");
     try {
-      const result = await api.profile(name.trim());
+      const result = await api.profile(trimmed);
       if (sessionToken !== api.csrfToken || result.user.id !== subjectId) return;
       updateUser(result.user);
       await client.invalidateQueries({ queryKey: ["bootstrap"] });
@@ -396,20 +402,20 @@ export function ProfileSettings() {
     } catch (e) {
       if (sessionToken === api.csrfToken) setError(errorText(e));
     } finally {
-      setBusy(false);
+      setSaving(false);
     }
   }
   async function signOut() {
     const sessionToken = api.csrfToken;
     setError("");
-    setBusy(true);
+    setSigningOut(true);
     try {
       await logout();
       if (!api.csrfToken) navigate("/login");
     } catch (e) {
       if (sessionToken === api.csrfToken) setError(errorText(e));
     } finally {
-      setBusy(false);
+      setSigningOut(false);
     }
   }
   return (
@@ -427,7 +433,7 @@ export function ProfileSettings() {
           </span>
         </div>
       </div>
-      <form className="settings-form" onSubmit={save}>
+      <form className="settings-form" noValidate onSubmit={save}>
         <h3>基本信息</h3>
         <Notice>{error}</Notice>
         <Notice kind="success">{saved ? "资料已保存。" : ""}</Notice>
@@ -449,9 +455,9 @@ export function ProfileSettings() {
           <small className="field-help">此邮箱用于登录你的 Teamie 账户。</small>
         </label>
         <Button
-          busy={busy}
+          busy={saving}
           type="submit"
-          disabled={!name.trim() || name.trim() === user!.displayName}
+          disabled={signingOut || !name.trim() || name.trim() === user!.displayName}
         >
           保存更改
         </Button>
@@ -539,7 +545,12 @@ export function ProfileSettings() {
           <h3>当前登录</h3>
           <p>退出后，下次访问需要重新登录。</p>
         </div>
-        <Button className="secondary danger-text" busy={busy} onClick={signOut}>
+        <Button
+          className="secondary danger-text"
+          busy={signingOut}
+          disabled={saving}
+          onClick={signOut}
+        >
           退出登录
         </Button>
       </div>

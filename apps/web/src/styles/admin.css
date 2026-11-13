@@ -24,7 +24,7 @@
   .admin-view {
     flex: 1;
     overflow: auto;
-    max-width: 1040px;
+    max-width: 960px;
     width: 100%;
     margin: 0 auto;
     scrollbar-width: thin;

@@ -6,7 +6,8 @@ import { ConfirmDialog } from "../ui";
 
 export type GatewayConfirmation =
   | { kind: "deleteProvider"; provider: AdminModelProvider }
-  | { kind: "deleteModel"; model: AdminModelProfile };
+  | { kind: "deleteModel"; model: AdminModelProfile }
+  | { kind: "setUnavailableDefault"; model: AdminModelProfile };
 
 /**
  * Destructive gateway catalog changes. Deleting never rewrites the configured
@@ -37,6 +38,24 @@ export function GatewayConfirmDialog({
           "删除后无法恢复，需要时请重新添加并填写密钥。",
         ]}
         confirmLabel="确认删除"
+        busy={busy}
+        error={error}
+        onCancel={onCancel}
+        onConfirm={onConfirm}
+      />
+    );
+  }
+  if (confirmation.kind === "setUnavailableDefault") {
+    const { model } = confirmation;
+    return (
+      <ConfirmDialog
+        tone="danger"
+        title={`将未就绪的模型「${model.displayName}」设为默认？`}
+        impact={[
+          "该模型当前已停用或所属服务商缺少密钥，暂时无法直接响应 Agent 调用。",
+          "在其启用并完成密钥配置前，所有回退调用会改用网关自动选择的其他可用模型；若无其他可用模型则无法回复。",
+        ]}
+        confirmLabel="仍然设为默认"
         busy={busy}
         error={error}
         onCancel={onCancel}

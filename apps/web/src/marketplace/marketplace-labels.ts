@@ -1,3 +1,18 @@
+export const MARKETPLACE_SLUG_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
+export const MARKETPLACE_SLUG_HELP =
+  "1–64 位小写字母、数字、下划线（_）或连字符（-），且以字母或数字开头；连字符在 Agent 工具名中会转为下划线（mcp__<slug>__<tool>）。";
+
+export const MARKETPLACE_DESCRIPTION_MAX_LENGTH = 500;
+
+export function validateMarketplaceSlug(raw: string): string | null {
+  const normalized = raw.trim().toLowerCase();
+  if (!MARKETPLACE_SLUG_PATTERN.test(normalized)) {
+    return "唯一标识（Slug）需为 1–64 位小写字母、数字、下划线（_）或连字符（-），且以字母或数字开头。";
+  }
+  return null;
+}
+
 export function sanitizeMcpToolSegment(raw: string): string {
   const out = raw
     .trim()

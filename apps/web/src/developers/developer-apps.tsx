@@ -14,13 +14,31 @@ import {
 import { api } from "@teamie/api-client";
 import type { DeveloperMarketplaceApp } from "@teamie/api-client";
 import { useAuth } from "../auth";
+import { copyToClipboard } from "../clipboard";
 import { errorText } from "../errors";
-import { reviewStatusMeta } from "../marketplace";
-import { BadgePill, Button, ConfirmDialog, Notice } from "../ui";
+import {
+  MARKETPLACE_DESCRIPTION_MAX_LENGTH,
+  MARKETPLACE_SLUG_HELP,
+  reviewStatusMeta,
+  sanitizeMcpToolSegment,
+  validateMarketplaceSlug,
+} from "../marketplace/marketplace-labels";
+import {
+  BadgePill,
+  Button,
+  ConfirmDialog,
+  DataList,
+  EmptyState,
+  Notice,
+} from "../ui";
 import { toast } from "../toast";
 import { ICON } from "../icons";
 
-export function DeveloperAppsList() {
+export function DeveloperAppsList({
+  marketplaceEnabled = true,
+}: {
+  marketplaceEnabled?: boolean;
+}) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
@@ -46,7 +64,16 @@ export function DeveloperAppsList() {
 
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy) return;
+    if (busy || !marketplaceEnabled) return;
+    if (!name.trim()) {
+      setError("请填写应用名称。");
+      return;
+    }
+    const slugError = validateMarketplaceSlug(slug);
+    if (slugError) {
+      setError(slugError);
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -67,6 +94,7 @@ export function DeveloperAppsList() {
         secret: created.signingSecret,
         copied: false,
       });
+      toast.success(`已创建应用草稿「${created.app.draftName || created.app.name}」`);
       await queryClient.invalidateQueries({ queryKey: ["developerMarketplaceApps"] });
     } catch (e) {
       setError(errorText(e));
@@ -76,7 +104,7 @@ export function DeveloperAppsList() {
   }
 
   async function handleDelete(app: DeveloperMarketplaceApp) {
-    if (deletingId) return;
+    if (deletingId || !marketplaceEnabled) return;
     setDeletingId(app.id);
     setError("");
     try {
@@ -86,7 +114,9 @@ export function DeveloperAppsList() {
       toast.success(`已删除草稿「${app.draftName}」`);
       await queryClient.invalidateQueries({ queryKey: ["developerMarketplaceApps"] });
     } catch (e) {
-      setError(errorText(e));
+      const msg = errorText(e);
+      setError(msg);
+      toast.error(msg);
     } finally {
       setDeletingId("");
     }
@@ -95,10 +125,13 @@ export function DeveloperAppsList() {
   async function copySecret() {
     if (!createdResult) return;
     try {
-      await navigator.clipboard.writeText(createdResult.secret);
+      await copyToClipboard(createdResult.secret);
       setCreatedResult({ ...createdResult, copied: true });
+      toast.success("签名密钥已复制到剪贴板");
     } catch {
-      setError("复制未成功，请手动选中密钥复制。");
+      const msg = "复制未成功，请手动选中密钥复制。";
+      setError(msg);
+      toast.error(msg);
     }
   }
 
@@ -120,6 +153,12 @@ export function DeveloperAppsList() {
           <Code2 size={ICON.xl} />
         </span>
       </div>
+
+      {!marketplaceEnabled && (
+        <Notice kind="info">
+          平台当前已暂停应用写入与新会话，已有应用草稿与线上记录仅供只读查看。
+        </Notice>
+      )}
 
       <div className="dev-steps" aria-label="接入与提审四步流程">
         <div className="dev-step-card">
@@ -188,7 +227,7 @@ export function DeveloperAppsList() {
         </section>
       )}
 
-      <form className="settings-form" onSubmit={handleCreate}>
+      <form className="settings-form" noValidate onSubmit={handleCreate}>
         <div className="mp-section-header">
           <h3>创建新应用草稿</h3>
           <Link to="/app/developers/docs" className="button secondary small-button">
@@ -202,6 +241,7 @@ export function DeveloperAppsList() {
             onChange={(e) => setName(e.target.value)}
             placeholder="例如：暗夜狼人杀法官台"
             maxLength={80}
+            disabled={!marketplaceEnabled}
             required
           />
         </label>
@@ -212,10 +252,17 @@ export function DeveloperAppsList() {
             onChange={(e) => setSlug(e.target.value)}
             placeholder="例如：werewolf-arena"
             maxLength={64}
+            disabled={!marketplaceEnabled}
             required
           />
           <small className="field-help">
-            仅限小写字母、数字与连字符（如 werewolf-arena），群聊内 Agent 工具将自动命名为 mcp__slug__tool。
+            {MARKETPLACE_SLUG_HELP}
+            {slug.trim() ? (
+              <>
+                {" "}
+                当前工具前缀：<code>mcp__{sanitizeMcpToolSegment(slug)}__*</code>
+              </>
+            ) : null}
           </small>
         </label>
         <label>
@@ -224,7 +271,8 @@ export function DeveloperAppsList() {
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="说明应用玩法、适用场景及人类与 Agent 如何协同使用"
-            maxLength={400}
+            maxLength={MARKETPLACE_DESCRIPTION_MAX_LENGTH}
+            disabled={!marketplaceEnabled}
           />
         </label>
         <label>
@@ -234,6 +282,7 @@ export function DeveloperAppsList() {
             value={webUrl}
             onChange={(e) => setWebUrl(e.target.value)}
             placeholder="https://werewolf.example.com/ui"
+            disabled={!marketplaceEnabled}
           />
         </label>
         <label>
@@ -243,9 +292,14 @@ export function DeveloperAppsList() {
             value={mcpUrl}
             onChange={(e) => setMcpUrl(e.target.value)}
             placeholder="https://werewolf.example.com/mcp"
+            disabled={!marketplaceEnabled}
           />
         </label>
-        <Button type="submit" busy={busy} disabled={!name.trim() || !slug.trim()}>
+        <Button
+          type="submit"
+          busy={busy}
+          disabled={!marketplaceEnabled || !name.trim() || !slug.trim()}
+        >
           <Plus size={ICON.sm} /> 创建草稿并获取密钥
         </Button>
       </form>
@@ -262,9 +316,13 @@ export function DeveloperAppsList() {
             </Button>
           </div>
         ) : apps.length === 0 ? (
-          <p className="muted">你还没有创建任何应用草稿，可先从上方创建并阅读开发者手册。</p>
+          <EmptyState
+            icon={<Code2 size={ICON.lg} />}
+            title="你还没有创建任何应用草稿"
+            description="可先从上方创建草稿并阅读开发者手册。"
+          />
         ) : (
-          <ul className="member-directory-list" aria-label="开发者应用列表">
+          <DataList label="开发者应用列表">
             {apps.map((app) => {
               const status = reviewStatusMeta(app.reviewStatus, app.adminSuspended);
               const displayName = app.draftName;
@@ -304,7 +362,7 @@ export function DeveloperAppsList() {
                         className="secondary danger-text"
                         size="sm"
                         busy={deletingId === app.id}
-                        disabled={!!deletingId}
+                        disabled={!marketplaceEnabled || !!deletingId}
                         onClick={() => {
                           setError("");
                           setConfirmingDelete(app);
@@ -318,7 +376,7 @@ export function DeveloperAppsList() {
                 </li>
               );
             })}
-          </ul>
+          </DataList>
         )}
       </section>
       {confirmingDelete && (

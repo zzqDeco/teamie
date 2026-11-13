@@ -1,48 +1,66 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  ArrowLeft,
-  CheckCheck,
-  CheckCircle2,
-  Copy,
-  KeyRound,
-  Play,
-  RefreshCw,
-  Send,
-  ShieldCheck,
-  Undo2,
-} from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { api, ApiError } from "@teamie/api-client";
 import type {
   DeveloperMarketplaceApp,
   MarketplaceEndpointVerification,
   Workspace,
 } from "@teamie/api-client";
-import { canConfigureModelGateway } from "../agent-management";
 import { useAuth } from "../auth";
-import { usePageTitleDetail } from "../shell/page-title";
 import { errorText } from "../errors";
-import {
-  probeStageLabel,
-  reviewActionLabel,
-  reviewStatusMeta,
-  sanitizeMcpToolSegment,
-} from "../marketplace";
-import { BadgePill, Button, Notice, SwitchField } from "../ui";
 import { ICON } from "../icons";
 import {
-  IssuedSecretDialog,
-  RotateSecretConfirm,
-} from "../marketplace/secret-dialogs";
+  MARKETPLACE_DESCRIPTION_MAX_LENGTH,
+  MARKETPLACE_SLUG_HELP,
+  reviewStatusMeta,
+  sanitizeMcpToolSegment,
+  validateMarketplaceSlug,
+} from "../marketplace/marketplace-labels";
+import { usePageTitleDetail } from "../shell/page-title";
+import { toast } from "../toast";
+import { BadgePill, Button, ConfirmDialog, Notice, SwitchField } from "../ui";
+import {
+  DeveloperAppCredentialsSection,
+  DeveloperAppPublishedDiff,
+  DeveloperAppSandboxSection,
+  DeveloperAppSteps,
+  DeveloperAppSubmissionSection,
+  DeveloperAppVerificationSection,
+} from "./developer-app-sections";
+
+interface DraftBaseline {
+  id: string;
+  updatedAt: string;
+  name: string;
+  slug: string;
+  description: string;
+  webUrl: string;
+  mcpUrl: string;
+}
+
+function toDraftBaseline(app: DeveloperMarketplaceApp): DraftBaseline {
+  return {
+    id: app.id,
+    updatedAt: app.updatedAt,
+    name: app.draftName,
+    slug: app.slug,
+    description: app.draftDescription,
+    webUrl: app.draftWebUrl,
+    mcpUrl: app.draftMcpUrl,
+  };
+}
 
 export function DeveloperAppDetail({
   appId,
   workspaces,
+  marketplaceEnabled = true,
 }: {
   appId: string;
   workspaces?: Workspace[];
+  marketplaceEnabled?: boolean;
 }) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -85,22 +103,46 @@ export function DeveloperAppDetail({
   const [description, setDescription] = useState("");
   const [webUrl, setWebUrl] = useState("");
   const [mcpUrl, setMcpUrl] = useState("");
-  const [enabled, setEnabled] = useState(true);
   const [submissionNote, setSubmissionNote] = useState("");
-  const [hydratedId, setHydratedId] = useState("");
+  const [baseline, setBaseline] = useState<DraftBaseline | null>(null);
+  const [remoteUpdated, setRemoteUpdated] = useState(false);
+
+  const syncDraftFromApp = useCallback((nextApp: DeveloperMarketplaceApp) => {
+    setName(nextApp.draftName);
+    setSlug(nextApp.slug);
+    setDescription(nextApp.draftDescription);
+    setWebUrl(nextApp.draftWebUrl);
+    setMcpUrl(nextApp.draftMcpUrl);
+    setSubmissionNote(nextApp.submissionNote || "");
+    setBaseline(toDraftBaseline(nextApp));
+    setRemoteUpdated(false);
+  }, []);
+
+  const isDraftDirty = Boolean(
+    baseline &&
+      app &&
+      baseline.id === app.id &&
+      (name !== baseline.name ||
+        slug !== baseline.slug ||
+        description !== baseline.description ||
+        webUrl !== baseline.webUrl ||
+        mcpUrl !== baseline.mcpUrl),
+  );
 
   useEffect(() => {
-    if (app && hydratedId !== `${app.id}:${app.updatedAt}`) {
-      setName(app.draftName);
-      setSlug(app.slug);
-      setDescription(app.draftDescription);
-      setWebUrl(app.draftWebUrl);
-      setMcpUrl(app.draftMcpUrl);
-      setEnabled(app.enabled);
-      setSubmissionNote(app.submissionNote || "");
-      setHydratedId(`${app.id}:${app.updatedAt}`);
+    if (!app) return;
+    if (!baseline || baseline.id !== app.id) {
+      syncDraftFromApp(app);
+      return;
     }
-  }, [app, hydratedId]);
+    if (app.updatedAt !== baseline.updatedAt) {
+      if (!isDraftDirty) {
+        syncDraftFromApp(app);
+      } else {
+        setRemoteUpdated(true);
+      }
+    }
+  }, [app, baseline, isDraftDirty, syncDraftFromApp]);
 
   const [busyAction, setBusyAction] = useState("");
   const [error, setError] = useState("");
@@ -110,7 +152,7 @@ export function DeveloperAppDetail({
   );
   const [issuedSecret, setIssuedSecret] = useState("");
   const [confirmingRotate, setConfirmingRotate] = useState(false);
-  const [copiedAppId, setCopiedAppId] = useState(false);
+  const [confirmingDisablePublished, setConfirmingDisablePublished] = useState(false);
 
   async function refreshApp() {
     await queryClient.invalidateQueries({ queryKey: ["developerMarketplaceApp", appId] });
@@ -126,8 +168,9 @@ export function DeveloperAppDetail({
       await fn();
       await refreshApp();
     } catch (e) {
-      setError(errorText(e));
-      // A failed submission persists its verification report; show it.
+      const msg = errorText(e);
+      setError(msg);
+      toast.error(msg);
       if (e instanceof ApiError && e.code === "endpoint_verification_failed")
         await refreshApp().catch(() => {});
     } finally {
@@ -135,19 +178,81 @@ export function DeveloperAppDetail({
     }
   }
 
+  function validateDraftInputs(): string | null {
+    if (!name.trim()) return "请填写应用名称。";
+    if (!app?.isPublished) {
+      const slugErr = validateMarketplaceSlug(slug);
+      if (slugErr) return slugErr;
+    }
+    return null;
+  }
+
   async function handleSaveDraft(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!marketplaceEnabled || !app) return;
+    const validationErr = validateDraftInputs();
+    if (validationErr) {
+      setError(validationErr);
+      return;
+    }
     await runAction("save", async () => {
       setLiveReport(null);
-      await api.updateDeveloperMarketplaceApp(appId, {
+      const updated = await api.updateDeveloperMarketplaceApp(appId, {
         name: name.trim(),
         slug: slug.trim().toLowerCase(),
         description: description.trim(),
         webUrl: webUrl.trim(),
         mcpUrl: mcpUrl.trim(),
-        enabled,
       });
+      syncDraftFromApp(updated.app);
       setSuccessMsg("草稿配置已保存。若修改了线上地址或工具定义，请重新执行协议检测。");
+      toast.success("草稿配置已保存");
+    });
+  }
+
+  async function handleSaveAndVerify() {
+    if (!marketplaceEnabled || !app) return;
+    const validationErr = validateDraftInputs();
+    if (validationErr) {
+      setError(validationErr);
+      return;
+    }
+    await runAction("saveAndVerify", async () => {
+      setLiveReport(null);
+      const updated = await api.updateDeveloperMarketplaceApp(app.id, {
+        name: name.trim(),
+        slug: slug.trim().toLowerCase(),
+        description: description.trim(),
+        webUrl: webUrl.trim(),
+        mcpUrl: mcpUrl.trim(),
+      });
+      syncDraftFromApp(updated.app);
+      const res = await api.verifyDeveloperMarketplaceApp(app.id);
+      setLiveReport(res.verification);
+      if (res.verification.ok) {
+        setSuccessMsg("草稿已保存，且四阶段线上协议检测全部通过！");
+        toast.success("四阶段线上协议检测通过");
+      } else {
+        toast.info("草稿已保存，请根据协议检测报告修复未通过项");
+      }
+    });
+  }
+
+  async function executeToggleEnabled(nextEnabled: boolean) {
+    if (!marketplaceEnabled || !app) return;
+    await runAction("toggleEnabled", async () => {
+      const updated = await api.updateDeveloperMarketplaceApp(app.id, {
+        enabled: nextEnabled,
+      });
+      setConfirmingDisablePublished(false);
+      setBaseline((prev) =>
+        prev && prev.id === updated.app.id
+          ? { ...prev, updatedAt: updated.app.updatedAt }
+          : prev,
+      );
+      const msg = nextEnabled ? "应用已启用。" : "应用已停用。";
+      setSuccessMsg(msg);
+      toast.success(msg);
     });
   }
 
@@ -186,9 +291,16 @@ export function DeveloperAppDetail({
 
   const isSuspended = app.adminSuspended || app.reviewStatus === "suspended";
   const isLocked = app.reviewStatus === "pending_review" || isSuspended;
+  const formDisabled = !marketplaceEnabled || isLocked;
   const status = reviewStatusMeta(app.reviewStatus, app.adminSuspended);
   const report = liveReport || app.verificationReport;
   const hasEndpoints = Boolean(app.draftWebUrl && app.draftMcpUrl);
+  const hasUnsavedEndpointEdits =
+    webUrl.trim() !== (app.draftWebUrl || "") ||
+    mcpUrl.trim() !== (app.draftMcpUrl || "");
+  const canSaveAndVerify = Boolean(
+    name.trim() && slug.trim() && webUrl.trim() && mcpUrl.trim(),
+  );
   const verifiedOk = Boolean(report?.ok);
 
   return (
@@ -217,36 +329,35 @@ export function DeveloperAppDetail({
         </div>
       </div>
 
-      <div className="dev-steps" aria-label="当前应用提审进度">
-        <div className="dev-step-card done">
-          <span className="dev-step-num">1 · 凭证就绪</span>
-          <b>App ID 已分配</b>
-          <small className="field-help">已生成独立 HS256 签名密钥。</small>
-        </div>
-        <div className={`dev-step-card ${hasEndpoints ? "done" : ""}`}>
-          <span className="dev-step-num">2 · 服务地址</span>
-          <b>{hasEndpoints ? "Web + MCP 已填写" : "待填写线上地址"}</b>
-          <small className="field-help">需部署在独立跨源域名上。</small>
-        </div>
-        <div className={`dev-step-card ${verifiedOk ? "done" : ""}`}>
-          <span className="dev-step-num">3 · 协议拨测</span>
-          <b>{verifiedOk ? "四阶段检测已通过" : "待执行线上检测"}</b>
-          <small className="field-help">校验跨源头、鉴权拦截与 MCP 工具。</small>
-        </div>
-        <div
-          className={`dev-step-card ${app.reviewStatus === "approved" && !isSuspended ? "done" : ""}`}
-        >
-          <span className="dev-step-num">4 · 审核上架</span>
-          <b>{status.label}</b>
-          <small className="field-help">
-            {app.publishedVersion > 0
-              ? `当前线上版本 v${app.publishedVersion}`
-              : "审批通过后全站可安装"}
-          </small>
-        </div>
-      </div>
+      {!marketplaceEnabled && (
+        <Notice kind="info">
+          平台当前已暂停应用写入与新会话，应用配置、拨测报告与审核记录仅供只读查看。
+        </Notice>
+      )}
 
-      <Notice>{confirmingRotate ? "" : error}</Notice>
+      {remoteUpdated && (
+        <div className="dev-remote-update-banner" role="status">
+          <span>服务端草稿已更新，当前保留了你尚未保存的本地修改。</span>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => syncDraftFromApp(app)}
+          >
+            加载最新内容
+          </Button>
+        </div>
+      )}
+
+      <DeveloperAppSteps
+        app={app}
+        hasEndpoints={hasEndpoints}
+        verifiedOk={verifiedOk}
+        isSuspended={isSuspended}
+        statusLabel={status.label}
+      />
+
+      <Notice>{confirmingRotate || confirmingDisablePublished ? "" : error}</Notice>
       <Notice kind="success">{successMsg}</Notice>
 
       {app.reviewStatus === "rejected" && app.reviewNote && (
@@ -260,87 +371,65 @@ export function DeveloperAppDetail({
         </Notice>
       )}
 
-      <section className="settings-form" aria-label="凭证与签名密钥">
-        <div className="mp-section-header">
-          <h3>应用凭证（App ID & Signing Secret）</h3>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            disabled={isLocked || !!busyAction}
-            busy={busyAction === "rotate"}
-            onClick={() => {
-              setError("");
-              setConfirmingRotate(true);
-            }}
-          >
-            <KeyRound size={ICON.xs} /> 轮换签名密钥
-          </Button>
-        </div>
-        <label>
-          App ID（对应 JWT aud 声明）
-          <div className="copy-input">
-            <input value={app.id} readOnly aria-label="应用 App ID" />
-            <button
-              type="button"
-              aria-label="复制 App ID"
-              onClick={() => {
-                void navigator.clipboard?.writeText(app.id).then(() => setCopiedAppId(true));
-              }}
-            >
-              {copiedAppId ? <CheckCheck size={ICON.md} /> : <Copy size={ICON.md} />}
-            </button>
-          </div>
-        </label>
+      <DeveloperAppCredentialsSection
+        app={app}
+        isLocked={isLocked}
+        marketplaceEnabled={marketplaceEnabled}
+        busyAction={busyAction}
+        confirmingRotate={confirmingRotate}
+        issuedSecret={issuedSecret}
+        error={error}
+        onRequestRotate={() => {
+          setError("");
+          setConfirmingRotate(true);
+        }}
+        onCancelRotate={() => setConfirmingRotate(false)}
+        onConfirmRotate={() =>
+          void runAction("rotate", async () => {
+            const res = await api.rotateDeveloperMarketplaceAppSecret(app.id);
+            setConfirmingRotate(false);
+            setIssuedSecret(res.signingSecret);
+            toast.success("已轮换应用签名密钥");
+          })
+        }
+        onAcknowledgeSecret={() => setIssuedSecret("")}
+      />
+
+      <section className="settings-form" aria-label="应用启用状态">
+        <SwitchField
+          checked={app.enabled}
+          disabled={!marketplaceEnabled || isSuspended || !!busyAction}
+          title="应用启用状态"
+          description="关闭后，已安装该应用的工作空间将暂停挂载其 Web UI 与 MCP 工具（审核排队期间仍可独立开关）。"
+          onChange={(nextEnabled) => {
+            setError("");
+            if (!nextEnabled && app.publishedVersion > 0) {
+              setConfirmingDisablePublished(true);
+              return;
+            }
+            void executeToggleEnabled(nextEnabled);
+          }}
+        />
       </section>
-      {confirmingRotate && (
-        <RotateSecretConfirm
-          appName={app.draftName || app.name}
-          published={app.publishedVersion > 0}
-          busy={busyAction === "rotate"}
+      {confirmingDisablePublished && (
+        <ConfirmDialog
+          tone="danger"
+          title={`停用已上架应用「${app.name}」？`}
+          impact={[
+            "所有已安装该应用的工作空间将立即暂停展示群聊 Web UI 面板，并停止向 Agent 暴露 MCP 工具。",
+            "工作空间中的已安装关系与配置会保留，重新启用后自动恢复。",
+          ]}
+          confirmLabel="确认停用"
+          busy={busyAction === "toggleEnabled"}
           error={error}
-          onCancel={() => setConfirmingRotate(false)}
-          onConfirm={() =>
-            void runAction("rotate", async () => {
-              const res = await api.rotateDeveloperMarketplaceAppSecret(app.id);
-              setConfirmingRotate(false);
-              setIssuedSecret(res.signingSecret);
-            })
-          }
-        />
-      )}
-      {issuedSecret && (
-        <IssuedSecretDialog
-          appName={app.draftName || app.name}
-          secret={issuedSecret}
-          onAcknowledge={() => setIssuedSecret("")}
+          onCancel={() => setConfirmingDisablePublished(false)}
+          onConfirm={() => void executeToggleEnabled(false)}
         />
       )}
 
-      {app.publishedVersion > 0 && (
-        <section className="settings-form" aria-label="线上与草稿版本对比">
-          <h3>线上版本与草稿隔离</h3>
-          <p className="field-help">
-            在草稿未通过新一轮审核前，其他工作空间仍继续使用线上已发布版本（v{app.publishedVersion}）。
-          </p>
-          <div className="dev-diff-grid">
-            <div className="dev-diff-col">
-              <b>线上运行版本 (v{app.publishedVersion})</b>
-              <p className="field-help">名称：{app.name}</p>
-              <p className="field-help">Web：{app.webUrl}</p>
-              <p className="field-help">MCP：{app.mcpUrl}</p>
-            </div>
-            <div className="dev-diff-col">
-              <b>当前编辑草稿</b>
-              <p className="field-help">名称：{app.draftName}</p>
-              <p className="field-help">Web：{app.draftWebUrl || "未配置"}</p>
-              <p className="field-help">MCP：{app.draftMcpUrl || "未配置"}</p>
-            </div>
-          </div>
-        </section>
-      )}
+      <DeveloperAppPublishedDiff app={app} />
 
-      <form className="settings-form" onSubmit={handleSaveDraft}>
+      <form className="settings-form" noValidate onSubmit={handleSaveDraft}>
         <h3>应用草稿配置</h3>
         {app.reviewStatus === "pending_review" && (
           <Notice kind="info">当前处于审核排队中，如需修改地址或元数据请先撤回提审。</Notice>
@@ -351,7 +440,7 @@ export function DeveloperAppDetail({
             value={name}
             onChange={(e) => setName(e.target.value)}
             maxLength={80}
-            disabled={isLocked}
+            disabled={formDisabled}
             required
           />
         </label>
@@ -361,22 +450,22 @@ export function DeveloperAppDetail({
             value={slug}
             onChange={(e) => setSlug(e.target.value)}
             maxLength={64}
-            disabled={isLocked || app.isPublished}
+            disabled={formDisabled || app.isPublished}
             required
           />
-          {app.isPublished && (
-            <small className="field-help">
-              已发布应用的 Slug 保持恒定，确保已接入群聊中的 Agent 工具名稳定。
-            </small>
-          )}
+          <small className="field-help">
+            {app.isPublished
+              ? "已发布应用的 Slug 保持恒定，确保已接入群聊中的 Agent 工具名稳定。"
+              : MARKETPLACE_SLUG_HELP}
+          </small>
         </label>
         <label>
           应用简介
           <input
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            maxLength={400}
-            disabled={isLocked}
+            maxLength={MARKETPLACE_DESCRIPTION_MAX_LENGTH}
+            disabled={formDisabled}
           />
         </label>
         <label>
@@ -386,7 +475,7 @@ export function DeveloperAppDetail({
             value={webUrl}
             onChange={(e) => setWebUrl(e.target.value)}
             placeholder="https://werewolf.example.com/ui"
-            disabled={isLocked}
+            disabled={formDisabled}
           />
         </label>
         <label>
@@ -396,211 +485,89 @@ export function DeveloperAppDetail({
             value={mcpUrl}
             onChange={(e) => setMcpUrl(e.target.value)}
             placeholder="https://werewolf.example.com/mcp"
-            disabled={isLocked}
+            disabled={formDisabled}
           />
         </label>
-        <SwitchField
-          checked={enabled}
-          disabled={isLocked}
-          title="应用启用状态"
-          description="关闭后，已安装该应用的工作空间将暂停挂载其 Web UI 与 MCP 工具。"
-          onChange={setEnabled}
-        />
         <Button
           type="submit"
           busy={busyAction === "save"}
-          disabled={isLocked || !name.trim() || !slug.trim()}
+          disabled={formDisabled || !name.trim() || !slug.trim() || !!busyAction}
         >
           保存草稿配置
         </Button>
       </form>
 
-      <section className="settings-form" aria-label="线上服务协议验证">
-        <div className="mp-section-header">
-          <div>
-            <h3>步骤 3A · 线上服务四阶段协议拨测</h3>
-            <p className="field-help">
-              Teamie 后端将主动拨测你的 Web UI 与 MCP Server，验证跨源隔离、无 Token 401 拒绝、伪造签名拒绝以及真实 HS256 Context Token 下的 tools/list 工具暴露。
-            </p>
-          </div>
-          <Button
-            type="button"
-            busy={busyAction === "verify"}
-            disabled={!hasEndpoints || isLocked || !!busyAction}
-            onClick={() =>
-              void runAction("verify", async () => {
-                const res = await api.verifyDeveloperMarketplaceApp(app.id);
-                setLiveReport(res.verification);
-                if (res.verification.ok) {
-                  setSuccessMsg("四阶段线上协议检测全部通过！现在可以自测或提交平台审核。");
-                }
-              })
+      <DeveloperAppVerificationSection
+        report={report}
+        hasEndpoints={hasEndpoints}
+        hasUnsavedEndpointEdits={hasUnsavedEndpointEdits}
+        canSaveAndVerify={canSaveAndVerify}
+        isLocked={isLocked}
+        marketplaceEnabled={marketplaceEnabled}
+        busyAction={busyAction}
+        onVerify={() =>
+          void runAction("verify", async () => {
+            const res = await api.verifyDeveloperMarketplaceApp(app.id);
+            setLiveReport(res.verification);
+            if (res.verification.ok) {
+              setSuccessMsg("四阶段线上协议检测全部通过！现在可以自测或提交平台审核。");
+              toast.success("四阶段线上协议检测通过");
             }
-          >
-            <Play size={ICON.xs} /> 立即检测线上服务
-          </Button>
-        </div>
+          })
+        }
+        onSaveAndVerify={() => void handleSaveAndVerify()}
+      />
 
-        {report ? (
-          <>
-            <ul className="dev-check-list" aria-label="协议检测结果列表">
-              {report.checks.map((chk) => (
-                <li key={chk.stage} className="dev-check-item">
-                  <div className="dev-check-head">
-                    <span>{probeStageLabel(chk.stage)}</span>
-                    <BadgePill
-                      className={chk.ok ? "mp-badge-approved" : "mp-badge-rejected"}
-                    >
-                      {chk.ok ? "通过" : "未通过"}
-                    </BadgePill>
-                  </div>
-                  <small className="field-help">{chk.summary}</small>
-                </li>
-              ))}
-            </ul>
-            {report.tools.length > 0 && (
-              <ul className="dev-tool-list" aria-label="已发现的 MCP 工具">
-                {report.tools.map((tool) => (
-                  <li key={tool.name} className="dev-tool-card">
-                    <b>
-                      <CheckCircle2 size={ICON.xs} /> {tool.exposedName}
-                    </b>
-                    {tool.description && <p className="field-help">{tool.description}</p>}
-                    {tool.inputSchemaJson && (
-                      <pre className="dev-code-block">{tool.inputSchemaJson}</pre>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </>
-        ) : (
-          <p className="muted">保存 Web UI 与 MCP Server 地址后，点击「立即检测线上服务」开始验证。</p>
-        )}
-      </section>
+      <DeveloperAppSandboxSection
+        ownedWorkspaces={ownedWorkspaces}
+        selectedWsId={selectedWsId}
+        hasEndpoints={hasEndpoints}
+        marketplaceEnabled={marketplaceEnabled}
+        busyAction={busyAction}
+        onSelectWs={setSelectedWsId}
+        onInstallSandbox={() =>
+          void runAction("sandboxInstall", async () => {
+            await api.installWorkspaceApp(selectedWsId, app.id);
+            await queryClient.invalidateQueries({
+              queryKey: ["workspaceApps", selectedWsId],
+            });
+            await queryClient.invalidateQueries({ queryKey: ["conversationApps"] });
+            const msg =
+              "已安装草稿到所选工作空间！进入该空间的任意小组对话点击右上角「群聊应用」即可联调。";
+            setSuccessMsg(msg);
+            toast.success("已安装草稿到工作空间");
+          })
+        }
+      />
 
-      <section className="settings-form" aria-label="自有工作空间联调自测">
-        <h3>步骤 3B · 安装到自有工作空间实测</h3>
-        <p className="field-help">
-          无需等待审核，你可将当前草稿直接安装到自己创建的工作空间，在真实群聊中验证人类 Web UI 面板与 Agent MCP 工具同场交互。
-        </p>
-        {ownedWorkspaces.length === 0 ? (
-          <p className="muted">你尚未创建工作空间，请先在左侧栏创建一个用于联调的工作空间。</p>
-        ) : (
-          <div className="dev-inline-actions">
-            <select
-              aria-label="选择联调工作空间"
-              value={selectedWsId}
-              onChange={(e) => setSelectedWsId(e.target.value)}
-            >
-              {ownedWorkspaces.map((ws) => (
-                <option key={ws.id} value={ws.id}>
-                  {ws.name}
-                </option>
-              ))}
-            </select>
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={!hasEndpoints || !selectedWsId || !!busyAction}
-              busy={busyAction === "sandboxInstall"}
-              onClick={() =>
-                void runAction("sandboxInstall", async () => {
-                  await api.installWorkspaceApp(selectedWsId, app.id);
-                  await queryClient.invalidateQueries({
-                    queryKey: ["workspaceApps", selectedWsId],
-                  });
-                  await queryClient.invalidateQueries({ queryKey: ["conversationApps"] });
-                  setSuccessMsg("已安装草稿到所选工作空间！进入该空间的任意小组对话点击右上角「群聊应用」即可联调。");
-                })
-              }
-            >
-              <RefreshCw size={ICON.xs} /> 安装草稿到该空间自测
-            </Button>
-          </div>
-        )}
-      </section>
-
-      <section className="settings-form" aria-label="提交平台审核">
-        <h3>步骤 4 · 提交平台审核</h3>
-        {app.reviewStatus === "pending_review" ? (
-          <>
-            <p className="field-help">
-              你的应用已提交至平台管理员审核队列。若需继续调整代码或地址，可随时撤回提审。
-            </p>
-            <div className="dev-inline-actions">
-              {canConfigureModelGateway(user) && (
-                <Link to="/app/admin/marketplace" className="button">
-                  <ShieldCheck size={ICON.xs} /> 前往平台审核队列
-                </Link>
-              )}
-              <Button
-                type="button"
-                variant="secondary"
-                busy={busyAction === "withdraw"}
-                onClick={() =>
-                  void runAction("withdraw", async () => {
-                    await api.withdrawDeveloperMarketplaceApp(app.id);
-                    setSuccessMsg("已撤回提审，草稿已恢复可编辑状态。");
-                  })
-                }
-              >
-                <Undo2 size={ICON.xs} /> 撤回提审
-              </Button>
-            </div>
-          </>
-        ) : (
-          <>
-            <label>
-              提审说明（供平台审核员查阅玩法、测试方法或版本变更摘要）
-              <textarea
-                rows={3}
-                value={submissionNote}
-                onChange={(e) => setSubmissionNote(e.target.value)}
-                placeholder="例如：支持 6-12 人局暗夜狼人杀（人类 + Agent 混排），已开启角色视野隔离与动作幂等锁。"
-                maxLength={500}
-                disabled={isSuspended}
-              />
-            </label>
-            <Button
-              type="button"
-              busy={busyAction === "submit"}
-              disabled={!verifiedOk || isSuspended || !!busyAction}
-              onClick={() =>
-                void runAction("submit", async () => {
-                  await api.submitDeveloperMarketplaceApp(
-                    app.id,
-                    submissionNote.trim() || undefined,
-                  );
-                  setSuccessMsg("已成功提交审核！平台管理员审批通过后将自动上架。");
-                })
-              }
-            >
-              <Send size={ICON.xs} /> 提交平台审核
-            </Button>
-            {!verifiedOk && (
-              <small className="field-help">
-                提交审核前，当前草稿配置必须先通过上方的「线上服务四阶段协议拨测」。
-              </small>
-            )}
-          </>
-        )}
-
-        {reviews.length > 0 && (
-          <div className="mp-modal-section">
-            <b>提审与审核历史</b>
-            <ul className="dev-timeline" aria-label="提审历史时间线">
-              {reviews.map((item) => (
-                <li key={item.id} className="dev-timeline-item">
-                  <b>{reviewActionLabel(item.action)}</b> ·{" "}
-                  <small>{new Date(item.createdAt).toLocaleString("zh-CN")}</small>
-                  {item.note && <p className="field-help">{item.note}</p>}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </section>
+      <DeveloperAppSubmissionSection
+        app={app}
+        user={user}
+        reviews={reviews}
+        submissionNote={submissionNote}
+        verifiedOk={verifiedOk}
+        isSuspended={isSuspended}
+        marketplaceEnabled={marketplaceEnabled}
+        busyAction={busyAction}
+        onChangeNote={setSubmissionNote}
+        onSubmitReview={() =>
+          void runAction("submit", async () => {
+            await api.submitDeveloperMarketplaceApp(
+              app.id,
+              submissionNote.trim() || undefined,
+            );
+            setSuccessMsg("已成功提交审核！平台管理员审批通过后将自动上架。");
+            toast.success("已提交平台审核");
+          })
+        }
+        onWithdrawReview={() =>
+          void runAction("withdraw", async () => {
+            await api.withdrawDeveloperMarketplaceApp(app.id);
+            setSuccessMsg("已撤回提审，草稿已恢复可编辑状态。");
+            toast.success("已撤回提审");
+          })
+        }
+      />
     </div>
   );
 }

@@ -75,6 +75,7 @@ export function ProviderProfileDialog({
     >
       <form
         className="gateway-model-profile-form"
+        noValidate
         onSubmit={submit}
         onInput={() => setDirty(true)}
         autoComplete="off"

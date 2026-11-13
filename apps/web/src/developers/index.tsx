@@ -26,16 +26,18 @@ export function DeveloperPortal({
   appId,
   isDocsPage = false,
   workspaces,
+  marketplaceEnabled = true,
 }: {
   appId?: string;
   isDocsPage?: boolean;
   workspaces?: Workspace[];
+  marketplaceEnabled?: boolean;
 }) {
   const { user } = useAuth();
   const isAppsSection = !isDocsPage;
   return (
     <>
-      <nav className="admin-section-nav" aria-label="开发者平台导航">
+      <nav className="admin-section-nav page-tabs" aria-label="开发者平台导航">
         <Link
           to="/app/developers"
           className={isAppsSection ? "active" : ""}
@@ -63,9 +65,13 @@ export function DeveloperPortal({
         {isDocsPage ? (
           <DeveloperHandbook />
         ) : appId ? (
-          <DeveloperAppDetail appId={appId} workspaces={workspaces} />
+          <DeveloperAppDetail
+            appId={appId}
+            workspaces={workspaces}
+            marketplaceEnabled={marketplaceEnabled}
+          />
         ) : (
-          <DeveloperAppsList />
+          <DeveloperAppsList marketplaceEnabled={marketplaceEnabled} />
         )}
       </Suspense>
     </>

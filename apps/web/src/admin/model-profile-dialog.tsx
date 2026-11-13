@@ -74,6 +74,7 @@ export function ModelProfileDialog({
     >
       <form
         className="gateway-model-profile-form"
+        noValidate
         onSubmit={submit}
         onInput={() => setDirty(true)}
         autoComplete="off"

@@ -128,92 +128,251 @@ export function ConversationAppsPane(props: {
             群聊应用 <b>{apps.length}</b>
           </span>
           <div className="mp-header-actions">
-            {owner && (
-              <IconButton label="管理工作区应用" onClick={onOpenWorkspaceApps}>
-                <Plus size={ICON.md} />
-              </IconButton>
-            )}
+            <ConversationAppsManageAction
+              userId={user.id}
+              owner={owner}
+              onOpenWorkspaceApps={onOpenWorkspaceApps}
+            />
             <IconButton label="关闭群聊应用面板" onClick={onClose}>
               <X size={ICON.md} />
             </IconButton>
           </div>
         </header>
 
-        {appsQuery.isLoading ? (
-          <div className="member-loading">
-            <LoaderCircle size={ICON.sm} className="spin" />
-            加载群聊应用…
-          </div>
-        ) : appsQuery.isError && apps.length === 0 ? (
-          <div className="members-description" role="alert">
-            <h3>加载失败</h3>
-            <p className="field-help">{errorText(appsQuery.error)}</p>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => void appsQuery.refetch()}
-            >
-              <RefreshCw size={ICON.xs} /> 重新加载
-            </Button>
-          </div>
-        ) : apps.length === 0 ? (
+        <ConversationAppsBody
+          appsQuery={appsQuery}
+          apps={apps}
+          activeApp={activeApp}
+          workspace={workspace}
+          conversation={conversation}
+          user={user}
+          owner={owner}
+          onSelectApp={setSelectedAppId}
+          onOpenWorkspaceApps={onOpenWorkspaceApps}
+        />
+        {overlayMembers && !sidebar && <OverlayFocusBoundary edge="end" />}
+      </aside>
+    </>
+  );
+}
+
+function useMarketplaceWriteEnabled(userId: string): boolean {
+  const capQuery = useQuery<boolean>({
+    queryKey: ["capability", "im.marketplace.enabled", userId],
+    queryFn: () => true,
+    enabled: false,
+  });
+  const bootstrapQuery = useQuery<{ capabilities?: Record<string, boolean> }>({
+    queryKey: ["bootstrap", userId],
+    queryFn: () => api.bootstrap(),
+    enabled: false,
+  });
+  if (typeof capQuery.data === "boolean") return capQuery.data;
+  const fromBootstrap = bootstrapQuery.data?.capabilities?.["im.marketplace.enabled"];
+  if (typeof fromBootstrap === "boolean") return fromBootstrap;
+  return true;
+}
+
+function ConversationAppsManageAction({
+  userId,
+  owner,
+  onOpenWorkspaceApps,
+}: {
+  userId: string;
+  owner: boolean;
+  onOpenWorkspaceApps: () => void;
+}) {
+  const marketplaceEnabled = useMarketplaceWriteEnabled(userId);
+  if (!owner || !marketplaceEnabled) return null;
+  return (
+    <IconButton label="管理工作区应用" onClick={onOpenWorkspaceApps}>
+      <Plus size={ICON.md} />
+    </IconButton>
+  );
+}
+
+function resolveTabKeyIndex(key: string, currentIndex: number, total: number): number {
+  if (total <= 0) return -1;
+  if (key === "ArrowRight") return (currentIndex + 1) % total;
+  if (key === "ArrowLeft") return (currentIndex - 1 + total) % total;
+  if (key === "Home") return 0;
+  if (key === "End") return total - 1;
+  return -1;
+}
+
+function ConversationAppsBody({
+  appsQuery,
+  apps,
+  activeApp,
+  workspace,
+  conversation,
+  user,
+  owner,
+  onSelectApp,
+  onOpenWorkspaceApps,
+}: {
+  appsQuery: {
+    isLoading: boolean;
+    isError: boolean;
+    error: unknown;
+    refetch: () => Promise<unknown>;
+  };
+  apps: MarketplaceApp[];
+  activeApp: MarketplaceApp | null;
+  workspace: Workspace;
+  conversation: Conversation;
+  user: User;
+  owner: boolean;
+  onSelectApp: (id: string) => void;
+  onOpenWorkspaceApps: () => void;
+}) {
+  const marketplaceEnabled = useMarketplaceWriteEnabled(user.id);
+  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  if (appsQuery.isLoading) {
+    return (
+      <div className="member-loading">
+        <LoaderCircle size={ICON.sm} className="spin" />
+        加载群聊应用…
+      </div>
+    );
+  }
+
+  if (appsQuery.isError && apps.length === 0) {
+    return (
+      <div className="members-description" role="alert">
+        <h3>加载失败</h3>
+        <p className="field-help">{errorText(appsQuery.error)}</p>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => void appsQuery.refetch()}
+        >
+          <RefreshCw size={ICON.xs} /> 重新加载
+        </Button>
+      </div>
+    );
+  }
+
+  if (!marketplaceEnabled) {
+    return (
+      <div className="mp-pane-body">
+        <Notice kind="info">
+          平台当前已关闭应用功能，已安装应用仅展示只读信息。
+        </Notice>
+        {apps.length === 0 ? (
           <div className="members-description">
             <span className="member-cover">
               <Blocks size={ICON.xl} />
             </span>
             <h3>暂无已安装应用</h3>
-            <p className="field-help">
-              「{workspace.name}」尚未安装应用。
-              {!owner && "如需使用，请联系工作空间创建者安装。"}
-            </p>
-            {owner && (
-              <Button type="button" onClick={onOpenWorkspaceApps}>
-                管理工作区应用
-              </Button>
-            )}
+            <p className="field-help">「{workspace.name}」尚未安装应用。</p>
           </div>
         ) : (
-          <div className="mp-pane-body">
-            {apps.length > 1 && (
-              <div
-                className="theme-options mp-pane-tabs"
-                role="tablist"
-                aria-label="切换群聊应用"
-              >
-                {apps.map((app) => (
-                  <button
-                    key={app.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={activeApp?.id === app.id}
-                    className={`theme-option ${activeApp?.id === app.id ? "active" : ""}`}
-                    onClick={() => setSelectedAppId(app.id)}
-                  >
-                    {app.name}
-                  </button>
-                ))}
-              </div>
-            )}
-            {activeApp && (
-              <ConversationAppFrame
-                key={JSON.stringify([
-                  user.id,
-                  conversation.workspaceId,
-                  conversation.id,
-                  activeApp.id,
-                  activeApp.webUrl,
-                  activeApp.mcpUrl,
-                ])}
-                app={activeApp}
-                conversation={conversation}
-                user={user}
-              />
-            )}
-          </div>
+          <ul className="mp-readonly-list" aria-label="已安装群聊应用只读列表">
+            {apps.map((app) => (
+              <li key={app.id} className="mp-readonly-card">
+                <div className="mp-frame-meta">
+                  <b>{app.name}</b>
+                  <BadgePill>{app.slug}</BadgePill>
+                  {app.servingDraft && (
+                    <BadgePill className="mp-badge-draft">测试草稿</BadgePill>
+                  )}
+                </div>
+                {app.description && <p className="field-help">{app.description}</p>}
+              </li>
+            ))}
+          </ul>
         )}
-        {overlayMembers && !sidebar && <OverlayFocusBoundary edge="end" />}
-      </aside>
-    </>
+      </div>
+    );
+  }
+
+  if (apps.length === 0) {
+    return (
+      <div className="members-description">
+        <span className="member-cover">
+          <Blocks size={ICON.xl} />
+        </span>
+        <h3>暂无已安装应用</h3>
+        <p className="field-help">
+          「{workspace.name}」尚未安装应用。
+          {!owner && "如需使用，请联系工作空间创建者安装。"}
+        </p>
+        {owner && (
+          <Button type="button" onClick={onOpenWorkspaceApps}>
+            管理工作区应用
+          </Button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mp-pane-body">
+      {apps.length > 1 && (
+        <div
+          className="theme-options mp-pane-tabs"
+          role="tablist"
+          aria-label="切换群聊应用"
+        >
+          {apps.map((app, idx) => {
+            const selected = activeApp?.id === app.id;
+            return (
+              <button
+                key={app.id}
+                ref={(el) => {
+                  tabRefs.current[idx] = el;
+                }}
+                id={`mp-pane-tab-${app.id}`}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                aria-controls={`mp-pane-panel-${app.id}`}
+                tabIndex={selected ? 0 : -1}
+                className={`theme-option ${selected ? "active" : ""}`}
+                onClick={() => onSelectApp(app.id)}
+                onKeyDown={(event) => {
+                  const nextIdx = resolveTabKeyIndex(event.key, idx, apps.length);
+                  if (nextIdx !== -1) {
+                    event.preventDefault();
+                    const nextApp = apps[nextIdx];
+                    if (nextApp) {
+                      onSelectApp(nextApp.id);
+                      tabRefs.current[nextIdx]?.focus();
+                    }
+                  }
+                }}
+              >
+                {app.name}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {activeApp && (
+        <div
+          id={apps.length > 1 ? `mp-pane-panel-${activeApp.id}` : undefined}
+          role={apps.length > 1 ? "tabpanel" : undefined}
+          aria-labelledby={apps.length > 1 ? `mp-pane-tab-${activeApp.id}` : undefined}
+          className="mp-pane-tabpanel"
+        >
+          <ConversationAppFrame
+            key={JSON.stringify([
+              user.id,
+              conversation.workspaceId,
+              conversation.id,
+              activeApp.id,
+              activeApp.webUrl,
+              activeApp.mcpUrl,
+            ])}
+            app={activeApp}
+            conversation={conversation}
+            user={user}
+          />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -362,6 +521,12 @@ function ConversationAppFrame({
           <RefreshCw size={ICON.xs} />
         </IconButton>
       </div>
+      {loading && !session && !sameOriginBlocked && !error && (
+        <div className="mp-frame-loading" role="status">
+          <LoaderCircle size={ICON.md} className="spin" aria-hidden="true" />
+          <span>正在启动应用会话…</span>
+        </div>
+      )}
       {!sameOriginBlocked && session && (
         <iframe
           ref={iframeRef}

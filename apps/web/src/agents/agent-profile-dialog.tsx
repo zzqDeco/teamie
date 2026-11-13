@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { EyeOff, Hash } from "lucide-react";
+import { EyeOff, Hash, LoaderCircle, RefreshCw } from "lucide-react";
 import { api } from "@teamie/api-client";
 import type { Agent, ModelCatalog, Workspace } from "@teamie/api-client";
 import { useAuth } from "../auth";
@@ -12,6 +12,7 @@ import {
   agentFailureText,
   agentProfileChanges,
   agentProfileInput,
+  canConfigureModelGateway,
   snapshotAgentProfile,
 } from "../agent-management";
 import { Button, ConfirmDialog, Modal, ModalCloseButton, Notice, SwitchField } from "../ui";
@@ -84,8 +85,7 @@ export function AgentProfileDialog({
     [enabled, setEnabled] = useState(initialAgent?.enabled ?? true);
   const catalogQuery = useQuery<ModelCatalog>({
     queryKey: ["modelCatalog", user!.id],
-    queryFn: () =>
-      api.modelCatalog().catch((): ModelCatalog => ({ models: [] })),
+    queryFn: () => api.modelCatalog(),
     retry: false,
   });
   const catalogModels = catalogQuery.data?.models || [];
@@ -218,12 +218,14 @@ export function AgentProfileDialog({
             name="agentModelId"
             value={modelId}
             onChange={(e) => setModelId(e.target.value)}
-            disabled={busy}
+            disabled={busy || catalogQuery.isPending}
           >
             <option value="">
-              {defaultModel
-                ? `平台默认模型（${defaultModel.displayName}）`
-                : "平台默认模型"}
+              {catalogQuery.isPending
+                ? "正在加载可用模型…"
+                : defaultModel
+                  ? `平台默认模型（${defaultModel.displayName}）`
+                  : "平台默认模型"}
             </option>
             {catalogModels.map((item) => (
               <option key={item.id} value={item.id}>
@@ -234,7 +236,9 @@ export function AgentProfileDialog({
             ))}
             {modelId && !catalogModels.some((item) => item.id === modelId) && (
               <option value={modelId}>
-                {modelId}（已下线，将自动回退到平台默认模型）
+                {catalogQuery.isSuccess
+                  ? `${modelId}（已下线，将自动回退到平台默认模型）`
+                  : modelId}
               </option>
             )}
           </select>
@@ -242,6 +246,40 @@ export function AgentProfileDialog({
             若所选模型停用或移除，将自动平滑回退到平台默认模型继续运行。
           </small>
         </label>
+        {catalogQuery.isPending && (
+          <div className="agent-catalog-notice" role="status">
+            <LoaderCircle size={ICON.xs} className="spin" aria-hidden="true" />
+            <span>正在加载平台模型目录…</span>
+          </div>
+        )}
+        {catalogQuery.isError && (
+          <div className="agent-catalog-notice error" role="alert">
+            <span>模型目录暂时无法加载，已保留当前模型选择。</span>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => void catalogQuery.refetch()}
+            >
+              <RefreshCw size={ICON.xs} /> 重试
+            </Button>
+          </div>
+        )}
+        {catalogQuery.isSuccess && catalogModels.length === 0 && (
+          <div className="agent-catalog-notice" role="status">
+            <span>
+              平台暂未配置可用模型，配置完成前 Agent 暂时无法回复。
+              {canConfigureModelGateway(user) && (
+                <>
+                  {" "}
+                  <Link to="/app/admin/gateway" onClick={onClose}>
+                    前往模型网关配置
+                  </Link>
+                </>
+              )}
+            </span>
+          </div>
+        )}
         <WorkspaceVisibilityFields
           workspaces={workspaces}
           selectedIds={workspaceIds}
