@@ -1,4 +1,50 @@
-/* Components layer: marketplace group apps pane, developer portal, live verification, and handbook. */
+/* Components & features layers: marketplace group apps pane, developer portal, live verification, and handbook. */
+
+@layer features {
+  .members-pane.mp-apps-pane {
+    position: relative;
+    width: var(--mp-pane-width, 400px);
+  }
+  .mp-apps-pane-dragging {
+    user-select: none;
+  }
+  .mp-apps-pane-dragging .mp-iframe {
+    pointer-events: none;
+  }
+  .mp-pane-resizing {
+    cursor: col-resize;
+    user-select: none;
+  }
+  .mp-resize-handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -4px;
+    width: 8px;
+    z-index: 2;
+    cursor: col-resize;
+    touch-action: none;
+  }
+  .mp-resize-handle::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 3px;
+    width: 2px;
+    background: transparent;
+    transition: background 0.15s;
+  }
+  .mp-resize-handle:hover::after,
+  .mp-resize-handle:focus-visible::after,
+  .mp-apps-pane-dragging .mp-resize-handle::after {
+    background: var(--brand);
+  }
+  .mp-resize-handle:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: -2px;
+  }
+}
 
 @layer components {
   .mp-header-actions {

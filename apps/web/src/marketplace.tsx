@@ -6,4 +6,14 @@ export {
   sanitizeMcpToolSegment,
 } from "./marketplace/marketplace-labels";
 export { WorkspaceMarketplaceModal } from "./marketplace/workspace-modal";
-export { ConversationAppsPane } from "./marketplace/conversation-apps";
+export {
+  clampAppPaneWidth,
+  clearPersistedAppPaneWidth,
+  computeMaxAppPaneWidth,
+  ConversationAppsPane,
+  DEFAULT_APP_PANE_WIDTH,
+  MAX_APP_PANE_WIDTH_CEILING,
+  MIN_APP_PANE_WIDTH,
+  readPersistedAppPaneWidth,
+  writePersistedAppPaneWidth,
+} from "./marketplace/conversation-apps";

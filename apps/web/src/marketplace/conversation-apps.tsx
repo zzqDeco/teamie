@@ -13,6 +13,28 @@ import type {
 import { errorText } from "../errors";
 import { BadgePill, Button, IconButton, Notice, OverlayFocusBoundary } from "../ui";
 import { ICON } from "../icons";
+import {
+  clampAppPaneWidth,
+  clearPersistedAppPaneWidth,
+  computeMaxAppPaneWidth,
+  DEFAULT_APP_PANE_WIDTH,
+  MAX_APP_PANE_WIDTH_CEILING,
+  MIN_APP_PANE_WIDTH,
+  readPersistedAppPaneWidth,
+  useConversationAppPaneResize,
+  writePersistedAppPaneWidth,
+} from "./app-pane-resize";
+
+export {
+  clampAppPaneWidth,
+  clearPersistedAppPaneWidth,
+  computeMaxAppPaneWidth,
+  DEFAULT_APP_PANE_WIDTH,
+  MAX_APP_PANE_WIDTH_CEILING,
+  MIN_APP_PANE_WIDTH,
+  readPersistedAppPaneWidth,
+  writePersistedAppPaneWidth,
+};
 
 export function ConversationAppsPane(props: {
   paneRef?: RefObject<HTMLElement | null>;
@@ -39,6 +61,16 @@ export function ConversationAppsPane(props: {
     onOpenWorkspaceApps,
   } = props;
   const [selectedAppId, setSelectedAppId] = useState("");
+  const {
+    effectiveWidth,
+    maxWidth,
+    isDragging,
+    desktopWidthStyle,
+    handleProps,
+  } = useConversationAppPaneResize({
+    userId: user.id,
+    overlayMembers,
+  });
 
   const appsQuery = useQuery({
     queryKey: ["conversationApps", conversation.id],
@@ -68,14 +100,28 @@ export function ConversationAppsPane(props: {
         />
       )}
       <aside
-        className="members-pane"
+        className={`members-pane mp-apps-pane${isDragging ? " mp-apps-pane-dragging" : ""}`}
         ref={paneRef}
+        style={desktopWidthStyle}
         role={overlayMembers ? "dialog" : undefined}
         aria-modal={overlayMembers ? true : undefined}
         aria-label="群聊应用"
         tabIndex={-1}
         inert={mobile && sidebar}
       >
+        {!overlayMembers && (
+          <div
+            className="mp-resize-handle"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="调节群聊应用面板宽度"
+            aria-valuenow={effectiveWidth}
+            aria-valuemin={MIN_APP_PANE_WIDTH}
+            aria-valuemax={maxWidth}
+            tabIndex={0}
+            {...handleProps}
+          />
+        )}
         {overlayMembers && !sidebar && <OverlayFocusBoundary edge="start" />}
         <header>
           <span>
