@@ -1,9 +1,8 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useMemo } from "react";
 import type { ReactNode } from "react";
-import { Check, Copy } from "lucide-react";
 import "katex/dist/katex.min.css";
 import type { Mention } from "@teamie/api-client";
-import { ICON } from "./icons";
+import { CodeBlock } from "./markdown/code-block";
 import {
   createMentionSentinelPrefix,
   injectMentions,
@@ -19,54 +18,6 @@ import {
 import type { ParseContext } from "./markdown/tokens";
 import { renderInline, renderPlainWithMentions } from "./markdown/inline";
 export { KATEX_DISPLAY_CLASS, matchBareUrl, sanitizeLinkUrl };
-
-function CodeBlock({
-  codeText,
-  lang,
-}: {
-  codeText: string;
-  lang: string;
-}) {
-  const [copied, setCopied] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => () => clearTimeout(timerRef.current), []);
-
-  async function handleCopy() {
-    try {
-      await navigator.clipboard?.writeText(codeText);
-      setCopied(true);
-      clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(() => setCopied(false), 1800);
-    } catch {
-      /* Clipboard write can fail in restricted contexts. */
-    }
-  }
-
-  return (
-    <div className="markdown-code-wrap">
-      <div className="markdown-code-header">
-        <span className="markdown-code-lang">{lang || "code"}</span>
-        <button
-          type="button"
-          className={`markdown-code-copy ${copied ? "copied" : ""}`}
-          onClick={() => void handleCopy()}
-          aria-label={copied ? "已复制代码" : "复制代码"}
-        >
-          {copied ? <Check size={ICON.xs} /> : <Copy size={ICON.xs} />}
-          <span>{copied ? "已复制" : "复制"}</span>
-        </button>
-      </div>
-      <pre className="markdown-code-block">
-        <code
-          className={lang ? `language-${lang}` : undefined}
-          data-language={lang || undefined}
-        >
-          {codeText}
-        </code>
-      </pre>
-    </div>
-  );
-}
 
 function splitTableCells(line: string): string[] {
   let trimmed = line.trim();

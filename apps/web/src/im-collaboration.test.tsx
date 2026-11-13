@@ -19,6 +19,7 @@ import type {
   Workspace,
 } from "@teamie/api-client";
 import { MessageAttachments } from "./attachments";
+import { clearAttachmentPreviews } from "./attachment-previews";
 import { AttentionInbox } from "./attention";
 import {
   buildMentionSpans,
@@ -1060,10 +1061,13 @@ describe("#119 IM Collaboration Web UI", () => {
     });
     expect(contentSpy).toHaveBeenCalledWith(channelA.id, imageAtt.id);
 
-    // Unmounting revokes the temporary thumbnail Blob URL
+    // Unmounting keeps the loaded thumbnail in the preview LRU (no refetch
+    // when the row returns); clearing previews (logout/session) revokes it.
     await act(async () => {
       root.render(<div />);
     });
+    expect(revokeObjectURL).not.toHaveBeenCalledWith("blob:thumb-preview");
+    clearAttachmentPreviews();
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:thumb-preview");
 
     // Retries temporary 429 saturation before rendering thumbnail

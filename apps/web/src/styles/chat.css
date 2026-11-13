@@ -479,8 +479,13 @@
     color: var(--text-muted);
   }
   .character-count {
-    color: var(--danger-text);
+    color: var(--text-muted);
     font-size: var(--font-xs);
+    font-variant-numeric: tabular-nums;
+  }
+  .character-count.over-limit {
+    color: var(--danger-text);
+    font-weight: 600;
   }
   .composer-footer {
     display: flex;

@@ -4,11 +4,8 @@ import {
   Copy,
   CornerUpLeft,
   Link2,
-  LoaderCircle,
   MoreHorizontal,
   Pencil,
-  PencilLine,
-  RefreshCw,
   SmilePlus,
   Trash2,
 } from "lucide-react";
@@ -19,17 +16,26 @@ import type {
   Mention,
   Message,
 } from "@teamie/api-client";
-import { sendMessage } from "./chat";
-import { chatStore } from "./store";
+import { chatStore, isUserMentioned } from "./store";
 import { errorText } from "./errors";
 import { toast } from "./toast";
 import type { LocalMessage } from "./store";
 import { ReactionPicker } from "./chat/reaction-picker";
 import { MentionInput } from "./mentions";
-import { restoreComposerDraft } from "./composer-drafts";
 import { MessageAttachments } from "./attachments";
 import { MessageBody } from "./markdown";
 import { Avatar, Button, date, IconButton, Notice, time } from "./ui";
+import { formatDateTime } from "./format-datetime";
+import { ReactionChips } from "./chat/reaction-chips";
+import { MessageSendStatus } from "./chat/message-send-status";
+import { MessageActionSheet } from "./chat/message-action-sheet";
+import { CollapsibleMessageBody } from "./chat/collapsible-body";
+import { useLongPress } from "./chat/long-press";
+import { messagePreviewText } from "./chat/plain-preview";
+import { recordRecentReaction } from "./chat/emoji-recent";
+import { prefersEnterToSend } from "./chat/keyboard-source";
+import "./styles/reactions.css";
+import "./styles/timeline.css";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
 import { ICON } from "./icons";
 import {
@@ -42,7 +48,6 @@ import {
   ConversationEmptyStart,
   ConversationHeader,
   copyToClipboard,
-  discardFailedMessage,
   emptyMembers,
   messageGrouping,
   messageLink,
@@ -64,6 +69,7 @@ export const MessageItem = memo(function MessageItem({
   message,
   showDate,
   compact,
+  showOwner = true,
   previousId,
   nextId,
   replyTarget: target,
@@ -115,6 +121,8 @@ export const MessageItem = memo(function MessageItem({
   message: LocalMessage;
   showDate: boolean;
   compact: boolean;
+  /** Show 「由 X 创建」 for an Agent sender (first head of that sender's run). */
+  showOwner?: boolean;
   previousId?: string;
   nextId?: string;
   /** Resolved reply target (reconciled cached/store/view versions). */
@@ -174,6 +182,20 @@ export const MessageItem = memo(function MessageItem({
   } | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [reactionBusy, setReactionBusy] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const isOwn = message.senderId === userId;
+  // Rows addressed to me (mention, addressed broadcast, or reply to my message).
+  const relevantToMe =
+    !isOwn &&
+    !message.retractedAt &&
+    (isUserMentioned(message.mentions, userId) ||
+      (!!target && !target.retractedAt && target.senderId === userId));
+  const canOpenSheet = !message.retractedAt && !message.status && editing?.id !== message.id;
+  const longPress = useLongPress<HTMLElement>(() => setSheetOpen(true), {
+    enabled: canOpenSheet,
+    // Interactive children keep their own touch behaviour (links, chips, buttons).
+    ignore: (el) => !!el.closest("a, button, input, textarea, [role='dialog'], .message-reactions"),
+  });
   const pickerWrapRef = useRef<HTMLDivElement>(null);
   const closePicker = useCallback(() => setPickerOpen(false), []);
 
@@ -202,6 +224,7 @@ export const MessageItem = memo(function MessageItem({
         : await api.putReaction(conversationId, message.id, emoji);
       if (chatStore.reactionScopeCurrent(scope)) {
         chatStore.setReactions(conversationId, message.id, result.reactions, result.reactionsVersion, scope);
+        if (!reactedByMe) recordRecentReaction(userId, emoji);
       }
     } catch (e) {
       if (chatStore.reactionScopeCurrent(scope))
@@ -241,8 +264,9 @@ export const MessageItem = memo(function MessageItem({
       <article
         id={`message-${message.id}`}
         data-seq={message.status ? undefined : message.seq}
-        data-own={message.senderId === userId ? "true" : undefined}
+        data-own={isOwn ? "true" : undefined}
         tabIndex={isRovingTarget ? 0 : -1}
+        {...longPress}
         onFocus={(event) => {
           if (event.currentTarget.contains(event.target as Node)) {
             setFocusedMessageId(message.id);
@@ -292,17 +316,23 @@ export const MessageItem = memo(function MessageItem({
             inputRef.current?.focus();
           }
         }}
-        className={`message ${highlighted ? "located" : ""} ${compact ? "compact" : ""} ${message.status || ""} ${message.retractedAt ? "retracted" : ""} ${actionsOpen || pickerOpen ? "actions-open" : ""}`}
+        className={`message ${highlighted ? "located" : ""} ${compact ? "compact" : ""} ${relevantToMe ? "relevant-to-me" : ""} ${message.status || ""} ${message.retractedAt ? "retracted" : ""} ${actionsOpen || pickerOpen ? "actions-open" : ""}`}
       >
         <div className="message-avatar">
           {!compact ? (
             message.senderKind === "agent" ? (
-              <AgentAvatar />
+              <AgentAvatar seed={message.senderId} />
             ) : (
               <Avatar name={message.senderName} seed={message.senderId} />
             )
           ) : (
-            <span className="compact-time">{time(message.createdAt)}</span>
+            <time
+              className="compact-time"
+              dateTime={message.createdAt}
+              title={formatDateTime(message.createdAt, "full")}
+            >
+              {time(message.createdAt)}
+            </time>
           )}
         </div>
         <div className="message-content">
@@ -310,12 +340,15 @@ export const MessageItem = memo(function MessageItem({
             <div className="message-meta">
               <b>{message.senderName}</b>
               {message.senderKind === "agent" && (
-                <AgentBadge ownerName={agentOwnerName} />
+                <AgentBadge ownerName={agentOwnerName} compact={!showOwner} />
               )}
-              {message.senderId === userId && (
-                <span className="you-label">你</span>
-              )}
-              <time dateTime={message.createdAt}>{time(message.createdAt)}</time>
+              {isOwn && <span className="you-label">你</span>}
+              <time
+                dateTime={message.createdAt}
+                title={formatDateTime(message.createdAt, "full")}
+              >
+                {time(message.createdAt)}
+              </time>
               <MessageCollaborationIndicators
                 isPinned={isPinned}
                 isSaved={isSaved}
@@ -350,10 +383,7 @@ export const MessageItem = memo(function MessageItem({
               <span>
                 {target?.retractedAt
                   ? "消息已撤回"
-                  : target?.body ||
-                    (target?.attachments?.length
-                      ? `${target.attachments.length} 个文件`
-                      : "引用了一条较早的消息")}
+                  : messagePreviewText(target, "引用了一条较早的消息")}
               </span>
             </button>
           )}
@@ -371,17 +401,14 @@ export const MessageItem = memo(function MessageItem({
                 enabled={mentionsEnabled}
                 allowBroadcastMentions={allowBroadcastMentions}
                 allowHereMention={allowHereMention}
+                currentUserId={userId}
                 required={!editing.attachments?.length}
                 aria-label="编辑消息内容"
                 onKeyDown={(e) => {
                   if (e.key === "Escape") {
                     setEditing(null);
                     inputRef.current?.focus();
-                  } else if (
-                    e.key === "Enter" &&
-                    !e.shiftKey &&
-                    !window.matchMedia("(pointer: coarse)").matches
-                  ) {
+                  } else if (e.key === "Enter" && prefersEnterToSend(e)) {
                     e.preventDefault();
                     e.currentTarget.form?.requestSubmit();
                   }
@@ -408,7 +435,9 @@ export const MessageItem = memo(function MessageItem({
               </div>
             </form>
           ) : (
-            <div className="message-text message-body">
+            <CollapsibleMessageBody
+              contentKey={`${message.retractedAt ? "retracted" : message.body}\u0000${message.editedAt || ""}`}
+            >
               {message.retractedAt ? (
                 "这条消息已撤回"
               ) : (
@@ -421,7 +450,7 @@ export const MessageItem = memo(function MessageItem({
               {message.editedAt && !message.retractedAt && (
                 <span className="edited-label">（已编辑）</span>
               )}
-            </div>
+            </CollapsibleMessageBody>
           )}
           {!message.retractedAt && !!message.attachments?.length && (
             <MessageAttachments
@@ -429,38 +458,16 @@ export const MessageItem = memo(function MessageItem({
               attachments={message.attachments}
             />
           )}
-          {!message.retractedAt &&
-            !!message.reactions &&
-            message.reactions.length > 0 && (
-              <div className="message-reactions" role="group" aria-label="表情回应">
-                {message.reactions.map((reaction) => {
-                  const active = reaction.userIds.includes(userId);
-                  const reactorNames = reaction.userIds.map((uid) => {
-                    if (uid === userId) return "你";
-                    return (
-                      allMembers.find((member) => member.userId === uid)
-                        ?.displayName || "成员"
-                    );
-                  });
-                  const tooltip = `${reactorNames.join("、")} 回应了 ${reaction.emoji}`;
-                  return (
-                    <button
-                      key={reaction.emoji}
-                      type="button"
-                      className={`reaction-chip ${active ? "active" : ""}`}
-                      disabled={(!canReact && !active) || reactionBusy}
-                      aria-pressed={active}
-                      title={tooltip}
-                      aria-label={`${reaction.emoji} ${reaction.count} 人回应：${reactorNames.join("、")}`}
-                      onClick={() => void toggleReaction(reaction.emoji)}
-                    >
-                      <span className="reaction-chip-emoji">{reaction.emoji}</span>
-                      <span className="reaction-chip-count">{reaction.count}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+          {!message.retractedAt && !!message.reactions?.length && (
+            <ReactionChips
+              reactions={message.reactions}
+              userId={userId}
+              members={allMembers}
+              canReact={canReact}
+              busy={reactionBusy}
+              onToggle={(emoji) => void toggleReaction(emoji)}
+            />
+          )}
           {!message.retractedAt &&
             !message.status &&
             message.senderId === userId &&
@@ -475,52 +482,11 @@ export const MessageItem = memo(function MessageItem({
                 isLatestOwn={isLatestOwn}
               />
             )}
-          {message.status === "sending" && (
-            <span className="send-status">
-              <LoaderCircle size={ICON.xs} className="spin" /> 正在发送
-            </span>
-          )}
-          {message.status === "failed" && (
-            <span className="send-status failed-status">
-              {message.error || "发送失败"}
-              {!(message as LocalMessage).permanent && (
-                <button
-                  onClick={() =>
-                    void sendMessage(
-                      message as LocalMessage,
-                      chatStore.generation,
-                    )
-                  }
-                >
-                  <RefreshCw size={ICON.xs} />
-                  重试
-                </button>
-              )}
-              {(message as LocalMessage).permanent && !!message.body && (
-                <button
-                  title={
-                    message.attachments?.length
-                      ? "恢复文字到输入框，附件需要重新添加"
-                      : undefined
-                  }
-                  onClick={() => {
-                    restoreComposerDraft(conversationId, message);
-                    discardFailedMessage(conversationId, message);
-                    inputRef.current?.focus();
-                  }}
-                >
-                  <PencilLine size={ICON.xs} />
-                  编辑并重发
-                </button>
-              )}
-              <button
-                onClick={() => discardFailedMessage(conversationId, message)}
-              >
-                <Trash2 size={ICON.xs} />
-                删除
-              </button>
-            </span>
-          )}
+          <MessageSendStatus
+            message={message}
+            conversationId={conversationId}
+            inputRef={inputRef}
+          />
           {copyFeedback && (
             <span
               className={`send-status ${copyFeedback.ok ? "" : "failed-status"}`}
@@ -607,7 +573,7 @@ export const MessageItem = memo(function MessageItem({
                 >
                   <Link2 size={ICON.xs} />
                 </IconButton>
-                {message.senderId === userId && canEdit && (
+                {isOwn && canEdit && (
                   <IconButton
                     label="编辑消息"
                     tabIndex={actionTabIndex}
@@ -616,7 +582,7 @@ export const MessageItem = memo(function MessageItem({
                     <Pencil size={ICON.xs} />
                   </IconButton>
                 )}
-                {message.senderId === userId && canRetract && (
+                {isOwn && canRetract && (
                   <IconButton
                     label="撤回消息"
                     className="danger-hover"
@@ -629,6 +595,34 @@ export const MessageItem = memo(function MessageItem({
               </div>
             </Fragment>
           )}
+        {sheetOpen && canOpenSheet && (
+          <MessageActionSheet
+            conversationId={conversationId}
+            message={message}
+            permissions={{
+              canReact,
+              canForward: canForward && Boolean(onForward),
+              canPin,
+              canSave,
+              canMarkUnread,
+              canEdit,
+              canRetract,
+              isPinned,
+              isSaved,
+              isOwn,
+            }}
+            onClose={() => setSheetOpen(false)}
+            onReact={(emoji) => void toggleReaction(emoji)}
+            onReply={() => onReply(message.id)}
+            onForward={() => onForward?.(message)}
+            onCopyText={() => void copy(message.body, "已复制消息文本")}
+            onCopyLink={() =>
+              void copy(messageLink(workspaceId, conversationId, message.id), "已复制消息链接")
+            }
+            onEdit={() => startEdit(message)}
+            onRetract={() => onRetractRequest(message)}
+          />
+        )}
       </article>
     </Fragment>
   );

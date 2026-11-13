@@ -718,3 +718,70 @@ describe("conversation search", () => {
     expect(host.textContent).not.toContain("<script>alert(1)</script>");
   });
 });
+
+describe("conversation search readability and keyboard (PR-3)", () => {
+  it("shows a Markdown-free snippet centred on a match deep in a long message, with a short aria-label", async () => {
+    const lines = Array.from({ length: 12 }, (_, i) => `第 ${i + 1} 行 **很长的** 说明文字，用来把命中词推到很后面。`);
+    lines.splice(9, 0, "这里有 [关键词](https://a.example) 出现");
+    vi.mocked(api.searchMessages).mockResolvedValue({ messages: [message(5, lines.join("\n"))], hasMore: false });
+    await render(view());
+    await type("关键词");
+    await tick();
+    const result = host.querySelector<HTMLButtonElement>(".search-message-result")!;
+    expect(result.querySelector("mark")?.textContent).toBe("关键词");
+    expect(result.textContent).not.toContain("**");
+    expect(result.textContent).not.toContain("](");
+    expect(result.textContent!.startsWith("…")).toBe(true);
+    expect(Array.from(result.textContent!.replace(/…/g, "")).length).toBeLessThanOrEqual(120);
+    expect(result.getAttribute("aria-label")).toMatch(/^小助手 · .+\d{2}:\d{2}$/);
+    expect(result.getAttribute("aria-label")).not.toContain("关键词");
+    expect(host.querySelector(".search-result-meta time")?.getAttribute("title")).toMatch(/\d{4}年/);
+  });
+
+  it("moves between results with ↑/↓ from the input and activates with Enter", async () => {
+    vi.mocked(api.searchMessages).mockResolvedValue({
+      messages: [message(1, "needle one"), message(2, "needle two"), message(3, "needle three")],
+      hasMore: false,
+    });
+    await render(view());
+    await type("needle");
+    await tick();
+    const input = host.querySelector<HTMLInputElement>('input[type="search"]')!;
+    const buttons = [...host.querySelectorAll<HTMLButtonElement>(".search-message-result")];
+    expect(buttons).toHaveLength(3);
+    const key = async (target: Element, k: string) =>
+      act(async () => { target.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true })); });
+    await key(input, "ArrowDown");
+    expect(document.activeElement).toBe(buttons[0]);
+    await key(buttons[0], "ArrowDown");
+    expect(document.activeElement).toBe(buttons[1]);
+    await key(buttons[1], "End");
+    expect(document.activeElement).toBe(buttons[2]);
+    await key(buttons[2], "Home");
+    expect(document.activeElement).toBe(buttons[0]);
+    await key(buttons[0], "ArrowUp");
+    expect(document.activeElement).toBe(input);
+    await key(input, "ArrowDown");
+    await act(async () => (document.activeElement as HTMLButtonElement).click());
+    expect(onLocate).toHaveBeenCalledWith("message-3");
+  });
+
+  it("restores the last keyword for the same account and conversation only", async () => {
+    vi.mocked(api.searchMessages).mockResolvedValue({ messages: [message(1, "保留 关键词")], hasMore: false });
+    await render(view());
+    await type("关键词");
+    await tick();
+    await render(<div />);
+    await render(view());
+    await tick();
+    const input = host.querySelector<HTMLInputElement>('input[type="search"]')!;
+    expect(input.value).toBe("关键词");
+    expect(host.querySelector("mark")?.textContent).toBe("关键词");
+    await render(view("other"));
+    expect(host.querySelector<HTMLInputElement>('input[type="search"]')!.value).toBe("");
+    await render(<div />);
+    await act(async () => chatStore.begin("another-account"));
+    await render(view());
+    expect(host.querySelector<HTMLInputElement>('input[type="search"]')!.value).toBe("");
+  });
+});

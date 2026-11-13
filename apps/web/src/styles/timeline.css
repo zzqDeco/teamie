@@ -1,0 +1,157 @@
+/* Features layer: timeline rows — long-message collapse, relevance highlight, located fade, touch action sheet, history sentinel and located-mode new-message pill. */
+
+@layer features {
+  /* Older pages are anchored manually (useHistoryPaging); native scroll
+     anchoring would compensate a second time and make the view jump. */
+  .message-scroll {
+    overflow-anchor: none;
+  }
+  .message-body.collapsed {
+    max-height: 600px;
+    overflow: hidden;
+    mask-image: linear-gradient(to bottom, black 80%, transparent);
+  }
+  .message-expand-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    margin-top: var(--space-1);
+    padding: var(--space-1) var(--space-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    background: var(--surface);
+    color: var(--brand-text);
+    font: inherit;
+    font-size: var(--font-sm);
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .message-expand-toggle:hover {
+    background: var(--hover-bg);
+    border-color: var(--border-strong);
+  }
+  .message-expand-toggle:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: var(--focus-ring-offset);
+  }
+  /* Messages that mention me (incl. addressed broadcasts) or reply to me. */
+  .app-shell .message.relevant-to-me {
+    background: var(--warning-bg);
+    box-shadow: inset 3px 0 0 var(--status-connecting);
+  }
+  .app-shell .message.relevant-to-me:hover,
+  .app-shell .message.relevant-to-me:focus-within {
+    background: var(--warning-bg);
+  }
+  /* Located message: highlighted, then fades after ~2.5s. */
+  .app-shell .message.located {
+    animation: located-fade 2.5s ease-out forwards;
+  }
+  @keyframes located-fade {
+    0%,
+    60% {
+      background: var(--lavender);
+    }
+    100% {
+      background: transparent;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .app-shell .message.located {
+      animation: none;
+    }
+  }
+  .history-sentinel {
+    height: 1px;
+    flex-shrink: 0;
+  }
+  .located-new-messages {
+    position: absolute;
+    left: 50%;
+    bottom: 154px;
+    transform: translateX(-50%);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-4);
+    border: 1px solid var(--brand);
+    border-radius: var(--r-pill);
+    background: var(--brand);
+    color: var(--on-brand);
+    font: inherit;
+    font-size: var(--font-sm);
+    font-weight: 600;
+    box-shadow: var(--shadow-md);
+    cursor: pointer;
+    z-index: 6;
+  }
+  .located-new-messages:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: var(--focus-ring-offset);
+  }
+  .modal.message-action-sheet {
+    width: min(480px, 100%);
+  }
+  .message-sheet-reactions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    padding-bottom: var(--space-3);
+    border-bottom: 1px solid var(--border);
+  }
+  .message-sheet-actions {
+    list-style: none;
+    margin: var(--space-2) 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .message-sheet-action {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    width: 100%;
+    min-height: 48px;
+    padding: 0 var(--space-3);
+    border: 0;
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--text-strong);
+    font: inherit;
+    font-size: var(--font-md);
+    text-align: left;
+    cursor: pointer;
+  }
+  .message-sheet-action:hover,
+  .message-sheet-action:focus-visible {
+    background: var(--hover-bg);
+  }
+  .message-sheet-action:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: calc(var(--focus-ring-offset) * -1);
+  }
+  .message-sheet-action.danger {
+    color: var(--danger-text);
+  }
+  @media (pointer: coarse) {
+    .modal-backdrop:has(> .modal.message-action-sheet) {
+      align-items: flex-end;
+    }
+    .modal.message-action-sheet {
+      border-radius: var(--r-xl) var(--r-xl) 0 0;
+      padding-bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
+    }
+    .failed-status > button {
+      min-height: 44px;
+      padding: 0 var(--space-2);
+    }
+    .reply-preview > .icon-button {
+      width: 44px;
+      height: 44px;
+    }
+    .message-expand-toggle {
+      min-height: 44px;
+      padding: 0 var(--space-4);
+    }
+  }
+}

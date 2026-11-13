@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
 import { CornerUpLeft, LoaderCircle, Search } from "lucide-react";
 import { api } from "@teamie/api-client";
 import type { Attachment, Message, MessagePage } from "@teamie/api-client";
@@ -7,8 +8,10 @@ import { useChatState } from "./chat";
 import { errorText } from "./errors";
 import { chatStore, reconcileMessages } from "./store";
 import { AgentBadge } from "./agent-ui";
-import { Button, date, IconButton, Modal, Notice, time } from "./ui";
+import { Button, IconButton, Modal, Notice } from "./ui";
 import { ICON } from "./icons";
+import { plainPreview, searchSnippet } from "./chat/plain-preview";
+import { formatDateTime } from "./format-datetime";
 import "./styles/conversation-search.css";
 
 type SearchResult = MessagePage & {
@@ -16,13 +19,46 @@ type SearchResult = MessagePage & {
   error: string;
   loadingMore: boolean;
 };
+type SearchMode = "messages" | "files";
+type RememberedSearch = { query: string; mode: SearchMode };
 
-function Highlight({ text, query }: { text: string; query: string }) {
-  if (!query) return text;
+// Last keyword/mode per account and conversation, in memory only. The whole
+// map is dropped whenever the signed-in account changes (or signs out), so a
+// keyword typed by one account is never offered to another.
+const remembered = new Map<string, RememberedSearch>();
+let rememberedUser = chatStore.getSnapshot().userId;
+chatStore.subscribe(() => {
+  const userId = chatStore.getSnapshot().userId;
+  if (userId === rememberedUser) return;
+  rememberedUser = userId;
+  remembered.clear();
+});
+const memoryKey = (userId: string, conversationId: string) =>
+  `${userId}\u0000${conversationId}`;
+
+/** Plain-text window around the first match, with literal matches marked. */
+function Snippet({ body, query }: { body: string; query: string }) {
+  const preview = plainPreview(body);
+  const queryLower = query.toLowerCase();
+  const source =
+    preview &&
+    (!queryLower ||
+      preview.toLowerCase().includes(queryLower) ||
+      !body.toLowerCase().includes(queryLower))
+      ? preview
+      : body;
+  const snippet = searchSnippet(source, query, 120);
   const literal = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return text
-    .split(new RegExp(`(${literal})`, "giu"))
-    .map((part, i) => (i % 2 ? <mark key={i}>{part}</mark> : part));
+  const parts = query
+    ? snippet.text.split(new RegExp(`(${literal})`, "giu"))
+    : [snippet.text];
+  return (
+    <>
+      {snippet.truncatedStart && "…"}
+      {parts.map((part, i) => (i % 2 ? <mark key={i}>{part}</mark> : part))}
+      {snippet.truncatedEnd && "…"}
+    </>
+  );
 }
 
 function matchingAttachments(
@@ -55,14 +91,22 @@ export function ConversationSearch({
   onClose: () => void;
   onLocate: (messageId: string) => void;
 }) {
-  const [query, setQuery] = useState("");
-  const [mode, setMode] = useState<"messages" | "files">("messages");
+  const snapshot = useChatState();
+  // The account this dialog was opened for; keywords are only remembered
+  // while that account is still the signed-in one.
+  const [owner] = useState(() => chatStore.getSnapshot().userId);
+  const [restored] = useState(() =>
+    owner ? remembered.get(memoryKey(owner, conversationId)) : undefined,
+  );
+  const [query, setQuery] = useState(restored?.query ?? "");
+  const [mode, setMode] = useState<SearchMode>(restored?.mode ?? "messages");
   const [revision, setRevision] = useState(0);
   const [result, setResult] = useState<SearchResult | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  const list = useRef<HTMLOListElement>(null);
+  const selectRestored = useRef(!!restored?.query);
   const requests = useRef(new Set<AbortController>());
   const sequence = useRef(0);
-  const snapshot = useChatState();
   const generation = chatStore.generation;
   const term = query.trim();
   const valid = Array.from(term).length <= 200;
@@ -83,7 +127,15 @@ export function ConversationSearch({
 
   useEffect(() => {
     input.current?.focus();
+    if (selectRestored.current) input.current?.select();
+    selectRestored.current = false;
   }, [mode]);
+  useEffect(() => {
+    if (!owner || chatStore.getSnapshot().userId !== owner) return;
+    const entry = memoryKey(owner, conversationId);
+    if (query.trim() || mode !== "messages") remembered.set(entry, { query, mode });
+    else remembered.delete(entry);
+  }, [owner, conversationId, query, mode]);
   useEffect(() => {
     const operation = ++sequence.current;
     const activeRequests = requests.current;
@@ -176,6 +228,43 @@ export function ConversationSearch({
     }
   }
 
+  // Arrow keys move focus between result buttons ("定位"/"查看消息"); Enter
+  // activates the focused button natively. ArrowUp on the first result
+  // returns to the search box.
+  function resultButtons() {
+    return Array.from(
+      list.current?.querySelectorAll<HTMLButtonElement>("[data-search-result]") ||
+        [],
+    );
+  }
+  function onInputKey(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "ArrowDown" || event.nativeEvent.isComposing) return;
+    const first = resultButtons()[0];
+    if (!first) return;
+    event.preventDefault();
+    first.focus();
+  }
+  function onResultKey(event: KeyboardEvent<HTMLOListElement>) {
+    const buttons = resultButtons();
+    const index = buttons.indexOf(event.target as HTMLButtonElement);
+    if (index < 0) return;
+    const target =
+      event.key === "ArrowDown"
+        ? buttons[Math.min(index + 1, buttons.length - 1)]
+        : event.key === "ArrowUp"
+          ? index === 0
+            ? input.current
+            : buttons[index - 1]
+          : event.key === "Home"
+            ? buttons[0]
+            : event.key === "End"
+              ? buttons[buttons.length - 1]
+              : undefined;
+    if (!target) return;
+    event.preventDefault();
+    target.focus();
+  }
+
   // Search pages stay local. Only matching cached versions can update them, so
   // locating/searching history cannot pollute the normal timeline or read cursor.
   const termLower = term.toLowerCase();
@@ -236,6 +325,7 @@ export function ConversationSearch({
           placeholder={mode === "files" ? "搜索文件名" : "搜索消息"}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={onInputKey}
         />
         <IconButton type="submit" label="搜索" disabled={!enabled}>
           {pending ? (
@@ -261,36 +351,42 @@ export function ConversationSearch({
             {mode === "files" ? "没有找到文件" : "没有找到消息"}
           </p>
         )}
-        <ol className="search-result-list" aria-label="搜索结果">
+        <ol
+          ref={list}
+          className="search-result-list"
+          aria-label="搜索结果"
+          onKeyDown={onResultKey}
+        >
           {messages.map((message) => {
+            const sent = formatDateTime(message.createdAt, "datetime");
             const forwarded = message.forwarded;
             const forwardedMatches = Boolean(
               forwarded?.body &&
                 forwarded.body.toLowerCase().includes(termLower),
             );
-            const ariaSummary =
-              message.body ||
-              (forwarded
-                ? `转发自 ${forwarded.senderName}：${forwarded.body}`
-                : "");
             return (
               <li key={message.id}>
                 <div className="search-result-meta">
                   <b>{message.senderName}</b>
                   {message.senderKind === "agent" && <AgentBadge />}
-                  <time dateTime={message.createdAt}>
-                    {date(message.createdAt)} {time(message.createdAt)}
+                  <time
+                    dateTime={message.createdAt}
+                    title={formatDateTime(message.createdAt, "full")}
+                  >
+                    {sent}
                   </time>
                 </div>
                 {mode === "messages" ? (
                   <button
+                    type="button"
+                    data-search-result=""
                     className="search-message-result"
                     onClick={() => onLocate(message.id)}
-                    aria-label={`定位消息：${ariaSummary}`}
+                    aria-label={`${message.senderName} · ${sent}`}
                   >
                     {(message.body || !forwardedMatches) && (
                       <span className="search-comment-snippet">
-                        <Highlight text={message.body} query={term} />
+                        <Snippet body={message.body} query={term} />
                       </span>
                     )}
                     {forwardedMatches && forwarded && (
@@ -298,7 +394,7 @@ export function ConversationSearch({
                         <span className="search-forwarded-label">
                           转发自 {forwarded.senderName}：
                         </span>
-                        <Highlight text={forwarded.body} query={term} />
+                        <Snippet body={forwarded.body} query={term} />
                       </span>
                     )}
                   </button>
@@ -310,6 +406,8 @@ export function ConversationSearch({
                 )}
                 {mode === "files" && (
                   <button
+                    type="button"
+                    data-search-result=""
                     className="search-source"
                     onClick={() => onLocate(message.id)}
                   >

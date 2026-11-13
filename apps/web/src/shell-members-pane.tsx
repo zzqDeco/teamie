@@ -129,7 +129,7 @@ export function ShellMembersPane({
             return (
             <div className="member-row" key={member.userId}>
               {member.kind === "agent" ? (
-                <AgentAvatar />
+                <AgentAvatar seed={member.userId} />
               ) : humanPresence ? (
                 <div className="avatar-with-presence">
                   <Avatar name={member.displayName} seed={member.userId} />

@@ -134,8 +134,11 @@ describe("reaction picker boundaries and portal interactions", () => {
     const buttons = menu.querySelectorAll("button");
     expect(document.activeElement).toBe(buttons[0]);
     buttons[0].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
-    expect(document.activeElement).toBe(buttons[7]);
-    buttons[7].dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true }));
+    // Wraps to the last entry, the 「更多表情」 button that opens the full panel.
+    const last = buttons[buttons.length - 1];
+    expect(document.activeElement).toBe(last);
+    expect(last.getAttribute("aria-label")).toBe("更多表情");
+    last.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true }));
     expect(document.activeElement).toBe(buttons[0]);
     buttons[0].dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     expect(document.activeElement).toBe(trigger);

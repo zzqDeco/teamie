@@ -3,12 +3,11 @@ import {
 } from "react";
 import type { DragEvent, FormEvent } from "react";
 import { ArrowDown, ArrowUp, LoaderCircle } from "lucide-react";
-import { api, defaultAttachmentLimits } from "@teamie/api-client";
+import { defaultAttachmentLimits } from "@teamie/api-client";
 import type { Conversation, Member, Mention, Message } from "@teamie/api-client";
 import { useAttachmentDraft } from "./attachments";
 import { useAuth } from "./auth";
 import { useChat, useChatState } from "./chat";
-import { errorText } from "./errors";
 import { chatStore, isUserMentioned, pinMessageId, reconcileMessages } from "./store";
 import type { LocalMessage } from "./store";
 import { projectReactionList } from "./reactions";
@@ -34,6 +33,11 @@ import { MessageComposer } from "./message-composer";
 import { useConversationReceiptsSync } from "./engagement-store";
 import { useConversationReadTracking } from "./chat/conversation-read-tracking";
 import { useConversationContextLoader } from "./chat/conversation-context-loader";
+import { useHistoryPaging } from "./chat/use-history-paging";
+import { JumpLatestButton, LocatedNewMessagesPill } from "./chat/timeline-pills";
+
+/** How long a located (deep-linked/searched) message stays highlighted. */
+export const LOCATED_HIGHLIGHT_MS = 2500;
 
 const noMessages: LocalMessage[] = [];
 const noMembers: Member[] = [];
@@ -261,62 +265,33 @@ export function ConversationView({
     lastReadRef: lastRead,
     setError,
   });
-  async function older() {
-    const boundary = historyBefore.current;
-    if (!boundary || boundary.generation !== chatStore.generation || loadingOlder) return;
-    const first = extendHistoryBoundary(boundary.seq, messages);
-    const token = chatStore.generation;
-    const reactionScope = chatStore.reactionScope(conversation.id);
-    const operation = navigation.current;
-    const height = scrollRef.current?.scrollHeight || 0;
-    setLoadingOlder(true);
-    setError("");
-    try {
-      const page = await api.messages(conversation.id, first);
-      if (token !== chatStore.generation || operation !== navigation.current || (reactionScope && !chatStore.reactionScopeCurrent(reactionScope))) return;
-      historyBefore.current = page.messages[0]
-        ? { seq: page.messages[0].seq, generation: token }
-        : null;
-      chatStore.ingestMessageReactions(page.messages, reactionScope);
-      if (located) setLocated((old) => (old ? reconcileMessages(old, page.messages) : old));
-      else chatStore.merge(page.messages);
-      setHasMore(page.hasMore);
-      requestAnimationFrame(() => {
-        if (token === chatStore.generation && operation === navigation.current && scrollRef.current)
-          scrollRef.current.scrollTop += scrollRef.current.scrollHeight - height;
-      });
-    } catch (e) {
-      if (token === chatStore.generation && operation === navigation.current) setError(errorText(e));
-    } finally {
-      if (token === chatStore.generation && operation === navigation.current) setLoadingOlder(false);
-    }
-  }
-  async function newer() {
-    if (!located || !unreadContext || loadingNewer || loadingOlder || locating) return;
-    const token = chatStore.generation;
-    const reactionScope = chatStore.reactionScope(conversation.id);
-    const operation = navigation.current;
-    const current = () =>
-      token === chatStore.generation &&
-      operation === navigation.current &&
-      chatStore.reactionScopeCurrent(reactionScope);
-    setLoadingNewer(true);
-    setError("");
-    try {
-      const page = await api.messagesAround(conversation.id, latest + 1);
-      if (!current()) return;
-      if (!page.messages.some((message) => message.seq > latest)) {
-        setError("后续消息暂未加载，请重试");
-        return;
-      }
-      chatStore.ingestMessageReactions(page.messages, reactionScope);
-      setLocated((old) => (old ? reconcileMessages(old, page.messages) : old));
-    } catch (e) {
-      if (current()) setError(errorText(e));
-    } finally {
-      if (current()) setLoadingNewer(false);
-    }
-  }
+  const { older, newer, sentinelRef } = useHistoryPaging({
+    conversation, messages, located, unreadContext, latest, hasMore, loading, locating,
+    loadingOlder, setLoadingOlder, loadingNewer, setLoadingNewer,
+    setHasMore, setLocated, setError,
+    historyBeforeRef: historyBefore, navigationRef: navigation,
+    initialScrollRef: initialScroll, scrollRef,
+  });
+  // The located highlight fades after ~2.5s of visibility; highlightId itself
+  // stays (it still drives focus restoration and the explicit read call).
+  const [fadedHighlight, setFadedHighlight] = useState("");
+  if (fadedHighlight && fadedHighlight !== highlightId) setFadedHighlight("");
+  useEffect(() => {
+    if (!highlightId || !visible) return;
+    const timer = setTimeout(() => setFadedHighlight(highlightId), LOCATED_HIGHLIGHT_MS);
+    return () => clearTimeout(timer);
+  }, [highlightId, visible]);
+  // New messages that reach the latest timeline while reading a located context.
+  const storeLatestSeq = allMessages.reduce((max, m) => (m.status ? max : Math.max(max, m.seq)), 0);
+  const [locatedBaseline, setLocatedBaseline] = useState<number | null>(null);
+  if (located && locatedBaseline === null) setLocatedBaseline(storeLatestSeq);
+  if (!located && locatedBaseline !== null) setLocatedBaseline(null);
+  const locatedNewCount =
+    located && locatedBaseline !== null
+      ? allMessages.filter(
+          (m) => !m.status && m.seq > locatedBaseline && m.senderId !== userId && !m.retractedAt,
+        ).length
+      : 0;
   const canEdit = !!data?.capabilities["im.message.edit"];
   const canRetract = !!data?.capabilities["im.message.retract"];
   const canReact = !!data?.capabilities["im.reactions.create"];
@@ -546,8 +521,9 @@ export function ConversationView({
               isWorkspaceOwner={isWorkspaceOwner} onInvite={onInvite}
             />
           )}
+          <div ref={sentinelRef} className="history-sentinel" aria-hidden="true" />
           {hasMore && (
-            <button className="load-earlier" onClick={older} disabled={loadingOlder || loadingNewer}>
+            <button className="load-earlier" onClick={() => void older()} disabled={loadingOlder || loadingNewer} aria-busy={loadingOlder}>
               {loadingOlder ? <LoaderCircle size={ICON.xs} className="spin" /> : <ArrowUp size={ICON.xs} />}{" "}
               加载更早的消息
             </button>
@@ -570,7 +546,7 @@ export function ConversationView({
             return (
               <MessageItem
                 key={message.id} message={message}
-                showDate={row.showDate} compact={row.compact}
+                showDate={row.showDate} compact={row.compact} showOwner={row.showOwner}
                 previousId={row.previousId} nextId={row.nextId} replyTarget={row.replyTarget}
                 workspaceId={conversation.workspaceId}
                 conversationId={conversation.id}
@@ -597,7 +573,7 @@ export function ConversationView({
                 senderReadSeq={message.senderId === userId ? readSeq : 0}
                 showUnreadDivider={message.id === firstUnread && (hasManualUnread || (entry?.readSeq ?? 0) > 0)}
                 isRovingTarget={message.id === rovingMessageId}
-                highlighted={highlightId === message.id}
+                highlighted={highlightId === message.id && fadedHighlight !== highlightId}
                 actionsOpen={actionMessageId === message.id}
                 editing={isEditing ? editing : null}
                 editBody={isEditing ? editBody : ""}
@@ -629,19 +605,18 @@ export function ConversationView({
         </div>
       </div>
       {!atBottom && !located && !locating && (
-        <button
-          className={`jump-latest${jumpUnreadCount > 0 ? " has-unread" : ""}${hasUnreadMention ? " has-mention" : ""}`}
-          onClick={() => {
+        <JumpLatestButton
+          unreadCount={jumpUnreadCount}
+          hasMention={hasUnreadMention}
+          onJump={() => {
             setLeftBottomSeq((prev) => Math.max(prev, readSeq, currentLastSeq));
             setAtBottom(true);
             scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
           }}
-        >
-          <ArrowDown size={ICON.xs} />
-          {jumpUnreadCount > 0
-            ? `${hasUnreadMention ? "@ " : ""}${jumpUnreadCount} 条新消息`
-            : "回到最新消息"}
-        </button>
+        />
+      )}
+      {located && !locating && locatedNewCount > 0 && (
+        <LocatedNewMessagesPill count={locatedNewCount} onReturn={returnToLatest} />
       )}
       <MessageComposer
         key={`${conversation.id}\u0000${draftEpoch}`} draftEpoch={draftEpoch}

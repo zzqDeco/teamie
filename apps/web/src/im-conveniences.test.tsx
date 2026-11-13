@@ -20,6 +20,8 @@ import { messageGrouping } from "./message-item";
 import { ConversationView } from "./messages";
 import { Shell } from "./shell";
 import { chatStore } from "./store";
+import { attachmentTransport } from "./chat/attachment-upload";
+import { clearAttachmentPreviews } from "./attachment-previews";
 
 const owner: User = {
   id: "owner",
@@ -283,6 +285,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
+  clearAttachmentPreviews();
   chatStore.clear();
   localStorage.clear();
   sessionStorage.clear();
@@ -295,7 +298,7 @@ afterEach(async () => {
 describe("PR-F IM conveniences", () => {
   it("1. uploads files pasted into the composer and files dragged/dropped onto .conversation-view", async () => {
     const upload = vi
-      .spyOn(api, "uploadAttachment")
+      .spyOn(attachmentTransport, "upload")
       .mockResolvedValueOnce({ attachment: rasterAttachment })
       .mockResolvedValueOnce({
         attachment: { ...rasterAttachment, id: "att-drop", filename: "dropped.png" },
@@ -424,10 +427,13 @@ describe("PR-F IM conveniences", () => {
     expect(dialog?.querySelector("h2")?.textContent).toBe("preview.png");
     expect(dialog?.textContent).toContain("下载原图");
 
-    // Unmounting revokes the object URL
+    // Unmounting keeps the loaded preview cached (no refetch/flicker when the
+    // row returns); clearing previews on logout/session change revokes it.
     await act(async () => {
       root.render(null);
     });
+    expect(revokeUrl).not.toHaveBeenCalledWith("blob:teamie-preview-url");
+    clearAttachmentPreviews();
     expect(revokeUrl).toHaveBeenCalledWith("blob:teamie-preview-url");
   });
 
@@ -581,7 +587,7 @@ describe("PR-F IM conveniences", () => {
     expect(document.activeElement).toBe(trigger);
   });
 
-  it("starts previews near the viewport, aborts them on exit, and releases rendered images", async () => {
+  it("starts previews near the viewport, aborts unfinished loads far off-screen, and keeps finished ones cached", async () => {
     const observed: Element[] = [];
     let callback!: IntersectionObserverCallback;
     let observer!: IntersectionObserver;
@@ -602,10 +608,15 @@ describe("PR-F IM conveniences", () => {
     await intersect(true); await flush(); expect(host.querySelector(".attachment-thumbnail")).not.toBeNull();
     await act(async () => host.querySelector<HTMLButtonElement>(".attachment-thumbnail-button")!.click());
     expect(host.querySelector('[role="dialog"]')).not.toBeNull();
-    await intersect(false); expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:viewport");
+    // Far off-screen: the rendered image and lightbox go away, but the loaded
+    // blob stays cached, so coming back shows it again without a refetch.
+    await intersect(false); expect(URL.revokeObjectURL).not.toHaveBeenCalledWith("blob:viewport");
     expect(host.querySelector(".attachment-thumbnail")).toBeNull();
     expect(host.querySelector('[role="dialog"]')).toBeNull();
+    const requests = request.mock.calls.length;
     await intersect(true); await flush();
+    expect(request.mock.calls.length).toBe(requests);
+    expect(host.querySelector(".attachment-thumbnail")?.getAttribute("src")).toBe("blob:viewport");
     expect(host.querySelector('[role="dialog"]')).toBeNull();
   });
 });

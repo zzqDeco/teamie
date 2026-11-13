@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { api, ApiError } from "@teamie/api-client";
-import { clearAttachmentPreviews, subscribeAttachmentPreview } from "./attachment-previews";
+import {
+  clearAttachmentPreviews,
+  retainedPreviewCount,
+  subscribeAttachmentPreview,
+  subscribeAttachmentThumbnail,
+} from "./attachment-previews";
 const releases: (() => void)[] = [];
 const blob = new Blob(["png"], { type: "image/png" });
 const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
@@ -68,12 +73,44 @@ it("cancels queued and active work on navigation and ignores a late old-session 
   expect(queued).not.toHaveBeenCalledWith({ url: expect.any(String) });
   expect(next).toHaveBeenLastCalledWith({ url: expect.any(String) });
 });
-it("revokes a shared URL only after its last consumer leaves, and never caches it across sessions", async () => {
+it("keeps a loaded URL cached after its last consumer leaves, reuses it without refetching, and never across sessions", async () => {
   const request = vi.spyOn(api, "attachmentContent").mockResolvedValue(blob);
   const first = subscribeAttachmentPreview("c", "i", vi.fn());
   const second = subscribeAttachmentPreview("c", "i", vi.fn());
-  await flush(); first(); expect(URL.revokeObjectURL).not.toHaveBeenCalled();
-  second(); expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1);
+  await flush(); first(); second();
+  // Scrolling away/unmounting must not revoke or refetch (no flicker on return).
+  expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+  expect(retainedPreviewCount()).toBe(1);
+  const again = vi.fn();
+  releases.push(subscribeAttachmentPreview("c", "i", again)); await flush();
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(again).toHaveBeenLastCalledWith({ url: "blob:preview-1" });
+  // Another session never sees the cached blob.
+  api.csrfToken = "session-b";
   releases.push(subscribeAttachmentPreview("c", "i", vi.fn())); await flush();
   expect(request).toHaveBeenCalledTimes(2);
+  clearAttachmentPreviews();
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:preview-1");
+});
+it("evicts the least recently used cached thumbnails beyond the retention limit", async () => {
+  vi.spyOn(api, "attachmentThumbnail").mockResolvedValue(blob);
+  for (let i = 0; i < 100; i++) {
+    const release = subscribeAttachmentThumbnail("c", `t-${i}`, "image/png", vi.fn());
+    await flush();
+    release();
+  }
+  expect(retainedPreviewCount()).toBe(96);
+  expect(URL.revokeObjectURL).toHaveBeenCalledTimes(4);
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:preview-1");
+});
+it("does not cache a load that was abandoned before it finished", async () => {
+  let complete!: (b: Blob) => void;
+  vi.spyOn(api, "attachmentContent").mockImplementation(
+    (_c, _i, signal) => new Promise<Blob>((resolve) => { complete = resolve; void signal; }),
+  );
+  const release = subscribeAttachmentPreview("c", "slow", vi.fn());
+  release();
+  complete(blob); await flush();
+  expect(retainedPreviewCount()).toBe(0);
+  expect(URL.createObjectURL).not.toHaveBeenCalled();
 });

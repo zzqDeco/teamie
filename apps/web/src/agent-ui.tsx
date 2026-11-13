@@ -23,16 +23,32 @@ export function AgentBadge({
     </span>
   );
 }
+/** Token palette classes shared with `Avatar` (see primitives.css). */
+const AGENT_TONES = ["lilac", "mint", "peach", "blue", "rose"] as const;
+
+/** Deterministic FNV-1a 32-bit hash of an Agent ID, mapped onto the token palette. */
+export function agentTone(seed: string): (typeof AGENT_TONES)[number] {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < seed.length; i++) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return AGENT_TONES[hash % AGENT_TONES.length];
+}
+
 export function AgentAvatar({
   size = "",
   disabled = false,
+  seed = "",
 }: {
   size?: "small" | "large" | "";
   disabled?: boolean;
+  /** Agent ID; distinct Agents get distinct, stable colours. */
+  seed?: string;
 }) {
   return (
     <span
-      className={`avatar agent-avatar ${size} ${disabled ? "disabled" : ""}`}
+      className={`avatar agent-avatar ${size} ${seed ? agentTone(seed) : ""} ${disabled ? "disabled" : ""}`}
       aria-hidden="true"
     >
       <Bot

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactNode, RefObject } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -8,6 +8,7 @@ import {
   ChevronDown,
   Hash,
   Megaphone,
+  PencilLine,
   Plus,
   Search,
   Users,
@@ -27,6 +28,7 @@ import { ConversationActions } from "./conversation-actions";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
 import type { DialogKind } from "./dialogs";
 import { conversationName } from "./messages";
+import { readDraftPresence, subscribeDraftPresence } from "./composer-drafts";
 import { chatStore } from "./store";
 import { conversationUnreadSummary, UnreadBadge } from "./unread-badge";
 import type { ChatSnapshot } from "./store";
@@ -91,6 +93,9 @@ function ConversationItem({
       ? otherMember.userId
       : undefined;
   const presenceState = useUserPresence(otherHumanId, !!presenceEnabled);
+  const hasDraft = useSyncExternalStore(subscribeDraftPresence, readDraftPresence).has(
+    conversation.id,
+  );
   return (
     <Link
       to={route(conversation)}
@@ -105,7 +110,7 @@ function ConversationItem({
           <Users size={ICON.sm} />
         </span>
       ) : otherMember?.kind === "agent" ? (
-        <AgentAvatar size="small" />
+        <AgentAvatar size="small" seed={otherMember.userId} />
       ) : presenceEnabled && otherHumanId ? (
         <div className="avatar-with-presence">
           <Avatar
@@ -129,6 +134,12 @@ function ConversationItem({
       <span>{conversationName(conversation, user!.id, members)}</span>
       {conversation.type === "direct" && otherMember?.kind === "agent" && (
         <AgentBadge compact ownerName={otherMember.ownerName} />
+      )}
+      {hasDraft && !selected && (
+        <span className="conversation-draft-marker" title="有未发送的草稿">
+          <PencilLine size={ICON.xs} aria-hidden="true" />
+          草稿
+        </span>
       )}
       <UnreadBadge summary={summary} conversationType={conversation.type} />
     </Link>

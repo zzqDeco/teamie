@@ -68,6 +68,22 @@
     color: var(--text-muted);
     line-height: 1.4;
   }
+  .attachment-progress {
+    display: block;
+    width: 100%;
+    min-width: 120px;
+    height: 4px;
+    border-radius: var(--r-pill);
+    background: var(--border);
+    overflow: hidden;
+  }
+  .attachment-progress > span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--brand);
+    transition: width 0.2s ease;
+  }
   .attachment-draft.failed {
     border-color: var(--danger-border);
   }

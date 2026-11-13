@@ -7,7 +7,6 @@ import {
   BellOff,
   Blocks,
   Check,
-  CheckCheck,
   Hash,
   MessageCircle,
   RefreshCw,
@@ -26,10 +25,8 @@ import { errorText } from "../errors";
 import { chatStore, effectiveNotificationLevel } from "../store";
 import type { LocalMessage } from "../store";
 import {
-  computeMessageReadSummary,
   formatPresenceLabel,
   presenceClassName,
-  useConversationReceipts,
   useUserPresence,
 } from "../engagement-store";
 import { trimMentionDraft } from "../mentions";
@@ -40,6 +37,9 @@ import { toast } from "../toast";
 import { AgentAvailability } from "../agent-ui";
 import type { Participant } from "../participants";
 import { MobileNavButton } from "../shell/page-header";
+import { handleRovingKeys } from "./roving-keys";
+import { messagePreviewText } from "./plain-preview";
+import { sameLocalDay } from "../format-datetime";
 export function useMessageActions(conversationId: string) {
   const editPending = useRef(false);
   const [actionMessageId, setActionMessageId] = useState("");
@@ -149,10 +149,7 @@ export function messageLink(
   return `${window.location.origin}/app/w/${encodeURIComponent(workspaceId)}/c/${encodeURIComponent(conversationId)}?message=${encodeURIComponent(messageId)}`;
 }
 
-export async function copyToClipboard(text: string) {
-  if (!navigator.clipboard?.writeText) throw new Error("clipboard unavailable");
-  await navigator.clipboard.writeText(text);
-}
+export { copyToClipboard } from "../clipboard";
 
 export function discardFailedMessage(conversationId: string, message: LocalMessage) {
   for (const attachment of message.attachments || []) {
@@ -254,8 +251,13 @@ export function ConversationHeader({
       if (event.key === "Escape") {
         event.stopPropagation();
         setNotifOpen(false);
+        notifWrapRef.current?.querySelector<HTMLElement>("[aria-haspopup]")?.focus({ preventScroll: true });
       }
     };
+    // Focus the checked level so arrow keys start from the current choice.
+    notifWrapRef.current
+      ?.querySelector<HTMLElement>('[role="menuitemradio"][aria-checked="true"]')
+      ?.focus({ preventScroll: true });
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown, true);
     return () => {
@@ -349,6 +351,9 @@ export function ConversationHeader({
                 className="notification-level-menu"
                 role="menu"
                 aria-label="会话通知级别"
+                onKeyDown={(event) => {
+                  handleRovingKeys(event, '[role="menuitemradio"]');
+                }}
               >
                 {NOTIFICATION_LEVEL_OPTIONS.map((option) => {
                   const active = level === option.value;
@@ -526,7 +531,7 @@ export function RetractMessageModal({
       subtitle="撤回后，所有人都会看到一条撤回提示。"
       onClose={onClose}
     >
-      <blockquote className="retract-quote">{retracting.body}</blockquote>
+      <blockquote className="retract-quote">{messagePreviewText(retracting)}</blockquote>
       <Notice>{actionError}</Notice>
       <div className="modal-actions">
         <Button className="secondary" onClick={onClose}>
@@ -546,10 +551,7 @@ export function messageGrouping(
   previous: LocalMessage | undefined,
   showUnreadDivider = false,
 ) {
-  const showDate =
-    !previous ||
-    new Date(previous.createdAt).toDateString() !==
-      new Date(message.createdAt).toDateString();
+  const showDate = !previous || !sameLocalDay(previous.createdAt, message.createdAt);
   const compact =
     !showDate &&
     !showUnreadDivider &&
@@ -559,138 +561,14 @@ export function messageGrouping(
       5 * 60_000 &&
     !message.replyToId &&
     !previous.retractedAt;
-  return { showDate, compact };
+  // Agent ownership text appears once per run of the same sender, not on
+  // every time-split group head (it stays in the badge tooltip).
+  const showOwner = !previous || previous.senderId !== message.senderId;
+  return { showDate, compact, showOwner };
 }
 
 export const emptyMembers: Member[] = [];
 
-export function OwnMessageReadReceipt({
-  conversationId,
-  conversationType,
-  seq,
-  userId,
-  senderReadSeq,
-  allMembers,
-  isLatestOwn,
-}: {
-  conversationId: string;
-  conversationType: Conversation["type"];
-  seq: number;
-  userId: string;
-  senderReadSeq: number;
-  allMembers: Member[];
-  isLatestOwn: boolean;
-}) {
-  const receipts = useConversationReceipts(conversationId, true);
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const summary = computeMessageReadSummary({
-    receipts,
-    seq,
-    senderId: userId,
-    senderReadSeq,
-    conversationType,
-    members: allMembers,
-  });
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (
-        event.target instanceof Node &&
-        !wrapRef.current?.contains(event.target)
-      ) {
-        setOpen(false);
-      }
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        setOpen(false);
-      }
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown, true);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown, true);
-    };
-  }, [open]);
-
-  if (!summary || !summary.label) return null;
-
-  const visibilityClass = isLatestOwn ? "persistent" : "on-hover";
-  const statusClass = summary.readCount > 0 ? "is-read" : "is-unread";
-
-  if (conversationType === "group") {
-    return (
-      <div
-        className={`message-read-receipt-wrap ${visibilityClass}`}
-        ref={wrapRef}
-      >
-        <button
-          type="button"
-          className={`message-read-receipt is-interactive ${statusClass}`}
-          aria-expanded={open}
-          aria-label={`已读回执：${summary.label}`}
-          onClick={() => setOpen((current) => !current)}
-        >
-          {summary.readCount > 0 ? (
-            <CheckCheck size={ICON.xs} aria-hidden="true" />
-          ) : (
-            <Check size={ICON.xs} aria-hidden="true" />
-          )}
-          {summary.label}
-        </button>
-        {open && (
-          <div
-            className="read-receipt-popover"
-            role="dialog"
-            aria-label="群聊已读详情"
-          >
-            <div className="read-receipt-section">
-              <b>已读 ({summary.readMembers.length})</b>
-              {summary.readMembers.length > 0 ? (
-                <ul>
-                  {summary.readMembers.map((member) => (
-                    <li key={member.userId}>{member.displayName}</li>
-                  ))}
-                </ul>
-              ) : (
-                <span>暂无成员已读</span>
-              )}
-            </div>
-            <div className="read-receipt-section">
-              <b>未读 ({summary.unreadMembers.length})</b>
-              {summary.unreadMembers.length > 0 ? (
-                <ul>
-                  {summary.unreadMembers.map((member) => (
-                    <li key={member.userId}>{member.displayName}</li>
-                  ))}
-                </ul>
-              ) : (
-                <span>全部成员已读</span>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <span
-      className={`message-read-receipt ${visibilityClass} ${statusClass}`}
-      aria-label={`已读状态：${summary.label}`}
-    >
-      {summary.readCount > 0 ? (
-        <CheckCheck size={ICON.xs} aria-hidden="true" />
-      ) : (
-        <Check size={ICON.xs} aria-hidden="true" />
-      )}
-      {summary.label}
-    </span>
-  );
-}
+export { OwnMessageReadReceipt } from "./read-receipts";
 
 // Memoized: rows receive only primitives and referentially stable values, so a

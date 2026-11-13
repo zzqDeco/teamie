@@ -24,6 +24,7 @@ import {
   readAttachmentDraft,
 } from "./attachment-drafts";
 import type { Message, SyncPage } from "@teamie/api-client";
+import { attachmentTransport } from "./chat/attachment-upload";
 
 const descriptor: Attachment = {
   id: "file-1",
@@ -86,7 +87,7 @@ afterEach(async () => {
 describe("conversation file drafts", () => {
   it("queues multiple uploads, removes pending files and consumes only descriptors for a file-only send", async () => {
     const upload = vi
-      .spyOn(api, "uploadAttachment")
+      .spyOn(attachmentTransport, "upload")
       .mockResolvedValueOnce({ attachment: descriptor })
       .mockResolvedValueOnce({
         attachment: { ...descriptor, id: "file-2", filename: "second.bin" },
@@ -121,7 +122,7 @@ describe("conversation file drafts", () => {
   });
   it("retains a failed upload for retry and rejects oversized or excessive files before transmission", async () => {
     const upload = vi
-      .spyOn(api, "uploadAttachment")
+      .spyOn(attachmentTransport, "upload")
       .mockRejectedValueOnce(new ApiError(429, "attachment_busy", "busy"))
       .mockResolvedValue({ attachment: descriptor });
     vi.spyOn(api, "deletePendingAttachment").mockResolvedValue(undefined);
@@ -160,7 +161,7 @@ describe("conversation file drafts", () => {
     );
   });
   it("keeps uploaded files across conversation switches and deep-link remounts without deleting them", async () => {
-    vi.spyOn(api, "uploadAttachment").mockResolvedValue({ attachment: descriptor });
+    vi.spyOn(attachmentTransport, "upload").mockResolvedValue({ attachment: descriptor });
     const remove = vi
       .spyOn(api, "deletePendingAttachment")
       .mockResolvedValue(undefined);
@@ -183,7 +184,7 @@ describe("conversation file drafts", () => {
   });
   it("finishes an upload after unmount and shows its result on return", async () => {
     let finish!: (value: { attachment: Attachment }) => void;
-    const upload = vi.spyOn(api, "uploadAttachment").mockImplementation(
+    const upload = vi.spyOn(attachmentTransport, "upload").mockImplementation(
       () =>
         new Promise((resolve) => {
           finish = resolve;
@@ -211,7 +212,7 @@ describe("conversation file drafts", () => {
     expect(host.textContent).toContain("已就绪");
   });
   it("send consumes drafts without deleting the linked files", async () => {
-    vi.spyOn(api, "uploadAttachment").mockResolvedValue({ attachment: descriptor });
+    vi.spyOn(attachmentTransport, "upload").mockResolvedValue({ attachment: descriptor });
     const remove = vi
       .spyOn(api, "deletePendingAttachment")
       .mockResolvedValue(undefined);
@@ -230,7 +231,7 @@ describe("conversation file drafts", () => {
   });
   it("logout deletes ready uploads, aborts in-flight ones and clears every draft", async () => {
     const upload = vi
-      .spyOn(api, "uploadAttachment")
+      .spyOn(attachmentTransport, "upload")
       .mockResolvedValueOnce({ attachment: descriptor })
       .mockImplementationOnce(() => new Promise(() => {}));
     const remove = vi
@@ -254,7 +255,7 @@ describe("conversation file drafts", () => {
     expect(draft.files).toEqual([]);
   });
   it("clears drafts on account switch without cross-account requests and prunes revoked conversations", async () => {
-    vi.spyOn(api, "uploadAttachment").mockResolvedValue({ attachment: descriptor });
+    vi.spyOn(attachmentTransport, "upload").mockResolvedValue({ attachment: descriptor });
     const remove = vi
       .spyOn(api, "deletePendingAttachment")
       .mockResolvedValue(undefined);
@@ -294,7 +295,7 @@ describe("conversation file drafts", () => {
     expect(remove).toHaveBeenCalledExactlyOnceWith("revoked", descriptor.id);
   });
   it("drops ready drafts whose pending upload has expired server-side", async () => {
-    vi.spyOn(api, "uploadAttachment").mockResolvedValue({ attachment: descriptor });
+    vi.spyOn(attachmentTransport, "upload").mockResolvedValue({ attachment: descriptor });
     await mount();
     await act(async () => {
       draft.add([new File(["abc"], "old.bin")]);

@@ -27,6 +27,13 @@ import {
 import { useTypingUsers } from "./typing-store";
 import { IconButton } from "./ui";
 import { ICON } from "./icons";
+import { toast } from "./toast";
+import { prefersEnterToSend } from "./chat/keyboard-source";
+import { messagePreviewText } from "./chat/plain-preview";
+
+/** Contract: message text max 8000 characters. */
+export const MESSAGE_MAX_CHARS = 8000;
+const COUNTER_FROM = 7600;
 
 export function MessageComposer({
   conversation,
@@ -105,6 +112,8 @@ export function MessageComposer({
     setDraft({ body: stored.body, mentions: stored.mentions, revision: textRevision });
   }
   const { body, mentions } = draft;
+  const trimmedLength = trimMentionDraft(body, mentions).body.length;
+  const overLimit = trimmedLength > MESSAGE_MAX_CHARS;
 
   function changeDraft(value: string, nextMentions: Mention[]) {
     setDraft({ body: value, mentions: nextMentions, revision: textRevision });
@@ -134,7 +143,7 @@ export function MessageComposer({
     const text = trimmed.body;
     if (
       (!text && !attachments.ready) ||
-      text.length > 8000 ||
+      text.length > MESSAGE_MAX_CHARS ||
       attachmentBlocked
     )
       return;
@@ -203,11 +212,9 @@ export function MessageComposer({
       }
       return;
     }
-    if (
-      !window.matchMedia("(pointer: coarse)").matches &&
-      event.key === "Enter" &&
-      !event.shiftKey
-    ) {
+    // Enter sends with a hardware keyboard (incl. iPad keyboards); the
+    // on-screen keyboard inserts a newline; Cmd/Ctrl+Enter always sends.
+    if (event.key === "Enter" && prefersEnterToSend(event)) {
       event.preventDefault();
       submit();
     }
@@ -235,7 +242,7 @@ export function MessageComposer({
               {reply?.retractedAt
                 ? "消息已撤回"
                 : reply
-                  ? reply.body || `${reply.attachments?.length || 0} 个文件`
+                  ? messagePreviewText(reply, "原消息")
                   : replyError || "正在加载原消息…"}
             </span>
           </div>
@@ -276,13 +283,14 @@ export function MessageComposer({
               lastTyping.current = Date.now();
             }
           }}
+          currentUserId={user.id}
           onKeyDown={keyDown}
           onPaste={(event) => {
             const files = event.clipboardData?.files;
-            if (uploadsEnabled && files && files.length > 0) {
-              event.preventDefault();
-              attachments.add(Array.from(files));
-            }
+            if (!files || files.length === 0) return;
+            event.preventDefault();
+            if (uploadsEnabled) attachments.add(Array.from(files));
+            else toast.error("文件上传已关闭，无法粘贴文件");
           }}
           placeholder={
             conversation.type === "channel"
@@ -301,15 +309,23 @@ export function MessageComposer({
               limit={attachmentLimits.maxFileBytes}
             />
           )}
-          {body.length > 7600 && (
-            <span className="character-count">{body.length}/8000</span>
+          {trimmedLength > COUNTER_FROM && (
+            <span
+              id={`composer-count-${conversation.id}`}
+              className={`character-count ${overLimit ? "over-limit" : ""}`}
+              role={overLimit ? "alert" : undefined}
+            >
+              {trimmedLength}/{MESSAGE_MAX_CHARS}
+              {overLimit && <span className="sr-only">，超出 {MESSAGE_MAX_CHARS} 字上限</span>}
+            </span>
           )}
           <button
             className="send-button"
             type="submit"
             disabled={
-              (!body.trim() && !attachments.ready) || attachmentBlocked
+              (!body.trim() && !attachments.ready) || attachmentBlocked || overLimit
             }
+            aria-describedby={overLimit ? `composer-count-${conversation.id}` : undefined}
             aria-label="发送消息"
             title="发送消息"
           >
