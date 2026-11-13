@@ -46,7 +46,7 @@ export function ConversationActions({
           {canDirect && (
             <button onClick={() => select("direct")}>
               <MessageSquarePlus size={ICON.md} aria-hidden="true" />
-              发起私聊
+              发起私信
             </button>
           )}
           {canGroup && (

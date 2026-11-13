@@ -10,6 +10,7 @@ import { errorText } from "../errors";
 import { BadgePill, Button, Modal, ModalCloseButton, Notice } from "../ui";
 import { toast } from "../toast";
 import { ICON } from "../icons";
+import { formatDateTime } from "../format-datetime";
 import { probeStageLabel, reviewActionLabel } from "./marketplace-labels";
 
 export function AdminReviewModal({
@@ -214,8 +215,7 @@ export function AdminReviewModal({
                 {!app.adminSuspended && app.reviewStatus !== "suspended" ? (
                   <Button
                     type="button"
-                    variant="secondary"
-                    className="danger-text"
+                    variant="danger"
                     busy={busyAction === "suspend"}
                     disabled={!note.trim()}
                     onClick={() =>
@@ -256,7 +256,7 @@ export function AdminReviewModal({
                   {reviews.map((item) => (
                     <li key={item.id} className="dev-timeline-item">
                       <b>{reviewActionLabel(item.action)}</b> ·{" "}
-                      <small>{new Date(item.createdAt).toLocaleString("zh-CN")}</small>
+                      <small>{formatDateTime(item.createdAt, "stamp")}</small>
                       {item.note && <p className="field-help">{item.note}</p>}
                     </li>
                   ))}

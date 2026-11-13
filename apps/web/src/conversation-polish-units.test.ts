@@ -109,7 +109,15 @@ describe("Agent identity", () => {
     expect(agentTone("agent-1")).toBe(agentTone("agent-1"));
     const tones = new Set(["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"].map((id) => agentTone(`agent-${id}`)));
     expect(tones.size).toBeGreaterThan(2);
-    for (const tone of tones) expect(["lilac", "mint", "peach", "blue", "rose"]).toContain(tone);
+    for (const tone of tones)
+      expect([
+        "avatar-tone-1",
+        "avatar-tone-2",
+        "avatar-tone-3",
+        "avatar-tone-4",
+        "avatar-tone-5",
+        "avatar-tone-6",
+      ]).toContain(tone);
   });
 });
 

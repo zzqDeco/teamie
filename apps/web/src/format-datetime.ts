@@ -14,7 +14,9 @@ export type DateTimeKind =
   | "datetime"
   /** Short date: 11月2日 / 2025年11月2日 */
   | "date"
-  /** Unambiguous tooltip: 2026年11月2日 星期一 10:35 */
+  /** Absolute date + 24h time for expiry & audit stamps: 2026年11月2日 10:35 */
+  | "stamp"
+  /** Unambiguous tooltip: 2026年11月2日星期一 10:35 */
   | "full";
 
 const formatters = new Map<string, Intl.DateTimeFormat>();
@@ -72,6 +74,13 @@ export function formatDateTime(
   switch (kind) {
     case "time":
       return formatter(TIME).format(value);
+    case "stamp":
+      return formatter({
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+        ...TIME,
+      }).format(value);
     case "full":
       return formatter({
         year: "numeric",

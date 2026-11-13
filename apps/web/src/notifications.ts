@@ -305,7 +305,7 @@ export function notifySyncedMessages(
           ? "在消息中提及了你"
           : isReplyToMe
             ? "回复了你的消息"
-            : conversation.type === "group" ? "发来一条新群聊消息" : "发来一条新私信";
+            : conversation.type === "group" ? "发来一条新小组消息" : "发来一条新私信";
     const previewText = message.body
       ? message.body.length > 120
         ? `${message.body.slice(0, 120)}…`

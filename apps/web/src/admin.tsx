@@ -20,6 +20,7 @@ import type {
 } from "@teamie/api-client";
 import { useAuth } from "./auth";
 import { errorText } from "./errors";
+import { formatDateTime } from "./format-datetime";
 import { Button, ConfirmDialog, EmptyState, IconButton, Notice } from "./ui";
 import { toast } from "./toast";
 import { ICON } from "./icons";
@@ -38,14 +39,7 @@ const statusLabels: Record<InviteStatus, string> = {
   revoked: "已撤销",
   expired: "已过期",
 };
-const formatDate = (value: string) =>
-  new Date(value).toLocaleString("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
+const formatDate = (value: string) => formatDateTime(value, "datetime");
 export function PlatformInvitations() {
   const { user } = useAuth();
   const client = useQueryClient();
@@ -234,8 +228,7 @@ export function PlatformInvitations() {
           </label>
           <div className="created-invite-footer">
             <small>
-              有效期至{" "}
-              {new Date(created.invite.expiresAt).toLocaleString("zh-CN")}
+              有效期至 {formatDateTime(created.invite.expiresAt, "stamp")}
             </small>
             <button
               onClick={() => {

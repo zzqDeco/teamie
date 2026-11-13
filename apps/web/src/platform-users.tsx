@@ -6,7 +6,16 @@ import { CheckCheck, Copy, KeyRound, LoaderCircle, Search, ShieldCheck, Users } 
 import { api, ApiError } from "@teamie/api-client";
 import type { CreatedPasswordResetLink, User } from "@teamie/api-client";
 import { useAuth } from "./auth";
-import { Avatar, Button, DataList, EmptyState, Modal, Notice } from "./ui";
+import { formatDateTime } from "./format-datetime";
+import {
+  Avatar,
+  Button,
+  DataList,
+  EmptyState,
+  Modal,
+  ModalCloseButton,
+  Notice,
+} from "./ui";
 import { ICON } from "./icons";
 
 type SessionScope = ReturnType<ReturnType<typeof useAuth>["captureSession"]>;
@@ -141,13 +150,13 @@ function AdminUsers({ user }: { user: User }) {
       </div>
       <form className="platform-user-search" onSubmit={search} role="search">
         <label><Search size={ICON.md} aria-hidden="true" /><span className="sr-only">搜索用户名称或邮箱</span><input type="search" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="搜索名称或邮箱" maxLength={200} /></label>
-        <Button type="submit" className="secondary">搜索</Button>
+        <Button type="submit" variant="secondary">搜索</Button>
       </form>
       <section className="platform-user-list" aria-label="平台用户">
         {query.isPending ? (
           <div className="admin-empty" role="status"><LoaderCircle className="spin" size={ICON.lg} /><p>正在加载用户…</p></div>
         ) : query.isError ? (
-          <div className="admin-empty" role="alert"><Notice>用户加载失败，请重新加载。</Notice><Button className="secondary" onClick={() => void query.refetch()}>重新加载</Button></div>
+          <div className="admin-empty" role="alert"><Notice>用户加载失败，请重新加载。</Notice><Button variant="secondary" onClick={() => void query.refetch()}>重新加载</Button></div>
         ) : users.length === 0 ? (
           <EmptyState
             icon={<Users size={ICON.xl} />}
@@ -158,7 +167,7 @@ function AdminUsers({ user }: { user: User }) {
           <DataList>{users.map((account) => (
             <li key={account.id} className="platform-user-row">
               <div className="platform-user-identity"><Avatar name={account.displayName} seed={account.id} /><div><b>{account.displayName}{account.id === user.id && <small>你</small>}</b><span>{account.email}</span></div></div>
-              <div className="platform-user-actions"><span className="platform-user-role">{account.platformRole === "admin" ? "管理员" : "用户"}</span><Button className="secondary" aria-label={`为 ${account.displayName} 重置密码`} onClick={() => {
+              <div className="platform-user-actions"><span className="platform-user-role">{account.platformRole === "admin" ? "管理员" : "用户"}</span><Button variant="secondary" aria-label={`为 ${account.displayName} 重置密码`} onClick={() => {
                 requestSequence.current += 1;
                 setDialog({ account, scope: captureSession(), busy: false, created: null, copied: false, error: "" });
               }}><KeyRound size={ICON.xs} />重置密码</Button></div>
@@ -166,10 +175,10 @@ function AdminUsers({ user }: { user: User }) {
           ))}</DataList>
         )}
       </section>
-      {(pages.length > 0 || query.data?.cursor) && <nav className="platform-users-pagination" aria-label="用户列表分页"><Button className="secondary" disabled={!pages.length || query.isFetching} onClick={() => setPages((value) => value.slice(0, -1))}>上一页</Button><span>第 {pages.length + 1} 页</span><Button className="secondary" disabled={!query.data?.cursor || query.isFetching} onClick={() => { if (query.data?.cursor) setPages((value) => [...value, query.data!.cursor!]); }}>下一页</Button></nav>}
+      {(pages.length > 0 || query.data?.cursor) && <nav className="platform-users-pagination" aria-label="用户列表分页"><Button variant="secondary" disabled={!pages.length || query.isFetching} onClick={() => setPages((value) => value.slice(0, -1))}>上一页</Button><span>第 {pages.length + 1} 页</span><Button variant="secondary" disabled={!query.data?.cursor || query.isFetching} onClick={() => { if (query.data?.cursor) setPages((value) => [...value, query.data!.cursor!]); }}>下一页</Button></nav>}
       <p className="admin-footnote"><KeyRound size={ICON.xs} />链接 1 小时内有效。生成新链接会使该用户此前未使用的链接失效。</p>
       {currentDialog && (
-        <Modal title={currentDialog.created ? expired ? "重置链接已过期" : "重置链接已生成" : "生成密码重置链接"} subtitle="请先核实用户身份，再将链接私下交给本人。" onClose={close}>
+        <Modal title={currentDialog.created ? expired ? "重置链接已过期" : "重置链接已生成" : "生成密码重置链接"} subtitle="请先核实用户身份，再将链接私下交给本人。" busy={currentDialog.busy} onClose={close}>
           <div className="reset-target"><Avatar name={currentDialog.account.displayName} seed={currentDialog.account.id} /><div><b>{currentDialog.account.displayName}</b><span>{currentDialog.account.email}</span></div></div>
           <Notice>{currentDialog.error}</Notice>
           {currentDialog.created ? expired ? (
@@ -177,13 +186,13 @@ function AdminUsers({ user }: { user: User }) {
           ) : (
             <div className="created-reset-link">
               <label>一次性重置链接<div className="copy-input"><input aria-label="一次性重置链接" value={link} readOnly onFocus={(event) => event.target.select()} /><button aria-label="复制重置链接" onClick={() => void copy(link)}>{currentDialog.copied ? <CheckCheck size={ICON.md} /> : <Copy size={ICON.md} />}</button></div></label>
-              <small>有效期至 {new Date(currentDialog.created.reset.expiresAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })} · 仅显示这一次</small>
+              <small>有效期至 {formatDateTime(currentDialog.created.reset.expiresAt, "stamp")} · 仅显示这一次</small>
               {currentDialog.copied && <Notice kind="success">链接已复制。</Notice>}
             </div>
           ) : <p className="reset-dialog-help">链接有效期为 1 小时，仅可使用一次。生成后，用户此前未使用的重置链接立即失效。</p>}
           <p className="reset-dialog-help">用户完成重置后，原有登录会话将失效。密码不会展示给管理员。</p>
           <div className="modal-actions">
-            <Button className="secondary" onClick={close}>{currentDialog.created ? "关闭" : "取消"}</Button>
+            <ModalCloseButton>{currentDialog.created ? "关闭" : "取消"}</ModalCloseButton>
             <Button busy={currentDialog.busy} onClick={() => void generate()}>{currentDialog.created ? "重新生成链接" : "生成重置链接"}</Button>
           </div>
         </Modal>

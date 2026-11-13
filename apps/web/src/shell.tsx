@@ -51,12 +51,13 @@ import {
   useShellKeyboardShortcuts,
   writePersistedShellNav,
 } from "./shell/shell-hooks";
+import { MAX_WIDTH_QUERY } from "./breakpoints";
 export { parseInviteCode, clearPersistedShellNav };
 
 export function Shell() {
   const { user, logout } = useAuth();
-  const mobile = useMediaQuery("(max-width: 780px)");
-  const overlayMembers = useMediaQuery("(max-width: 1250px)");
+  const mobile = useMediaQuery(MAX_WIDTH_QUERY.md);
+  const overlayMembers = useMediaQuery(MAX_WIDTH_QUERY.lg);
   const navigationRef = useRef<HTMLDivElement>(null);
   const membersRef = useRef<HTMLElement>(null);
   const chat = useChat(),
@@ -413,7 +414,7 @@ export function Shell() {
         <Logo />
         <Notice>{chat.error}</Notice>
         <Button onClick={() => void chat.refresh()}>重新连接</Button>
-        <Button className="secondary" onClick={signOut} busy={busy}>
+        <Button variant="secondary" onClick={signOut} busy={busy}>
           退出登录
         </Button>
       </div>

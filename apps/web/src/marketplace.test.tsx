@@ -352,7 +352,7 @@ describe("Group conversation apps button & iframe postMessage handshake", () => 
       );
     });
     expect(
-      document.body.querySelector('button[aria-label="群聊应用"]'),
+      document.body.querySelector('button[aria-label="小组应用"]'),
     ).not.toBeNull();
 
     for (const nonGroupType of ["channel", "direct"] as const) {
@@ -371,7 +371,7 @@ describe("Group conversation apps button & iframe postMessage handshake", () => 
         );
       });
       expect(
-        document.body.querySelector('button[aria-label="群聊应用"]'),
+        document.body.querySelector('button[aria-label="小组应用"]'),
       ).toBeNull();
     }
   });
@@ -408,7 +408,7 @@ describe("Group conversation apps button & iframe postMessage handshake", () => 
 
     expect(sessionSpy).toHaveBeenCalledWith("conv-group-1", "app-1");
     const iframe = document.body.querySelector<HTMLIFrameElement>(
-      'iframe[title="群聊应用：协作棋盘"]',
+      'iframe[title="小组应用：协作棋盘"]',
     );
     expect(iframe).not.toBeNull();
     expect(iframe?.getAttribute("src")).toBe("https://board.example.test/ui");

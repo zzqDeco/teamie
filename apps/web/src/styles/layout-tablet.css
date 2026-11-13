@@ -1,32 +1,6 @@
-/* Layout layer: wide-screen, coarse-pointer, and tablet responsive breakpoints. */
+/* Layout layer: coarse-pointer and tablet (<= 1250px) responsive breakpoint. */
 
 @layer layout {
-  @media (min-width: 1700px) {
-    .hero {
-      min-height: 690px;
-    }
-    .auth-story {
-      padding-left: 90px;
-      padding-right: 90px;
-    }
-    .hero h1 {
-      font-size: var(--font-display);
-    }
-    .message {
-      padding-left: 40px;
-      padding-right: 40px;
-    }
-    .conversation-start {
-      padding-left: 40px;
-    }
-    .composer-area {
-      padding-left: 36px;
-      padding-right: 36px;
-    }
-    .conversation-header {
-      padding-left: 36px;
-    }
-  }
   @media (max-height: 700px) {
     .scroll-story-track {
       height: auto;
@@ -35,7 +9,7 @@
       position: static;
       height: auto;
       min-height: 0;
-      padding: 56px 0;
+      padding: var(--space-12) 0;
     }
   }
   @media (hover: none), (pointer: coarse) {
@@ -48,49 +22,121 @@
   }
   @media (max-width: 1250px) {
     .hero {
-      padding: 50px 35px 65px;
-      gap: 10px;
-      min-height: 580px;
+      grid-template-columns: 1fr 1fr;
+      padding: var(--space-10) var(--space-8) var(--space-12);
+      gap: var(--space-6);
+      min-height: 560px;
     }
     .hero h1 {
       font-size: var(--font-5xl);
+      letter-spacing: 0;
     }
     .hero-copy > p {
-      font-size: var(--font-sm);
+      font-size: var(--font-base);
     }
     .hero-actions {
-      gap: 12px;
+      gap: var(--space-3);
     }
     .hero-actions > span {
       display: none;
     }
     .hero-visual {
-      padding-left: 10px;
+      padding-left: var(--space-2_5);
+      margin-right: 0;
     }
     .demo-sidebar {
-      width: 130px;
-      padding-left: 8px;
-      padding-right: 8px;
+      width: 112px;
+      padding-left: var(--space-2);
+      padding-right: var(--space-2);
+    }
+    .demo-title {
+      padding: 0 var(--space-3);
+    }
+    .demo-window {
+      min-height: 320px;
+    }
+    .demo-body {
+      min-height: 280px;
+    }
+    .demo-message {
+      gap: var(--space-1_5);
+    }
+    .demo-message > .avatar {
+      width: 21px;
+      height: 21px;
+      font-size: var(--font-sm);
+      border-radius: var(--r-sm);
+    }
+    .demo-message p,
+    .demo-message b,
+    .demo-message b small {
+      font-size: var(--font-sm);
     }
     .demo-chat {
-      padding: 0 12px;
+      padding: 0 var(--space-3);
+    }
+    .demo-chat-heading {
+      font-size: var(--font-sm);
+    }
+    .demo-channel {
+      padding-left: var(--space-1_5);
+      gap: var(--space-1);
+      font-size: var(--font-sm);
+    }
+    .demo-workspace,
+    .demo-sidebar > small {
+      font-size: var(--font-sm);
+    }
+    .demo-input {
+      font-size: var(--font-sm);
+      padding: var(--space-2_5) var(--space-2);
+    }
+    .floating-note {
+      bottom: 14px;
+      right: 16px;
+      padding: var(--space-3) var(--space-3_5);
+      gap: var(--space-2);
+    }
+    .floating-icon {
+      width: 29px;
+      height: 29px;
+      border-radius: var(--r-md);
+    }
+    .floating-note > span:nth-child(2),
+    .floating-note small {
+      font-size: var(--font-sm);
     }
     .values,
     .landing-cta,
     .public-footer {
-      margin-left: 36px;
-      margin-right: 36px;
+      margin-left: var(--space-8);
+      margin-right: var(--space-8);
+    }
+    .scroll-story-inner {
+      gap: var(--space-8);
+      padding: 0 var(--space-8);
+    }
+    .auth-page {
+      grid-template-columns: minmax(330px, 44%) 1fr;
     }
     .auth-story {
-      padding-left: 40px;
-      padding-right: 40px;
+      padding-left: var(--space-8);
+      padding-right: var(--space-8);
     }
     .auth-story h1 {
       font-size: var(--font-5xl);
     }
+    .auth-story .eyebrow,
+    .story-bottom,
+    .story-bottom > span {
+      font-size: var(--font-sm);
+    }
     .auth-content {
-      padding-left: 40px;
-      padding-right: 40px;
+      padding-left: var(--space-8);
+      padding-right: var(--space-8);
+    }
+    .auth-form h2 {
+      font-size: var(--font-3xl);
     }
     .members-pane {
       box-shadow: var(--shadow-lg);
@@ -103,11 +149,16 @@
       width: min(340px, 88vw);
     }
     .navigation-sidebar {
-      width: 232px;
+      width: 224px;
+    }
+    .workspace-rail {
+      width: 65px;
+      padding-left: var(--space-1_5);
+      padding-right: var(--space-1_5);
     }
     .workspace-header {
-      padding-left: 17px;
-      padding-right: 17px;
+      padding-left: var(--space-4);
+      padding-right: var(--space-4);
     }
     .workspace-title > b {
       font-size: var(--font-md);
@@ -120,21 +171,65 @@
       left: -4px;
       top: 12px;
     }
-  }
-  @media (max-width: 1200px) {
+    .conversation-header {
+      padding-left: var(--space-6);
+      padding-right: var(--space-6);
+    }
+    .conversation-start {
+      padding-left: var(--space-6);
+      padding-right: var(--space-6);
+    }
+    .conversation-start h2 {
+      font-size: var(--font-2xl);
+    }
+    .message {
+      padding-left: var(--space-6);
+      padding-right: var(--space-6);
+    }
+    .composer-area {
+      padding-left: var(--space-5);
+      padding-right: var(--space-5);
+    }
+    .settings-view {
+      padding-left: var(--space-8);
+      padding-right: var(--space-8);
+    }
+    .admin-view {
+      padding-left: var(--space-8);
+      padding-right: var(--space-8);
+    }
+    .admin-generate {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: var(--space-4);
+    }
+    .admin-invites-table th,
+    .admin-invites-table td {
+      padding-left: var(--space-3_5);
+      padding-right: var(--space-3_5);
+    }
+    .admin-heading h2 {
+      font-size: var(--font-3xl);
+      gap: var(--space-2);
+    }
+    .admin-heading-icon {
+      width: 57px;
+      height: 57px;
+      border-radius: var(--r-xl);
+    }
     .agents-view {
-      padding-left: 29px;
-      padding-right: 29px;
+      padding-left: var(--space-7);
+      padding-right: var(--space-7);
     }
     .agent-detail-heading {
-      gap: 16px;
+      gap: var(--space-4);
       flex-wrap: wrap;
     }
     .agent-detail-summary {
       flex-basis: calc(100% - 92px);
     }
     .agent-detail-actions {
-      margin-left: 89px;
+      margin-left: 0;
       padding-top: 0;
       align-self: auto;
     }
@@ -142,223 +237,22 @@
       font-size: var(--font-3xl);
     }
     .agent-card {
-      padding: 19px;
+      padding: var(--space-5);
     }
     .gateway-test-panel {
       align-items: flex-start;
       flex-direction: column;
-      gap: 16px;
+      gap: var(--space-4);
     }
-  }
-  @media (max-width: 1050px) {
     .member-directory-row {
       flex-wrap: wrap;
-      gap: 13px;
+      gap: var(--space-3);
     }
     .member-directory-identity {
       flex-basis: 100%;
     }
     .member-directory-actions {
-      padding-left: 48px;
-    }
-  }
-  @media (max-width: 1000px) {
-    .hero {
-      grid-template-columns: 1fr 1fr;
-      padding-top: 38px;
-      padding-bottom: 65px;
-      min-height: 560px;
-    }
-    .hero h1 {
-      font-size: var(--font-5xl);
-      letter-spacing: -1.4px;
-    }
-    .hero-visual {
-      margin-right: -25px;
-    }
-    .demo-sidebar {
-      width: 110px;
-    }
-    .demo-title {
-      padding: 0 12px;
-    }
-    .demo-window {
-      min-height: 320px;
-    }
-    .demo-body {
-      min-height: 280px;
-    }
-    .demo-message {
-      gap: 6px;
-    }
-    .demo-message > .avatar {
-      width: 21px;
-      height: 21px;
-      font-size: var(--font-xs);
-      border-radius: var(--r-sm);
-    }
-    .demo-message p,
-    .demo-message b,
-    .demo-message b small {
-      font-size: var(--font-xs);
-    }
-    .demo-chat {
-      padding: 0 10px;
-    }
-    .demo-chat-heading {
-      font-size: var(--font-xs);
-    }
-    .demo-channel {
-      padding-left: 7px;
-      gap: 5px;
-      font-size: var(--font-xs);
-    }
-    .demo-workspace,
-    .demo-sidebar > small {
-      font-size: var(--font-xs);
-    }
-    .demo-input {
-      font-size: var(--font-xs);
-      padding: 10px 7px;
-    }
-    .floating-note {
-      bottom: 14px;
-      right: 16px;
-      padding: 12px 14px;
-      gap: 8px;
-    }
-    .floating-icon {
-      width: 29px;
-      height: 29px;
-      border-radius: var(--r-md);
-    }
-    .floating-note > span:nth-child(2),
-    .floating-note small {
-      font-size: var(--font-xs);
-    }
-    .auth-page {
-      grid-template-columns: minmax(330px, 44%) 1fr;
-    }
-    .auth-story {
-      padding-left: 30px;
-      padding-right: 30px;
-    }
-    .auth-story h1 {
-      font-size: var(--font-5xl);
-    }
-    .auth-story .eyebrow,
-    .story-bottom,
-    .story-bottom > span {
-      font-size: var(--font-xs);
-    }
-    .auth-content {
-      padding-left: 35px;
-      padding-right: 35px;
-    }
-    .auth-form h2 {
-      font-size: var(--font-3xl);
-    }
-    .navigation-sidebar {
-      width: 221px;
-    }
-    .workspace-rail {
-      width: 65px;
-      padding-left: 6px;
-      padding-right: 6px;
-    }
-    .conversation-header {
-      padding-left: 23px;
-      padding-right: 23px;
-    }
-    .conversation-start {
-      padding-left: 26px;
-      padding-right: 26px;
-    }
-    .conversation-start h2 {
-      font-size: var(--font-2xl);
-    }
-    .message {
-      padding-left: 24px;
-      padding-right: 24px;
-    }
-    .composer-area {
-      padding-left: 20px;
-      padding-right: 20px;
-    }
-    .composer-footer > span:last-child {
-      font-size: var(--font-xs);
-    }
-    .settings-view {
-      padding-left: 32px;
-      padding-right: 32px;
-    }
-    .admin-view {
-      padding-left: 30px;
-      padding-right: 30px;
-    }
-    .admin-generate {
-      align-items: flex-start;
-      flex-direction: column;
-      gap: 15px;
-    }
-    .admin-invites-table th,
-    .admin-invites-table td {
-      padding-left: 15px;
-      padding-right: 15px;
-    }
-    .admin-heading h2 {
-      font-size: var(--font-3xl);
-      gap: 8px;
-    }
-    .admin-heading-icon {
-      width: 57px;
-      height: 57px;
-      border-radius: var(--r-xl);
-    }
-  }
-  @media (max-width: 1000px) and (min-width: 781px) {
-    .agent-card-grid {
-      grid-template-columns: 1fr;
-    }
-    .agents-heading {
-      align-items: flex-start;
-      flex-direction: column;
-      gap: 16px;
-    }
-    .agent-detail-heading > .avatar {
-      width: 61px;
-      height: 61px;
-      border-radius: var(--r-xl);
-    }
-    .agent-detail-actions {
-      margin-left: 77px;
-    }
-    .agent-delete-section {
-      align-items: flex-start;
-      flex-direction: column;
-      gap: 13px;
-    }
-    .navigation-sidebar {
-      width: 220px;
-    }
-    .hero {
-      padding-left: 32px;
-      padding-right: 32px;
-      gap: 24px;
-    }
-    .hero h1 {
-      font-size: var(--font-5xl);
-    }
-    .demo-sidebar {
-      width: 108px;
-    }
-    .demo-chat {
-      padding-left: 12px;
-      padding-right: 12px;
-    }
-    .scroll-story-inner {
-      gap: 32px;
-      padding: 0 32px;
+      padding-left: var(--space-12);
     }
   }
 }

@@ -5,6 +5,8 @@
     white-space: normal;
     word-break: break-word;
     overflow-wrap: anywhere;
+    font-size: var(--font-lg);
+    line-height: var(--lh-body);
   }
   .message-body > :first-child {
     margin-top: 0;
@@ -13,7 +15,7 @@
     margin-bottom: 0;
   }
   .message-body > .markdown-paragraph {
-    margin: 0 0 8px;
+    margin: 0 0 var(--space-2);
     white-space: pre-wrap;
   }
   .message-body > .markdown-paragraph:last-child {
@@ -27,7 +29,7 @@
     font-weight: 600;
     color: var(--text-strong);
     line-height: 1.4;
-    margin: 12px 0 6px;
+    margin: var(--space-3) 0 var(--space-1_5);
   }
   .message-body h1.markdown-heading {
     font-size: var(--font-2xl);
@@ -49,12 +51,12 @@
     font-size: var(--font-base);
     background: var(--lavender);
     color: var(--brand-strong);
-    padding: 2px 5px;
+    padding: var(--space-0_5) var(--space-1_5);
     border-radius: var(--r-xs);
     border: 1px solid var(--border);
   }
   .message-body .markdown-code-wrap {
-    margin: 8px 0;
+    margin: var(--space-2) 0;
     background: var(--surface-sunken);
     border: 1px solid var(--border-strong);
     border-radius: var(--r-md);
@@ -64,8 +66,8 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
-    padding: 6px 12px;
+    gap: var(--space-2);
+    padding: var(--space-1_5) var(--space-3);
     border-bottom: 1px solid var(--border);
     background: var(--surface-sunken);
   }
@@ -79,8 +81,8 @@
   .message-body .markdown-code-copy {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 2px 8px;
+    gap: var(--space-1);
+    padding: var(--space-0_5) var(--space-2);
     border: 1px solid var(--border);
     border-radius: var(--r-xs);
     background: var(--surface);
@@ -106,8 +108,8 @@
   }
   .message-body .markdown-code-block,
   .message-body pre {
-    margin: 8px 0;
-    padding: 12px 14px;
+    margin: var(--space-2) 0;
+    padding: var(--space-3) var(--space-3_5);
     background: var(--surface-sunken);
     border: 1px solid var(--border-strong);
     border-radius: var(--r-md);
@@ -132,8 +134,8 @@
   }
   .message-body .markdown-blockquote,
   .message-body blockquote {
-    margin: 8px 0;
-    padding: 6px 12px;
+    margin: var(--space-2) 0;
+    padding: var(--space-1_5) var(--space-3);
     border-left: 3px solid var(--brand);
     background: var(--surface-sunken);
     border-radius: 0 var(--r-sm) var(--r-sm) 0;
@@ -148,11 +150,11 @@
   .message-body .markdown-list,
   .message-body ul,
   .message-body ol {
-    margin: 6px 0;
-    padding-left: 22px;
+    margin: var(--space-1_5) 0;
+    padding-left: var(--space-5);
   }
   .message-body li {
-    margin: 3px 0;
+    margin: var(--space-1) 0;
     line-height: 1.6;
   }
   .message-body .task-list-item {
@@ -160,7 +162,7 @@
     margin-left: -18px;
     display: flex;
     align-items: baseline;
-    gap: 8px;
+    gap: var(--space-2);
   }
   .message-body .task-list-checkbox {
     width: 14px;
@@ -170,7 +172,7 @@
     flex-shrink: 0;
   }
   .message-body .markdown-table-wrap {
-    margin: 8px 0;
+    margin: var(--space-2) 0;
     overflow-x: auto;
     border: 1px solid var(--border-strong);
     border-radius: var(--r-md);
@@ -183,7 +185,7 @@
     background: var(--surface);
   }
   .message-body .markdown-table th {
-    padding: 7px 11px;
+    padding: var(--space-1_5) var(--space-2_5);
     border-bottom: 1px solid var(--border);
     border-right: 1px solid var(--border);
     text-align: left;
@@ -192,7 +194,7 @@
     color: var(--text-strong);
   }
   .message-body .markdown-table td {
-    padding: 7px 11px;
+    padding: var(--space-1_5) var(--space-2_5);
     border-bottom: 1px solid var(--border);
     border-right: 1px solid var(--border);
     text-align: left;
@@ -219,16 +221,16 @@
   .message-body hr {
     border: 0;
     border-top: 1px solid var(--border-strong);
-    margin: 12px 0;
+    margin: var(--space-3) 0;
   }
   .message-body .markdown-math-block,
   .message-body .markdown-math-display,
   .message-body .katex-display {
     display: block;
-    margin: 8px 0;
+    margin: var(--space-2) 0;
     overflow-x: auto;
     overflow-y: hidden;
-    padding: 4px 0;
+    padding: var(--space-1) 0;
   }
   .message-body .markdown-math-inline {
     display: inline;

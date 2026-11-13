@@ -73,8 +73,7 @@ export function GatewayProviderCard({
           </Button>
           <Button
             type="button"
-            variant="secondary"
-            className="danger-text"
+            variant="danger"
             disabled={providerBusy || models.length > 0}
             title={
               models.length > 0

@@ -1,4 +1,4 @@
-/* Feedback primitives: toast, modal dismissal, button states and form fields. */
+/* Feedback primitives: toast, modal dismissal, confirm impact, and inline form feedback. */
 
 @layer features {
   /* Toasts */
@@ -38,7 +38,7 @@
     border-radius: var(--r-md);
     box-shadow: var(--shadow-pop);
     font-size: var(--font-md);
-    line-height: 1.5;
+    line-height: var(--lh-ui);
   }
   .toast.success {
     border-left-color: var(--success-text);
@@ -47,7 +47,7 @@
     border-left-color: var(--danger-text);
   }
   .toast-icon {
-    margin-top: 2px;
+    margin-top: var(--space-0_5);
     color: var(--brand-text);
   }
   .toast.success .toast-icon {
@@ -59,7 +59,7 @@
   .toast-message {
     flex: 1;
     min-width: 0;
-    padding-top: 1px;
+    padding-top: var(--space-0_5);
     overflow-wrap: anywhere;
   }
   .toast-action,
@@ -88,7 +88,7 @@
   }
   @media (prefers-reduced-motion: no-preference) {
     .toast {
-      animation: toast-in 0.18s ease-out;
+      animation: toast-in var(--dur-base) var(--ease-standard);
     }
   }
   @keyframes toast-in {
@@ -124,7 +124,7 @@
   }
   @media (prefers-reduced-motion: no-preference) {
     .modal.dismiss-blocked {
-      animation: modal-nudge 0.3s ease-in-out;
+      animation: modal-nudge var(--dur-slow) ease-in-out;
     }
   }
   @keyframes modal-nudge {
@@ -138,7 +138,7 @@
   .modal-discard {
     position: sticky;
     top: 0;
-    z-index: 1;
+    z-index: var(--z-raised);
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -171,7 +171,7 @@
     background: var(--surface-sunken);
     color: var(--text);
     font-size: var(--font-base);
-    line-height: 1.7;
+    line-height: var(--lh-body);
   }
   .confirm-dialog.danger .confirm-impact {
     border-color: var(--danger-border);
@@ -180,38 +180,6 @@
   }
   .confirm-dialog .notice {
     margin-top: var(--space-3);
-  }
-
-  /* Button states */
-  .button[aria-busy="true"]:disabled {
-    opacity: 0.85;
-    cursor: progress;
-  }
-  .button.secondary:hover:not(:disabled) {
-    background: var(--hover-bg);
-    border-color: var(--brand-muted);
-    color: var(--text-strong);
-    box-shadow: none;
-  }
-  .button.secondary:active:not(:disabled),
-  .button.ghost:active:not(:disabled) {
-    background: var(--lavender);
-  }
-  .button.ghost {
-    background: transparent;
-    border-color: transparent;
-    color: var(--text-muted);
-  }
-  .button.ghost:hover:not(:disabled) {
-    background: var(--hover-bg);
-    color: var(--text-strong);
-    box-shadow: none;
-  }
-  .button.danger:hover:not(:disabled) {
-    filter: brightness(0.92);
-  }
-  .button.danger:active:not(:disabled) {
-    filter: brightness(0.85);
   }
 
   /* Inline field feedback */
@@ -223,7 +191,7 @@
     margin-top: var(--space-2);
     font-size: var(--font-sm);
     font-weight: 500;
-    line-height: 1.5;
+    line-height: var(--lh-ui);
     text-align: left;
   }
   .field-error {
@@ -236,7 +204,7 @@
     margin-bottom: 0;
   }
   label + .field-error {
-    margin-bottom: 18px;
+    margin-bottom: var(--space-4);
   }
   input[aria-invalid="true"] {
     border-color: var(--danger-text);
@@ -244,14 +212,14 @@
 
   /* Password field */
   .password-field {
-    margin-bottom: 18px;
+    margin-bottom: var(--space-4);
   }
   .password-field > label {
     margin-bottom: 0;
   }
   .password-input {
     position: relative;
-    margin-top: 9px;
+    margin-top: var(--space-2);
   }
   .password-input > input {
     padding-right: var(--space-12);
@@ -301,7 +269,7 @@
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
     gap: var(--space-1) var(--space-3);
-    margin-bottom: 18px;
+    margin-bottom: var(--space-4);
     padding: var(--space-3) var(--space-4);
     border: 1px solid var(--border-strong);
     border-radius: var(--r-md);
@@ -310,7 +278,7 @@
   .invite-summary-text {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--space-0_5);
     min-width: 0;
     font-size: var(--font-sm);
     font-weight: 600;
@@ -361,7 +329,7 @@
     flex-basis: 100%;
     margin: 0;
     text-align: left;
-    color: var(--text-muted);
+    color: var(--text-strong);
   }
   .welcome-join-form > .field-error {
     flex-basis: 100%;
@@ -380,7 +348,7 @@
       right: 6px;
     }
     .modal-heading {
-      padding-right: 40px;
+      padding-right: var(--space-10);
     }
     .toast-action,
     .toast-close {

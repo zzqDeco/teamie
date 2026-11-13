@@ -161,7 +161,7 @@ describe("message rows", () => {
     expect(row(7).querySelector(".message-meta")).not.toBeNull();
     expect(row(7).textContent).not.toContain("由 老板 创建");
     expect(row(7).querySelector(".agent-badge")?.getAttribute("title")).toBe("Agent · 由 老板 创建");
-    expect(row(6).querySelector(".agent-avatar")?.className).toMatch(/lilac|mint|peach|blue|rose/);
+    expect(row(6).querySelector(".agent-avatar")?.className).toMatch(/avatar-tone-[1-6]/);
     const time = row(8).querySelector("time")!;
     expect(time.getAttribute("title")).toMatch(/^\d{4}年\d{1,2}月\d{1,2}日星期.+ \d{2}:\d{2}$/);
     // Reply quotes show plain text, not Markdown.

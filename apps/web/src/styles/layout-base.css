@@ -4,7 +4,7 @@
   .landing-register {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--space-1);
     font-size: var(--font-base);
     font-weight: 600;
     color: var(--purple-dark);
@@ -23,9 +23,9 @@
   .sidebar-empty-action {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--space-1);
     min-height: 32px;
-    margin-top: 4px;
+    margin-top: var(--space-1);
     padding: 0;
     border: 0;
     background: transparent;
@@ -47,15 +47,15 @@
     overflow: auto;
   }
   .password-settings {
-    margin-top: 32px;
-    padding-top: 28px;
+    margin-top: var(--space-8);
+    padding-top: var(--space-7);
     border-top: 1px solid var(--border);
   }
   .password-settings > h3 {
-    margin-bottom: 8px;
+    margin-bottom: var(--space-2);
   }
   .password-settings > .field-help {
-    margin-bottom: 22px;
+    margin-bottom: var(--space-5);
   }
   .conversation-actions {
     position: relative;
@@ -76,7 +76,7 @@
     top: calc(100% + 4px);
     right: 0;
     width: 180px;
-    padding: 6px;
+    padding: var(--space-1_5);
     border: 1px solid var(--border-strong);
     border-radius: var(--r-md);
     background: var(--surface);
@@ -96,7 +96,7 @@
     min-height: 44px;
     height: 44px;
     width: 100%;
-    padding: 4px;
+    padding: var(--space-1);
     border-radius: var(--r-lg);
   }
   .account-trigger:hover,
@@ -114,7 +114,7 @@
     right: 1px;
     bottom: 1px;
     display: flex;
-    padding: 2px;
+    padding: var(--space-0_5);
     border-radius: 50%;
     background: var(--lavender);
   }
@@ -138,7 +138,7 @@
     max-width: calc(100vw - 80px);
     max-height: min(70dvh, 360px);
     overflow: auto;
-    padding: 6px;
+    padding: var(--space-1_5);
     border: 1px solid var(--border-strong);
     border-radius: var(--r-md);
     background: var(--surface);
@@ -147,10 +147,10 @@
   .account-menu > a {
     display: flex;
     align-items: center;
-    gap: 11px;
+    gap: var(--space-2_5);
     width: 100%;
     min-height: 44px;
-    padding: 10px 12px;
+    padding: var(--space-2_5) var(--space-3);
     border-radius: var(--r-sm);
     font-size: var(--font-md);
     color: var(--text-muted);
@@ -159,10 +159,10 @@
   .account-menu > button {
     display: flex;
     align-items: center;
-    gap: 11px;
+    gap: var(--space-2_5);
     width: 100%;
     min-height: 44px;
-    padding: 10px 12px;
+    padding: var(--space-2_5) var(--space-3);
     border-radius: var(--r-sm);
     font-size: var(--font-md);
     color: var(--text-muted);
@@ -180,10 +180,10 @@
   .conversation-actions-menu > button {
     display: flex;
     align-items: center;
-    gap: 11px;
+    gap: var(--space-2_5);
     width: 100%;
     min-height: 44px;
-    padding: 10px 12px;
+    padding: var(--space-2_5) var(--space-3);
     border-radius: var(--r-sm);
     font-size: var(--font-md);
     color: var(--text-muted);
@@ -215,15 +215,15 @@
     margin-right: auto;
     display: flex;
     align-items: center;
-    gap: 9px;
+    gap: var(--space-2);
     min-height: 46px;
     border: 1px solid var(--border-strong);
     border-radius: var(--r-md);
     background: var(--surface);
     color: var(--text-muted);
-    padding: 0 13px;
-    margin-top: 24px;
-    margin-bottom: 18px;
+    padding: 0 var(--space-3);
+    margin-top: var(--space-6);
+    margin-bottom: var(--space-4);
   }
   .member-directory-list {
     width: 100%;
@@ -244,7 +244,7 @@
     max-width: 960px;
     margin-left: auto;
     margin-right: auto;
-    margin-bottom: 18px;
+    margin-bottom: var(--space-4);
   }
   .members-empty {
     width: 100%;
@@ -254,8 +254,8 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 13px;
-    padding: 65px 10px;
+    gap: var(--space-3);
+    padding: 65px var(--space-2_5);
     text-align: center;
     color: var(--text-muted);
   }
@@ -269,7 +269,7 @@
     font-weight: 600;
   }
   .members-heading p {
-    margin-top: 8px;
+    margin-top: var(--space-2);
     color: var(--text-muted);
     font-size: var(--font-base);
     overflow-wrap: anywhere;
@@ -284,7 +284,7 @@
   .member-search input {
     width: 100%;
     min-height: 44px;
-    padding: 8px 0;
+    padding: var(--space-2) 0;
     border: 0;
     box-shadow: none;
     background: transparent;
@@ -297,8 +297,8 @@
   .member-directory-row {
     display: flex;
     align-items: center;
-    gap: 18px;
-    padding: 18px 0;
+    gap: var(--space-4);
+    padding: var(--space-4) 0;
     border-bottom: 1px solid var(--border);
   }
   .member-directory-identity {
@@ -306,7 +306,7 @@
     min-width: 0;
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: var(--space-3);
   }
   .member-directory-identity > .avatar,
   .member-directory-identity > .agent-avatar {
@@ -326,22 +326,22 @@
   .member-directory-actions {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
     flex-wrap: wrap;
     flex-shrink: 0;
   }
   .member-directory-actions > .button {
     min-height: 44px;
     font-size: var(--font-base);
-    padding: 9px 12px;
+    padding: var(--space-2) var(--space-3);
   }
   .member-manage-link {
     min-height: 44px;
     font-size: var(--font-base);
-    padding: 9px 12px;
+    padding: var(--space-2) var(--space-3);
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: var(--space-1_5);
     color: var(--brand-text);
     border-radius: var(--r-sm);
   }
@@ -349,7 +349,7 @@
     background: var(--lavender);
   }
   .member-unavailable {
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     color: var(--text-muted);
     flex-shrink: 0;
   }
@@ -366,9 +366,9 @@
   .platform-management-link {
     display: flex;
     align-items: center;
-    gap: 14px;
-    padding: 18px 0;
-    margin-top: 28px;
+    gap: var(--space-3_5);
+    padding: var(--space-4) 0;
+    margin-top: var(--space-7);
     border-top: 1px solid var(--border);
     border-bottom: 1px solid var(--border);
     color: var(--text-muted);
@@ -384,7 +384,7 @@
   }
   .platform-management-link small {
     display: block;
-    margin-top: 5px;
+    margin-top: var(--space-1_5);
     color: var(--text-muted);
     font-size: var(--font-sm);
   }
@@ -395,6 +395,6 @@
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: var(--space-2);
   }
 }

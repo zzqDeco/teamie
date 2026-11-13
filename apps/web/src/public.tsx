@@ -52,7 +52,7 @@ export function Landing() {
               </Link>
             </div>
           </div>
-          <div className="hero-visual" aria-label="Teamie 团队沟通界面示意">
+          <div className="hero-visual" role="img" aria-label="Teamie 团队沟通界面示意">
             <div className="visual-grid" />
             <div className="demo-window">
               <div className="demo-title">
@@ -116,7 +116,7 @@ export function Landing() {
                     </div>
                   </div>
                   <div className="demo-message">
-                    <span className="avatar lilac">
+                    <span className="avatar avatar-tone-1">
                       <Bot size={ICON.md} />
                     </span>
                     <div>

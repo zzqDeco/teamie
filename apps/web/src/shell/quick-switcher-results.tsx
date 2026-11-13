@@ -190,7 +190,8 @@ export function QuickSwitcherMessageResults({
           {currentSearchPage?.cursor ? (
             <Button
               type="button"
-              className="secondary quick-switcher-more"
+              variant="secondary"
+              className="quick-switcher-more"
               busy={currentSearchPage.loadingMore}
               onClick={onLoadMore}
             >
@@ -199,7 +200,8 @@ export function QuickSwitcherMessageResults({
           ) : currentSearchPage?.error ? (
             <Button
               type="button"
-              className="secondary quick-switcher-more"
+              variant="secondary"
+              className="quick-switcher-more"
               onClick={onRetry}
             >
               重试

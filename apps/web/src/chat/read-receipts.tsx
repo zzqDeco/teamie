@@ -101,7 +101,7 @@ export function OwnMessageReadReceipt({
             ref={popoverRef}
             className="read-receipt-popover"
             role="dialog"
-            aria-label="群聊已读详情"
+            aria-label="小组已读详情"
             onKeyDown={(event) => {
               handleRovingKeys(event, "li[tabindex]", { wrap: false });
             }}

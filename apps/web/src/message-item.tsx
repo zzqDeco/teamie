@@ -419,14 +419,15 @@ export const MessageItem = memo(function MessageItem({
                 <span>修改后会显示「已编辑」</span>
                 <Button
                   type="button"
-                  className="secondary small-button"
+                  variant="secondary"
+                  size="sm"
                   onClick={() => setEditing(null)}
                 >
                   取消
                 </Button>
                 <Button
                   type="submit"
-                  className="small-button"
+                  size="sm"
                   busy={actionBusy}
                   disabled={!editBody.trim() && !editing.attachments?.length}
                 >

@@ -127,6 +127,8 @@ describe("PR-6 dark mode tokens, head bootstrap & settings switcher", () => {
     }
 
     for (const required of [
+      "--field-border",
+      "--logo-accent",
       "--scrollbar-thumb",
       "--scrollbar-thumb-hover",
       "--backdrop",
@@ -135,6 +137,18 @@ describe("PR-6 dark mode tokens, head bootstrap & settings switcher", () => {
       "--status-online",
       "--status-connecting",
       "--status-offline",
+      "--avatar-1-bg",
+      "--avatar-1-fg",
+      "--avatar-2-bg",
+      "--avatar-2-fg",
+      "--avatar-3-bg",
+      "--avatar-3-fg",
+      "--avatar-4-bg",
+      "--avatar-4-fg",
+      "--avatar-5-bg",
+      "--avatar-5-fg",
+      "--avatar-6-bg",
+      "--avatar-6-fg",
     ]) {
       expect(darkMap.has(required), `missing dark token ${required}`).toBe(
         true,
@@ -168,6 +182,9 @@ describe("PR-6 dark mode tokens, head bootstrap & settings switcher", () => {
       }
     }
     const nonTextTokens = [
+      "--field-border",
+      "--scrollbar-thumb",
+      "--scrollbar-thumb-hover",
       "--switch-bg",
       "--switch-on",
       "--status-online",
@@ -182,6 +199,20 @@ describe("PR-6 dark mode tokens, head bootstrap & settings switcher", () => {
           `dark ${token} (${fg}) on ${bg}`,
         ).toBeGreaterThanOrEqual(3);
       }
+    }
+    const textLum = luminance(parseHex(darkMap.get("--text")!));
+    const mutedLum = luminance(parseHex(darkMap.get("--text-muted")!));
+    expect(
+      Math.max(textLum, mutedLum) / Math.max(Math.min(textLum, mutedLum), 0.001),
+    ).toBeGreaterThanOrEqual(1.55);
+    for (let tone = 1; tone <= 6; tone++) {
+      expect(
+        contrastRatio(
+          darkMap.get(`--avatar-${tone}-fg`)!,
+          darkMap.get(`--avatar-${tone}-bg`)!,
+        ),
+        `dark avatar tone ${tone} contrast`,
+      ).toBeGreaterThanOrEqual(4.5);
     }
     expect(
       contrastRatio(darkMap.get("--on-brand")!, darkMap.get("--brand")!),

@@ -420,7 +420,8 @@ export function ConversationSearch({
         </ol>
         {page?.hasMore && (
           <Button
-            className="secondary search-more"
+            variant="secondary"
+            className="search-more"
             busy={page.loadingMore}
             onClick={() => void more()}
           >
@@ -429,7 +430,8 @@ export function ConversationSearch({
         )}
         {page?.error && !page.hasMore && (
           <Button
-            className="secondary search-more"
+            variant="secondary"
+            className="search-more"
             onClick={() => setRevision((old) => old + 1)}
           >
             重试

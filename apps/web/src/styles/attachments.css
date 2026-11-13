@@ -41,7 +41,7 @@
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    padding: 9px 10px;
+    padding: var(--space-2) var(--space-2_5);
     border: 1px solid var(--border);
     border-radius: var(--r-md);
     min-width: 0;
@@ -51,7 +51,7 @@
   .attachment-details {
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: var(--space-1);
     min-width: 0;
     text-align: left;
   }
@@ -64,7 +64,7 @@
     font-size: var(--font-base);
   }
   .attachment-meta {
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     color: var(--text-muted);
     line-height: 1.4;
   }
@@ -93,7 +93,7 @@
   }
   .attachment-draft button {
     border: 0;
-    padding: 5px;
+    padding: var(--space-1_5);
     background: transparent;
     color: inherit;
     cursor: pointer;
@@ -105,11 +105,11 @@
   }
   .attachment-error {
     font-size: var(--font-sm);
-    margin: 6px 0;
+    margin: var(--space-1_5) 0;
     overflow-wrap: anywhere;
   }
   .message-attachments {
-    margin-top: 6px;
+    margin-top: var(--space-1_5);
   }
   .message-attachments li {
     max-width: 100%;
@@ -118,7 +118,7 @@
   .message-attachments button {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-2_5);
     width: 100%;
     max-width: 340px;
     min-width: 180px;
@@ -126,7 +126,7 @@
     background: var(--surface);
     color: var(--text-muted);
     border-radius: var(--r-md);
-    padding: 11px var(--space-3);
+    padding: var(--space-2_5) var(--space-3);
     cursor: pointer;
   }
   .message-attachments button:hover {

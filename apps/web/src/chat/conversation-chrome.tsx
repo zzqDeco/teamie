@@ -31,7 +31,7 @@ import {
 } from "../engagement-store";
 import { trimMentionDraft } from "../mentions";
 import { sameMentions } from "../composer-drafts";
-import { Button, IconButton, Modal, Notice } from "../ui";
+import { Button, IconButton, Modal, ModalCloseButton, Notice } from "../ui";
 import { ICON } from "../icons";
 import { toast } from "../toast";
 import { AgentAvailability } from "../agent-ui";
@@ -173,7 +173,7 @@ const NOTIFICATION_LEVEL_OPTIONS: ReadonlyArray<{
   {
     value: "mentions",
     label: "相关消息",
-    description: "私聊、群聊、@提及与回复",
+    description: "私信、小组、@提及与回复",
   },
   {
     value: "none",
@@ -303,7 +303,7 @@ export function ConversationHeader({
         <h1>{name}</h1>
         <span>
           {conversation.type === "channel"
-            ? "团队频道"
+            ? "频道"
             : conversation.type === "direct"
               ? "私信"
               : "小组对话"}
@@ -399,7 +399,7 @@ export function ConversationHeader({
         </IconButton>
         {conversation.type === "group" && onApps && (
           <IconButton
-            label="群聊应用"
+            label="小组应用"
             onClick={onApps}
             aria-expanded={appsOpen}
           >
@@ -502,7 +502,7 @@ export function ConversationEmptyStart({
       <p>还没有消息，打个招呼吧。</p>
       {conversation.type === "channel" &&
         (isWorkspaceOwner && onInvite ? (
-          <Button className="secondary small-button" onClick={onInvite}>
+          <Button variant="secondary" size="sm" onClick={onInvite}>
             邀请成员加入
           </Button>
         ) : isWorkspaceOwner === false ? (
@@ -529,15 +529,14 @@ export function RetractMessageModal({
     <Modal
       title="撤回这条消息？"
       subtitle="撤回后，所有人都会看到一条撤回提示。"
+      busy={actionBusy}
       onClose={onClose}
     >
       <blockquote className="retract-quote">{messagePreviewText(retracting)}</blockquote>
       <Notice>{actionError}</Notice>
       <div className="modal-actions">
-        <Button className="secondary" onClick={onClose}>
-          保留消息
-        </Button>
-        <Button className="danger" busy={actionBusy} onClick={onConfirm}>
+        <ModalCloseButton>保留消息</ModalCloseButton>
+        <Button variant="danger" busy={actionBusy} onClick={onConfirm}>
           确认撤回
         </Button>
       </div>

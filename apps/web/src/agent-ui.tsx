@@ -2,7 +2,14 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { Bot, Check, CirclePause, Eye, LockKeyhole } from "lucide-react";
 import type { WebSearchGatewayConfig, Workspace } from "@teamie/api-client";
-import { Button, ConfirmDialog, Notice, SwitchField } from "./ui";
+import {
+  avatarTone,
+  Button,
+  ConfirmDialog,
+  Notice,
+  SwitchField,
+} from "./ui";
+import type { AvatarTone } from "./ui";
 import { ICON } from "./icons";
 
 export function AgentBadge({
@@ -23,17 +30,9 @@ export function AgentBadge({
     </span>
   );
 }
-/** Token palette classes shared with `Avatar` (see primitives.css). */
-const AGENT_TONES = ["lilac", "mint", "peach", "blue", "rose"] as const;
-
-/** Deterministic FNV-1a 32-bit hash of an Agent ID, mapped onto the token palette. */
-export function agentTone(seed: string): (typeof AGENT_TONES)[number] {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < seed.length; i++) {
-    hash ^= seed.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return AGENT_TONES[hash % AGENT_TONES.length];
+/** Deterministic FNV-1a 32-bit hash of an Agent ID, mapped onto the 6-hue avatar token palette. */
+export function agentTone(seed: string): AvatarTone {
+  return avatarTone(seed);
 }
 
 export function AgentAvatar({
@@ -48,7 +47,7 @@ export function AgentAvatar({
 }) {
   return (
     <span
-      className={`avatar agent-avatar ${size} ${seed ? agentTone(seed) : ""} ${disabled ? "disabled" : ""}`}
+      className={`avatar agent-avatar ${size} ${seed ? agentTone(seed) : "avatar-tone-1"} ${disabled ? "disabled" : ""}`.trim()}
       aria-hidden="true"
     >
       <Bot

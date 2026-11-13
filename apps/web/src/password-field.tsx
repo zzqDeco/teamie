@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
-import { Check, Eye, EyeOff, TriangleAlert, X } from "lucide-react";
+import { Check, Eye, EyeOff, Minus, TriangleAlert, X } from "lucide-react";
 import { passwordRules } from "./password-policy";
 import { ICON } from "./icons";
 
@@ -8,7 +8,7 @@ import { ICON } from "./icons";
 export function FieldError({ id, message }: { id: string; message?: string }) {
   if (!message) return null;
   return (
-    <small id={id} className="field-error">
+    <small id={id} className="field-error" role="alert">
       <TriangleAlert size={ICON.xs} aria-hidden="true" />
       {message}
     </small>
@@ -142,25 +142,29 @@ export function PasswordField({
       </div>
       {showRules && (
         <ul className="password-rules" id={rulesId} aria-live="polite">
-          <li className={rules.minLength ? "met" : ""}>
-            {rules.minLength ? (
+          <li className={value && rules.minLength ? "met" : ""}>
+            {!value ? (
+              <Minus size={ICON.xs} aria-hidden="true" />
+            ) : rules.minLength ? (
               <Check size={ICON.xs} aria-hidden="true" />
             ) : (
               <X size={ICON.xs} aria-hidden="true" />
             )}
             <span className="sr-only">
-              {rules.minLength ? "已满足：" : "未满足："}
+              {!value ? "待输入：" : rules.minLength ? "已满足：" : "未满足："}
             </span>
             至少 12 个字符
           </li>
           <li className={value && rules.maxBytes ? "met" : ""}>
-            {rules.maxBytes ? (
+            {!value ? (
+              <Minus size={ICON.xs} aria-hidden="true" />
+            ) : rules.maxBytes ? (
               <Check size={ICON.xs} aria-hidden="true" />
             ) : (
               <X size={ICON.xs} aria-hidden="true" />
             )}
             <span className="sr-only">
-              {rules.maxBytes ? "已满足：" : "未满足："}
+              {!value ? "待输入：" : rules.maxBytes ? "已满足：" : "未满足："}
             </span>
             不超过 72 字节（约 24 个汉字）
           </li>

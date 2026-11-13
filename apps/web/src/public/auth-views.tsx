@@ -15,9 +15,10 @@ import { chatStore } from "../store";
 import { useAuth } from "../auth";
 import { clearSessionExpired, readSessionExpired } from "../session-notice";
 import { errorText } from "../errors";
-import { Avatar, Button, Logo, Notice, PublicHeader } from "../ui";
+import { formatDateTime } from "../format-datetime";
+import { Avatar, Button, Field, Logo, Notice, PublicHeader } from "../ui";
 import { passwordPolicyError } from "../password-policy";
-import { FieldError, PasswordField, fieldErrorProps } from "../password-field";
+import { PasswordField, fieldErrorProps } from "../password-field";
 import { ICON } from "../icons";
 import { resetPageScroll } from "./scroll";
 
@@ -38,6 +39,28 @@ const LOGIN_FIELDS: LoginField[] = ["email", "password"];
 // Deliberately lenient, like the browser's type=email check; the server is
 // authoritative.
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+$/;
+export function normalizeInviteInput(raw: string): {
+  code: string;
+  isWorkspaceJoinLink: boolean;
+} {
+  const trimmed = raw.trim();
+  if (!trimmed) return { code: "", isWorkspaceJoinLink: false };
+  if (/(?:^|\/)join\/[^/?#\s]+/i.test(trimmed)) {
+    return { code: trimmed, isWorkspaceJoinLink: true };
+  }
+  if (trimmed.includes("inviteCode=")) {
+    try {
+      const url = trimmed.startsWith("http")
+        ? new URL(trimmed)
+        : new URL(trimmed, "https://teamie.local");
+      const extracted = url.searchParams.get("inviteCode")?.trim();
+      if (extracted) return { code: extracted, isWorkspaceJoinLink: false };
+    } catch {
+      /* Fall back to raw text when not a parseable URL. */
+    }
+  }
+  return { code: trimmed, isWorkspaceJoinLink: false };
+}
 function loginFieldError(
   field: LoginField,
   data: FormData,
@@ -45,8 +68,13 @@ function loginFieldError(
 ): string {
   const text = (name: string) => String(data.get(name) || "");
   switch (field) {
-    case "inviteCode":
-      return text("inviteCode").trim() ? "" : "请填写注册邀请码。";
+    case "inviteCode": {
+      const parsed = normalizeInviteInput(text("inviteCode"));
+      if (!parsed.code) return "请填写注册邀请码。";
+      if (parsed.isWorkspaceJoinLink)
+        return "这是工作空间邀请链接，请先使用管理员提供的注册邀请码注册账号。";
+      return "";
+    }
     case "displayName":
       return text("displayName").trim() ? "" : "请填写显示名称。";
     case "email": {
@@ -174,7 +202,7 @@ export function Login() {
             email: String(data.get("email")).trim(),
             password,
             displayName: String(data.get("displayName")).trim(),
-            inviteCode: String(data.get("inviteCode") || "").trim(),
+            inviteCode: normalizeInviteInput(String(data.get("inviteCode") || "")).code,
           })
         : await api.login(String(data.get("email")).trim(), password);
       if (!active.current || sessionToken !== api.csrfToken) {
@@ -221,8 +249,9 @@ export function Login() {
             <Logo />
           </Link>
           <h2>{register ? "受邀注册" : "登录 Teamie"}</h2>
-          <div className="auth-tabs" aria-label="账户入口">
+          <div className="auth-tabs" role="group" aria-label="账户入口">
             <button
+              type="button"
               className={!register ? "active" : ""}
               aria-pressed={!register}
               disabled={busy}
@@ -231,6 +260,7 @@ export function Login() {
               登录
             </button>
             <button
+              type="button"
               className={register ? "active" : ""}
               aria-pressed={register}
               disabled={busy}
@@ -264,7 +294,7 @@ export function Login() {
             aria-busy={busy}
             noValidate
           >
-            <Notice id={errorId}>{error}</Notice>
+            <Notice id={errorId}>{invalidField ? "" : error}</Notice>
             {register &&
               (inviteSummary ? (
                 <div className="invite-summary">
@@ -287,54 +317,60 @@ export function Login() {
                   </small>
                 </div>
               ) : (
-                <>
-                  <label>
-                    {inviteLabel}
-                    <span className="optional">由管理员提供</span>
-                    <input
-                      ref={inviteInput}
-                      name="inviteCode"
-                      autoComplete="off"
-                      autoCapitalize="none"
-                      spellCheck={false}
-                      defaultValue={inviteCode}
-                      placeholder="输入邀请码"
-                      required
-                      readOnly={busy}
-                      aria-disabled={busy || undefined}
-                      {...fieldA11y("inviteCode")}
-                    />
-                    <small className="field-help">{inviteHelp}</small>
-                  </label>
-                  <FieldError
-                    id={errorElementId("inviteCode")}
-                    message={errorFor("inviteCode")}
-                  />
-                </>
-              ))}
-            {register && (
-              <>
-                <label>
-                  显示名称
+                <Field
+                  label={inviteLabel}
+                  optional="由管理员提供"
+                  hint={inviteHelp}
+                  error={errorFor("inviteCode")}
+                  errorId={errorElementId("inviteCode")}
+                >
                   <input
-                    name="displayName"
-                    autoComplete="nickname"
-                    placeholder="你的名字"
-                    maxLength={80}
+                    ref={inviteInput}
+                    name="inviteCode"
+                    autoComplete="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    defaultValue={inviteCode}
+                    placeholder="输入邀请码"
                     required
                     readOnly={busy}
                     aria-disabled={busy || undefined}
-                    {...fieldA11y("displayName")}
+                    onInput={(event) => {
+                      const parsed = normalizeInviteInput(event.currentTarget.value);
+                      if (parsed.isWorkspaceJoinLink) {
+                        setInvalidField("inviteCode");
+                        setError("这是工作空间邀请链接，请先使用管理员提供的注册邀请码注册账号。");
+                      } else if (parsed.code && parsed.code !== event.currentTarget.value.trim()) {
+                        event.currentTarget.value = parsed.code;
+                      }
+                    }}
+                    {...fieldA11y("inviteCode")}
                   />
-                </label>
-                <FieldError
-                  id={errorElementId("displayName")}
-                  message={errorFor("displayName")}
+                </Field>
+              ))}
+            {register && (
+              <Field
+                label="显示名称"
+                error={errorFor("displayName")}
+                errorId={errorElementId("displayName")}
+              >
+                <input
+                  name="displayName"
+                  autoComplete="nickname"
+                  placeholder="你的名字"
+                  maxLength={80}
+                  required
+                  readOnly={busy}
+                  aria-disabled={busy || undefined}
+                  {...fieldA11y("displayName")}
                 />
-              </>
+              </Field>
             )}
-            <label>
-              邮箱地址
+            <Field
+              label="邮箱地址"
+              error={errorFor("email")}
+              errorId={errorElementId("email")}
+            >
               <input
                 type="email"
                 name="email"
@@ -347,11 +383,7 @@ export function Login() {
                 aria-disabled={busy || undefined}
                 {...fieldA11y("email")}
               />
-            </label>
-            <FieldError
-              id={errorElementId("email")}
-              message={errorFor("email")}
-            />
+            </Field>
             <PasswordField
               name="password"
               label="密码"
@@ -468,7 +500,7 @@ export function Join() {
         <p>
           {query.data
             ? user
-              ? "接受邀请后，即可参与团队对话。"
+              ? "接受邀请后，即可参与工作空间对话。"
               : "加入工作空间需要 Teamie 账号。请先登录，再接受邀请。"
             : pendingInvite
               ? "正在加载…"
@@ -516,7 +548,7 @@ export function Join() {
               </>
             )}
             <small className="invite-expiry">
-              有效期至 {new Date(query.data.expiresAt).toLocaleString("zh-CN")}
+              有效期至 {formatDateTime(query.data.expiresAt, "stamp")}
             </small>
           </>
         )}

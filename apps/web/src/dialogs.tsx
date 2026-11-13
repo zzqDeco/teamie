@@ -18,8 +18,18 @@ import type { Conversation, Workspace } from "@teamie/api-client";
 import { useAuth } from "./auth";
 import { useChat } from "./chat";
 import { errorText } from "./errors";
+import { formatDateTime } from "./format-datetime";
+import { FieldError } from "./password-field";
 import { chatStore } from "./store";
-import { Avatar, Button, Modal, ModalCloseButton, Notice, SwitchField } from "./ui";
+import {
+  Avatar,
+  Button,
+  Field,
+  Modal,
+  ModalCloseButton,
+  Notice,
+  SwitchField,
+} from "./ui";
 import { enrichParticipants } from "./participants";
 import { ParticipantIdentity } from "./group-members";
 import { canConfigureModelGateway } from "./agent-management";
@@ -171,8 +181,11 @@ export function WorkspaceDialog({
         <Notice>{error}</Notice>
         {kind === "workspace" && (
           <>
-            <label>
-              工作空间名称
+            <Field
+              label="工作空间名称"
+              error={fieldErrors.name}
+              errorId={nameErrorId}
+            >
               <input
                 name="name"
                 placeholder="例如：灵感工作室"
@@ -182,8 +195,7 @@ export function WorkspaceDialog({
                 aria-invalid={fieldErrors.name ? true : undefined}
                 aria-describedby={fieldErrors.name ? nameErrorId : undefined}
               />
-            </label>
-            <FieldError id={nameErrorId} message={fieldErrors.name} />
+            </Field>
             <div className="form-note">
               <Hash size={ICON.md} />
               <span>自动创建 general 频道。</span>
@@ -192,8 +204,11 @@ export function WorkspaceDialog({
         )}
         {kind === "channel" && (
           <>
-            <label>
-              频道名称
+            <Field
+              label="频道名称"
+              error={fieldErrors.name}
+              errorId={nameErrorId}
+            >
               <div className="input-icon">
                 <Hash size={ICON.sm} />
                 <input
@@ -206,8 +221,7 @@ export function WorkspaceDialog({
                   aria-describedby={fieldErrors.name ? nameErrorId : undefined}
                 />
               </div>
-            </label>
-            <FieldError id={nameErrorId} message={fieldErrors.name} />
+            </Field>
             <div className="form-note">
               <Users size={ICON.md} />
               <span>工作空间内的所有成员都可以访问这个频道。</span>
@@ -215,20 +229,20 @@ export function WorkspaceDialog({
           </>
         )}
         {kind === "group" && (
-          <>
-            <label>
-              小组名称
-              <input
-                name="name"
-                placeholder="例如：周五灵感碰头"
-                maxLength={80}
-                required
-                aria-invalid={fieldErrors.name ? true : undefined}
-                aria-describedby={fieldErrors.name ? nameErrorId : undefined}
-              />
-            </label>
-            <FieldError id={nameErrorId} message={fieldErrors.name} />
-          </>
+          <Field
+            label="小组名称"
+            error={fieldErrors.name}
+            errorId={nameErrorId}
+          >
+            <input
+              name="name"
+              placeholder="例如：周五灵感碰头"
+              maxLength={80}
+              required
+              aria-invalid={fieldErrors.name ? true : undefined}
+              aria-describedby={fieldErrors.name ? nameErrorId : undefined}
+            />
+          </Field>
         )}
         {["direct", "group"].includes(kind) && (
           <div
@@ -314,7 +328,7 @@ export function WorkspaceDialog({
                   </div>
                 </label>
                 <small>
-                  有效期至 {new Date(invite.expiresAt).toLocaleString("zh-CN")}
+                  有效期至 {formatDateTime(invite.expiresAt, "stamp")}
                 </small>
               </>
             )}
@@ -348,13 +362,6 @@ export function WorkspaceDialog({
       </form>
     </Modal>
   );
-}
-function FieldError({ id, message }: { id: string; message?: string }) {
-  return message ? (
-    <small id={id} className="field-error" role="alert">
-      {message}
-    </small>
-  ) : null;
 }
 export function ProfileSettings() {
   const { user, updateUser, logout } = useAuth();
@@ -429,7 +436,7 @@ export function ProfileSettings() {
           <span
             className={`profile-tag ${user!.platformRole === "admin" ? "admin-profile-tag" : ""}`}
           >
-            {user!.platformRole === "admin" ? "平台管理员" : "团队伙伴"}
+            {user!.platformRole === "admin" ? "平台管理员" : "成员"}
           </span>
         </div>
       </div>
@@ -546,7 +553,7 @@ export function ProfileSettings() {
           <p>退出后，下次访问需要重新登录。</p>
         </div>
         <Button
-          className="secondary danger-text"
+          variant="danger"
           busy={signingOut}
           disabled={saving}
           onClick={signOut}

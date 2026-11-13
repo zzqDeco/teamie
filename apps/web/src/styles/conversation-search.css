@@ -6,7 +6,7 @@
     overflow: hidden;
   }
   .conversation-search .modal-heading {
-    margin-bottom: 18px;
+    margin-bottom: var(--space-4);
     flex: none;
   }
   .conversation-search .modal-close {
@@ -15,8 +15,8 @@
   }
   .search-modes {
     display: flex;
-    gap: 6px;
-    margin-bottom: 14px;
+    gap: var(--space-1_5);
+    margin-bottom: var(--space-3_5);
     flex: none;
   }
   .search-modes button {
@@ -36,11 +36,11 @@
   .conversation-search .search-form {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-1_5);
     margin-bottom: var(--space-3);
     border: 1px solid var(--border-strong);
     border-radius: var(--r-md);
-    padding: 3px 5px 3px var(--space-3);
+    padding: var(--space-1) var(--space-1_5) var(--space-1) var(--space-3);
     flex: none;
   }
   .conversation-search .search-form:focus-within {
@@ -74,7 +74,7 @@
     color: var(--text-muted);
     font-size: var(--font-md);
     text-align: center;
-    margin: 36px var(--space-3);
+    margin: var(--space-8) var(--space-3);
   }
   .search-result-list {
     list-style: none;
@@ -89,7 +89,7 @@
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 7px;
+    gap: var(--space-1_5);
     font-size: var(--font-base);
     color: var(--text);
   }
@@ -98,7 +98,7 @@
   }
   .search-result-meta time {
     margin-left: auto;
-    font-size: var(--font-xs);
+    font-size: var(--font-sm);
     color: var(--text-muted);
   }
   /* The body is a plain-text snippet centred on the match, so it wraps
@@ -107,7 +107,7 @@
     display: block;
     width: 100%;
     border: 0;
-    padding: var(--space-3) 0 5px;
+    padding: var(--space-3) 0 var(--space-1_5);
     background: transparent;
     color: var(--text);
     font: inherit;
@@ -145,9 +145,9 @@
   .search-source {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-1_5);
     min-height: 44px;
-    padding: 5px 0;
+    padding: var(--space-1_5) 0;
     border: 0;
     background: transparent;
     color: var(--brand-text);

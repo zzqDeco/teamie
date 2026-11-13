@@ -231,7 +231,7 @@ function AdminMarketplaceCatalog({
             平台管理员
           </span>
           <p>
-            审核社区开发者提审的外部 Web + MCP 服务并维护官方直发应用。通过审核后，工作空间所有者即可安装至群聊。
+            审核社区开发者提审的外部 Web + MCP 服务并维护官方直发应用。通过审核后，工作空间所有者即可安装至小组。
           </p>
         </div>
         <Button type="button" onClick={() => setCreatingOfficial(true)}>
@@ -348,7 +348,7 @@ function AdminMarketplaceCatalog({
                     <div className="member-directory-actions">
                       <Button
                         type="button"
-                        className="secondary"
+                        variant="secondary"
                         disabled={!!busyAppId}
                         onClick={() => setReviewAppId(app.id)}
                         aria-label={`审核 ${displayName}`}
@@ -357,7 +357,7 @@ function AdminMarketplaceCatalog({
                       </Button>
                       <Button
                         type="button"
-                        className="secondary"
+                        variant="secondary"
                         disabled={!!busyAppId}
                         busy={busyAppId === app.id}
                         onClick={() =>
@@ -376,7 +376,7 @@ function AdminMarketplaceCatalog({
                       </Button>
                       <Button
                         type="button"
-                        className="secondary"
+                        variant="secondary"
                         disabled={!!busyAppId}
                         onClick={() => {
                           setError("");
@@ -388,7 +388,7 @@ function AdminMarketplaceCatalog({
                       </Button>
                       <Button
                         type="button"
-                        className="secondary danger-text"
+                        variant="danger"
                         disabled={!!busyAppId}
                         onClick={() => {
                           setError("");

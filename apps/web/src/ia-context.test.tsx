@@ -294,6 +294,7 @@ describe("workspace apps page", () => {
   it("replaces the member-directory header modal with page tabs", async () => {
     await mount("/app/w/team/members");
     expect(container.textContent).not.toContain("工作区应用");
+    expect(container.textContent).not.toContain("工作空间应用");
     await click('nav.page-tabs a[href="/app/w/team/apps"]');
     expect(location()).toBe("/app/w/team/apps");
     expect(container.querySelector(".modal")).toBeNull();

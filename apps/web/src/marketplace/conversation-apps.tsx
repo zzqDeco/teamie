@@ -185,7 +185,7 @@ function ConversationAppsManageAction({
   const marketplaceEnabled = useMarketplaceWriteEnabled(userId);
   if (!owner || !marketplaceEnabled) return null;
   return (
-    <IconButton label="管理工作区应用" onClick={onOpenWorkspaceApps}>
+    <IconButton label="管理工作空间应用" onClick={onOpenWorkspaceApps}>
       <Plus size={ICON.md} />
     </IconButton>
   );
@@ -233,7 +233,7 @@ function ConversationAppsBody({
     return (
       <div className="member-loading">
         <LoaderCircle size={ICON.sm} className="spin" />
-        加载群聊应用…
+        加载小组应用…
       </div>
     );
   }
@@ -269,7 +269,7 @@ function ConversationAppsBody({
             <p className="field-help">「{workspace.name}」尚未安装应用。</p>
           </div>
         ) : (
-          <ul className="mp-readonly-list" aria-label="已安装群聊应用只读列表">
+          <ul className="mp-readonly-list" aria-label="已安装小组应用只读列表">
             {apps.map((app) => (
               <li key={app.id} className="mp-readonly-card">
                 <div className="mp-frame-meta">
@@ -301,7 +301,7 @@ function ConversationAppsBody({
         </p>
         {owner && (
           <Button type="button" onClick={onOpenWorkspaceApps}>
-            管理工作区应用
+            管理工作空间应用
           </Button>
         )}
       </div>
@@ -314,7 +314,7 @@ function ConversationAppsBody({
         <div
           className="theme-options mp-pane-tabs"
           role="tablist"
-          aria-label="切换群聊应用"
+          aria-label="切换小组应用"
         >
           {apps.map((app, idx) => {
             const selected = activeApp?.id === app.id;
@@ -502,7 +502,7 @@ function ConversationAppFrame({
     <>
       <Notice>
         {sameOriginBlocked
-          ? "安全限制：群聊应用 Web UI 必须部署在独立跨源域名上，禁止与当前主站同源挂载。"
+          ? "安全限制：小组应用 Web UI 必须部署在独立跨源域名上，禁止与当前主站同源挂载。"
           : error}
       </Notice>
       <div className="mp-frame-bar">
@@ -531,7 +531,7 @@ function ConversationAppFrame({
         <iframe
           ref={iframeRef}
           tabIndex={0}
-          title={`群聊应用：${app.name}`}
+          title={`小组应用：${app.name}`}
           src={session.app.webUrl}
           sandbox="allow-scripts allow-forms allow-same-origin"
           onLoad={postContext}

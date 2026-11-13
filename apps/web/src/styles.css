@@ -1,9 +1,11 @@
 /* Core style entrypoint: imports modular domain stylesheets in cascade order. */
 @import "./styles/base.css";
 @import "./styles/primitives.css";
+@import "./styles/primitives-controls.css";
 @import "./styles/public.css";
 @import "./styles/auth.css";
 @import "./styles/shell.css";
+@import "./styles/quick-switcher.css";
 @import "./styles/settings.css";
 @import "./styles/chat.css";
 @import "./styles/markdown.css";

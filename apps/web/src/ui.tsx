@@ -30,6 +30,24 @@ export function Logo({ compact = false }: { compact?: boolean }) {
     </span>
   );
 }
+export const AVATAR_TONES = [
+  "avatar-tone-1",
+  "avatar-tone-2",
+  "avatar-tone-3",
+  "avatar-tone-4",
+  "avatar-tone-5",
+  "avatar-tone-6",
+] as const;
+export type AvatarTone = (typeof AVATAR_TONES)[number];
+/** Deterministic FNV-1a 32-bit hash mapped onto the 6-hue avatar token palette. */
+export function avatarTone(seed: string): AvatarTone {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < seed.length; i++) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return AVATAR_TONES[hash % AVATAR_TONES.length]!;
+}
 export function Avatar({
   name,
   size = "",
@@ -41,14 +59,9 @@ export function Avatar({
   seed?: string;
   className?: string;
 }) {
-  const colors = ["lilac", "mint", "peach", "blue", "rose"];
-  const n = Array.from(seed || name).reduce(
-    (sum, c) => sum + c.charCodeAt(0),
-    0,
-  );
   return (
     <span
-      className={`avatar ${size} ${colors[n % colors.length]} ${className}`}
+      className={`avatar ${size} ${avatarTone(seed || name)} ${className}`.trim()}
       aria-hidden="true"
     >
       {Array.from(name.trim())[0]?.toUpperCase() || "T"}
@@ -56,12 +69,17 @@ export function Avatar({
   );
 }
 export type ButtonVariant = "primary" | "secondary" | "danger" | "ghost";
-export type ButtonSize = "sm" | "md";
+export type ButtonSize = "sm" | "md" | "lg";
 const buttonVariantClass: Record<ButtonVariant, string> = {
   primary: "",
   secondary: "secondary",
   danger: "danger",
   ghost: "ghost",
+};
+const buttonSizeClass: Record<ButtonSize, string> = {
+  sm: "small-button",
+  md: "",
+  lg: "large-button",
 };
 export function Button({
   children,
@@ -78,7 +96,7 @@ export function Button({
   const classes = [
     "button",
     buttonVariantClass[variant],
-    size === "sm" ? "small-button" : "",
+    buttonSizeClass[size],
     className,
   ]
     .filter(Boolean)
@@ -118,22 +136,38 @@ export function IconButton({
     </button>
   );
 }
+export type NoticeTone = "error" | "success" | "info" | "warning";
 export function Notice({
   children,
-  kind = "error",
+  kind,
+  tone,
   id,
+  onDismiss,
 }: {
   children: ReactNode;
-  kind?: "error" | "success" | "info";
+  kind?: NoticeTone;
+  tone?: NoticeTone;
   id?: string;
+  onDismiss?: () => void;
 }) {
+  const effectiveKind = tone ?? kind ?? "error";
   return children ? (
     <div
       id={id}
-      className={`notice ${kind}`}
-      role={kind === "error" ? "alert" : "status"}
+      className={`notice ${effectiveKind} ${onDismiss ? "dismissible" : ""}`.trim()}
+      role={effectiveKind === "error" ? "alert" : "status"}
     >
-      {children}
+      <div className="notice-content">{children}</div>
+      {onDismiss && (
+        <button
+          type="button"
+          className="notice-dismiss"
+          aria-label="关闭提示"
+          onClick={onDismiss}
+        >
+          <X size={ICON.xs} aria-hidden="true" />
+        </button>
+      )}
     </div>
   ) : null;
 }
@@ -165,9 +199,7 @@ export function FormRow({
   children: ReactNode;
   className?: string;
 }) {
-  return (
-    <div className={`gateway-form-row ${className}`.trim()}>{children}</div>
-  );
+  return <div className={`form-row ${className}`.trim()}>{children}</div>;
 }
 export function SwitchField({
   checked,
@@ -194,6 +226,7 @@ export function SwitchField({
     <label className={`agent-enabled-switch ${className}`.trim()}>
       <input
         type="checkbox"
+        role="switch"
         name={name}
         checked={checked}
         disabled={disabled}
@@ -215,7 +248,7 @@ export function SwitchField({
 }
 export function Loading({ label = "正在加载你的空间…" }: { label?: string }) {
   return (
-    <div className="loading-screen">
+    <div className="loading-screen" role="status">
       <Logo />
       <LoaderCircle className="spin" size={ICON.xl} />
       <p>{label}</p>
@@ -606,3 +639,5 @@ export function date(value: string) {
   return formatDateTime(value, "day");
 }
 export { DataList, EmptyState } from "./management-ui";
+export { Field, Tabs } from "./form-primitives";
+export type { TabItem } from "./form-primitives";

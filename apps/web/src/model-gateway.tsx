@@ -406,7 +406,7 @@ export function ModelGatewaySettings() {
       ) : !query.data ? (
         <div className="gateway-load-error">
           <Notice>{gatewayFailureText(query.error)}</Notice>
-          <Button className="secondary" onClick={() => void query.refetch()}>
+          <Button variant="secondary" onClick={() => void query.refetch()}>
             重新加载
           </Button>
         </div>
@@ -536,7 +536,7 @@ export function ModelGatewaySettings() {
               <p>使用当前生效的默认模型发送 1 次请求，可能产生费用。</p>
             </div>
             <Button
-              className="secondary"
+              variant="secondary"
               busy={testing}
               disabled={
                 !query.data.config.configured || !query.data.config.enabled

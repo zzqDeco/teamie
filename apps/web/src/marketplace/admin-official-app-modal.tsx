@@ -93,7 +93,7 @@ export function AdminOfficialAppModal({
   return (
     <Modal
       title="上架官方应用"
-      subtitle="注册官方直发群聊应用并签发一次性 HMAC-SHA256 签名密钥。"
+      subtitle="注册官方直发小组应用并签发一次性 HMAC-SHA256 签名密钥。"
       className="mp-modal-wide"
       busy={busy}
       dirty={dirty}
@@ -129,7 +129,7 @@ export function AdminOfficialAppModal({
           <input
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="简要说明该群聊应用的用途与交互方式"
+            placeholder="简要说明该小组应用的用途与交互方式"
             maxLength={MARKETPLACE_DESCRIPTION_MAX_LENGTH}
           />
         </label>

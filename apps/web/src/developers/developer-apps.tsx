@@ -146,7 +146,7 @@ export function DeveloperAppsList({
             开放生态
           </span>
           <p>
-            使用你的 Teamie 账号接入自部署的外部群聊应用（Web UI + Streamable HTTP MCP Server），支持人类成员与 Agent 在群聊中同场协作或同台博弈。
+            使用你的 Teamie 账号接入自部署的外部小组应用（Web UI + Streamable HTTP MCP Server），支持人类成员与 Agent 在小组中同场协作或同台博弈。
           </p>
         </div>
         <span className="admin-heading-icon">
@@ -177,7 +177,7 @@ export function DeveloperAppsList({
         </div>
         <div className="dev-step-card">
           <span className="dev-step-num">步骤 3 · 拨测与自测</span>
-          <b>协议验证 + 群聊实测</b>
+          <b>协议验证 + 小组实测</b>
           <small className="field-help">
             通过四阶段线上协议检测后，一键安装至你创建的工作空间与真实 Agent 联调。
           </small>
@@ -359,7 +359,7 @@ export function DeveloperAppsList({
                     {app.publishedVersion === 0 && app.reviewStatus !== "pending_review" && (
                       <Button
                         type="button"
-                        className="secondary danger-text"
+                        variant="danger"
                         size="sm"
                         busy={deletingId === app.id}
                         disabled={!marketplaceEnabled || !!deletingId}

@@ -8,9 +8,11 @@ const srcDir = dirname(fileURLToPath(import.meta.url));
 const modularStyleFiles = [
   "styles/base.css",
   "styles/primitives.css",
+  "styles/primitives-controls.css",
   "styles/public.css",
   "styles/auth.css",
   "styles/shell.css",
+  "styles/quick-switcher.css",
   "styles/settings.css",
   "styles/chat.css",
   "styles/markdown.css",
@@ -151,6 +153,15 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
       "--lavender",
       "--border",
       "--border-strong",
+      "--field-border",
+      "--lh-tight",
+      "--lh-ui",
+      "--lh-body",
+      "--dur-fast",
+      "--dur-base",
+      "--dur-slow",
+      "--ease-standard",
+      "--ease-emphasized",
       "--r-xs",
       "--r-sm",
       "--r-md",
@@ -161,25 +172,54 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
       "--shadow-md",
       "--shadow-lg",
       "--shadow-pop",
+      "--space-0_5",
       "--space-1",
+      "--space-1_5",
       "--space-2",
+      "--space-2_5",
       "--space-3",
+      "--space-3_5",
       "--space-4",
       "--space-5",
       "--space-6",
+      "--space-7",
       "--space-8",
+      "--space-10",
       "--space-12",
+      "--z-raised",
+      "--z-local",
+      "--z-sticky",
+      "--z-banner",
+      "--z-members-shade",
+      "--z-members-pane",
       "--z-dropdown",
+      "--z-drawer-shade",
       "--z-drawer",
       "--z-popover",
       "--z-modal",
       "--z-toast",
+      "--avatar-1-bg",
+      "--avatar-1-fg",
+      "--avatar-2-bg",
+      "--avatar-2-fg",
+      "--avatar-3-bg",
+      "--avatar-3-fg",
+      "--avatar-4-bg",
+      "--avatar-4-fg",
+      "--avatar-5-bg",
+      "--avatar-5-fg",
+      "--avatar-6-bg",
+      "--avatar-6-fg",
       "--header-h",
       "--header-h-mobile",
     ];
     for (const name of required) {
       expect(tokenMap.has(name), `missing token ${name}`).toBe(true);
     }
+    expect(tokenMap.get("--font-xs")).toBe("12px");
+    expect(tokenMap.get("--font-sm")).toBe("13px");
+    expect(tokenMap.get("--font-base")).toBe("14px");
+    expect(tokenMap.get("--font-lg")).toBe("15px");
     expect(tokensCss).toContain("font-family: var(--font-sans);");
     expect(tokensCss).toContain("color: var(--text-strong);");
     expect(tokensCss).toContain("background: var(--bg);");
@@ -214,6 +254,9 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
       }
     }
     const nonTextTokens = [
+      "--field-border",
+      "--scrollbar-thumb",
+      "--scrollbar-thumb-hover",
       "--switch-bg",
       "--switch-on",
       "--status-online",
@@ -228,6 +271,20 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
           `${token} (${fg}) on ${bg}`,
         ).toBeGreaterThanOrEqual(3);
       }
+    }
+    const textLum = luminance(parseHex(tokenMap.get("--text")!)!);
+    const mutedLum = luminance(parseHex(tokenMap.get("--text-muted")!)!);
+    expect(
+      Math.max(textLum, mutedLum) / Math.max(Math.min(textLum, mutedLum), 0.001),
+    ).toBeGreaterThanOrEqual(1.55);
+    for (let tone = 1; tone <= 6; tone++) {
+      expect(
+        contrastRatio(
+          tokenMap.get(`--avatar-${tone}-fg`)!,
+          tokenMap.get(`--avatar-${tone}-bg`)!,
+        ),
+        `avatar tone ${tone} contrast`,
+      ).toBeGreaterThanOrEqual(4.5);
     }
     expect(
       contrastRatio(tokenMap.get("--brand")!, "#ffffff"),
@@ -249,7 +306,7 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
         const pxMatch = /^(\d+(?:\.\d+)?)px/.exec(value);
         if (pxMatch) {
           const px = Number(pxMatch[1]);
-          expect(px, `${file}: font-size ${value}`).toBeGreaterThanOrEqual(11);
+          expect(px, `${file}: font-size ${value}`).toBeGreaterThanOrEqual(12);
           expect(
             Number.isInteger(px),
             `${file}: fractional font-size ${value}`,
@@ -276,7 +333,85 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
         [...content.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map((m) => m[0]),
         `${file} should contain zero raw hex color literals`,
       ).toEqual([]);
+      expect(
+        [...content.matchAll(/%23[0-9a-fA-F]{3,8}\b/g)].map((m) => m[0]),
+        `${file} should contain zero URL-encoded %23 hex color literals`,
+      ).toEqual([]);
+      expect(
+        [...content.matchAll(/\b(?:rgba?|hsla?)\s*\(/gi)].map((m) => m[0]),
+        `${file} should contain zero raw rgb()/hsl() color functions`,
+      ).toEqual([]);
     }
+  });
+
+  it("caps --font-xs to <=25 badge/counter declarations, enforces >=85% --space-* coverage, --z-* tokenization, and 3-tier breakpoints", () => {
+    const spacingPropRe =
+      /^\s*(?:padding(?:-(?:top|right|bottom|left|inline|block))?|margin(?:-(?:top|right|bottom|left|inline|block))?|gap|row-gap|column-gap)\s*:\s*([^;]+);/;
+    let fontXsCount = 0;
+    let spacingTotal = 0;
+    let spacingTokenized = 0;
+    const rawZIndexes: string[] = [];
+    const invalidBreakpoints: string[] = [];
+
+    for (const file of cssFiles) {
+      if (file === "tokens.css") continue;
+      const content = readFileSync(join(srcDir, file), "utf8");
+      fontXsCount += [...content.matchAll(/var\(--font-xs\)/g)].length;
+
+      for (const m of content.matchAll(
+        /@media[^{]*\((?:min|max)-width\s*:\s*(\d+)px\)/g,
+      )) {
+        const bp = Number(m[1]);
+        if (![600, 780, 1250].includes(bp)) {
+          invalidBreakpoints.push(`${file}: ${m[0]}`);
+        }
+      }
+
+      const allLines = content.split("\n");
+      // Skip lines 1-50 of styles/marketplace.css owned by concurrent PR #137.
+      const lines =
+        file === "styles/marketplace.css" ? allLines.slice(50) : allLines;
+
+      lines.forEach((line, idx) => {
+        const zMatch = /\bz-index\s*:\s*([^;}\n]+)/.exec(line);
+        if (zMatch) {
+          const zVal = zMatch[1].trim();
+          if (
+            !zVal.startsWith("var(--z-") &&
+            !["0", "1", "-1", "-2", "auto"].includes(zVal)
+          ) {
+            rawZIndexes.push(`${file}:${idx + 1}: z-index: ${zVal}`);
+          }
+        }
+
+        const spMatch = spacingPropRe.exec(line);
+        if (!spMatch) return;
+        const val = spMatch[1].trim();
+        if (/(?:calc|max|min|clamp|env)\s*\(/.test(val)) return;
+        for (const tok of val.split(/\s+/).filter(Boolean)) {
+          if (
+            tok === "0" ||
+            tok === "0px" ||
+            tok === "auto" ||
+            tok === "inherit" ||
+            tok === "initial" ||
+            tok.endsWith("%") ||
+            /\d+(?:vh|vw|dvh|dvw|em|rem)$/.test(tok)
+          ) {
+            continue;
+          }
+          spacingTotal++;
+          if (tok.startsWith("var(--space-")) {
+            spacingTokenized++;
+          }
+        }
+      });
+    }
+
+    expect(fontXsCount).toBeLessThanOrEqual(25);
+    expect(spacingTokenized / spacingTotal).toBeGreaterThanOrEqual(0.85);
+    expect(rawZIndexes).toEqual([]);
+    expect(invalidBreakpoints).toEqual([]);
   });
 });
 

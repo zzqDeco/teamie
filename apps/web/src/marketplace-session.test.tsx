@@ -64,7 +64,7 @@ async function selectApp(app: MarketplaceApp) {
 }
 
 function frame(app: MarketplaceApp) {
-  return host.querySelector<HTMLIFrameElement>(`iframe[title="群聊应用：${app.name}"]`);
+  return host.querySelector<HTMLIFrameElement>(`iframe[title="小组应用：${app.name}"]`);
 }
 
 function captureMessages(iframe: HTMLIFrameElement) {

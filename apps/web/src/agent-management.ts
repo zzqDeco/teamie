@@ -107,7 +107,7 @@ export function agentFailureText(error: unknown): string {
   if (status === 401) return "登录已失效，请重新登录。";
   if (status === 403) return "你当前没有管理这个 Agent 的权限。";
   if (status === 404) return "这个 Agent 暂时无法管理，请返回列表重试。";
-  if (status === 400) return "资料未通过校验，请检查名称和可见团队。";
+  if (status === 400) return "资料未通过校验，请检查名称和可见工作空间。";
   if (status === 409) return "资料已发生变化，请刷新后重试。";
   return "操作未完成，请检查资料或稍后重试。";
 }
