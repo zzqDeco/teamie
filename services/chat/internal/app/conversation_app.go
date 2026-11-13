@@ -231,15 +231,25 @@ func (s *Service) groupMember(ctx context.Context, actorID, conversationID, targ
 		if c.Type != "group" {
 			return domain.ErrOnlyGroupMembershipChanged()
 		}
-		if role != "owner" && c.CreatedBy != actorID {
-			return domain.ErrGroupManageForbidden()
-		}
 		ids, err := s.Conversations.ConversationRecipients(txCtx, c)
 		if err != nil {
 			return err
 		}
-		if role != "owner" && !slices.Contains(ids, actorID) {
-			return domain.ErrGroupCurrentMembershipRequired()
+		selfLeave := !add && actorID == targetUserID
+		if selfLeave {
+			if role != "owner" && !slices.Contains(ids, actorID) {
+				if c.CreatedBy == actorID {
+					return domain.ErrGroupCurrentMembershipRequired()
+				}
+				return domain.ErrGroupManageForbidden()
+			}
+		} else {
+			if role != "owner" && c.CreatedBy != actorID {
+				return domain.ErrGroupManageForbidden()
+			}
+			if role != "owner" && !slices.Contains(ids, actorID) {
+				return domain.ErrGroupCurrentMembershipRequired()
+			}
 		}
 		if replay {
 			c.MemberIDs, c.CanManageMembers = ids, true
@@ -276,7 +286,7 @@ func (s *Service) groupMember(ctx context.Context, actorID, conversationID, targ
 		if err != nil {
 			return err
 		}
-		c.CanManageMembers = role == "owner" || c.CreatedBy == actorID
+		c.CanManageMembers = role == "owner" || (c.CreatedBy == actorID && slices.Contains(c.MemberIDs, actorID))
 		return s.Conversations.Fanout(txCtx, ids, domain.Event{
 			Type:           "membership.changed",
 			WorkspaceID:    ws,
@@ -284,6 +294,45 @@ func (s *Service) groupMember(ctx context.Context, actorID, conversationID, targ
 		})
 	})
 	return c, err
+}
+
+// DeleteConversation permanently dissolves a group conversation and notifies recipients.
+func (s *Service) DeleteConversation(ctx context.Context, actorID, conversationID string) error {
+	return s.Tx.WithinTx(ctx, func(txCtx context.Context) error {
+		ws, err := s.Conversations.GetConversationWorkspaceID(txCtx, conversationID)
+		if err != nil {
+			return err
+		}
+		if err = s.Workspaces.WorkspaceLock(txCtx, ws, actorID, false, false); err != nil {
+			return err
+		}
+		c, role, err := s.Conversations.LockConversationWithActorRole(txCtx, conversationID, actorID)
+		if err != nil {
+			return err
+		}
+		if c.Type != "group" {
+			return domain.ErrOnlyGroupDeleted()
+		}
+		if role != "owner" && c.CreatedBy != actorID {
+			return domain.ErrGroupManageForbidden()
+		}
+		ids, err := s.Conversations.ConversationRecipients(txCtx, c)
+		if err != nil {
+			return err
+		}
+		if role != "owner" && !slices.Contains(ids, actorID) {
+			return domain.ErrGroupCurrentMembershipRequired()
+		}
+		if err = s.Conversations.DeleteConversationCascade(txCtx, conversationID); err != nil {
+			return err
+		}
+		fanoutIDs := domain.NormalizedIDs(append(ids, actorID))
+		return s.Conversations.Fanout(txCtx, fanoutIDs, domain.Event{
+			Type:           "membership.changed",
+			WorkspaceID:    ws,
+			ConversationID: conversationID,
+		})
+	})
 }
 
 // SetNotificationLevel updates the caller's notification preference for a conversation.

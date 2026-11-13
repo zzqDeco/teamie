@@ -61,8 +61,9 @@ SQL
     "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 < services/chat/internal/infra/pg/migrations/010_retire_embedded_marketplace.sql >/dev/null
     "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 < services/chat/internal/infra/pg/migrations/011_platform_announcements.sql >/dev/null
     "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 < services/chat/internal/infra/pg/migrations/012_collaboration.sql >/dev/null
+    "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 < services/chat/internal/infra/pg/migrations/013_group_deletion.sql >/dev/null
     "${pg[@]}" psql -U postgres -d teamie_chat -v ON_ERROR_STOP=1 <<'SQL'
-INSERT INTO chat_schema_migrations(version) VALUES(10),(11),(12) ON CONFLICT DO NOTHING;
+INSERT INTO chat_schema_migrations(version) VALUES(10),(11),(12),(13) ON CONFLICT DO NOTHING;
 INSERT INTO platform_announcements(id,title,body,author_id,author_name) VALUES('restore-announcement','Teamie v0.4.6','### 更新说明\n- 新增平台公告','owner','Owner');
 INSERT INTO platform_announcement_reads(user_id,read_seq) VALUES('owner',1);
 INSERT INTO conversations(id,workspace_id,type,name) VALUES('restore-conversation','restore-workspace','channel','general');
@@ -74,7 +75,8 @@ INSERT INTO attachments(id,conversation_id,uploader_id,message_id,filename,media
 VALUES('restore-attachment','restore-conversation','owner','restore-message','binary.restore.bin','application/octet-stream',7,'fixture',decode('00fffe80890a0d','hex'));
 INSERT INTO attachment_uploads(uploader_id,upload_key,conversation_id,fingerprint,attachment_id)
 VALUES('owner','restore-upload','restore-conversation','fixture-fingerprint','restore-attachment'),
-      ('owner','restore-removed','restore-conversation','removed-fingerprint',NULL);
+      ('owner','restore-removed','restore-conversation','removed-fingerprint',NULL),
+      ('owner','restore-deleted-group-upload','restore-deleted-group','deleted-group-fingerprint',NULL);
 UPDATE messages SET body='@Owner',mentions='[{"userId":"owner","start":0,"end":6}]',original_mentions='[{"userId":"owner","start":0,"end":6}]' WHERE id='restore-message';
 UPDATE messages SET reactions_version=3 WHERE id='restore-message';
 INSERT INTO message_reactions(conversation_id,message_id,emoji,user_id)
@@ -233,8 +235,8 @@ SQL
       "SELECT encode(a.content,'hex')||':'||a.filename||':'||(m.attachments->0->>'id')||':'||m.original_attachment_ids[1] FROM attachments a JOIN messages m ON m.id=a.message_id WHERE a.id='restore-attachment' AND a.size_bytes=7 AND m.body='@Owner' AND m.mentions=m.original_mentions AND m.mentions='[{\"userId\":\"owner\",\"start\":0,\"end\":6}]'::jsonb;")
     [[ $actual == '00fffe80890a0d:binary.restore.bin:restore-attachment:restore-attachment' ]] || { echo 'Chat attachment binary restore verification failed.' >&2; exit 1; }
     actual=$("${pg[@]}" psql -U postgres -d restore_chat -At -v ON_ERROR_STOP=1 -c \
-      "SELECT (SELECT string_agg(version::text,',' ORDER BY version) FROM chat_schema_migrations)||':'||(SELECT attachment_id FROM attachment_uploads WHERE uploader_id='owner' AND upload_key='restore-upload')||':'||(SELECT count(*) FROM attachment_uploads WHERE upload_key='restore-removed' AND attachment_id IS NULL)||':'||(to_regclass('public.marketplace_apps') IS NULL)::text;")
-    [[ $actual == '1,2,3,4,5,6,7,8,9,10,11,12:restore-attachment:1:true' ]] || { echo 'Chat upload receipts, tombstones and retired marketplace cleanup verification failed.' >&2; exit 1; }
+      "SELECT (SELECT string_agg(version::text,',' ORDER BY version) FROM chat_schema_migrations)||':'||(SELECT attachment_id FROM attachment_uploads WHERE uploader_id='owner' AND upload_key='restore-upload')||':'||(SELECT count(*) FROM attachment_uploads WHERE upload_key='restore-removed' AND attachment_id IS NULL)||':'||(SELECT count(*) FROM attachment_uploads WHERE upload_key='restore-deleted-group-upload' AND conversation_id='restore-deleted-group' AND attachment_id IS NULL)||':'||(to_regclass('public.marketplace_apps') IS NULL)::text;")
+    [[ $actual == '1,2,3,4,5,6,7,8,9,10,11,12,13:restore-attachment:1:1:true' ]] || { echo 'Chat upload receipts, tombstones and retired marketplace cleanup verification failed.' >&2; exit 1; }
     actual=$("${pg[@]}" psql -U postgres -d restore_chat -At -v ON_ERROR_STOP=1 -c \
       "SELECT (SELECT pinned_by FROM conversation_pins WHERE conversation_id='restore-conversation' AND message_id='restore-message')||':'||(SELECT count(*) FROM saved_messages WHERE user_id='owner' AND message_id='restore-message')||':'||(SELECT seq||','||manual_unread_seq FROM read_cursors WHERE conversation_id='restore-conversation' AND user_id='owner')||':'||(SELECT media_type||','||encode(content,'hex') FROM attachment_thumbnails WHERE attachment_id='restore-attachment');")
     [[ $actual == 'owner:1:2,1:image/png,89504e470d0a1a0a' ]] || { echo 'Chat collaboration pins, saved messages, manual unread and thumbnail restore failed.' >&2; exit 1; }

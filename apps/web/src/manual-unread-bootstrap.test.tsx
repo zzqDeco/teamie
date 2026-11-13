@@ -279,7 +279,7 @@ describe("Authoritative bootstrap & manual unread concurrency (#129)", () => {
     await settle(() => freshBootstrap.resolve(makeBootstrap([{ ...baseConversation, manualUnreadSeq: 3 }])));
     await settle();
     expect(chatStore.getSnapshot().conversations[baseConversation.id].manualUnreadSeq).toBe(3);
-    expect(api.bootstrap).toHaveBeenCalledTimes(3);
+    await vi.waitFor(() => expect(api.bootstrap).toHaveBeenCalledTimes(3));
   });
 
   it("preserves a newly marked unread state when bootstrap overlaps an in-flight markMessageAsUnread request (both resolution orders)", async () => {

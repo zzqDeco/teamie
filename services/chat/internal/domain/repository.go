@@ -73,6 +73,7 @@ type ConversationRepository interface {
 	InsertConversation(ctx context.Context, c Conversation, pairKey string) (time.Time, error)
 	InsertConversationMember(ctx context.Context, conversationID, userID string, onConflictDoNothing bool) (bool, error)
 	DeleteConversationMember(ctx context.Context, conversationID, userID string) error
+	DeleteConversationCascade(ctx context.Context, conversationID string) error
 	LockConversationWithActorRole(ctx context.Context, conversationID, actorID string) (Conversation, string, error)
 	ConversationRecipients(ctx context.Context, c Conversation) ([]string, error)
 	CountConversationMembersAndCheckTarget(ctx context.Context, conversationID, targetUserID string) (count int, present bool, err error)

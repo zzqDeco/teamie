@@ -344,6 +344,10 @@ func (s *Store) GroupMember(ctx context.Context, actor, conversation, target str
 	return c, compatErr(err)
 }
 
+func (s *Store) DeleteConversation(ctx context.Context, actor, conversation string) error {
+	return compatErr(s.App(nil, "").DeleteConversation(ctx, actor, conversation))
+}
+
 func (s *Store) Message(ctx context.Context, user, conversation, id string) (Message, error) {
 	m, err := s.App(nil, "").Message(ctx, user, conversation, id)
 	return fromDomainMessage(m), compatErr(err)

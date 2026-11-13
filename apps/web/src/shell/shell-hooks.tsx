@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Hash } from "lucide-react";
 import type { Conversation, Workspace } from "@teamie/api-client";
 import { chatStore, compareTimestampsDesc } from "../store";
@@ -83,6 +83,206 @@ export function clearPersistedShellNav(userId?: string) {
   } catch {
     /* Ignore storage access errors. */
   }
+}
+
+const chatPathConversationId = (path: string) => /\/c\/([^/?#]+)$/.exec(path)?.[1] || "";
+
+export function pruneConversationIdsFromNav(
+  nav: PersistedShellNav,
+  isAllowed: (conversationId: string) => boolean,
+  fallbackChatPath = "",
+): PersistedShellNav | null {
+  let changed = false;
+  const pathConvId = chatPathConversationId(nav.lastChatPath);
+  const nextChatPath = pathConvId && !isAllowed(pathConvId) ? fallbackChatPath : nav.lastChatPath;
+  if (nextChatPath !== nav.lastChatPath) changed = true;
+
+  const nextByWorkspace: Record<string, string> = {};
+  for (const [wsId, convId] of Object.entries(nav.lastConversationByWorkspace)) {
+    if (isAllowed(convId)) nextByWorkspace[wsId] = convId;
+    else changed = true;
+  }
+  const nextRecent = nav.recentConversationIds.filter((id) => isAllowed(id));
+  if (nextRecent.length !== nav.recentConversationIds.length) changed = true;
+
+  if (!changed) return null;
+  return {
+    lastChatPath: nextChatPath,
+    lastConversationByWorkspace: nextByWorkspace,
+    recentConversationIds: nextRecent,
+  };
+}
+
+export type ShellPersistedNavController = ReturnType<typeof useShellPersistedNav>;
+
+export function useShellPersistedNav(
+  userId?: string,
+  onClearPreviousUser?: (previousUserId: string) => void,
+) {
+  const [initialNav] = useState(() => readPersistedShellNav(userId));
+  const navUserIdRef = useRef(userId);
+  const onClearPreviousRef = useRef(onClearPreviousUser);
+  useEffect(() => {
+    onClearPreviousRef.current = onClearPreviousUser;
+  });
+  const lastConversationByWorkspace = useRef<Record<string, string>>(
+    initialNav.lastConversationByWorkspace,
+  );
+  const [rememberedByWorkspace, setRememberedByWorkspace] = useState(
+    initialNav.lastConversationByWorkspace,
+  );
+  const lastChatRoute = useRef<string>(initialNav.lastChatPath);
+  const [lastChatPath, setLastChatPath] = useState(initialNav.lastChatPath);
+  const recentConversationsRef = useRef<string[]>(
+    initialNav.recentConversationIds,
+  );
+  const [recentConversationIds, setRecentConversationIds] = useState<string[]>(
+    initialNav.recentConversationIds,
+  );
+
+  const applyNav = useCallback((next: PersistedShellNav) => {
+    lastConversationByWorkspace.current = next.lastConversationByWorkspace;
+    lastChatRoute.current = next.lastChatPath;
+    recentConversationsRef.current = next.recentConversationIds;
+    setRememberedByWorkspace(next.lastConversationByWorkspace);
+    setLastChatPath(next.lastChatPath);
+    setRecentConversationIds(next.recentConversationIds);
+  }, []);
+
+  useEffect(() => {
+    if (navUserIdRef.current && navUserIdRef.current !== userId) {
+      clearPersistedShellNav(navUserIdRef.current);
+      onClearPreviousRef.current?.(navUserIdRef.current);
+    }
+    navUserIdRef.current = userId;
+    applyNav(readPersistedShellNav(userId));
+  }, [userId, applyNav]);
+
+  const pruneConversation = useCallback(
+    (removedId: string, fallbackChatPath = "") => {
+      if (!userId) return;
+      const pruned = pruneConversationIdsFromNav(
+        {
+          lastChatPath: lastChatRoute.current,
+          lastConversationByWorkspace: lastConversationByWorkspace.current,
+          recentConversationIds: recentConversationsRef.current,
+        },
+        (id) => id !== removedId,
+        fallbackChatPath,
+      );
+      if (!pruned) return;
+      applyNav(pruned);
+      writePersistedShellNav(userId, pruned);
+    },
+    [userId, applyNav],
+  );
+
+  const clearForUser = useCallback(
+    (targetUserId?: string) => {
+      clearPersistedShellNav(targetUserId);
+      applyNav({
+        lastChatPath: "",
+        lastConversationByWorkspace: {},
+        recentConversationIds: [],
+      });
+    },
+    [applyNav],
+  );
+
+  return {
+    lastChatPath,
+    rememberedByWorkspace,
+    recentConversationIds,
+    lastConversationByWorkspace,
+    lastChatRoute,
+    recentConversationsRef,
+    applyNav,
+    pruneConversation,
+    clearForUser,
+  };
+}
+
+export function useSyncShellPersistedNav(
+  nav: ShellPersistedNavController,
+  {
+    userId,
+    workspace,
+    conversation,
+    conversations,
+  }: {
+    userId?: string;
+    workspace?: Workspace;
+    conversation?: Conversation;
+    conversations: Record<string, Conversation>;
+  },
+) {
+  const {
+    lastConversationByWorkspace,
+    lastChatRoute,
+    recentConversationsRef,
+    applyNav,
+  } = nav;
+  useEffect(() => {
+    if (
+      conversation &&
+      workspace &&
+      conversation.workspaceId === workspace.id &&
+      userId
+    ) {
+      const nextRoute = route(conversation);
+      const nextByWorkspace =
+        lastConversationByWorkspace.current[workspace.id] === conversation.id
+          ? lastConversationByWorkspace.current
+          : {
+              ...lastConversationByWorkspace.current,
+              [workspace.id]: conversation.id,
+            };
+      const prevRecent = recentConversationsRef.current;
+      const nextRecent =
+        prevRecent[0] === conversation.id
+          ? prevRecent
+          : [
+              conversation.id,
+              ...prevRecent.filter((id) => id !== conversation.id),
+            ].slice(0, 20);
+      const nextNav: PersistedShellNav = {
+        lastChatPath: nextRoute,
+        lastConversationByWorkspace: nextByWorkspace,
+        recentConversationIds: nextRecent,
+      };
+      applyNav(nextNav);
+      writePersistedShellNav(userId, nextNav);
+    }
+  }, [
+    conversation,
+    workspace,
+    userId,
+    lastConversationByWorkspace,
+    recentConversationsRef,
+    applyNav,
+  ]);
+
+  useEffect(() => {
+    if (!userId || !chatStore.hasAuthoritativeConversations) return;
+    const pruned = pruneConversationIdsFromNav(
+      {
+        lastChatPath: lastChatRoute.current,
+        lastConversationByWorkspace: lastConversationByWorkspace.current,
+        recentConversationIds: recentConversationsRef.current,
+      },
+      (id) => Boolean(conversations[id]),
+    );
+    if (!pruned) return;
+    applyNav(pruned);
+    writePersistedShellNav(userId, pruned);
+  }, [
+    userId,
+    conversations,
+    lastChatRoute,
+    lastConversationByWorkspace,
+    recentConversationsRef,
+    applyNav,
+  ]);
 }
 
 let trackedNavUserId = chatStore.getSnapshot().userId;

@@ -115,6 +115,10 @@ func ErrOnlyGroupMembershipChanged() error {
 	return Err(400, "invalid_conversation", "Only group membership can be changed")
 }
 
+func ErrOnlyGroupDeleted() error {
+	return Err(400, "invalid_conversation", "Only group conversations can be deleted")
+}
+
 func ErrInvalidDelegatedMembership() error {
 	return Err(400, "invalid_membership", "Invalid delegated membership request")
 }
