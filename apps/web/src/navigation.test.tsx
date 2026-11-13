@@ -302,19 +302,19 @@ describe("member and account navigation", () => {
     expect(container.querySelector('aside [aria-label="管理工作空间应用"]')).not.toBeNull();
     bootstrap = { ...bootstrap, capabilities: { ...bootstrap.capabilities, "im.marketplace.enabled": false } };
     await mount("/app/w/team/c/group");
-    const readonlyPane = find('aside[aria-label="群聊应用"]');
+    const readonlyPane = find('aside[aria-label="小组应用"]');
     expect(readonlyPane.textContent).toContain("平台当前已关闭应用功能，已安装应用仅展示只读信息。");
     expect(container.querySelector('aside [aria-label="管理工作空间应用"]')).toBeNull();
-    await click('aside [aria-label="关闭群聊应用面板"]');
-    expect(container.querySelector('aside[aria-label="群聊应用"]')).toBeNull();
+    await click('aside [aria-label="关闭小组应用面板"]');
+    expect(container.querySelector('aside[aria-label="小组应用"]')).toBeNull();
     expect(find("main.app-main").hasAttribute("inert")).toBe(false);
     expect(find(".app-shell").classList.contains("details-open")).toBe(false);
     bootstrap = { ...bootstrap, capabilities: { ...bootstrap.capabilities, "im.marketplace.enabled": true } };
     await mount("/app/w/team/c/group");
-    expect(container.querySelector('aside[aria-label="群聊应用"]')).toBeNull();
+    expect(container.querySelector('aside[aria-label="小组应用"]')).toBeNull();
     await click('[aria-label="小组应用"]');
-    expect(container.querySelector('aside[aria-label="群聊应用"]')).not.toBeNull();
-    await click('aside [aria-label="关闭群聊应用面板"]');
+    expect(container.querySelector('aside[aria-label="小组应用"]')).not.toBeNull();
+    await click('aside [aria-label="关闭小组应用面板"]');
     expect(find("main.app-main").hasAttribute("inert")).toBe(false);
   });
 
@@ -331,11 +331,11 @@ describe("member and account navigation", () => {
     await mount("/app/w/team/c/group");
     expect(container.querySelector(".modal")).toBeNull();
     expect(container.querySelector('aside [aria-label="管理工作空间应用"]')).toBeNull();
-    await click('aside [aria-label="关闭群聊应用面板"]');
+    await click('aside [aria-label="关闭小组应用面板"]');
     expect(find("main.app-main").hasAttribute("inert")).toBe(false);
     await click('[aria-label="查看会话成员"]');
     expect(find("main.app-main").hasAttribute("inert")).toBe(true);
-    expect(container.querySelector('aside[aria-label="群聊应用"]')).toBeNull();
+    expect(container.querySelector('aside[aria-label="小组应用"]')).toBeNull();
     await escape();
     expect(find("main.app-main").hasAttribute("inert")).toBe(false);
   });
@@ -345,10 +345,10 @@ describe("member and account navigation", () => {
     await mount("/app/w/team/c/group");
     await click('[aria-label="小组应用"]');
     await click('.navigation-sidebar a[href="/app/w/team/c/general"]');
-    expect(container.querySelector('aside[aria-label="群聊应用"]')).toBeNull();
+    expect(container.querySelector('aside[aria-label="小组应用"]')).toBeNull();
     expect(find("main.app-main").hasAttribute("inert")).toBe(false);
     await click('.navigation-sidebar a[href="/app/w/team/c/group"]');
-    expect(container.querySelector('aside[aria-label="群聊应用"]')).toBeNull();
+    expect(container.querySelector('aside[aria-label="小组应用"]')).toBeNull();
   });
 
   it("keeps independent Agent discovery, edits and deletion usable with runtime admission disabled", async () => {

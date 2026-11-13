@@ -21,7 +21,7 @@
     bottom: 0;
     left: -4px;
     width: 8px;
-    z-index: 2;
+    z-index: var(--z-local);
     cursor: col-resize;
     touch-action: none;
   }
@@ -33,7 +33,7 @@
     left: 3px;
     width: 2px;
     background: transparent;
-    transition: background 0.15s;
+    transition: background var(--dur-fast) var(--ease-standard);
   }
   .mp-resize-handle:hover::after,
   .mp-resize-handle:focus-visible::after,

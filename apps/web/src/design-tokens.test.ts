@@ -367,10 +367,7 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
         }
       }
 
-      const allLines = content.split("\n");
-      // Skip lines 1-50 of styles/marketplace.css owned by concurrent PR #137.
-      const lines =
-        file === "styles/marketplace.css" ? allLines.slice(50) : allLines;
+      const lines = content.split("\n");
 
       lines.forEach((line, idx) => {
         const zMatch = /\bz-index\s*:\s*([^;}\n]+)/.exec(line);

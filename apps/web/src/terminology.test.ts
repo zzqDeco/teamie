@@ -46,13 +46,7 @@ describe("PR-5 global terminology, breakpoints & date/time i18n guardrails", () 
       const lines = readFileSync(join(srcDir, file), "utf8").split("\n");
       lines.forEach((line, index) => {
         const lineNo = index + 1;
-        // Explicit allowlist exception: lines 1-140 of marketplace/conversation-apps.tsx
-        // belong to concurrent PR #137 (feat/web-conversation-apps-resize) and are untouched
-        // until #137 merges.
-        if (file === "marketplace/conversation-apps.tsx" && lineNo <= 140) {
-          return;
-        }
-        // Strip single-line and block comments before checking user-facing strings.
+        // Strip single-line comments before checking user-facing strings.
         const codeOnly = line.replace(/\/\/.*$/, "");
         if (/私聊|群聊|工作区/.test(codeOnly)) {
           violations.push(`${file}:${lineNo}: ${line.trim()}`);
