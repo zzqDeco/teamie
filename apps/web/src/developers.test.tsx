@@ -416,6 +416,15 @@ describe("Developer Platform & Submission Workflow", () => {
 
     expect(sessionSpy).not.toHaveBeenCalled();
     expect(host.querySelector("iframe")).toBeNull();
+    expect(host.textContent).toContain("测试草稿");
+
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>(".mp-launcher-card")!.click();
+    });
+    await flush();
+
+    expect(sessionSpy).not.toHaveBeenCalled();
+    expect(host.querySelector("iframe")).toBeNull();
     expect(host.textContent).toContain("独立跨源域名");
     expect(host.textContent).toContain("测试草稿");
   });

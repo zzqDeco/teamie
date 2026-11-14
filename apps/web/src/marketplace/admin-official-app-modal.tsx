@@ -76,6 +76,8 @@ export function AdminOfficialAppModal({
       });
       await queryClient.invalidateQueries({ queryKey: ["adminMarketplaceApps"] });
       await queryClient.invalidateQueries({ queryKey: ["marketplaceCatalog"] });
+      await queryClient.invalidateQueries({ queryKey: ["workspaceApps"] });
+      await queryClient.invalidateQueries({ queryKey: ["conversationApps"] });
       toast.success(`已上架官方应用「${created.app.name}」`);
       onCreated({
         appName: created.app.name,

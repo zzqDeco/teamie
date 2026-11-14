@@ -492,7 +492,7 @@ describe("PR-4 admin marketplace governance, developer portal UX, and read-prese
     expect(host.querySelector('[aria-label="管理工作空间应用"]')).toBeNull();
     expect(sessionSpy).not.toHaveBeenCalled();
 
-    // 2. Live capability flip to true -> shows 正在启动应用会话… while session is pending + arrow-key tabs
+    // 2. Live capability flip to true -> shows click-to-open launcher first, then loading state & arrow-key tabs
     await act(async () => {
       qcDisabled.setQueryData(
         ["capability", "im.marketplace.enabled", currentUser.id],
@@ -501,14 +501,47 @@ describe("PR-4 admin marketplace governance, developer portal UX, and read-prese
     });
     await flush();
 
+    expect(sessionSpy).not.toHaveBeenCalled();
+    expect(host.querySelector("iframe")).toBeNull();
+
+    const cards = host.querySelectorAll<HTMLButtonElement>(".mp-launcher-card");
+    expect(cards.length).toBe(2);
+    await act(async () => {
+      cards[0]!.click();
+    });
+    await flush();
+
     expect(host.textContent).toContain("正在启动应用会话…");
     expect(host.querySelector('[role="tabpanel"]')).not.toBeNull();
 
-    const firstTab = host.querySelector<HTMLButtonElement>('#mp-pane-tab-app-a')!;
     await act(async () => {
-      firstTab.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+      host.querySelector<HTMLButtonElement>('[aria-label="打开新应用"]')!.click();
     });
-    expect(host.querySelector('#mp-pane-tab-app-b')?.getAttribute("aria-selected")).toBe("true");
+    await flush();
+    await act(async () => {
+      host.querySelectorAll<HTMLButtonElement>(".mp-launcher-card")[1]!.click();
+    });
+    await flush();
+
+    const secondTab = host.querySelector<HTMLButtonElement>(
+      `#mp-pane-tab-${sampleGroup.id}-app-b`,
+    )!;
+    expect(secondTab.getAttribute("aria-selected")).toBe("true");
+    await act(async () => {
+      secondTab.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }),
+      );
+    });
+    const firstTab = host.querySelector<HTMLButtonElement>(
+      `#mp-pane-tab-${sampleGroup.id}-app-a`,
+    )!;
+    expect(firstTab.getAttribute("aria-selected")).toBe("true");
+    await act(async () => {
+      firstTab.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }),
+      );
+    });
+    expect(secondTab.getAttribute("aria-selected")).toBe("true");
 
     // Cleanly settle in-flight session
     await act(async () => {

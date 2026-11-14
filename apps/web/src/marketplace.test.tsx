@@ -406,6 +406,14 @@ describe("Group conversation apps button & iframe postMessage handshake", () => 
     });
     await flush();
 
+    expect(sessionSpy).not.toHaveBeenCalled();
+    expect(document.body.querySelector("iframe")).toBeNull();
+
+    await act(async () => {
+      document.body.querySelector<HTMLButtonElement>(".mp-launcher-card")!.click();
+    });
+    await flush();
+
     expect(sessionSpy).toHaveBeenCalledWith("conv-group-1", "app-1");
     const iframe = document.body.querySelector<HTMLIFrameElement>(
       'iframe[title="小组应用：协作棋盘"]',

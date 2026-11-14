@@ -56,15 +56,32 @@ async function renderPane(conv = conversation, mobile = false) {
   await flush();
 }
 
-async function selectApp(app: MarketplaceApp) {
-  const tab = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(node => node.textContent === app.name)!;
-  expect(tab).toBeDefined();
-  await act(async () => tab.click());
+async function openApp(app: MarketplaceApp) {
+  if (!host.querySelector(".mp-launcher-list")) {
+    const addBtn = host.querySelector<HTMLButtonElement>('[aria-label="打开新应用"]')!;
+    expect(addBtn).not.toBeNull();
+    await act(async () => addBtn.click());
+    await flush();
+  }
+  const card = [...host.querySelectorAll<HTMLButtonElement>(".mp-launcher-card")].find(
+    node => node.querySelector("b")?.textContent === app.name,
+  )!;
+  expect(card).toBeDefined();
+  await act(async () => card.click());
   await flush();
 }
 
-function frame(app: MarketplaceApp) {
-  return host.querySelector<HTMLIFrameElement>(`iframe[title="小组应用：${app.name}"]`);
+async function closeTab(app: MarketplaceApp) {
+  const closeBtn = host.querySelector<HTMLButtonElement>(`[aria-label="关闭标签页：${app.name}"]`)!;
+  expect(closeBtn).not.toBeNull();
+  await act(async () => closeBtn.click());
+  await flush();
+}
+
+function frame(app: MarketplaceApp, convId = conversation.id) {
+  return host.querySelector<HTMLIFrameElement>(
+    `#mp-pane-panel-${convId}-${app.id} iframe[title="小组应用：${app.name}"]`,
+  );
 }
 
 function captureMessages(iframe: HTMLIFrameElement) {
@@ -80,14 +97,22 @@ async function appEvent(iframe: HTMLIFrameElement, type: string) {
 }
 
 describe.each([false, true])("Marketplace session isolation (mobile=%s)", (mobile) => {
-  it("does not initialize a new same-origin app with the previous app's token", async () => {
+  it("does not initialize a new same-origin app with the previous app's token while keeping the previous tab alive in background", async () => {
     const pendingB = deferred<ConversationAppSessionResp>();
     vi.spyOn(api, "createConversationAppSession").mockImplementation(async (_conv, id) => id === appA.id ? sessionFor(appA) : pendingB.promise);
     await renderPane(conversation, mobile);
-    expect(frame(appA)).not.toBeNull();
-    await selectApp(appB);
+    expect(api.createConversationAppSession).not.toHaveBeenCalled();
     expect(frame(appA)).toBeNull();
+
+    await openApp(appA);
+    const a = frame(appA)!;
+    expect(a).not.toBeNull();
+
+    await openApp(appB);
+    expect(frame(appA)).toBe(a);
+    expect(a.closest<HTMLElement>(".mp-frame-slot")?.hidden).toBe(true);
     expect(frame(appB)).toBeNull();
+
     await act(async () => pendingB.resolve(sessionFor(appB)));
     const b = frame(appB)!;
     const send = captureMessages(b);
@@ -96,11 +121,13 @@ describe.each([false, true])("Marketplace session isolation (mobile=%s)", (mobil
     expect(send.mock.calls.every(([message]) => message.payload.token !== "token-app-a")).toBe(true);
   });
 
-  it.each(["resolve", "reject"] as const)("ignores a late %s from the previous app", async (outcome) => {
+  it.each(["resolve", "reject"] as const)("ignores a late %s from a closed previous app tab", async (outcome) => {
     const pendingA = deferred<ConversationAppSessionResp>();
     vi.spyOn(api, "createConversationAppSession").mockImplementation(async (_conv, id) => id === appA.id ? pendingA.promise : sessionFor(appB));
     await renderPane(conversation, mobile);
-    await selectApp(appB);
+    await openApp(appA);
+    await closeTab(appA);
+    await openApp(appB);
     const b = frame(appB)!;
     const send = captureMessages(b);
     await act(async () => {
@@ -116,7 +143,7 @@ describe.each([false, true])("Marketplace session isolation (mobile=%s)", (mobil
   });
 });
 
-it("isolates a pending refresh when switching conversations with the same app", async () => {
+it("isolates a pending refresh when switching conversations with the same app kept alive in both groups", async () => {
   const oldRefresh = deferred<ConversationAppSessionResp>();
   let oldCalls = 0;
   vi.spyOn(api, "createConversationAppSession").mockImplementation(async (conv) => {
@@ -124,18 +151,25 @@ it("isolates a pending refresh when switching conversations with the same app", 
     return ++oldCalls === 1 ? sessionFor(appA) : oldRefresh.promise;
   });
   await renderPane();
-  const oldFrame = frame(appA)!;
-  captureMessages(oldFrame);
+  await openApp(appA);
+  const oldFrame = frame(appA, conversation.id)!;
+  const oldSend = captureMessages(oldFrame);
   await appEvent(oldFrame, "teamie:mcp-app:refresh-token");
+
   const newConversation = { ...conversation, id: "another-group" };
   await renderPane(newConversation);
-  const current = frame(appA)!;
+  expect(oldFrame.isConnected).toBe(true);
+  expect(oldFrame.closest<HTMLElement>(".mp-frame-slot")?.hidden).toBe(true);
+
+  await openApp(appA);
+  const current = frame(appA, "another-group")!;
   const send = captureMessages(current);
   expect(current).not.toBe(oldFrame);
   await act(async () => oldRefresh.resolve(sessionFor(appA, "old-group-refresh-token")));
   await appEvent(current, "teamie:mcp-app:ready");
   expect(send).toHaveBeenCalledWith(expect.objectContaining({ payload: expect.objectContaining({ conversationId: "another-group", token: "new-group-token" }) }), "https://apps.example.test");
   expect(send.mock.calls.every(([message]) => message.payload.token === "new-group-token")).toBe(true);
+  expect(oldSend).toHaveBeenCalledWith(expect.objectContaining({ payload: expect.objectContaining({ conversationId: "group", token: "old-group-refresh-token" }) }), "https://apps.example.test");
 });
 
 it("delivers only the newest refresh result to the existing iframe", async () => {
@@ -146,6 +180,7 @@ it("delivers only the newest refresh result to the existing iframe", async () =>
     .mockImplementationOnce(() => first.promise)
     .mockImplementationOnce(() => second.promise);
   await renderPane();
+  await openApp(appA);
   const current = frame(appA)!;
   const send = captureMessages(current);
   await appEvent(current, "teamie:mcp-app:refresh-token");
@@ -160,6 +195,7 @@ it("delivers only the newest refresh result to the existing iframe", async () =>
 it("ignores ready and refresh requests from another origin or window", async () => {
   const request = vi.spyOn(api, "createConversationAppSession").mockResolvedValue(sessionFor(appA));
   await renderPane();
+  await openApp(appA);
   const current = frame(appA)!;
   const send = captureMessages(current);
   await act(async () => {
