@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import type { Message } from "@teamie/api-client";
 import { COMMON_REACTION_EMOJIS } from "../engagement-store";
+import { formatDateTime } from "../format-datetime";
 import { ICON } from "../icons";
 import { Modal } from "../ui";
 import {
@@ -89,7 +90,7 @@ export function MessageActionSheet({
   return createPortal(
     <Modal
       title="消息操作"
-      subtitle={`${message.senderName}：${preview.length > 60 ? `${preview.slice(0, 60)}…` : preview}`}
+      subtitle={`${message.senderName} · ${formatDateTime(message.createdAt, "datetime")}：${preview.length > 60 ? `${preview.slice(0, 60)}…` : preview}`}
       onClose={onClose}
       className="message-action-sheet"
     >

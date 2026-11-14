@@ -707,4 +707,23 @@ describe("PR-5 CSS cleanup, unified focus, icon scale & self-hosted DM Sans", ()
     }
     expect(circularSccs, "circular relative import SCCs").toEqual([]);
   });
+
+  it("keeps composer inner textarea transparent and compact message timestamps hover-revealed", () => {
+    const chatCss = readFileSync(join(srcDir, "styles/chat.css"), "utf8");
+    const conveniencesCss = readFileSync(
+      join(srcDir, "styles/conveniences.css"),
+      "utf8",
+    );
+    expect(chatCss).toMatch(
+      /\.composer textarea\s*\{[^}]*background:\s*transparent;/,
+    );
+    expect(chatCss).not.toMatch(/\.message\.compact\s+\.message-avatar\s*>\s*span/);
+    expect(chatCss).toMatch(
+      /\.message\.compact\s+\.compact-time\s*\{[^}]*opacity:\s*0;/,
+    );
+    expect(chatCss).toMatch(
+      /\.message\.compact:hover\s+\.compact-time[\s\S]*?\{[^}]*opacity:\s*1;/,
+    );
+    expect(conveniencesCss).not.toMatch(/\.compact-time/);
+  });
 });

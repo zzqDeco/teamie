@@ -259,7 +259,7 @@
   }
   .composer textarea::placeholder {
     color: var(--text-subtle);
-    font-size: var(--font-md);
+    font-size: inherit;
   }
   .composer-footer > span:last-child {
     font-size: var(--font-sm);
