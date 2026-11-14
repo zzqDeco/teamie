@@ -46,6 +46,8 @@ export function AdminReviewModal({
       await queryClient.invalidateQueries({ queryKey: ["adminMarketplaceReview", appId] });
       await queryClient.invalidateQueries({ queryKey: ["adminMarketplaceApps"] });
       await queryClient.invalidateQueries({ queryKey: ["marketplaceCatalog"] });
+      await queryClient.invalidateQueries({ queryKey: ["workspaceApps"] });
+      await queryClient.invalidateQueries({ queryKey: ["conversationApps"] });
       if (successMsg) toast.success(successMsg);
     } catch (e) {
       const msg = errorText(e);

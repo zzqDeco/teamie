@@ -96,6 +96,8 @@ export function DeveloperAppsList({
       });
       toast.success(`已创建应用草稿「${created.app.draftName || created.app.name}」`);
       await queryClient.invalidateQueries({ queryKey: ["developerMarketplaceApps"] });
+      await queryClient.invalidateQueries({ queryKey: ["workspaceApps"] });
+      await queryClient.invalidateQueries({ queryKey: ["conversationApps"] });
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -113,6 +115,8 @@ export function DeveloperAppsList({
       if (createdResult?.app.id === app.id) setCreatedResult(null);
       toast.success(`已删除草稿「${app.draftName}」`);
       await queryClient.invalidateQueries({ queryKey: ["developerMarketplaceApps"] });
+      await queryClient.invalidateQueries({ queryKey: ["workspaceApps"] });
+      await queryClient.invalidateQueries({ queryKey: ["conversationApps"] });
     } catch (e) {
       const msg = errorText(e);
       setError(msg);

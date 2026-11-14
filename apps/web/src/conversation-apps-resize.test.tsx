@@ -345,6 +345,14 @@ describe("ConversationAppsPane resizable desktop width & persistence (Issue #135
     await renderAppsPane();
     const appsAside = getAppsAside();
     const separator = getSeparator()!;
+    expect(host.querySelector(".mp-iframe")).toBeNull();
+    expect(api.createConversationAppSession).toHaveBeenCalledTimes(0);
+
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>(".mp-launcher-card")!.click();
+    });
+    await flush();
+
     const initialIframe = host.querySelector<HTMLIFrameElement>(".mp-iframe")!;
     expect(initialIframe).not.toBeNull();
     expect(api.createConversationAppSession).toHaveBeenCalledTimes(1);

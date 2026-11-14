@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useId, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import {
   ArrowUp,
@@ -40,6 +40,7 @@ import { MobileNavButton } from "../shell/page-header";
 import { handleRovingKeys } from "./roving-keys";
 import { messagePreviewText } from "./plain-preview";
 import { sameLocalDay } from "../format-datetime";
+import { useConversationOpenAppCount } from "../marketplace/app-tabs-state";
 export function useMessageActions(conversationId: string) {
   const editPending = useRef(false);
   const [actionMessageId, setActionMessageId] = useState("");
@@ -202,6 +203,7 @@ export function ConversationHeader({
   name,
   membersOpen,
   appsOpen = false,
+  openAppsCount,
   onMenu,
   onSearchOpen,
   onMembers,
@@ -215,6 +217,7 @@ export function ConversationHeader({
   name: string;
   membersOpen: boolean;
   appsOpen?: boolean;
+  openAppsCount?: number;
   onMenu: () => void;
   onSearchOpen: () => void;
   onMembers: () => void;
@@ -227,6 +230,9 @@ export function ConversationHeader({
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifBusy, setNotifBusy] = useState(false);
   const notifWrapRef = useRef<HTMLDivElement>(null);
+  const appsBadgeId = useId();
+  const contextOpenAppsCount = useConversationOpenAppCount(conversation.id);
+  const runningAppsCount = openAppsCount ?? contextOpenAppsCount;
   const level = effectiveNotificationLevel(conversation);
   const otherMember =
     conversation.type === "direct" && members && userId
@@ -409,13 +415,27 @@ export function ConversationHeader({
           <Search size={ICON.lg} />
         </IconButton>
         {conversation.type === "group" && onApps && (
-          <IconButton
-            label="小组应用"
-            onClick={onApps}
-            aria-expanded={appsOpen}
-          >
-            <Blocks size={ICON.lg} />
-          </IconButton>
+          <>
+            <IconButton
+              label="小组应用"
+              className={`mp-apps-trigger${runningAppsCount > 0 ? " has-running-apps" : ""}`}
+              onClick={onApps}
+              aria-expanded={appsOpen}
+              aria-describedby={runningAppsCount > 0 ? appsBadgeId : undefined}
+            >
+              <Blocks size={ICON.lg} />
+              {runningAppsCount > 0 && (
+                <span className="mp-running-badge" aria-hidden="true">
+                  {runningAppsCount}
+                </span>
+              )}
+            </IconButton>
+            {runningAppsCount > 0 && (
+              <span id={appsBadgeId} className="sr-only">
+                {`已打开 ${runningAppsCount} 个应用标签页`}
+              </span>
+            )}
+          </>
         )}
         <IconButton
           label="查看会话成员"
