@@ -39,6 +39,8 @@ import { RemoveMemberModal, ShellMembersPane } from "./shell-members-pane";
 import {
   clearPersistedAppPaneWidth,
   ConversationAppsPane,
+  ConversationAppTabsProvider,
+  useConversationAppTabsController,
 } from "./marketplace/conversation-apps";
 import { WorkspaceMarketplaceModal } from "./marketplace/workspace-modal";
 import { AnnouncementModals, usePlatformAnnouncements } from "./announcements";
@@ -77,7 +79,6 @@ export function Shell() {
   const [dialog, setDialog] = useState<DialogKind | null>(null),
     [sidebar, setSidebar] = useState(false),
     [details, setDetails] = useState(false),
-    [appsOpen, setAppsOpen] = useState(false),
     [managingWorkspaceApps, setManagingWorkspaceApps] = useState(false),
     [managingGroup, setManagingGroup] = useState(false),
     [groupExit, setGroupExit] = useState<"leave" | "dissolve" | null>(null),
@@ -183,11 +184,28 @@ export function Shell() {
     closeGroupManager = useCallback(() => setManagingGroup(false), []),
     closeQuickSwitcher = useCallback(() => setQuickSwitcherOpen(false), []),
     closeShortcuts = useCallback(() => setShortcutsOpen(false), []);
+  const caps = chat.data?.capabilities || {};
+  const marketplaceEnabled = caps["im.marketplace.enabled"] !== false;
+  const announcementsPublishEnabled = caps["im.announcements.publish"] !== false;
+  const appTabs = useConversationAppTabsController({
+    userId: user?.id,
+    marketplaceEnabled,
+    conversations: snapshot.conversations,
+    hasAuthoritativeConversations: chatStore.hasAuthoritativeConversations,
+    workspaces: chat.data?.workspaces,
+  });
+  const closeAllOpenAppPanes = appTabs.closeAllOpenPanes;
+  const setAppPaneOpen = appTabs.setPaneOpen;
+  const prevLocationRef = useRef(`${location.pathname}${location.search}`);
   useEffect(() => {
+    const nextLocation = `${location.pathname}${location.search}`;
+    const locationChanged = prevLocationRef.current !== nextLocation;
+    prevLocationRef.current = nextLocation;
+    if (!locationChanged) return;
     setSidebar(false);
     setManagingGroup(false);
     setGroupExit(null);
-    setAppsOpen(false);
+    if (overlayMembers) closeAllOpenAppPanes();
     setError("");
     setDirectError("");
     if (
@@ -195,18 +213,16 @@ export function Shell() {
       new URLSearchParams(location.search).has("message")
     )
       setDetails(false);
-  }, [location.pathname, location.search]);
+  }, [closeAllOpenAppPanes, location.pathname, location.search, overlayMembers]);
   const closeSidebar = useCallback(() => setSidebar(false), []);
   const closeDetails = useCallback(() => {
     setDetails(false);
-    setAppsOpen(false);
+    if (conversation) setAppPaneOpen(conversation.id, false);
+    else closeAllOpenAppPanes();
     setDirectError("");
-  }, []);
+  }, [closeAllOpenAppPanes, conversation, setAppPaneOpen]);
   const baseOverlayModal =
     !!dialog || quickSwitcherOpen || shortcutsOpen || managingGroup || !!groupExit || managingWorkspaceApps || !!removing;
-  const caps = chat.data?.capabilities || {};
-  const marketplaceEnabled = caps["im.marketplace.enabled"] !== false;
-  const announcementsPublishEnabled = caps["im.announcements.publish"] !== false;
   const { isAnnouncementsAdminPage, isAttentionPage, isAgentsPage, isManagement } = routes;
   const announcementPopupVisible =
     !announcementsHistoryOpen &&
@@ -245,6 +261,7 @@ export function Shell() {
   )
     setViewKey({ conversation: viewConversationId, target: initialMessageId });
   const appsAvailable = !isManagement && !routes.isNotFound && !!workspace && conversation?.type === "group";
+  const appsOpen = appsAvailable && appTabs.isPaneOpen(conversation?.id);
   const appsVisible = appsOpen && !details && appsAvailable;
   const membersVisible = details && !isManagement && !routes.isNotFound && !!workspace && !!conversation;
   const rightPaneVisible = appsVisible || membersVisible;
@@ -252,10 +269,7 @@ export function Shell() {
     if (user) {
       client.setQueryData(["capability", "im.marketplace.enabled", user.id], marketplaceEnabled);
     }
-    if (!appsAvailable) {
-      setAppsOpen(false);
-      setManagingWorkspaceApps(false);
-    } else if (!marketplaceEnabled) {
+    if (!appsAvailable || !marketplaceEnabled) {
       setManagingWorkspaceApps(false);
     }
   }, [appsAvailable, client, marketplaceEnabled, user]);
@@ -329,7 +343,7 @@ export function Shell() {
     setGroupExit(null);
     setManagingGroup(false);
     setDetails(false);
-    setAppsOpen(false);
+    appTabs.purgeConversation(removedId);
     chatStore.removeConversation(removedId);
     navigate(fallbackTarget, { replace: true });
     toast.success(kind === "dissolve" ? "已解散小组" : "已退出小组");
@@ -347,6 +361,7 @@ export function Shell() {
     try {
       await logout();
       if (!api.csrfToken) {
+        appTabs.resetAll();
         nav.clearForUser(currentUserId);
         clearPersistedAppPaneWidth(currentUserId);
         navigate("/login");
@@ -405,6 +420,7 @@ export function Shell() {
   }
   return (
     <PageTitleProvider value={setTitleDetail}>
+    <ConversationAppTabsProvider value={appTabs}>
     <div className={`app-shell ${sidebar ? "sidebar-open" : ""} ${rightPaneVisible ? "details-open" : ""}`}>
       <a
         href="#main-content"
@@ -489,19 +505,20 @@ export function Shell() {
             onClearMessageTarget={() => navigate(location.pathname, { replace: true })}
             members={members}
             onMembers={() => {
+              const nextDetails = !details;
               setSidebar(false);
               setDirectError("");
-              setAppsOpen(false);
-              setDetails(!details);
+              if (nextDetails) appTabs.setPaneOpen(conversation.id, false);
+              setDetails(nextDetails);
             }}
             membersOpen={details}
-                appsOpen={appsVisible}
+            appsOpen={appsVisible}
             onApps={
               conversation.type === "group"
                 ? () => {
                     setSidebar(false);
                     setDetails(false);
-                    setAppsOpen(!appsOpen);
+                    appTabs.setPaneOpen(conversation.id, !appsVisible);
                   }
                 : undefined
             }
@@ -545,20 +562,22 @@ export function Shell() {
           onInvite={() => setDialog("invite")}
         />
       )}
-      {appsVisible && workspace && conversation && (
-        <ConversationAppsPane
-          paneRef={membersRef}
-          overlayMembers={overlayMembers}
-          mobile={mobile}
-          sidebar={sidebar}
-          workspace={workspace}
-          conversation={conversation}
-          user={user!}
-          owner={owner}
-          onClose={() => setAppsOpen(false)}
-          onOpenWorkspaceApps={() => setManagingWorkspaceApps(true)}
-        />
-      )}
+      <ConversationAppsPane
+        paneRef={appsVisible ? membersRef : undefined}
+        visible={appsVisible}
+        tabsController={appTabs}
+        overlayMembers={overlayMembers}
+        mobile={mobile}
+        sidebar={sidebar}
+        workspace={appsAvailable ? workspace : undefined}
+        conversation={appsAvailable ? conversation : undefined}
+        user={user!}
+        owner={owner}
+        onClose={() => {
+          if (conversation) appTabs.setPaneOpen(conversation.id, false);
+        }}
+        onOpenWorkspaceApps={() => setManagingWorkspaceApps(true)}
+      />
       {managingWorkspaceApps && marketplaceEnabled && appsAvailable && workspace && (
         <WorkspaceMarketplaceModal
           workspace={workspace}
@@ -640,6 +659,7 @@ export function Shell() {
         onDismissOptimistic={announcements.applyLocalReadSeq}
       />
     </div>
+    </ConversationAppTabsProvider>
     </PageTitleProvider>
   );
 }

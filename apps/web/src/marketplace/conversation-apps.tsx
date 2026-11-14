@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { RefObject } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { Blocks, LoaderCircle, Plus, RefreshCw, X } from "lucide-react";
-import { api } from "@teamie/api-client";
+import { api, ApiError } from "@teamie/api-client";
 import type {
   Conversation,
-  ConversationAppSessionResp,
   MarketplaceApp,
   User,
   Workspace,
@@ -24,25 +23,46 @@ import {
   useConversationAppPaneResize,
   writePersistedAppPaneWidth,
 } from "./app-pane-resize";
+import {
+  buildAppInstanceKey,
+  ConversationAppTabsProvider,
+  MAX_LIVE_APP_FRAMES,
+  useConversationAppTabsController,
+  useConversationOpenAppCount,
+} from "./app-tabs-state";
+import type {
+  ConversationAppTabsController,
+  OpenedAppTab,
+} from "./app-tabs-state";
+import { ConversationAppFrame } from "./conversation-app-frame";
 
 export {
+  buildAppInstanceKey,
   clampAppPaneWidth,
   clearPersistedAppPaneWidth,
   computeMaxAppPaneWidth,
+  ConversationAppTabsProvider,
   DEFAULT_APP_PANE_WIDTH,
   MAX_APP_PANE_WIDTH_CEILING,
+  MAX_LIVE_APP_FRAMES,
   MIN_APP_PANE_WIDTH,
   readPersistedAppPaneWidth,
+  useConversationAppTabsController,
+  useConversationOpenAppCount,
   writePersistedAppPaneWidth,
 };
+export type { ConversationAppTabsController, OpenedAppTab };
 
 export function ConversationAppsPane(props: {
   paneRef?: RefObject<HTMLElement | null>;
+  visible?: boolean;
+  tabsController?: ConversationAppTabsController;
+  maxLiveFrames?: number;
   overlayMembers: boolean;
   mobile: boolean;
   sidebar: boolean;
-  workspace: Workspace;
-  conversation: Conversation;
+  workspace?: Workspace;
+  conversation?: Conversation;
   user: User;
   owner: boolean;
   onClose: () => void;
@@ -50,6 +70,9 @@ export function ConversationAppsPane(props: {
 }) {
   const {
     paneRef,
+    visible = true,
+    tabsController,
+    maxLiveFrames = MAX_LIVE_APP_FRAMES,
     overlayMembers,
     mobile,
     sidebar,
@@ -60,7 +83,24 @@ export function ConversationAppsPane(props: {
     onClose,
     onOpenWorkspaceApps,
   } = props;
-  const [selectedAppId, setSelectedAppId] = useState("");
+
+  const queryMarketplaceEnabled = useMarketplaceWriteEnabled(user.id);
+  const internalController = useConversationAppTabsController({
+    userId: user.id,
+    marketplaceEnabled: queryMarketplaceEnabled,
+    maxLiveFrames,
+  });
+  const controller = tabsController ?? internalController;
+  const marketplaceEnabled = tabsController
+    ? controller.marketplaceEnabled && queryMarketplaceEnabled
+    : queryMarketplaceEnabled;
+
+  useEffect(() => {
+    if (!marketplaceEnabled) {
+      controller.clearAllTabs();
+    }
+  }, [controller, marketplaceEnabled]);
+
   const {
     effectiveWidth,
     maxWidth,
@@ -69,31 +109,91 @@ export function ConversationAppsPane(props: {
     handleProps,
   } = useConversationAppPaneResize({
     userId: user.id,
-    overlayMembers,
+    overlayMembers: !visible || overlayMembers,
   });
 
-  const appsQuery = useQuery({
-    queryKey: ["conversationApps", conversation.id],
-    queryFn: () => api.conversationApps(conversation.id),
-    enabled: conversation.type === "group",
-  });
+  const activeGroupId =
+    visible && conversation?.type === "group" ? conversation.id : "";
+  const trackedConversationIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (activeGroupId) ids.add(activeGroupId);
+    if (marketplaceEnabled) {
+      for (const id of controller.openConversationIds) ids.add(id);
+    }
+    return [...ids];
+  }, [activeGroupId, controller.openConversationIds, marketplaceEnabled]);
 
-  const apps = useMemo(() => appsQuery.data?.apps || [], [appsQuery.data]);
-  const activeApp = useMemo(
-    () => apps.find((a) => a.id === selectedAppId) || apps[0] || null,
-    [apps, selectedAppId],
-  );
+  const appQueries = useQueries({
+    queries: trackedConversationIds.map((id) => ({
+      queryKey: ["conversationApps", id],
+      queryFn: () => api.conversationApps(id),
+    })),
+  });
 
   useEffect(() => {
-    if (activeApp && activeApp.id !== selectedAppId) {
-      setSelectedAppId(activeApp.id);
+    if (!marketplaceEnabled) return;
+    trackedConversationIds.forEach((convId, index) => {
+      const q = appQueries[index];
+      if (!q) return;
+      if (q.data?.apps) {
+        controller.syncConversationApps(convId, q.data.apps);
+      } else if (
+        q.isError &&
+        q.error instanceof ApiError &&
+        (q.error.status === 403 || q.error.status === 404)
+      ) {
+        controller.purgeConversation(convId);
+      }
+    });
+  }, [appQueries, controller, marketplaceEnabled, trackedConversationIds]);
+
+  const activeQueryIndex = activeGroupId
+    ? trackedConversationIds.indexOf(activeGroupId)
+    : -1;
+  const activeAppsQuery =
+    activeQueryIndex >= 0 ? appQueries[activeQueryIndex] : undefined;
+  const apps = useMemo(
+    () => activeAppsQuery?.data?.apps || [],
+    [activeAppsQuery?.data],
+  );
+
+  const activeSlice = controller.getSlice(activeGroupId);
+  useEffect(() => {
+    if (visible && activeGroupId && marketplaceEnabled) {
+      controller.touchForegroundConversation(activeGroupId);
     }
-  }, [activeApp, selectedAppId]);
+  }, [
+    activeGroupId,
+    activeSlice.activeTabAppId,
+    activeSlice.launcherOpen,
+    controller,
+    marketplaceEnabled,
+    visible,
+  ]);
+
+  const liveTabs = marketplaceEnabled ? controller.liveTabs : [];
+  if (!visible && liveTabs.length === 0) {
+    return null;
+  }
+
+  const hasForegroundSurface = Boolean(
+    visible && workspace && conversation && conversation.type === "group",
+  );
+  const activeOpenTabs = activeSlice.tabs;
+  const isLauncherView =
+    activeOpenTabs.length === 0 || activeSlice.launcherOpen;
+  const foregroundActiveTab = !isLauncherView
+    ? activeOpenTabs.find((t) => t.appId === activeSlice.activeTabAppId) ?? null
+    : null;
+  const showActiveLiveStage = Boolean(
+    hasForegroundSurface && marketplaceEnabled && foregroundActiveTab?.live,
+  );
 
   return (
     <>
-      {overlayMembers && !sidebar && (
+      {visible && overlayMembers && !sidebar && (
         <button
+          type="button"
           className="members-shade"
           aria-label="关闭小组应用面板"
           onClick={onClose}
@@ -101,15 +201,16 @@ export function ConversationAppsPane(props: {
       )}
       <aside
         className={`members-pane mp-apps-pane${isDragging ? " mp-apps-pane-dragging" : ""}`}
-        ref={paneRef}
-        style={desktopWidthStyle}
-        role={overlayMembers ? "dialog" : undefined}
-        aria-modal={overlayMembers ? true : undefined}
+        ref={visible ? paneRef : undefined}
+        style={visible ? desktopWidthStyle : undefined}
+        role={visible && overlayMembers ? "dialog" : undefined}
+        aria-modal={visible && overlayMembers ? true : undefined}
         aria-label="小组应用"
         tabIndex={-1}
-        inert={mobile && sidebar}
+        hidden={!visible}
+        inert={!visible || (mobile && sidebar)}
       >
-        {!overlayMembers && (
+        {visible && !overlayMembers && (
           <div
             className="mp-resize-handle"
             role="separator"
@@ -122,35 +223,62 @@ export function ConversationAppsPane(props: {
             {...handleProps}
           />
         )}
-        {overlayMembers && !sidebar && <OverlayFocusBoundary edge="start" />}
-        <header>
-          <span>
-            小组应用 <b>{apps.length}</b>
-          </span>
-          <div className="mp-header-actions">
-            <ConversationAppsManageAction
-              userId={user.id}
-              owner={owner}
-              onOpenWorkspaceApps={onOpenWorkspaceApps}
-            />
-            <IconButton label="关闭小组应用面板" onClick={onClose}>
-              <X size={ICON.md} />
-            </IconButton>
-          </div>
-        </header>
-
-        <ConversationAppsBody
-          appsQuery={appsQuery}
-          apps={apps}
-          activeApp={activeApp}
-          workspace={workspace}
-          conversation={conversation}
-          user={user}
-          owner={owner}
-          onSelectApp={setSelectedAppId}
-          onOpenWorkspaceApps={onOpenWorkspaceApps}
-        />
-        {overlayMembers && !sidebar && <OverlayFocusBoundary edge="end" />}
+        {visible && overlayMembers && !sidebar && (
+          <OverlayFocusBoundary edge="start" />
+        )}
+        {hasForegroundSurface && workspace && conversation && (
+          <ConversationAppsForeground
+            apps={apps}
+            appsQuery={activeAppsQuery}
+            workspace={workspace}
+            conversation={conversation}
+            owner={owner}
+            marketplaceEnabled={marketplaceEnabled}
+            openTabs={activeOpenTabs}
+            activeTabAppId={activeSlice.activeTabAppId}
+            launcherOpen={isLauncherView}
+            controller={controller}
+            onClose={onClose}
+            onOpenWorkspaceApps={onOpenWorkspaceApps}
+          />
+        )}
+        <div
+          className="mp-frames-stage"
+          hidden={!showActiveLiveStage}
+          inert={!showActiveLiveStage}
+        >
+          {liveTabs.map((tab) => {
+            const isForegroundTab =
+              showActiveLiveStage &&
+              conversation?.id === tab.conversationId &&
+              foregroundActiveTab?.appId === tab.appId;
+            return (
+              <div
+                key={tab.instanceKey}
+                id={`mp-pane-panel-${tab.conversationId}-${tab.appId}`}
+                role="tabpanel"
+                aria-labelledby={
+                  isForegroundTab
+                    ? `mp-pane-tab-${tab.conversationId}-${tab.appId}`
+                    : undefined
+                }
+                className="mp-pane-tabpanel mp-frame-slot"
+                hidden={!isForegroundTab}
+                inert={!isForegroundTab}
+              >
+                <ConversationAppFrame
+                  app={tab.app}
+                  conversationId={tab.conversationId}
+                  workspaceId={tab.workspaceId}
+                  user={user}
+                />
+              </div>
+            );
+          })}
+        </div>
+        {visible && overlayMembers && !sidebar && (
+          <OverlayFocusBoundary edge="end" />
+        )}
       </aside>
     </>
   );
@@ -168,30 +296,17 @@ function useMarketplaceWriteEnabled(userId: string): boolean {
     enabled: false,
   });
   if (typeof capQuery.data === "boolean") return capQuery.data;
-  const fromBootstrap = bootstrapQuery.data?.capabilities?.["im.marketplace.enabled"];
+  const fromBootstrap =
+    bootstrapQuery.data?.capabilities?.["im.marketplace.enabled"];
   if (typeof fromBootstrap === "boolean") return fromBootstrap;
   return true;
 }
 
-function ConversationAppsManageAction({
-  userId,
-  owner,
-  onOpenWorkspaceApps,
-}: {
-  userId: string;
-  owner: boolean;
-  onOpenWorkspaceApps: () => void;
-}) {
-  const marketplaceEnabled = useMarketplaceWriteEnabled(userId);
-  if (!owner || !marketplaceEnabled) return null;
-  return (
-    <IconButton label="管理工作空间应用" onClick={onOpenWorkspaceApps}>
-      <Plus size={ICON.md} />
-    </IconButton>
-  );
-}
-
-function resolveTabKeyIndex(key: string, currentIndex: number, total: number): number {
+function resolveTabKeyIndex(
+  key: string,
+  currentIndex: number,
+  total: number,
+): number {
   if (total <= 0) return -1;
   if (key === "ArrowRight") return (currentIndex + 1) % total;
   if (key === "ArrowLeft") return (currentIndex - 1 + total) % total;
@@ -200,36 +315,225 @@ function resolveTabKeyIndex(key: string, currentIndex: number, total: number): n
   return -1;
 }
 
-function ConversationAppsBody({
-  appsQuery,
+function ConversationAppsForeground({
   apps,
-  activeApp,
+  appsQuery,
   workspace,
   conversation,
-  user,
   owner,
-  onSelectApp,
+  marketplaceEnabled,
+  openTabs,
+  activeTabAppId,
+  launcherOpen,
+  controller,
+  onClose,
   onOpenWorkspaceApps,
 }: {
-  appsQuery: {
+  apps: MarketplaceApp[];
+  appsQuery?: {
     isLoading: boolean;
     isError: boolean;
     error: unknown;
     refetch: () => Promise<unknown>;
   };
-  apps: MarketplaceApp[];
-  activeApp: MarketplaceApp | null;
   workspace: Workspace;
   conversation: Conversation;
-  user: User;
   owner: boolean;
-  onSelectApp: (id: string) => void;
+  marketplaceEnabled: boolean;
+  openTabs: OpenedAppTab[];
+  activeTabAppId: string | null;
+  launcherOpen: boolean;
+  controller: ConversationAppTabsController;
+  onClose: () => void;
   onOpenWorkspaceApps: () => void;
 }) {
-  const marketplaceEnabled = useMarketplaceWriteEnabled(user.id);
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
-  if (appsQuery.isLoading) {
+  return (
+    <>
+      <header>
+        <span>
+          小组应用 <b>{apps.length}</b>
+        </span>
+        <div className="mp-header-actions">
+          {owner && marketplaceEnabled && (
+            <IconButton
+              label="管理工作空间应用"
+              onClick={onOpenWorkspaceApps}
+            >
+              <Plus size={ICON.md} />
+            </IconButton>
+          )}
+          <IconButton label="关闭小组应用面板" onClick={onClose}>
+            <X size={ICON.md} />
+          </IconButton>
+        </div>
+      </header>
+
+      {!marketplaceEnabled ? (
+        <div className="mp-pane-body">
+          <Notice kind="info">
+            平台当前已关闭应用功能，已安装应用仅展示只读信息。
+          </Notice>
+          {apps.length === 0 ? (
+            <div className="members-description">
+              <span className="member-cover">
+                <Blocks size={ICON.xl} />
+              </span>
+              <h3>暂无已安装应用</h3>
+              <p className="field-help">「{workspace.name}」尚未安装应用。</p>
+            </div>
+          ) : (
+            <ul
+              className="mp-readonly-list"
+              aria-label="已安装小组应用只读列表"
+            >
+              {apps.map((app) => (
+                <li key={app.id} className="mp-readonly-card">
+                  <div className="mp-frame-meta">
+                    <b>{app.name}</b>
+                    <BadgePill>{app.slug}</BadgePill>
+                    {app.servingDraft && (
+                      <BadgePill className="mp-badge-draft">测试草稿</BadgePill>
+                    )}
+                  </div>
+                  {app.description && (
+                    <p className="field-help">{app.description}</p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : (
+        <>
+          {openTabs.length > 0 && (
+            <div className="mp-browser-tabbar">
+              <div
+                className="mp-pane-tabs"
+                role="tablist"
+                aria-label="切换小组应用"
+              >
+                {openTabs.map((tab, idx) => {
+                  const selected =
+                    !launcherOpen && activeTabAppId === tab.appId;
+                  const tabFocusable = selected || (launcherOpen && idx === 0);
+                  return (
+                    <div
+                      key={tab.appId}
+                      className={`mp-tab-item${selected ? " active" : ""}${!tab.live ? " hibernated" : ""}`}
+                      role="presentation"
+                    >
+                      <button
+                        ref={(el) => {
+                          tabRefs.current[idx] = el;
+                        }}
+                        id={`mp-pane-tab-${conversation.id}-${tab.appId}`}
+                        type="button"
+                        role="tab"
+                        aria-selected={selected}
+                        aria-controls={`mp-pane-panel-${conversation.id}-${tab.appId}`}
+                        tabIndex={tabFocusable ? 0 : -1}
+                        className="mp-tab-trigger"
+                        title={
+                          tab.live
+                            ? tab.app.name
+                            : `${tab.app.name}（已休眠，点击唤醒）`
+                        }
+                        onClick={() =>
+                          controller.activateTab(conversation.id, tab.appId)
+                        }
+                        onKeyDown={(event) => {
+                          const nextIdx = resolveTabKeyIndex(
+                            event.key,
+                            idx,
+                            openTabs.length,
+                          );
+                          if (nextIdx !== -1) {
+                            event.preventDefault();
+                            const nextTab = openTabs[nextIdx];
+                            if (nextTab) {
+                              controller.activateTab(
+                                conversation.id,
+                                nextTab.appId,
+                              );
+                              tabRefs.current[nextIdx]?.focus();
+                            }
+                          }
+                        }}
+                      >
+                        <span className="mp-tab-title">{tab.app.name}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="mp-tab-close"
+                        aria-label={`关闭标签页：${tab.app.name}`}
+                        title={`关闭标签页：${tab.app.name}`}
+                        tabIndex={selected ? 0 : -1}
+                        onClick={() =>
+                          controller.closeTab(conversation.id, tab.appId)
+                        }
+                      >
+                        <X size={ICON.xs} aria-hidden="true" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+              <IconButton
+                label="打开新应用"
+                className={`mp-tab-add${launcherOpen ? " active" : ""}`}
+                aria-pressed={launcherOpen}
+                onClick={() => controller.openLauncher(conversation.id)}
+              >
+                <Plus size={ICON.sm} />
+              </IconButton>
+            </div>
+          )}
+
+          {launcherOpen && (
+            <ConversationAppsLauncher
+              apps={apps}
+              appsQuery={appsQuery}
+              workspace={workspace}
+              conversation={conversation}
+              owner={owner}
+              openTabs={openTabs}
+              controller={controller}
+              onOpenWorkspaceApps={onOpenWorkspaceApps}
+            />
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
+function ConversationAppsLauncher({
+  apps,
+  appsQuery,
+  workspace,
+  conversation,
+  owner,
+  openTabs,
+  controller,
+  onOpenWorkspaceApps,
+}: {
+  apps: MarketplaceApp[];
+  appsQuery?: {
+    isLoading: boolean;
+    isError: boolean;
+    error: unknown;
+    refetch: () => Promise<unknown>;
+  };
+  workspace: Workspace;
+  conversation: Conversation;
+  owner: boolean;
+  openTabs: OpenedAppTab[];
+  controller: ConversationAppTabsController;
+  onOpenWorkspaceApps: () => void;
+}) {
+  if (appsQuery?.isLoading && apps.length === 0) {
     return (
       <div className="member-loading">
         <LoaderCircle size={ICON.sm} className="spin" />
@@ -238,7 +542,7 @@ function ConversationAppsBody({
     );
   }
 
-  if (appsQuery.isError && apps.length === 0) {
+  if (appsQuery?.isError && apps.length === 0) {
     return (
       <div className="members-description" role="alert">
         <h3>加载失败</h3>
@@ -250,40 +554,6 @@ function ConversationAppsBody({
         >
           <RefreshCw size={ICON.xs} /> 重新加载
         </Button>
-      </div>
-    );
-  }
-
-  if (!marketplaceEnabled) {
-    return (
-      <div className="mp-pane-body">
-        <Notice kind="info">
-          平台当前已关闭应用功能，已安装应用仅展示只读信息。
-        </Notice>
-        {apps.length === 0 ? (
-          <div className="members-description">
-            <span className="member-cover">
-              <Blocks size={ICON.xl} />
-            </span>
-            <h3>暂无已安装应用</h3>
-            <p className="field-help">「{workspace.name}」尚未安装应用。</p>
-          </div>
-        ) : (
-          <ul className="mp-readonly-list" aria-label="已安装小组应用只读列表">
-            {apps.map((app) => (
-              <li key={app.id} className="mp-readonly-card">
-                <div className="mp-frame-meta">
-                  <b>{app.name}</b>
-                  <BadgePill>{app.slug}</BadgePill>
-                  {app.servingDraft && (
-                    <BadgePill className="mp-badge-draft">测试草稿</BadgePill>
-                  )}
-                </div>
-                {app.description && <p className="field-help">{app.description}</p>}
-              </li>
-            ))}
-          </ul>
-        )}
       </div>
     );
   }
@@ -309,235 +579,42 @@ function ConversationAppsBody({
   }
 
   return (
-    <div className="mp-pane-body">
-      {apps.length > 1 && (
-        <div
-          className="theme-options mp-pane-tabs"
-          role="tablist"
-          aria-label="切换小组应用"
-        >
-          {apps.map((app, idx) => {
-            const selected = activeApp?.id === app.id;
-            return (
+    <div className="mp-launcher">
+      <p className="mp-launcher-hint field-help">
+        点击应用在标签页中启动，切换小组或收起面板后继续后台保活。
+      </p>
+      <ul className="mp-launcher-list" aria-label="已安装小组应用列表">
+        {apps.map((app) => {
+          const openedTab = openTabs.find((t) => t.appId === app.id);
+          return (
+            <li key={app.id} className="mp-launcher-item">
               <button
-                key={app.id}
-                ref={(el) => {
-                  tabRefs.current[idx] = el;
-                }}
-                id={`mp-pane-tab-${app.id}`}
                 type="button"
-                role="tab"
-                aria-selected={selected}
-                aria-controls={`mp-pane-panel-${app.id}`}
-                tabIndex={selected ? 0 : -1}
-                className={`theme-option ${selected ? "active" : ""}`}
-                onClick={() => onSelectApp(app.id)}
-                onKeyDown={(event) => {
-                  const nextIdx = resolveTabKeyIndex(event.key, idx, apps.length);
-                  if (nextIdx !== -1) {
-                    event.preventDefault();
-                    const nextApp = apps[nextIdx];
-                    if (nextApp) {
-                      onSelectApp(nextApp.id);
-                      tabRefs.current[nextIdx]?.focus();
-                    }
-                  }
-                }}
+                className="mp-launcher-card"
+                onClick={() => controller.openOrActivateTab(conversation, app)}
               >
-                {app.name}
+                <span className="mp-frame-meta">
+                  <b>{app.name}</b>
+                  <BadgePill>{app.slug}</BadgePill>
+                  {app.servingDraft && (
+                    <BadgePill className="mp-badge-draft">测试草稿</BadgePill>
+                  )}
+                  {openedTab && (
+                    <BadgePill className="mp-badge-running">
+                      {openedTab.live ? "已打开" : "已休眠"}
+                    </BadgePill>
+                  )}
+                </span>
+                {app.description && (
+                  <span className="mp-launcher-desc field-help">
+                    {app.description}
+                  </span>
+                )}
               </button>
-            );
-          })}
-        </div>
-      )}
-      {activeApp && (
-        <div
-          id={apps.length > 1 ? `mp-pane-panel-${activeApp.id}` : undefined}
-          role={apps.length > 1 ? "tabpanel" : undefined}
-          aria-labelledby={apps.length > 1 ? `mp-pane-tab-${activeApp.id}` : undefined}
-          className="mp-pane-tabpanel"
-        >
-          <ConversationAppFrame
-            key={JSON.stringify([
-              user.id,
-              conversation.workspaceId,
-              conversation.id,
-              activeApp.id,
-              activeApp.webUrl,
-              activeApp.mcpUrl,
-            ])}
-            app={activeApp}
-            conversation={conversation}
-            user={user}
-          />
-        </div>
-      )}
+            </li>
+          );
+        })}
+      </ul>
     </div>
-  );
-}
-
-// A different user, conversation or app mounts a new instance. Pending requests
-// and iframe refs therefore cannot cross the credential's scope, even on one origin.
-function ConversationAppFrame({
-  app,
-  conversation,
-  user,
-}: {
-  app: MarketplaceApp;
-  conversation: Conversation;
-  user: User;
-}) {
-  const iframeRef = useRef<HTMLIFrameElement | null>(null);
-  const requests = useRef({ generation: 0 });
-  const [session, setSession] = useState<ConversationAppSessionResp | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-
-  const sameOriginBlocked = useMemo(() => {
-    try {
-      return new URL(app.webUrl).origin === window.location.origin;
-    } catch {
-      return true;
-    }
-  }, [app.webUrl]);
-
-  const fetchSession = useCallback(async () => {
-    if (sameOriginBlocked) return;
-    const pending = requests.current;
-    const generation = ++pending.generation;
-    setLoading(true);
-    setError("");
-    try {
-      const next = await api.createConversationAppSession(conversation.id, app.id);
-      if (generation !== pending.generation) return;
-      if (next.app.id !== app.id || next.app.webUrl !== app.webUrl) {
-        throw new Error("应用信息已更新，请重新打开应用。");
-      }
-      setSession(next);
-    } catch (e) {
-      if (generation !== pending.generation) return;
-      setSession(null);
-      setError(errorText(e));
-    } finally {
-      if (generation === pending.generation) setLoading(false);
-    }
-  }, [app.id, app.webUrl, conversation.id, sameOriginBlocked]);
-
-  useEffect(() => {
-    const pending = requests.current;
-    void fetchSession();
-    return () => {
-      pending.generation++;
-    };
-  }, [fetchSession]);
-
-  const postContext = useCallback(() => {
-    const win = iframeRef.current?.contentWindow;
-    if (!win || !session || session.app.id !== app.id || session.app.webUrl !== app.webUrl) {
-      return;
-    }
-    let origin: string;
-    try {
-      origin = new URL(app.webUrl).origin;
-    } catch {
-      return;
-    }
-    if (origin === window.location.origin) return;
-    win.postMessage(
-      {
-        type: "teamie:mcp-app:init",
-        payload: {
-          appId: session.app.id,
-          slug: session.app.slug,
-          name: session.app.name,
-          webUrl: session.app.webUrl,
-          mcpUrl: session.app.mcpUrl,
-          token: session.token,
-          expiresAt: session.expiresAt,
-          workspaceId: conversation.workspaceId,
-          conversationId: conversation.id,
-          user: { id: user.id, displayName: user.displayName },
-        },
-      },
-      origin,
-    );
-  }, [
-    app.id,
-    app.webUrl,
-    conversation.id,
-    conversation.workspaceId,
-    session,
-    user.displayName,
-    user.id,
-  ]);
-
-  // A refreshed credential must reach the existing frame without reloading it.
-  useEffect(() => {
-    postContext();
-  }, [postContext]);
-
-  useEffect(() => {
-    if (sameOriginBlocked) return;
-    let origin: string;
-    try {
-      origin = new URL(app.webUrl).origin;
-    } catch {
-      return;
-    }
-    const onMessage = (event: MessageEvent) => {
-      if (event.origin !== origin || event.source !== iframeRef.current?.contentWindow) return;
-      const type = (event.data as { type?: string } | null)?.type;
-      if (type === "teamie:mcp-app:ready") {
-        if (session) postContext();
-        else void fetchSession();
-      } else if (type === "teamie:mcp-app:refresh-token") {
-        void fetchSession();
-      }
-    };
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, [app.webUrl, fetchSession, postContext, sameOriginBlocked, session]);
-
-  return (
-    <>
-      <Notice>
-        {sameOriginBlocked
-          ? "安全限制：小组应用 Web UI 必须部署在独立跨源域名上，禁止与当前主站同源挂载。"
-          : error}
-      </Notice>
-      <div className="mp-frame-bar">
-        <span className="mp-frame-meta">
-          <b>{app.name}</b>
-          <small>· {app.slug}</small>
-          {(app.servingDraft || session?.app.servingDraft) && (
-            <BadgePill className="mp-badge-draft">测试草稿</BadgePill>
-          )}
-        </span>
-        <IconButton
-          label="刷新应用会话"
-          disabled={loading || sameOriginBlocked}
-          onClick={() => void fetchSession()}
-        >
-          <RefreshCw size={ICON.xs} />
-        </IconButton>
-      </div>
-      {loading && !session && !sameOriginBlocked && !error && (
-        <div className="mp-frame-loading" role="status">
-          <LoaderCircle size={ICON.md} className="spin" aria-hidden="true" />
-          <span>正在启动应用会话…</span>
-        </div>
-      )}
-      {!sameOriginBlocked && session && (
-        <iframe
-          ref={iframeRef}
-          tabIndex={0}
-          title={`小组应用：${app.name}`}
-          src={session.app.webUrl}
-          sandbox="allow-scripts allow-forms allow-same-origin"
-          onLoad={postContext}
-          className="mp-iframe"
-        />
-      )}
-    </>
   );
 }

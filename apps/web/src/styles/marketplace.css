@@ -52,6 +52,35 @@
     align-items: center;
     gap: var(--space-1);
   }
+  .mp-apps-trigger {
+    position: relative;
+  }
+  .mp-apps-trigger.has-running-apps {
+    color: var(--brand-text);
+    background: var(--lavender);
+  }
+  .mp-running-badge {
+    position: absolute;
+    top: calc(-1 * var(--space-0_5));
+    right: calc(-1 * var(--space-0_5));
+    min-width: 16px;
+    height: 16px;
+    padding: 0 var(--space-1);
+    border-radius: var(--r-pill);
+    background: var(--brand);
+    color: var(--on-brand);
+    font-size: var(--font-xs);
+    font-weight: 700;
+    line-height: 16px;
+    text-align: center;
+    pointer-events: none;
+  }
+  .mp-tab-trigger:focus-visible,
+  .mp-tab-close:focus-visible,
+  .mp-launcher-card:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: -2px;
+  }
 }
 
 @layer features {
@@ -61,8 +90,159 @@
     flex: 1;
     min-height: 0;
   }
+  .mp-browser-tabbar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-1_5) var(--space-2) 0;
+    background: var(--surface-sunken);
+    border-bottom: 1px solid var(--border);
+  }
   .mp-pane-tabs {
-    padding: var(--space-2) var(--space-3);
+    display: flex;
+    align-items: stretch;
+    gap: var(--space-1);
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    padding: 0;
+    scrollbar-width: thin;
+  }
+  .mp-tab-item {
+    display: inline-flex;
+    align-items: center;
+    max-width: 180px;
+    min-width: 0;
+    border: 1px solid transparent;
+    border-bottom: 0;
+    border-radius: var(--r-sm) var(--r-sm) 0 0;
+    background: transparent;
+    color: var(--text-muted);
+    transition:
+      background var(--dur-fast) var(--ease-standard),
+      color var(--dur-fast) var(--ease-standard);
+  }
+  .mp-tab-item:hover {
+    background: var(--hover-bg);
+    color: var(--text-strong);
+  }
+  .mp-tab-item.active {
+    background: var(--surface);
+    border-color: var(--border);
+    color: var(--text-strong);
+    margin-bottom: -1px;
+    padding-bottom: 1px;
+  }
+  .mp-tab-item.hibernated .mp-tab-title {
+    opacity: 0.72;
+  }
+  .mp-tab-trigger {
+    display: inline-flex;
+    align-items: center;
+    min-width: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font-size: var(--font-xs);
+    font-weight: 600;
+    padding: var(--space-1_5) var(--space-1) var(--space-1_5) var(--space-2_5);
+    cursor: pointer;
+  }
+  .mp-tab-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 120px;
+  }
+  .mp-tab-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    margin-right: var(--space-1);
+    padding: 0;
+    border: 0;
+    border-radius: var(--r-xs);
+    background: transparent;
+    color: var(--text-subtle);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .mp-tab-close:hover {
+    background: var(--danger-bg);
+    color: var(--danger-text);
+  }
+  .mp-tab-add {
+    width: 28px;
+    height: 28px;
+    margin-bottom: var(--space-1);
+    flex-shrink: 0;
+  }
+  .mp-tab-add.active {
+    background: var(--lavender);
+    color: var(--brand-text);
+  }
+  .mp-launcher {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: var(--space-3);
+    gap: var(--space-2_5);
+  }
+  .mp-launcher-hint {
+    margin: 0;
+  }
+  .mp-launcher-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+  .mp-launcher-item {
+    margin: 0;
+  }
+  .mp-launcher-card {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-1_5);
+    padding: var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--surface);
+    color: var(--text-strong);
+    text-align: left;
+    cursor: pointer;
+    transition:
+      border-color var(--dur-fast) var(--ease-standard),
+      background var(--dur-fast) var(--ease-standard);
+  }
+  .mp-launcher-card:hover {
+    border-color: var(--brand);
+    background: var(--hover-bg);
+  }
+  .mp-launcher-desc {
+    margin: 0;
+  }
+  .mp-badge-running {
+    background: var(--success-bg);
+    color: var(--success-text);
+    border-color: var(--success-border);
+  }
+  .mp-frames-stage {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+  .mp-frame-slot {
+    min-height: 0;
   }
   .mp-frame-bar {
     display: flex;
@@ -402,5 +582,13 @@
     border: 1px solid var(--border);
     border-radius: var(--r-md);
     background: var(--surface);
+  }
+}
+
+@layer utilities {
+  .mp-apps-pane[hidden],
+  .mp-frames-stage[hidden],
+  .mp-frame-slot[hidden] {
+    display: none;
   }
 }
