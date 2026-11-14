@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { RefObject } from "react";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Blocks, LoaderCircle, Plus, RefreshCw, X } from "lucide-react";
 import { api, ApiError } from "@teamie/api-client";
 import type {
@@ -84,6 +84,7 @@ export function ConversationAppsPane(props: {
     onOpenWorkspaceApps,
   } = props;
 
+  const queryClient = useQueryClient();
   const queryMarketplaceEnabled = useMarketplaceWriteEnabled(user.id);
   const internalController = useConversationAppTabsController({
     userId: user.id,
@@ -114,6 +115,18 @@ export function ConversationAppsPane(props: {
 
   const activeGroupId =
     visible && conversation?.type === "group" ? conversation.id : "";
+  const prevActiveGroupIdRef = useRef("");
+  useEffect(() => {
+    const prev = prevActiveGroupIdRef.current;
+    prevActiveGroupIdRef.current = activeGroupId;
+    if (!activeGroupId || activeGroupId === prev) return;
+    const state = queryClient.getQueryState(["conversationApps", activeGroupId]);
+    if (state && state.dataUpdatedAt > 0 && state.fetchStatus !== "fetching") {
+      void queryClient.invalidateQueries({
+        queryKey: ["conversationApps", activeGroupId],
+      });
+    }
+  }, [activeGroupId, queryClient]);
   const trackedConversationIds = useMemo(() => {
     const ids = new Set<string>();
     if (activeGroupId) ids.add(activeGroupId);

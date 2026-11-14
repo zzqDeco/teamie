@@ -384,8 +384,6 @@ export function Shell() {
     setSidebar(false);
   }
   if (chat.loading && !chat.data) return <Loading />;
-  if (legacyDirectoryMatch)
-    return <Navigate to={`/app/w/${legacyDirectoryMatch.params.workspaceId}/members`} replace />;
   if (chat.error && !chat.data)
     return (
       <div className="loading-screen">
@@ -397,26 +395,25 @@ export function Shell() {
         </Button>
       </div>
     );
-  if (
+  let redirectTarget = "";
+  if (legacyDirectoryMatch) {
+    redirectTarget = `/app/w/${legacyDirectoryMatch.params.workspaceId}/members`;
+  } else if (
     !match &&
     pathname === "/app" &&
     chat.data?.workspaces.length &&
     (backChatRoute !== "/app" || conversations.length)
-  )
-    return (
-      <Navigate
-        to={backChatRoute !== "/app" ? backChatRoute : route(channels[0] || conversations[0])}
-        replace
-      />
-    );
-  if (workspaceRootMatch && chat.data) {
+  ) {
+    redirectTarget =
+      backChatRoute !== "/app" ? backChatRoute : route(channels[0] || conversations[0]);
+  } else if (workspaceRootMatch && chat.data) {
     const id = workspaceRootMatch.params.workspaceId!;
     const stored = Object.values(snapshot.conversations).filter((c) => c.workspaceId === id);
     const inWorkspace = stored.length
       ? stored
       : chat.data.conversations.filter((c) => c.workspaceId === id);
     const first = inWorkspace.find((c) => c.type === "channel") || inWorkspace[0];
-    return <Navigate to={first ? route(first) : `/app/w/${id}/members`} replace />;
+    redirectTarget = first ? route(first) : `/app/w/${id}/members`;
   }
   return (
     <PageTitleProvider value={setTitleDetail}>
@@ -474,7 +471,9 @@ export function Shell() {
           onRetry={chat.reconnect ?? chat.sync}
         />
         {error && !removing && <Notice>{error}</Notice>}
-        {routes.isNotFound ? (
+        {redirectTarget ? (
+          <Navigate to={redirectTarget} replace />
+        ) : routes.isNotFound ? (
           <NotFoundView onOpenNavigation={() => setSidebar(true)} />
         ) : isAttentionPage ? (
           <AttentionInbox key={user!.id} onMenu={() => setSidebar(true)} />

@@ -150,6 +150,8 @@ function AdminMarketplaceCatalog({
       setPending(null);
       await queryClient.invalidateQueries({ queryKey: ["adminMarketplaceApps"] });
       await queryClient.invalidateQueries({ queryKey: ["marketplaceCatalog"] });
+      await queryClient.invalidateQueries({ queryKey: ["workspaceApps"] });
+      await queryClient.invalidateQueries({ queryKey: ["conversationApps"] });
       if (successMsg) toast.success(successMsg);
     } catch (e) {
       const msg = errorText(e);

@@ -169,6 +169,8 @@ export function DeveloperAppDetail({
   async function refreshApp() {
     await queryClient.invalidateQueries({ queryKey: ["developerMarketplaceApp", appId] });
     await queryClient.invalidateQueries({ queryKey: ["developerMarketplaceApps"] });
+    await queryClient.invalidateQueries({ queryKey: ["workspaceApps"] });
+    await queryClient.invalidateQueries({ queryKey: ["conversationApps"] });
   }
 
   async function runAction(action: string, fn: () => Promise<void>) {

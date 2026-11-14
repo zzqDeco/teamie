@@ -515,6 +515,15 @@ describe("Browser-style group app tabs & cross-group zero-reload keep-alive (Iss
     expect(frameGroupA.isConnected).toBe(true);
     expect(frameGroupB.isConnected).toBe(true);
 
+    // Click workspace rail logo (/app redirect) -> preserves frame host through <Navigate> redirect!
+    const sessionsBeforeRedirect = vi.mocked(api.createConversationAppSession).mock.calls.length;
+    await click(find('a[href="/app"]'));
+    expect(frameGroupA.isConnected).toBe(true);
+    expect(frameGroupB.isConnected).toBe(true);
+    expect(vi.mocked(api.createConversationAppSession).mock.calls.length).toBe(
+      sessionsBeforeRedirect,
+    );
+
     // Close members pane and switch back to group-a -> desktop remembers group-a pane was open!
     await click(find('.navigation-sidebar a[href="/app/w/team/c/group-a"]'));
     await click(find('header.conversation-header [aria-label="查看会话成员"]'));
@@ -575,11 +584,25 @@ describe("Browser-style group app tabs & cross-group zero-reload keep-alive (Iss
     expect(frameAPoll.isConnected).toBe(false);
     expect(frameBBoard.isConnected).toBe(true);
 
-    // Re-open updated appBoard in group-a, then test group membership loss
+    // Re-open updated appBoard in group-a, disable appBoard on server for group-b WITHOUT manual invalidateQueries,
+    // and verify returning to group-b's open pane automatically revalidates conversationApps and destroys frameBBoard!
     await click(find('.navigation-sidebar a[href="/app/w/team/c/group-a"]'));
     await clickLauncherApp("协作白板");
     const frameABoardV2 = getSlotFrame("group-a", appBoard.id)!;
     expect(frameABoardV2).not.toBeNull();
+
+    appsByConversation[groupB.id] = [{ ...appBoard, enabled: false }];
+    await click(find('.navigation-sidebar a[href="/app/w/team/c/group-b"]'));
+    expect(frameBBoard.isConnected).toBe(false);
+
+    // Re-enable in group-b and re-open so we can also test authoritative conversation removal
+    appsByConversation[groupB.id] = [appBoard];
+    await click(find('aside [aria-label="关闭小组应用面板"]'));
+    await click(find('header.conversation-header [aria-label="小组应用"]'));
+    await clickLauncherApp("协作白板");
+    const frameBBoardV2 = getSlotFrame("group-b", appBoard.id)!;
+    expect(frameBBoardV2.isConnected).toBe(true);
+    await click(find('.navigation-sidebar a[href="/app/w/team/c/group-a"]'));
 
     // 2) Losing access to group-b via authoritative conversation sync immediately destroys group-b's iframe
     bootstrap = {
@@ -590,7 +613,7 @@ describe("Browser-style group app tabs & cross-group zero-reload keep-alive (Iss
       chatStore.replaceConversations([channelGeneral, groupA]);
     });
     await rerenderShell();
-    expect(frameBBoard.isConnected).toBe(false);
+    expect(frameBBoardV2.isConnected).toBe(false);
     expect(frameABoardV2.isConnected).toBe(true);
 
     // 3) Capability im.marketplace.enabled turning false immediately destroys all iframes and shows read-only list
