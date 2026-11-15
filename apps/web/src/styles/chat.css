@@ -209,13 +209,13 @@
     background: var(--surface);
   }
   .message-avatar {
-    width: 35px;
+    width: 36px;
     flex-shrink: 0;
     padding-top: 0;
   }
   .message-avatar > .avatar {
-    width: 35px;
-    height: 35px;
+    width: 36px;
+    height: 36px;
     font-size: var(--font-md);
     border-radius: var(--r-md);
   }
@@ -245,6 +245,7 @@
     font-weight: 400;
     flex-shrink: 0;
     font-size: var(--font-sm);
+    font-variant-numeric: tabular-nums;
     color: var(--text-muted);
   }
   .you-label {
@@ -289,16 +290,27 @@
     padding-top: 0;
   }
   .message.compact .message-avatar {
-    padding-top: var(--space-1_5);
+    padding-top: 0;
+    display: flex;
+    justify-content: flex-end;
   }
-  .message.compact .message-avatar > span {
-    color: var(--text-muted);
-    display: none;
-    text-align: center;
-    font-size: var(--font-sm);
-  }
-  .message.compact:hover .message-avatar > span {
+  .message.compact .compact-time {
+    color: var(--text-subtle);
     display: block;
+    text-align: right;
+    font-size: var(--font-sm);
+    font-variant-numeric: tabular-nums;
+    line-height: calc(var(--font-lg) * var(--lh-body));
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    user-select: none;
+    transition: opacity var(--dur-fast) var(--ease-standard);
+  }
+  .message.compact:hover .compact-time,
+  .message.compact:focus-within .compact-time,
+  .message.compact.actions-open .compact-time {
+    opacity: 1;
   }
   .message-actions {
     position: absolute;
@@ -431,6 +443,7 @@
   .composer textarea {
     border: 0;
     border-radius: 0;
+    background: transparent;
     box-shadow: none;
     field-sizing: content;
     resize: none;
@@ -446,6 +459,7 @@
   .composer textarea:focus {
     border: 0;
     border-radius: 0;
+    background: transparent;
     box-shadow: none;
     field-sizing: content;
     resize: none;
@@ -513,9 +527,9 @@
     gap: var(--space-2);
     padding: var(--space-2_5) var(--space-3);
     background: var(--surface);
-    border: 1px solid var(--border-strong);
+    border: 1px solid var(--field-border);
     border-bottom: 0;
-    border-radius: 8px 8px 0 0;
+    border-radius: var(--r-md) var(--r-md) 0 0;
     font-size: var(--font-sm);
     color: var(--text-muted);
     flex-shrink: 0;
@@ -542,7 +556,7 @@
     color: var(--text-muted);
   }
   .composer.with-reply {
-    border-radius: 0 0 9px 9px;
+    border-radius: 0 0 var(--r-md) var(--r-md);
   }
   .retract-quote {
     font-size: var(--font-base);
