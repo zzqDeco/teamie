@@ -503,6 +503,93 @@ describe("unread entry", () => {
     await elapse(450);
     expect(api.read).toHaveBeenCalledWith("room", 2);
   });
+
+  it("pages forward from a deep link without advancing readSeq until seamless merge, and clears ?message= without calling fetchLatest", async () => {
+    const conversation = conversationWith(10, 120);
+    bootstrap.conversations = [conversation];
+    chatStore.replaceConversations([conversation]);
+    const history = Array.from({ length: 120 }, (_, i) => message(i + 1));
+    let visible = new Set(Array.from({ length: 75 }, (_, i) => i + 16));
+    visibleOnly(() => visible);
+    vi.spyOn(api, "message").mockResolvedValue({ message: history[39] });
+    const around = vi.spyOn(api, "messagesAround")
+      .mockResolvedValueOnce({ messages: history.slice(15, 65), hasMore: false })
+      .mockResolvedValueOnce({ messages: history.slice(40, 90), hasMore: false })
+      .mockResolvedValueOnce({ messages: history.slice(65, 120), hasMore: false });
+    const clear = vi.fn();
+    await show(conversation, { initialMessageId: "m40", onClearMessageTarget: clear });
+    await elapse(700);
+    // Initial deep-link read acknowledges only the target m40, never rows 41..65.
+    expect(api.read).toHaveBeenCalledExactlyOnceWith("room", 40);
+    expect(api.messages).not.toHaveBeenCalled();
+    expect(host.querySelector(".located-banner")).not.toBeNull();
+    expect(host.querySelector(".load-later")).not.toBeNull();
+    vi.mocked(api.read).mockClear();
+
+    // Forward paging through old history while gap remains must keep readSeq unchanged and stay out of chatStore.
+    const scroll = host.querySelector<HTMLElement>(".message-scroll")!;
+    scroll.scrollTop = 410;
+    await act(async () => host.querySelector<HTMLButtonElement>(".load-later")!.click());
+    await act(async () => scroll.dispatchEvent(new Event("scroll")));
+    await elapse(700);
+    expect(around).toHaveBeenLastCalledWith("room", 66);
+    expect(api.read).not.toHaveBeenCalled();
+    expect(chatStore.getSnapshot().messages.room).toBeUndefined();
+    expect(clear).not.toHaveBeenCalled();
+
+    // Catching up to lastSeq merges seamlessly, preserves scroll, and clears ?message= without triggering fetchLatest.
+    vi.mocked(HTMLElement.prototype.scrollTo).mockClear();
+    vi.mocked(HTMLElement.prototype.scrollIntoView).mockClear();
+    await act(async () => host.querySelector<HTMLButtonElement>(".load-later")!.click());
+    expect(around).toHaveBeenLastCalledWith("room", 91);
+    expect(host.querySelector(".located-banner")).toBeNull();
+    expect(host.querySelector(".load-later")).toBeNull();
+    expect(scroll.scrollTop).toBe(410);
+    expect(HTMLElement.prototype.scrollTo).not.toHaveBeenCalled();
+    expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
+    expect(clear).toHaveBeenCalledTimes(1);
+    expect(host.querySelectorAll("article[data-seq]")).toHaveLength(105);
+
+    // Router updates initialMessageId to "" in place: skipNextFetchLatestRef must skip fetchLatest once.
+    await show(chatStore.getSnapshot().conversations.room, {
+      initialMessageId: "",
+      onClearMessageTarget: clear,
+    });
+    expect(api.messages).not.toHaveBeenCalled();
+    expect(scroll.scrollTop).toBe(410);
+    expect(host.querySelectorAll("article[data-seq]")).toHaveLength(105);
+
+    // Once back in normal timeline, viewing visible rows resumes normal read tracking.
+    visible = new Set(Array.from({ length: 80 }, (_, i) => i + 41));
+    await act(async () => scroll.dispatchEvent(new Event("scroll")));
+    await elapse(700);
+    expect(api.read).toHaveBeenCalledWith("room", 120);
+  });
+
+  it("shows .load-later when currentLastSeq advances past a located view even if conversation.lastSeq prop is stale", async () => {
+    const conversation = conversationWith(50, 50);
+    bootstrap.conversations = [conversation];
+    chatStore.replaceConversations([conversation]);
+    const history = Array.from({ length: 51 }, (_, i) => message(i + 1));
+    vi.spyOn(api, "message").mockResolvedValue({ message: history[24] });
+    const around = vi.spyOn(api, "messagesAround")
+      .mockResolvedValueOnce({ messages: history.slice(0, 50), hasMore: false })
+      .mockResolvedValueOnce({ messages: history.slice(25, 51), hasMore: false });
+    await show(conversation, { initialMessageId: "m25" });
+    // Initial jump must NOT auto-merge even when messagesAround reaches lastSeq.
+    expect(host.querySelector(".located-banner")).not.toBeNull();
+    expect(host.querySelector(".load-later")).toBeNull();
+
+    // Live sync delivers seq 51 while conversation.lastSeq prop stays 50.
+    await act(async () => { chatStore.merge([history[50]]); });
+    expect(host.querySelector(".load-later")).not.toBeNull();
+
+    await act(async () => host.querySelector<HTMLButtonElement>(".load-later")!.click());
+    expect(around).toHaveBeenLastCalledWith("room", 51);
+    expect(host.querySelector(".located-banner")).toBeNull();
+    expect(host.querySelector(".load-later")).toBeNull();
+    expect(host.querySelectorAll("article[data-seq]")).toHaveLength(51);
+  });
 });
 
 describe("editing shortcuts", () => {

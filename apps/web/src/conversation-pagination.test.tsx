@@ -177,4 +177,163 @@ describe("conversation history pagination", () => {
     expect(chatStore.getSnapshot().messages.history.some((message) => message.seq === 151)).toBe(true);
     expect(chatStore.getSnapshot().messages.history.some((message) => message.seq === 50)).toBe(false);
   });
+
+  it("pages forward from a non-unread located jump, ignores isolated cached rows via extendHistoryBoundary, and seamlessly merges into the latest store window", async () => {
+    const target = history[124];
+    history[249] = { ...history[249], replyToId: target.id };
+    chatStore.merge([history[0]]);
+    vi.spyOn(api, "message").mockResolvedValue({ message: target });
+    const around = vi.spyOn(api, "messagesAround")
+      .mockResolvedValueOnce({ messages: history.slice(99, 149), hasMore: false })
+      .mockResolvedValueOnce({ messages: history.slice(124, 174), hasMore: false })
+      .mockResolvedValueOnce({ messages: history.slice(149, 200), hasMore: false });
+    await mount();
+    expect(chatStore.getSnapshot().messages.history.slice(0, 2).map((m) => m.seq)).toEqual([1, 201]);
+
+    await click(".message-reply");
+    expect(host.querySelector(".located-banner")).not.toBeNull();
+    expect(host.querySelector(".load-later")).not.toBeNull();
+    expect(chatStore.getSnapshot().messages.history.some((m) => m.seq === 125)).toBe(false);
+
+    // First forward page reaches 174 (< 201 - 1): must remain isolated from chatStore despite cached seq 1.
+    await click(".load-later");
+    expect(around).toHaveBeenLastCalledWith(conversation.id, 150);
+    expect(host.querySelector(".located-banner")).not.toBeNull();
+    expect(host.querySelector(".load-later")).not.toBeNull();
+    expect(chatStore.getSnapshot().messages.history.some((m) => m.seq === 174)).toBe(false);
+
+    // Second forward page reaches 200 (adjacent to contiguous store window 201..250): merges seamlessly.
+    const scroll = host.querySelector<HTMLElement>(".message-scroll")!;
+    scroll.scrollTop = 320;
+    vi.mocked(HTMLElement.prototype.scrollTo).mockClear();
+    vi.mocked(HTMLElement.prototype.scrollIntoView).mockClear();
+    await click(".load-later");
+    expect(around).toHaveBeenLastCalledWith(conversation.id, 175);
+    expect(host.querySelector(".located-banner")).toBeNull();
+    expect(host.querySelector(".load-later")).toBeNull();
+    expect(scroll.scrollTop).toBe(320);
+    expect(HTMLElement.prototype.scrollTo).not.toHaveBeenCalled();
+    expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
+    const storeSeqs = chatStore.getSnapshot().messages.history.map((m) => m.seq);
+    expect(storeSeqs).toEqual([1, ...Array.from({ length: 151 }, (_, i) => 100 + i)]);
+    expect(host.querySelectorAll(".message")).toHaveLength(152);
+
+    // Older paging after merge uses contiguous boundary 100 rather than isolated seq 1.
+    await click(".load-earlier");
+    expect(api.messages).toHaveBeenLastCalledWith(conversation.id, 100);
+  });
+
+  it("retries older() instead of fetchLatest() when loading older history fails", async () => {
+    const target = history[124];
+    history[249] = { ...history[249], replyToId: target.id };
+    vi.spyOn(api, "message").mockResolvedValue({ message: target });
+    vi.spyOn(api, "messagesAround").mockResolvedValue({ messages: history.slice(99, 149), hasMore: false });
+    await mount();
+    await click(".message-reply");
+    vi.mocked(api.messages).mockRejectedValueOnce(new Error("timeout"));
+    await click(".load-earlier");
+    expect(host.querySelector(".message-error")).not.toBeNull();
+    expect(host.querySelector(".located-banner")).not.toBeNull();
+
+    const callsBeforeRetry = vi.mocked(api.messages).mock.calls.length;
+    await click(".message-error button");
+    expect(vi.mocked(api.messages).mock.calls).toHaveLength(callsBeforeRetry + 1);
+    expect(api.messages).toHaveBeenLastCalledWith(conversation.id, 100);
+    expect(host.querySelector(".located-banner")).not.toBeNull();
+    expect(host.querySelectorAll(".message")).toHaveLength(100);
+    expect(host.querySelector(".message-error")).toBeNull();
+  });
+
+  it("auto-loads newer pages via bottom sentinel only after located scroll settles and user scrolls down, with a failure circuit breaker", async () => {
+    type IO = { callback: IntersectionObserverCallback; targets: Element[]; disconnected: boolean };
+    const observers: IO[] = [];
+    vi.stubGlobal("IntersectionObserver", class {
+      io: IO;
+      constructor(callback: IntersectionObserverCallback) {
+        this.io = { callback, targets: [], disconnected: false };
+        observers.push(this.io);
+      }
+      observe(target: Element) { this.io.targets.push(target); }
+      unobserve() {}
+      disconnect() { this.io.disconnected = true; }
+    });
+    const bottomObservers = () =>
+      observers.filter(
+        (o) => !o.disconnected && o.targets.some((t) => t.getAttribute("data-history-sentinel") === "bottom"),
+      );
+
+    const target = history[124];
+    history[249] = { ...history[249], replyToId: target.id };
+    vi.spyOn(api, "message").mockResolvedValue({ message: target });
+    const around = vi.spyOn(api, "messagesAround")
+      .mockResolvedValueOnce({ messages: history.slice(99, 149), hasMore: false })
+      .mockResolvedValueOnce({ messages: history.slice(124, 174), hasMore: false })
+      .mockRejectedValueOnce(new Error("network glitch"))
+      .mockResolvedValueOnce({ messages: history.slice(149, 199), hasMore: false });
+
+    await mount();
+    await click(".message-reply");
+    // Must not arm or fire before the user actively scrolls downward.
+    expect(around).toHaveBeenCalledTimes(1);
+    expect(bottomObservers()).toHaveLength(0);
+
+    const scroll = host.querySelector<HTMLElement>(".message-scroll")!;
+    await act(async () => { scroll.dispatchEvent(new Event("scroll")); });
+    expect(bottomObservers()).toHaveLength(0);
+
+    scroll.scrollTop = 260;
+    await act(async () => { scroll.dispatchEvent(new Event("scroll")); });
+    const [firstBottomIo] = bottomObservers();
+    expect(firstBottomIo).toBeDefined();
+
+    // Concurrent intersections deduplicate via newerBusyRef.
+    const visible = [{ isIntersecting: true, target: firstBottomIo.targets[0] }] as unknown as IntersectionObserverEntry[];
+    await act(async () => {
+      firstBottomIo.callback(visible, {} as IntersectionObserver);
+      firstBottomIo.callback(visible, {} as IntersectionObserver);
+    });
+    expect(around).toHaveBeenCalledTimes(2);
+    expect(around).toHaveBeenLastCalledWith(conversation.id, 150);
+    expect(host.querySelectorAll(".message")).toHaveLength(75);
+
+    // Re-armed observer trips circuit breaker on failure instead of looping.
+    const [secondBottomIo] = bottomObservers();
+    expect(secondBottomIo).toBeDefined();
+    expect(secondBottomIo).not.toBe(firstBottomIo);
+    await act(async () => secondBottomIo.callback(visible, {} as IntersectionObserver));
+    expect(around).toHaveBeenCalledTimes(3);
+    expect(bottomObservers()).toHaveLength(0);
+    expect(host.querySelector(".message-error")).not.toBeNull();
+
+    // Retrying via error banner calls newer() (not fetchLatest) and re-arms the sentinel.
+    const messagesCalls = vi.mocked(api.messages).mock.calls.length;
+    await click(".message-error button");
+    expect(vi.mocked(api.messages).mock.calls).toHaveLength(messagesCalls);
+    expect(around).toHaveBeenCalledTimes(4);
+    expect(around).toHaveBeenLastCalledWith(conversation.id, 175);
+    expect(host.querySelectorAll(".message")).toHaveLength(100);
+    expect(bottomObservers()).toHaveLength(1);
+  });
+
+  it("treats zero-progress messagesAround responses as transient errors without merging a gap", async () => {
+    const target = history[124];
+    history[249] = { ...history[249], replyToId: target.id };
+    vi.spyOn(api, "message").mockResolvedValue({ message: target });
+    const around = vi.spyOn(api, "messagesAround")
+      .mockResolvedValueOnce({ messages: history.slice(99, 149), hasMore: false })
+      .mockResolvedValueOnce({ messages: history.slice(99, 149), hasMore: false })
+      .mockResolvedValueOnce({ messages: history.slice(124, 174), hasMore: false });
+    await mount();
+    await click(".message-reply");
+
+    await click(".load-later");
+    expect(around).toHaveBeenLastCalledWith(conversation.id, 150);
+    expect(host.textContent).toContain("后续消息暂未加载，请重试");
+    expect(host.querySelector(".located-banner")).not.toBeNull();
+    expect(chatStore.getSnapshot().messages.history.some((m) => m.seq === 149)).toBe(false);
+
+    await click(".load-later");
+    expect(host.textContent).not.toContain("后续消息暂未加载，请重试");
+    expect(host.querySelectorAll(".message")).toHaveLength(75);
+  });
 });

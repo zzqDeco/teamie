@@ -83,7 +83,7 @@ export function useConversationReadTracking({
       lastReadRef.current = readSeq;
     }
   }, [conversation.id, lastReadRef, readSeq]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     ackState.current = {
       allowed: !located || unreadContext,
       blocked: searchOpen || !visible || loading,
@@ -259,6 +259,10 @@ export function useConversationReadTracking({
     located, membersOpen, messages, navigationRef, scrollRef, setError, visible,
   ]);
   useEffect(() => {
+    if (located && !unreadContext) {
+      if (readCandidate !== 0) setReadCandidate(0);
+      return;
+    }
     const manualHold =
       chatStore.getSnapshot().manualUnreadByConversation?.[conversation.id] ??
       conversation.manualUnreadSeq;
@@ -292,7 +296,18 @@ export function useConversationReadTracking({
           }
         }
       });
-  }, [conversation.id, conversation.manualUnreadSeq, generation, lastReadRef, latest, readCandidate, readSeq, scheduleSeen]);
+  }, [
+    conversation.id,
+    conversation.manualUnreadSeq,
+    generation,
+    lastReadRef,
+    latest,
+    located,
+    readCandidate,
+    readSeq,
+    scheduleSeen,
+    unreadContext,
+  ]);
   const markLatestRead = useCallback(() => {
     const hasManualUnread = Boolean(
       chatStore.getSnapshot().manualUnreadByConversation?.[conversation.id] ||

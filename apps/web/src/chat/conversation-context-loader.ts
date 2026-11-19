@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useLayoutEffect } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import type { Dispatch, MutableRefObject, RefObject, SetStateAction } from "react";
 import { api } from "@teamie/api-client";
 import type { Conversation, Message } from "@teamie/api-client";
 import { errorText } from "../errors";
 import { chatStore, reconcileMessages } from "../store";
 import type { LocalMessage } from "../store";
+
+export type LocatedScrollState = { scope: string; lastScrollTop: number };
 
 export function useConversationContextLoader({
   conversation,
@@ -31,6 +33,8 @@ export function useConversationContextLoader({
   setError,
   setResolvedTargets,
   fetchedLatestRef,
+  skipNextFetchLatestRef,
+  locatedScrollSettledRef,
   acknowledgementRef,
   historyBeforeRef,
   initialScrollRef,
@@ -61,6 +65,8 @@ export function useConversationContextLoader({
   setError: (err: string) => void;
   setResolvedTargets: Dispatch<SetStateAction<Record<string, Message>>>;
   fetchedLatestRef: MutableRefObject<boolean>;
+  skipNextFetchLatestRef: MutableRefObject<string | null>;
+  locatedScrollSettledRef: MutableRefObject<LocatedScrollState | null>;
   acknowledgementRef: MutableRefObject<{
     id: string;
     seq: number;
@@ -72,10 +78,14 @@ export function useConversationContextLoader({
   navigationRef: MutableRefObject<number>;
   scrollRef: RefObject<HTMLDivElement | null>;
 }) {
+  const pendingLocatedFocusRef = useRef<number | null>(null);
   const fetchLatest = useCallback(async () => {
     const token = chatStore.generation;
     const reactionScope = chatStore.reactionScope(conversation.id);
     const operation = ++navigationRef.current;
+    skipNextFetchLatestRef.current = null;
+    locatedScrollSettledRef.current = null;
+    pendingLocatedFocusRef.current = null;
     const hasConfirmed = (chatStore.getSnapshot().messages[conversation.id] || []).some(
       (m) => !m.status,
     );
@@ -122,6 +132,7 @@ export function useConversationContextLoader({
     fetchedLatestRef,
     historyBeforeRef,
     initialScrollRef,
+    locatedScrollSettledRef,
     navigationRef,
     setAnchorPending,
     setAtBottom,
@@ -136,24 +147,52 @@ export function useConversationContextLoader({
     setLocated,
     setLocating,
     setUnreadContext,
+    skipNextFetchLatestRef,
   ]);
 
-  const focusMessage = useCallback(
-    (id: string) => {
+  const focusMessageTarget = useCallback(
+    (id: string, instant = false) => {
       const target = document.getElementById(`message-${id}`);
-      if (!target || !scrollRef.current?.contains(target) || target.closest("[inert]")) return;
+      if (!target || !scrollRef.current?.contains(target) || target.closest("[inert]"))
+        return false;
       target.scrollIntoView({
         block: "center",
-        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth",
+        behavior:
+          instant || window.matchMedia("(prefers-reduced-motion: reduce)").matches
+            ? "instant"
+            : "smooth",
       });
       target.focus({ preventScroll: true });
+      return true;
     },
     [scrollRef],
   );
+  const focusMessage = useCallback(
+    (id: string) => {
+      focusMessageTarget(id, false);
+    },
+    [focusMessageTarget],
+  );
 
   useLayoutEffect(() => {
-    if (highlightId) focusMessage(highlightId);
-  }, [highlightId, focusMessage, visible, membersOpen]);
+    if (!highlightId) return;
+    const isInitialLocated = pendingLocatedFocusRef.current === navigationRef.current;
+    if (focusMessageTarget(highlightId, isInitialLocated) && isInitialLocated) {
+      pendingLocatedFocusRef.current = null;
+      locatedScrollSettledRef.current = {
+        scope: `${chatStore.generation}:${navigationRef.current}`,
+        lastScrollTop: scrollRef.current?.scrollTop ?? 0,
+      };
+    }
+  }, [
+    highlightId,
+    focusMessageTarget,
+    visible,
+    membersOpen,
+    locatedScrollSettledRef,
+    navigationRef,
+    scrollRef,
+  ]);
 
   const loadContext = useCallback(
     async (id: string, readOnDisplay = false) => {
@@ -162,10 +201,14 @@ export function useConversationContextLoader({
       const operation = ++navigationRef.current;
       const current = () =>
         token === chatStore.generation && operation === navigationRef.current && (!reactionScope || chatStore.reactionScopeCurrent(reactionScope));
+      skipNextFetchLatestRef.current = null;
+      locatedScrollSettledRef.current = null;
+      pendingLocatedFocusRef.current = null;
       setAtBottom(false);
       setLoading(false);
       setLoadingOlder(false);
       setLoadingNewer(false);
+      setHighlightId("");
       setLocating(true);
       acknowledgementRef.current = null;
       historyBeforeRef.current = null;
@@ -205,6 +248,7 @@ export function useConversationContextLoader({
         setUnreadContext(false);
         historyBeforeRef.current = context[0] ? { seq: context[0].seq, generation: token } : null;
         setHasMore((historyBeforeRef.current?.seq ?? 1) > 1);
+        pendingLocatedFocusRef.current = operation;
         setHighlightId(id);
       } catch (e) {
         if (current())
@@ -222,6 +266,7 @@ export function useConversationContextLoader({
       conversation.id,
       historyBeforeRef,
       initialScrollRef,
+      locatedScrollSettledRef,
       navigationRef,
       setAtBottom,
       setError,
@@ -234,6 +279,7 @@ export function useConversationContextLoader({
       setLocating,
       setResolvedTargets,
       setUnreadContext,
+      skipNextFetchLatestRef,
     ],
   );
 
@@ -244,11 +290,15 @@ export function useConversationContextLoader({
     const operation = ++navigationRef.current;
     const current = () =>
       token === chatStore.generation && operation === navigationRef.current && (!reactionScope || chatStore.reactionScopeCurrent(reactionScope));
+    skipNextFetchLatestRef.current = null;
+    locatedScrollSettledRef.current = null;
+    pendingLocatedFocusRef.current = null;
     setAnchorPending(false);
     setAtBottom(false);
     setLoading(false);
     setLoadingOlder(false);
     setLoadingNewer(false);
+    setHighlightId("");
     setLocating(true);
     acknowledgementRef.current = null;
     historyBeforeRef.current = null;
@@ -270,7 +320,15 @@ export function useConversationContextLoader({
       historyBeforeRef.current = context[0] ? { seq: context[0].seq, generation: token } : null;
       setHasMore((historyBeforeRef.current?.seq ?? 1) > 1);
       const target = context.find((m) => !m.status && m.seq >= seq);
-      if (target) setHighlightId(target.id);
+      if (target) {
+        pendingLocatedFocusRef.current = operation;
+        setHighlightId(target.id);
+      } else {
+        locatedScrollSettledRef.current = {
+          scope: `${token}:${operation}`,
+          lastScrollTop: scrollRef.current?.scrollTop ?? 0,
+        };
+      }
     } catch (e) {
       if (current()) setError(errorText(e));
     } finally {
@@ -281,8 +339,10 @@ export function useConversationContextLoader({
     conversation.id,
     historyBeforeRef,
     initialScrollRef,
+    locatedScrollSettledRef,
     navigationRef,
     readSeq,
+    scrollRef,
     setAnchorPending,
     setAtBottom,
     setError,
@@ -294,9 +354,11 @@ export function useConversationContextLoader({
     setLocated,
     setLocating,
     setUnreadContext,
+    skipNextFetchLatestRef,
   ]);
 
   function returnToLatest() {
+    skipNextFetchLatestRef.current = null;
     const current = chatStore.getSnapshot().conversations[conversation.id];
     if (current) {
       setEntry({ readSeq: current.readSeq, lastSeq: current.lastSeq });
@@ -309,6 +371,8 @@ export function useConversationContextLoader({
   async function locate(id: string) {
     if (!messages.some((message) => message.id === id)) return loadContext(id);
     navigationRef.current++;
+    skipNextFetchLatestRef.current = null;
+    pendingLocatedFocusRef.current = null;
     acknowledgementRef.current = null;
     setLoading(false);
     setLoadingOlder(false);
@@ -319,6 +383,12 @@ export function useConversationContextLoader({
     setHighlightId(id);
     focusMessage(id);
     const el = scrollRef.current;
+    locatedScrollSettledRef.current = located
+      ? {
+          scope: `${chatStore.generation}:${navigationRef.current}`,
+          lastScrollTop: el?.scrollTop ?? 0,
+        }
+      : null;
     if (el) setAtBottom(!located && el.scrollHeight - el.scrollTop - el.clientHeight < 80);
   }
 
@@ -353,9 +423,16 @@ export function useConversationContextLoader({
   }, [conversation.id]);
 
   useEffect(() => {
-    if (initialMessageId) void loadContext(initialMessageId, true);
-    else void fetchLatest();
-  }, [fetchLatest, loadContext, initialMessageId]);
+    if (initialMessageId) {
+      skipNextFetchLatestRef.current = null;
+      void loadContext(initialMessageId, true);
+    } else if (skipNextFetchLatestRef.current === conversation.id) {
+      skipNextFetchLatestRef.current = null;
+    } else {
+      skipNextFetchLatestRef.current = null;
+      void fetchLatest();
+    }
+  }, [conversation.id, fetchLatest, loadContext, initialMessageId, skipNextFetchLatestRef]);
 
   return {
     fetchLatest,
