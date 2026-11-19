@@ -336,4 +336,69 @@ describe("conversation history pagination", () => {
     expect(host.textContent).not.toContain("后续消息暂未加载，请重试");
     expect(host.querySelectorAll(".message")).toHaveLength(75);
   });
+
+  it("preserves the visible message viewport offset when seamless catch-up prepends older cached rows", async () => {
+    const target = history[124];
+    history[249] = { ...history[249], replyToId: target.id };
+    vi.spyOn(api, "message").mockResolvedValue({ message: target });
+    vi.spyOn(api, "messagesAround")
+      .mockResolvedValueOnce({ messages: history.slice(99, 149), hasMore: false })
+      .mockResolvedValueOnce({ messages: history.slice(149, 200), hasMore: false });
+
+    await mount();
+    // Retain an isolated cached older row (seq 1) in the live store before jumping to seq 125.
+    await act(async () => {
+      chatStore.merge([{ ...history[0], body: "older cached row", editedAt: "2026-10-16T05:00:00Z" }]);
+    });
+
+    await click(".message-reply");
+    expect(host.querySelector(".located-banner")).not.toBeNull();
+
+    const scroll = host.querySelector<HTMLDivElement>(".message-scroll")!;
+    scroll.scrollTop = 320;
+    const scrollToSpy = vi.spyOn(scroll, "scrollTo");
+    scrollToSpy.mockClear();
+    let mergedAboveShift = 0;
+    vi.spyOn(scroll, "getBoundingClientRect").mockImplementation(
+      () => ({ top: 100, bottom: 700, left: 0, right: 800, width: 800, height: 600, x: 0, y: 100, toJSON: () => ({}) }),
+    );
+    const originalRect = Element.prototype.getBoundingClientRect;
+    const rectSpy = vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      if (this === scroll) {
+        return { top: 100, bottom: 700, left: 0, right: 800, width: 800, height: 600, x: 0, y: 100, toJSON: () => ({}) };
+      }
+      const seqAttr = this.getAttribute("data-seq");
+      if (seqAttr) {
+        const seq = Number(seqAttr);
+        const top = seq === 1 ? 40 : 120 + (seq - 100) * 40 + mergedAboveShift;
+        return { top, bottom: top + 36, left: 0, right: 800, width: 800, height: 36, x: 0, y: top, toJSON: () => ({}) };
+      }
+      return originalRect.call(this);
+    });
+
+    try {
+      // Simulate cached seq 1 pushing seq 100 down by 80px once the live store list commits.
+      mergedAboveShift = 0;
+      const loadLaterPromise = act(async () => {
+        const button = host.querySelector<HTMLButtonElement>(".load-later")!;
+        // First capture runs synchronously before chatStore.merge inside newer(), then DOM commits with seq 1 above.
+        const origMerge = chatStore.merge.bind(chatStore);
+        const mergeSpy = vi.spyOn(chatStore, "merge").mockImplementation((msgs) => {
+          mergedAboveShift = 80;
+          return origMerge(msgs);
+        });
+        button.click();
+        await Promise.resolve();
+        await Promise.resolve();
+        mergeSpy.mockRestore();
+      });
+      await loadLaterPromise;
+      expect(host.querySelector(".located-banner")).toBeNull();
+      expect(scrollToSpy).not.toHaveBeenCalled();
+      expect(scroll.scrollTop).toBe(400);
+    } finally {
+      scrollToSpy.mockRestore();
+      rectSpy.mockRestore();
+    }
+  });
 });

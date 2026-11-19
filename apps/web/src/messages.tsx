@@ -275,7 +275,7 @@ export function ConversationView({
   const { older, newer, sentinelRef, bottomSentinelRef, retryError } = useHistoryPaging({
     conversation, messages, located, unreadContext, latestLoaded, latest, currentLastSeq,
     hasMore, loading, locating, loadingOlder, setLoadingOlder, loadingNewer, setLoadingNewer,
-    setHasMore, setLatestLoaded, setLocated, setUnreadContext, setAnchorPending, setHighlightId,
+    setHasMore, setLatestLoaded, setLocated, setUnreadContext, setAnchorPending, setAtBottom, setHighlightId,
     initialMessageId, onClearMessageTarget, onRetryFallback: fetchLatest, error, setError,
     historyBeforeRef: historyBefore, navigationRef: navigation, initialScrollRef: initialScroll,
     fetchedLatestRef: fetchedLatest, skipNextFetchLatestRef: skipNextFetchLatest,

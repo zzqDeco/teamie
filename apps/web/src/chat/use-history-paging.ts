@@ -9,8 +9,40 @@ import { extendHistoryBoundary } from "../composer-drafts";
 import { subscribeBodyCollapse } from "./collapsible-body";
 import type { LocatedScrollState } from "./conversation-context-loader";
 
-type Anchor = { height: number; top: number; token: number; operation: number };
+type Anchor =
+  | { kind: "height"; height: number; top: number; token: number; operation: number }
+  | {
+      kind: "message";
+      messageDomId: string;
+      viewportOffset: number;
+      token: number;
+      operation: number;
+    };
 type PagingError = { scope: string; direction: "older" | "newer"; message: string };
+
+function captureVisibleMessageAnchor(
+  el: HTMLDivElement | null,
+  token: number,
+  operation: number,
+): Anchor | null {
+  if (!el) return null;
+  const containerRect = el.getBoundingClientRect();
+  const rows = el.querySelectorAll<HTMLElement>("article.message[id]");
+  for (const row of rows) {
+    const rect = row.getBoundingClientRect();
+    if (rect.height <= 0 && rect.width <= 0) continue;
+    if (rect.bottom > containerRect.top) {
+      return {
+        kind: "message",
+        messageDomId: row.id,
+        viewportOffset: rect.top - containerRect.top,
+        token,
+        operation,
+      };
+    }
+  }
+  return null;
+}
 
 /**
  * Older/newer page loading for the timeline. Older pages keep the reader's
@@ -40,6 +72,7 @@ export function useHistoryPaging({
   setLocated,
   setUnreadContext,
   setAnchorPending,
+  setAtBottom,
   setHighlightId,
   initialMessageId,
   onClearMessageTarget,
@@ -73,6 +106,7 @@ export function useHistoryPaging({
   setLocated: Dispatch<SetStateAction<LocalMessage[] | null>>;
   setUnreadContext: Dispatch<SetStateAction<boolean>>;
   setAnchorPending: Dispatch<SetStateAction<boolean>>;
+  setAtBottom: Dispatch<SetStateAction<boolean>>;
   setHighlightId: Dispatch<SetStateAction<string>>;
   initialMessageId: string;
   onClearMessageTarget?: () => void;
@@ -111,16 +145,32 @@ export function useHistoryPaging({
       anchor.current = null;
       return;
     }
-    el.scrollTop = Math.max(0, pending.top + (el.scrollHeight - pending.height));
-    if (locatedScrollSettledRef.current) {
-      locatedScrollSettledRef.current.lastScrollTop = el.scrollTop;
+    if (pending.kind === "height") {
+      el.scrollTop = Math.max(0, pending.top + (el.scrollHeight - pending.height));
+      if (locatedScrollSettledRef.current) {
+        locatedScrollSettledRef.current.lastScrollTop = el.scrollTop;
+      }
+      return;
     }
-  }, [locatedScrollSettledRef, navigationRef, scrollRef]);
+    if (located !== null) return;
+    const target = document.getElementById(pending.messageDomId);
+    if (target && el.contains(target)) {
+      const targetRect = target.getBoundingClientRect();
+      const containerRect = el.getBoundingClientRect();
+      if (targetRect.height > 0 || targetRect.width > 0) {
+        const delta = (targetRect.top - containerRect.top) - pending.viewportOffset;
+        if (delta !== 0) {
+          el.scrollTop = Math.max(0, el.scrollTop + delta);
+        }
+      }
+    }
+    anchor.current = null;
+  }, [located, locatedScrollSettledRef, navigationRef, scrollRef]);
 
   useLayoutEffect(() => {
     applyAnchor();
     const settled = anchor.current;
-    if (!settled) return;
+    if (!settled || settled.kind !== "height") return;
     const timer = setTimeout(() => {
       if (anchor.current === settled) anchor.current = null;
     }, 0);
@@ -158,7 +208,7 @@ export function useHistoryPaging({
         : null;
       const el = scrollRef.current;
       anchor.current = el
-        ? { height: el.scrollHeight, top: el.scrollTop, token, operation }
+        ? { kind: "height", height: el.scrollHeight, top: el.scrollTop, token, operation }
         : null;
       chatStore.ingestMessageReactions(page.messages, reactionScope);
       if (located) setLocated((old) => (old ? reconcileMessages(old, page.messages) : old));
@@ -245,6 +295,11 @@ export function useHistoryPaging({
         storeContiguousStart > 0 &&
         mergedTailSeq >= storeContiguousStart - 1;
       if (reachedLatestSeq || reachedStoreWindow) {
+        anchor.current = captureVisibleMessageAnchor(
+          scrollRef.current,
+          token,
+          operation,
+        );
         chatStore.merge(mergedLocated);
         const mergedStore = chatStore.getSnapshot().messages[conversation.id] || [];
         const mergedStoreLatest = mergedStore.reduce(
@@ -266,10 +321,12 @@ export function useHistoryPaging({
         fetchedLatestRef.current = true;
         initialScrollRef.current = false;
         setAnchorPending(false);
+        setAtBottom(false);
         locatedScrollSettledRef.current = null;
         setLocated(null);
         setUnreadContext(false);
         setHighlightId("");
+        setAnchorTick((value) => value + 1);
         if (initialMessageId && onClearMessageTarget) {
           skipNextFetchLatestRef.current = conversation.id;
           onClearMessageTarget();
