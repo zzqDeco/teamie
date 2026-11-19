@@ -20,7 +20,9 @@ import {
   AddParticipantToGroupDialog,
   ParticipantIdentity,
 } from "./group-members";
+import { rankParticipantsByQuery } from "./member-picker";
 import type { Participant } from "./participants";
+import { usePinyin } from "./shell/pinyin-match";
 import { chatStore } from "./store";
 import {
   formatPresenceLabel,
@@ -66,17 +68,8 @@ export function WorkspaceMembers({
     );
   const groupMember = eligibleMember(groupMemberId);
   const newGroupMember = eligibleMember(newGroupMemberId);
-  const term = search.trim().toLocaleLowerCase();
-  const filtered = members.filter((member) =>
-    [
-      member.displayName,
-      member.ownerName || "",
-      member.kind === "agent" ? "agent" : "",
-    ]
-      .join(" ")
-      .toLocaleLowerCase()
-      .includes(term),
-  );
+  const toPinyin = usePinyin();
+  const filtered = rankParticipantsByQuery(members, search, toPinyin);
 
   async function direct(member: Participant) {
     if (member.selectable === false || !data?.capabilities["im.dm.create"])
@@ -124,7 +117,7 @@ export function WorkspaceMembers({
           type="search"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="搜索名称或 Agent 创建者"
+          placeholder="搜索名称、拼音或 Agent 创建者"
           maxLength={200}
         />
       </label>

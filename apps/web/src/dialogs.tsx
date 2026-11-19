@@ -1,9 +1,8 @@
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Check,
   CheckCheck,
   ChevronRight,
   Code2,
@@ -19,7 +18,6 @@ import { useAuth } from "./auth";
 import { useChat } from "./chat";
 import { errorText } from "./errors";
 import { formatDateTime } from "./format-datetime";
-import { FieldError } from "./password-field";
 import { chatStore } from "./store";
 import {
   Avatar,
@@ -31,7 +29,8 @@ import {
   SwitchField,
 } from "./ui";
 import { enrichParticipants } from "./participants";
-import { ParticipantIdentity } from "./group-members";
+import type { Participant } from "./participants";
+import { MemberPicker } from "./member-picker";
 import { canConfigureModelGateway } from "./agent-management";
 import { PasswordSettings } from "./password-settings";
 import { ICON } from "./icons";
@@ -59,8 +58,10 @@ export function WorkspaceDialog({
   const { refresh, data } = useChat();
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false),
+    [busyMemberId, setBusyMemberId] = useState(""),
     [error, setError] = useState(""),
     [selected, setSelected] = useState<string[]>(initialMemberIds);
+  const directSubmittingRef = useRef(false);
   const [invite, setInvite] = useState<{
       code: string;
       expiresAt: string;
@@ -101,8 +102,35 @@ export function WorkspaceDialog({
     group: ["创建小组", ""],
     invite: ["邀请成员", "仅已注册用户可通过此链接加入。"],
   };
+  async function startDirect(member: Participant) {
+    if (!workspace || busy || directSubmittingRef.current) return;
+    directSubmittingRef.current = true;
+    setBusy(true);
+    setBusyMemberId(member.userId);
+    setError("");
+    const generation = chatStore.generation;
+    try {
+      const result = await api.createConversation(workspace.id, {
+        type: "direct",
+        memberIds: [member.userId],
+      });
+      if (generation !== chatStore.generation) return;
+      chatStore.addConversation(result.conversation);
+      await refresh();
+      if (generation !== chatStore.generation) return;
+      navigate(`/app/w/${workspace.id}/c/${result.conversation.id}`);
+      onClose();
+    } catch (e) {
+      if (generation === chatStore.generation) setError(errorText(e));
+    } finally {
+      directSubmittingRef.current = false;
+      setBusy(false);
+      setBusyMemberId("");
+    }
+  }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (kind === "direct" || busy) return;
     setBusy(true);
     setError("");
     const form = event.currentTarget;
@@ -244,59 +272,44 @@ export function WorkspaceDialog({
             />
           </Field>
         )}
-        {["direct", "group"].includes(kind) && (
-          <div
-            className="member-select"
-            aria-describedby={fieldErrors.members ? membersErrorId : undefined}
-          >
-            <span className="label-text">
-              {kind === "direct"
-                ? "选择一位伙伴"
-                : `选择小组成员 · 已选 ${eligibleSelected.length} 位`}
-            </span>
-            {memberQuery.isLoading && <p className="muted">正在加载成员…</p>}
-            {memberQuery.error && (
-              <div role="alert">
-                <Notice>成员加载失败。</Notice>
-                <Button type="button" variant="secondary" size="sm" onClick={() => void memberQuery.refetch()}>
-                  重新加载
-                </Button>
-              </div>
-            )}
-            {participants.map((member) => (
-              <button
-                key={member.userId}
-                type="button"
-                disabled={kind === "group" && !selected.includes(member.userId) && eligibleSelected.length >= 49}
-                className={`member-option ${selected.includes(member.userId) ? "selected" : ""}`}
-                onClick={() => {
-                  setDirty(true);
-                  setFieldErrors((old) => ({ ...old, members: undefined }));
-                  setSelected((old) =>
-                    kind === "direct"
-                      ? [member.userId]
-                      : old.includes(member.userId)
-                        ? old.filter((id) => id !== member.userId)
-                        : [...old, member.userId],
-                  );
-                }}
-              >
-                <ParticipantIdentity member={member} />
-                <span className="selection-check">
-                  {selected.includes(member.userId) && <Check size={ICON.xs} />}
-                </span>
-              </button>
-            ))}
-            {!memberQuery.isLoading &&
-              !agentsQuery.isLoading &&
-              !memberQuery.error &&
-              participants.length === 0 && (
-                <div className="mini-empty">
-                  暂无可选成员。请先邀请成员加入工作空间。
-                </div>
-              )}
-            <FieldError id={membersErrorId} message={fieldErrors.members} />
-          </div>
+        {kind === "direct" && (
+          <MemberPicker
+            mode="single-instant"
+            members={participants}
+            label="选择一位伙伴"
+            searchPlaceholder="搜索成员（支持拼音）"
+            searchLabel="搜索成员"
+            emptyText="暂无可选成员。请先邀请成员加入工作空间。"
+            loading={memberQuery.isLoading || agentsQuery.isLoading}
+            loadError={!!memberQuery.error}
+            onRetry={() => void memberQuery.refetch()}
+            busy={busy}
+            busyMemberId={busyMemberId}
+            onInstantSelect={(member) => void startDirect(member)}
+          />
+        )}
+        {kind === "group" && (
+          <MemberPicker
+            mode="multiple"
+            members={participants}
+            selectedIds={selected}
+            onChangeSelected={(next) => {
+              setDirty(true);
+              setFieldErrors((old) => ({ ...old, members: undefined }));
+              setSelected(next);
+            }}
+            maxSelected={49}
+            label="选择小组成员"
+            searchPlaceholder="搜索成员（支持拼音）"
+            searchLabel="搜索成员"
+            emptyText="暂无可选成员。请先邀请成员加入工作空间。"
+            loading={memberQuery.isLoading || agentsQuery.isLoading}
+            loadError={!!memberQuery.error}
+            onRetry={() => void memberQuery.refetch()}
+            errorId={membersErrorId}
+            fieldError={fieldErrors.members}
+            busy={busy}
+          />
         )}
         {kind === "invite" && (
           <div className="invite-generator">
@@ -336,13 +349,14 @@ export function WorkspaceDialog({
         )}
         <div className="modal-actions">
           <ModalCloseButton>{invite ? "完成" : "取消"}</ModalCloseButton>
-          {!invite && (
+          {!invite && kind !== "direct" && (
             <Button
               type="submit"
               busy={busy}
               disabled={
-                ["direct", "group"].includes(kind) &&
-                (eligibleSelected.length < 1 || (kind === "group" && eligibleSelected.length > 49) ||
+                kind === "group" &&
+                (eligibleSelected.length < 1 ||
+                  eligibleSelected.length > 49 ||
                   memberQuery.isLoading ||
                   agentsQuery.isLoading)
               }
@@ -351,11 +365,9 @@ export function WorkspaceDialog({
                 ? "创建邀请链接"
                 : kind === "workspace"
                   ? "创建工作空间"
-                  : kind === "direct"
-                    ? "开始私信"
-                    : kind === "group"
-                      ? "创建小组"
-                      : "创建频道"}
+                  : kind === "group"
+                    ? "创建小组"
+                    : "创建频道"}
             </Button>
           )}
         </div>

@@ -1,5 +1,4 @@
 import { useState } from "react";
-import type { ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Check, LoaderCircle, Plus, Trash2, UserMinus, Users } from "lucide-react";
 import { api } from "@teamie/api-client";
@@ -8,48 +7,13 @@ import { useAuth } from "./auth";
 import { useChat, useChatState } from "./chat";
 import { errorText } from "./errors";
 import { chatStore } from "./store";
-import { AgentAvatar, AgentBadge } from "./agent-ui";
-import { Avatar, Button, ConfirmDialog, Modal, ModalCloseButton, Notice } from "./ui";
+import { MemberPicker, ParticipantIdentity } from "./member-picker";
+import { Button, ConfirmDialog, Modal, ModalCloseButton, Notice } from "./ui";
 import type { Participant } from "./participants";
 import { ICON } from "./icons";
 import { toast } from "./toast";
-export function ParticipantIdentity({
-  member,
-  badges,
-}: {
-  member: Member;
-  badges?: ReactNode;
-}) {
-  return (
-    <>
-      {member.kind === "agent" ? (
-        <AgentAvatar seed={member.userId} />
-      ) : (
-        <Avatar name={member.displayName} seed={member.userId} />
-      )}
-      <span className="participant-identity">
-        <b>
-          <span className="participant-name" title={member.displayName}>
-            {member.displayName}
-          </span>
-          {member.kind === "agent" && (
-            <AgentBadge compact ownerName={member.ownerName} />
-          )}
-          {badges}
-        </b>
-        <small>
-          {member.kind === "agent"
-            ? member.ownerName
-              ? `由 ${member.ownerName} 创建`
-              : "Agent"
-            : member.role === "owner"
-              ? "空间所有者"
-              : "成员"}
-        </small>
-      </span>
-    </>
-  );
-}
+
+export { ParticipantIdentity };
 const DISSOLVE_GROUP_IMPACT = [
   "小组内的全部消息、上传文件、表情回应与置顶记录将被彻底清除",
   "所有成员在此小组中的收藏记录将被清除",
@@ -159,6 +123,8 @@ export function GroupMembersDialog({
   const client = useQueryClient();
   const [busyId, setBusyId] = useState(""),
     [error, setError] = useState(""),
+    [selectedToAdd, setSelectedToAdd] = useState<string[]>([]),
+    [addingSelected, setAddingSelected] = useState(false),
     [confirmingRemoval, setConfirmingRemoval] = useState<Member | null>(null),
     [confirmingDissolve, setConfirmingDissolve] = useState(false),
     [dissolving, setDissolving] = useState(false);
@@ -171,19 +137,79 @@ export function GroupMembersDialog({
       !conversation.memberIds.includes(member.userId) &&
       member.selectable !== false,
   );
+  const remainingSlots = Math.max(0, 50 - conversation.memberIds.length);
+  const eligibleSelectedToAdd = selectedToAdd.filter((id) =>
+    available.some((member) => member.userId === id),
+  );
   const addAllowed = !!data?.capabilities["im.group.create"];
-  async function change(member: Member, remove = false): Promise<boolean> {
+  async function addSelected() {
+    if (
+      !conversation.canManageMembers ||
+      !addAllowed ||
+      addingSelected ||
+      !!busyId ||
+      eligibleSelectedToAdd.length === 0
+    ) {
+      return;
+    }
+    const targets = eligibleSelectedToAdd
+      .slice(0, remainingSlots)
+      .map((id) => available.find((member) => member.userId === id))
+      .filter((member): member is Participant => !!member);
+    if (!targets.length) return;
+    setAddingSelected(true);
+    setError("");
+    const generation = chatStore.generation;
+    const added: Participant[] = [];
+    const remaining = new Set(eligibleSelectedToAdd);
+    let failedError = "";
+    try {
+      for (const member of targets) {
+        try {
+          const result = await api.addConversationMember(
+            conversation.id,
+            member.userId,
+          );
+          if (generation !== chatStore.generation) return;
+          chatStore.addConversation(result.conversation);
+          added.push(member);
+          remaining.delete(member.userId);
+        } catch (e) {
+          if (generation !== chatStore.generation) return;
+          failedError = errorText(e);
+          break;
+        }
+      }
+      if (generation !== chatStore.generation) return;
+      setSelectedToAdd([...remaining]);
+      if (added.length === 1) {
+        toast.success(`已将 ${added[0].displayName} 加入小组`);
+      } else if (added.length > 1) {
+        toast.success(`已将 ${added.length} 位成员加入小组`);
+      }
+      if (failedError) setError(failedError);
+      if (added.length > 0) {
+        await Promise.all([
+          refresh(),
+          client.invalidateQueries({ queryKey: ["members"] }),
+        ]);
+      }
+    } finally {
+      if (generation === chatStore.generation) setAddingSelected(false);
+    }
+  }
+  async function removeMember(member: Member): Promise<boolean> {
     if (!conversation.canManageMembers) return false;
     setBusyId(member.userId);
     setError("");
     const generation = chatStore.generation;
     try {
-      const result = remove
-        ? await api.removeConversationMember(conversation.id, member.userId)
-        : await api.addConversationMember(conversation.id, member.userId);
+      const result = await api.removeConversationMember(
+        conversation.id,
+        member.userId,
+      );
       if (generation !== chatStore.generation) return false;
       chatStore.addConversation(result.conversation);
-      if (!remove) toast.success(`已将 ${member.displayName} 加入小组`);
       await Promise.all([
         refresh(),
         client.invalidateQueries({ queryKey: ["members"] }),
@@ -197,7 +223,7 @@ export function GroupMembersDialog({
     }
   }
   async function confirmRemoval(member: Member) {
-    if (await change(member, true)) setConfirmingRemoval(null);
+    if (await removeMember(member)) setConfirmingRemoval(null);
   }
   async function confirmDissolve() {
     if (!conversation.canManageMembers || dissolving) return;
@@ -272,7 +298,7 @@ export function GroupMembersDialog({
               conversation.canManageMembers && (
                 <button
                   className="group-member-remove"
-                  disabled={!!busyId}
+                  disabled={!!busyId || addingSelected}
                   onClick={() => {
                     setError("");
                     setConfirmingRemoval(member);
@@ -292,26 +318,45 @@ export function GroupMembersDialog({
         ))}
       </div>
       {conversation.canManageMembers && addAllowed && (
-        <div className="group-member-section">
-          <h3>添加伙伴</h3>
-          {available.length ? (
-            available.map((member) => (
-              <div key={member.userId} className="group-member-row">
-                <ParticipantIdentity member={member} />
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  busy={busyId === member.userId}
-                  disabled={!!busyId}
-                  onClick={() => void change(member)}
-                >
-                  <Plus size={ICON.xs} />
-                  添加
-                </Button>
-              </div>
-            ))
-          ) : (
-            <div className="mini-empty">暂无可添加成员。</div>
+        <div className="group-member-section group-member-add-section">
+          <MemberPicker
+            mode="multiple"
+            members={available}
+            selectedIds={eligibleSelectedToAdd}
+            onChangeSelected={(next) => {
+              setError("");
+              setSelectedToAdd(next);
+            }}
+            maxSelected={remainingSlots}
+            label="添加伙伴"
+            searchPlaceholder="搜索成员（支持拼音）"
+            searchLabel="搜索可添加成员"
+            emptyText="暂无可添加成员。"
+            noMatchText="没有找到匹配的成员。"
+            busy={!!busyId || addingSelected || dissolving}
+          />
+          {available.length > 0 && (
+            <div className="group-member-add-actions">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                busy={addingSelected}
+                disabled={
+                  eligibleSelectedToAdd.length === 0 ||
+                  remainingSlots === 0 ||
+                  !!busyId ||
+                  addingSelected ||
+                  dissolving
+                }
+                onClick={() => void addSelected()}
+              >
+                <Plus size={ICON.xs} />
+                {eligibleSelectedToAdd.length > 0
+                  ? `添加已选成员 (${eligibleSelectedToAdd.length})`
+                  : "添加已选成员"}
+              </Button>
+            </div>
           )}
         </div>
       )}
@@ -325,7 +370,7 @@ export function GroupMembersDialog({
             type="button"
             variant="danger"
             size="sm"
-            disabled={!!busyId || dissolving}
+            disabled={!!busyId || addingSelected || dissolving}
             onClick={() => {
               setError("");
               setConfirmingDissolve(true);
