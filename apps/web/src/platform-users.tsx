@@ -156,7 +156,7 @@ function AdminUsers({ user }: { user: User }) {
         {query.isPending ? (
           <div className="admin-empty" role="status"><LoaderCircle className="spin" size={ICON.lg} /><p>正在加载用户…</p></div>
         ) : query.isError ? (
-          <div className="admin-empty" role="alert"><Notice>用户加载失败，请重新加载。</Notice><Button variant="secondary" onClick={() => void query.refetch()}>重新加载</Button></div>
+          <div className="admin-empty" role="alert"><Notice kind="error">用户加载失败，请重新加载。</Notice><Button variant="secondary" onClick={() => void query.refetch()}>重新加载</Button></div>
         ) : users.length === 0 ? (
           <EmptyState
             icon={<Users size={ICON.xl} />}
@@ -180,7 +180,7 @@ function AdminUsers({ user }: { user: User }) {
       {currentDialog && (
         <Modal title={currentDialog.created ? expired ? "重置链接已过期" : "重置链接已生成" : "生成密码重置链接"} subtitle="请先核实用户身份，再将链接私下交给本人。" busy={currentDialog.busy} onClose={close}>
           <div className="reset-target"><Avatar name={currentDialog.account.displayName} seed={currentDialog.account.id} /><div><b>{currentDialog.account.displayName}</b><span>{currentDialog.account.email}</span></div></div>
-          <Notice>{currentDialog.error}</Notice>
+          <Notice kind="error">{currentDialog.error}</Notice>
           {currentDialog.created ? expired ? (
             <Notice kind="info">链接已过期，请重新生成后交给用户。</Notice>
           ) : (

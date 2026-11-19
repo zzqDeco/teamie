@@ -31,7 +31,7 @@
     .hero-actions > .button {
       padding: var(--space-3_5) var(--space-5);
       min-height: 44px;
-      font-size: var(--font-md);
+      font-size: var(--font-base);
     }
     .hero-actions > span {
       display: block;
@@ -126,7 +126,7 @@
       margin-top: var(--space-7);
     }
     .auth-form label {
-      font-size: var(--font-md);
+      font-size: var(--font-base);
     }
     .auth-form .button {
       min-height: 48px;
@@ -292,7 +292,7 @@
       height: auto;
       min-height: calc(var(--header-h-mobile) + env(safe-area-inset-top));
       padding: env(safe-area-inset-top) var(--space-3_5) 0 var(--space-1_5);
-      font-size: var(--font-md);
+      font-size: var(--font-base);
     }
     .settings-view {
       padding: var(--space-6) var(--space-4_5) max(var(--space-7), env(safe-area-inset-bottom));
@@ -323,7 +323,7 @@
       margin-top: var(--space-6);
     }
     .admin-generate h2 {
-      font-size: var(--font-md);
+      font-size: var(--font-base);
     }
     .admin-generate .button {
       width: 100%;
@@ -351,7 +351,7 @@
       gap: var(--space-2_5);
     }
     .admin-invite-history h2 {
-      font-size: var(--font-md);
+      font-size: var(--font-base);
     }
     .admin-invites-table td {
       display: block;

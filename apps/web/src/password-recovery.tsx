@@ -221,7 +221,7 @@ function ResetPasswordForm({ fragment }: { fragment: string }) {
         </>
       ) : state === "error" ? (
         <>
-          <Notice>暂时无法验证链接，请检查网络后重试。</Notice>
+          <Notice kind="error">暂时无法验证链接，请检查网络后重试。</Notice>
           <Button className="full-width" onClick={() => setAttempt((value) => value + 1)}>重新验证链接</Button>
         </>
       ) : state === "success" ? (
@@ -239,7 +239,7 @@ function ResetPasswordForm({ fragment }: { fragment: string }) {
           <div className="reset-account"><b>{inspection.account.displayName}</b><span>{inspection.account.emailMasked}</span></div>
           <p className="reset-expiry">链接有效期至 {formatDateTime(inspection.expiresAt, "stamp")}</p>
           <form ref={formRef} onSubmit={submit} onInput={revalidate} aria-busy={busy} noValidate>
-            <Notice id={errorId}>{invalidField ? "" : error}</Notice>
+            <Notice kind="error" id={errorId}>{invalidField ? "" : error}</Notice>
             <PasswordField name="newPassword" label="新密码" autoComplete="new-password" placeholder="至少 12 个字符" readOnly={busy} error={invalidField === "newPassword" ? error : undefined} showRules />
             <PasswordField name="confirmPassword" label="确认新密码" autoComplete="new-password" placeholder="再次输入新密码" readOnly={busy} error={invalidField === "confirmPassword" ? error : undefined} confirmOf="newPassword" mismatchMessage="两次输入的新密码不一致。" />
             <small className="field-help reset-session-help">重置后，该账号原有的登录会话将失效。</small>

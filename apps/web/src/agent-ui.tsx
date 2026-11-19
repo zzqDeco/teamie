@@ -53,6 +53,7 @@ export function AgentAvatar({
       <Bot
         size={size === "large" ? ICON.lg : size === "small" ? ICON.xs : ICON.sm}
       />
+      <i />
     </span>
   );
 }
@@ -188,7 +189,7 @@ export function WebSearchConfigurationFields({
         onSubmit={submit}
         autoComplete="off"
       >
-        <Notice>{error}</Notice>
+        <Notice kind="error">{error}</Notice>
         <SwitchField
           name="gatewayWebSearchEnabled"
           checked={enabled}

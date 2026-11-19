@@ -191,7 +191,7 @@ export function QuickSwitcherMessageResults({
             </div>
           ) : null}
           {currentSearchPage?.error && (
-            <Notice>{currentSearchPage.error}</Notice>
+            <Notice kind="error">{currentSearchPage.error}</Notice>
           )}
           {currentSearchPage?.cursor ? (
             <Button

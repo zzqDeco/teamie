@@ -172,8 +172,8 @@
   }
   .members-directory-link:hover,
   .members-invite:hover {
-    background: var(--lavender);
-    color: var(--purple-dark);
+    background: var(--hover-bg);
+    color: var(--brand-strong);
   }
   .members-danger-action {
     display: flex;
@@ -264,7 +264,7 @@
     color: var(--text-strong);
     font-weight: 500;
     min-width: 0;
-    font-size: var(--font-md);
+    font-size: var(--font-base);
     flex-wrap: wrap;
   }
   .participant-identity > b > .agent-badge {
@@ -388,7 +388,7 @@
     text-align: left;
     color: var(--text-muted);
     min-height: 60px;
-    font-size: var(--font-md);
+    font-size: var(--font-base);
   }
   .agent-group-option > .group-avatar {
     width: 31px;

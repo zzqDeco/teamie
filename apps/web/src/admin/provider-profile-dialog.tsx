@@ -80,7 +80,7 @@ export function ProviderProfileDialog({
         onInput={() => setDirty(true)}
         autoComplete="off"
       >
-        <Notice>{error}</Notice>
+        <Notice kind="error">{error}</Notice>
         <FormRow>
           <label>
             服务商名称

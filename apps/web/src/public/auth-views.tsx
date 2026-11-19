@@ -297,7 +297,7 @@ export function Login() {
             aria-busy={busy}
             noValidate
           >
-            <Notice id={errorId}>{invalidField ? "" : error}</Notice>
+            <Notice kind="error" id={errorId}>{invalidField ? "" : error}</Notice>
             {register &&
               (inviteSummary ? (
                 <div className="invite-summary">
@@ -514,7 +514,7 @@ export function Join() {
                 ? "网络或服务暂时不可用，邀请本身可能仍然有效，请稍后重试。"
                 : "邀请链接可能已过期或被撤销，请联系工作空间管理员获取新邀请。"}
         </p>
-        <Notice>{error}</Notice>
+        <Notice kind="error">{error}</Notice>
         {query.data && (
           <>
             {user ? (

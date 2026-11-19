@@ -123,7 +123,7 @@ export function PasswordSettings() {
     >
       <h3>修改密码</h3>
       <p className="field-help">修改后需要重新登录。</p>
-      <Notice id={errorId}>{error}</Notice>
+      <Notice kind="error" id={errorId}>{error}</Notice>
       <PasswordField
         name="currentPassword"
         label="当前密码"

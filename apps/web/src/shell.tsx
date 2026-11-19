@@ -388,7 +388,7 @@ export function Shell() {
     return (
       <div className="loading-screen">
         <Logo />
-        <Notice>{chat.error}</Notice>
+        <Notice kind="error">{chat.error}</Notice>
         <Button onClick={() => void chat.refresh()}>重新连接</Button>
         <Button variant="secondary" onClick={signOut} busy={busy}>
           退出登录
@@ -470,7 +470,7 @@ export function Shell() {
           showSyncError={!conversation || isManagement || isAttentionPage || routes.isNotFound}
           onRetry={chat.reconnect ?? chat.sync}
         />
-        {error && !removing && <Notice>{error}</Notice>}
+        {error && !removing && <Notice kind="error">{error}</Notice>}
         {redirectTarget ? (
           <Navigate to={redirectTarget} replace />
         ) : routes.isNotFound ? (

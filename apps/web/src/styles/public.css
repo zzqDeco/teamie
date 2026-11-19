@@ -42,7 +42,7 @@
   }
   .route-state h2 {
     color: var(--text-strong);
-    font-size: var(--font-xl);
+    font-size: var(--font-2xl);
   }
   .route-state p {
     font-size: var(--font-sm);
@@ -107,7 +107,7 @@
     gap: var(--space-6);
   }
   .public-header nav > a:not(.button):hover {
-    color: var(--purple);
+    color: var(--brand-text);
   }
   .public-header .button {
     margin-left: var(--space-0_5);
@@ -506,13 +506,13 @@
     color: var(--text-muted);
   }
   .story-step-pill.active {
-    background: var(--lavender);
+    background: var(--selected-bg);
     border-color: var(--border-strong);
     color: var(--brand-strong);
     font-weight: 600;
   }
   .story-step-pill.active b {
-    color: var(--purple);
+    color: var(--brand-strong);
   }
   .story-progress-bar {
     margin-top: var(--space-4);
@@ -526,7 +526,7 @@
   .story-progress-bar > span {
     display: block;
     height: 100%;
-    background: var(--purple);
+    background: var(--brand);
     border-radius: var(--r-pill);
     transition: width 0.22s ease-out;
   }

@@ -375,16 +375,16 @@ export function DeveloperAppDetail({
         statusLabel={status.label}
       />
 
-      <Notice>{confirmingRotate || confirmingDisablePublished ? "" : error}</Notice>
+      <Notice kind="error">{confirmingRotate || confirmingDisablePublished ? "" : error}</Notice>
       <Notice kind="success">{successMsg}</Notice>
 
       {app.reviewStatus === "rejected" && app.reviewNote && (
-        <Notice>
+        <Notice kind="error">
           上次提审未通过：{app.reviewNote}。请按要求调整配置并重新通过协议检测后再次提交。
         </Notice>
       )}
       {isSuspended && (
-        <Notice>
+        <Notice kind="error">
           该应用已被平台封禁下架：{app.suspendedReason || app.reviewNote || "违反平台应用治理规范"}。
         </Notice>
       )}

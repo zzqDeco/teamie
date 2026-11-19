@@ -246,7 +246,7 @@ function AdminMarketplaceCatalog({
           平台当前已暂停应用写入与新会话，已注册目录与审核记录仍可查阅。
         </Notice>
       )}
-      <Notice>{pending ? "" : error}</Notice>
+      <Notice kind="error">{pending ? "" : error}</Notice>
 
       <section className="settings-form" aria-label="已注册应用列表">
         <div className="mp-filter-bar">

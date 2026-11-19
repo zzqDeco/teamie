@@ -102,7 +102,7 @@ export function AdminOfficialAppModal({
       onClose={onClose}
     >
       <form className="settings-form" noValidate onSubmit={handleCreate}>
-        <Notice>{error}</Notice>
+        <Notice kind="error">{error}</Notice>
         <label>
           应用名称
           <input

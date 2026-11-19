@@ -307,7 +307,7 @@
     justify-content: center;
   }
   .admin-empty h3 {
-    font-size: var(--font-md);
+    font-size: var(--font-base);
     font-weight: 600;
     color: var(--text-strong);
   }
@@ -377,7 +377,7 @@
     background: transparent;
     box-shadow: none;
     padding: var(--space-2_5);
-    font-size: var(--font-md);
+    font-size: var(--font-base);
   }
   .platform-user-search input:focus {
     box-shadow: none;
@@ -429,7 +429,7 @@
   .platform-user-identity b,
   .reset-target b {
     color: var(--text-strong);
-    font-size: var(--font-md);
+    font-size: var(--font-base);
     font-weight: 600;
   }
   .platform-user-identity b > small {

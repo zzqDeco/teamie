@@ -180,7 +180,7 @@
       padding-right: var(--space-4);
     }
     .workspace-title > b {
-      font-size: var(--font-md);
+      font-size: var(--font-base);
     }
     .welcome-content > h1 {
       font-size: var(--font-4xl);

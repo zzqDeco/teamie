@@ -195,7 +195,7 @@ export function DeveloperAppsList({
         </div>
       </section>
 
-      <Notice>{confirmingDelete ? "" : error}</Notice>
+      <Notice kind="error">{confirmingDelete ? "" : error}</Notice>
 
       {createdResult && (
         <section className="settings-form" aria-label="新建应用签名密钥">

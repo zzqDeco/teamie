@@ -79,7 +79,7 @@ export function ModelProfileDialog({
         onInput={() => setDirty(true)}
         autoComplete="off"
       >
-        <Notice>{error}</Notice>
+        <Notice kind="error">{error}</Notice>
         <label>
           所属模型服务商
           <select

@@ -121,10 +121,10 @@ export function WorkspaceMembers({
           maxLength={200}
         />
       </label>
-      <Notice>{error}</Notice>
+      <Notice kind="error">{error}</Notice>
       {loadError && (
         <div className="member-load-error">
-          <Notice>部分成员暂时无法加载，请重试。</Notice>
+          <Notice kind="error">部分成员暂时无法加载，请重试。</Notice>
           <Button variant="secondary" onClick={onRetry}>
             重新加载
           </Button>

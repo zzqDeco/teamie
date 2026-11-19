@@ -317,7 +317,7 @@ export function ForwardMessageModal({
             aria-label="转发留言"
           />
         </div>
-        <Notice>{error}</Notice>
+        <Notice kind="error">{error}</Notice>
         <div className="modal-actions">
           <Button type="button" variant="secondary" onClick={onClose}>取消</Button>
           <Button type="submit" busy={busy} disabled={!targetId}>确认转发</Button>
@@ -574,7 +574,7 @@ export function SavedMessagesList({
   return (
     <div className="attention-scroll" aria-busy={loading}>
       {loading && !visibleItems.length && <p className="attention-empty" role="status">正在加载…</p>}
-      {error && <Notice>{error}</Notice>}
+      {error && <Notice kind="error">{error}</Notice>}
       {!loading && !error && !visibleItems.length && <p className="attention-empty">暂无收藏消息</p>}
       <ol className="attention-list" aria-label="收藏消息">
         {visibleItems.map((item) => {

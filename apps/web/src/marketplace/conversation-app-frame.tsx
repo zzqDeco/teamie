@@ -170,7 +170,7 @@ export function ConversationAppFrame({
 
   return (
     <>
-      <Notice>
+      <Notice kind="error">
         {sameOriginBlocked
           ? "安全限制：小组应用 Web UI 必须部署在独立跨源域名上，禁止与当前主站同源挂载。"
           : error}

@@ -6,9 +6,9 @@
     align-items: center;
     gap: var(--space-1);
     padding: var(--space-1) var(--space-1_5);
-    border: 1px solid var(--border-strong);
-    background: var(--lavender);
-    color: var(--brand-text);
+    border: 1px solid var(--agent-border);
+    background: var(--agent-bg);
+    color: var(--agent-fg);
     border-radius: var(--r-xs);
     line-height: 1.35;
     font-weight: 500;
@@ -17,10 +17,10 @@
   }
   .agent-badge > small {
     font-weight: 400;
-    color: var(--text-subtle);
+    color: var(--agent-fg);
     padding-left: var(--space-1_5);
     margin-left: var(--space-1);
-    border-left: 1px solid var(--border-strong);
+    border-left: 1px solid var(--agent-border);
     font-size: var(--font-sm);
   }
   .agent-badge.compact {
@@ -39,7 +39,7 @@
     gap: var(--space-1_5);
     font-weight: 600;
     padding: 0;
-    font-size: var(--font-md);
+    font-size: var(--font-base);
     color: var(--text-strong);
   }
   .agent-visibility > p {
@@ -71,8 +71,8 @@
     min-height: 48px;
   }
   .visibility-option.selected {
-    background: var(--lavender);
-    border-color: var(--border-strong);
+    background: var(--selected-bg);
+    border-color: var(--brand-muted);
     color: var(--brand-text);
   }
   .visibility-option > input {
@@ -149,7 +149,7 @@
     padding: var(--space-1) var(--space-1_5);
     border-radius: var(--r-xs);
     color: var(--text-subtle);
-    background: var(--lavender);
+    background: var(--surface-sunken);
     font-size: var(--font-sm);
     white-space: nowrap;
   }
@@ -159,7 +159,7 @@
   }
   .agent-status.disabled {
     color: var(--text-muted);
-    background: var(--lavender);
+    background: var(--surface-sunken);
   }
   .gateway-configuration-form {
     padding: var(--space-6) 0;
@@ -254,7 +254,7 @@
   .agents-summary {
     margin: var(--space-2_5) 0;
     color: var(--text-muted);
-    font-size: var(--font-md);
+    font-size: var(--font-base);
   }
   .agents-heading p {
     line-height: 1.9;
@@ -413,7 +413,7 @@
   }
   .agents-empty > p {
     line-height: 2;
-    font-size: var(--font-md);
+    font-size: var(--font-base);
     color: var(--text-muted);
   }
   .agents-empty > .button {
@@ -465,7 +465,7 @@
     color: var(--text-subtle);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-    font-size: var(--font-md);
+    font-size: var(--font-base);
   }
   .agent-detail-actions {
     display: flex;
@@ -526,7 +526,7 @@
   .agent-delete-section h3 {
     color: var(--text-strong);
     font-weight: 600;
-    font-size: var(--font-md);
+    font-size: var(--font-base);
   }
   .agent-delete-section p {
     color: var(--text-subtle);

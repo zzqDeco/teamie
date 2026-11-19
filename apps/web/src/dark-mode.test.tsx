@@ -130,13 +130,25 @@ describe("PR-6 dark mode tokens, head bootstrap & settings switcher", () => {
       "--field-border",
       "--logo-accent",
       "--scrollbar-thumb",
-      "--scrollbar-thumb-hover",
       "--backdrop",
       "--switch-bg",
       "--switch-on",
       "--status-online",
       "--status-connecting",
       "--status-offline",
+      "--selected-bg",
+      "--info-text",
+      "--info-bg",
+      "--info-border",
+      "--agent-fg",
+      "--agent-bg",
+      "--agent-border",
+      "--mention-accent",
+      "--mention-row-bg",
+      "--mention-row-hover",
+      "--unread-line",
+      "--unread-mention",
+      "--on-unread-mention",
       "--avatar-1-bg",
       "--avatar-1-fg",
       "--avatar-2-bg",
@@ -160,6 +172,9 @@ describe("PR-6 dark mode tokens, head bootstrap & settings switcher", () => {
       darkMap.get("--surface")!,
       darkMap.get("--surface-sunken")!,
       darkMap.get("--rail")!,
+      darkMap.get("--hover-bg")!,
+      darkMap.get("--selected-bg")!,
+      darkMap.get("--lavender")!,
     ];
     const textTokens = [
       "--text-strong",
@@ -171,6 +186,9 @@ describe("PR-6 dark mode tokens, head bootstrap & settings switcher", () => {
       "--danger-text",
       "--warning-text",
       "--success-text",
+      "--info-text",
+      "--agent-fg",
+      "--unread-line",
     ];
     for (const token of textTokens) {
       const fg = darkMap.get(token)!;
@@ -184,21 +202,42 @@ describe("PR-6 dark mode tokens, head bootstrap & settings switcher", () => {
     const nonTextTokens = [
       "--field-border",
       "--scrollbar-thumb",
-      "--scrollbar-thumb-hover",
       "--switch-bg",
       "--switch-on",
       "--status-online",
       "--status-connecting",
       "--status-offline",
+      "--mention-accent",
+      "--unread-line",
     ];
     for (const token of nonTextTokens) {
       const fg = darkMap.get(token)!;
-      for (const bg of [...surfaces, darkMap.get("--lavender")!]) {
+      for (const bg of [
+        ...surfaces,
+        darkMap.get("--mention-row-bg")!,
+        darkMap.get("--mention-row-hover")!,
+      ]) {
         expect(
           contrastRatio(fg, bg),
           `dark ${token} (${fg}) on ${bg}`,
         ).toBeGreaterThanOrEqual(3);
       }
+    }
+    const pairedDark: Array<[string, string]> = [
+      ["--danger-text", "--danger-bg"],
+      ["--warning-text", "--warning-bg"],
+      ["--success-text", "--success-bg"],
+      ["--info-text", "--info-bg"],
+      ["--agent-fg", "--agent-bg"],
+      ["--text-strong", "--mention-row-bg"],
+      ["--text-muted", "--mention-row-hover"],
+      ["--on-unread-mention", "--unread-mention"],
+    ];
+    for (const [fgToken, bgToken] of pairedDark) {
+      expect(
+        contrastRatio(darkMap.get(fgToken)!, darkMap.get(bgToken)!),
+        `dark ${fgToken} on ${bgToken}`,
+      ).toBeGreaterThanOrEqual(4.5);
     }
     const textLum = luminance(parseHex(darkMap.get("--text")!));
     const mutedLum = luminance(parseHex(darkMap.get("--text-muted")!));
@@ -349,13 +388,16 @@ describe("PR-6 dark mode tokens, head bootstrap & settings switcher", () => {
       /\.unread-badge\s*\{[^}]*color:\s*var\(--on-brand\);[^}]*background:\s*var\(--brand\);/s,
     );
     expect(chatCss).toMatch(
-      /\.send-button\s*\{[^}]*background:\s*var\(--purple\);[^}]*color:\s*var\(--on-brand\);/s,
+      /\.send-button\s*\{[^}]*background:\s*var\(--brand\);[^}]*color:\s*var\(--on-brand\);/s,
     );
     expect(attentionCss).toMatch(
-      /\.rail-attention-count\s*\{[^}]*background:\s*var\(--brand\);[^}]*color:\s*var\(--on-brand\);/s,
+      /\.rail-attention-count\s*\{[^}]*background:\s*var\(--unread-mention\);[^}]*color:\s*var\(--on-unread-mention\);/s,
     );
     expect(mentionsCss).toMatch(
       /\.mention-options\s*\{[^}]*background:\s*var\(--surface\);/s,
+    );
+    expect(mentionsCss).toMatch(
+      /\.mention-broadcast-icon\s*\{[^}]*background:\s*var\(--brand\);[^}]*color:\s*var\(--on-brand\);/s,
     );
   });
 });

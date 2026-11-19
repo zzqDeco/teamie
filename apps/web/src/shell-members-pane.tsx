@@ -132,8 +132,8 @@ export function ShellMembersPane({
               加载成员…
             </div>
           )}
-          {hasError && <Notice>成员暂时无法加载。</Notice>}
-          <Notice>{directError}</Notice>
+          {hasError && <Notice kind="error">成员暂时无法加载。</Notice>}
+          <Notice kind="error">{directError}</Notice>
           {visibleMembers.map((member) => {
             const humanPresence =
               presenceEnabled && member.kind === "human"
@@ -142,7 +142,7 @@ export function ShellMembersPane({
             return (
             <div className="member-row" key={member.userId}>
               {member.kind === "agent" ? (
-                <AgentAvatar seed={member.userId} />
+                <AgentAvatar seed={member.userId} disabled={member.agentEnabled === false} />
               ) : humanPresence ? (
                 <div className="avatar-with-presence">
                   <Avatar name={member.displayName} seed={member.userId} />
@@ -293,7 +293,7 @@ export function RemoveMemberModal({
       busy={busy}
       onClose={onClose}
     >
-      <Notice>{error}</Notice>
+      <Notice kind="error">{error}</Notice>
       <div className="modal-actions">
         <ModalCloseButton>取消</ModalCloseButton>
         <Button variant="danger" busy={busy} onClick={onConfirm}>

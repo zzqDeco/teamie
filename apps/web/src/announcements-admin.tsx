@@ -179,7 +179,7 @@ function AdminAnnouncementsManager({
           平台公告发布功能当前已关闭，已发布的公告仍可正常查阅。
         </Notice>
       )}
-      <Notice>{formError}</Notice>
+      <Notice kind="error">{formError}</Notice>
       <Notice kind="success">{successMsg}</Notice>
 
       <form
@@ -273,7 +273,7 @@ function AdminAnnouncementsManager({
           </div>
         ) : listQuery.isError ? (
           <div className="admin-empty">
-            <Notice>{errorText(listQuery.error)}</Notice>
+            <Notice kind="error">{errorText(listQuery.error)}</Notice>
             <Button
               type="button"
               variant="secondary"
@@ -352,7 +352,7 @@ function AdminAnnouncementsManager({
           }}
           busy={deleteBusy}
         >
-          <Notice>{deleteError}</Notice>
+          <Notice kind="error">{deleteError}</Notice>
           <p>
             确定要删除公告 <b>「{deletingTarget.title}」</b> 吗？
           </p>

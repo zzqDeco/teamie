@@ -157,7 +157,7 @@ export function PlatformInvitations() {
           <KeyRound size={ICON.xl} />
         </span>
       </div>
-      <Notice>{!revoking ? error : ""}</Notice>
+      <Notice kind="error">{!revoking ? error : ""}</Notice>
       <div className="admin-generate">
         <div>
           <h2>创建注册邀请</h2>
@@ -270,7 +270,7 @@ export function PlatformInvitations() {
           </div>
         ) : query.error ? (
           <div className="admin-empty">
-            <Notice>邀请码记录加载失败，请重新刷新。</Notice>
+            <Notice kind="error">邀请码记录加载失败，请重新刷新。</Notice>
             <Button
               variant="secondary"
               size="sm"

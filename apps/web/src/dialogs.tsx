@@ -206,7 +206,7 @@ export function WorkspaceDialog({
           if (fieldErrors.name) setFieldErrors((old) => ({ ...old, name: undefined }));
         }}
       >
-        <Notice>{error}</Notice>
+        <Notice kind="error">{error}</Notice>
         {kind === "workspace" && (
           <>
             <Field
@@ -454,7 +454,7 @@ export function ProfileSettings() {
       </div>
       <form className="settings-form" noValidate onSubmit={save}>
         <h3>基本信息</h3>
-        <Notice>{error}</Notice>
+        <Notice kind="error">{error}</Notice>
         <Notice kind="success">{saved ? "资料已保存。" : ""}</Notice>
         <label>
           显示名称

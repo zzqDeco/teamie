@@ -398,7 +398,10 @@ export function MentionInput({
                 onClick={() => choose(candidate)}
               >
                 {candidate.member.kind === "agent" ? (
-                  <AgentAvatar seed={candidate.member.userId} />
+                  <AgentAvatar
+                    seed={candidate.member.userId}
+                    disabled={isDisabledAgent(candidate.member)}
+                  />
                 ) : (
                   <Avatar
                     name={candidate.member.displayName}

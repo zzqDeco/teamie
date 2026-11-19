@@ -79,7 +79,7 @@
   }
   .search-empty {
     color: var(--text-muted);
-    font-size: var(--font-md);
+    font-size: var(--font-base);
     text-align: center;
     margin: var(--space-8) var(--space-3);
   }
@@ -118,7 +118,7 @@
     background: transparent;
     color: var(--text);
     font: inherit;
-    font-size: var(--font-md);
+    font-size: var(--font-base);
     line-height: 1.65;
     white-space: normal;
     overflow-wrap: anywhere;

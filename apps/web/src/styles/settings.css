@@ -118,7 +118,7 @@
   .settings-form > h3 {
     font-weight: 600;
     margin-bottom: var(--space-6);
-    font-size: var(--font-md);
+    font-size: var(--font-base);
     color: var(--text-strong);
   }
   .settings-form input {
@@ -360,7 +360,7 @@
   }
   .invite-generator > h3 {
     font-weight: 600;
-    font-size: var(--font-md);
+    font-size: var(--font-base);
     color: var(--text-strong);
   }
   .invite-generator > p {
@@ -407,12 +407,12 @@
   }
   .workspace-button .workspace-unread-dot {
     position: absolute;
-    top: var(--space-1);
-    right: var(--space-1);
-    width: 8px;
-    height: 8px;
+    top: -2px;
+    right: -2px;
+    width: 10px;
+    height: 10px;
     border-radius: 50%;
-    background: var(--brand);
+    background: var(--unread-mention);
     border: 2px solid var(--rail);
     pointer-events: none;
   }
@@ -505,7 +505,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: var(--font-md);
+    font-size: var(--font-base);
     font-weight: 600;
     color: var(--text-strong);
   }

@@ -564,7 +564,7 @@ export function RetractMessageModal({
       onClose={onClose}
     >
       <blockquote className="retract-quote">{messagePreviewText(retracting)}</blockquote>
-      <Notice>{actionError}</Notice>
+      <Notice kind="error">{actionError}</Notice>
       <div className="modal-actions">
         <ModalCloseButton>保留消息</ModalCloseButton>
         <Button variant="danger" busy={actionBusy} onClick={onConfirm}>
