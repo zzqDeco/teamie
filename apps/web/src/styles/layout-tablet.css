@@ -141,7 +141,7 @@
     .members-pane {
       box-shadow: var(--shadow-lg);
       position: fixed;
-      top: 0;
+      top: var(--app-top, 0px);
       right: 0;
       bottom: auto;
       height: var(--app-height, 100dvh);

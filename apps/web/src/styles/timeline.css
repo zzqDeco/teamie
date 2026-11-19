@@ -133,7 +133,18 @@
   .message-sheet-action.danger {
     color: var(--danger-text);
   }
-  @media (pointer: coarse) {
+  @media (hover: none), (pointer: coarse) {
+    .message {
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    .message input,
+    .message textarea {
+      -webkit-touch-callout: default;
+      -webkit-user-select: text;
+      user-select: text;
+    }
     .modal-backdrop:has(> .modal.message-action-sheet) {
       align-items: flex-end;
     }

@@ -178,7 +178,11 @@
   }
   .modal-backdrop {
     position: fixed;
-    inset: 0;
+    top: var(--app-top, 0px);
+    right: 0;
+    left: 0;
+    bottom: auto;
+    height: var(--app-height, 100dvh);
     background: var(--backdrop);
     backdrop-filter: blur(3px);
     display: flex;
