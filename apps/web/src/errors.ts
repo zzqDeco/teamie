@@ -82,7 +82,7 @@ export const errorMessages: Record<string, string> = {
   pin_limit: "当前对话最多只能置顶 50 条消息，请先取消置顶部分旧消息。",
   saved_limit: "个人收藏数量已达上限（1000 条），请先清理不再需要的收藏。",
   broadcast_forbidden: "当前对话不允许使用全体提及，或仅工作空间所有者可在频道中使用。",
-  presence_unavailable: "在线状态已关闭，当前无法使用 @here 提及在线成员。",
+  presence_unavailable: "在线状态已关闭，当前无法使用 @在线成员 提及在线成员。",
   invalid_client_message_id: "消息标识无效，请删除后重新发送。",
   message_retracted: "已撤回的消息无法继续操作。",
   reaction_limit: "单条消息最多可添加 20 种不同表情回应。",

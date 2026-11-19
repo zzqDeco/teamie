@@ -13,8 +13,15 @@ import type {
   Message,
   User,
 } from "@teamie/api-client";
-import { MentionInput, MentionText, trimMentionDraft } from "./mentions";
+import { errorMessages } from "./errors";
+import {
+  MentionInput,
+  MentionText,
+  rankMentionMembers,
+  trimMentionDraft,
+} from "./mentions";
 import { ConversationView } from "./messages";
+import { loadPinyin } from "./shell/pinyin-match";
 import { chatStore } from "./store";
 
 const user: User = {
@@ -242,6 +249,127 @@ describe("structured mention composing", () => {
         mentions: [{ userId: "agent", start: 0, end: 3 }],
       }),
     );
+  });
+
+  it("matches Chinese members by full pinyin and initials while keeping disabled Agents last", async () => {
+    const toPinyin = await loadPinyin();
+    expect(toPinyin).not.toBeNull();
+    const chineseMembers: Array<Member & { agentEnabled?: boolean }> = [
+      { userId: "me", displayName: "陈本人", kind: "human", role: "member" },
+      { userId: "sub", displayName: "李陈明", kind: "human", role: "member" },
+      { userId: "prefix", displayName: "陈明", kind: "human", role: "member" },
+      { userId: "word", displayName: "研发-陈明", kind: "human", role: "member" },
+      {
+        userId: "disabled-agent",
+        displayName: "陈明助手",
+        kind: "agent",
+        role: "member",
+        agentEnabled: false,
+      },
+    ];
+    expect(
+      rankMentionMembers(chineseMembers, "chenming", "me", 12, toPinyin).map(
+        (m) => m.userId,
+      ),
+    ).toEqual(["prefix", "sub", "word", "disabled-agent"]);
+    expect(
+      rankMentionMembers(chineseMembers, "cm", "me", 12, toPinyin).map(
+        (m) => m.userId,
+      ),
+    ).toEqual(["prefix", "sub", "word", "disabled-agent"]);
+
+    let latest = { body: "", mentions: [] as Mention[] };
+    function PinyinMentionHarness() {
+      const [value, setValue] = useState({ body: "", mentions: [] as Mention[] });
+      return (
+        <MentionInput
+          aria-label="拼音提及输入"
+          value={value.body}
+          mentions={value.mentions}
+          onChange={(body, next) => {
+            latest = { body, mentions: next };
+            setValue({ body, mentions: next });
+          }}
+          members={chineseMembers}
+          currentUserId="me"
+          enabled
+        />
+      );
+    }
+    await render(<PinyinMentionHarness />);
+    await type("请 @cm");
+    await vi.waitFor(() => {
+      expect(host.querySelectorAll('[role="option"]').length).toBeGreaterThan(0);
+    });
+    expect(host.querySelector('[role="option"]')?.textContent).toContain("陈明");
+    await key("Enter");
+    expect(latest).toEqual({
+      body: "请 @陈明 ",
+      mentions: [{ userId: "prefix", start: 2, end: 5 }],
+    });
+  });
+
+  it("matches Chinese/English/pinyin broadcast queries and inserts @所有人 and @在线成员", async () => {
+    await loadPinyin();
+    let latest = { body: "", mentions: [] as Mention[] };
+    function BroadcastMentionHarness() {
+      const [value, setValue] = useState({ body: "", mentions: [] as Mention[] });
+      return (
+        <MentionInput
+          aria-label="广播提及输入"
+          value={value.body}
+          mentions={value.mentions}
+          onChange={(body, next) => {
+            latest = { body, mentions: next };
+            setValue({ body, mentions: next });
+          }}
+          members={members.slice(0, 3)}
+          currentUserId={user.id}
+          enabled
+          allowBroadcastMentions
+          allowHereMention
+        />
+      );
+    }
+    await render(<BroadcastMentionHarness />);
+
+    for (const query of ["@all", "@所有人", "@suoyouren", "@syr"]) {
+      await type(query);
+      const opts = [...host.querySelectorAll('[role="option"]')];
+      expect(opts.some((o) => o.textContent?.includes("所有人")), query).toBe(true);
+    }
+    await key("Enter");
+    expect(latest).toEqual({
+      body: "@所有人 ",
+      mentions: [{ kind: "all", start: 0, end: 4 }],
+    });
+
+    // At most one broadcast mention per draft
+    await type(latest.body + "@here");
+    expect(host.querySelectorAll('[role="option"]')).toHaveLength(0);
+
+    // Reset and test @在线成员 lookup + insertion
+    for (const query of [
+      "@here",
+      "@在线成员",
+      "@当前在线",
+      "@zaixianchengyuan",
+      "@zxcy",
+      "@zx",
+      "@dqzx",
+    ]) {
+      await type(query);
+      const opts = [...host.querySelectorAll('[role="option"]')];
+      expect(opts.some((o) => o.textContent?.includes("在线成员")), query).toBe(true);
+    }
+    await key("Enter");
+    expect(latest).toEqual({
+      body: "@在线成员 ",
+      mentions: [{ kind: "here", start: 0, end: 5 }],
+    });
+
+    expect(errorMessages.presence_unavailable).toContain("@在线成员");
+    expect(errorMessages.presence_unavailable).not.toContain("@here");
   });
 });
 

@@ -10,6 +10,7 @@ import { conversationName } from "../composer-drafts";
 import { errorText } from "../errors";
 import { ICON } from "../icons";
 import { MessageBody } from "../markdown";
+import { ConversationTargetPicker } from "../member-picker";
 import { MentionInput, MentionText, trimMentionDraft } from "../mentions";
 import { chatStore, pinMessageId, savedItemConversationId, savedItemMessageId } from "../store";
 import type { PinnedMessage, SavedMessage } from "../store";
@@ -89,6 +90,22 @@ export async function markMessageAsUnread(conversationId: string, message: Messa
   }
 }
 
+function messageSnippet(msg?: Message, fallback = "") {
+  if (msg?.body) return msg.body;
+  if (msg?.attachments?.length) return `[${msg.attachments.length} 个文件]`;
+  if (msg?.forwarded) return `[转发自 ${msg.forwarded.senderName}]`;
+  return fallback;
+}
+
+function usePushPath() {
+  const inRouter = useInRouterContext();
+  const navCtx = useContext(UNSAFE_NavigationContext);
+  return (path: string) => {
+    if (inRouter && navCtx?.navigator) navCtx.navigator.push(path);
+    else if (typeof window !== "undefined") window.history.pushState(null, "", path);
+  };
+}
+
 export function ForwardedMessageCard({
   forwarded,
   conversationId,
@@ -106,8 +123,7 @@ export function ForwardedMessageCard({
   onJumpToSource?: (conversationId: string, messageId: string) => void;
   onLocateMessage?: (messageId: string) => void;
 }) {
-  const inRouter = useInRouterContext();
-  const navCtx = useContext(UNSAFE_NavigationContext);
+  const pushPath = usePushPath();
   const sourceConvId =
     forwarded.sourceConversationId || forwarded.conversationId || "";
   const sourceMsgId =
@@ -124,30 +140,16 @@ export function ForwardedMessageCard({
         (sourceConvId === conversationId ? onLocateMessage : true)),
   );
   function handleJumpToSource() {
-    if (onJumpToSource) {
-      onJumpToSource(sourceConvId, sourceMsgId);
-      return;
-    }
-    if (onLocateSource) {
-      onLocateSource(sourceConvId, sourceMsgId);
-      return;
-    }
-    if (sourceConvId === conversationId) {
-      onLocateMessage?.(sourceMsgId);
-      return;
-    }
+    if (onJumpToSource) return onJumpToSource(sourceConvId, sourceMsgId);
+    if (onLocateSource) return onLocateSource(sourceConvId, sourceMsgId);
+    if (sourceConvId === conversationId) return onLocateMessage?.(sourceMsgId);
     const wsId =
       targetConv?.workspaceId ||
       workspaceId ||
       chatStore.getSnapshot().conversations[conversationId]?.workspaceId ||
       "";
     if (!wsId) return;
-    const path = `/app/w/${encodeURIComponent(wsId)}/c/${encodeURIComponent(sourceConvId)}?message=${encodeURIComponent(sourceMsgId)}`;
-    if (inRouter && navCtx?.navigator) {
-      navCtx.navigator.push(path);
-    } else if (typeof window !== "undefined") {
-      window.history.pushState(null, "", path);
-    }
+    pushPath(`/app/w/${encodeURIComponent(wsId)}/c/${encodeURIComponent(sourceConvId)}?message=${encodeURIComponent(sourceMsgId)}`);
   }
   return (
     <div className="message-forwarded-card" data-testid="forwarded-card">
@@ -209,28 +211,22 @@ export function ForwardMessageModal({
   allowHereMention?: boolean;
   onClose: () => void;
 }) {
-  const sameWorkspace = conversations.filter(
-    (c) => c.workspaceId === currentConversation.workspaceId,
-  );
-  const targetOptions =
-    sameWorkspace.length > 0 ? sameWorkspace : [currentConversation];
-  const [targetId, setTargetId] = useState(
-    targetOptions[0]?.id || currentConversation.id,
-  );
+  const pushPath = usePushPath();
+  const [targetId, setTargetId] = useState("");
   const [comment, setComment] = useState("");
   const [mentions, setMentions] = useState<Mention[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const pendingAttemptRef = useRef<{
-    key: string;
-    clientMessageId: string;
-  } | null>(null);
+  const pendingAttemptRef = useRef<{ key: string; clientMessageId: string } | null>(null);
 
   const targetConv =
-    targetOptions.find((c) => c.id === targetId) || currentConversation;
-  const targetMembers = members.filter((m) =>
-    targetConv.memberIds.includes(m.userId),
-  );
+    conversations.find((c) => c.id === targetId) ||
+    (targetId === currentConversation.id ? currentConversation : undefined);
+  const targetMembers = !targetConv
+    ? []
+    : targetConv.type === "channel" && targetConv.memberIds.length === 0
+      ? members
+      : members.filter((m) => targetConv.memberIds.includes(m.userId));
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -242,24 +238,27 @@ export function ForwardMessageModal({
     try {
       const trimmed = trimMentionDraft(comment, mentions);
       const attemptKey = `${message.id}:${targetId}:${comment}`;
-      let clientMessageId: string;
-      if (pendingAttemptRef.current?.key === attemptKey) {
-        clientMessageId = pendingAttemptRef.current.clientMessageId;
-      } else {
-        clientMessageId = crypto.randomUUID();
-        pendingAttemptRef.current = { key: attemptKey, clientMessageId };
-      }
+      const clientMessageId =
+        pendingAttemptRef.current?.key === attemptKey
+          ? pendingAttemptRef.current.clientMessageId
+          : (pendingAttemptRef.current = { key: attemptKey, clientMessageId: crypto.randomUUID() })
+              .clientMessageId;
       const response = await api.send(targetId, {
         clientMessageId,
         body: trimmed.body,
         ...(trimmed.mentions.length ? { mentions: trimmed.mentions } : {}),
-        forwardOf: {
-          conversationId: message.conversationId,
-          messageId: message.id,
-        },
+        forwardOf: { conversationId: message.conversationId, messageId: message.id },
       });
       if (!chatStore.reactionScopeCurrent(scope)) return;
       if (response?.message) chatStore.merge([response.message]);
+      const targetName = targetConv
+        ? `${targetConv.type === "channel" ? "# " : ""}${conversationName(targetConv, userId, members)}`
+        : "目标对话";
+      const wsId = targetConv?.workspaceId || currentConversation.workspaceId;
+      const jumpPath = `/app/w/${encodeURIComponent(wsId)}/c/${encodeURIComponent(targetId)}${response?.message?.id ? `?message=${encodeURIComponent(response.message.id)}` : ""}`;
+      toast.success(`已转发到 ${targetName}`, {
+        action: { label: "查看", onClick: () => pushPath(jumpPath) },
+      });
       onClose();
     } catch (e) {
       if (chatStore.reactionScopeCurrent(scope)) setError(errorText(e));
@@ -269,44 +268,27 @@ export function ForwardMessageModal({
   }
 
   return (
-    <Modal
-      title="转发消息"
-      subtitle="选择同一工作空间内的目标对话，并可附上留言。"
-      onClose={onClose}
-    >
+    <Modal title="转发消息" subtitle="选择同一工作空间内的目标对话，并可附上留言。" onClose={onClose}>
       <form className="forward-modal-form" onSubmit={(e) => void submit(e)}>
-        <label className="forward-field">
-          <span>目标对话</span>
-          <select
-            aria-label="目标对话"
-            value={targetId}
-            onChange={(e) => {
-              setTargetId(e.target.value);
-              setMentions([]);
-            }}
-          >
-            {targetOptions.map((conv) => (
-              <option key={conv.id} value={conv.id}>
-                {conv.type === "channel" ? "# " : ""}
-                {conversationName(conv, userId, members)}
-              </option>
-            ))}
-          </select>
-        </label>
+        <ConversationTargetPicker
+          conversations={conversations}
+          currentConversation={currentConversation}
+          members={members}
+          userId={userId}
+          selectedId={targetId}
+          busy={busy}
+          onSelect={(nextId) => {
+            setTargetId(nextId);
+            setMentions([]);
+          }}
+        />
         <div className="forward-preview-box">
           <div className="forward-preview-meta">
             <b>{message.senderName}</b>
             {message.senderKind === "agent" && <AgentBadge />}
             <time dateTime={message.createdAt}>{time(message.createdAt)}</time>
           </div>
-          <p className="forward-preview-snippet">
-            {message.body ||
-              (message.attachments?.length
-                ? `[${message.attachments.length} 个文件]`
-                : message.forwarded
-                  ? `[转发自 ${message.forwarded.senderName}]`
-                  : "")}
-          </p>
+          <p className="forward-preview-snippet">{messageSnippet(message)}</p>
         </div>
         <div className="forward-field">
           <span>附加留言（可选）</span>
@@ -320,14 +302,15 @@ export function ForwardMessageModal({
             members={targetMembers}
             currentUserId={userId}
             enabled={mentionsEnabled}
-            allowBroadcastMentions={
-              allowBroadcastMentions &&
-              targetConv.type !== "direct" &&
-              (targetConv as { kind?: string }).kind !== "dm" &&
-              (targetConv.type !== "channel" ||
-                (isWorkspaceOwner ??
-                  members.some((m) => m.userId === userId && m.role === "owner")))
-            }
+            allowBroadcastMentions={Boolean(
+              targetConv &&
+                allowBroadcastMentions &&
+                targetConv.type !== "direct" &&
+                (targetConv as { kind?: string }).kind !== "dm" &&
+                (targetConv.type !== "channel" ||
+                  (isWorkspaceOwner ??
+                    members.some((m) => m.userId === userId && m.role === "owner"))),
+            )}
             allowHereMention={allowHereMention}
             placeholder="添加留言（可选）"
             aria-label="转发留言"
@@ -335,12 +318,8 @@ export function ForwardMessageModal({
         </div>
         <Notice>{error}</Notice>
         <div className="modal-actions">
-          <Button type="button" variant="secondary" onClick={onClose}>
-            取消
-          </Button>
-          <Button type="submit" busy={busy} disabled={!targetId}>
-            确认转发
-          </Button>
+          <Button type="button" variant="secondary" onClick={onClose}>取消</Button>
+          <Button type="submit" busy={busy} disabled={!targetId}>确认转发</Button>
         </div>
       </form>
     </Modal>
@@ -361,13 +340,7 @@ export function PinnedMessagesBar({
   if (!pins.length) return null;
   const latestPin = pins[0];
   const latestMsg = latestPin.message;
-  const latestSnippet =
-    latestMsg?.body ||
-    (latestMsg?.attachments?.length
-      ? `[${latestMsg.attachments.length} 个文件]`
-      : latestMsg?.forwarded
-        ? `[转发自 ${latestMsg.forwarded.senderName}]`
-        : "查看置顶消息");
+  const latestSnippet = messageSnippet(latestMsg, "查看置顶消息");
 
   return (
     <div className="pinned-messages-bar">
@@ -404,13 +377,7 @@ export function PinnedMessagesBar({
             {pins.map((pin) => {
               const msgId = pinMessageId(pin);
               const msg = pin.message;
-              const snippet =
-                msg?.body ||
-                (msg?.attachments?.length
-                  ? `[${msg.attachments.length} 个文件]`
-                  : msg?.forwarded
-                    ? `[转发自 ${msg.forwarded.senderName}]`
-                    : "置顶消息");
+              const snippet = messageSnippet(msg, "置顶消息");
               return (
                 <li key={msgId} className="pinned-message-item">
                   <button

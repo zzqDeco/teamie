@@ -21,6 +21,7 @@ import type {
 import { MessageAttachments } from "./attachments";
 import { clearAttachmentPreviews } from "./attachment-previews";
 import { AttentionInbox } from "./attention";
+import { ForwardMessageModal } from "./chat/collaboration-ui";
 import {
   buildMentionSpans,
   MentionInput,
@@ -28,7 +29,9 @@ import {
   trimMentionDraft,
 } from "./mentions";
 import { ConversationView } from "./messages";
+import { loadPinyin } from "./shell/pinyin-match";
 import { ShellSidebar } from "./shell-sidebar";
+import { toast, Toaster } from "./toast";
 import {
   isRelevantMessage,
   isUserMentioned,
@@ -428,13 +431,24 @@ describe("#119 IM Collaboration Web UI", () => {
 
     const dialog = document.querySelector('[role="dialog"]');
     expect(dialog).not.toBeNull();
-    const select = dialog!.querySelector<HTMLSelectElement>(
-      'select[aria-label="目标对话"]',
+    const submitBtn = dialog!.querySelector<HTMLButtonElement>(
+      'button[type="submit"]',
     )!;
+    // Target conversation is never pre-selected to reduce mis-forwarding risk
+    expect(submitBtn.disabled).toBe(true);
+    const listbox = dialog!.querySelector<HTMLElement>(
+      '[role="listbox"][aria-label="目标对话"]',
+    )!;
+    expect(listbox).not.toBeNull();
+    const targetOption = listbox.querySelector<HTMLButtonElement>(
+      `[role="option"][data-conversation-id="${channelB.id}"]`,
+    )!;
+    expect(targetOption).not.toBeNull();
     await act(async () => {
-      select.value = channelB.id;
-      select.dispatchEvent(new Event("change", { bubbles: true }));
+      targetOption.click();
     });
+    expect(submitBtn.disabled).toBe(false);
+    expect(targetOption.getAttribute("aria-selected")).toBe("true");
     const commentInput = dialog!.querySelector<HTMLTextAreaElement>(
       'textarea[aria-label="转发留言"]',
     )!;
@@ -919,32 +933,55 @@ describe("#119 IM Collaboration Web UI", () => {
     });
 
     const textarea = host.querySelector("textarea")!;
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(
-        HTMLTextAreaElement.prototype,
-        "value",
-      )!.set!.call(textarea, "@all");
-      textarea.setSelectionRange(4, 4);
-      textarea.dispatchEvent(new Event("input", { bubbles: true }));
-    });
+    const setDraftText = async (text: string) => {
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(
+          HTMLTextAreaElement.prototype,
+          "value",
+        )!.set!.call(textarea, text);
+        textarea.setSelectionRange(text.length, text.length);
+        textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    };
+
+    await setDraftText("@all");
 
     const options = [
       ...host.querySelectorAll<HTMLButtonElement>('[role="option"]'),
     ];
     expect(options).toHaveLength(1);
-    expect(options[0].textContent).toContain("all");
     expect(options[0].textContent).toContain("所有人");
+    expect(options[0].textContent).toContain("全体成员");
 
     await act(async () => {
       options[0].click();
     });
 
-    expect(latestDraft.body).toBe("@all ");
+    expect(latestDraft.body).toBe("@所有人 ");
     expect(buildMentionSpans(latestDraft.body, latestDraft.mentions)).toEqual([
       { kind: "all", start: 0, end: 4 },
     ]);
-    expect(trimMentionDraft("  @here 请看", [{ kind: "here", start: 2, end: 7 }])).toEqual({
-      body: "@here 请看",
+
+    // Pinyin & Chinese & English queries match broadcast mentions
+    await setDraftText("@syr");
+    expect(host.querySelector('[role="option"]')?.textContent).toContain("所有人");
+    await setDraftText("@here");
+    const hereOptions = [
+      ...host.querySelectorAll<HTMLButtonElement>('[role="option"]'),
+    ];
+    expect(hereOptions).toHaveLength(1);
+    expect(hereOptions[0].textContent).toContain("在线成员");
+    expect(hereOptions[0].textContent).toContain("当前在线");
+    await act(async () => {
+      hereOptions[0].click();
+    });
+    expect(latestDraft.body).toBe("@在线成员 ");
+    expect(buildMentionSpans(latestDraft.body, latestDraft.mentions)).toEqual([
+      { kind: "here", start: 0, end: 5 },
+    ]);
+
+    expect(trimMentionDraft("  @在线成员 请看", [{ kind: "here", start: 2, end: 7 }])).toEqual({
+      body: "@在线成员 请看",
       mentions: [{ kind: "here", start: 0, end: 5 }],
     });
 
@@ -968,7 +1005,7 @@ describe("#119 IM Collaboration Web UI", () => {
       isRelevantMessage(
         channelA,
         makeMessage(9, {
-          body: "@all 通知",
+          body: "@所有人 通知",
           mentions: [{ kind: "all", start: 0, end: 4 }],
         }),
         owner.id,
@@ -978,7 +1015,7 @@ describe("#119 IM Collaboration Web UI", () => {
     await act(async () => {
       root.render(
         <MentionText
-          body="@all 请查收"
+          body="@所有人 请查收"
           mentions={[{ kind: "all", start: 0, end: 4 }]}
           userId={owner.id}
         />,
@@ -1217,6 +1254,15 @@ describe("#119 IM Collaboration Web UI", () => {
 
     const dialog = document.querySelector('[role="dialog"]')!;
     const submitForm = dialog.querySelector<HTMLFormElement>("form")!;
+    const targetOption = dialog.querySelector<HTMLButtonElement>(
+      `[role="option"][data-conversation-id="${channelB.id}"]`,
+    )!;
+    expect(
+      dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled,
+    ).toBe(true);
+    await act(async () => {
+      targetOption.click();
+    });
 
     // First attempt fails
     await act(async () => {
@@ -1389,5 +1435,137 @@ describe("#119 IM Collaboration Web UI", () => {
 
     expect(host.textContent).toContain("Saved in A");
     expect(host.textContent).not.toContain("Saved in B");
+  });
+
+  it("10. Sorts forward targets by recent visits, filters by pinyin, excludes other workspaces, and shows an actionable success toast", async () => {
+    await loadPinyin();
+    toast.clear();
+    localStorage.setItem(
+      `teamie.nav.${owner.id}`,
+      JSON.stringify({
+        lastChatPath: `/app/w/${workspace.id}/c/${channelA.id}`,
+        lastConversationByWorkspace: {},
+        recentConversationIds: [channelA.id, "conv-design", channelB.id],
+      }),
+    );
+    const designGroup: Conversation = {
+      id: "conv-design",
+      workspaceId: workspace.id,
+      type: "group",
+      name: "设计评审小组",
+      memberIds: [owner.id, peer.id],
+      lastSeq: 1,
+      readSeq: 1,
+      updatedAt: "2026-10-20T00:50:00Z",
+    };
+    const otherWorkspaceConv: Conversation = {
+      id: "conv-other-ws",
+      workspaceId: "ws-other",
+      type: "channel",
+      name: "外部频道",
+      memberIds: [owner.id],
+      lastSeq: 1,
+      readSeq: 1,
+      updatedAt: "2026-10-20T02:00:00Z",
+    };
+    const privateOtherGroup: Conversation = {
+      id: "conv-not-member",
+      workspaceId: workspace.id,
+      type: "group",
+      name: "未加入小组",
+      memberIds: [peer.id],
+      lastSeq: 1,
+      readSeq: 1,
+      updatedAt: "2026-10-20T02:00:00Z",
+    };
+    chatStore.replaceConversations([channelA, channelB, designGroup]);
+    const sendSpy = vi.spyOn(api, "send").mockResolvedValue({
+      message: makeMessage(20, {
+        id: "forwarded-msg-20",
+        conversationId: designGroup.id,
+      }),
+    });
+    const onClose = vi.fn();
+
+    function LocationProbe() {
+      const loc = useLocation();
+      return <output data-testid="forward-loc">{`${loc.pathname}${loc.search}`}</output>;
+    }
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={[`/app/w/${workspace.id}/c/${channelA.id}`]}>
+          <ForwardMessageModal
+            message={makeMessage(1, { body: "设计定稿" })}
+            currentConversation={channelA}
+            conversations={[
+              channelA,
+              channelB,
+              designGroup,
+              otherWorkspaceConv,
+              privateOtherGroup,
+            ]}
+            members={members}
+            userId={owner.id}
+            mentionsEnabled
+            onClose={onClose}
+          />
+          <Toaster />
+          <LocationProbe />
+        </MemoryRouter>,
+      );
+    });
+    await flush();
+
+    const dialog = document.querySelector('[role="dialog"]')!;
+    const optionIds = () =>
+      [...dialog.querySelectorAll<HTMLButtonElement>('[role="option"]')].map((b) =>
+        b.getAttribute("data-conversation-id"),
+      );
+    // Recent non-current targets first, current conversation last, cross-workspace & non-member excluded
+    expect(optionIds()).toEqual(["conv-design", channelB.id, channelA.id]);
+
+    // Filter by pinyin initials
+    const searchInput = dialog.querySelector<HTMLInputElement>(
+      'input[aria-label="搜索目标对话"]',
+    )!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      )!.set!.call(searchInput, "sjps");
+      searchInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await flush();
+    expect(optionIds()).toEqual(["conv-design"]);
+
+    await act(async () => {
+      dialog.querySelector<HTMLButtonElement>('[role="option"]')!.click();
+    });
+    await act(async () => {
+      dialog
+        .querySelector<HTMLFormElement>("form")!
+        .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    await flush();
+
+    expect(sendSpy).toHaveBeenCalledWith(
+      designGroup.id,
+      expect.objectContaining({
+        forwardOf: { conversationId: channelA.id, messageId: "msg-1" },
+      }),
+    );
+    expect(onClose).toHaveBeenCalledOnce();
+    const toastAction = document.querySelector<HTMLButtonElement>(".toast-action");
+    expect(toastAction?.textContent).toBe("查看");
+    expect(document.querySelector(".toast-message")?.textContent).toContain("设计评审小组");
+    await act(async () => {
+      toastAction!.click();
+    });
+    expect(host.querySelector('[data-testid="forward-loc"]')?.textContent).toBe(
+      `/app/w/${workspace.id}/c/${designGroup.id}?message=forwarded-msg-20`,
+    );
+    toast.clear();
+    localStorage.clear();
   });
 });

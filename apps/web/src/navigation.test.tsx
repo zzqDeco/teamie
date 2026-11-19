@@ -17,6 +17,7 @@ import type {
 import { Landing } from "./public";
 import { Login } from "./public/auth-views";
 import { Shell } from "./shell";
+import { loadPinyin } from "./shell/pinyin-match";
 import { chatStore } from "./store";
 
 const owner: User = {
@@ -1393,5 +1394,130 @@ describe("member and account navigation", () => {
       left: 0,
       behavior: "auto",
     });
+  });
+
+  it("opens a direct message on single click with pinyin search and never marks the modal dirty from search input", async () => {
+    await loadPinyin();
+    let resolveCreate!: (value: { conversation: Conversation }) => void;
+    const create = vi.spyOn(api, "createConversation").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveCreate = resolve;
+        }),
+    );
+    await mount("/app/w/team/c/general");
+    await click(".conversation-actions-trigger");
+    await click(".conversation-actions-menu button:first-child");
+    expect(find(".modal h2").textContent).toBe("发起私信");
+    expect(container.querySelector('.modal button[type="submit"]')).toBeNull();
+
+    // Typing into the search filter must NOT mark the modal dirty
+    await input('.modal input[type="search"]', "sjhb");
+    expect(container.querySelectorAll(".modal .member-option")).toHaveLength(1);
+    expect(find(".modal .member-option").textContent).toContain("设计伙伴");
+    await escape();
+    expect(container.querySelector(".modal")).toBeNull();
+
+    // Reopen, filter by pinyin for Agent, click once to open DM immediately (and guard double click)
+    await click(".conversation-actions-trigger");
+    await click(".conversation-actions-menu button:first-child");
+    await input('.modal input[type="search"]', "cphb");
+    expect(container.querySelectorAll(".modal .member-option")).toHaveLength(1);
+    const option = find<HTMLButtonElement>(".modal .member-option");
+    expect(option.textContent).toContain("产品伙伴");
+    await settle(() => {
+      option.click();
+      option.click();
+    });
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(create).toHaveBeenCalledWith(workspace.id, {
+      type: "direct",
+      memberIds: [agent.id],
+    });
+    expect(option.disabled).toBe(true);
+
+    await settle(() =>
+      resolveCreate({
+        conversation: {
+          ...channel,
+          id: "dm-agent-instant",
+          type: "direct",
+          memberIds: [owner.id, agent.id],
+        },
+      }),
+    );
+    expect(container.querySelector(".modal")).toBeNull();
+    expect(find("[data-location]").textContent).toBe("/app/w/team/c/dm-agent-instant");
+  });
+
+  it("preserves off-filter group member selections across pinyin searches without dirtying on filter typing", async () => {
+    await loadPinyin();
+    const create = vi.spyOn(api, "createConversation").mockResolvedValue({
+      conversation: { ...group, id: "pinyin-group", name: "拼音小组" },
+    });
+    await mount("/app/w/team/c/general");
+    await click(".conversation-actions-trigger");
+    await click(".conversation-actions-menu button:last-child");
+
+    // Search typing alone does not trigger dirty discard confirmation
+    await input('.modal input[type="search"]', "sjhb");
+    expect(container.querySelectorAll(".modal .member-option")).toHaveLength(1);
+    await escape();
+    expect(container.querySelector(".modal")).toBeNull();
+
+    // Reopen, select one member under filter A, switch to filter B, select a second member
+    await click(".conversation-actions-trigger");
+    await click(".conversation-actions-menu button:last-child");
+    await input('.modal input[type="search"]', "sjhb");
+    await click(".modal .member-option");
+    expect(find(".modal .member-select .label-text").textContent).toContain("已选 1 位");
+
+    await input('.modal input[type="search"]', "cphb");
+    expect(find(".modal .picker-selection-hint").textContent).toContain("另有 1 位已选");
+    await click(".modal .member-option");
+    expect(find(".modal .member-select .label-text").textContent).toContain("已选 2 位");
+
+    await input('.modal input[name="name"]', "拼音小组");
+    await settle(() =>
+      find<HTMLFormElement>(".modal form").dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true }),
+      ),
+    );
+    expect(create).toHaveBeenCalledOnce();
+    expect([...(create.mock.calls[0][1].memberIds || [])].sort()).toEqual(
+      [agent.id, "human"].sort(),
+    );
+  });
+
+  it("supports pinyin search in WorkspaceMembers directory and multi-select adding in GroupMembersDialog", async () => {
+    await loadPinyin();
+    await mount("/app/w/team/members");
+    await input('input[type="search"]', "sjhb");
+    expect(find('[aria-label="工作空间成员"]').querySelectorAll("li")).toHaveLength(1);
+    expect(find('[aria-label="工作空间成员"]').textContent).toContain("设计伙伴");
+
+    const addSpy = vi
+      .spyOn(api, "addConversationMember")
+      .mockImplementation(async (_convId, userId) => ({
+        conversation: { ...group, memberIds: [...group.memberIds, userId] },
+      }));
+
+    await settle(() => root.unmount());
+    root = createRoot(container);
+    await mount("/app/w/team/c/group");
+    await click('[aria-label="查看会话成员"]');
+    await click(".members-pane .members-invite");
+    expect(find(".modal h2").textContent).toBe("小组成员");
+
+    await input('.modal input[aria-label="搜索可添加成员"]', "sjhb");
+    await click(".modal .member-option");
+    await input('.modal input[aria-label="搜索可添加成员"]', "cphb");
+    expect(find(".modal .picker-selection-hint").textContent).toContain("另有 1 位已选");
+    await click(".modal .member-option");
+    await click(".group-member-add-actions button");
+
+    expect(addSpy).toHaveBeenCalledTimes(2);
+    expect(addSpy).toHaveBeenNthCalledWith(1, group.id, "human");
+    expect(addSpy).toHaveBeenNthCalledWith(2, group.id, agent.id);
   });
 });

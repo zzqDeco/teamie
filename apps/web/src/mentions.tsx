@@ -2,7 +2,10 @@ import { Fragment, useId, useLayoutEffect, useRef, useState } from "react";
 import type { ClipboardEvent, KeyboardEvent, RefObject } from "react";
 import type { Member, Mention } from "@teamie/api-client";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
+import { isDisabledAgent, matchPinyinText } from "./member-picker";
 import { isUserMentioned } from "./notification-model";
+import { usePinyin } from "./shell/pinyin-match";
+import type { PinyinConverter } from "./shell/pinyin-match";
 import { Avatar } from "./ui";
 import "./styles/mentions.css";
 
@@ -52,10 +55,6 @@ export function trimMentionDraft(body: string, mentions: Mention[]) {
 
 export function buildMentionSpans(body: string, mentions: Mention[]): Mention[] {
   return trimMentionDraft(body, mentions).mentions;
-}
-
-function isDisabledAgent(member: Member & { agentEnabled?: boolean }) {
-  return member.kind === "agent" && member.agentEnabled === false;
 }
 
 // Safari dispatches the candidate-confirming keydown after compositionend with
@@ -108,7 +107,7 @@ export function MentionText({
 }
 
 /**
- * @ candidate order: prefix match, then word-start match, then substring;
+ * @ candidate order: prefix, word-start, pinyin prefix, substring, pinyin substring;
  * ties keep member order. Disabled Agents stay mentionable but always rank
  * after everyone else (they will not respond). The current user is excluded.
  */
@@ -117,17 +116,19 @@ export function rankMentionMembers<T extends Member & { agentEnabled?: boolean }
   query: string,
   currentUserId = "",
   limit = 12,
+  toPinyin?: PinyinConverter | null,
 ): T[] {
-  const needle = query.toLocaleLowerCase();
-  const rank = (name: string) => {
-    const lower = name.toLocaleLowerCase();
-    if (lower.startsWith(needle)) return 0;
-    if (lower.split(/[\s\-_.·・,，、()（）]+/u).some((part) => part.startsWith(needle))) return 1;
-    return lower.includes(needle) ? 2 : -1;
-  };
   return members
-    .map((member, index) => ({ member, index, rank: rank(member.displayName) }))
-    .filter((item) => item.rank >= 0 && (!currentUserId || item.member.userId !== currentUserId))
+    .map((member, index) => ({
+      member,
+      index,
+      rank: matchPinyinText(member.displayName, query, toPinyin ?? null),
+    }))
+    .filter(
+      (item): item is { member: T; index: number; rank: number } =>
+        item.rank !== null &&
+        (!currentUserId || item.member.userId !== currentUserId),
+    )
     .sort(
       (a, b) =>
         Number(isDisabledAgent(a.member)) - Number(isDisabledAgent(b.member)) ||
@@ -136,6 +137,50 @@ export function rankMentionMembers<T extends Member & { agentEnabled?: boolean }
     )
     .slice(0, limit)
     .map((item) => item.member);
+}
+
+const BROADCAST_OPTIONS: Array<{
+  kind: "all" | "here";
+  token: string;
+  subtitle: string;
+  labels: string[];
+  pinyinPrefixes: string[];
+}> = [
+  {
+    kind: "all",
+    token: "所有人",
+    subtitle: "全体成员",
+    labels: ["所有人", "全体成员", "all"],
+    pinyinPrefixes: ["suoyouren", "syr", "quantichengyuan", "qtcy"],
+  },
+  {
+    kind: "here",
+    token: "在线成员",
+    subtitle: "当前在线",
+    labels: ["在线成员", "当前在线", "here"],
+    pinyinPrefixes: [
+      "zaixianchengyuan",
+      "zxcy",
+      "zaixian",
+      "zx",
+      "dangqianzaixian",
+      "dqzx",
+    ],
+  },
+];
+
+function matchesBroadcastOption(
+  option: (typeof BROADCAST_OPTIONS)[number],
+  query: string,
+  toPinyin: PinyinConverter | null,
+) {
+  if (!query) return true;
+  if (option.labels.some((label) => label.includes(query))) return true;
+  if (option.pinyinPrefixes.some((alias) => alias.startsWith(query))) return true;
+  return option.labels.some((label) => {
+    const rank = matchPinyinText(label, query, toPinyin);
+    return rank !== null && rank <= 2;
+  });
 }
 
 type MentionCandidate =
@@ -186,6 +231,7 @@ export function MentionInput({
   const [dismissed, setDismissed] = useState("");
   const [selection, setSelection] = useState({ signature: "", index: 0 });
   const pendingCaret = useRef<number | null>(null);
+  const toPinyin = usePinyin(enabled);
   const query = /(?:^|\s)@([^\s@]{0,64})$/u.exec(value.slice(0, caret));
   const start = query ? caret - query[1].length - 1 : -1;
   const signature = `${value}:${caret}`;
@@ -205,35 +251,20 @@ export function MentionInput({
     allowBroadcastMentions &&
     !hasBroadcastInDraft &&
     (activeQuery.length > 0 || showBroadcastOnEmptyQuery)
-      ? [
-          ...("all".includes(activeQuery) || "所有人".includes(activeQuery)
-            ? [
-                {
-                  type: "broadcast" as const,
-                  kind: "all" as const,
-                  token: "all",
-                  subtitle: "所有人",
-                },
-              ]
-            : []),
-          ...(allowHereMention &&
-          ("here".includes(activeQuery) ||
-            "当前在线".includes(activeQuery) ||
-            "在线成员".includes(activeQuery))
-            ? [
-                {
-                  type: "broadcast" as const,
-                  kind: "here" as const,
-                  token: "here",
-                  subtitle: "当前在线",
-                },
-              ]
-            : []),
-        ]
+      ? BROADCAST_OPTIONS.filter(
+          (option) =>
+            (option.kind !== "here" || allowHereMention) &&
+            matchesBroadcastOption(option, activeQuery, toPinyin),
+        ).map((option) => ({
+          type: "broadcast" as const,
+          kind: option.kind,
+          token: option.token,
+          subtitle: option.subtitle,
+        }))
       : [];
   const memberCandidates: MentionCandidate[] =
     activeQuery !== null
-      ? rankMentionMembers(members, activeQuery, currentUserId).map((member) => ({
+      ? rankMentionMembers(members, activeQuery, currentUserId, 12, toPinyin).map((member) => ({
           type: "member" as const,
           member,
         }))
@@ -260,7 +291,7 @@ export function MentionInput({
     const label =
       candidate.type === "member"
         ? `@${candidate.member.displayName}`
-        : `@${candidate.kind}`;
+        : `@${candidate.token}`;
     const text = value.slice(0, start) + label + " " + value.slice(caret);
     if (text.length > 8000 || mentions.length >= 32) return;
     const next = moveMentions(value, text, mentions);
