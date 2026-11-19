@@ -1539,6 +1539,37 @@ describe("#119 IM Collaboration Web UI", () => {
     await flush();
     expect(optionIds()).toEqual(["conv-design"]);
 
+    // IME confirmation Enter must NOT prematurely select the sole matching conversation
+    await act(async () => {
+      searchInput.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", keyCode: 229, bubbles: true, cancelable: true }),
+      );
+      searchInput.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", isComposing: true, bubbles: true, cancelable: true }),
+      );
+    });
+    expect(
+      dialog.querySelector<HTMLButtonElement>('[role="option"]')!.getAttribute("aria-selected"),
+    ).toBe("false");
+
+    await act(async () => {
+      dialog.querySelector<HTMLButtonElement>('[role="option"]')!.click();
+    });
+    // Insert a mention in the comment, then re-click the already-selected target: mentions must stay intact!
+    const commentInput = dialog.querySelector<HTMLTextAreaElement>('textarea[aria-label="转发留言"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(commentInput, "@");
+      commentInput.setSelectionRange(1, 1);
+      commentInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await flush();
+    const firstMentionOption = dialog.querySelector<HTMLButtonElement>('.mention-options [role="option"]');
+    expect(firstMentionOption).not.toBeNull();
+    await act(async () => {
+      firstMentionOption!.click();
+    });
+    await flush();
+    // Re-click the same target option
     await act(async () => {
       dialog.querySelector<HTMLButtonElement>('[role="option"]')!.click();
     });
@@ -1553,6 +1584,7 @@ describe("#119 IM Collaboration Web UI", () => {
       designGroup.id,
       expect.objectContaining({
         forwardOf: { conversationId: channelA.id, messageId: "msg-1" },
+        mentions: expect.arrayContaining([expect.objectContaining({ start: 0 })]),
       }),
     );
     expect(onClose).toHaveBeenCalledOnce();

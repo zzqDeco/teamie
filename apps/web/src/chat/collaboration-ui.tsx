@@ -278,6 +278,7 @@ export function ForwardMessageModal({
           selectedId={targetId}
           busy={busy}
           onSelect={(nextId) => {
+            if (nextId === targetId) return;
             setTargetId(nextId);
             setMentions([]);
           }}

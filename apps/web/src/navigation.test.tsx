@@ -1411,10 +1411,19 @@ describe("member and account navigation", () => {
     expect(find(".modal h2").textContent).toBe("发起私信");
     expect(container.querySelector('.modal button[type="submit"]')).toBeNull();
 
-    // Typing into the search filter must NOT mark the modal dirty
+    // Typing into the search filter must NOT mark the modal dirty, and IME Enter must NOT instant-open DM
     await input('.modal input[type="search"]', "sjhb");
     expect(container.querySelectorAll(".modal .member-option")).toHaveLength(1);
     expect(find(".modal .member-option").textContent).toContain("设计伙伴");
+    const dmSearch = find<HTMLInputElement>('.modal input[type="search"]');
+    await settle(() => {
+      const imeEnter = new KeyboardEvent("keydown", { key: "Enter", keyCode: 229, bubbles: true, cancelable: true });
+      dmSearch.dispatchEvent(imeEnter);
+      const composingEnter = new KeyboardEvent("keydown", { key: "Enter", isComposing: true, bubbles: true, cancelable: true });
+      dmSearch.dispatchEvent(composingEnter);
+    });
+    expect(create).not.toHaveBeenCalled();
+    expect(container.querySelector(".modal")).not.toBeNull();
     await escape();
     expect(container.querySelector(".modal")).toBeNull();
 

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { ReactNode } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import { Check, ChevronRight, Hash, LoaderCircle, Search, Users } from "lucide-react";
 import type { Conversation, Member } from "@teamie/api-client";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
@@ -13,6 +13,18 @@ import { compareTimestampsDesc } from "./store";
 import { Avatar, Button, Notice } from "./ui";
 
 const WORD_SPLIT = /[\s\-_./#·・,，、()（）]+/u;
+
+function isPickerComposingKey(
+  event: Pick<KeyboardEvent<HTMLInputElement>, "keyCode"> & {
+    nativeEvent?: { isComposing?: boolean; keyCode?: number };
+  },
+) {
+  return Boolean(
+    event.nativeEvent?.isComposing ||
+      event.keyCode === 229 ||
+      event.nativeEvent?.keyCode === 229,
+  );
+}
 
 export function isDisabledAgent(member: Member & { agentEnabled?: boolean }) {
   return member.kind === "agent" && member.agentEnabled === false;
@@ -182,6 +194,7 @@ export function MemberPicker(props: MemberPickerProps) {
     busyMemberId = "",
   } = props;
   const [query, setQuery] = useState("");
+  const [composing, setComposing] = useState(false);
   const toPinyin = usePinyin();
   const filtered = rankParticipantsByQuery(members, query, toPinyin);
   const selectedIds = props.mode === "multiple" ? props.selectedIds : [];
@@ -239,8 +252,12 @@ export function MemberPicker(props: MemberPickerProps) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onInput={(e) => e.stopPropagation()}
+            onCompositionStart={() => setComposing(true)}
+            onCompositionEnd={() => setComposing(false)}
+            onBlur={() => setComposing(false)}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
+                if (composing || isPickerComposingKey(e)) return;
                 e.preventDefault();
                 if (
                   props.mode === "single-instant" &&
@@ -386,6 +403,7 @@ export function ConversationTargetPicker({
   busy?: boolean;
 }) {
   const [query, setQuery] = useState("");
+  const [composing, setComposing] = useState(false);
   const toPinyin = usePinyin();
   const ordered = sortForwardConversations(
     conversations,
@@ -436,8 +454,12 @@ export function ConversationTargetPicker({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onInput={(e) => e.stopPropagation()}
+          onCompositionStart={() => setComposing(true)}
+          onCompositionEnd={() => setComposing(false)}
+          onBlur={() => setComposing(false)}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
+              if (composing || isPickerComposingKey(e)) return;
               e.preventDefault();
               if (filtered.length === 1 && !busy) {
                 onSelect(filtered[0].id);
