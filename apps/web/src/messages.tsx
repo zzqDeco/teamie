@@ -33,6 +33,7 @@ import { MessageComposer } from "./message-composer";
 import { useConversationReceiptsSync } from "./engagement-store";
 import { useConversationReadTracking } from "./chat/conversation-read-tracking";
 import { useConversationContextLoader } from "./chat/conversation-context-loader";
+import type { LocatedScrollState } from "./chat/conversation-context-loader";
 import { useHistoryPaging } from "./chat/use-history-paging";
 import { JumpLatestButton, LocatedNewMessagesPill } from "./chat/timeline-pills";
 
@@ -86,6 +87,8 @@ export function ConversationView({
   const [latestLoaded, setLatestLoaded] = useState(false);
   const [unreadContext, setUnreadContext] = useState(false);
   const fetchedLatest = useRef(false);
+  const skipNextFetchLatest = useRef<string | null>(null);
+  const locatedScrollSettled = useRef<LocatedScrollState | null>(null);
   const [located, setLocated] = useState<LocalMessage[] | null>(null);
   const [resolvedTargets, setResolvedTargets] = useState<Record<string, Message>>({});
   const messages = useMemo(() => {
@@ -189,6 +192,8 @@ export function ConversationView({
     setError,
     setResolvedTargets,
     fetchedLatestRef: fetchedLatest,
+    skipNextFetchLatestRef: skipNextFetchLatest,
+    locatedScrollSettledRef: locatedScrollSettled,
     acknowledgementRef: acknowledgement,
     historyBeforeRef: historyBefore,
     initialScrollRef: initialScroll,
@@ -196,10 +201,12 @@ export function ConversationView({
     scrollRef,
   });
   const latest = messages.filter((m) => !m.status).at(-1)?.seq || 0;
+  const storeLatestSeq = allMessages.reduce((max, m) => (m.status ? max : Math.max(max, m.seq)), 0);
   const currentLastSeq = Math.max(
     conversation.lastSeq,
     snapshot.conversations[conversation.id]?.lastSeq ?? 0,
     latest,
+    storeLatestSeq,
   );
   const [leftBottomSeq, setLeftBottomSeq] = useState(readSeq);
   const focusedConversationRef = useRef("");
@@ -265,12 +272,14 @@ export function ConversationView({
     lastReadRef: lastRead,
     setError,
   });
-  const { older, newer, sentinelRef } = useHistoryPaging({
-    conversation, messages, located, unreadContext, latest, hasMore, loading, locating,
-    loadingOlder, setLoadingOlder, loadingNewer, setLoadingNewer,
-    setHasMore, setLocated, setError,
-    historyBeforeRef: historyBefore, navigationRef: navigation,
-    initialScrollRef: initialScroll, scrollRef,
+  const { older, newer, sentinelRef, bottomSentinelRef, retryError } = useHistoryPaging({
+    conversation, messages, located, unreadContext, latestLoaded, latest, currentLastSeq,
+    hasMore, loading, locating, loadingOlder, setLoadingOlder, loadingNewer, setLoadingNewer,
+    setHasMore, setLatestLoaded, setLocated, setUnreadContext, setAnchorPending, setAtBottom, setHighlightId,
+    initialMessageId, onClearMessageTarget, onRetryFallback: fetchLatest, error, setError,
+    historyBeforeRef: historyBefore, navigationRef: navigation, initialScrollRef: initialScroll,
+    fetchedLatestRef: fetchedLatest, skipNextFetchLatestRef: skipNextFetchLatest,
+    locatedScrollSettledRef: locatedScrollSettled, scrollRef,
   });
   // The located highlight fades after ~2.5s of visibility; highlightId itself
   // stays (it still drives focus restoration and the explicit read call).
@@ -282,7 +291,6 @@ export function ConversationView({
     return () => clearTimeout(timer);
   }, [highlightId, visible]);
   // New messages that reach the latest timeline while reading a located context.
-  const storeLatestSeq = allMessages.reduce((max, m) => (m.status ? max : Math.max(max, m.seq)), 0);
   const [locatedBaseline, setLocatedBaseline] = useState<number | null>(null);
   if (located && locatedBaseline === null) setLocatedBaseline(storeLatestSeq);
   if (!located && locatedBaseline !== null) setLocatedBaseline(null);
@@ -507,7 +515,7 @@ export function ConversationView({
         aria-live="polite"
         aria-relevant="additions"
         aria-label="消息历史"
-        aria-busy={loading || loadingOlder || undefined}
+        aria-busy={loading || loadingOlder || loadingNewer || undefined}
         onScroll={(event) => {
           const el = event.currentTarget;
           const bottom = !located && el.scrollHeight - el.scrollTop - el.clientHeight < 80;
@@ -542,7 +550,7 @@ export function ConversationView({
           {error && (
             <div className="message-error">
               <Notice>{error}</Notice>
-              <button onClick={fetchLatest}>重新加载</button>
+              <button onClick={retryError}>重新加载</button>
             </div>
           )}
           {messages.map((message, index) => {
@@ -596,16 +604,18 @@ export function ConversationView({
               />
             );
           })}
-          {located && unreadContext && latest < conversation.lastSeq && (
+          {located && latest < currentLastSeq && (
             <button
               className="load-earlier load-later"
               onClick={() => void newer()}
               disabled={loadingNewer || loadingOlder || locating}
+              aria-busy={loadingNewer}
             >
               {loadingNewer ? <LoaderCircle size={ICON.xs} className="spin" /> : <ArrowDown size={ICON.xs} />}{" "}
               加载后续消息
             </button>
           )}
+          <div ref={bottomSentinelRef} className="history-sentinel" data-history-sentinel="bottom" aria-hidden="true" />
           <div className="message-end" />
         </div>
       </div>

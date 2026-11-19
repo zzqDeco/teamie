@@ -7,23 +7,59 @@ import { chatStore, reconcileMessages } from "../store";
 import type { LocalMessage } from "../store";
 import { extendHistoryBoundary } from "../composer-drafts";
 import { subscribeBodyCollapse } from "./collapsible-body";
+import type { LocatedScrollState } from "./conversation-context-loader";
 
-type Anchor = { height: number; top: number; token: number; operation: number };
+type Anchor =
+  | { kind: "height"; height: number; top: number; token: number; operation: number }
+  | {
+      kind: "message";
+      messageDomId: string;
+      viewportOffset: number;
+      token: number;
+      operation: number;
+    };
+type PagingError = { scope: string; direction: "older" | "newer"; message: string };
+
+function captureVisibleMessageAnchor(
+  el: HTMLDivElement | null,
+  token: number,
+  operation: number,
+): Anchor | null {
+  if (!el) return null;
+  const containerRect = el.getBoundingClientRect();
+  const rows = el.querySelectorAll<HTMLElement>("article.message[id]");
+  for (const row of rows) {
+    const rect = row.getBoundingClientRect();
+    if (rect.height <= 0 && rect.width <= 0) continue;
+    if (rect.bottom > containerRect.top) {
+      return {
+        kind: "message",
+        messageDomId: row.id,
+        viewportOffset: rect.top - containerRect.top,
+        token,
+        operation,
+      };
+    }
+  }
+  return null;
+}
 
 /**
  * Older/newer page loading for the timeline. Older pages keep the reader's
  * viewport on the same message: the scroll position is compensated in a
  * layout effect right after the prepended rows commit (the scroller has
  * `overflow-anchor: none`, so native anchoring cannot double-compensate).
- * A top sentinel observed with IntersectionObserver loads older pages
- * automatically; the visible button remains the fallback and a11y entry.
+ * Top and bottom sentinels observed with IntersectionObserver load pages
+ * automatically; visible buttons remain the fallback and a11y entry.
  */
 export function useHistoryPaging({
   conversation,
   messages,
   located,
   unreadContext,
+  latestLoaded,
   latest,
+  currentLastSeq,
   hasMore,
   loading,
   locating,
@@ -32,18 +68,32 @@ export function useHistoryPaging({
   loadingNewer,
   setLoadingNewer,
   setHasMore,
+  setLatestLoaded,
   setLocated,
+  setUnreadContext,
+  setAnchorPending,
+  setAtBottom,
+  setHighlightId,
+  initialMessageId,
+  onClearMessageTarget,
+  onRetryFallback,
+  error,
   setError,
   historyBeforeRef,
   navigationRef,
   initialScrollRef,
+  fetchedLatestRef,
+  skipNextFetchLatestRef,
+  locatedScrollSettledRef,
   scrollRef,
 }: {
   conversation: Conversation;
   messages: LocalMessage[];
   located: LocalMessage[] | null;
   unreadContext: boolean;
+  latestLoaded: boolean;
   latest: number;
+  currentLastSeq: number;
   hasMore: boolean;
   loading: boolean;
   locating: boolean;
@@ -52,19 +102,36 @@ export function useHistoryPaging({
   loadingNewer: boolean;
   setLoadingNewer: Dispatch<SetStateAction<boolean>>;
   setHasMore: Dispatch<SetStateAction<boolean>>;
+  setLatestLoaded: Dispatch<SetStateAction<boolean>>;
   setLocated: Dispatch<SetStateAction<LocalMessage[] | null>>;
+  setUnreadContext: Dispatch<SetStateAction<boolean>>;
+  setAnchorPending: Dispatch<SetStateAction<boolean>>;
+  setAtBottom: Dispatch<SetStateAction<boolean>>;
+  setHighlightId: Dispatch<SetStateAction<string>>;
+  initialMessageId: string;
+  onClearMessageTarget?: () => void;
+  onRetryFallback: () => void;
+  error: string;
   setError: Dispatch<SetStateAction<string>>;
   historyBeforeRef: MutableRefObject<{ seq: number; generation: number } | null>;
   navigationRef: MutableRefObject<number>;
   initialScrollRef: MutableRefObject<boolean>;
+  fetchedLatestRef: MutableRefObject<boolean>;
+  skipNextFetchLatestRef: MutableRefObject<string | null>;
+  locatedScrollSettledRef: MutableRefObject<LocatedScrollState | null>;
   scrollRef: RefObject<HTMLDivElement | null>;
 }) {
   const [anchorTick, setAnchorTick] = useState(0);
   const [olderFailedScope, setOlderFailedScope] = useState<string | null>(null);
+  const [newerFailedScope, setNewerFailedScope] = useState<string | null>(null);
+  const [newerArmedScope, setNewerArmedScope] = useState<string | null>(null);
+  const [pagingError, setPagingError] = useState<PagingError | null>(null);
   const anchor = useRef<Anchor | null>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
-  // Navigation id of the in-flight older page; a navigation reset frees it.
+  const bottomSentinelRef = useRef<HTMLDivElement>(null);
+  // Navigation id of in-flight pages; a navigation reset frees them.
   const busy = useRef<number | null>(null);
+  const newerBusyRef = useRef<number | null>(null);
 
   const applyAnchor = useCallback(() => {
     const pending = anchor.current;
@@ -78,13 +145,32 @@ export function useHistoryPaging({
       anchor.current = null;
       return;
     }
-    el.scrollTop = Math.max(0, pending.top + (el.scrollHeight - pending.height));
-  }, [navigationRef, scrollRef]);
+    if (pending.kind === "height") {
+      el.scrollTop = Math.max(0, pending.top + (el.scrollHeight - pending.height));
+      if (locatedScrollSettledRef.current) {
+        locatedScrollSettledRef.current.lastScrollTop = el.scrollTop;
+      }
+      return;
+    }
+    if (located !== null) return;
+    const target = document.getElementById(pending.messageDomId);
+    if (target && el.contains(target)) {
+      const targetRect = target.getBoundingClientRect();
+      const containerRect = el.getBoundingClientRect();
+      if (targetRect.height > 0 || targetRect.width > 0) {
+        const delta = (targetRect.top - containerRect.top) - pending.viewportOffset;
+        if (delta !== 0) {
+          el.scrollTop = Math.max(0, el.scrollTop + delta);
+        }
+      }
+    }
+    anchor.current = null;
+  }, [located, locatedScrollSettledRef, navigationRef, scrollRef]);
 
   useLayoutEffect(() => {
     applyAnchor();
     const settled = anchor.current;
-    if (!settled) return;
+    if (!settled || settled.kind !== "height") return;
     const timer = setTimeout(() => {
       if (anchor.current === settled) anchor.current = null;
     }, 0);
@@ -98,7 +184,9 @@ export function useHistoryPaging({
     if (
       !boundary ||
       boundary.generation !== chatStore.generation ||
-      busy.current === navigationRef.current
+      busy.current === navigationRef.current ||
+      newerBusyRef.current === navigationRef.current ||
+      loadingNewer
     )
       return;
     const first = extendHistoryBoundary(boundary.seq, messages);
@@ -109,6 +197,7 @@ export function useHistoryPaging({
     const current = () => token === chatStore.generation && operation === navigationRef.current;
     busy.current = operation;
     setOlderFailedScope(null);
+    setPagingError(null);
     setLoadingOlder(true);
     setError("");
     try {
@@ -119,7 +208,7 @@ export function useHistoryPaging({
         : null;
       const el = scrollRef.current;
       anchor.current = el
-        ? { height: el.scrollHeight, top: el.scrollTop, token, operation }
+        ? { kind: "height", height: el.scrollHeight, top: el.scrollTop, token, operation }
         : null;
       chatStore.ingestMessageReactions(page.messages, reactionScope);
       if (located) setLocated((old) => (old ? reconcileMessages(old, page.messages) : old));
@@ -128,8 +217,10 @@ export function useHistoryPaging({
       setAnchorTick((value) => value + 1);
     } catch (e) {
       if (current()) {
-        setError(errorText(e));
+        const message = errorText(e);
+        setError(message);
         setOlderFailedScope(scopeKey);
+        setPagingError({ scope: scopeKey, direction: "older", message });
       }
     } finally {
       if (current()) {
@@ -140,37 +231,145 @@ export function useHistoryPaging({
   }
 
   async function newer() {
-    if (!located || !unreadContext || loadingNewer || loadingOlder || locating) return;
+    if (
+      !located ||
+      latest >= currentLastSeq ||
+      busy.current === navigationRef.current ||
+      newerBusyRef.current === navigationRef.current ||
+      loadingNewer ||
+      loadingOlder ||
+      locating
+    )
+      return;
     const token = chatStore.generation;
     const reactionScope = chatStore.reactionScope(conversation.id);
     const operation = navigationRef.current;
+    const scopeKey = `${token}:${operation}`;
     const current = () =>
       token === chatStore.generation &&
       operation === navigationRef.current &&
-      chatStore.reactionScopeCurrent(reactionScope);
+      (!reactionScope || chatStore.reactionScopeCurrent(reactionScope));
+    newerBusyRef.current = operation;
+    setNewerFailedScope(null);
+    setPagingError(null);
     setLoadingNewer(true);
     setError("");
     try {
       const page = await api.messagesAround(conversation.id, latest + 1);
       if (!current()) return;
       if (!page.messages.some((message) => message.seq > latest)) {
-        setError("后续消息暂未加载，请重试");
+        const message = "后续消息暂未加载，请重试";
+        setError(message);
+        setNewerFailedScope(scopeKey);
+        setPagingError({ scope: scopeKey, direction: "newer", message });
         return;
       }
       chatStore.ingestMessageReactions(page.messages, reactionScope);
+      const snap = chatStore.getSnapshot();
+      const freshStoreMessages = snap.messages[conversation.id] || [];
+      const freshStoreConv = snap.conversations[conversation.id];
+      const freshStoreLatestSeq = freshStoreMessages.reduce(
+        (max, m) => (m.status ? max : Math.max(max, m.seq)),
+        0,
+      );
+      const mergedLocated = reconcileMessages(located, page.messages);
+      const confirmedMerged = mergedLocated.filter((m) => !m.status);
+      const mergedTailSeq = confirmedMerged.at(-1)?.seq || 0;
+      const mergedMinSeq = confirmedMerged[0]?.seq || 0;
+      const freshLastSeq = Math.max(
+        conversation.lastSeq,
+        freshStoreConv?.lastSeq ?? 0,
+        freshStoreLatestSeq,
+        mergedTailSeq,
+      );
+      const reachedLatestSeq = freshLastSeq > 0 && mergedTailSeq >= freshLastSeq;
+      const storeContiguousStart =
+        latestLoaded &&
+        freshStoreMessages.length > 0 &&
+        freshStoreLatestSeq > 0 &&
+        freshStoreLatestSeq >= freshLastSeq
+          ? extendHistoryBoundary(freshStoreLatestSeq, freshStoreMessages)
+          : 0;
+      const reachedStoreWindow =
+        !unreadContext &&
+        storeContiguousStart > 0 &&
+        mergedTailSeq >= storeContiguousStart - 1;
+      if (reachedLatestSeq || reachedStoreWindow) {
+        anchor.current = captureVisibleMessageAnchor(
+          scrollRef.current,
+          token,
+          operation,
+        );
+        chatStore.merge(mergedLocated);
+        const mergedStore = chatStore.getSnapshot().messages[conversation.id] || [];
+        const mergedStoreLatest = mergedStore.reduce(
+          (max, m) => (m.status ? max : Math.max(max, m.seq)),
+          0,
+        );
+        const contiguousMin =
+          mergedStoreLatest > 0
+            ? extendHistoryBoundary(mergedStoreLatest, mergedStore)
+            : mergedMinSeq;
+        const nextBeforeSeq =
+          mergedMinSeq > 0 && contiguousMin > 0
+            ? Math.min(mergedMinSeq, contiguousMin)
+            : mergedMinSeq || contiguousMin;
+        historyBeforeRef.current =
+          nextBeforeSeq > 0 ? { seq: nextBeforeSeq, generation: token } : null;
+        setHasMore(nextBeforeSeq > 1);
+        setLatestLoaded(true);
+        fetchedLatestRef.current = true;
+        initialScrollRef.current = false;
+        setAnchorPending(false);
+        setAtBottom(false);
+        locatedScrollSettledRef.current = null;
+        setLocated(null);
+        setUnreadContext(false);
+        setHighlightId("");
+        setAnchorTick((value) => value + 1);
+        if (initialMessageId && onClearMessageTarget) {
+          skipNextFetchLatestRef.current = conversation.id;
+          onClearMessageTarget();
+        }
+        return;
+      }
       setLocated((old) => (old ? reconcileMessages(old, page.messages) : old));
     } catch (e) {
-      if (current()) setError(errorText(e));
+      if (current()) {
+        const message = errorText(e);
+        setError(message);
+        setNewerFailedScope(scopeKey);
+        setPagingError({ scope: scopeKey, direction: "newer", message });
+      }
     } finally {
-      if (current()) setLoadingNewer(false);
+      if (current()) {
+        newerBusyRef.current = null;
+        setLoadingNewer(false);
+      }
     }
   }
 
   const olderRef = useRef(older);
+  const newerRef = useRef(newer);
   useLayoutEffect(() => {
     olderRef.current = older;
+    newerRef.current = newer;
   });
   const loadOlder = useCallback(() => olderRef.current(), []);
+  const loadNewer = useCallback(() => newerRef.current(), []);
+  const retryError = useCallback(() => {
+    const currentScope = `${chatStore.generation}:${navigationRef.current}`;
+    if (pagingError && pagingError.scope === currentScope && pagingError.message === error) {
+      if (pagingError.direction === "older") {
+        void olderRef.current();
+        return;
+      }
+      void newerRef.current();
+      return;
+    }
+    void onRetryFallback();
+  }, [error, navigationRef, onRetryFallback, pagingError]);
+
   const autoLoad =
     hasMore &&
     !loading &&
@@ -213,5 +412,94 @@ export function useHistoryPaging({
     scrollRef,
   ]);
 
-  return { older: loadOlder, newer, sentinelRef };
+  // Arm bottom auto-load only after initial located target focus has settled
+  // and the user actively scrolls downward in the located view.
+  useEffect(() => {
+    const root = scrollRef.current;
+    if (!located || latest >= currentLastSeq || locating || !root) return;
+    const armIfSettled = () => {
+      const scope = `${chatStore.generation}:${navigationRef.current}`;
+      const settled = locatedScrollSettledRef.current;
+      if (!settled || settled.scope !== scope) return;
+      setNewerArmedScope((prev) => (prev === scope ? prev : scope));
+    };
+    const onScroll = () => {
+      const scope = `${chatStore.generation}:${navigationRef.current}`;
+      const settled = locatedScrollSettledRef.current;
+      if (!settled || settled.scope !== scope) return;
+      const top = root.scrollTop;
+      if (top > settled.lastScrollTop) {
+        settled.lastScrollTop = top;
+        setNewerArmedScope((prev) => (prev === scope ? prev : scope));
+      } else if (top < settled.lastScrollTop) {
+        settled.lastScrollTop = top;
+      }
+    };
+    const onWheel = (event: WheelEvent) => {
+      if (event.deltaY > 0) armIfSettled();
+    };
+    root.addEventListener("scroll", onScroll, { passive: true });
+    root.addEventListener("wheel", onWheel, { passive: true });
+    return () => {
+      root.removeEventListener("scroll", onScroll);
+      root.removeEventListener("wheel", onWheel);
+    };
+  }, [
+    conversation.id,
+    currentLastSeq,
+    latest,
+    located,
+    locatedScrollSettledRef,
+    locating,
+    navigationRef,
+    scrollRef,
+  ]);
+
+  const bottomAutoLoad =
+    located !== null &&
+    latest < currentLastSeq &&
+    !loading &&
+    !locating &&
+    !loadingOlder &&
+    !loadingNewer;
+
+  useEffect(() => {
+    const sentinel = bottomSentinelRef.current;
+    const root = scrollRef.current;
+    const currentScope = `${chatStore.generation}:${navigationRef.current}`;
+    if (
+      !bottomAutoLoad ||
+      newerArmedScope !== currentScope ||
+      newerFailedScope === currentScope ||
+      !sentinel ||
+      !root ||
+      typeof IntersectionObserver === "undefined"
+    )
+      return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (
+          initialScrollRef.current ||
+          `${chatStore.generation}:${navigationRef.current}` !== currentScope
+        )
+          return;
+        if (entries.some((entry) => entry.isIntersecting)) void loadNewer();
+      },
+      { root, rootMargin: "0px 0px 200px 0px" },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [
+    bottomAutoLoad,
+    conversation.id,
+    initialScrollRef,
+    loadNewer,
+    messages.length,
+    navigationRef,
+    newerArmedScope,
+    newerFailedScope,
+    scrollRef,
+  ]);
+
+  return { older: loadOlder, newer: loadNewer, sentinelRef, bottomSentinelRef, retryError };
 }
