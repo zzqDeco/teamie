@@ -14,6 +14,7 @@ import { COMMON_REACTION_EMOJIS, computeMessageReadSummary } from "./engagement-
 import { isReactionEmoji, searchEmojis, allowedEmojiCount } from "./chat/emoji-catalog";
 import { FULLY_QUALIFIED_COUNT } from "./chat/emoji-data.generated";
 import { thumbnailBox } from "./attachments";
+import { computeViewportLayout } from "./shell/shell-navigation-helpers";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -249,5 +250,55 @@ describe("thumbnail reservation", () => {
     expect(thumbnailBox(640, 360)).toEqual({ width: "320px", aspectRatio: "640 / 360" });
     expect(thumbnailBox(300, 600)).toEqual({ width: "110px", aspectRatio: "300 / 600" });
     expect(thumbnailBox(100, 50)).toEqual({ width: "100px", aspectRatio: "100 / 50" });
+  });
+});
+
+describe("visualViewport shell layout computation", () => {
+  it("tracks unzoomed height and iOS keyboard offsetTop without collapsing under pinch zoom", () => {
+    const initial = computeViewportLayout(
+      { height: 844, offsetTop: 0, scale: 1 },
+      844,
+      null,
+    );
+    expect(initial).toEqual({ height: 844, top: 0, unzoomedHeight: 844 });
+
+    // iOS software keyboard shrinks visualViewport.height and shifts offsetTop while scale stays 1.
+    const keyboardOpen = computeViewportLayout(
+      { height: 508, offsetTop: 44, scale: 1 },
+      844,
+      initial.unzoomedHeight,
+    );
+    expect(keyboardOpen).toEqual({ height: 508, top: 44, unzoomedHeight: 508 });
+
+    // Pinch zoom (scale != 1) must preserve the last unzoomed height and reset top offset to 0.
+    const zoomed = computeViewportLayout(
+      { height: 422, offsetTop: 190, scale: 2 },
+      844,
+      initial.unzoomedHeight,
+    );
+    expect(zoomed).toEqual({ height: 844, top: 0, unzoomedHeight: 844 });
+
+    // Even if first measured while already pinch-zoomed, falls back to innerHeight rather than zoomed height.
+    const firstZoomed = computeViewportLayout(
+      { height: 422, offsetTop: 120, scale: 2 },
+      844,
+      null,
+    );
+    expect(firstZoomed).toEqual({ height: 844, top: 0, unzoomedHeight: 844 });
+
+    // Returning to scale 1 restores live visualViewport tracking.
+    const unzoomed = computeViewportLayout(
+      { height: 844, offsetTop: 0, scale: 1 },
+      844,
+      zoomed.unzoomedHeight,
+    );
+    expect(unzoomed).toEqual({ height: 844, top: 0, unzoomedHeight: 844 });
+
+    // Without visualViewport, uses window.innerHeight and top 0.
+    expect(computeViewportLayout(undefined, 900, null)).toEqual({
+      height: 900,
+      top: 0,
+      unzoomedHeight: 900,
+    });
   });
 });

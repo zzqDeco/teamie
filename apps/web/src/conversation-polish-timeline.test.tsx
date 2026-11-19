@@ -247,6 +247,65 @@ describe("message rows", () => {
     expect(document.querySelector(".message-action-sheet")).toBeNull();
     expect(host.querySelector(".reply-preview span")?.textContent).toBe("加粗 的 链接");
   });
+
+  it("swallows synthesized ghost mousedown/click on portaled action sheet when lifting after a long press, while allowing the next deliberate tap", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("coarse") }));
+    const saveSpy = vi.spyOn(api, "saveMessage").mockResolvedValue({
+      saved: {
+        conversationId: "c1",
+        messageId: "m1",
+        savedAt: "2026-11-12T10:00:00Z",
+      },
+    });
+    history = [message(1, { body: "长按防误触测试" })];
+    await mount();
+    vi.useFakeTimers();
+    const article = host.querySelector<HTMLElement>("#message-m1 .message-text")!;
+    const down = new MouseEvent("pointerdown", { bubbles: true, clientX: 40, clientY: 600 });
+    Object.assign(down, { pointerType: "touch", isPrimary: true, pointerId: 7 });
+    article.dispatchEvent(down);
+
+    // Hold beyond LONG_PRESS_MS (even longer than the old 1000ms window before lifting).
+    await act(async () => { vi.advanceTimersByTime(LONG_PRESS_MS + 1300); });
+    const sheet = document.querySelector(".message-action-sheet")!;
+    expect(sheet).not.toBeNull();
+
+    // Finger lifts from the screen; browser synthesizes mousedown on backdrop/item and click on "收藏".
+    const up = new MouseEvent("pointerup", { bubbles: true, clientX: 40, clientY: 600 });
+    Object.assign(up, { pointerType: "touch", isPrimary: true, pointerId: 7 });
+    await act(async () => {
+      article.dispatchEvent(up);
+    });
+
+    const backdrop = document.querySelector<HTMLElement>(".modal-backdrop")!;
+    const saveBtn = [...sheet.querySelectorAll<HTMLButtonElement>(".message-sheet-action")].find(
+      (b) => b.textContent === "收藏",
+    )!;
+    await act(async () => {
+      backdrop.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+      saveBtn.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+      saveBtn.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }));
+      saveBtn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    });
+
+    // Neither the backdrop mousedown nor the ghost click on "收藏" should fire.
+    expect(document.querySelector(".message-action-sheet")).not.toBeNull();
+    expect(saveSpy).not.toHaveBeenCalled();
+
+    // A deliberate second tap (new pointerdown -> click) immediately works without waiting.
+    const reply = [...sheet.querySelectorAll<HTMLButtonElement>(".message-sheet-action")].find(
+      (b) => b.textContent === "回复",
+    )!;
+    await act(async () => {
+      const tapDown = new MouseEvent("pointerdown", { bubbles: true, clientX: 40, clientY: 500 });
+      Object.assign(tapDown, { pointerType: "touch", isPrimary: true, pointerId: 8 });
+      reply.dispatchEvent(tapDown);
+      reply.click();
+    });
+    vi.useRealTimers();
+    expect(document.querySelector(".message-action-sheet")).toBeNull();
+    expect(host.querySelector(".reply-preview span")?.textContent).toBe("长按防误触测试");
+  });
 });
 
 describe("located context mode", () => {

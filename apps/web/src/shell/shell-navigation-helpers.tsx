@@ -330,20 +330,74 @@ export function useShellViewportAndFocus({
   );
   useEffect(() => {
     const viewport = window.visualViewport;
-    const resize = () =>
+    let lastUnzoomedHeight: number | null = null;
+    const syncViewport = () => {
+      const layout = computeViewportLayout(
+        viewport,
+        window.innerHeight,
+        lastUnzoomedHeight,
+      );
+      lastUnzoomedHeight = layout.unzoomedHeight;
       document.documentElement.style.setProperty(
         "--app-height",
-        `${viewport?.height || window.innerHeight}px`,
+        `${layout.height}px`,
       );
-    resize();
-    viewport?.addEventListener("resize", resize);
-    window.addEventListener("resize", resize);
+      document.documentElement.style.setProperty(
+        "--app-top",
+        `${layout.top}px`,
+      );
+    };
+    syncViewport();
+    viewport?.addEventListener("resize", syncViewport);
+    viewport?.addEventListener("scroll", syncViewport);
+    window.addEventListener("resize", syncViewport);
     return () => {
-      viewport?.removeEventListener("resize", resize);
-      window.removeEventListener("resize", resize);
+      viewport?.removeEventListener("resize", syncViewport);
+      viewport?.removeEventListener("scroll", syncViewport);
+      window.removeEventListener("resize", syncViewport);
       document.documentElement.style.removeProperty("--app-height");
+      document.documentElement.style.removeProperty("--app-top");
     };
   }, []);
+}
+
+const VIEWPORT_ZOOM_EPSILON = 0.01;
+
+/**
+ * Computes `--app-height` and `--app-top` from `visualViewport`.
+ *
+ * When pinch-zoomed (`scale !== 1`), visualViewport shrinks proportionally and
+ * pans via `offsetTop`; updating the fixed shell to zoomed dimensions collapses
+ * the UI. Keep the last unzoomed height and `top: 0` until zoom returns to 1,
+ * while tracking iOS software-keyboard `offsetTop` shifts when unzoomed.
+ */
+export function computeViewportLayout(
+  viewport:
+    | Pick<VisualViewport, "height" | "offsetTop" | "scale">
+    | null
+    | undefined,
+  innerHeight: number,
+  lastUnzoomedHeight: number | null,
+): { height: number; top: number; unzoomedHeight: number } {
+  if (!viewport) {
+    const height = Math.max(1, Math.round(innerHeight));
+    return { height, top: 0, unzoomedHeight: height };
+  }
+  const scale =
+    viewport.scale && Number.isFinite(viewport.scale) ? viewport.scale : 1;
+  if (Math.abs(scale - 1) > VIEWPORT_ZOOM_EPSILON) {
+    const fallback = Math.max(
+      1,
+      Math.round(
+        lastUnzoomedHeight ??
+          (innerHeight > 0 ? innerHeight : viewport.height * scale),
+      ),
+    );
+    return { height: fallback, top: 0, unzoomedHeight: fallback };
+  }
+  const height = Math.max(1, Math.round(viewport.height || innerHeight));
+  const top = Math.max(0, Math.round(viewport.offsetTop || 0));
+  return { height, top, unzoomedHeight: height };
 }
 
 export function route(conversation: Conversation) {
