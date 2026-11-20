@@ -13,7 +13,8 @@ import { PasswordField } from "./password-field";
 import { Join, Login, normalizeInviteInput } from "./public/auth-views";
 import { chatStore } from "./store";
 import { TOAST_DURATION, Toaster, toast } from "./toast";
-import { Button, Field, Loading, Modal, Notice, SwitchField, Tabs } from "./ui";
+import { BadgePill, Button, Field, Loading, Modal, Notice, SwitchField, Tabs } from "./ui";
+import { UnreadBadge } from "./unread-badge";
 
 let host: HTMLDivElement;
 let root: Root;
@@ -316,6 +317,19 @@ describe("Button", () => {
             { value: "b", label: "分区二" },
           ]}
         />
+        <Tabs
+          variant="underline"
+          mode="group"
+          ariaLabel="模式筛选"
+          value="x"
+          onChange={onTab}
+          items={[
+            { value: "x", label: "全部" },
+            { value: "y", label: "未读", badge: <UnreadBadge count={3} variant="mention" /> },
+          ]}
+        />
+        <BadgePill tone="success">已上架</BadgePill>
+        <BadgePill tone="brand">默认模型</BadgePill>
         <SwitchField checked={false} title="桌面通知" onChange={onSwitch} />
         <Notice>默认信息提示</Notice>
         <Notice kind="error">显式错误提示</Notice>
@@ -336,6 +350,12 @@ describe("Button", () => {
     });
     expect(onTab).toHaveBeenCalledWith("b");
     expect(document.activeElement).toBe(tabs[1]);
+    const groupList = find('.tabs-list.underline[role="group"]');
+    const groupButtons = Array.from(groupList.querySelectorAll<HTMLButtonElement>("button"));
+    expect(groupButtons[0].getAttribute("aria-pressed")).toBe("true");
+    expect(groupButtons[1].querySelector(".unread-badge.mention-badge")?.textContent).toBe("3");
+    expect(find(".badge-pill.tone-success").textContent).toBe("已上架");
+    expect(find(".badge-pill.tone-brand").textContent).toBe("默认模型");
 
     const sw = find<HTMLInputElement>('input[role="switch"]');
     expect(sw.type).toBe("checkbox");

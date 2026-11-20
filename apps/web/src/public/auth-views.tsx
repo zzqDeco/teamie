@@ -16,7 +16,7 @@ import { useAuth } from "../auth";
 import { clearSessionExpired, readSessionExpired } from "../session-notice";
 import { errorText } from "../errors";
 import { formatDateTime } from "../format-datetime";
-import { Avatar, Button, Field, Logo, Notice, PublicHeader } from "../ui";
+import { Avatar, Button, Field, Logo, Notice, PublicHeader, Tabs } from "../ui";
 import { passwordPolicyError } from "../password-policy";
 import { PasswordField, fieldErrorProps } from "../password-field";
 import { ICON } from "../icons";
@@ -252,26 +252,18 @@ export function Login() {
             <Logo />
           </Link>
           <h2>{register ? "受邀注册" : "登录 Teamie"}</h2>
-          <div className="auth-tabs" role="group" aria-label="账户入口">
-            <button
-              type="button"
-              className={!register ? "active" : ""}
-              aria-pressed={!register}
-              disabled={busy}
-              onClick={() => changeMode("login")}
-            >
-              登录
-            </button>
-            <button
-              type="button"
-              className={register ? "active" : ""}
-              aria-pressed={register}
-              disabled={busy}
-              onClick={() => changeMode("register")}
-            >
-              受邀注册
-            </button>
-          </div>
+          <Tabs
+            variant="underline"
+            mode="group"
+            className="auth-tabs"
+            ariaLabel="账户入口"
+            value={register ? "register" : "login"}
+            onChange={(next) => changeMode(next)}
+            items={[
+              { value: "login", label: "登录", disabled: busy },
+              { value: "register", label: "受邀注册", disabled: busy },
+            ]}
+          />
           {register && registration.data?.bootstrapRequired && (
             <Notice kind="info">
               首次注册将创建平台管理员，请使用初始化邀请码。

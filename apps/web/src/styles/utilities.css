@@ -13,10 +13,6 @@
   .spin {
     animation: spin 1s linear infinite;
   }
-  .danger-text,
-  .icon-button.danger-text {
-    color: var(--danger-text);
-  }
   .danger-hover:hover,
   .icon-button.danger-hover:hover {
     background: var(--danger-bg);

@@ -19,7 +19,7 @@ import type { ChatSnapshot } from "./store";
 import { fetchAttentionCount } from "./notification-projection";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
 import { MentionText } from "./mentions";
-import { Avatar, Button, date, IconButton, Notice, time } from "./ui";
+import { Avatar, Button, date, IconButton, Notice, Tabs, time } from "./ui";
 import { ICON } from "./icons";
 import { MobileNavButton } from "./shell/page-header";
 import { UnreadBadge } from "./unread-badge";
@@ -502,27 +502,22 @@ export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
           </IconButton>
         </div>
       </header>
-      <div className="attention-filters" role="group" aria-label="提醒筛选">
-        <button
-          aria-pressed={tab === "all"}
-          onClick={() => setTab("all")}
-        >
-          全部
-        </button>
-        <button
-          aria-pressed={tab === "saved"}
-          onClick={() => setTab("saved")}
-        >
-          收藏
-        </button>
-        <button
-          aria-pressed={tab === "unread"}
-          onClick={() => setTab("unread")}
-        >
-          未读
-          <UnreadBadge count={serverUnread} />
-        </button>
-      </div>
+      <Tabs
+        mode="group"
+        className="attention-filters"
+        ariaLabel="提醒筛选"
+        value={tab}
+        onChange={setTab}
+        items={[
+          { value: "all", label: "全部" },
+          { value: "saved", label: "收藏" },
+          {
+            value: "unread",
+            label: "未读",
+            badge: <UnreadBadge count={serverUnread} variant="mention" />,
+          },
+        ]}
+      />
       {isSavedTab ? (
         <SavedMessagesList
           items={(snapshot.savedMessages || []).filter((item) =>

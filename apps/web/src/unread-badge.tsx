@@ -36,12 +36,14 @@ export function conversationUnreadSummary(
 export function UnreadBadge({
   summary,
   count,
+  variant = "default",
   conversationType,
   showLevelIcons = true,
   showDot = false,
 }: {
   summary?: ConversationUnreadSummary;
   count?: number;
+  variant?: "default" | "mention";
   conversationType?: Conversation["type"];
   showLevelIcons?: boolean;
   /** Mark uncounted unread (ordinary channel traffic, manual markers) with a dot. */
@@ -51,7 +53,10 @@ export function UnreadBadge({
     if (!count || count <= 0) return null;
     return (
       <>
-        <span className="unread-badge" aria-hidden="true">
+        <span
+          className={`unread-badge ${variant === "mention" ? "mention-badge" : ""}`.trim()}
+          aria-hidden="true"
+        >
           {count > 99 ? "99+" : count}
         </span>
         <em className="sr-only">{`（${count} 条未读）`}</em>

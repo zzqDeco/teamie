@@ -76,32 +76,32 @@ export function AccountMenu({
       {expanded && (
         <nav
           id={id}
-          className="account-menu"
+          className="menu account-menu"
           aria-label="个人账户"
           ref={popover}
         >
-          <Link to="/app/settings" onClick={navigate}>
+          <Link to="/app/settings" className="menu-item" onClick={navigate}>
             <Settings size={ICON.md} aria-hidden="true" />
             账号设置
           </Link>
-          <Link to="/app/developers" onClick={navigate}>
+          <Link to="/app/developers" className="menu-item" onClick={navigate}>
             <Code2 size={ICON.md} aria-hidden="true" />
             开发者平台
           </Link>
           {canConfigureModelGateway(user) && (
-            <Link to="/app/admin" onClick={navigate}>
+            <Link to="/app/admin" className="menu-item" onClick={navigate}>
               <ShieldCheck size={ICON.md} aria-hidden="true" />
               平台管理
             </Link>
           )}
           {onShortcuts && (
-            <button type="button" onClick={() => runAction(onShortcuts)}>
+            <button type="button" className="menu-item" onClick={() => runAction(onShortcuts)}>
               <Keyboard size={ICON.md} aria-hidden="true" />
               键盘快捷键
             </button>
           )}
           {onAnnouncements && (
-            <button type="button" onClick={() => runAction(onAnnouncements)}>
+            <button type="button" className="menu-item" onClick={() => runAction(onAnnouncements)}>
               <Megaphone size={ICON.md} aria-hidden="true" />
               平台公告
               {hasUnreadAnnouncement && (
@@ -109,10 +109,10 @@ export function AccountMenu({
               )}
             </button>
           )}
-          <div className="account-menu-separator" role="separator" />
+          <div className="menu-separator" role="separator" />
           <button
             type="button"
-            className="danger-text"
+            className="menu-item danger"
             disabled={busy}
             onClick={() => {
               setOpen(false);

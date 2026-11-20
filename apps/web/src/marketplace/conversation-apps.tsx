@@ -207,13 +207,13 @@ export function ConversationAppsPane(props: {
       {visible && overlayMembers && !sidebar && (
         <button
           type="button"
-          className="members-shade"
+          className="side-pane-shade"
           aria-label="关闭小组应用面板"
           onClick={onClose}
         />
       )}
       <aside
-        className={`members-pane mp-apps-pane${isDragging ? " mp-apps-pane-dragging" : ""}`}
+        className={`side-pane mp-apps-pane${isDragging ? " mp-apps-pane-dragging" : ""}`}
         ref={visible ? paneRef : undefined}
         style={visible ? desktopWidthStyle : undefined}
         role={visible && overlayMembers ? "dialog" : undefined}
@@ -407,7 +407,7 @@ function ConversationAppsForeground({
                     <b>{app.name}</b>
                     <BadgePill>{app.slug}</BadgePill>
                     {app.servingDraft && (
-                      <BadgePill className="mp-badge-draft">测试草稿</BadgePill>
+                      <BadgePill tone="neutral">测试草稿</BadgePill>
                     )}
                   </div>
                   {app.description && (
@@ -610,10 +610,10 @@ function ConversationAppsLauncher({
                   <b>{app.name}</b>
                   <BadgePill>{app.slug}</BadgePill>
                   {app.servingDraft && (
-                    <BadgePill className="mp-badge-draft">测试草稿</BadgePill>
+                    <BadgePill tone="neutral">测试草稿</BadgePill>
                   )}
                   {openedTab && (
-                    <BadgePill className="mp-badge-running">
+                    <BadgePill tone={openedTab.live ? "brand" : "neutral"}>
                       {openedTab.live ? "已打开" : "已休眠"}
                     </BadgePill>
                   )}

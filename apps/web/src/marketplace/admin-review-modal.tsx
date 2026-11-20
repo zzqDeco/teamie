@@ -133,7 +133,7 @@ export function AdminReviewModal({
                         <div className="dev-check-head">
                           <span>{probeStageLabel(chk.stage)}</span>
                           <BadgePill
-                            className={chk.ok ? "mp-badge-approved" : "mp-badge-rejected"}
+                            tone={chk.ok ? "success" : "danger"}
                           >
                             {chk.ok ? "通过" : "未通过"}
                           </BadgePill>

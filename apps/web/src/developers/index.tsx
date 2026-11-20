@@ -37,7 +37,7 @@ export function DeveloperPortal({
   const isAppsSection = !isDocsPage;
   return (
     <>
-      <nav className="admin-section-nav page-tabs" aria-label="开发者平台导航">
+      <nav className="page-tabs" aria-label="开发者平台导航">
         <Link
           to="/app/developers"
           className={isAppsSection ? "active" : ""}

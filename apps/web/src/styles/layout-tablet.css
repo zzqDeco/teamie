@@ -106,7 +106,6 @@
     .floating-note small {
       font-size: var(--font-sm);
     }
-    .values,
     .landing-cta,
     .public-footer {
       margin-left: var(--space-8);
@@ -126,7 +125,6 @@
     .auth-story h1 {
       font-size: var(--font-5xl);
     }
-    .auth-story .eyebrow,
     .story-bottom,
     .story-bottom > span {
       font-size: var(--font-sm);
@@ -138,14 +136,14 @@
     .auth-form h2 {
       font-size: var(--font-3xl);
     }
-    .members-pane {
+    .side-pane {
       box-shadow: var(--shadow-lg);
       position: fixed;
       top: var(--app-top, 0px);
       right: 0;
       bottom: auto;
       height: var(--app-height, 100dvh);
-      z-index: var(--z-members-pane);
+      z-index: var(--z-side-pane);
       width: min(340px, 88vw);
       visibility: visible;
       pointer-events: auto;
@@ -155,11 +153,11 @@
         visibility 0s;
     }
     @starting-style {
-      .members-pane {
+      .side-pane {
         transform: translateX(100%);
       }
     }
-    .app-shell:not(.details-open) .members-pane {
+    .app-shell:not(.details-open) .side-pane {
       visibility: hidden;
       pointer-events: none;
       transform: translateX(100%);

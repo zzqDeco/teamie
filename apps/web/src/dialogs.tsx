@@ -27,6 +27,7 @@ import {
   ModalCloseButton,
   Notice,
   SwitchField,
+  Tabs,
 } from "./ui";
 import { enrichParticipants } from "./participants";
 import type { Participant } from "./participants";
@@ -484,19 +485,15 @@ export function ProfileSettings() {
       <section className="settings-form theme-settings" aria-label="外观">
         <h3>外观</h3>
         <p className="field-help">选择界面外观主题，仅保存在当前设备。</p>
-        <div className="theme-options" role="group" aria-label="外观主题">
-          {themeOptions.map((opt) => (
-            <button
-              key={opt.value}
-              type="button"
-              className={`theme-option ${themePref === opt.value ? "active" : ""}`}
-              aria-pressed={themePref === opt.value}
-              onClick={() => setThemePref(opt.value)}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
+        <Tabs
+          mode="group"
+          className="theme-options"
+          tabClassName="theme-option"
+          ariaLabel="外观主题"
+          value={themePref}
+          onChange={setThemePref}
+          items={themeOptions}
+        />
       </section>
       <section
         className="settings-form notification-settings"

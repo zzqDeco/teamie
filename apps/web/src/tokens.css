@@ -13,8 +13,8 @@
     --z-local: 4;
     --z-sticky: 8;
     --z-banner: 15;
-    --z-members-shade: 19;
-    --z-members-pane: 20;
+    --z-side-pane-shade: 19;
+    --z-side-pane: 20;
     /* Text hierarchy — all verified >= 4.5:1 WCAG AA across all light surfaces including --rail, --hover-bg, and --selected-bg */
     --text-strong: #221e2c;
     --text: #352f42;
@@ -135,9 +135,18 @@
     --font-5xl: 36px;
     --font-display: 48px;
     --font-decor: 140px;
+    --lh-none: 1;
     --lh-tight: 1.3;
+    --lh-heading: 1.35;
     --lh-ui: 1.5;
     --lh-body: 1.7;
+    --lh-relaxed: 1.85;
+
+    /* Control height scale */
+    --control-h-sm: 32px;
+    --control-h-md: 40px;
+    --control-h-lg: 48px;
+    --control-h-touch: 44px;
 
     /* Motion tokens */
     --dur-fast: 120ms;

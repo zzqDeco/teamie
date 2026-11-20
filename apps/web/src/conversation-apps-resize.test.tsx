@@ -185,7 +185,8 @@ describe("ConversationAppsPane resizable desktop width & persistence (Issue #135
     await renderAppsPane();
 
     const appsAside = getAppsAside();
-    expect(appsAside.classList.contains("members-pane")).toBe(true);
+    expect(appsAside.classList.contains("side-pane")).toBe(true);
+    expect(appsAside.classList.contains("members-pane")).toBe(false);
     expect(appsAside.classList.contains("mp-apps-pane")).toBe(true);
     expect(appsAside.style.getPropertyValue("--mp-pane-width")).toBe(
       `${DEFAULT_APP_PANE_WIDTH}px`,
@@ -240,7 +241,7 @@ describe("ConversationAppsPane resizable desktop width & persistence (Issue #135
       const membersAside = membersHost.querySelector<HTMLElement>(
         'aside[aria-label="对话成员"]',
       )!;
-      expect(membersAside.className).toBe("members-pane");
+      expect(membersAside.className).toBe("side-pane members-pane");
       expect(membersAside.style.getPropertyValue("--mp-pane-width")).toBe("");
       expect(membersHost.querySelector('[role="separator"]')).toBeNull();
     } finally {
@@ -508,7 +509,7 @@ describe("ConversationAppsPane resizable desktop width & persistence (Issue #135
     expect(appsAside.style.getPropertyValue("--mp-pane-width")).toBe("");
     expect(appsAside.getAttribute("role")).toBe("dialog");
     expect(appsAside.getAttribute("aria-modal")).toBe("true");
-    expect(host.querySelector(".members-shade")).not.toBeNull();
+    expect(host.querySelector(".side-pane-shade")).not.toBeNull();
     expect(
       host.querySelector('[data-overlay-focus-boundary="start"]'),
     ).not.toBeNull();
@@ -516,14 +517,14 @@ describe("ConversationAppsPane resizable desktop width & persistence (Issue #135
       host.querySelector('[data-overlay-focus-boundary="end"]'),
     ).not.toBeNull();
 
-    // Verify cascade layer order: .members-pane.mp-apps-pane is in @layer features while
+    // Verify cascade layer order: .side-pane.mp-apps-pane is in @layer features while
     // <=1250px and <=780px drawer rules live in @layer layout with zero !important.
     const marketplaceCss = readFileSync(
       join(srcDir, "styles/marketplace.css"),
       "utf8",
     );
     expect(marketplaceCss).toMatch(
-      /@layer\s+features\s*\{[\s\S]*?\.members-pane\.mp-apps-pane/,
+      /@layer\s+features\s*\{[\s\S]*?\.side-pane\.mp-apps-pane/,
     );
     expect(marketplaceCss).toContain("pointer-events: none;");
     expect(marketplaceCss).not.toContain("!important");

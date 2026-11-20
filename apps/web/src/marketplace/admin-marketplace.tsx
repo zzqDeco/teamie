@@ -21,6 +21,7 @@ import {
   DataList,
   EmptyState,
   Notice,
+  Tabs,
 } from "../ui";
 import { toast } from "../toast";
 import { ICON } from "../icons";
@@ -228,10 +229,10 @@ function AdminMarketplaceCatalog({
     <div className="admin-view">
       <div className="admin-heading">
         <div>
-          <span className="platform-role-badge">
+          <BadgePill tone="brand" className="platform-role-badge">
             <ShieldCheck size={ICON.xs} aria-hidden="true" />
             平台管理员
-          </span>
+          </BadgePill>
           <p>
             审核社区开发者提审的外部 Web + MCP 服务并维护官方直发应用。通过审核后，工作空间所有者即可安装至小组。
           </p>
@@ -273,26 +274,24 @@ function AdminMarketplaceCatalog({
           </label>
         </div>
 
-        <div className="theme-options mp-status-filters" role="group" aria-label="筛选应用状态">
-          {filterItems.map((item) => {
-            const active = filter === item.id;
-            const highlightPending = item.id === "pending_review" && item.count > 0;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                aria-pressed={active}
-                className={`theme-option ${active ? "active" : ""} ${highlightPending ? "mp-filter-attention" : ""}`}
-                onClick={() => {
-                  setFilter(item.id);
-                  setVisibleLimit(ADMIN_MARKETPLACE_PAGE_SIZE);
-                }}
-              >
-                {item.label} ({item.count})
-              </button>
-            );
-          })}
-        </div>
+        <Tabs
+          mode="group"
+          className="mp-status-filters"
+          ariaLabel="筛选应用状态"
+          value={filter}
+          onChange={(next) => {
+            setFilter(next);
+            setVisibleLimit(ADMIN_MARKETPLACE_PAGE_SIZE);
+          }}
+          items={filterItems.map((item) => ({
+            value: item.id,
+            label: `${item.label} (${item.count})`,
+            itemClassName:
+              item.id === "pending_review" && item.count > 0
+                ? "mp-filter-attention"
+                : "",
+          }))}
+        />
 
         {appsQuery.isLoading ? (
           <p className="muted" role="status">正在加载应用目录…</p>
@@ -328,13 +327,13 @@ function AdminMarketplaceCatalog({
                       <div className="mp-admin-meta">
                         <b>
                           {displayName} <BadgePill>{app.slug}</BadgePill>{" "}
-                          <BadgePill className={status.className}>{status.label}</BadgePill>{" "}
+                          <BadgePill tone={status.tone}>{status.label}</BadgePill>{" "}
                           {app.isOfficial ? (
-                            <BadgePill className="mp-badge-approved">官方</BadgePill>
+                            <BadgePill tone="success">官方</BadgePill>
                           ) : publisherLabel ? (
                             <BadgePill>开发者：{publisherLabel}</BadgePill>
                           ) : null}{" "}
-                          <BadgePill className={app.enabled ? "" : "member-unavailable"}>
+                          <BadgePill tone={app.enabled ? "neutral" : "warning"}>
                             {app.enabled ? "已启用" : "已停用"}
                           </BadgePill>
                         </b>

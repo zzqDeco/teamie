@@ -2,40 +2,7 @@
 
 @layer features {
   .members-pane {
-    flex-shrink: 0;
-    border-left: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    background: var(--surface);
-    z-index: var(--z-sticky);
-    min-height: 0;
     width: 264px;
-  }
-  .members-pane > header {
-    padding: 0 var(--space-4) 0 var(--space-5);
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    font-weight: 600;
-    font-size: var(--font-sm);
-    color: var(--text-muted);
-    height: var(--header-h);
-    flex-shrink: 0;
-  }
-  .members-pane > header b {
-    font-weight: 600;
-    background: var(--lavender);
-    border-radius: var(--r-sm);
-    padding: var(--space-0_5) var(--space-1_5);
-    margin-left: var(--space-1_5);
-    color: var(--text-muted);
-    font-size: var(--font-xs);
-  }
-  .members-pane > header > .icon-button {
-    color: var(--text-muted);
-    width: 28px;
-    height: 28px;
   }
   .members-description {
     text-align: center;
@@ -62,7 +29,7 @@
   }
   .members-description p {
     margin-top: var(--space-1_5);
-    line-height: 1.75;
+    line-height: var(--lh-body);
     font-size: var(--font-sm);
     color: var(--text-subtle);
   }
@@ -260,7 +227,7 @@
     display: flex;
     align-items: center;
     gap: var(--space-1_5);
-    line-height: 1.6;
+    line-height: var(--lh-ui);
     color: var(--text-strong);
     font-weight: 500;
     min-width: 0;
@@ -273,7 +240,7 @@
   }
   .participant-identity > small {
     color: var(--text-subtle);
-    line-height: 1.7;
+    line-height: var(--lh-body);
     margin-top: var(--space-1);
     display: block;
     font-size: var(--font-sm);
@@ -317,13 +284,6 @@
     font-size: var(--font-sm);
     border-radius: var(--r-md);
   }
-  .group-member-row > .button {
-    font-size: var(--font-sm);
-    min-height: 28px;
-    padding: var(--space-1_5) var(--space-2);
-    gap: var(--space-1);
-    border-radius: var(--r-sm);
-  }
   .group-member-remove {
     width: 26px;
     height: 26px;
@@ -365,7 +325,7 @@
     color: var(--text-strong);
     font-weight: 600;
     display: block;
-    line-height: 1.7;
+    line-height: var(--lh-body);
   }
   .adding-agent-summary .agent-badge {
     margin-top: var(--space-1_5);
@@ -435,7 +395,7 @@
     color: var(--brand-text);
     padding: 0;
     margin: var(--space-4) 0 var(--space-1_5);
-    line-height: 1.8;
+    line-height: var(--lh-relaxed);
   }
   .avatar-with-presence {
     position: relative;
@@ -523,7 +483,7 @@
     background: var(--lavender);
     font-size: var(--font-sm);
     font-weight: 500;
-    line-height: 1.4;
+    line-height: var(--lh-heading);
     color: var(--text-subtle);
     white-space: nowrap;
   }
@@ -552,7 +512,7 @@
     border-radius: var(--r-pill);
     font-size: var(--font-sm);
     font-weight: 500;
-    line-height: 1.6;
+    line-height: var(--lh-ui);
     white-space: nowrap;
   }
   .agent-availability.available {

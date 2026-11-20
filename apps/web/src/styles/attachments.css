@@ -66,7 +66,7 @@
   .attachment-meta {
     font-size: var(--font-sm);
     color: var(--text-muted);
-    line-height: 1.4;
+    line-height: var(--lh-heading);
   }
   .attachment-progress {
     display: block;
@@ -82,7 +82,7 @@
     height: 100%;
     border-radius: inherit;
     background: var(--brand);
-    transition: width 0.2s ease;
+    transition: width var(--dur-base) ease;
   }
   .attachment-draft.failed {
     border-color: var(--danger-border);

@@ -13,7 +13,7 @@
     max-width: calc(100% - var(--space-8));
     padding: var(--space-2) var(--space-4);
     font-size: var(--font-base);
-    line-height: 1.5;
+    line-height: var(--lh-ui);
     border: 1px solid var(--border);
     border-radius: var(--r-md);
     background: var(--lavender);

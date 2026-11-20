@@ -31,11 +31,6 @@
     padding: var(--space-7);
     max-width: 960px;
   }
-  .settings-view > .eyebrow {
-    font-size: var(--font-sm);
-    letter-spacing: 1.6px;
-    color: var(--text-subtle);
-  }
   .settings-view > h1 {
     font-weight: 600;
     margin: var(--space-2_5) 0 var(--space-2_5);
@@ -65,7 +60,7 @@
     top: -45px;
     font-size: var(--font-decor);
     color: var(--border-strong);
-    line-height: 1.5;
+    line-height: var(--lh-ui);
     transform: rotate(8deg);
   }
   .profile-banner > span:last-child {
@@ -130,11 +125,6 @@
     background: var(--surface);
     color: var(--text-subtle);
   }
-  .settings-form .button {
-    min-height: 36px;
-    padding: var(--space-2_5) var(--space-4);
-    font-size: var(--font-sm);
-  }
   .session-setting {
     margin-top: var(--space-10);
     padding-top: var(--space-6);
@@ -150,15 +140,49 @@
     font-size: var(--font-base);
   }
   .session-setting p {
-    line-height: 1.8;
+    line-height: var(--lh-relaxed);
     margin-top: var(--space-1_5);
     font-size: var(--font-sm);
     color: var(--text-subtle);
   }
-  .session-setting .button {
-    min-height: 33px;
-    padding: var(--space-2) var(--space-3);
+  .password-settings {
+    margin-top: var(--space-8);
+    padding-top: var(--space-7);
+    border-top: 1px solid var(--border);
+  }
+  .password-settings > h3 {
+    margin-bottom: var(--space-2);
+  }
+  .password-settings > .field-help {
+    margin-bottom: var(--space-5);
+  }
+  .platform-management-link {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3_5);
+    padding: var(--space-4) 0;
+    margin-top: var(--space-7);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    color: var(--text-muted);
+  }
+  .platform-management-link > span {
+    flex: 1;
+    min-width: 0;
+  }
+  .platform-management-link b {
+    display: block;
     font-size: var(--font-base);
+    font-weight: 600;
+  }
+  .platform-management-link small {
+    display: block;
+    margin-top: var(--space-1_5);
+    color: var(--text-muted);
+    font-size: var(--font-sm);
+  }
+  .platform-management-link:hover {
+    color: var(--brand-strong);
   }
   .member-select {
     margin: var(--space-3_5) 0 var(--space-3_5);
@@ -338,7 +362,7 @@
     padding: var(--space-6) var(--space-3_5);
     font-size: var(--font-sm);
     color: var(--text-subtle);
-    line-height: 2;
+    line-height: var(--lh-relaxed);
     text-align: center;
     background: var(--surface);
     border-radius: var(--r-md);
@@ -364,7 +388,7 @@
     color: var(--text-strong);
   }
   .invite-generator > p {
-    line-height: 1.9;
+    line-height: var(--lh-relaxed);
     margin: var(--space-2_5) 0 var(--space-6);
     font-size: var(--font-base);
     color: var(--text-subtle);
@@ -442,33 +466,8 @@
   .theme-settings > .field-help {
     margin: calc(-1 * var(--space-1)) 0 var(--space-3);
   }
-  .theme-options {
-    display: inline-flex;
-    gap: var(--space-1_5);
-    padding: var(--space-1);
-    border: 1px solid var(--border);
-    border-radius: var(--r-md);
-    background: var(--surface-sunken);
-  }
-  .theme-option {
-    padding: var(--space-2) var(--space-4);
-    border-radius: var(--r-sm);
-    border: 1px solid transparent;
-    background: transparent;
-    color: var(--text-muted);
-    font-size: var(--font-base);
-    font-weight: 500;
-    cursor: pointer;
-  }
-  .theme-option:hover {
-    color: var(--text-strong);
-    background: var(--hover-bg);
-  }
-  .theme-option.active {
-    background: var(--surface);
-    color: var(--brand-text);
-    border-color: var(--border-strong);
-    box-shadow: var(--shadow-sm);
+  .theme-options .theme-option {
+    padding: var(--space-1_5) var(--space-4);
   }
   .notification-settings > .field-help {
     margin: calc(-1 * var(--space-1)) 0 var(--space-3);
@@ -520,8 +519,5 @@
   }
   .page-header-back {
     white-space: nowrap;
-  }
-  .page-tabs > a[aria-current="page"] {
-    font-weight: 600;
   }
 }

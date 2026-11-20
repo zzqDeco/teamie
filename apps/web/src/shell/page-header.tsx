@@ -72,7 +72,7 @@ export function PageHeader({
         )}
       </header>
       {!!tabs?.length && (
-        <nav className="admin-section-nav page-tabs" aria-label={tabsLabel || title}>
+        <nav className="page-tabs" aria-label={tabsLabel || title}>
           {tabs.map(({ to, label, icon: TabIcon, current }) => (
             <Link
               key={to}

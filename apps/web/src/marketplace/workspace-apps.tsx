@@ -136,12 +136,12 @@ export function WorkspaceAppsPanel({
             <b>
               {name} <BadgePill>{app.slug}</BadgePill>
               {app.isOfficial ? (
-                <BadgePill className="mp-badge-approved">官方</BadgePill>
+                <BadgePill tone="success">官方</BadgePill>
               ) : publisher ? (
                 <BadgePill>开发者：{publisher}</BadgePill>
               ) : null}
-              {options.isDraftOnly && <BadgePill className="mp-badge-draft">自测草稿</BadgePill>}
-              {options.installed && <BadgePill>已安装</BadgePill>}
+              {options.isDraftOnly && <BadgePill tone="neutral">自测草稿</BadgePill>}
+              {options.installed && <BadgePill tone="brand">已安装</BadgePill>}
             </b>
             {description && <p className="field-help">{description}</p>}
           </div>

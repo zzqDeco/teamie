@@ -15,7 +15,7 @@
     background: var(--surface);
     color: var(--text-muted);
     font-size: var(--font-sm);
-    line-height: 1.65;
+    line-height: var(--lh-body);
   }
   .gateway-routing-banner > svg {
     margin-top: var(--space-0_5);
@@ -70,12 +70,12 @@
   .gateway-saved-state b {
     color: var(--warning-text);
     font-weight: 600;
-    line-height: 1.8;
+    line-height: var(--lh-relaxed);
     font-size: var(--font-base);
   }
   .gateway-saved-state p {
     color: var(--warning-text);
-    line-height: 1.9;
+    line-height: var(--lh-relaxed);
     margin-top: var(--space-1_5);
     font-size: var(--font-base);
   }
@@ -122,15 +122,12 @@
     font-size: var(--font-base);
   }
   .gateway-test-panel p {
-    line-height: 1.9;
+    line-height: var(--lh-relaxed);
     color: var(--text-subtle);
     margin-top: var(--space-2);
     font-size: var(--font-base);
   }
   .gateway-test-panel > .button {
-    font-size: var(--font-base);
-    min-height: 35px;
-    padding: var(--space-2_5) var(--space-3);
     flex-shrink: 0;
   }
   .gateway-load-error {
@@ -162,15 +159,11 @@
     margin-top: var(--space-1_5);
     font-size: var(--font-base);
     color: var(--text-muted);
-    line-height: 1.7;
+    line-height: var(--lh-body);
   }
 
   .gateway-models-header > .button,
   .gateway-header-actions > .button {
-    min-height: 39px;
-    padding: var(--space-2_5) var(--space-4);
-    font-size: var(--font-sm);
-    gap: var(--space-1_5);
     flex-shrink: 0;
   }
 
@@ -241,27 +234,7 @@
   .gateway-provider-info > small {
     font-size: var(--font-sm);
     color: var(--text-subtle);
-    line-height: 1.6;
-  }
-
-  .gateway-key-badge {
-    font-size: var(--font-xs);
-    font-weight: 500;
-    padding: var(--space-0_5) var(--space-2);
-    border-radius: var(--r-pill);
-    border: 1px solid var(--border);
-  }
-
-  .gateway-key-badge.configured {
-    background: var(--success-bg);
-    border-color: var(--success-border);
-    color: var(--success-text);
-  }
-
-  .gateway-key-badge.missing {
-    background: var(--warning-bg);
-    border-color: var(--warning-border);
-    color: var(--warning-text);
+    line-height: var(--lh-body);
   }
 
   .gateway-provider-actions {
@@ -270,14 +243,6 @@
     flex-wrap: wrap;
     gap: var(--space-2);
     flex-shrink: 0;
-  }
-
-  .gateway-provider-actions > .button {
-    min-height: 34px;
-    padding: var(--space-1_5) var(--space-3);
-    font-size: var(--font-sm);
-    gap: var(--space-1_5);
-    border-radius: var(--r-sm);
   }
 
   .gateway-provider-models-empty {
@@ -305,7 +270,7 @@
     border: 1px solid var(--border);
     border-radius: var(--r-md);
     background: var(--surface);
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    transition: border-color var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
   }
 
   .gateway-model-card:hover {
@@ -346,13 +311,13 @@
   .gateway-model-info > p {
     font-size: var(--font-base);
     color: var(--text-muted);
-    line-height: 1.6;
+    line-height: var(--lh-ui);
   }
 
   .gateway-model-info > small {
     font-size: var(--font-sm);
     color: var(--text-subtle);
-    line-height: 1.6;
+    line-height: var(--lh-ui);
   }
 
   .gateway-model-paused-hint {
@@ -366,26 +331,7 @@
   }
 
   .gateway-model-test-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-1);
-    font-size: var(--font-xs);
-    font-weight: 500;
-    padding: var(--space-0_5) var(--space-2);
-    border-radius: var(--r-pill);
-    border: 1px solid var(--border);
-  }
-
-  .gateway-model-test-badge.ok {
-    background: var(--success-bg);
-    border-color: var(--success-border);
-    color: var(--success-text);
-  }
-
-  .gateway-model-test-badge.failed {
-    background: var(--danger-bg);
-    border-color: var(--danger-border);
-    color: var(--danger-text);
+    font-variant-numeric: tabular-nums;
   }
 
   .gateway-model-test-result {
@@ -414,14 +360,6 @@
     flex-wrap: wrap;
     gap: var(--space-2);
     flex-shrink: 0;
-  }
-
-  .gateway-model-actions > .button {
-    min-height: 34px;
-    padding: var(--space-1_5) var(--space-3);
-    font-size: var(--font-sm);
-    gap: var(--space-1_5);
-    border-radius: var(--r-sm);
   }
 
   .gateway-web-search-section {
@@ -468,7 +406,7 @@
     font-size: var(--font-sm);
     color: var(--text-subtle);
     margin-top: var(--space-1_5);
-    line-height: 1.8;
+    line-height: var(--lh-relaxed);
   }
 
   .gateway-configuration-form input:disabled {
@@ -478,16 +416,5 @@
 
   .gateway-configuration-form input {
     color: var(--text);
-  }
-
-  @media (pointer: coarse) {
-    .gateway-header-actions > .button,
-    .gateway-provider-actions > .button,
-    .gateway-model-actions > .button,
-    .gateway-test-panel > .button {
-      min-height: 44px;
-      min-width: 44px;
-      padding: var(--space-2_5) var(--space-3_5);
-    }
   }
 }

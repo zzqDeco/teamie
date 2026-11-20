@@ -89,13 +89,13 @@ export function ShellMembersPane({
     <>
       {overlayMembers && !sidebar && (
         <button
-          className="members-shade"
+          className="side-pane-shade"
           aria-label="关闭成员列表"
           onClick={onClose}
         />
       )}
       <aside
-        className="members-pane"
+        className="side-pane members-pane"
         ref={membersRef}
         role={overlayMembers ? "dialog" : undefined}
         aria-modal={overlayMembers ? true : undefined}

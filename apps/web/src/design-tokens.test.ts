@@ -17,6 +17,7 @@ const modularStyleFiles = [
   "styles/chat.css",
   "styles/markdown.css",
   "styles/members.css",
+  "styles/member-directory.css",
   "styles/admin.css",
   "styles/agents.css",
   "styles/gateway.css",
@@ -173,9 +174,16 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
       "--border",
       "--border-strong",
       "--field-border",
+      "--lh-none",
       "--lh-tight",
+      "--lh-heading",
       "--lh-ui",
       "--lh-body",
+      "--lh-relaxed",
+      "--control-h-sm",
+      "--control-h-md",
+      "--control-h-lg",
+      "--control-h-touch",
       "--dur-fast",
       "--dur-base",
       "--dur-slow",
@@ -208,8 +216,8 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
       "--z-local",
       "--z-sticky",
       "--z-banner",
-      "--z-members-shade",
-      "--z-members-pane",
+      "--z-side-pane-shade",
+      "--z-side-pane",
       "--z-dropdown",
       "--z-drawer-shade",
       "--z-drawer",
@@ -496,7 +504,12 @@ describe("PR-5 CSS cleanup, unified focus, icon scale & self-hosted DM Sans", ()
   it("contains zero unreferenced CSS classes across all modular and feature stylesheets", () => {
     const allFiles = listRelativeFiles(srcDir);
     const tsFiles = allFiles.filter(
-      (f) => f.endsWith(".ts") || f.endsWith(".tsx"),
+      (f) =>
+        (f.endsWith(".ts") || f.endsWith(".tsx")) &&
+        !f.endsWith(".test.ts") &&
+        !f.endsWith(".test.tsx") &&
+        !f.endsWith(".generated.ts") &&
+        !f.endsWith(".generated.tsx"),
     );
     let corpus =
       readFileSync(join(srcDir, "..", "index.html"), "utf8") + "\n";
@@ -510,7 +523,12 @@ describe("PR-5 CSS cleanup, unified focus, icon scale & self-hosted DM Sans", ()
       for (const m of content.matchAll(/\.([a-zA-Z_-][a-zA-Z0-9_-]*)/g)) {
         classes.add(m[1]);
       }
-      const unreferenced = [...classes].filter((cls) => !corpus.includes(cls));
+      const unreferenced = [...classes].filter((cls) => {
+        const escaped = cls.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        return !new RegExp(`(?<![a-zA-Z0-9_-])${escaped}(?![a-zA-Z0-9_-])`).test(
+          corpus,
+        );
+      });
       expect(unreferenced, `${cssFile} unreferenced classes`).toEqual([]);
     }
   });
@@ -648,6 +666,10 @@ describe("PR-5 CSS cleanup, unified focus, icon scale & self-hosted DM Sans", ()
           block,
           `${file} must not declare outline: none/0 inside @layer features`,
         ).not.toMatch(/outline\s*:\s*(none|0)\b/);
+        expect(
+          block,
+          `${file} must not override .button height or min-height inside @layer features`,
+        ).not.toMatch(/\.button\b[^{]*\{[^}]*(?:^|[;\s])(?:min-)?height\s*:/m);
       }
       if (/outline\s*:\s*(none|0)\b/.test(content)) {
         expect(

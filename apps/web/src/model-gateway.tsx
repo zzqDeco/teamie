@@ -31,7 +31,7 @@ import type {
 } from "./agent-management";
 import { WebSearchConfigurationFields } from "./agent-ui";
 import type { WebSearchFormValue } from "./agent-ui";
-import { Button, EmptyState, Notice } from "./ui";
+import { BadgePill, Button, EmptyState, Notice } from "./ui";
 import { ICON } from "./icons";
 import {
   clearModelsLastTest,
@@ -388,10 +388,10 @@ export function ModelGatewaySettings() {
     <div className="admin-view gateway-view">
       <div className="admin-heading">
         <div>
-          <span className="platform-role-badge">
+          <BadgePill tone="brand" className="platform-role-badge">
             <ShieldCheck size={ICON.xs} aria-hidden="true" />
             平台管理员
-          </span>
+          </BadgePill>
           <p>所有 Agent 共用的服务商连接与多模型目录。</p>
         </div>
         <span className="admin-heading-icon">

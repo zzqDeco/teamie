@@ -93,7 +93,7 @@
   }
   .stage-msg p {
     font-size: var(--font-base);
-    line-height: 1.75;
+    line-height: var(--lh-body);
     color: var(--text);
     margin-top: var(--space-1);
   }
@@ -135,7 +135,7 @@
   .stage-inbox-item p {
     font-size: var(--font-base);
     color: var(--text);
-    line-height: 1.75;
+    line-height: var(--lh-body);
     margin-top: var(--space-1_5);
   }
   .stage-quote-jump {
@@ -152,7 +152,7 @@
   .stage-agent-bio {
     margin-top: var(--space-4);
     font-size: var(--font-base);
-    line-height: 1.85;
+    line-height: var(--lh-relaxed);
     color: var(--text);
   }
   .spotlight-card-header {
@@ -258,7 +258,7 @@
     bottom: -42px;
     font-size: var(--font-decor);
     color: var(--border-strong);
-    line-height: 1;
+    line-height: var(--lh-none);
     pointer-events: none;
   }
   .public-footer {
@@ -314,10 +314,6 @@
   .auth-story > a {
     align-self: flex-start;
   }
-  .auth-story .eyebrow {
-    font-size: var(--font-sm);
-    color: var(--text-muted);
-  }
   .auth-story h1 {
     font-weight: 600;
     letter-spacing: 0;
@@ -330,7 +326,7 @@
     color: var(--brand-text);
   }
   .auth-story p {
-    line-height: 2.1;
+    line-height: var(--lh-relaxed);
     color: var(--text-subtle);
     font-size: var(--font-subhead);
     margin-top: var(--space-5);
@@ -373,42 +369,18 @@
   }
   .auth-form h2 {
     font-weight: 600;
-    line-height: 1.5;
+    line-height: var(--lh-ui);
     margin: var(--space-3_5) 0 var(--space-2_5);
     font-size: var(--font-4xl);
     letter-spacing: -0.5px;
   }
   .auth-form > p {
-    line-height: 1.8;
+    line-height: var(--lh-relaxed);
     font-size: var(--font-sm);
     color: var(--text-muted);
   }
   .auth-tabs {
-    display: flex;
     margin: var(--space-7) 0 var(--space-6);
-    border-bottom: 1px solid var(--border);
-    gap: var(--space-6);
-  }
-  .auth-tabs > button {
-    font-weight: 500;
-    padding: 0 var(--space-1) var(--space-3);
-    color: var(--text-subtle);
-    position: relative;
-    min-height: 46px;
-    font-size: var(--font-base);
-  }
-  .auth-tabs > button.active {
-    color: var(--brand-text);
-  }
-  .auth-tabs > button.active:after {
-    height: 2px;
-    background: var(--brand);
-    position: absolute;
-    bottom: -1px;
-    left: 0;
-    right: 0;
-    content: "";
-    border-radius: var(--r-xs);
   }
   .auth-form label {
     margin-bottom: var(--space-4);
@@ -423,8 +395,6 @@
   }
   .auth-form .button {
     margin-top: var(--space-1_5);
-    font-size: var(--font-base);
-    min-height: 46px;
   }
   .join-page {
     min-height: 100dvh;
@@ -462,20 +432,15 @@
     font-size: var(--font-4xl);
     color: var(--text-subtle);
   }
-  .join-card .eyebrow {
-    display: block;
-    font-size: var(--font-sm);
-    color: var(--text-subtle);
-  }
   .join-card h1 {
     font-size: var(--font-3xl);
     font-weight: 600;
     margin: var(--space-3_5) 0;
-    line-height: 1.7;
+    line-height: var(--lh-body);
     overflow-wrap: anywhere;
   }
   .join-card > p {
-    line-height: 2;
+    line-height: var(--lh-relaxed);
     max-width: 340px;
     margin: 0 auto var(--space-5);
     font-size: var(--font-base);

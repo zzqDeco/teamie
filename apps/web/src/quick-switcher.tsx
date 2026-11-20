@@ -16,7 +16,7 @@ import { isComposingKey } from "./mentions";
 import { conversationName } from "./messages";
 import { enrichParticipants } from "./participants";
 import { chatStore, compareTimestampsDesc, reconcileMessages } from "./store";
-import { Modal, Notice } from "./ui";
+import { Modal, Notice, Tabs } from "./ui";
 import {
   KeyboardShortcutsModal,
   QuickSwitcherJumpResults,
@@ -488,33 +488,20 @@ export function QuickSwitcher({
       onClose={onClose}
     >
       <div className="quick-switcher">
-        <div
+        <Tabs
+          mode="group"
           className="search-modes quick-switcher-modes"
-          role="group"
-          aria-label="快速跳转模式"
-        >
-          <button
-            type="button"
-            aria-pressed={mode === "jump"}
-            onClick={() => {
-              setMode("jump");
-              setActiveId("");
-            }}
-          >
-            跳转
-          </button>
-          <button
-            type="button"
-            aria-pressed={mode === "messages"}
-            disabled={!targetWorkspace}
-            onClick={() => {
-              setMode("messages");
-              setActiveId("");
-            }}
-          >
-            搜索消息
-          </button>
-        </div>
+          ariaLabel="快速跳转模式"
+          value={mode}
+          onChange={(next) => {
+            setMode(next);
+            setActiveId("");
+          }}
+          items={[
+            { value: "jump", label: "跳转" },
+            { value: "messages", label: "搜索消息", disabled: !targetWorkspace },
+          ]}
+        />
         <label className="quick-switcher-input">
           {searchPending ? (
             <LoaderCircle size={ICON.md} className="spin" aria-hidden="true" />

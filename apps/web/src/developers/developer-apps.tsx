@@ -145,10 +145,10 @@ export function DeveloperAppsList({
     <div className="admin-view">
       <div className="admin-heading">
         <div>
-          <span className="platform-role-badge">
+          <BadgePill tone="brand" className="platform-role-badge">
             <Code2 size={ICON.xs} aria-hidden="true" />
             开放生态
-          </span>
+          </BadgePill>
           <p>
             使用你的 Teamie 账号接入自部署的外部小组应用（Web UI + Streamable HTTP MCP Server），支持人类成员与 Agent 在小组中同场协作或同台博弈。
           </p>
@@ -339,9 +339,9 @@ export function DeveloperAppsList({
                     <div>
                       <b>
                         {displayName} <BadgePill>{app.slug}</BadgePill>{" "}
-                        <BadgePill className={status.className}>{status.label}</BadgePill>{" "}
+                        <BadgePill tone={status.tone}>{status.label}</BadgePill>{" "}
                         {app.publishedVersion > 0 && (
-                          <BadgePill className="mp-badge-approved">
+                          <BadgePill tone="success">
                             线上 v{app.publishedVersion}
                           </BadgePill>
                         )}
