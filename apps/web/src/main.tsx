@@ -18,7 +18,6 @@ import { applyTheme, useThemePreference } from "./theme";
 import { Button, Loading, Logo, Notice } from "./ui";
 import { Toaster } from "./toast";
 import "@fontsource-variable/dm-sans";
-import "@fontsource-variable/noto-sans-sc";
 import "./tokens.css";
 import "./styles.css";
 import "./layout.css";
@@ -61,7 +60,7 @@ function Protected({ children }: { children: ReactNode }) {
     return (
       <div className="loading-screen">
         <Logo />
-        <Notice>{error}</Notice>
+        <Notice kind="error">{error}</Notice>
         <Button onClick={retry}>重试连接</Button>
         <Link to="/">回到首页</Link>
       </div>

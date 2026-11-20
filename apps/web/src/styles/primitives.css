@@ -39,7 +39,7 @@
     color: var(--text-muted);
   }
   .icon-button:hover {
-    background: var(--lavender);
+    background: var(--hover-bg);
     color: var(--brand-text);
   }
   .brand {
@@ -69,7 +69,7 @@
     height: 36px;
   }
   .brand-period {
-    color: var(--purple);
+    color: var(--brand-text);
   }
   .eyebrow {
     font-size: var(--font-sm);
@@ -140,8 +140,9 @@
     border: 1px solid var(--success-border);
   }
   .notice.info {
-    background: var(--lavender);
-    color: var(--brand-text);
+    background: var(--info-bg);
+    color: var(--info-text);
+    border: 1px solid var(--info-border);
   }
   .field-help {
     display: block;
@@ -237,7 +238,7 @@
   .modal input:not([type="checkbox"]),
   .modal select,
   .modal textarea {
-    font-size: var(--font-md);
+    font-size: var(--font-base);
     min-height: 44px;
     color: var(--text);
   }
@@ -336,7 +337,7 @@
     color: var(--text-subtle);
   }
   .copy-input > button:hover {
-    background: var(--lavender);
+    background: var(--hover-bg);
   }
   .modal label {
     font-size: var(--font-base);
@@ -350,14 +351,15 @@
     border: 1px solid var(--border-strong);
   }
   .avatar.agent-avatar i {
-    width: 5px;
-    height: 5px;
-    border: 1px solid var(--border);
+    width: 8px;
+    height: 8px;
+    border: 2px solid var(--surface);
     border-radius: 50%;
     background: var(--status-online);
     position: absolute;
-    bottom: 2px;
-    right: 2px;
+    bottom: -2px;
+    right: -2px;
+    box-sizing: content-box;
   }
   .avatar.agent-avatar.disabled i {
     background: var(--status-offline);
@@ -365,14 +367,22 @@
   .avatar.agent-avatar.small {
     border-radius: var(--r-md);
   }
+  .avatar.agent-avatar.small i {
+    width: 7px;
+    height: 7px;
+    border-width: 1.5px;
+    bottom: -1px;
+    right: -1px;
+  }
   .avatar.agent-avatar.large {
     border-radius: var(--r-xl);
   }
   .avatar.agent-avatar.large i {
-    width: 9px;
-    height: 9px;
-    bottom: 5px;
-    right: 5px;
+    width: 12px;
+    height: 12px;
+    border-width: 2px;
+    bottom: 2px;
+    right: 2px;
   }
   .modal .field-help {
     font-size: var(--font-sm);

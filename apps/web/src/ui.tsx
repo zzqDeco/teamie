@@ -150,7 +150,7 @@ export function Notice({
   id?: string;
   onDismiss?: () => void;
 }) {
-  const effectiveKind = tone ?? kind ?? "error";
+  const effectiveKind = tone ?? kind ?? "info";
   return children ? (
     <div
       id={id}
@@ -599,7 +599,7 @@ export function ConfirmDialog({
         </ul>
       )}
       {children}
-      {error ? <Notice>{error}</Notice> : null}
+      {error ? <Notice kind="error">{error}</Notice> : null}
       <div className="modal-actions">
         <ModalCloseButton disabled={busy} data-autofocus>
           {cancelLabel}

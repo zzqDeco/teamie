@@ -116,7 +116,7 @@
   }
   .conversation-start p {
     line-height: 1.85;
-    font-size: var(--font-md);
+    font-size: var(--font-base);
     color: var(--text-muted);
   }
   .load-earlier {
@@ -134,7 +134,7 @@
     font-size: var(--font-sm);
   }
   .load-earlier:hover {
-    background: var(--lavender);
+    background: var(--hover-bg);
   }
   .message-loading {
     display: flex;
@@ -168,7 +168,7 @@
   .date-divider:after {
     content: "";
     height: 1px;
-    background: var(--lavender);
+    background: var(--border);
     flex: 1;
   }
   .date-divider > span {
@@ -179,20 +179,20 @@
     align-items: center;
     gap: var(--space-2_5);
     margin: var(--space-3_5) var(--space-7) var(--space-2_5);
-    color: var(--text-muted);
+    color: var(--unread-line);
     font-size: var(--font-sm);
     font-weight: 600;
   }
   .unread-divider:before {
     content: "";
     height: 1px;
-    background: var(--lavender);
+    background: var(--unread-line);
     flex: 0.2;
   }
   .unread-divider:after {
     content: "";
     height: 1px;
-    background: var(--lavender);
+    background: var(--unread-line);
     flex: 1;
   }
   .message {
@@ -206,7 +206,7 @@
     transition: background 0.15s;
   }
   .message:hover {
-    background: var(--surface);
+    background: var(--hover-bg);
   }
   .message-avatar {
     width: 36px;
@@ -216,7 +216,7 @@
   .message-avatar > .avatar {
     width: 36px;
     height: 36px;
-    font-size: var(--font-md);
+    font-size: var(--font-base);
     border-radius: var(--r-md);
   }
   .message-content {
@@ -238,7 +238,7 @@
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
-    font-size: var(--font-md);
+    font-size: var(--font-base);
     color: var(--text-strong);
   }
   .message-meta time {
@@ -364,7 +364,7 @@
     flex-shrink: 0;
   }
   .message-reply:hover {
-    color: var(--purple-dark);
+    color: var(--brand-strong);
   }
   .message-end {
     height: 10px;
@@ -392,7 +392,7 @@
     font-size: var(--font-sm);
   }
   .edit-message textarea {
-    font-size: var(--font-md);
+    font-size: var(--font-base);
     min-height: 80px;
     resize: vertical;
     line-height: 1.7;
@@ -479,17 +479,17 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--purple);
+    background: var(--brand);
     color: var(--on-brand);
     transition: background 0.15s;
     width: 38px;
     height: 38px;
   }
   .send-button:hover {
-    background: var(--purple-dark);
+    background: var(--brand-text);
   }
   .send-button:disabled {
-    background: var(--lavender);
+    background: var(--surface-sunken);
     color: var(--text-muted);
   }
   .character-count {
@@ -575,7 +575,7 @@
     padding: var(--space-10) var(--space-7);
   }
   .message:focus-within {
-    background: var(--surface);
+    background: var(--hover-bg);
   }
   .message-scroll-content {
     display: flex;

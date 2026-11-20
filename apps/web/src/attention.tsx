@@ -543,10 +543,10 @@ export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
             正在加载…
           </p>
         )}
-        {query.error && <Notice>{errorText(query.error)}</Notice>}
-        {markReadError && <Notice>{markReadError}</Notice>}
+        {query.error && <Notice kind="error">{errorText(query.error)}</Notice>}
+        {markReadError && <Notice kind="error">{markReadError}</Notice>}
         {activeRemaining.length > 0 && !markReadError && (
-          <Notice>
+          <Notice kind="warning">
             {`已处理 ${completedCount} / ${batchFailure!.total}，重试剩余会话即可完成标记已读。`}
           </Notice>
         )}

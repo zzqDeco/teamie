@@ -188,7 +188,7 @@ export function AnnouncementModals({
           <span>共有 {unreadCount} 条未读公告，当前为你展示最新一条。</span>
         </div>
       )}
-      <Notice>{ackError}</Notice>
+      <Notice kind="error">{ackError}</Notice>
       <div className="announcement-body-scroll">
         <div className="announcement-markdown">
           <MessageBody body={latest.body} userId={user.id} />
@@ -285,7 +285,7 @@ function AnnouncementHistoryModal({
         </div>
       ) : historyQuery.isError ? (
         <div className="announcement-history-empty">
-          <Notice>{errorText(historyQuery.error)}</Notice>
+          <Notice kind="error">{errorText(historyQuery.error)}</Notice>
           <Button
             type="button"
             variant="secondary"

@@ -67,7 +67,7 @@ export function AdminReviewModal({
       onClose={onClose}
     >
       <div>
-        <Notice>{error}</Notice>
+        <Notice kind="error">{error}</Notice>
         {detailQuery.isLoading ? (
           <p className="muted" role="status">正在加载审核详情…</p>
         ) : detailQuery.isError || !app ? (

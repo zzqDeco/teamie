@@ -344,7 +344,7 @@ export function ConversationSearch({
           )}
         </IconButton>
       </form>
-      {!valid && <Notice>关键词最多 200 个字符</Notice>}
+      {!valid && <Notice kind="error">关键词最多 200 个字符</Notice>}
       <div className="search-results" aria-busy={pending}>
         {pending && (
           <p className="search-empty" role="status">
@@ -354,7 +354,7 @@ export function ConversationSearch({
         {!term && mode === "messages" && (
           <p className="search-empty">输入关键词搜索</p>
         )}
-        {page?.error && <Notice>{page.error}</Notice>}
+        {page?.error && <Notice kind="error">{page.error}</Notice>}
         {page && !page.error && !messages.length && (
           <p className="search-empty" role="status">
             {mode === "files" ? "没有找到文件" : "没有找到消息"}

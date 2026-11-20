@@ -33,7 +33,7 @@
 
   .reaction-chip.active,
   .reaction-chip.active:hover:not(:disabled) {
-    background: var(--lavender);
+    background: var(--selected-bg);
     border-color: var(--brand);
     color: var(--brand-text);
   }
@@ -71,14 +71,16 @@
     border: 0;
     border-radius: var(--r-sm);
     background: transparent;
-    font-size: var(--font-md);
+    font-size: var(--font-base);
     cursor: pointer;
     transition: background 0.12s ease, transform 0.12s ease;
   }
 
-  .reaction-picker-emoji:hover,
+  .reaction-picker-emoji:hover {
+    background: var(--hover-bg);
+  }
   .reaction-picker-emoji.active {
-    background: var(--lavender);
+    background: var(--selected-bg);
   }
 
   .message-read-receipt-wrap {
@@ -117,9 +119,13 @@
     transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
   }
 
-  .message-read-receipt.is-interactive:hover,
+  .message-read-receipt.is-interactive:hover {
+    background: var(--hover-bg);
+    border-color: var(--border-strong);
+    color: var(--brand-text);
+  }
   .message-read-receipt.is-interactive[aria-expanded="true"] {
-    background: var(--lavender);
+    background: var(--selected-bg);
     border-color: var(--border-strong);
     color: var(--brand-text);
   }
@@ -254,7 +260,7 @@
     border: 0;
     border-radius: var(--r-sm);
     background: transparent;
-    font-size: var(--font-md);
+    font-size: var(--font-base);
     cursor: pointer;
   }
   .emoji-panel-tab[aria-pressed="true"] {
@@ -305,7 +311,7 @@
     display: block;
     margin-bottom: var(--space-2);
     color: var(--text-strong);
-    font-size: var(--font-md);
+    font-size: var(--font-base);
   }
   .reactor-sheet > ul {
     list-style: none;

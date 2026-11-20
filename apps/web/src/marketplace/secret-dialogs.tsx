@@ -89,7 +89,7 @@ export function IssuedSecretDialog({
           {copied ? <CheckCheck size={ICON.md} /> : <Copy size={ICON.md} />}
         </button>
       </div>
-      <Notice>{copyError}</Notice>
+      <Notice kind="error">{copyError}</Notice>
       <div className="modal-actions">
         <Button type="button" data-autofocus onClick={onAcknowledge}>
           我已保存

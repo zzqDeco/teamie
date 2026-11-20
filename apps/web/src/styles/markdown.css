@@ -35,15 +35,15 @@
     font-size: var(--font-2xl);
   }
   .message-body h2.markdown-heading {
-    font-size: var(--font-xl);
+    font-size: var(--font-subhead);
   }
   .message-body h3.markdown-heading {
-    font-size: var(--font-subhead);
+    font-size: var(--font-lg);
   }
   .message-body h4.markdown-heading,
   .message-body h5.markdown-heading,
   .message-body h6.markdown-heading {
-    font-size: var(--font-lg);
+    font-size: var(--font-base);
   }
   .message-body .markdown-inline-code,
   .message-body code {

@@ -202,8 +202,8 @@
   }
 
   .unread-badge.mention-badge {
-    background: var(--brand);
-    color: var(--on-brand);
+    background: var(--unread-mention);
+    color: var(--on-unread-mention);
   }
 
   .notification-level-control {
@@ -213,7 +213,7 @@
 
   .notification-level-control > .icon-button[aria-expanded="true"],
   .notification-level-control > .icon-button.is-customized {
-    background: var(--lavender);
+    background: var(--selected-bg);
     color: var(--brand-text);
   }
 

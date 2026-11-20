@@ -5,7 +5,7 @@
     min-height: 40px;
     padding: var(--space-2) var(--space-4);
     border-radius: var(--r-md);
-    background: var(--purple);
+    background: var(--brand);
     color: var(--on-brand);
     display: inline-flex;
     align-items: center;
@@ -31,11 +31,11 @@
   .button.large-button {
     min-height: 48px;
     padding: var(--space-3) var(--space-6);
-    font-size: var(--font-md);
+    font-size: var(--font-base);
     gap: var(--space-2_5);
   }
   .button:hover:not(:disabled) {
-    background: var(--purple-dark);
+    background: var(--brand-text);
     box-shadow: var(--shadow-md);
   }
   .button:active:not(:disabled) {
@@ -62,7 +62,7 @@
     box-shadow: none;
   }
   .button.secondary:active:not(:disabled) {
-    background: var(--lavender);
+    background: var(--selected-bg);
   }
   .button.danger {
     background: var(--danger);
@@ -85,7 +85,7 @@
     box-shadow: none;
   }
   .button.ghost:active:not(:disabled) {
-    background: var(--lavender);
+    background: var(--selected-bg);
   }
   @media (pointer: coarse) {
     .button,
@@ -162,7 +162,7 @@
   .agent-enabled-switch b {
     font-weight: 600;
     display: block;
-    font-size: var(--font-md);
+    font-size: var(--font-base);
     color: var(--text-strong);
   }
   .agent-enabled-switch small {

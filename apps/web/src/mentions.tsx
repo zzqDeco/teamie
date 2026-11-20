@@ -2,7 +2,7 @@ import { Fragment, useId, useLayoutEffect, useRef, useState } from "react";
 import type { ClipboardEvent, KeyboardEvent, RefObject } from "react";
 import type { Member, Mention } from "@teamie/api-client";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
-import { isDisabledAgent, matchPinyinText } from "./member-picker";
+import { agentDisabledState, isDisabledAgent, matchPinyinText } from "./member-picker";
 import { isUserMentioned } from "./notification-model";
 import { usePinyin } from "./shell/pinyin-match";
 import type { PinyinConverter } from "./shell/pinyin-match";
@@ -398,7 +398,10 @@ export function MentionInput({
                 onClick={() => choose(candidate)}
               >
                 {candidate.member.kind === "agent" ? (
-                  <AgentAvatar seed={candidate.member.userId} />
+                  <AgentAvatar
+                    seed={candidate.member.userId}
+                    disabled={agentDisabledState(candidate.member)}
+                  />
                 ) : (
                   <Avatar
                     name={candidate.member.displayName}

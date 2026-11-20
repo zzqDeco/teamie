@@ -549,7 +549,7 @@ export function QuickSwitcher({
           />
         </label>
         {mode === "messages" && !validQuery && (
-          <Notice>关键词最多 200 个字符</Notice>
+          <Notice kind="error">关键词最多 200 个字符</Notice>
         )}
         {mode === "jump" ? (
           jumpItems.length ? (

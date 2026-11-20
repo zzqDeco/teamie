@@ -405,7 +405,7 @@ export function ModelGatewaySettings() {
         </div>
       ) : !query.data ? (
         <div className="gateway-load-error">
-          <Notice>{gatewayFailureText(query.error)}</Notice>
+          <Notice kind="error">{gatewayFailureText(query.error)}</Notice>
           <Button variant="secondary" onClick={() => void query.refetch()}>
             重新加载
           </Button>
@@ -442,7 +442,7 @@ export function ModelGatewaySettings() {
             defaultModelId={query.data.defaultModelId}
             models={models}
           />
-          <Notice>{confirmation ? "" : error}</Notice>
+          <Notice kind="error">{confirmation ? "" : error}</Notice>
           <Notice kind="success">{saved ? "配置已保存。" : ""}</Notice>
           <Notice kind={test?.ok ? "success" : "error"}>
             {test

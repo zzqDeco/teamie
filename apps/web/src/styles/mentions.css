@@ -42,9 +42,11 @@
     color: inherit;
     cursor: pointer;
   }
-  .mention-options button[aria-selected="true"],
   .mention-options button:hover {
-    background: var(--lavender);
+    background: var(--hover-bg);
+  }
+  .mention-options button[aria-selected="true"] {
+    background: var(--selected-bg);
   }
   .mention-options button > span:not(.agent-badge) {
     min-width: 0;
@@ -65,8 +67,8 @@
     width: 28px;
     height: 28px;
     border-radius: var(--r-pill);
-    background: var(--brand-muted);
-    color: var(--brand-text);
+    background: var(--brand);
+    color: var(--on-brand);
     font-weight: 700;
     font-size: var(--font-sm);
   }
@@ -91,7 +93,7 @@
     background: var(--mention-self-bg);
   }
   .app-shell .message.located {
-    background: var(--lavender);
+    background: var(--selected-bg);
   }
   .app-shell .message.located:focus-visible {
     outline: var(--focus-ring);
@@ -105,8 +107,9 @@
     gap: var(--space-3);
     padding: var(--space-2) var(--space-4);
     font-size: var(--font-sm);
-    background: var(--lavender);
-    color: var(--text);
+    background: var(--info-bg);
+    color: var(--info-text);
+    border-bottom: 1px solid var(--info-border);
   }
   .located-banner button,
   .unread-jump-banner button {

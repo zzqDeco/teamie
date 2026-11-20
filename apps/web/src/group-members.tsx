@@ -284,7 +284,7 @@ export function GroupMembersDialog({
       subtitle="移出后，成员将无法访问此对话。"
       onClose={onClose}
     >
-      <Notice>{error}</Notice>
+      <Notice kind="error">{error}</Notice>
       <div className="group-member-section">
         <h3>
           当前成员 <span>{current.length}</span>
@@ -447,7 +447,7 @@ export function AddParticipantToGroupDialog({
       <div className="adding-agent-summary">
         <ParticipantIdentity member={member} />
       </div>
-      <Notice>{error}</Notice>
+      <Notice kind="error">{error}</Notice>
       <div className="agent-group-options">
         {groups.length ? (
           groups.map((group) => {

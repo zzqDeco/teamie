@@ -93,7 +93,7 @@ export function MyAgents({
         </div>
       ) : query.error ? (
         <div className="agents-empty">
-          <Notice>Agent 列表暂时无法加载，请稍后重试。</Notice>
+          <Notice kind="error">Agent 列表暂时无法加载，请稍后重试。</Notice>
           <Button variant="secondary" onClick={() => void query.refetch()}>
             重新加载
           </Button>
@@ -336,7 +336,7 @@ export function AgentDetail({ agentId }: { agentId: string }) {
           )}
         </div>
       </div>
-      <Notice>
+      <Notice kind="error">
         {!deleting
           ? error || (query.error ? agentFailureText(query.error) : "")
           : ""}

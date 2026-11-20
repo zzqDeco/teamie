@@ -549,7 +549,7 @@ export function ConversationView({
           )}
           {error && (
             <div className="message-error">
-              <Notice>{error}</Notice>
+              <Notice kind="error">{error}</Notice>
               <button onClick={retryError}>重新加载</button>
             </div>
           )}

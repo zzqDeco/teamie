@@ -41,7 +41,7 @@
   }
   .stage-channel-row b {
     display: block;
-    font-size: var(--font-md);
+    font-size: var(--font-base);
     font-weight: 600;
   }
   .stage-channel-row small {
@@ -116,7 +116,7 @@
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: var(--purple);
+    background: var(--brand);
     margin-top: var(--space-1_5);
     flex-shrink: 0;
   }
@@ -127,7 +127,7 @@
   }
   .stage-inbox-item b {
     display: block;
-    font-size: var(--font-md);
+    font-size: var(--font-base);
     font-weight: 600;
     color: var(--text-strong);
     margin-top: var(--space-1);
@@ -151,7 +151,7 @@
   }
   .stage-agent-bio {
     margin-top: var(--space-4);
-    font-size: var(--font-md);
+    font-size: var(--font-base);
     line-height: 1.85;
     color: var(--text);
   }
@@ -327,7 +327,7 @@
     line-height: var(--lh-ui);
   }
   .auth-story h1 > span {
-    color: var(--purple);
+    color: var(--brand-text);
   }
   .auth-story p {
     line-height: 2.1;
@@ -395,14 +395,14 @@
     color: var(--text-subtle);
     position: relative;
     min-height: 46px;
-    font-size: var(--font-md);
+    font-size: var(--font-base);
   }
   .auth-tabs > button.active {
     color: var(--brand-text);
   }
   .auth-tabs > button.active:after {
     height: 2px;
-    background: var(--purple);
+    background: var(--brand);
     position: absolute;
     bottom: -1px;
     left: 0;
@@ -423,7 +423,7 @@
   }
   .auth-form .button {
     margin-top: var(--space-1_5);
-    font-size: var(--font-md);
+    font-size: var(--font-base);
     min-height: 46px;
   }
   .join-page {
@@ -478,7 +478,7 @@
     line-height: 2;
     max-width: 340px;
     margin: 0 auto var(--space-5);
-    font-size: var(--font-md);
+    font-size: var(--font-base);
     color: var(--text-muted);
   }
   .invite-identity {

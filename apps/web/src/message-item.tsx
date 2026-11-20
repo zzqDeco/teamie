@@ -430,7 +430,7 @@ export const MessageItem = memo(function MessageItem({
                   }
                 }}
               />
-              <Notice>{actionError}</Notice>
+              <Notice kind="error">{actionError}</Notice>
               <div>
                 <span>修改后会显示「已编辑」</span>
                 <Button

@@ -30,6 +30,15 @@ export function isDisabledAgent(member: Member & { agentEnabled?: boolean }) {
   return member.kind === "agent" && member.agentEnabled === false;
 }
 
+export function agentDisabledState(
+  member: Member & { agentEnabled?: boolean },
+): boolean | undefined {
+  if (member.kind !== "agent" || typeof member.agentEnabled !== "boolean") {
+    return undefined;
+  }
+  return !member.agentEnabled;
+}
+
 /**
  * Multi-tier text + pinyin match rank (lower is better), or `null` when
  * unmatched:
@@ -121,7 +130,7 @@ export function ParticipantIdentity({
   return (
     <>
       {member.kind === "agent" ? (
-        <AgentAvatar seed={member.userId} />
+        <AgentAvatar seed={member.userId} disabled={agentDisabledState(member)} />
       ) : (
         <Avatar name={member.displayName} seed={member.userId} />
       )}
@@ -278,7 +287,7 @@ export function MemberPicker(props: MemberPickerProps) {
       {loading && <p className="muted">正在加载成员…</p>}
       {loadError && (
         <div role="alert">
-          <Notice>成员加载失败。</Notice>
+          <Notice kind="error">成员加载失败。</Notice>
           {onRetry && (
             <Button type="button" variant="secondary" size="sm" onClick={onRetry}>
               重新加载
@@ -500,7 +509,10 @@ export function ConversationTargetPicker({
                 ) : conv.type === "group" ? (
                   <Users size={ICON.sm} />
                 ) : peerMember?.kind === "agent" ? (
-                  <AgentAvatar seed={peerMember.userId} />
+                  <AgentAvatar
+                    seed={peerMember.userId}
+                    disabled={agentDisabledState(peerMember)}
+                  />
                 ) : (
                   <Avatar name={name} seed={peerMember?.userId || conv.id} />
                 )}

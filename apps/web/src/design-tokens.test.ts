@@ -105,9 +105,15 @@ function contrastRatio(hexA: string, hexB: string) {
 describe("PR-4 design tokens & WCAG AA contrast", () => {
   const tokensCss = readFileSync(join(srcDir, "tokens.css"), "utf8");
   const lightBlock = /:root\s*\{([\s\S]*?)\}/.exec(tokensCss)?.[1] || "";
+  const darkBlock =
+    /:root\[data-theme="dark"\]\s*\{([\s\S]*?)\}/.exec(tokensCss)?.[1] || "";
   const tokenMap = new Map<string, string>();
   for (const match of lightBlock.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)) {
     tokenMap.set(match[1], match[2].trim());
+  }
+  const darkMap = new Map<string, string>();
+  for (const match of darkBlock.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)) {
+    darkMap.set(match[1], match[2].trim());
   }
 
   it("declares cascade @layer order and defines complete color, surface, typography, radius, shadow, spacing, z-index, and layout tokens", () => {
@@ -123,12 +129,24 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
       "--brand-muted",
       "--brand-text",
       "--brand-strong",
+      "--on-brand",
       "--focus-ring",
       "--danger",
       "--danger-hover",
       "--on-danger",
+      "--info-text",
+      "--info-bg",
+      "--info-border",
+      "--agent-fg",
+      "--agent-bg",
+      "--agent-border",
+      "--mention-accent",
+      "--mention-row-bg",
+      "--mention-row-hover",
+      "--unread-line",
+      "--unread-mention",
+      "--on-unread-mention",
       "--scrollbar-thumb",
-      "--scrollbar-thumb-hover",
       "--backdrop",
       "--switch-bg",
       "--switch-on",
@@ -140,9 +158,8 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
       "--font-xs",
       "--font-sm",
       "--font-base",
-      "--font-md",
       "--font-lg",
-      "--font-xl",
+      "--font-subhead",
       "--font-2xl",
       "--font-3xl",
       "--font-4xl",
@@ -151,6 +168,8 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
       "--surface-sunken",
       "--rail",
       "--lavender",
+      "--hover-bg",
+      "--selected-bg",
       "--border",
       "--border-strong",
       "--field-border",
@@ -161,7 +180,6 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
       "--dur-base",
       "--dur-slow",
       "--ease-standard",
-      "--ease-emphasized",
       "--r-xs",
       "--r-sm",
       "--r-md",
@@ -216,6 +234,17 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
     for (const name of required) {
       expect(tokenMap.has(name), `missing token ${name}`).toBe(true);
     }
+    for (const removed of [
+      "--purple",
+      "--purple-dark",
+      "--muted",
+      "--font-md",
+      "--font-xl",
+      "--ease-emphasized",
+      "--scrollbar-thumb-hover",
+    ]) {
+      expect(tokenMap.has(removed), `legacy/redundant token ${removed} should be removed`).toBe(false);
+    }
     expect(tokenMap.get("--font-xs")).toBe("12px");
     expect(tokenMap.get("--font-sm")).toBe("13px");
     expect(tokenMap.get("--font-base")).toBe("14px");
@@ -223,77 +252,114 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
     expect(tokensCss).toContain("font-family: var(--font-sans);");
     expect(tokensCss).toContain("color: var(--text-strong);");
     expect(tokensCss).toContain("background: var(--bg);");
-    expect(tokensCss).toContain("font-size: var(--font-md);");
+    expect(tokensCss).toContain("font-size: var(--font-base);");
   });
 
-  it("ensures every text token meets WCAG AA >= 4.5:1 and non-text UI tokens meet >= 3:1 across all light surfaces", () => {
-    const surfaces = [
-      "#ffffff",
-      tokenMap.get("--bg")!,
-      tokenMap.get("--surface-sunken")!,
-      tokenMap.get("--rail")!,
-    ];
-    const textTokens = [
-      "--text-strong",
-      "--text",
-      "--text-muted",
-      "--text-subtle",
-      "--brand-text",
-      "--brand-strong",
-      "--danger-text",
-      "--warning-text",
-      "--success-text",
-    ];
-    for (const token of textTokens) {
-      const fg = tokenMap.get(token)!;
-      for (const bg of surfaces) {
+  it("ensures every text token meets WCAG AA >= 4.5:1 and non-text UI tokens meet >= 3:1 across all light and dark state surfaces", () => {
+    for (const [themeName, map] of [
+      ["light", tokenMap],
+      ["dark", darkMap],
+    ] as const) {
+      const surfaces = [
+        map.get("--surface")!,
+        map.get("--bg")!,
+        map.get("--surface-sunken")!,
+        map.get("--rail")!,
+        map.get("--hover-bg")!,
+        map.get("--selected-bg")!,
+        map.get("--lavender")!,
+      ];
+      const textTokens = [
+        "--text-strong",
+        "--text",
+        "--text-muted",
+        "--text-subtle",
+        "--brand-text",
+        "--brand-strong",
+        "--danger-text",
+        "--warning-text",
+        "--success-text",
+        "--info-text",
+        "--agent-fg",
+        "--unread-line",
+      ];
+      for (const token of textTokens) {
+        const fg = map.get(token)!;
+        for (const bg of surfaces) {
+          expect(
+            contrastRatio(fg, bg),
+            `${themeName} ${token} (${fg}) on ${bg}`,
+          ).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+      const pairedStateSurfaces: Array<[string, string]> = [
+        ["--danger-text", "--danger-bg"],
+        ["--warning-text", "--warning-bg"],
+        ["--success-text", "--success-bg"],
+        ["--info-text", "--info-bg"],
+        ["--agent-fg", "--agent-bg"],
+        ["--text-strong", "--mention-row-bg"],
+        ["--text", "--mention-row-bg"],
+        ["--text-muted", "--mention-row-bg"],
+        ["--brand-text", "--mention-row-bg"],
+        ["--text-strong", "--mention-row-hover"],
+        ["--text", "--mention-row-hover"],
+        ["--text-muted", "--mention-row-hover"],
+        ["--brand-text", "--mention-row-hover"],
+        ["--on-brand", "--brand"],
+        ["--on-brand", "--brand-muted"],
+        ["--on-brand", "--brand-text"],
+        ["--on-brand", "--brand-strong"],
+        ["--on-danger", "--danger"],
+        ["--on-danger", "--danger-hover"],
+        ["--on-unread-mention", "--unread-mention"],
+      ];
+      for (const [fgToken, bgToken] of pairedStateSurfaces) {
         expect(
-          contrastRatio(fg, bg),
-          `${token} (${fg}) on ${bg}`,
+          contrastRatio(map.get(fgToken)!, map.get(bgToken)!),
+          `${themeName} ${fgToken} (${map.get(fgToken)}) on ${bgToken} (${map.get(bgToken)})`,
         ).toBeGreaterThanOrEqual(4.5);
       }
-    }
-    const nonTextTokens = [
-      "--field-border",
-      "--scrollbar-thumb",
-      "--scrollbar-thumb-hover",
-      "--switch-bg",
-      "--switch-on",
-      "--status-online",
-      "--status-connecting",
-      "--status-offline",
-    ];
-    for (const token of nonTextTokens) {
-      const fg = tokenMap.get(token)!;
-      for (const bg of [...surfaces, tokenMap.get("--lavender")!]) {
-        expect(
-          contrastRatio(fg, bg),
-          `${token} (${fg}) on ${bg}`,
-        ).toBeGreaterThanOrEqual(3);
+      const nonTextTokens = [
+        "--field-border",
+        "--scrollbar-thumb",
+        "--switch-bg",
+        "--switch-on",
+        "--status-online",
+        "--status-connecting",
+        "--status-offline",
+        "--mention-accent",
+        "--unread-line",
+      ];
+      for (const token of nonTextTokens) {
+        const fg = map.get(token)!;
+        for (const bg of [
+          ...surfaces,
+          map.get("--mention-row-bg")!,
+          map.get("--mention-row-hover")!,
+        ]) {
+          expect(
+            contrastRatio(fg, bg),
+            `${themeName} ${token} (${fg}) on ${bg}`,
+          ).toBeGreaterThanOrEqual(3);
+        }
       }
-    }
-    const textLum = luminance(parseHex(tokenMap.get("--text")!)!);
-    const mutedLum = luminance(parseHex(tokenMap.get("--text-muted")!)!);
-    expect(
-      Math.max(textLum, mutedLum) / Math.max(Math.min(textLum, mutedLum), 0.001),
-    ).toBeGreaterThanOrEqual(1.55);
-    for (let tone = 1; tone <= 6; tone++) {
+      const textLum = luminance(parseHex(map.get("--text")!)!);
+      const mutedLum = luminance(parseHex(map.get("--text-muted")!)!);
       expect(
-        contrastRatio(
-          tokenMap.get(`--avatar-${tone}-fg`)!,
-          tokenMap.get(`--avatar-${tone}-bg`)!,
-        ),
-        `avatar tone ${tone} contrast`,
-      ).toBeGreaterThanOrEqual(4.5);
-    }
-    expect(
-      contrastRatio(tokenMap.get("--brand")!, "#ffffff"),
-    ).toBeGreaterThanOrEqual(4.5);
-    for (const fill of ["--danger", "--danger-hover"]) {
-      expect(
-        contrastRatio(tokenMap.get("--on-danger")!, tokenMap.get(fill)!),
-        `--on-danger on ${fill}`,
-      ).toBeGreaterThanOrEqual(4.5);
+        Math.max(textLum, mutedLum) /
+          Math.max(Math.min(textLum, mutedLum), 0.001),
+        `${themeName} text/muted separation`,
+      ).toBeGreaterThanOrEqual(1.55);
+      for (let tone = 1; tone <= 6; tone++) {
+        expect(
+          contrastRatio(
+            map.get(`--avatar-${tone}-fg`)!,
+            map.get(`--avatar-${tone}-bg`)!,
+          ),
+          `${themeName} avatar tone ${tone} contrast`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
     }
   });
 
@@ -340,6 +406,20 @@ describe("PR-4 design tokens & WCAG AA contrast", () => {
       expect(
         [...content.matchAll(/\b(?:rgba?|hsla?)\s*\(/gi)].map((m) => m[0]),
         `${file} should contain zero raw rgb()/hsl() color functions`,
+      ).toEqual([]);
+      expect(
+        [...content.matchAll(/(?:^|[;{\s])color\s*:\s*var\(--brand\)\b/gm)].map(
+          (m) => m[0].trim(),
+        ),
+        `${file} must use --brand-text or --brand-strong for text color instead of --brand`,
+      ).toEqual([]);
+      expect(
+        [
+          ...content.matchAll(
+            /var\(--(?:purple|purple-dark|muted|font-md|font-xl|ease-emphasized|scrollbar-thumb-hover)\)/g,
+          ),
+        ].map((m) => m[0]),
+        `${file} must not reference removed legacy or redundant tokens`,
       ).toEqual([]);
     }
   });
@@ -508,6 +588,7 @@ describe("PR-5 CSS cleanup, unified focus, icon scale & self-hosted DM Sans", ()
     const mainTsx = readFileSync(join(srcDir, "main.tsx"), "utf8");
     const tokensCss = readFileSync(join(srcDir, "tokens.css"), "utf8");
     expect(mainTsx).toContain('import "@fontsource-variable/dm-sans"');
+    expect(mainTsx).not.toContain("@fontsource-variable/noto-sans-sc");
     for (const file of cssFiles) {
       const content = readFileSync(join(srcDir, file), "utf8");
       expect(content).not.toContain("fonts.googleapis.com");

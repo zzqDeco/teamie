@@ -15,50 +15,62 @@
     --z-banner: 15;
     --z-members-shade: 19;
     --z-members-pane: 20;
-    /* Text hierarchy — all verified >= 4.5:1 WCAG AA on #ffffff, #fbfaf8, #f7f5f9, and #ece8f3 */
+    /* Text hierarchy — all verified >= 4.5:1 WCAG AA across all light surfaces including --rail, --hover-bg, and --selected-bg */
     --text-strong: #221e2c;
     --text: #352f42;
-    --text-muted: #645973;
-    --text-subtle: #6b6079;
+    --text-muted: #564c66;
+    --text-subtle: #5e536e;
 
     /* Brand & interactive accents */
     --brand: #7463d4;
-    --brand-muted: #7264bd;
-    --brand-text: #5f4fc1;
-    --brand-strong: #4f3ea6;
+    --brand-muted: #6f5ec9;
+    --brand-text: #5240b3;
+    --brand-strong: #423196;
     --on-brand: #ffffff;
     --logo-accent: #d8efae;
-
-    /* Legacy variable aliases for compatibility */
-    --purple: var(--brand);
-    --purple-dark: var(--brand-text);
-    --muted: var(--text-muted);
 
     /* Surfaces & borders (preserving warm ivory & soft lavender identity) */
     --bg: #fbfaf8;
     --surface: #ffffff;
-    --surface-sunken: #f7f5f9;
-    --rail: #ece8f3;
+    --surface-sunken: #f6f4fa;
+    --rail: #ebe6f4;
     --lavender: #f0ecfb;
-    --hover-bg: #f2eef8;
-    --border: #eae5ee;
-    --border-strong: #ddd5e6;
-    --field-border: #807391;
+    --hover-bg: #f1edf9;
+    --selected-bg: #e3dbf8;
+    --border: #e8e2ef;
+    --border-strong: #d5cce2;
+    --field-border: #726585;
 
-    /* Semantic feedback tokens (WCAG AA compliant) */
-    --danger-text: #a82e2e;
+    /* Semantic feedback & domain state tokens (WCAG AA compliant) */
+    --danger-text: #a52828;
     --danger-bg: #fdf2f2;
     --danger-border: #e8b4b4;
     /* Destructive button fill (5.9:1 with --on-danger; hover 7.6:1) */
     --danger: #b03a48;
     --danger-hover: #962f3c;
     --on-danger: #ffffff;
-    --warning-text: #6b5322;
-    --warning-bg: #fbf6ea;
-    --warning-border: #efe5cf;
-    --success-text: #355d2d;
-    --success-bg: #eef6ea;
-    --success-border: #dcebd4;
+    --warning-text: #684c14;
+    --warning-bg: #fbf5e6;
+    --warning-border: #ebdcb7;
+    --success-text: #2c5724;
+    --success-bg: #ecf6e8;
+    --success-border: #cde2c5;
+    --info-text: #1e4c78;
+    --info-bg: #edf5fc;
+    --info-border: #c5dcf2;
+
+    /* Distinct teal hue for Agent identity (separate from brand purple) */
+    --agent-fg: #13575d;
+    --agent-bg: #e5f4f5;
+    --agent-border: #b3dce0;
+
+    /* Mention / reply relevance & high-salience unread indicators */
+    --mention-accent: #995c0f;
+    --mention-row-bg: #fdf6e8;
+    --mention-row-hover: #f8ecd1;
+    --unread-line: #b0243f;
+    --unread-mention: #b0243f;
+    --on-unread-mention: #ffffff;
 
     /* Avatar 6-hue non-error palette (verified >= 6.8:1 fg-on-bg contrast) */
     --avatar-1-bg: #e9e2fb;
@@ -75,14 +87,13 @@
     --avatar-6-fg: #643370;
 
     /* Scrollbars, overlays, switches, and status indicators (WCAG non-text >= 3:1) */
-    --scrollbar-thumb: #837694;
-    --scrollbar-thumb-hover: #6c5f7d;
+    --scrollbar-thumb: #756887;
     --backdrop: rgba(46, 36, 61, 0.34);
-    --switch-bg: #867899;
+    --switch-bg: #76698a;
     --switch-on: #7463d4;
-    --status-online: #497a3d;
-    --status-connecting: #94662a;
-    --status-offline: #766888;
+    --status-online: #3f7035;
+    --status-connecting: #8f6020;
+    --status-offline: #6d5f80;
     --mention-bg: rgba(116, 99, 212, 0.12);
     --mention-self-bg: rgba(116, 99, 212, 0.22);
 
@@ -91,7 +102,7 @@
     --focus-ring-offset: 2px;
     --focus-halo: 0 0 0 3px rgba(116, 99, 212, 0.2);
 
-    /* Typography families & scale (Chinese prefers system fonts; the self-hosted fallback loads only when those lack a glyph) */
+    /* Typography families & scale (Latin self-hosted DM Sans; Chinese uses system fonts) */
     --font-sans:
       "DM Sans Variable",
       "DM Sans",
@@ -104,7 +115,6 @@
       "Microsoft YaHei",
       "Noto Sans CJK SC",
       "Source Han Sans SC",
-      "Noto Sans SC Variable",
       sans-serif;
     --font-mono:
       "JetBrains Mono",
@@ -117,10 +127,8 @@
     --font-xs: 12px;
     --font-sm: 13px;
     --font-base: 14px;
-    --font-md: 14px;
     --font-lg: 15px;
     --font-subhead: 16px;
-    --font-xl: 17px;
     --font-2xl: 20px;
     --font-3xl: 24px;
     --font-4xl: 30px;
@@ -136,7 +144,6 @@
     --dur-base: 180ms;
     --dur-slow: 360ms;
     --ease-standard: cubic-bezier(0.2, 0, 0, 1);
-    --ease-emphasized: cubic-bezier(0.2, 0, 0, 1);
 
     /* Global root typography, colors, and font rendering */
     color-scheme: light;
@@ -147,7 +154,7 @@
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    font-size: var(--font-md);
+    font-size: var(--font-base);
 
     /* Border radius scale */
     --r-xs: 4px;
@@ -200,45 +207,62 @@
   :root[data-theme="dark"] {
     color-scheme: dark;
 
-    /* Text hierarchy — all verified >= 5.5:1 WCAG AA on #17141c, #201c27, #1c1822, and #1b1722 */
-    --text-strong: #f2eef8;
-    --text: #e2dcf0;
-    --text-muted: #a99ebd;
-    --text-subtle: #9b8fb0;
+    /* Text hierarchy — all verified >= 4.5:1 WCAG AA across all dark surfaces including --hover-bg and --selected-bg */
+    --text-strong: #f4f0fa;
+    --text: #e4def2;
+    --text-muted: #bab0ce;
+    --text-subtle: #b0a5c4;
 
     /* Brand & interactive accents (brightened lavender-purple paired with dark on-brand text) */
     --brand: #9d8ff0;
     --brand-muted: #8b7ce0;
-    --brand-text: #b4a7f5;
-    --brand-strong: #cfc6fa;
+    --brand-text: #c3b8fa;
+    --brand-strong: #dcd5fd;
     --on-brand: #17141c;
     --logo-accent: #d8efae;
 
-    /* Warm deep-plum surfaces & borders */
+    /* Warm deep-plum surfaces & borders with clear visual ladder */
     --bg: #17141c;
-    --surface: #201c27;
-    --surface-sunken: #1c1822;
-    --rail: #1b1722;
-    --lavender: #2a2338;
-    --hover-bg: #262033;
-    --border: #312a3d;
-    --border-strong: #3e354d;
-    --field-border: #7d7091;
+    --rail: #120f17;
+    --surface-sunken: #1c1824;
+    --surface: #231e2d;
+    --lavender: #2b233d;
+    --hover-bg: #2c263b;
+    --selected-bg: #392e54;
+    --border: #332c42;
+    --border-strong: #463d59;
+    --field-border: #8e81a6;
 
-    /* Semantic feedback tokens in dark mode (WCAG AA compliant) */
-    --danger-text: #f59b9b;
-    --danger-bg: #361c20;
-    --danger-border: #5c2b31;
+    /* Semantic feedback & domain state tokens in dark mode (WCAG AA compliant) */
+    --danger-text: #faa8a8;
+    --danger-bg: #381c21;
+    --danger-border: #632e36;
     /* Destructive button fill (6.8:1 with --on-danger; hover 9.3:1) */
     --danger: #ec7d8a;
     --danger-hover: #f5a3ad;
     --on-danger: #17141c;
-    --warning-text: #f0c97a;
-    --warning-bg: #332816;
-    --warning-border: #544120;
-    --success-text: #8fd682;
-    --success-bg: #1b2e19;
-    --success-border: #2c4d29;
+    --warning-text: #f3ce80;
+    --warning-bg: #342815;
+    --warning-border: #5c4622;
+    --success-text: #94db88;
+    --success-bg: #1b2f19;
+    --success-border: #2f542c;
+    --info-text: #98ccf7;
+    --info-bg: #182b3e;
+    --info-border: #2b4d6e;
+
+    /* Distinct teal hue for Agent identity in dark mode */
+    --agent-fg: #7fdce2;
+    --agent-bg: #163135;
+    --agent-border: #28575e;
+
+    /* Mention / reply relevance & high-salience unread indicators in dark mode */
+    --mention-accent: #e6aa4c;
+    --mention-row-bg: #2d2417;
+    --mention-row-hover: #382d1d;
+    --unread-line: #f47a8e;
+    --unread-mention: #ee6c82;
+    --on-unread-mention: #17141c;
 
     /* Avatar 6-hue non-error palette in dark mode (verified >= 9.1:1 fg-on-bg contrast) */
     --avatar-1-bg: #332a52;
@@ -255,14 +279,13 @@
     --avatar-6-fg: #ecccf5;
 
     /* Scrollbars, overlays, switches, and status indicators in dark mode (WCAG non-text >= 3:1) */
-    --scrollbar-thumb: #796c8d;
-    --scrollbar-thumb-hover: #9183a6;
+    --scrollbar-thumb: #8c7fa3;
     --backdrop: rgba(8, 6, 12, 0.62);
-    --switch-bg: #7f7295;
+    --switch-bg: #8e81a6;
     --switch-on: #9d8ff0;
     --status-online: #7bc96f;
-    --status-connecting: #e0a958;
-    --status-offline: #988ca9;
+    --status-connecting: #e5ad55;
+    --status-offline: #a397b5;
     --mention-bg: rgba(157, 143, 240, 0.18);
     --mention-self-bg: rgba(157, 143, 240, 0.3);
 

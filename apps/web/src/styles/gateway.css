@@ -71,7 +71,7 @@
     color: var(--warning-text);
     font-weight: 600;
     line-height: 1.8;
-    font-size: var(--font-md);
+    font-size: var(--font-base);
   }
   .gateway-saved-state p {
     color: var(--warning-text);
@@ -119,7 +119,7 @@
   .gateway-test-panel h3 {
     font-weight: 600;
     color: var(--text-strong);
-    font-size: var(--font-md);
+    font-size: var(--font-base);
   }
   .gateway-test-panel p {
     line-height: 1.9;
@@ -152,7 +152,7 @@
   }
 
   .gateway-models-header h2 {
-    font-size: var(--font-xl);
+    font-size: var(--font-subhead);
     font-weight: 600;
     color: var(--text-strong);
     letter-spacing: -0.3px;
@@ -223,7 +223,7 @@
   }
 
   .gateway-provider-title > b {
-    font-size: var(--font-md);
+    font-size: var(--font-base);
     font-weight: 600;
     color: var(--text-strong);
   }
@@ -328,7 +328,7 @@
   }
 
   .gateway-model-title > b {
-    font-size: var(--font-md);
+    font-size: var(--font-base);
     font-weight: 600;
     color: var(--text-strong);
   }
@@ -431,7 +431,7 @@
   }
 
   .gateway-web-search-section > h3 {
-    font-size: var(--font-xl);
+    font-size: var(--font-subhead);
     font-weight: 600;
     color: var(--text-strong);
     letter-spacing: -0.3px;

@@ -190,7 +190,7 @@ export function AgentProfileDialog({
       dirty={dirty}
     >
       <form noValidate onSubmit={submit} onInput={() => setDirty(true)}>
-        <Notice>{error}</Notice>
+        <Notice kind="error">{error}</Notice>
         <label>
           Agent 名称
           <input
