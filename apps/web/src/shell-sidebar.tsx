@@ -26,7 +26,7 @@ import type { Connection } from "./chat";
 import { AccountMenu } from "./account-menu";
 import { ConversationActions } from "./conversation-actions";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
-import { isDisabledAgent } from "./member-picker";
+import { agentDisabledState } from "./member-picker";
 import type { DialogKind } from "./dialogs";
 import { conversationName } from "./messages";
 import { readDraftPresence, subscribeDraftPresence } from "./composer-drafts";
@@ -114,7 +114,7 @@ function ConversationItem({
         <AgentAvatar
           size="small"
           seed={otherMember.userId}
-          disabled={isDisabledAgent(otherMember)}
+          disabled={agentDisabledState(otherMember)}
         />
       ) : presenceEnabled && otherHumanId ? (
         <div className="avatar-with-presence">

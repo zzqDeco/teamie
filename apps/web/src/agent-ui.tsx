@@ -37,10 +37,11 @@ export function agentTone(seed: string): AvatarTone {
 
 export function AgentAvatar({
   size = "",
-  disabled = false,
+  disabled,
   seed = "",
 }: {
   size?: "small" | "large" | "";
+  /** Known enabled state: `false` = enabled dot, `true` = disabled dot, `undefined` = hide dot. */
   disabled?: boolean;
   /** Agent ID; distinct Agents get distinct, stable colours. */
   seed?: string;
@@ -53,7 +54,7 @@ export function AgentAvatar({
       <Bot
         size={size === "large" ? ICON.lg : size === "small" ? ICON.xs : ICON.sm}
       />
-      <i />
+      {typeof disabled === "boolean" && <i />}
     </span>
   );
 }

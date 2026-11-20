@@ -30,6 +30,15 @@ export function isDisabledAgent(member: Member & { agentEnabled?: boolean }) {
   return member.kind === "agent" && member.agentEnabled === false;
 }
 
+export function agentDisabledState(
+  member: Member & { agentEnabled?: boolean },
+): boolean | undefined {
+  if (member.kind !== "agent" || typeof member.agentEnabled !== "boolean") {
+    return undefined;
+  }
+  return !member.agentEnabled;
+}
+
 /**
  * Multi-tier text + pinyin match rank (lower is better), or `null` when
  * unmatched:
@@ -121,7 +130,7 @@ export function ParticipantIdentity({
   return (
     <>
       {member.kind === "agent" ? (
-        <AgentAvatar seed={member.userId} disabled={isDisabledAgent(member)} />
+        <AgentAvatar seed={member.userId} disabled={agentDisabledState(member)} />
       ) : (
         <Avatar name={member.displayName} seed={member.userId} />
       )}
@@ -502,7 +511,7 @@ export function ConversationTargetPicker({
                 ) : peerMember?.kind === "agent" ? (
                   <AgentAvatar
                     seed={peerMember.userId}
-                    disabled={isDisabledAgent(peerMember)}
+                    disabled={agentDisabledState(peerMember)}
                   />
                 ) : (
                   <Avatar name={name} seed={peerMember?.userId || conv.id} />

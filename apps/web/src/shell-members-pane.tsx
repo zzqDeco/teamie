@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import type { Conversation, Member, Workspace } from "@teamie/api-client";
 import { AgentAvatar, AgentAvailability, AgentBadge } from "./agent-ui";
+import { agentDisabledState } from "./member-picker";
 import type { Participant } from "./participants";
 import { conversationName } from "./messages";
 import {
@@ -142,7 +143,7 @@ export function ShellMembersPane({
             return (
             <div className="member-row" key={member.userId}>
               {member.kind === "agent" ? (
-                <AgentAvatar seed={member.userId} disabled={member.agentEnabled === false} />
+                <AgentAvatar seed={member.userId} disabled={agentDisabledState(member)} />
               ) : humanPresence ? (
                 <div className="avatar-with-presence">
                   <Avatar name={member.displayName} seed={member.userId} />

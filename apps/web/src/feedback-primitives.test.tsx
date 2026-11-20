@@ -320,7 +320,8 @@ describe("Button", () => {
         <Notice>默认信息提示</Notice>
         <Notice kind="error">显式错误提示</Notice>
         <Notice tone="warning" onDismiss={onDismiss}>请注意保存密钥</Notice>
-        <AgentAvatar seed="agent-1" />
+        <AgentAvatar seed="agent-unknown" />
+        <AgentAvatar seed="agent-1" disabled={false} />
         <AgentAvatar seed="agent-2" disabled />
         <Loading label="正在准备…" />
       </>,
@@ -346,11 +347,12 @@ describe("Button", () => {
     expect(errorNotice.textContent).toContain("显式错误提示");
     expect(find(".notice.warning").textContent).toContain("请注意保存密钥");
     const avatars = Array.from(host.querySelectorAll<HTMLElement>(".agent-avatar"));
-    expect(avatars).toHaveLength(2);
-    expect(avatars[0].querySelector("i")).not.toBeNull();
-    expect(avatars[0].classList.contains("disabled")).toBe(false);
+    expect(avatars).toHaveLength(3);
+    expect(avatars[0].querySelector("i")).toBeNull();
     expect(avatars[1].querySelector("i")).not.toBeNull();
-    expect(avatars[1].classList.contains("disabled")).toBe(true);
+    expect(avatars[1].classList.contains("disabled")).toBe(false);
+    expect(avatars[2].querySelector("i")).not.toBeNull();
+    expect(avatars[2].classList.contains("disabled")).toBe(true);
     await act(async () => find<HTMLButtonElement>(".notice-dismiss").click());
     expect(onDismiss).toHaveBeenCalledTimes(1);
     expect(find(".loading-screen").getAttribute("role")).toBe("status");
