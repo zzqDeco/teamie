@@ -275,6 +275,64 @@ describe("Modal dismissal", () => {
     );
     expect(document.activeElement?.textContent?.trim()).toBe("取消");
   });
+
+  it("isolates background siblings with ref-counted inert across nested modals and focuses dialog container on coarse pointers", async () => {
+    function Harness({ outer, inner }: { outer: boolean; inner: boolean }) {
+      return (
+        <div>
+          <button id="bg-trigger" type="button">触发按钮</button>
+          {outer && (
+            <Modal title="外层弹窗" onClose={() => {}}>
+              <input name="outer-field" />
+              {inner && (
+                <Modal title="内层确认" onClose={() => {}}>
+                  <Button variant="secondary">好的</Button>
+                </Modal>
+              )}
+            </Modal>
+          )}
+        </div>
+      );
+    }
+
+    await render(<Harness outer={false} inner={false} />);
+    const trigger = find<HTMLButtonElement>("#bg-trigger");
+    trigger.focus();
+    await render(<Harness outer inner={false} />);
+    expect(trigger.hasAttribute("inert")).toBe(true);
+
+    // Opening nested modal keeps background inert after inner modal closes.
+    await render(<Harness outer inner />);
+    expect(trigger.hasAttribute("inert")).toBe(true);
+    expect(find<HTMLInputElement>('input[name="outer-field"]').hasAttribute("inert")).toBe(true);
+
+    await render(<Harness outer inner={false} />);
+    expect(find<HTMLInputElement>('input[name="outer-field"]').hasAttribute("inert")).toBe(false);
+    expect(trigger.hasAttribute("inert")).toBe(true);
+
+    // Closing outer modal releases inert BEFORE restoring focus to trigger.
+    await render(<Harness outer={false} inner={false} />);
+    expect(trigger.hasAttribute("inert")).toBe(false);
+    expect(document.activeElement).toBe(trigger);
+
+    // Coarse pointer focuses dialog container instead of popping up soft keyboard on form input.
+    const originalMatchMedia = window.matchMedia;
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: query.includes("pointer: coarse"),
+        media: query,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    );
+    try {
+      await render(<Harness outer inner={false} />);
+      expect(document.activeElement).toBe(find('[role="dialog"]'));
+    } finally {
+      vi.stubGlobal("matchMedia", originalMatchMedia);
+    }
+  });
 });
 
 describe("Button", () => {
@@ -341,6 +399,12 @@ describe("Button", () => {
       </>,
     );
     expect(find(".field .field-error").getAttribute("role")).toBe("alert");
+    const fieldHelp = find(".field .field-help");
+    const fieldError = find(".field .field-error");
+    const fieldInput = find<HTMLInputElement>("#ws-name");
+    expect(fieldHelp.id).toBeTruthy();
+    expect(fieldInput.getAttribute("aria-describedby")).toContain(fieldHelp.id);
+    expect(fieldInput.getAttribute("aria-describedby")).toContain(fieldError.id);
     const tabs = Array.from(host.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
     expect(tabs[0].getAttribute("aria-selected")).toBe("true");
     expect(tabs[0].tabIndex).toBe(0);

@@ -11,7 +11,7 @@ import { agentTone } from "./agent-ui";
 import { rankMentionMembers } from "./mentions";
 import { prefersEnterToSend, resetKeyboardSourceForTests } from "./chat/keyboard-source";
 import { COMMON_REACTION_EMOJIS, computeMessageReadSummary } from "./engagement-store";
-import { isReactionEmoji, searchEmojis, allowedEmojiCount } from "./chat/emoji-catalog";
+import { isReactionEmoji, searchEmojis, allowedEmojiCount, emojiLabel } from "./chat/emoji-catalog";
 import { FULLY_QUALIFIED_COUNT } from "./chat/emoji-data.generated";
 import { thumbnailBox } from "./attachments";
 import { computeViewportLayout } from "./shell/shell-navigation-helpers";
@@ -226,6 +226,19 @@ describe("reaction emoji allowlist", () => {
     expect(searchEmojis("Japan")).toContain("🇯🇵");
     expect(searchEmojis("United States")).toContain("🇺🇸");
     expect(searchEmojis("旗帜").length).toBeGreaterThan(100);
+    // Chinese keyword & pinyin search + Chinese accessible labels
+    expect(searchEmojis("赞")).toContain("👍");
+    expect(searchEmojis("火焰")).toContain("🔥");
+    expect(searchEmojis("庆祝")).toContain("🎉");
+    expect(searchEmojis("思考")).toContain("🤔");
+    expect(searchEmojis("鼓掌")).toContain("👏");
+    expect(searchEmojis("勾选")).toContain("✅");
+    expect(searchEmojis("zan")).toContain("👍");
+    expect(searchEmojis("huojian")).toContain("🚀");
+    expect(searchEmojis("sikao")).toContain("🤔");
+    expect(searchEmojis("aixin")).toContain("❤️");
+    expect(emojiLabel("👍")).toBe("点赞");
+    expect(emojiLabel("🚀")).toBe("火箭");
   });
 });
 

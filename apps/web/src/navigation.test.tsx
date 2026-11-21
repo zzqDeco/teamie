@@ -284,9 +284,9 @@ describe("member and account navigation", () => {
 
   it("opens quick switching from the visible sidebar action and restores focus on Escape", async () => {
     await mount("/app/w/team/c/general");
-    const launcher = find<HTMLButtonElement>('[aria-label="搜索与快速切换"]');
+    const launcher = find<HTMLButtonElement>(".sidebar-quick-switcher");
     expect(launcher.getAttribute("aria-keyshortcuts")).toBe("Control+K Meta+K");
-    await click('[aria-label="搜索与快速切换"]');
+    await click(".sidebar-quick-switcher");
     expect(find('.modal input')).toBe(document.activeElement);
     expect(find('.modal').textContent).toContain("快速跳转");
     await escape();
@@ -411,6 +411,9 @@ describe("member and account navigation", () => {
       navigation.querySelector('a[href="/app/w/team/members"]'),
     ).toBeNull();
     const rail = find(".workspace-rail");
+    expect(rail.tagName).toBe("NAV");
+    expect(rail.getAttribute("aria-label")).toBe("工作空间切换");
+    expect(find(".navigation-sidebar").getAttribute("aria-label")).toBe("空间导航");
     expect(find(".rail-agents").nextElementSibling).toBe(find(".account-panel"));
     expect(rail.querySelector('a[href="/app/agents"]')).toBeTruthy();
     expect(rail.querySelector(".account-trigger")).toBeTruthy();

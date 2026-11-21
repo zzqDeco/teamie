@@ -205,7 +205,7 @@ describe("current workspace context", () => {
     expect(find(".workspace-title").textContent).toBe(beta.name);
     await click('.rail-attention');
     expect(find(".workspace-button.selected").getAttribute("aria-label")).toContain(beta.name);
-    await click('[aria-label="搜索与快速切换"]');
+    await click(".sidebar-quick-switcher");
     await click(".quick-switcher-modes button:last-child");
     expect(document.querySelector<HTMLInputElement>(".quick-switcher input")?.placeholder).toContain(beta.name);
     await settle(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));

@@ -774,6 +774,42 @@ describe("conversation search readability and keyboard (PR-3)", () => {
     expect(onLocate).toHaveBeenCalledWith("message-3");
   });
 
+  it("ignores Safari/CJK IME composition Enter and ArrowDown in the search input", async () => {
+    vi.mocked(api.searchMessages).mockResolvedValue({
+      messages: [message(1, "规划"), message(2, "规划方案")],
+      hasMore: false,
+    });
+    await render(view());
+    await type("规划");
+    await tick();
+    const input = host.querySelector<HTMLInputElement>('input[type="search"]')!;
+    const callsBefore = vi.mocked(api.searchMessages).mock.calls.length;
+    input.focus();
+    const composingEnter = new KeyboardEvent("keydown", {
+      key: "Enter",
+      bubbles: true,
+      cancelable: true,
+      isComposing: true,
+    });
+    Object.defineProperty(composingEnter, "keyCode", { value: 229 });
+    await act(async () => {
+      input.dispatchEvent(composingEnter);
+    });
+    expect(composingEnter.defaultPrevented).toBe(true);
+    expect(vi.mocked(api.searchMessages)).toHaveBeenCalledTimes(callsBefore);
+    const composingDown = new KeyboardEvent("keydown", {
+      key: "ArrowDown",
+      bubbles: true,
+      cancelable: true,
+      isComposing: true,
+    });
+    Object.defineProperty(composingDown, "keyCode", { value: 229 });
+    await act(async () => {
+      input.dispatchEvent(composingDown);
+    });
+    expect(document.activeElement).toBe(input);
+  });
+
   it("restores the last keyword for the same account and conversation only", async () => {
     vi.mocked(api.searchMessages).mockResolvedValue({ messages: [message(1, "保留 关键词")], hasMore: false });
     await render(view());

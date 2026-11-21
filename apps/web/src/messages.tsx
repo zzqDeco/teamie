@@ -35,7 +35,9 @@ import { useConversationReadTracking } from "./chat/conversation-read-tracking";
 import { useConversationContextLoader } from "./chat/conversation-context-loader";
 import type { LocatedScrollState } from "./chat/conversation-context-loader";
 import { useHistoryPaging } from "./chat/use-history-paging";
+import { useLiveMessageAnnouncement } from "./chat/use-live-announcement";
 import { JumpLatestButton, LocatedNewMessagesPill } from "./chat/timeline-pills";
+import { preferredScrollBehavior } from "./a11y";
 
 /** How long a located (deep-linked/searched) message stays highlighted. */
 export const LOCATED_HIGHLIGHT_MS = 2500;
@@ -425,6 +427,9 @@ export function ConversationView({
     (highlightId && messages.some((m) => m.id === highlightId) ? highlightId : undefined) ||
     messages.at(-1)?.id ||
     "";
+  const liveAnnouncement = useLiveMessageAnnouncement({
+    conversationId: conversation.id, messages, userId, loading, locating, located: !!located,
+  });
 
   return (
     <section
@@ -512,8 +517,6 @@ export function ConversationView({
         className="message-scroll"
         ref={scrollRef}
         role="log"
-        aria-live="polite"
-        aria-relevant="additions"
         aria-label="消息历史"
         aria-busy={loading || loadingOlder || loadingNewer || undefined}
         onScroll={(event) => {
@@ -619,6 +622,9 @@ export function ConversationView({
           <div className="message-end" />
         </div>
       </div>
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true" data-message-live-announcer="">
+        {liveAnnouncement}
+      </div>
       {!atBottom && !located && !locating && (
         <JumpLatestButton
           unreadCount={jumpUnreadCount}
@@ -626,7 +632,7 @@ export function ConversationView({
           onJump={() => {
             setLeftBottomSeq((prev) => Math.max(prev, readSeq, currentLastSeq));
             setAtBottom(true);
-            scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+            scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: preferredScrollBehavior() });
           }}
         />
       )}

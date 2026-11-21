@@ -347,7 +347,7 @@ export function MessageComposer({
 function TypingIndicator({ conversationId }: { conversationId: string }) {
   const otherTyping = useTypingUsers(conversationId);
   return (
-    <span>
+    <span role="status" aria-live="polite" aria-atomic="true">
       {otherTyping.length
         ? `${otherTyping.map((x) => x.displayName).join("、")} 正在输入…`
         : ""}

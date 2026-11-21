@@ -333,6 +333,9 @@
       min-height: 44px;
       padding: 0 var(--space-3);
     }
+    .emoji-panel-search {
+      min-height: var(--control-h-touch);
+    }
     .reaction-picker-emoji,
     .emoji-panel-tab {
       width: 44px;

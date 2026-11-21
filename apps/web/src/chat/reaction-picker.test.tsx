@@ -129,10 +129,24 @@ describe("reaction picker boundaries and portal interactions", () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
-  it("supports keyboard selection and restores the trigger on Escape", async () => {
-    const menu = await open();
+  it("supports keyboard selection, exposes aria-pressed/labels, and focuses search after expanding", async () => {
+    await act(async () =>
+      root.render(
+        <ReactionPicker
+          anchorRef={{ current: anchor }}
+          reactions={[{ emoji: "👍", count: 1, userIds: ["self"] }]}
+          userId="self"
+          onSelect={onSelect}
+          onClose={onClose}
+        />,
+      ),
+    );
+    const menu = document.querySelector<HTMLDivElement>(".reaction-picker-popover")!;
     const buttons = menu.querySelectorAll("button");
     expect(document.activeElement).toBe(buttons[0]);
+    expect(buttons[0].getAttribute("aria-pressed")).toBe("true");
+    expect(buttons[0].getAttribute("aria-label")).toBe("表情回应 点赞（👍）");
+    expect(buttons[1].getAttribute("aria-pressed")).toBe("false");
     buttons[0].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
     // Wraps to the last entry, the 「更多表情」 button that opens the full panel.
     const last = buttons[buttons.length - 1];
@@ -140,7 +154,15 @@ describe("reaction picker boundaries and portal interactions", () => {
     expect(last.getAttribute("aria-label")).toBe("更多表情");
     last.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true }));
     expect(document.activeElement).toBe(buttons[0]);
-    buttons[0].dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await act(async () => last.click());
+    // Wait for lazy emoji catalog load and automatic search focus transition.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    });
+    const search = menu.querySelector<HTMLInputElement>(".emoji-panel-search")!;
+    expect(search).not.toBeNull();
+    expect(document.activeElement).toBe(search);
+    search.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     expect(document.activeElement).toBe(trigger);
     expect(onClose).toHaveBeenCalledOnce();
   });

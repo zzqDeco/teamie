@@ -413,7 +413,10 @@
     background: var(--border);
   }
   @media (pointer: coarse) {
-    .tab-trigger,
+    .tab-trigger {
+      min-width: var(--control-h-touch);
+      min-height: var(--control-h-touch);
+    }
     .menu-item {
       min-height: var(--control-h-touch);
     }
@@ -457,7 +460,7 @@
   .member-search input:focus-visible,
   .mp-admin-search input:focus-visible,
   .platform-user-search input:focus-visible,
-  .created-reset-link .copy-input input:focus-visible {
+  .copy-input > input:focus-visible {
     outline: none;
   }
 }

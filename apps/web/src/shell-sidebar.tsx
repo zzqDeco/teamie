@@ -23,6 +23,7 @@ import type {
 } from "@teamie/api-client";
 import { useAuth } from "./auth";
 import type { Connection } from "./chat";
+import { preferredScrollBehavior } from "./a11y";
 import { AccountMenu } from "./account-menu";
 import { ConversationActions } from "./conversation-actions";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
@@ -206,7 +207,7 @@ function ConversationSection({
         <button
           type="button"
           className="nav-section-toggle"
-          aria-label={`${title}${hasUnread ? "（有未读消息）" : ""}`}
+          aria-label={`${title} ${count}${hasUnread ? "（有未读消息）" : ""}`}
           aria-expanded={expanded}
           aria-controls={id}
           onClick={() => {
@@ -268,7 +269,7 @@ function scrollToNextUnread(scroller: HTMLElement | null) {
   const next = Array.from(
     scroller.querySelectorAll<HTMLElement>(".conversation-link.has-unread"),
   ).find((link) => !link.closest("[hidden]") && link.getBoundingClientRect().top >= bottom - 4);
-  next?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+  next?.scrollIntoView?.({ block: "center", behavior: preferredScrollBehavior() });
   next?.focus({ preventScroll: true });
 }
 
@@ -360,7 +361,7 @@ export function ShellSidebar({
       tabIndex={-1}
       inert={mobile && !sidebar}
     >
-      <aside className="workspace-rail" aria-label="工作空间切换">
+      <nav className="workspace-rail" aria-label="工作空间切换">
         <Link
           className="rail-home"
           to="/app"
@@ -478,8 +479,8 @@ export function ShellSidebar({
           onAnnouncements={onOpenAnnouncements}
           hasUnreadAnnouncement={hasUnreadAnnouncement}
         />
-      </aside>
-      <aside className="navigation-sidebar">
+      </nav>
+      <aside className="navigation-sidebar" aria-label="空间导航">
         <div className="workspace-header">
           <div className="workspace-title" title={workspace?.name}>
             <b>{workspace?.name || "我的 Teamie"}</b>
@@ -504,7 +505,6 @@ export function ShellSidebar({
         <button
           type="button"
           className="sidebar-quick-switcher"
-          aria-label="搜索与快速切换"
           aria-haspopup="dialog"
           aria-keyshortcuts="Control+K Meta+K"
           onClick={onOpenQuickSwitcher}

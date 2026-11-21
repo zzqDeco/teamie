@@ -120,7 +120,7 @@
     .app-navigation {
       position: absolute;
       inset: 0 auto 0 0;
-      width: min(352px, 100%);
+      width: min(calc(352px + env(safe-area-inset-left)), 100%);
       height: 100%;
       z-index: var(--z-drawer);
       display: flex;
@@ -141,10 +141,10 @@
         visibility 0s;
     }
     .app-navigation .workspace-rail {
-      flex: 0 0 64px;
-      width: 64px;
+      flex: 0 0 calc(64px + env(safe-area-inset-left));
+      width: calc(64px + env(safe-area-inset-left));
       height: 100%;
-      padding-left: var(--space-2);
+      padding-left: max(var(--space-2), env(safe-area-inset-left));
       padding-right: var(--space-2);
     }
     .app-navigation .navigation-sidebar {
@@ -173,7 +173,7 @@
     .conversation-header {
       height: auto;
       min-height: calc(var(--header-h-mobile) + env(safe-area-inset-top));
-      padding: env(safe-area-inset-top) var(--space-2_5) 0 var(--space-1_5);
+      padding: env(safe-area-inset-top) max(var(--space-2_5), env(safe-area-inset-right)) 0 max(var(--space-1_5), env(safe-area-inset-left));
       gap: var(--space-2);
     }
     .conversation-header-actions > .icon-button {
@@ -190,7 +190,7 @@
       font-size: var(--font-3xl);
     }
     .message {
-      padding: var(--space-3) var(--space-12) var(--space-3) var(--space-3_5);
+      padding: var(--space-3) max(var(--space-12), env(safe-area-inset-right)) var(--space-3) max(var(--space-3_5), env(safe-area-inset-left));
       gap: var(--space-2_5);
     }
     .message.compact {
@@ -220,7 +220,7 @@
       height: 44px;
     }
     .composer-area {
-      padding: var(--space-2) var(--space-3) max(var(--space-2_5), env(safe-area-inset-bottom));
+      padding: var(--space-2) max(var(--space-3), env(safe-area-inset-right)) max(var(--space-2_5), env(safe-area-inset-bottom)) max(var(--space-3), env(safe-area-inset-left));
     }
     .composer textarea {
       font-size: var(--font-subhead);
@@ -364,7 +364,7 @@
       margin-top: var(--space-6);
     }
     .modal-backdrop {
-      padding: max(var(--space-3), env(safe-area-inset-top)) var(--space-3) max(var(--space-3), env(safe-area-inset-bottom));
+      padding: max(var(--space-3), env(safe-area-inset-top)) max(var(--space-3), env(safe-area-inset-right)) max(var(--space-3), env(safe-area-inset-bottom)) max(var(--space-3), env(safe-area-inset-left));
     }
     .modal {
       padding: var(--space-6) var(--space-5) var(--space-5);
