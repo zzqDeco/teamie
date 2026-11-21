@@ -10,6 +10,7 @@
 @import "./styles/chat.css";
 @import "./styles/markdown.css";
 @import "./styles/members.css";
+@import "./styles/member-directory.css";
 @import "./styles/admin.css";
 @import "./styles/agents.css";
 @import "./styles/gateway.css";

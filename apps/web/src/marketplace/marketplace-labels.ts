@@ -22,25 +22,27 @@ export function sanitizeMcpToolSegment(raw: string): string {
   return out || "tool";
 }
 
+import type { BadgeTone } from "../ui";
+
 export function reviewStatusMeta(
   status?: string,
   adminSuspended?: boolean,
 ): {
   label: string;
-  className: string;
+  tone: BadgeTone;
 } {
   if (adminSuspended || status === "suspended") {
-    return { label: "已封禁", className: "mp-badge-rejected" };
+    return { label: "已封禁", tone: "danger" };
   }
   switch (status) {
     case "pending_review":
-      return { label: "审核中", className: "mp-badge-pending" };
+      return { label: "审核中", tone: "warning" };
     case "approved":
-      return { label: "已上架", className: "mp-badge-approved" };
+      return { label: "已上架", tone: "success" };
     case "rejected":
-      return { label: "已驳回", className: "mp-badge-rejected" };
+      return { label: "已驳回", tone: "danger" };
     default:
-      return { label: "草稿", className: "mp-badge-draft" };
+      return { label: "草稿", tone: "neutral" };
   }
 }
 

@@ -21,7 +21,7 @@ import type {
 import { useAuth } from "./auth";
 import { errorText } from "./errors";
 import { formatDateTime } from "./format-datetime";
-import { Button, ConfirmDialog, EmptyState, IconButton, Notice } from "./ui";
+import { BadgePill, Button, ConfirmDialog, EmptyState, IconButton, Notice } from "./ui";
 import { toast } from "./toast";
 import { ICON } from "./icons";
 export type InviteStatus = "available" | "used" | "revoked" | "expired";
@@ -147,10 +147,10 @@ export function PlatformInvitations() {
     <div className="admin-view">
       <div className="admin-heading">
         <div>
-          <span className="platform-role-badge">
+          <BadgePill tone="brand" className="platform-role-badge">
             <ShieldCheck size={ICON.xs} aria-hidden="true" />
             平台管理员
-          </span>
+          </BadgePill>
           <p>一次性邀请码，7 天内有效。</p>
         </div>
         <span className="admin-heading-icon">
@@ -322,10 +322,19 @@ export function PlatformInvitations() {
                           )}
                         </td>
                         <td>
-                          <span className={`invite-status ${status}`}>
+                          <BadgePill
+                            tone={
+                              status === "available"
+                                ? "success"
+                                : status === "revoked"
+                                  ? "danger"
+                                  : "neutral"
+                            }
+                            className={`invite-status ${status}`}
+                          >
                             <i />
                             {statusLabels[status]}
-                          </span>
+                          </BadgePill>
                         </td>
                         <td>
                           {status === "available" && (

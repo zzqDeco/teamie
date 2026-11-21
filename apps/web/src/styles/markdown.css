@@ -28,7 +28,7 @@
   .message-body .markdown-heading {
     font-weight: 600;
     color: var(--text-strong);
-    line-height: 1.4;
+    line-height: var(--lh-heading);
     margin: var(--space-3) 0 var(--space-1_5);
   }
   .message-body h1.markdown-heading {
@@ -114,7 +114,7 @@
     border: 1px solid var(--border-strong);
     border-radius: var(--r-md);
     overflow-x: auto;
-    line-height: 1.55;
+    line-height: var(--lh-ui);
     white-space: pre;
   }
   .message-body .markdown-code-wrap > .markdown-code-block {
@@ -155,7 +155,7 @@
   }
   .message-body li {
     margin: var(--space-1) 0;
-    line-height: 1.6;
+    line-height: var(--lh-ui);
   }
   .message-body .task-list-item {
     list-style: none;

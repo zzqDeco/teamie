@@ -26,6 +26,40 @@ const noFeaturesOutlineNonePlugin = stylelint.createPlugin(
   },
 );
 
+const strictTransitionDurationRule = "teamie/strict-transition-duration";
+const strictTransitionDurationMessages = stylelint.utils.ruleMessages(
+  strictTransitionDurationRule,
+  {
+    rejected: (raw) =>
+      `Unexpected raw transition duration "${raw}"; use var(--dur-fast | --dur-base | --dur-slow) instead.`,
+  },
+);
+
+const strictTransitionDurationPlugin = stylelint.createPlugin(
+  strictTransitionDurationRule,
+  (primary) => (root, result) => {
+    if (!primary) return;
+    root.walkDecls(/^transition$/, (decl) => {
+      const value = decl.value.trim();
+      if (value === "none" || value === "inherit" || value === "initial" || value === "unset") {
+        return;
+      }
+      // Strip var(...) calls before scanning for raw non-zero <time> literals.
+      const stripped = value.replace(/var\([^)]*\)/g, "");
+      for (const match of stripped.matchAll(/(?<![a-zA-Z0-9_-])(\d*\.?\d+)(ms|s)\b/gi)) {
+        const numeric = Number(match[1]);
+        if (numeric === 0) continue;
+        stylelint.utils.report({
+          ruleName: strictTransitionDurationRule,
+          result,
+          node: decl,
+          message: strictTransitionDurationMessages.rejected(match[0]),
+        });
+      }
+    });
+  },
+);
+
 const cssKeywordValues = ["inherit", "initial", "unset", "revert", "revert-layer"];
 const spacingAllowedValues = [
   ...cssKeywordValues,
@@ -43,7 +77,11 @@ const spacingAllowedValues = [
 
 /** @type {import("stylelint").Config} */
 export default {
-  plugins: ["stylelint-declaration-strict-value", noFeaturesOutlineNonePlugin],
+  plugins: [
+    "stylelint-declaration-strict-value",
+    noFeaturesOutlineNonePlugin,
+    strictTransitionDurationPlugin,
+  ],
   rules: {
     "no-duplicate-selectors": true,
   },
@@ -52,6 +90,7 @@ export default {
       files: ["src/styles/**/*.css", "**/src/styles/**/*.css"],
       rules: {
         [noFeaturesOutlineNoneRule]: true,
+        [strictTransitionDurationRule]: true,
         "scale-unlimited/declaration-strict-value": [
           [
             "color",
@@ -65,6 +104,8 @@ export default {
             "fill",
             "stroke",
             "font-size",
+            "line-height",
+            "transition-duration",
             "z-index",
             "/^(row-|column-)?gap$/",
             "/^padding(-(top|right|bottom|left|inline|block)(-start|-end)?)?$/",
@@ -77,6 +118,8 @@ export default {
             ignoreValues: {
               "": [...cssKeywordValues, "transparent", "currentColor", "none"],
               "font-size": [...cssKeywordValues, "/^clamp\\(/", "/%$/", "/em$/"],
+              "line-height": [...cssKeywordValues, "normal", "/^calc\\(/"],
+              "transition-duration": [...cssKeywordValues, "0s", "0ms"],
               "z-index": [...cssKeywordValues, "auto", "0", "1", "-1", "-2"],
               "/^(row-|column-)?gap$/": spacingAllowedValues,
               "/^padding(-(top|right|bottom|left|inline|block)(-start|-end)?)?$/":

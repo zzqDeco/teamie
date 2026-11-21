@@ -1,7 +1,7 @@
 /* Components & features layers: marketplace group apps pane, developer portal, live verification, and handbook. */
 
 @layer features {
-  .members-pane.mp-apps-pane {
+  .side-pane.mp-apps-pane {
     position: relative;
     width: var(--mp-pane-width, 400px);
   }
@@ -69,9 +69,13 @@
     border-radius: var(--r-pill);
     background: var(--brand);
     color: var(--on-brand);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     font-size: var(--font-xs);
     font-weight: 700;
-    line-height: 16px;
+    font-variant-numeric: tabular-nums;
+    line-height: var(--lh-none);
     text-align: center;
     pointer-events: none;
   }
@@ -230,11 +234,6 @@
   .mp-launcher-desc {
     margin: 0;
   }
-  .mp-badge-running {
-    background: var(--success-bg);
-    color: var(--success-text);
-    border-color: var(--success-border);
-  }
   .mp-frames-stage {
     display: flex;
     flex-direction: column;
@@ -266,26 +265,6 @@
     border: 0;
     min-height: 360px;
     background: var(--surface);
-  }
-  .mp-badge-approved {
-    background: var(--success-bg);
-    color: var(--success-text);
-    border-color: var(--success-border);
-  }
-  .mp-badge-pending {
-    background: var(--warning-bg);
-    color: var(--warning-text);
-    border-color: var(--warning-border);
-  }
-  .mp-badge-rejected {
-    background: var(--danger-bg);
-    color: var(--danger-text);
-    border-color: var(--danger-border);
-  }
-  .mp-badge-draft {
-    background: var(--lavender);
-    color: var(--brand-text);
-    border-color: var(--border-strong);
   }
   .mp-filter-bar {
     display: flex;
@@ -395,7 +374,7 @@
     background: var(--surface-sunken);
     font-family: var(--font-mono);
     font-size: var(--font-sm);
-    line-height: 1.65;
+    line-height: var(--lh-body);
     overflow-x: auto;
     white-space: pre;
     color: var(--text);
@@ -438,9 +417,6 @@
     margin-top: var(--space-3);
   }
   .dev-handbook-nav {
-    display: flex;
-    gap: var(--space-2);
-    flex-wrap: wrap;
     margin: var(--space-4) 0;
   }
   .dev-handbook-section {
@@ -449,7 +425,7 @@
     border: 1px solid var(--border);
     border-radius: var(--r-lg);
     background: var(--surface);
-    line-height: 1.8;
+    line-height: var(--lh-relaxed);
     font-size: var(--font-base);
     color: var(--text);
   }

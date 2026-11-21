@@ -363,7 +363,7 @@ export function ConversationHeader({
             </IconButton>
             {notifOpen && (
               <div
-                className="notification-level-menu"
+                className="menu notification-level-menu"
                 role="menu"
                 aria-label="会话通知级别"
                 tabIndex={-1}
@@ -379,7 +379,7 @@ export function ConversationHeader({
                       type="button"
                       role="menuitemradio"
                       aria-checked={active}
-                      className={`notification-level-option ${active ? "active" : ""}`}
+                      className={`menu-item notification-level-option ${active ? "active" : ""}`.trim()}
                       onClick={() => void selectNotificationLevel(option.value)}
                     >
                       <div className="notification-level-option-text">

@@ -201,11 +201,6 @@
     margin-left: 0;
   }
 
-  .unread-badge.mention-badge {
-    background: var(--unread-mention);
-    color: var(--on-unread-mention);
-  }
-
   .notification-level-control {
     position: relative;
     display: inline-flex;
@@ -229,46 +224,21 @@
   }
 
   .notification-level-menu {
-    position: absolute;
     top: calc(100% + 6px);
     right: 0;
     width: 276px;
     max-width: calc(100vw - 24px);
-    padding: var(--space-1_5);
-    border-radius: var(--r-md);
-    background: var(--surface);
-    border: 1px solid var(--border-strong);
     box-shadow: var(--shadow-pop);
-    z-index: var(--z-popover);
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
   }
 
   .notification-level-option {
-    display: flex;
-    align-items: center;
     justify-content: space-between;
     gap: var(--space-2);
-    width: 100%;
     padding: var(--space-2) var(--space-2_5);
-    border: 0;
-    border-radius: var(--r-sm);
-    background: transparent;
     color: var(--text-strong);
-    text-align: left;
-    cursor: pointer;
-    transition: background 0.12s ease;
-  }
-
-  .notification-level-option:hover {
-    background: var(--hover-bg);
-  }
-
-  .notification-level-option.active,
-  .notification-level-option.active:hover {
-    background: var(--lavender);
-    color: var(--brand-text);
   }
 
   .notification-level-option.active > svg {
@@ -291,7 +261,7 @@
   .notification-level-option-text > span {
     font-size: var(--font-sm);
     color: var(--text-muted);
-    line-height: 1.4;
+    line-height: var(--lh-heading);
   }
 
 

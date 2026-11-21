@@ -4,6 +4,7 @@ import { Bot, Check, CirclePause, Eye, LockKeyhole } from "lucide-react";
 import type { WebSearchGatewayConfig, Workspace } from "@teamie/api-client";
 import {
   avatarTone,
+  BadgePill,
   Button,
   ConfirmDialog,
   Notice,
@@ -120,10 +121,10 @@ export function WorkspaceVisibilityFields({
 export function AgentEnabledStatus({ enabled }: { enabled: boolean }) {
   const Icon = enabled ? Check : CirclePause;
   return (
-    <span className={`agent-status ${enabled ? "enabled" : "disabled"}`}>
+    <BadgePill tone={enabled ? "success" : "neutral"}>
       <Icon size={ICON.xs} aria-hidden="true" />
       {enabled ? "已启用" : "已停用"}
-    </span>
+    </BadgePill>
   );
 }
 /**

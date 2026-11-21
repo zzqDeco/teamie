@@ -23,7 +23,6 @@
     }
     .public-header nav .button {
       font-size: var(--font-base);
-      min-height: 40px;
       padding: var(--space-2_5) var(--space-3);
     }
     .public-header .brand {
@@ -32,7 +31,7 @@
     .hero-copy > p {
       font-size: var(--font-base);
       margin-top: 0;
-      line-height: 1.9;
+      line-height: var(--lh-relaxed);
     }
     .hero-actions {
       margin-top: var(--space-6);
@@ -252,13 +251,13 @@
     .sync-banner button {
       min-height: 32px;
     }
-    .members-pane > header {
+    .side-pane > header {
       min-height: calc(var(--header-h-mobile) + env(safe-area-inset-top));
       height: auto;
       padding-top: env(safe-area-inset-top);
       font-size: var(--font-base);
     }
-    .members-pane > header b {
+    .side-pane > header b {
       font-size: var(--font-base);
     }
     .member-row {

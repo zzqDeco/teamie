@@ -23,8 +23,10 @@
     outline-offset: var(--focus-ring-offset);
   }
   .icon-button {
-    width: 32px;
-    height: 32px;
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -34,9 +36,13 @@
     transition:
       color var(--dur-fast) var(--ease-standard),
       background var(--dur-fast) var(--ease-standard);
-    min-width: 36px;
-    min-height: 36px;
     color: var(--text-muted);
+  }
+  .icon-button.small-icon-button {
+    width: var(--control-h-sm);
+    height: var(--control-h-sm);
+    min-width: var(--control-h-sm);
+    min-height: var(--control-h-sm);
   }
   .icon-button:hover {
     background: var(--hover-bg);
@@ -49,7 +55,7 @@
     font-size: var(--font-4xl);
     letter-spacing: -0.01em;
     font-weight: 700;
-    line-height: 1;
+    line-height: var(--lh-none);
     color: var(--text-strong);
   }
   .brand-icon {
@@ -70,13 +76,6 @@
   }
   .brand-period {
     color: var(--brand-text);
-  }
-  .eyebrow {
-    font-size: var(--font-sm);
-    letter-spacing: 0.08em;
-    font-weight: 600;
-    color: var(--text-muted);
-    line-height: var(--lh-body);
   }
   .tiny-dot {
     display: inline-block;
@@ -267,7 +266,7 @@
   }
   .modal-actions > .button {
     padding: var(--space-2_5) var(--space-4);
-    min-height: 40px;
+    min-height: var(--control-h-md);
     font-size: var(--font-base);
   }
   .form-note {
@@ -392,11 +391,112 @@
     align-items: center;
     gap: var(--space-1);
     padding: var(--space-0_5) var(--space-1_5);
+    border: 1px solid var(--border);
     border-radius: var(--r-xs);
+    background: var(--surface-sunken);
+    color: var(--text-muted);
     font-size: var(--font-xs);
     font-weight: 500;
     line-height: var(--lh-tight);
     white-space: nowrap;
+  }
+  .badge-pill.tone-brand {
+    background: var(--selected-bg);
+    color: var(--brand-text);
+    border-color: var(--border-strong);
+  }
+  .badge-pill.tone-agent {
+    background: var(--agent-bg);
+    color: var(--agent-fg);
+    border-color: var(--agent-border);
+  }
+  .badge-pill.tone-success {
+    background: var(--success-bg);
+    color: var(--success-text);
+    border-color: var(--success-border);
+  }
+  .badge-pill.tone-warning {
+    background: var(--warning-bg);
+    color: var(--warning-text);
+    border-color: var(--warning-border);
+  }
+  .badge-pill.tone-danger {
+    background: var(--danger-bg);
+    color: var(--danger-text);
+    border-color: var(--danger-border);
+  }
+  .badge-pill.tone-info {
+    background: var(--info-bg);
+    color: var(--info-text);
+    border-color: var(--info-border);
+  }
+  .unread-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--font-xs);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    line-height: var(--lh-tight);
+    color: var(--on-brand);
+    background: var(--brand);
+    border-radius: var(--r-pill);
+    padding: var(--space-0_5) var(--space-1_5);
+    min-width: 18px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  .unread-badge.mention-badge {
+    background: var(--unread-mention);
+    color: var(--on-unread-mention);
+  }
+  .side-pane {
+    flex-shrink: 0;
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    background: var(--surface);
+    z-index: var(--z-sticky);
+    min-height: 0;
+  }
+  .side-pane > header {
+    padding: 0 var(--space-4) 0 var(--space-5);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-weight: 600;
+    font-size: var(--font-sm);
+    color: var(--text-muted);
+    height: var(--header-h);
+    flex-shrink: 0;
+  }
+  .side-pane > header b {
+    font-weight: 600;
+    background: var(--lavender);
+    border-radius: var(--r-sm);
+    padding: var(--space-0_5) var(--space-1_5);
+    margin-left: var(--space-1_5);
+    color: var(--text-muted);
+    font-size: var(--font-xs);
+  }
+  .side-pane > header > .icon-button {
+    color: var(--text-muted);
+    width: var(--control-h-sm);
+    height: var(--control-h-sm);
+    min-width: var(--control-h-sm);
+    min-height: var(--control-h-sm);
+  }
+  .side-pane-shade {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-side-pane-shade);
+    background: var(--backdrop);
+    opacity: 1;
+    visibility: visible;
+    transition:
+      opacity var(--dur-base) var(--ease-standard),
+      visibility 0s;
   }
   .empty-state {
     width: 100%;

@@ -4,7 +4,7 @@ import { BookOpen, CheckCheck, Code2, Copy } from "lucide-react";
 import { copyToClipboard } from "../clipboard";
 import { ICON } from "../icons";
 import { toast } from "../toast";
-import { Button, Tabs } from "../ui";
+import { BadgePill, Button, Tabs } from "../ui";
 
 type HandbookTopicId =
   | "architecture"
@@ -194,10 +194,10 @@ export function DeveloperHandbook() {
     <div className="admin-view">
       <div className="admin-heading">
         <div>
-          <span className="platform-role-badge">
+          <BadgePill tone="brand" className="platform-role-badge">
             <BookOpen size={ICON.xs} aria-hidden="true" />
             开发者接入与提审手册 · 协议 v1
-          </span>
+          </BadgePill>
           <p>
             本手册面向第三方应用开发者，完整说明如何自部署符合 Teamie 平台协议的外部 Web UI 与 Streamable HTTP MCP Server，并通过四阶段拨测上架应用市场。
           </p>
@@ -209,7 +209,6 @@ export function DeveloperHandbook() {
 
       <Tabs
         className="dev-handbook-nav"
-        tabClassName="theme-option"
         ariaLabel="手册章节切换"
         value={topic}
         onChange={selectTopic}

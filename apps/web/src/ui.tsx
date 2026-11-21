@@ -121,14 +121,18 @@ export function Button({
 export function IconButton({
   children,
   label,
+  size = "md",
   className = "",
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { label: string }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & {
+  label: string;
+  size?: "sm" | "md";
+}) {
   return (
     <button
       type="button"
       {...props}
-      className={`icon-button ${className}`}
+      className={`icon-button ${size === "sm" ? "small-icon-button" : ""} ${className}`.trim()}
       title={label}
       aria-label={label}
     >
@@ -171,19 +175,41 @@ export function Notice({
     </div>
   ) : null;
 }
+export type BadgeTone =
+  | "neutral"
+  | "brand"
+  | "agent"
+  | "success"
+  | "warning"
+  | "danger"
+  | "info";
+const BADGE_TONE_CLASS: Record<BadgeTone, string> = {
+  neutral: "",
+  brand: "tone-brand",
+  agent: "tone-agent",
+  success: "tone-success",
+  warning: "tone-warning",
+  danger: "tone-danger",
+  info: "tone-info",
+};
 export function BadgePill({
   children,
+  tone = "neutral",
   className = "",
   title,
   ariaLabel,
 }: {
   children: ReactNode;
+  tone?: BadgeTone;
   className?: string;
   title?: string;
   ariaLabel?: string;
 }) {
   return (
-    <span className={`badge-pill ${className}`.trim()} title={title}>
+    <span
+      className={`badge-pill ${BADGE_TONE_CLASS[tone]} ${className}`.trim()}
+      title={title}
+    >
       {ariaLabel ? (
         <>
           <span className="sr-only">{ariaLabel}</span>

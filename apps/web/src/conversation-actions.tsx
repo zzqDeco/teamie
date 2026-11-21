@@ -38,19 +38,19 @@ export function ConversationActions({
       {expanded && (
         <div
           id={id}
-          className="conversation-actions-menu"
+          className="menu conversation-actions-menu"
           role="group"
           aria-label="新对话"
           ref={popover}
         >
           {canDirect && (
-            <button onClick={() => select("direct")}>
+            <button type="button" className="menu-item" onClick={() => select("direct")}>
               <MessageSquarePlus size={ICON.md} aria-hidden="true" />
               发起私信
             </button>
           )}
           {canGroup && (
-            <button onClick={() => select("group")}>
+            <button type="button" className="menu-item" onClick={() => select("group")}>
               <Users size={ICON.md} aria-hidden="true" />
               创建小组
             </button>

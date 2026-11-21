@@ -9,6 +9,7 @@ import { useAuth } from "./auth";
 import { formatDateTime } from "./format-datetime";
 import {
   Avatar,
+  BadgePill,
   Button,
   DataList,
   EmptyState,
@@ -143,7 +144,7 @@ function AdminUsers({ user }: { user: User }) {
     <div className="admin-view platform-users-view">
       <div className="admin-heading">
         <div>
-          <span className="platform-role-badge"><ShieldCheck size={ICON.xs} aria-hidden="true" />平台管理员</span>
+          <BadgePill tone="brand" className="platform-role-badge"><ShieldCheck size={ICON.xs} aria-hidden="true" />平台管理员</BadgePill>
           <p>为已核实身份的用户提供一次性密码重置链接。</p>
         </div>
         <span className="admin-heading-icon"><Users size={ICON.xl} /></span>

@@ -2,19 +2,11 @@
 
 @layer features {
   .platform-role-badge {
-    display: inline-flex;
-    align-items: center;
     gap: var(--space-1_5);
-    padding: var(--space-1_5) var(--space-2);
-    background: var(--lavender);
-    color: var(--brand-text);
-    border: 1px solid var(--border-strong);
+    padding: var(--space-1) var(--space-2);
     border-radius: var(--r-sm);
-    font-size: var(--font-xs);
     letter-spacing: 0;
     vertical-align: middle;
-    font-weight: 500;
-    white-space: nowrap;
   }
   .admin-profile-tag,
   .profile-tag.admin-profile-tag {
@@ -39,11 +31,6 @@
     justify-content: space-between;
     gap: var(--space-5);
   }
-  .admin-heading .eyebrow {
-    font-size: var(--font-sm);
-    letter-spacing: 1.6px;
-    color: var(--text-subtle);
-  }
   .admin-heading h2 {
     font-weight: 600;
     letter-spacing: -0.7px;
@@ -55,7 +42,7 @@
     font-size: var(--font-3xl);
   }
   .admin-heading > div > p {
-    line-height: 1.9;
+    line-height: var(--lh-relaxed);
     color: var(--text-muted);
     font-size: var(--font-base);
   }
@@ -88,13 +75,8 @@
   .admin-generate p {
     color: var(--text-subtle);
     margin-top: var(--space-1_5);
-    line-height: 1.8;
+    line-height: var(--lh-relaxed);
     font-size: var(--font-base);
-  }
-  .admin-generate .button {
-    font-size: var(--font-base);
-    min-height: 39px;
-    padding: var(--space-2_5) var(--space-3_5);
   }
   .created-invite {
     border: 1px solid var(--success-border);
@@ -123,7 +105,7 @@
     font-size: var(--font-sm);
   }
   .created-invite > p {
-    line-height: 1.9;
+    line-height: var(--lh-relaxed);
     color: var(--success-text);
     margin: var(--space-3) 0 var(--space-5);
     font-size: var(--font-base);
@@ -157,7 +139,7 @@
   .created-invite-footer > small {
     font-size: var(--font-sm);
     color: var(--success-text);
-    line-height: 1.8;
+    line-height: var(--lh-relaxed);
   }
   .created-invite-footer > button {
     display: flex;
@@ -220,7 +202,7 @@
     padding: var(--space-4) var(--space-5);
     border-bottom: 1px solid var(--border);
     color: var(--text-muted);
-    line-height: 1.6;
+    line-height: var(--lh-ui);
     font-size: var(--font-base);
   }
   .admin-invites-table tr:last-child td {
@@ -233,40 +215,18 @@
     display: block;
     color: var(--text-subtle);
     margin-top: var(--space-1_5);
-    line-height: 1.5;
+    line-height: var(--lh-ui);
     font-size: var(--font-sm);
   }
   .invite-status {
-    display: inline-flex;
-    align-items: center;
     gap: var(--space-1_5);
     padding: var(--space-1) var(--space-2);
-    border-radius: var(--r-xs);
-    font-size: var(--font-sm);
-    background: var(--lavender);
-    color: var(--text-subtle);
   }
   .invite-status i {
     width: 4px;
     height: 4px;
     border-radius: 50%;
     background: currentColor;
-  }
-  .invite-status.available {
-    color: var(--success-text);
-    background: var(--success-bg);
-  }
-  .invite-status.used {
-    color: var(--text-muted);
-    background: var(--lavender);
-  }
-  .invite-status.revoked {
-    color: var(--text-subtle);
-    background: var(--danger-bg);
-  }
-  .invite-status.expired {
-    color: var(--text-subtle);
-    background: var(--lavender);
   }
   .revoke-invite {
     display: inline-flex;
@@ -312,7 +272,7 @@
     color: var(--text-strong);
   }
   .admin-empty p {
-    line-height: 1.8;
+    line-height: var(--lh-relaxed);
     color: var(--text-subtle);
     font-size: var(--font-base);
   }
@@ -321,7 +281,7 @@
     align-items: center;
     gap: var(--space-1_5);
     margin-top: var(--space-5);
-    line-height: 1.8;
+    line-height: var(--lh-relaxed);
     font-size: var(--font-sm);
     color: var(--text-muted);
   }
@@ -381,10 +341,6 @@
   }
   .platform-user-search input:focus {
     box-shadow: none;
-  }
-  .platform-user-search > .button {
-    font-size: var(--font-base);
-    min-height: 44px;
   }
   .platform-user-list {
     border: 1px solid var(--border);
@@ -449,11 +405,6 @@
     gap: var(--space-5);
     flex-shrink: 0;
   }
-  .platform-user-actions .button {
-    min-height: 44px;
-    font-size: var(--font-base);
-    padding: var(--space-2_5) var(--space-3_5);
-  }
   .platform-user-role {
     color: var(--text-muted);
     font-size: var(--font-sm);
@@ -468,10 +419,6 @@
   .platform-users-pagination > span {
     font-size: var(--font-sm);
     color: var(--text-muted);
-  }
-  .platform-users-pagination > .button {
-    min-height: 44px;
-    font-size: var(--font-base);
   }
   .reset-target {
     margin: var(--space-2) 0 var(--space-5);

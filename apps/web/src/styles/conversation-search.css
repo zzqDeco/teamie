@@ -51,24 +51,8 @@
     height: 40px;
   }
   .search-modes {
-    display: flex;
-    gap: var(--space-1_5);
     margin-bottom: var(--space-3_5);
     flex: none;
-  }
-  .search-modes button {
-    min-height: 44px;
-    padding: var(--space-2) var(--space-5);
-    border: 0;
-    border-radius: var(--r-md);
-    background: transparent;
-    color: var(--text-muted);
-    cursor: pointer;
-    font: inherit;
-  }
-  .search-modes button[aria-pressed="true"] {
-    background: var(--lavender);
-    color: var(--brand-text);
   }
   .search-results {
     min-height: 160px;
@@ -119,7 +103,7 @@
     color: var(--text);
     font: inherit;
     font-size: var(--font-base);
-    line-height: 1.65;
+    line-height: var(--lh-body);
     white-space: normal;
     overflow-wrap: anywhere;
     text-align: left;

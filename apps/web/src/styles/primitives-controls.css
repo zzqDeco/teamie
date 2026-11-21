@@ -2,7 +2,7 @@
 
 @layer components {
   .button {
-    min-height: 40px;
+    min-height: var(--control-h-md);
     padding: var(--space-2) var(--space-4);
     border-radius: var(--r-md);
     background: var(--brand);
@@ -23,13 +23,13 @@
       box-shadow var(--dur-fast) var(--ease-standard);
   }
   .button.small-button {
-    min-height: 32px;
+    min-height: var(--control-h-sm);
     padding: var(--space-1_5) var(--space-3);
     font-size: var(--font-sm);
     gap: var(--space-1_5);
   }
   .button.large-button {
-    min-height: 48px;
+    min-height: var(--control-h-lg);
     padding: var(--space-3) var(--space-6);
     font-size: var(--font-base);
     gap: var(--space-2_5);
@@ -90,7 +90,7 @@
   @media (pointer: coarse) {
     .button,
     .button.small-button {
-      min-height: 44px;
+      min-height: var(--control-h-touch);
     }
   }
 
@@ -240,18 +240,24 @@
     border-radius: var(--r-md);
     background: var(--surface-sunken);
   }
+  .tabs-list.segmented {
+    padding: var(--space-1);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--surface-sunken);
+  }
   .tab-trigger {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: var(--space-1_5);
-    min-height: 36px;
+    min-height: var(--control-h-sm);
     padding: var(--space-1_5) var(--space-3_5);
     border-radius: var(--r-sm);
     border: 1px solid transparent;
     background: transparent;
     color: var(--text-muted);
-    font-size: var(--font-base);
+    font-size: var(--font-sm);
     font-weight: 500;
     cursor: pointer;
     transition:
@@ -259,7 +265,7 @@
       color var(--dur-fast) var(--ease-standard),
       border-color var(--dur-fast) var(--ease-standard);
   }
-  .tab-trigger:hover {
+  .tab-trigger:hover:not(:disabled) {
     color: var(--text-strong);
     background: var(--hover-bg);
   }
@@ -269,6 +275,148 @@
     border-color: var(--border-strong);
     font-weight: 600;
     box-shadow: var(--shadow-sm);
+  }
+  .tab-trigger:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .tabs-list.underline {
+    display: flex;
+    gap: var(--space-6);
+    padding: 0;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    border-radius: 0;
+    background: transparent;
+  }
+  .tabs-list.underline .tab-trigger {
+    position: relative;
+    min-height: var(--control-h-touch);
+    padding: 0 var(--space-1) var(--space-3);
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--text-subtle);
+    font-size: var(--font-base);
+    box-shadow: none;
+  }
+  .tabs-list.underline .tab-trigger:hover:not(:disabled) {
+    background: transparent;
+    color: var(--text-strong);
+  }
+  .tabs-list.underline .tab-trigger.active {
+    background: transparent;
+    color: var(--brand-text);
+    border: 0;
+    box-shadow: none;
+  }
+  .tabs-list.underline .tab-trigger.active::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -1px;
+    height: 2px;
+    background: var(--brand);
+    border-radius: var(--r-xs);
+  }
+
+  .page-tabs {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: 0 var(--space-7);
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    flex-shrink: 0;
+    overflow-x: auto;
+  }
+  .page-tabs > a {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1_5);
+    min-height: var(--control-h-touch);
+    padding: 0 var(--space-3);
+    font-size: var(--font-sm);
+    font-weight: 500;
+    color: var(--text-muted);
+    position: relative;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .page-tabs > a:hover {
+    color: var(--text-strong);
+  }
+  .page-tabs > a.active,
+  .page-tabs > a[aria-current="page"] {
+    color: var(--brand-text);
+    font-weight: 600;
+  }
+  .page-tabs > a.active::after,
+  .page-tabs > a[aria-current="page"]::after {
+    content: "";
+    position: absolute;
+    left: var(--space-3);
+    right: var(--space-3);
+    bottom: 0;
+    height: 2px;
+    background: var(--brand);
+    border-radius: var(--r-xs);
+  }
+
+  .menu {
+    position: absolute;
+    z-index: var(--z-popover);
+    padding: var(--space-1_5);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-md);
+    background: var(--surface);
+    box-shadow: var(--shadow-lg);
+  }
+  .menu-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2_5);
+    width: 100%;
+    min-height: var(--control-h-md);
+    padding: var(--space-2) var(--space-3);
+    border: 0;
+    border-radius: var(--r-sm);
+    background: transparent;
+    font-size: var(--font-base);
+    color: var(--text);
+    text-align: left;
+    cursor: pointer;
+    transition:
+      background var(--dur-fast) var(--ease-standard),
+      color var(--dur-fast) var(--ease-standard);
+  }
+  .menu-item:hover:not(:disabled) {
+    background: var(--hover-bg);
+    color: var(--text-strong);
+  }
+  .menu-item.active {
+    background: var(--selected-bg);
+    color: var(--brand-text);
+    font-weight: 600;
+  }
+  .menu-item.danger {
+    color: var(--danger-text);
+  }
+  .menu-item.danger:hover:not(:disabled) {
+    background: var(--danger-bg);
+    color: var(--danger-text);
+  }
+  .menu-separator {
+    height: 1px;
+    margin: var(--space-1) 0;
+    background: var(--border);
+  }
+  @media (pointer: coarse) {
+    .tab-trigger,
+    .menu-item {
+      min-height: var(--control-h-touch);
+    }
   }
 
   .notice.warning {

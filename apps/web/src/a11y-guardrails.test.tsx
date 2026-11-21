@@ -621,6 +621,9 @@ describe("PR-6 automated ESLint and Stylelint guardrails", () => {
         "  .sample-box {",
         "    color: #333333;",
         "    font-size: 13px;",
+        "    line-height: 1.5;",
+        "    transition-duration: 150ms;",
+        "    transition: opacity 0.15s ease;",
         "    padding: 12px;",
         "    z-index: 50;",
         "    outline: none;",
@@ -638,6 +641,7 @@ describe("PR-6 automated ESLint and Stylelint guardrails", () => {
     expect(rulesTriggered.has("scale-unlimited/declaration-strict-value")).toBe(true);
     expect(rulesTriggered.has("no-duplicate-selectors")).toBe(true);
     expect(rulesTriggered.has("teamie/no-features-outline-none")).toBe(true);
+    expect(rulesTriggered.has("teamie/strict-transition-duration")).toBe(true);
 
     const goodCss = await stylelint.lint({
       configFile,
@@ -647,6 +651,8 @@ describe("PR-6 automated ESLint and Stylelint guardrails", () => {
         "  .sample-handle {",
         "    color: var(--text);",
         "    font-size: var(--font-sm);",
+        "    line-height: var(--lh-ui);",
+        "    transition: opacity var(--dur-fast) var(--ease-standard), visibility 0s;",
         "    padding: var(--space-3);",
         "    z-index: var(--z-local);",
         "  }",

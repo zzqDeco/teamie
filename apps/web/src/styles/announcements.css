@@ -58,7 +58,7 @@
   }
 
   .announcement-markdown {
-    line-height: 1.65;
+    line-height: var(--lh-body);
     font-size: var(--font-base);
     color: var(--text);
     word-break: break-word;
@@ -190,36 +190,14 @@
   }
 
   .admin-announcement-tabs {
-    display: inline-flex;
-    gap: var(--space-1);
     padding: var(--space-0_5);
-    border-radius: var(--r-sm);
-    background: var(--lavender);
-  }
-
-  .admin-announcement-tabs button {
-    border: 0;
-    background: transparent;
-    padding: var(--space-1) var(--space-2_5);
-    border-radius: var(--r-sm);
-    font: inherit;
-    font-size: var(--font-sm);
-    font-weight: 600;
-    color: var(--text-muted);
-    cursor: pointer;
-  }
-
-  .admin-announcement-tabs button[aria-selected="true"] {
-    background: var(--surface);
-    color: var(--text-strong);
-    box-shadow: var(--shadow-sm);
   }
 
   .admin-announcement-composer textarea {
     min-height: 160px;
     resize: vertical;
     font-family: inherit;
-    line-height: 1.55;
+    line-height: var(--lh-ui);
   }
 
   .admin-announcement-preview {

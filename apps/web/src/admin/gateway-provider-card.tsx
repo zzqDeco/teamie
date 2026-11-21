@@ -4,7 +4,7 @@ import type {
   AdminModelProvider,
 } from "@teamie/api-client";
 import { AgentEnabledStatus } from "../agent-ui";
-import { Button } from "../ui";
+import { BadgePill, Button } from "../ui";
 import { ICON } from "../icons";
 import { GatewayModelCard } from "./model-last-test";
 import type { ModelTestOutcome } from "./model-last-test";
@@ -47,11 +47,11 @@ export function GatewayProviderCard({
             <b>{provider.displayName}</b>
             <code>{provider.id}</code>
             <AgentEnabledStatus enabled={provider.enabled} />
-            <span
-              className={`gateway-key-badge ${provider.hasApiKey ? "configured" : "missing"}`}
+            <BadgePill
+              tone={provider.hasApiKey ? "success" : "warning"}
             >
               {provider.hasApiKey ? "已配置密钥" : "缺少密钥"}
-            </span>
+            </BadgePill>
           </div>
           <small>
             地址：{provider.baseUrl || "未配置"} · 关联模型：{models.length} 个

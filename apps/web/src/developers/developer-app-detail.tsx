@@ -330,9 +330,9 @@ export function DeveloperAppDetail({
           </Link>
         </div>
         <div className="mp-header-actions">
-          <BadgePill className={status.className}>{status.label}</BadgePill>
+          <BadgePill tone={status.tone}>{status.label}</BadgePill>
           {app.publishedVersion > 0 && (
-            <BadgePill className="mp-badge-approved">已上架 v{app.publishedVersion}</BadgePill>
+            <BadgePill tone="success">已上架 v{app.publishedVersion}</BadgePill>
           )}
         </div>
       </div>

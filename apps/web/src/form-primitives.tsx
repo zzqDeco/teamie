@@ -51,6 +51,7 @@ export type TabItem<T extends string = string> = {
   disabled?: boolean;
   id?: string;
   controlsId?: string;
+  itemClassName?: string;
 };
 
 export function Tabs<T extends string>({
@@ -58,6 +59,8 @@ export function Tabs<T extends string>({
   value,
   onChange,
   ariaLabel,
+  variant = "segmented",
+  mode = "tabs",
   className = "",
   tabClassName = "",
 }: {
@@ -65,6 +68,8 @@ export function Tabs<T extends string>({
   value: T;
   onChange: (next: T) => void;
   ariaLabel: string;
+  variant?: "segmented" | "underline";
+  mode?: "tabs" | "group";
   className?: string;
   tabClassName?: string;
 }) {
@@ -93,6 +98,7 @@ export function Tabs<T extends string>({
     refs.current[targetIdx]?.focus();
   }
   function handleKeyDown(event: KeyboardEvent<HTMLButtonElement>, idx: number) {
+    if (mode !== "tabs") return;
     if (
       event.key === "ArrowRight" ||
       event.key === "ArrowLeft" ||
@@ -103,10 +109,11 @@ export function Tabs<T extends string>({
       moveFocus(idx, event.key);
     }
   }
+  const isTabs = mode === "tabs";
   return (
     <div
-      className={`tabs-list ${className}`.trim()}
-      role="tablist"
+      className={`tabs-list ${variant} ${className}`.trim()}
+      role={isTabs ? "tablist" : "group"}
       aria-label={ariaLabel}
     >
       {items.map((item, idx) => {
@@ -119,12 +126,13 @@ export function Tabs<T extends string>({
             }}
             id={item.id}
             type="button"
-            role="tab"
-            aria-selected={selected}
+            role={isTabs ? "tab" : undefined}
+            aria-selected={isTabs ? selected : undefined}
+            aria-pressed={!isTabs ? selected : undefined}
             aria-controls={item.controlsId}
-            tabIndex={selected ? 0 : -1}
+            tabIndex={isTabs ? (selected ? 0 : -1) : undefined}
             disabled={item.disabled}
-            className={`tab-trigger ${tabClassName} ${selected ? "active" : ""}`.trim()}
+            className={`tab-trigger ${tabClassName} ${item.itemClassName || ""} ${selected ? "active" : ""}`.trim()}
             onClick={() => onChange(item.value)}
             onKeyDown={(event) => handleKeyDown(event, idx)}
           >

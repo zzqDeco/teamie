@@ -6,7 +6,7 @@ import type {
 } from "@teamie/api-client";
 import { AgentEnabledStatus } from "../agent-ui";
 import { ICON } from "../icons";
-import { Button } from "../ui";
+import { BadgePill, Button } from "../ui";
 
 export type ModelTestOutcome = {
   ok: boolean;
@@ -186,22 +186,23 @@ export function GatewayModelCard({
           <b>{item.displayName}</b>
           <code>{item.id}</code>
           {item.isDefault && (
-            <span className="platform-role-badge">
+            <BadgePill tone="brand">
               <Star size={ICON.xs} />
               默认模型
-            </span>
+            </BadgePill>
           )}
           <AgentEnabledStatus enabled={item.enabled} />
           {item.enabled && !provider.enabled && (
             <span className="gateway-model-paused-hint">随服务商停用</span>
           )}
           {resolvedTest && (
-            <span
+            <BadgePill
+              tone={resolvedTest.ok ? "success" : "danger"}
               className={`gateway-model-test-badge ${resolvedTest.ok ? "ok" : "failed"}`}
             >
               {resolvedTest.ok ? "测试通过" : "测试失败"}
               {roundedLatency !== null ? ` · ${roundedLatency}ms` : ""}
-            </span>
+            </BadgePill>
           )}
         </div>
         {item.description && <p>{item.description}</p>}

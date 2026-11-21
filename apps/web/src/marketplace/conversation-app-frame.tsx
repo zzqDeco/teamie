@@ -180,7 +180,7 @@ export function ConversationAppFrame({
           <b>{app.name}</b>
           <small>· {app.slug}</small>
           {(app.servingDraft || session?.app.servingDraft) && (
-            <BadgePill className="mp-badge-draft">测试草稿</BadgePill>
+            <BadgePill tone="neutral">测试草稿</BadgePill>
           )}
         </span>
         <IconButton

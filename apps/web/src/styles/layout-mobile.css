@@ -73,12 +73,6 @@
       left: 0;
       display: none;
     }
-    .values {
-      padding-top: var(--space-8);
-      padding-bottom: var(--space-12);
-      margin-left: var(--space-6);
-      margin-right: var(--space-6);
-    }
     .landing-cta {
       margin: 0 var(--space-6) var(--space-8);
       gap: var(--space-5);
@@ -89,7 +83,6 @@
     }
     .landing-cta > .button {
       padding: var(--space-3) var(--space-4);
-      min-height: 38px;
     }
     .cta-decoration {
       right: -15px;
@@ -253,10 +246,12 @@
       margin-right: var(--space-5);
       margin: var(--space-5) var(--space-4);
     }
-    .members-pane {
-      width: 260px;
+    .side-pane {
       box-shadow: var(--shadow-lg);
-      z-index: var(--z-members-pane);
+      z-index: var(--z-side-pane);
+    }
+    .side-pane.members-pane {
+      width: 260px;
     }
     .sync-banner {
       gap: var(--space-1_5);
@@ -283,9 +278,6 @@
     }
     .welcome-view > footer {
       padding: var(--space-5);
-    }
-    .welcome-view .eyebrow {
-      font-size: var(--font-sm);
     }
     .settings-header {
       gap: var(--space-2);
@@ -400,7 +392,7 @@
       gap: var(--space-3);
     }
     .agent-enabled-switch small {
-      line-height: 1.6;
+      line-height: var(--lh-ui);
     }
     .agents-view {
       padding: var(--space-6) var(--space-4_5) max(var(--space-7), env(safe-area-inset-bottom));
@@ -454,18 +446,12 @@
       margin-top: var(--space-7);
       gap: var(--space-3_5);
     }
-    .admin-section-nav {
-      padding-left: var(--space-6);
-      padding-right: var(--space-6);
-      min-height: 41px;
+    .page-tabs {
       padding: 0 var(--space-4);
-      gap: var(--space-6);
-      overflow-x: auto;
+      gap: var(--space-2);
     }
-    .admin-section-nav > a {
-      padding-top: var(--space-3);
-      padding-bottom: var(--space-3);
-      min-height: 44px;
+    .page-tabs > a {
+      min-height: var(--control-h-touch);
       white-space: nowrap;
     }
     .gateway-saved-state {

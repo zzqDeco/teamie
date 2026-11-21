@@ -8,7 +8,7 @@ import { useChatState } from "./chat";
 import { errorText } from "./errors";
 import { chatStore, reconcileMessages } from "./store";
 import { AgentBadge } from "./agent-ui";
-import { Button, IconButton, Modal, Notice } from "./ui";
+import { Button, IconButton, Modal, Notice, Tabs } from "./ui";
 import { ICON } from "./icons";
 import { plainPreview, searchSnippet } from "./chat/plain-preview";
 import { formatDateTime } from "./format-datetime";
@@ -303,22 +303,17 @@ export function ConversationSearch({
     : [];
   return (
     <Modal title="搜索会话" onClose={onClose} className="conversation-search">
-      <div className="search-modes" role="group" aria-label="搜索范围">
-        <button
-          type="button"
-          aria-pressed={mode === "messages"}
-          onClick={() => setMode("messages")}
-        >
-          消息
-        </button>
-        <button
-          type="button"
-          aria-pressed={mode === "files"}
-          onClick={() => setMode("files")}
-        >
-          文件
-        </button>
-      </div>
+      <Tabs
+        mode="group"
+        className="search-modes"
+        ariaLabel="搜索范围"
+        value={mode}
+        onChange={setMode}
+        items={[
+          { value: "messages", label: "消息" },
+          { value: "files", label: "文件" },
+        ]}
+      />
       <form
         className="search-form"
         role="search"
