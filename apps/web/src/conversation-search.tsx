@@ -12,6 +12,7 @@ import { Button, IconButton, Modal, Notice, Tabs } from "./ui";
 import { ICON } from "./icons";
 import { plainPreview, searchSnippet } from "./chat/plain-preview";
 import { formatDateTime } from "./format-datetime";
+import { isComposingKey } from "./mentions";
 import "./styles/conversation-search.css";
 
 type SearchResult = MessagePage & {
@@ -247,7 +248,11 @@ export function ConversationSearch({
     );
   }
   function onInputKey(event: KeyboardEvent<HTMLInputElement>) {
-    if (event.key !== "ArrowDown" || event.nativeEvent.isComposing) return;
+    if (isComposingKey(event)) {
+      if (event.key === "Enter") event.preventDefault();
+      return;
+    }
+    if (event.key !== "ArrowDown") return;
     const first = resultButtons()[0];
     if (!first) return;
     event.preventDefault();

@@ -12,14 +12,12 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    width: 73px;
+    width: calc(73px + env(safe-area-inset-left));
     flex-shrink: 0;
     background: var(--rail);
-    padding: var(--space-5) var(--space-2_5) var(--space-3_5);
+    padding: max(var(--space-4), env(safe-area-inset-top)) var(--space-2_5) max(var(--space-3), env(safe-area-inset-bottom)) max(var(--space-2_5), env(safe-area-inset-left));
     border-right: 1px solid var(--border-strong);
     min-height: 0;
-    padding-top: max(16px, env(safe-area-inset-top));
-    padding-bottom: max(12px, env(safe-area-inset-bottom));
   }
   .rail-home {
     margin-bottom: var(--space-5);

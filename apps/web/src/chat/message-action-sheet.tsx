@@ -22,6 +22,7 @@ import {
   toggleMessageSave,
 } from "./collaboration-ui";
 import { messagePreviewText } from "./plain-preview";
+import { reactionAriaLabel } from "./emoji-recent";
 
 export type MessageSheetPermissions = {
   canReact: boolean;
@@ -101,7 +102,7 @@ export function MessageActionSheet({
               key={emoji}
               type="button"
               className="reaction-picker-emoji"
-              aria-label={`表情回应 ${emoji}`}
+              aria-label={reactionAriaLabel(emoji)}
               onClick={() => {
                 onClose();
                 onReact(emoji);

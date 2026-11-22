@@ -183,16 +183,56 @@ describe("full emoji panel", () => {
     expect(grid().getAttribute("aria-label")).toBe("最近使用");
     expect([...grid().querySelectorAll("button")].map((b) => b.textContent)).toEqual(["🚀"]);
     expect(grid().querySelector("button")!.classList.contains("active")).toBe(true);
+    expect(grid().querySelector("button")!.getAttribute("aria-pressed")).toBe("true");
+    expect(grid().querySelector("button")!.getAttribute("aria-label")).toBe("表情回应 火箭（🚀）");
     await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="动物与自然"]')!.click());
     expect(grid().getAttribute("aria-label")).toBe("动物与自然");
     expect(grid().textContent).toContain("🐙");
+
+    // Single roving tabIndex stop + 2D arrow-key grid navigation across rows
+    const gridButtons = [...grid().querySelectorAll<HTMLButtonElement>("button")];
+    expect(gridButtons.filter((b) => b.tabIndex === 0)).toHaveLength(1);
+    expect(gridButtons[0].tabIndex).toBe(0);
+    expect(gridButtons[0].getAttribute("aria-pressed")).toBe("false");
+    // Simulate a 4-column rendered grid via offsetTop so ArrowDown/ArrowUp move by 4.
+    gridButtons.forEach((btn, idx) => {
+      Object.defineProperty(btn, "offsetTop", { configurable: true, value: Math.floor(idx / 4) * 34 });
+    });
+    const scrollIntoViewSpy = vi.fn();
+    gridButtons[gridButtons.length - 1].scrollIntoView = scrollIntoViewSpy;
+    await act(async () => {
+      gridButtons[0].focus();
+      gridButtons[0].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    });
+    expect(document.activeElement).toBe(gridButtons[1]);
+    expect(gridButtons[1].tabIndex).toBe(0);
+    expect(gridButtons[0].tabIndex).toBe(-1);
+    await act(async () => {
+      gridButtons[1].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    });
+    expect(document.activeElement).toBe(gridButtons[5]);
+    await act(async () => {
+      gridButtons[5].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+    });
+    expect(document.activeElement).toBe(gridButtons[1]);
+    await act(async () => {
+      gridButtons[1].dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }));
+    });
+    expect(document.activeElement).toBe(gridButtons[gridButtons.length - 1]);
+    expect(scrollIntoViewSpy).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" });
+    await act(async () => {
+      gridButtons[gridButtons.length - 1].dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true }));
+    });
+    expect(document.activeElement).toBe(gridButtons[0]);
+
     const search = host.querySelector<HTMLInputElement>(".emoji-panel-search")!;
     await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(search, "party");
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(search, "庆祝");
       search.dispatchEvent(new Event("input", { bubbles: true }));
     });
     expect(grid().getAttribute("aria-label")).toBe("搜索结果");
     const party = [...grid().querySelectorAll("button")].find((b) => b.textContent === "🎉")!;
+    expect(party.getAttribute("aria-label")).toBe("表情回应 庆祝（🎉）");
     await act(async () => party.click());
     expect(onSelect).toHaveBeenCalledWith("🎉");
   });

@@ -408,10 +408,27 @@ describe("PR-6 timeline ARIA semantics", () => {
 
     const log = host.querySelector<HTMLElement>(".message-scroll")!;
     expect(log.getAttribute("role")).toBe("log");
-    expect(log.getAttribute("aria-live")).toBe("polite");
-    expect(log.getAttribute("aria-relevant")).toBe("additions");
+    expect(log.getAttribute("aria-live")).toBe("off");
+    expect(log.getAttribute("aria-relevant")).toBeNull();
     expect(log.getAttribute("aria-label")).toBe("消息历史");
     expect(log.getAttribute("aria-busy")).toBeNull();
+
+    // Dedicated polite live announcer (dual alternating slots) stays silent after initial load.
+    const announcer = host.querySelector<HTMLElement>("[data-message-live-announcer]")!;
+    expect(announcer.classList.contains("sr-only")).toBe(true);
+    const liveSlots = Array.from(announcer.querySelectorAll<HTMLElement>('[role="status"]'));
+    expect(liveSlots).toHaveLength(2);
+    for (const slot of liveSlots) {
+      expect(slot.getAttribute("aria-live")).toBe("polite");
+      expect(slot.getAttribute("aria-atomic")).toBe("true");
+      expect(slot.textContent).toBe("");
+    }
+    expect(announcer.textContent).toBe("");
+
+    // Typing indicator exposes polite live status region.
+    const typingRegion = host.querySelector<HTMLElement>(".composer-footer > span[role='status']")!;
+    expect(typingRegion.getAttribute("aria-live")).toBe("polite");
+    expect(typingRegion.getAttribute("aria-atomic")).toBe("true");
 
     // Date and unread dividers have role="separator"
     const dateDivider = host.querySelector<HTMLElement>(".date-divider")!;
@@ -440,13 +457,125 @@ describe("PR-6 timeline ARIA semantics", () => {
       expect(timeEl?.textContent?.trim().length).toBeGreaterThan(0);
     }
 
-    // Trigger loadingOlder and verify aria-busy="true" while pending
+    // Trigger loadingOlder and verify aria-busy="true" while pending, and announcer stays silent.
     const loadEarlierBtn = host.querySelector<HTMLButtonElement>(".load-earlier")!;
     await settle(() => loadEarlierBtn.click());
     expect(log.getAttribute("aria-busy")).toBe("true");
 
-    await settle(() => resolveEarlier({ messages: [], hasMore: false }));
+    await settle(() =>
+      resolveEarlier({
+        messages: [
+          {
+            id: "m0",
+            clientMessageId: "c0",
+            conversationId: channel.id,
+            senderId: "peer",
+            senderName: "周予",
+            senderKind: "human",
+            seq: 8,
+            body: "更早的历史消息",
+            createdAt: "2026-11-11T08:00:00Z",
+          },
+        ],
+        hasMore: false,
+      }),
+    );
     expect(log.getAttribute("aria-busy")).toBeNull();
+    expect(announcer.textContent).toBe("");
+
+    // Single incoming real-time message from another user is announced in plain text.
+    await settle(() =>
+      chatStore.merge([
+        {
+          id: "m4",
+          clientMessageId: "c4",
+          conversationId: channel.id,
+          senderId: "peer",
+          senderName: "周予",
+          senderKind: "human",
+          seq: 12,
+          body: "**重要** 请看 [文档](https://example.com)",
+          createdAt: "2026-11-12T08:03:00Z",
+        },
+      ]),
+    );
+    expect(announcer.textContent).toBe("周予：重要 请看 文档");
+    const firstActiveSlot = liveSlots.findIndex((s) => s.textContent === "周予：重要 请看 文档");
+    expect(firstActiveSlot).toBeGreaterThanOrEqual(0);
+
+    // Consecutive identical summary flips to the alternate persistent live region so AT re-announces it.
+    await settle(() =>
+      chatStore.merge([
+        {
+          id: "m4b",
+          clientMessageId: "c4b",
+          conversationId: channel.id,
+          senderId: "peer",
+          senderName: "周予",
+          senderKind: "human",
+          seq: 13,
+          body: "重要 请看 文档",
+          createdAt: "2026-11-12T08:03:30Z",
+        },
+      ]),
+    );
+    expect(announcer.textContent).toBe("周予：重要 请看 文档");
+    const secondActiveSlot = liveSlots.findIndex((s) => s.textContent === "周予：重要 请看 文档");
+    expect(secondActiveSlot).toBe(1 - firstActiveSlot);
+    expect(liveSlots[firstActiveSlot].textContent).toBe("");
+
+    // Own incoming message must not overwrite the live announcement.
+    await settle(() =>
+      chatStore.merge([
+        {
+          id: "m5",
+          clientMessageId: "c5",
+          conversationId: channel.id,
+          senderId: adminUser.id,
+          senderName: adminUser.displayName,
+          senderKind: "human",
+          seq: 14,
+          body: "我自己发的消息",
+          createdAt: "2026-11-12T08:04:00Z",
+        },
+      ]),
+    );
+    expect(announcer.textContent).toBe("周予：重要 请看 文档");
+
+    // Multi-message batch sync must stay silent instead of flooding screen readers.
+    await settle(() =>
+      chatStore.merge([
+        {
+          id: "m6",
+          clientMessageId: "c6",
+          conversationId: channel.id,
+          senderId: "peer",
+          senderName: "周予",
+          senderKind: "human",
+          seq: 15,
+          body: "断线重连第一条",
+          createdAt: "2026-11-12T08:05:00Z",
+        },
+        {
+          id: "m7",
+          clientMessageId: "c7",
+          conversationId: channel.id,
+          senderId: "peer",
+          senderName: "周予",
+          senderKind: "human",
+          seq: 16,
+          body: "断线重连第二条",
+          replyToId: "m5",
+          createdAt: "2026-11-12T08:06:00Z",
+        },
+      ]),
+    );
+    expect(announcer.textContent).toBe("周予：重要 请看 文档");
+
+    // Reply-to-me message exposes a non-color semantic badge ("回复你").
+    const replyRow = host.querySelector<HTMLElement>("#message-m7")!;
+    expect(replyRow.classList.contains("relevant-to-me")).toBe(true);
+    expect(replyRow.querySelector(".message-meta .badge-pill.tone-brand")?.textContent).toContain("回复你");
   });
 });
 
@@ -671,5 +800,25 @@ describe("PR-6 automated ESLint and Stylelint guardrails", () => {
     expect(conveniences).toMatch(
       /@layer\s+layout\s*\{\s*@media\s*\(hover:\s*none\),\s*\(pointer:\s*coarse\)\s*\{[\s\S]*?\.message-more-button\s*\{\s*display:\s*inline-flex;/,
     );
+
+    // PR 6 CSS guardrails: copy-input focus ring, reduced-motion located highlight,
+    // iOS 16px anti-zoom, coarse-pointer 44px targets, 12px resize hit area, safe areas.
+    const [primitives, timeline, marketplace, layoutMobile, layoutTablet] = await Promise.all([
+      fs.promises.readFile(path.join(WEB_ROOT, "src/styles/primitives.css"), "utf8"),
+      fs.promises.readFile(path.join(WEB_ROOT, "src/styles/timeline.css"), "utf8"),
+      fs.promises.readFile(path.join(WEB_ROOT, "src/styles/marketplace.css"), "utf8"),
+      fs.promises.readFile(path.join(WEB_ROOT, "src/styles/layout-mobile.css"), "utf8"),
+      fs.promises.readFile(path.join(WEB_ROOT, "src/styles/layout-tablet.css"), "utf8"),
+    ]);
+    expect(primitives).toMatch(/\.copy-input:focus-within\s*\{[\s\S]*?box-shadow:\s*var\(--focus-halo\)/);
+    expect(primitives).toMatch(/\.copy-input\s*>\s*input\s*\{[\s\S]*?flex:\s*1;/);
+    expect(timeline).toMatch(
+      /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.app-shell\s+\.message\.located\s*\{[\s\S]*?background:\s*var\(--selected-bg\)[\s\S]*?box-shadow:\s*inset 3px 0 0 var\(--brand\)/,
+    );
+    expect(marketplace).toMatch(/\.mp-resize-handle\s*\{[\s\S]*?width:\s*12px;/);
+    expect(layoutMobile).toMatch(/@media\s*\(max-width:\s*780px\),\s*\(pointer:\s*coarse\)\s*\{[\s\S]*?\.edit-message textarea[\s\S]*?font-size:\s*var\(--font-subhead\)/);
+    expect(layoutTablet).toMatch(/@media\s*\(pointer:\s*coarse\)\s*\{[\s\S]*?\.icon-button[\s\S]*?min-width:\s*var\(--control-h-touch\)/);
+    expect(layoutMobile).toContain("env(safe-area-inset-left)");
+    expect(layoutMobile).toContain("env(safe-area-inset-right)");
   });
 });

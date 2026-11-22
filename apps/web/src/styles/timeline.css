@@ -59,6 +59,8 @@
   @media (prefers-reduced-motion: reduce) {
     .app-shell .message.located {
       animation: none;
+      background: var(--selected-bg);
+      box-shadow: inset 3px 0 0 var(--brand);
     }
   }
   .history-sentinel {

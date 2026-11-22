@@ -44,6 +44,23 @@ export function recordRecentReaction(userId: string, emoji: string) {
   }
 }
 
+const COMMON_EMOJI_LABELS: Record<string, string> = {
+  "👍": "点赞",
+  "🎉": "庆祝",
+  "❤️": "红心",
+  "🔥": "火焰",
+  "👀": "围观",
+  "😂": "笑哭",
+  "🚀": "火箭",
+  "👏": "鼓掌",
+};
+
+/** Accessible label for reaction buttons, combining a readable name and glyph. */
+export function reactionAriaLabel(emoji: string, label?: string): string {
+  const name = label || COMMON_EMOJI_LABELS[emoji];
+  return name ? `表情回应 ${name}（${emoji}）` : `表情回应 ${emoji}`;
+}
+
 /** Recents that pass the contract allowlist (empty until the catalog loads). */
 export function validRecentReactions(userId: string, current = loaded): string[] {
   if (!current) return [];

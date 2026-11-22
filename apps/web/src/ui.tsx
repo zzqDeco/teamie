@@ -13,6 +13,7 @@ import { LoaderCircle, X } from "lucide-react";
 import { Link } from "react-router-dom";
 import { ICON } from "./icons";
 import { formatDateTime } from "./format-datetime";
+import { applyInertOutside } from "./a11y";
 export function Logo({ compact = false }: { compact?: boolean }) {
   return (
     <span className="brand">
@@ -329,9 +330,10 @@ export function useOverlayFocus(
   ref: RefObject<HTMLElement | null>,
   active: boolean,
   onClose: () => void,
-  { preferFormField = false, fallbackFocus }: {
+  { preferFormField = false, fallbackFocus, inertContainerRef }: {
     preferFormField?: boolean;
     fallbackFocus?: () => HTMLElement | null | undefined;
+    inertContainerRef?: RefObject<HTMLElement | null>;
   } = {},
 ) {
   const onCloseRef = useRef(onClose);
@@ -345,6 +347,9 @@ export function useOverlayFocus(
     const previous = document.activeElement as HTMLElement | null;
     const node = ref.current;
     if (!node) return;
+    const releaseInert = inertContainerRef
+      ? applyInertOutside(inertContainerRef.current)
+      : null;
     const entry: OverlayEntry = { node, order: ++overlayOrder };
     overlayStack.push(entry);
     const focusables = () =>
@@ -359,8 +364,14 @@ export function useOverlayFocus(
     const fields = preferFormField
       ? Array.from(node.querySelectorAll<HTMLElement>(FORM_FIELD_SELECTOR))
       : [];
-    if (!focusFirst([autoFocusTarget, ...fields, focusables()[0]]))
+    const isCoarsePointer = Boolean(
+      window.matchMedia?.("(pointer: coarse)")?.matches,
+    );
+    if (isCoarsePointer && preferFormField) {
       node.focus({ preventScroll: true });
+    } else if (!focusFirst([autoFocusTarget, ...fields, focusables()[0]])) {
+      node.focus({ preventScroll: true });
+    }
     function handle(event: KeyboardEvent) {
       if (!isTopOverlay(entry)) return;
       if (event.key === "Escape") {
@@ -402,9 +413,10 @@ export function useOverlayFocus(
       document.removeEventListener("focusin", contain);
       const index = overlayStack.indexOf(entry);
       if (index >= 0) overlayStack.splice(index, 1);
+      releaseInert?.();
       if (!focusFirst([previous])) focusFirst([fallbackFocusRef.current?.()]);
     };
-  }, [active, preferFormField, ref]);
+  }, [active, inertContainerRef, preferFormField, ref]);
 }
 const ModalCloseContext = createContext<(() => void) | null>(null);
 /**
@@ -457,6 +469,7 @@ export function Modal({
   dirty?: boolean;
   discardMessage?: string;
 }) {
+  const backdropRef = useRef<HTMLDivElement>(null);
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const subtitleId = useId();
@@ -506,9 +519,13 @@ export function Modal({
       ?.querySelector<HTMLElement>("[data-discard-keep]")
       ?.focus();
   }, [confirmingDiscard]);
-  useOverlayFocus(ref, true, requestClose, { preferFormField: true });
+  useOverlayFocus(ref, true, requestClose, {
+    preferFormField: true,
+    inertContainerRef: backdropRef,
+  });
   return (
     <div
+      ref={backdropRef}
       className="modal-backdrop"
       role="presentation"
       onMouseDown={(event) => {

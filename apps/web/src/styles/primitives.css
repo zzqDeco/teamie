@@ -308,8 +308,16 @@
     border-radius: var(--r-md);
     overflow: hidden;
     min-width: 0;
+    transition:
+      border-color var(--dur-fast) var(--ease-standard),
+      box-shadow var(--dur-fast) var(--ease-standard);
+  }
+  .copy-input:focus-within {
+    border-color: var(--brand-text);
+    box-shadow: var(--focus-halo);
   }
   .copy-input > input {
+    flex: 1;
     border: 0;
     background: transparent;
     box-shadow: none;
@@ -337,6 +345,9 @@
   }
   .copy-input > button:hover {
     background: var(--hover-bg);
+  }
+  .copy-input > button:focus-visible {
+    outline-offset: -2px;
   }
   .modal label {
     font-size: var(--font-base);

@@ -6,7 +6,12 @@ import type { Message } from "@teamie/api-client";
 import { COMMON_REACTION_EMOJIS } from "../engagement-store";
 import { ICON } from "../icons";
 import { EmojiPanel } from "./emoji-panel";
-import { loadEmojiCatalog, loadedEmojiCatalog, validRecentReactions } from "./emoji-recent";
+import {
+  loadEmojiCatalog,
+  loadedEmojiCatalog,
+  reactionAriaLabel,
+  validRecentReactions,
+} from "./emoji-recent";
 
 export function ReactionPicker({
   anchorRef,
@@ -117,52 +122,83 @@ export function ReactionPicker({
   }, [anchorRef, onClose]);
 
   return createPortal(
+    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- keyboard scoping for dialog popover
     <div
       ref={menuRef}
       className={`reaction-picker-popover ${expanded ? "expanded" : ""}`}
-      role={expanded ? "dialog" : "menu"}
+      role="dialog"
       aria-label="选择表情回应"
+      tabIndex={-1}
       onKeyDown={(event) => {
         // Portal events still bubble through the message's React tree.
         event.stopPropagation();
-        const buttons = Array.from(event.currentTarget.querySelectorAll("button"));
-        if ((event.target as HTMLElement).tagName === "INPUT") {
+        const target = event.target as HTMLElement;
+        if (target.tagName === "INPUT") {
           if (event.key === "ArrowDown") {
             event.preventDefault();
-            event.currentTarget
-              .querySelector<HTMLButtonElement>(".emoji-panel-grid button")
-              ?.focus({ preventScroll: true });
+            const targetBtn =
+              event.currentTarget.querySelector<HTMLButtonElement>(
+                '.emoji-panel-grid button[tabindex="0"]',
+              ) ??
+              event.currentTarget.querySelector<HTMLButtonElement>(
+                ".emoji-panel-grid button",
+              );
+            targetBtn?.focus({ preventScroll: true });
+            targetBtn?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
           }
           return;
         }
+        if (target.closest(".emoji-panel")) {
+          return;
+        }
+        const buttons = Array.from(
+          event.currentTarget.querySelectorAll<HTMLButtonElement>(
+            ".reaction-picker-quick button",
+          ),
+        );
         const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
         let next: number;
         switch (event.key) {
-          case "ArrowRight": case "ArrowDown": next = (index + 1) % buttons.length; break;
-          case "ArrowLeft": case "ArrowUp": next = (index - 1 + buttons.length) % buttons.length; break;
-          case "Home": next = 0; break;
-          case "End": next = buttons.length - 1; break;
+          case "ArrowRight":
+          case "ArrowDown":
+            if (expanded && event.key === "ArrowDown") return;
+            next = (index + 1) % buttons.length;
+            break;
+          case "ArrowLeft":
+          case "ArrowUp":
+            if (expanded && event.key === "ArrowUp") return;
+            next = (index - 1 + buttons.length) % buttons.length;
+            break;
+          case "Home":
+            next = 0;
+            break;
+          case "End":
+            next = buttons.length - 1;
+            break;
           case "Tab":
             if (expanded) return;
             anchorRef.current?.querySelector("button")?.focus({ preventScroll: true });
             onClose();
             return;
-          default: return;
+          default:
+            return;
         }
         event.preventDefault();
         buttons[next]?.focus({ preventScroll: true });
       }}
     >
-      <div className="reaction-picker-quick" role="none">
+      <div className="reaction-picker-quick" role="group" aria-label="快捷表情">
         {quick.map((emoji) => {
           const active = !!reactions?.find((item) => item.emoji === emoji)?.userIds.includes(userId);
+          const label = catalog?.emojiLabel(emoji);
           return (
             <button
               key={emoji}
               type="button"
-              role={expanded ? undefined : "menuitem"}
               className={`reaction-picker-emoji ${active ? "active" : ""}`}
-              aria-label={`表情回应 ${emoji}`}
+              aria-pressed={active}
+              aria-label={reactionAriaLabel(emoji, label)}
+              title={label || undefined}
               onClick={() => select(emoji)}
             >
               {emoji}
@@ -172,24 +208,32 @@ export function ReactionPicker({
         {!expanded && (
           <button
             type="button"
-            role="menuitem"
             className="reaction-picker-emoji reaction-picker-more"
             aria-label="更多表情"
             title="更多表情"
             onClick={() => {
               setExpanded(true);
-              requestAnimationFrame(() =>
-                menuRef.current
-                  ?.querySelector<HTMLInputElement>(".emoji-panel-search, .emoji-panel button")
-                  ?.focus({ preventScroll: true }),
-              );
+              requestAnimationFrame(() => {
+                const search = menuRef.current?.querySelector<HTMLInputElement>(
+                  ".emoji-panel-search",
+                );
+                if (search) search.focus({ preventScroll: true });
+                else menuRef.current?.focus({ preventScroll: true });
+              });
             }}
           >
             <Plus size={ICON.sm} />
           </button>
         )}
       </div>
-      {expanded && <EmojiPanel userId={userId} reactions={reactions} onSelect={select} />}
+      {expanded && (
+        <EmojiPanel
+          userId={userId}
+          reactions={reactions}
+          onSelect={select}
+          autoFocusSearch
+        />
+      )}
     </div>,
     document.body,
   );

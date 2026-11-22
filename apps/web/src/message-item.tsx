@@ -24,7 +24,7 @@ import { ReactionPicker } from "./chat/reaction-picker";
 import { MentionInput } from "./mentions";
 import { MessageAttachments } from "./attachments";
 import { MessageBody } from "./markdown";
-import { Avatar, Button, date, IconButton, Notice, time } from "./ui";
+import { Avatar, BadgePill, Button, date, IconButton, Notice, time } from "./ui";
 import { formatDateTime } from "./format-datetime";
 import { ReactionChips } from "./chat/reaction-chips";
 import { MessageSendStatus } from "./chat/message-send-status";
@@ -185,11 +185,15 @@ export const MessageItem = memo(function MessageItem({
   const [sheetOpen, setSheetOpen] = useState(false);
   const isOwn = message.senderId === userId;
   // Rows addressed to me (mention, addressed broadcast, or reply to my message).
-  const relevantToMe =
+  const mentionedMe =
+    !isOwn && !message.retractedAt && isUserMentioned(message.mentions, userId);
+  const repliedToMe =
     !isOwn &&
     !message.retractedAt &&
-    (isUserMentioned(message.mentions, userId) ||
-      (!!target && !target.retractedAt && target.senderId === userId));
+    !!target &&
+    !target.retractedAt &&
+    target.senderId === userId;
+  const relevantToMe = mentionedMe || repliedToMe;
   const canOpenSheet = !message.retractedAt && !message.status && editing?.id !== message.id;
   const longPress = useLongPress<HTMLElement>(() => setSheetOpen(true), {
     enabled: canOpenSheet,
@@ -364,18 +368,30 @@ export const MessageItem = memo(function MessageItem({
                 isPinned={isPinned}
                 isSaved={isSaved}
               />
+              {repliedToMe && (
+                <BadgePill tone="brand">
+                  <CornerUpLeft size={ICON.xs} aria-hidden="true" />
+                  回复你
+                </BadgePill>
+              )}
             </div>
           ) : (
             <>
               <span id={senderElId} className="sr-only">
                 {message.senderName}
               </span>
-              {(isPinned || isSaved) && (
+              {(isPinned || isSaved || repliedToMe) && (
                 <div className="message-meta">
                   <MessageCollaborationIndicators
                     isPinned={isPinned}
                     isSaved={isSaved}
                   />
+                  {repliedToMe && (
+                    <BadgePill tone="brand">
+                      <CornerUpLeft size={ICON.xs} aria-hidden="true" />
+                      回复你
+                    </BadgePill>
+                  )}
                 </div>
               )}
             </>
@@ -533,7 +549,7 @@ export const MessageItem = memo(function MessageItem({
                       label="添加表情回应"
                       tabIndex={actionTabIndex}
                       aria-expanded={pickerOpen}
-                      aria-haspopup="menu"
+                      aria-haspopup="dialog"
                       disabled={reactionBusy}
                       onClick={() => setPickerOpen((open) => !open)}
                     >
