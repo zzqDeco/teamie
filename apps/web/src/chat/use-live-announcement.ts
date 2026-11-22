@@ -4,6 +4,11 @@ import { plainPreview } from "./plain-preview";
 
 const MAX_ANNOUNCEMENT_CHARS = 120;
 
+export type LiveMessageAnnouncement = {
+  text: string;
+  slot: 0 | 1;
+};
+
 function formatLiveMessageSummary(message: LocalMessage): string {
   const raw =
     plainPreview(message.body) ||
@@ -22,9 +27,10 @@ function formatLiveMessageSummary(message: LocalMessage): string {
 
 /**
  * Produces polite screen-reader announcements exclusively for single real-time
- * incoming messages from other participants. Initial loads, conversation
- * switches, older history pages, located-context jumps, own messages, and
- * multi-message reconnect sync batches stay silent to avoid flooding AT.
+ * incoming messages from other participants. Alternates between two persistent
+ * live-region slots so consecutive messages with identical summaries (e.g.,
+ * repeated short replies or attachment-only messages) still trigger a fresh
+ * announcement in screen readers.
  */
 export function useLiveMessageAnnouncement({
   conversationId,
@@ -40,8 +46,11 @@ export function useLiveMessageAnnouncement({
   loading: boolean;
   locating: boolean;
   located: boolean;
-}): string {
-  const [announcement, setAnnouncement] = useState("");
+}): LiveMessageAnnouncement {
+  const [announcement, setAnnouncement] = useState<LiveMessageAnnouncement>({
+    text: "",
+    slot: 0,
+  });
   const stateRef = useRef<{
     conversationId: string;
     ready: boolean;
@@ -63,7 +72,7 @@ export function useLiveMessageAnnouncement({
         maxSeq: 0,
         knownIds: new Set(),
       };
-      setAnnouncement("");
+      setAnnouncement({ text: "", slot: 0 });
     }
     const current = stateRef.current;
 
@@ -96,7 +105,11 @@ export function useLiveMessageAnnouncement({
     for (const msg of messages) current.knownIds.add(msg.id);
 
     if (added.length === 1 && added[0]!.senderId !== userId) {
-      setAnnouncement(formatLiveMessageSummary(added[0]!));
+      const nextText = formatLiveMessageSummary(added[0]!);
+      setAnnouncement((last) => ({
+        text: nextText,
+        slot: last.slot === 0 ? 1 : 0,
+      }));
     }
   }, [conversationId, messages, userId, loading, locating, located]);
 

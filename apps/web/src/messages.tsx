@@ -623,8 +623,13 @@ export function ConversationView({
           <div className="message-end" />
         </div>
       </div>
-      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true" data-message-live-announcer="">
-        {liveAnnouncement}
+      <div className="sr-only" data-message-live-announcer="">
+        <div role="status" aria-live="polite" aria-atomic="true">
+          {liveAnnouncement.slot === 0 ? liveAnnouncement.text : ""}
+        </div>
+        <div role="status" aria-live="polite" aria-atomic="true">
+          {liveAnnouncement.slot === 1 ? liveAnnouncement.text : ""}
+        </div>
       </div>
       {!atBottom && !located && !locating && (
         <JumpLatestButton

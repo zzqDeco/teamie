@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, useState } from "react";
+import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
@@ -277,37 +278,56 @@ describe("Modal dismissal", () => {
   });
 
   it("isolates background siblings with ref-counted inert across nested modals and focuses dialog container on coarse pointers", async () => {
-    function Harness({ outer, inner }: { outer: boolean; inner: boolean }) {
+    function Harness({
+      outer,
+      inner,
+      portaled = false,
+    }: {
+      outer: boolean;
+      inner: boolean;
+      portaled?: boolean;
+    }) {
       return (
-        <div>
-          <button id="bg-trigger" type="button">触发按钮</button>
-          {outer && (
-            <Modal title="外层弹窗" onClose={() => {}}>
-              <input name="outer-field" />
-              {inner && (
-                <Modal title="内层确认" onClose={() => {}}>
-                  <Button variant="secondary">好的</Button>
-                </Modal>
+        <>
+          <div id="app-content">
+            <button id="bg-trigger" type="button">触发按钮</button>
+            {outer && !portaled && (
+              <Modal title="外层弹窗" onClose={() => {}}>
+                <input name="outer-field" />
+                {inner && (
+                  <Modal title="内层确认" onClose={() => {}}>
+                    <Button variant="secondary">好的</Button>
+                  </Modal>
+                )}
+              </Modal>
+            )}
+            {outer &&
+              portaled &&
+              createPortal(
+                <Modal title="传送门弹窗" onClose={() => {}}>
+                  <Button variant="secondary">关闭</Button>
+                </Modal>,
+                document.body,
               )}
-            </Modal>
-          )}
-        </div>
+          </div>
+          <Toaster />
+        </>
       );
     }
 
     await render(<Harness outer={false} inner={false} />);
     const liveBanner = document.createElement("div");
     liveBanner.className = "sr-only connection-live-region";
-    const toastRegion = document.createElement("div");
-    toastRegion.className = "toast-region";
-    document.body.append(liveBanner, toastRegion);
+    document.body.append(liveBanner);
     const trigger = find<HTMLButtonElement>("#bg-trigger");
+    const toaster = find<HTMLElement>(".toaster");
     trigger.focus();
     try {
       await render(<Harness outer inner={false} />);
       expect(trigger.hasAttribute("inert")).toBe(true);
       expect(liveBanner.hasAttribute("inert")).toBe(false);
-      expect(toastRegion.hasAttribute("inert")).toBe(false);
+      expect(toaster.hasAttribute("inert")).toBe(false);
+      expect(toaster.closest("[inert]")).toBeNull();
 
       // Opening nested modal keeps background inert after inner modal closes.
       await render(<Harness outer inner />);
@@ -322,9 +342,17 @@ describe("Modal dismissal", () => {
       await render(<Harness outer={false} inner={false} />);
       expect(trigger.hasAttribute("inert")).toBe(false);
       expect(document.activeElement).toBe(trigger);
+
+      // Portaled modal isolates #app-content while still keeping sibling <Toaster /> non-inert.
+      await render(<Harness outer inner={false} portaled />);
+      expect(find("#app-content").hasAttribute("inert")).toBe(true);
+      expect(toaster.hasAttribute("inert")).toBe(false);
+      expect(toaster.closest("[inert]")).toBeNull();
+      expect(liveBanner.hasAttribute("inert")).toBe(false);
+      await render(<Harness outer={false} inner={false} />);
+      expect(find("#app-content").hasAttribute("inert")).toBe(false);
     } finally {
       liveBanner.remove();
-      toastRegion.remove();
     }
 
     // Coarse pointer focuses dialog container instead of popping up soft keyboard on form input.

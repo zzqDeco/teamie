@@ -413,12 +413,16 @@ describe("PR-6 timeline ARIA semantics", () => {
     expect(log.getAttribute("aria-label")).toBe("消息历史");
     expect(log.getAttribute("aria-busy")).toBeNull();
 
-    // Dedicated polite live announcer stays silent after initial load.
+    // Dedicated polite live announcer (dual alternating slots) stays silent after initial load.
     const announcer = host.querySelector<HTMLElement>("[data-message-live-announcer]")!;
     expect(announcer.classList.contains("sr-only")).toBe(true);
-    expect(announcer.getAttribute("role")).toBe("status");
-    expect(announcer.getAttribute("aria-live")).toBe("polite");
-    expect(announcer.getAttribute("aria-atomic")).toBe("true");
+    const liveSlots = Array.from(announcer.querySelectorAll<HTMLElement>('[role="status"]'));
+    expect(liveSlots).toHaveLength(2);
+    for (const slot of liveSlots) {
+      expect(slot.getAttribute("aria-live")).toBe("polite");
+      expect(slot.getAttribute("aria-atomic")).toBe("true");
+      expect(slot.textContent).toBe("");
+    }
     expect(announcer.textContent).toBe("");
 
     // Typing indicator exposes polite live status region.
@@ -496,6 +500,29 @@ describe("PR-6 timeline ARIA semantics", () => {
       ]),
     );
     expect(announcer.textContent).toBe("周予：重要 请看 文档");
+    const firstActiveSlot = liveSlots.findIndex((s) => s.textContent === "周予：重要 请看 文档");
+    expect(firstActiveSlot).toBeGreaterThanOrEqual(0);
+
+    // Consecutive identical summary flips to the alternate persistent live region so AT re-announces it.
+    await settle(() =>
+      chatStore.merge([
+        {
+          id: "m4b",
+          clientMessageId: "c4b",
+          conversationId: channel.id,
+          senderId: "peer",
+          senderName: "周予",
+          senderKind: "human",
+          seq: 13,
+          body: "重要 请看 文档",
+          createdAt: "2026-11-12T08:03:30Z",
+        },
+      ]),
+    );
+    expect(announcer.textContent).toBe("周予：重要 请看 文档");
+    const secondActiveSlot = liveSlots.findIndex((s) => s.textContent === "周予：重要 请看 文档");
+    expect(secondActiveSlot).toBe(1 - firstActiveSlot);
+    expect(liveSlots[firstActiveSlot].textContent).toBe("");
 
     // Own incoming message must not overwrite the live announcement.
     await settle(() =>
@@ -507,7 +534,7 @@ describe("PR-6 timeline ARIA semantics", () => {
           senderId: adminUser.id,
           senderName: adminUser.displayName,
           senderKind: "human",
-          seq: 13,
+          seq: 14,
           body: "我自己发的消息",
           createdAt: "2026-11-12T08:04:00Z",
         },
@@ -525,7 +552,7 @@ describe("PR-6 timeline ARIA semantics", () => {
           senderId: "peer",
           senderName: "周予",
           senderKind: "human",
-          seq: 14,
+          seq: 15,
           body: "断线重连第一条",
           createdAt: "2026-11-12T08:05:00Z",
         },
@@ -536,7 +563,7 @@ describe("PR-6 timeline ARIA semantics", () => {
           senderId: "peer",
           senderName: "周予",
           senderKind: "human",
-          seq: 15,
+          seq: 16,
           body: "断线重连第二条",
           replyToId: "m5",
           createdAt: "2026-11-12T08:06:00Z",
