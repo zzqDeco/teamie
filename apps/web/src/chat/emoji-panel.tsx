@@ -231,7 +231,9 @@ export function EmojiPanel({
     event.preventDefault();
     event.stopPropagation();
     setActiveIndex(next);
-    buttons[next]?.focus({ preventScroll: true });
+    const target = buttons[next];
+    target?.focus({ preventScroll: true });
+    target?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   }
 
   return (

@@ -26,7 +26,12 @@ export function applyInertOutside(container: HTMLElement | null): () => void {
     for (const child of Array.from(parent.children)) {
       if (!(child instanceof HTMLElement) || child === current) continue;
       if (IGNORED_TAGS.has(child.tagName)) continue;
-      if (child.classList.contains("toast-region")) continue;
+      if (
+        child.classList.contains("toast-region") ||
+        child.classList.contains("connection-live-region")
+      ) {
+        continue;
+      }
       const existing = inertRefs.get(child);
       if (existing) {
         existing.count += 1;

@@ -144,6 +144,7 @@ export function ReactionPicker({
                 ".emoji-panel-grid button",
               );
             targetBtn?.focus({ preventScroll: true });
+            targetBtn?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
           }
           return;
         }

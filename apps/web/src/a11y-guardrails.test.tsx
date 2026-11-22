@@ -408,7 +408,7 @@ describe("PR-6 timeline ARIA semantics", () => {
 
     const log = host.querySelector<HTMLElement>(".message-scroll")!;
     expect(log.getAttribute("role")).toBe("log");
-    expect(log.getAttribute("aria-live")).toBeNull();
+    expect(log.getAttribute("aria-live")).toBe("off");
     expect(log.getAttribute("aria-relevant")).toBeNull();
     expect(log.getAttribute("aria-label")).toBe("消息历史");
     expect(log.getAttribute("aria-busy")).toBeNull();

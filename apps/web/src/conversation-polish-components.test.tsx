@@ -198,6 +198,8 @@ describe("full emoji panel", () => {
     gridButtons.forEach((btn, idx) => {
       Object.defineProperty(btn, "offsetTop", { configurable: true, value: Math.floor(idx / 4) * 34 });
     });
+    const scrollIntoViewSpy = vi.fn();
+    gridButtons[gridButtons.length - 1].scrollIntoView = scrollIntoViewSpy;
     await act(async () => {
       gridButtons[0].focus();
       gridButtons[0].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
@@ -217,6 +219,7 @@ describe("full emoji panel", () => {
       gridButtons[1].dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }));
     });
     expect(document.activeElement).toBe(gridButtons[gridButtons.length - 1]);
+    expect(scrollIntoViewSpy).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" });
     await act(async () => {
       gridButtons[gridButtons.length - 1].dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true }));
     });

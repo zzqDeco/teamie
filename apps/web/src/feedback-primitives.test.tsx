@@ -296,24 +296,36 @@ describe("Modal dismissal", () => {
     }
 
     await render(<Harness outer={false} inner={false} />);
+    const liveBanner = document.createElement("div");
+    liveBanner.className = "sr-only connection-live-region";
+    const toastRegion = document.createElement("div");
+    toastRegion.className = "toast-region";
+    document.body.append(liveBanner, toastRegion);
     const trigger = find<HTMLButtonElement>("#bg-trigger");
     trigger.focus();
-    await render(<Harness outer inner={false} />);
-    expect(trigger.hasAttribute("inert")).toBe(true);
+    try {
+      await render(<Harness outer inner={false} />);
+      expect(trigger.hasAttribute("inert")).toBe(true);
+      expect(liveBanner.hasAttribute("inert")).toBe(false);
+      expect(toastRegion.hasAttribute("inert")).toBe(false);
 
-    // Opening nested modal keeps background inert after inner modal closes.
-    await render(<Harness outer inner />);
-    expect(trigger.hasAttribute("inert")).toBe(true);
-    expect(find<HTMLInputElement>('input[name="outer-field"]').hasAttribute("inert")).toBe(true);
+      // Opening nested modal keeps background inert after inner modal closes.
+      await render(<Harness outer inner />);
+      expect(trigger.hasAttribute("inert")).toBe(true);
+      expect(find<HTMLInputElement>('input[name="outer-field"]').hasAttribute("inert")).toBe(true);
 
-    await render(<Harness outer inner={false} />);
-    expect(find<HTMLInputElement>('input[name="outer-field"]').hasAttribute("inert")).toBe(false);
-    expect(trigger.hasAttribute("inert")).toBe(true);
+      await render(<Harness outer inner={false} />);
+      expect(find<HTMLInputElement>('input[name="outer-field"]').hasAttribute("inert")).toBe(false);
+      expect(trigger.hasAttribute("inert")).toBe(true);
 
-    // Closing outer modal releases inert BEFORE restoring focus to trigger.
-    await render(<Harness outer={false} inner={false} />);
-    expect(trigger.hasAttribute("inert")).toBe(false);
-    expect(document.activeElement).toBe(trigger);
+      // Closing outer modal releases inert BEFORE restoring focus to trigger.
+      await render(<Harness outer={false} inner={false} />);
+      expect(trigger.hasAttribute("inert")).toBe(false);
+      expect(document.activeElement).toBe(trigger);
+    } finally {
+      liveBanner.remove();
+      toastRegion.remove();
+    }
 
     // Coarse pointer focuses dialog container instead of popping up soft keyboard on form input.
     const originalMatchMedia = window.matchMedia;

@@ -517,6 +517,7 @@ export function ConversationView({
         className="message-scroll"
         ref={scrollRef}
         role="log"
+        aria-live="off"
         aria-label="消息历史"
         aria-busy={loading || loadingOlder || loadingNewer || undefined}
         onScroll={(event) => {
