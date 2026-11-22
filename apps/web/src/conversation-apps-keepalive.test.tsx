@@ -689,9 +689,10 @@ describe("Browser-style group app tabs & cross-group zero-reload keep-alive (Iss
     expect(f3.isConnected).toBe(true);
     expect(container.querySelectorAll("iframe.mp-iframe").length).toBe(2);
     expect(container.querySelectorAll('[role="tab"]').length).toBe(3);
-    expect(
-      find(`#mp-pane-tab-group-a-${appBoard.id}`).closest(".mp-tab-item")?.classList.contains("hibernated"),
-    ).toBe(true);
+    const hibernatedTab = find(`#mp-pane-tab-group-a-${appBoard.id}`);
+    expect(hibernatedTab.closest(".mp-tab-item")?.classList.contains("hibernated")).toBe(true);
+    expect(hibernatedTab.querySelector(".mp-tab-hibernated-icon")).not.toBeNull();
+    expect(hibernatedTab.querySelector(".sr-only")?.textContent).toContain("已休眠");
 
     // Launcher reflects "已休眠" for App 1 and "已打开" for App 2 & App 3
     await click(find('[aria-label="打开新应用"]'));

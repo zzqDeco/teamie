@@ -152,19 +152,16 @@
     gap: var(--space-1);
   }
   .workspace-title {
-    display: block;
-    text-align: left;
+    position: relative;
+    display: flex;
+    align-items: center;
     flex: 1;
     min-width: 0;
-    width: auto;
-    padding: 0;
   }
-  .workspace-title > b {
+  .workspace-title > b,
+  .workspace-title-trigger > b {
     font-weight: 600;
     letter-spacing: -0.4px;
-    align-items: center;
-    gap: var(--space-2_5);
-    justify-content: space-between;
     max-width: 100%;
     color: var(--text);
     display: block;
@@ -172,6 +169,35 @@
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
+  }
+  .workspace-title-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    max-width: 100%;
+    min-width: 0;
+    padding: var(--space-1) var(--space-1_5);
+    margin-left: calc(-1 * var(--space-1_5));
+    border-radius: var(--r-sm);
+    color: var(--text-muted);
+    transition: background var(--dur-fast) var(--ease-standard);
+  }
+  .workspace-title-trigger:hover,
+  .workspace-title-trigger[aria-expanded="true"] {
+    background: var(--hover-bg);
+    color: var(--text-strong);
+  }
+  .workspace-title-trigger > svg {
+    flex-shrink: 0;
+    transition: transform var(--dur-fast) var(--ease-standard);
+  }
+  .workspace-title-trigger > svg.open {
+    transform: rotate(180deg);
+  }
+  .workspace-title-menu {
+    top: calc(100% + var(--space-1));
+    left: 0;
+    min-width: 184px;
   }
   .sidebar-scroll {
     padding: var(--space-4) var(--space-2_5);

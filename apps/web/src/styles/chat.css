@@ -335,6 +335,22 @@
     opacity: 1;
     pointer-events: auto;
   }
+  .message.actions-open .message-actions {
+    z-index: var(--z-popover);
+  }
+  .message-overflow-wrap {
+    position: relative;
+    display: inline-flex;
+  }
+  .message-overflow-menu {
+    top: calc(100% + var(--space-1));
+    right: 0;
+    min-width: 164px;
+  }
+  .message-overflow-menu.flip-up {
+    top: auto;
+    bottom: calc(100% + var(--space-1));
+  }
   .message-reply {
     display: flex;
     align-items: center;

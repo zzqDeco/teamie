@@ -24,10 +24,8 @@ import {
 } from "./engagement-store";
 import {
   Avatar,
-  Button,
+  ConfirmDialog,
   IconButton,
-  Modal,
-  ModalCloseButton,
   Notice,
 } from "./ui";
 import { ICON } from "./icons";
@@ -158,7 +156,7 @@ export function ShellMembersPane({
               )}
               <div className="member-row-info">
                 <b>
-                  {member.displayName}
+                  <span className="member-row-name">{member.displayName}</span>
                   {member.userId === userId && <small>你</small>}
                   {member.kind === "agent" && (
                     <AgentBadge compact ownerName={member.ownerName} />
@@ -199,7 +197,8 @@ export function ShellMembersPane({
                 conversation.canManageMembers) ||
                 (conversation.type === "channel" &&
                   owner &&
-                  member.role !== "owner")) &&
+                  member.role !== "owner" &&
+                  member.workspaceMember !== false)) &&
                 member.userId !== userId && (
                   <IconButton
                     className="remove-member"
@@ -284,23 +283,19 @@ export function RemoveMemberModal({
   onConfirm: () => void;
 }) {
   return (
-    <Modal
+    <ConfirmDialog
+      tone="danger"
       title={`移除 ${removing.displayName}？`}
       subtitle={
         removingFromGroup
           ? "该成员将无法继续访问这个小组对话。工作空间成员资格不受影响。"
           : "该成员将无法继续访问这个工作空间及其中的对话。可以通过新邀请重新加入。"
       }
+      confirmLabel="确认移除"
       busy={busy}
-      onClose={onClose}
-    >
-      <Notice kind="error">{error}</Notice>
-      <div className="modal-actions">
-        <ModalCloseButton>取消</ModalCloseButton>
-        <Button variant="danger" busy={busy} onClick={onConfirm}>
-          确认移除
-        </Button>
-      </div>
-    </Modal>
+      error={error}
+      onCancel={onClose}
+      onConfirm={onConfirm}
+    />
   );
 }

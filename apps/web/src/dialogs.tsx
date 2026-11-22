@@ -33,6 +33,9 @@ import { enrichParticipants } from "./participants";
 import type { Participant } from "./participants";
 import { MemberPicker } from "./member-picker";
 import { canConfigureModelGateway } from "./agent-management";
+import { logoutAndCleanup } from "./logout-cleanup";
+import { useOptionalConversationAppTabs } from "./marketplace/app-tabs-state";
+import { toast } from "./toast";
 import { PasswordSettings } from "./password-settings";
 import { ICON } from "./icons";
 import { useThemePreference } from "./theme";
@@ -182,6 +185,7 @@ export function WorkspaceDialog({
     try {
       await navigator.clipboard.writeText(link);
       setCopied(true);
+      toast.success("已复制邀请链接");
     } catch {
       setError("复制未成功，请选中链接手动复制。");
     }
@@ -378,6 +382,7 @@ export function WorkspaceDialog({
 }
 export function ProfileSettings() {
   const { user, updateUser, logout } = useAuth();
+  const appTabs = useOptionalConversationAppTabs();
   const client = useQueryClient();
   const navigate = useNavigate();
   const [themePref, setThemePref] = useThemePreference();
@@ -430,8 +435,12 @@ export function ProfileSettings() {
     setError("");
     setSigningOut(true);
     try {
-      await logout();
-      if (!api.csrfToken) navigate("/login");
+      await logoutAndCleanup({
+        userId: user?.id,
+        logout,
+        navigate,
+        appTabs,
+      });
     } catch (e) {
       if (sessionToken === api.csrfToken) setError(errorText(e));
     } finally {

@@ -112,9 +112,14 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
     gap: var(--space-5);
     padding: var(--space-5);
     margin-top: var(--space-2);
+  }
+  .gateway-test-panel > .notice {
+    flex-basis: 100%;
+    margin: 0;
   }
   .gateway-test-panel h3 {
     font-weight: 600;

@@ -36,6 +36,7 @@ import {
   useShellViewportAndFocus,
 } from "./shell-sidebar";
 import { RemoveMemberModal, ShellMembersPane } from "./shell-members-pane";
+import { logoutAndCleanup } from "./logout-cleanup";
 import {
   clearPersistedAppPaneWidth,
   ConversationAppsPane,
@@ -359,13 +360,13 @@ export function Shell() {
     setBusy(true);
     setError("");
     try {
-      await logout();
-      if (!api.csrfToken) {
-        appTabs.resetAll();
-        nav.clearForUser(currentUserId);
-        clearPersistedAppPaneWidth(currentUserId);
-        navigate("/login");
-      }
+      await logoutAndCleanup({
+        userId: currentUserId,
+        logout,
+        navigate,
+        appTabs,
+        clearNav: nav.clearForUser,
+      });
     } catch (e) {
       if (sessionToken === api.csrfToken) setError(errorText(e));
     } finally {

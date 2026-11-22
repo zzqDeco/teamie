@@ -154,11 +154,13 @@ export function WebSearchConfigurationFields({
   initial,
   onSave,
   error = "",
+  saved = false,
   busy = false,
 }: {
   initial: WebSearchGatewayConfig;
   onSave: (value: WebSearchFormValue) => Promise<boolean>;
   error?: string;
+  saved?: boolean;
   busy?: boolean;
 }) {
   const [enabled, setEnabled] = useState(initial.enabled);
@@ -192,6 +194,7 @@ export function WebSearchConfigurationFields({
         autoComplete="off"
       >
         <Notice kind="error">{error}</Notice>
+        <Notice kind="success">{saved ? "搜索设置已保存。" : ""}</Notice>
         <SwitchField
           name="gatewayWebSearchEnabled"
           checked={enabled}

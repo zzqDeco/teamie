@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api } from "@teamie/api-client";
+import { api, ApiError } from "@teamie/api-client";
 import type { MarketplaceApp, ConversationAppSessionResp, User, Workspace, Conversation } from "@teamie/api-client";
 import { ConversationAppsPane } from "./marketplace";
 
@@ -204,4 +204,43 @@ it("ignores ready and refresh requests from another origin or window", async () 
   });
   expect(send).not.toHaveBeenCalled();
   expect(request).toHaveBeenCalledTimes(1);
+});
+
+it("remounts the iframe on explicit reload, recovers via error retry button, and simplifies launcher/frame-bar chrome", async () => {
+  const create = vi
+    .spyOn(api, "createConversationAppSession")
+    .mockRejectedValueOnce(new ApiError(502, "upstream_timeout", "会话初始化超时"))
+    .mockResolvedValueOnce(sessionFor(appA, "token-v1"))
+    .mockResolvedValueOnce(sessionFor(appA, "token-v2"));
+  await renderPane();
+  expect(host.querySelector(".mp-launcher")?.textContent).toContain("切换小组后应用仍保持打开");
+  expect(host.querySelector(".mp-launcher")?.textContent).not.toContain("后台保活");
+
+  // Initial load fails -> error notice + explicit retry button
+  await openApp(appA);
+  expect(frame(appA)).toBeNull();
+  const errorBox = host.querySelector(".mp-frame-error");
+  expect(errorBox?.querySelector(".notice.error")?.textContent).toContain("服务暂时不可用");
+  const retryBtn = Array.from(errorBox?.querySelectorAll<HTMLButtonElement>("button") ?? []).find(
+    (btn) => btn.textContent?.trim() === "重试",
+  );
+  expect(retryBtn).toBeDefined();
+
+  // Clicking retry recovers and mounts iframe; frame bar omits duplicate name/slug
+  await act(async () => retryBtn!.click());
+  await flush();
+  const firstFrame = frame(appA);
+  expect(firstFrame).not.toBeNull();
+  expect(host.querySelector(".mp-frame-bar")?.textContent).not.toContain(appA.name);
+  expect(host.querySelector(".mp-frame-bar")?.textContent).not.toContain(appA.slug);
+
+  // Explicit reload button unmounts old iframe and mounts a brand-new iframe with fresh token
+  const reloadBtn = host.querySelector<HTMLButtonElement>('[aria-label="重新加载应用"]');
+  expect(reloadBtn).not.toBeNull();
+  await act(async () => reloadBtn!.click());
+  await flush();
+  const secondFrame = frame(appA);
+  expect(secondFrame).not.toBeNull();
+  expect(secondFrame).not.toBe(firstFrame);
+  expect(create).toHaveBeenCalledTimes(3);
 });

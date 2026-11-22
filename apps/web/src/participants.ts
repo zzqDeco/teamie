@@ -2,6 +2,11 @@ import type { Agent, Member } from "@teamie/api-client";
 export type Participant = Member & {
   selectable?: boolean;
   /**
+   * True when this entry came from `api.members()` (actual workspace member);
+   * false when appended purely from workspace Agent discovery.
+   */
+  workspaceMember?: boolean;
+  /**
    * Public `enabled` flag of an Agent member's discovery profile; undefined for
    * humans and for Agents absent from discovery (which show no availability).
    */
@@ -20,9 +25,10 @@ export function enrichParticipants(
           ownerId: agent?.ownerId || member.ownerId,
           ownerName: agent?.ownerName || member.ownerName,
           selectable: !!agent && agent.enabled,
+          workspaceMember: true,
           ...(agent ? { agentEnabled: agent.enabled } : {}),
         }
-      : { ...member, selectable: true };
+      : { ...member, selectable: true, workspaceMember: true };
   });
   const existing = new Set(result.map((member) => member.userId));
   for (const agent of agents)
@@ -35,6 +41,7 @@ export function enrichParticipants(
         ownerId: agent.ownerId,
         ownerName: agent.ownerName,
         selectable: agent.enabled,
+        workspaceMember: false,
         agentEnabled: agent.enabled,
       });
   return result;

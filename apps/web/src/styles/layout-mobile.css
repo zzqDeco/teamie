@@ -253,6 +253,9 @@
     .side-pane.members-pane {
       width: 260px;
     }
+    .side-pane.mp-apps-pane {
+      width: 100%;
+    }
     .sync-banner {
       gap: var(--space-1_5);
       padding: var(--space-2) var(--space-3_5);

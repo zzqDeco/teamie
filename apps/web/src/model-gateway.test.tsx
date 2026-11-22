@@ -597,4 +597,27 @@ describe("model gateway settings page", () => {
       "连接尚需测试验证。",
     );
   });
+
+  it("renders web search save feedback and test connection results inline in their own sections", async () => {
+    vi.spyOn(api, "modelGateway").mockResolvedValue(gateway);
+    vi.spyOn(api, "saveWebSearch").mockResolvedValue(gateway);
+    vi.spyOn(api, "testModelGateway").mockResolvedValue({
+      ok: true,
+      model: "model-id",
+      latencyMs: 38,
+    });
+
+    await renderSettings();
+    await click(buttonByText("保存搜索设置"));
+    const webSearchSection = find(".gateway-web-search-section");
+    expect(webSearchSection.querySelector(".notice.success")?.textContent).toContain(
+      "搜索设置已保存。",
+    );
+
+    await click(buttonByText("测试连接"));
+    const testPanel = find(".gateway-test-panel");
+    expect(testPanel.querySelector(".notice.success")?.textContent).toContain(
+      "连接测试通过 · model-id · 38 ms",
+    );
+  });
 });

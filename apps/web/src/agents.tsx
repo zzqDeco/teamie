@@ -7,6 +7,7 @@ import {
   Bot,
   CirclePause,
   LoaderCircle,
+  MessageCircle,
   Pencil,
   Play,
   Plus,
@@ -17,6 +18,7 @@ import type { ModelCatalog } from "@teamie/api-client";
 import { useAuth } from "./auth";
 import { usePageTitleDetail } from "./shell/page-title";
 import { useChat } from "./chat";
+import { chatStore } from "./store";
 import {
   AgentAvatar,
   AgentBadge,
@@ -162,12 +164,13 @@ export function MyAgents({
 }
 export function AgentDetail({ agentId }: { agentId: string }) {
   const { user } = useAuth();
-  const { data } = useChat();
+  const { data, refresh } = useChat();
   const client = useQueryClient();
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false),
     [deleting, setDeleting] = useState(false),
     [busy, setBusy] = useState(false),
+    [messaging, setMessaging] = useState(false),
     [error, setError] = useState("");
   const closeEdit = useCallback(() => setEditing(false), []),
     closeDelete = useCallback(() => setDeleting(false), []);
@@ -193,6 +196,31 @@ export function AgentDetail({ agentId }: { agentId: string }) {
   const editable = !!data?.capabilities["agents.update"];
   const deletable = !!data?.capabilities["agents.delete"];
   const canEnable = !!data?.capabilities["agents.enabled"];
+  const canDirect = !!data?.capabilities["im.dm.create"];
+  const dmWorkspace = (data?.workspaces || []).find((w) =>
+    agent?.workspaceIds.includes(w.id),
+  );
+  async function startDirectMessage() {
+    if (!agent || !dmWorkspace || !agent.enabled || !canDirect || messaging) return;
+    setMessaging(true);
+    setError("");
+    const generation = chatStore.generation;
+    try {
+      const result = await api.createConversation(dmWorkspace.id, {
+        type: "direct",
+        memberIds: [agent.principalId],
+      });
+      if (generation !== chatStore.generation) return;
+      chatStore.addConversation(result.conversation);
+      await refresh();
+      if (generation !== chatStore.generation) return;
+      navigate(`/app/w/${dmWorkspace.id}/c/${result.conversation.id}`);
+    } catch (e) {
+      if (generation === chatStore.generation) setError(agentFailureText(e));
+    } finally {
+      setMessaging(false);
+    }
+  }
   async function enable() {
     if (!agent || !allowed) return;
     setBusy(true);
@@ -305,11 +333,29 @@ export function AgentDetail({ agentId }: { agentId: string }) {
         </div>
         <div className="agent-detail-actions">
           {editable && (
+            <Button variant="secondary" onClick={() => setEditing(true)}>
+              <Pencil size={ICON.xs} />
+              编辑资料
+            </Button>
+          )}
+          {canDirect && dmWorkspace && (
+            <Button
+              variant="secondary"
+              busy={messaging}
+              disabled={!agent.enabled || busy}
+              title={
+                agent.enabled
+                  ? `在「${dmWorkspace.name}」中给 ${agent.name} 发消息`
+                  : "启用该 Agent 后可发消息"
+              }
+              onClick={() => void startDirectMessage()}
+            >
+              <MessageCircle size={ICON.xs} />
+              发消息
+            </Button>
+          )}
+          {editable && (
             <>
-              <Button variant="secondary" onClick={() => setEditing(true)}>
-                <Pencil size={ICON.xs} />
-                编辑资料
-              </Button>
               <Button
                 variant={agent.enabled ? "secondary" : "primary"}
                 busy={busy}

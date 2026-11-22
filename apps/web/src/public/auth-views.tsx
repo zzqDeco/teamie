@@ -16,6 +16,7 @@ import { useAuth } from "../auth";
 import { clearSessionExpired, readSessionExpired } from "../session-notice";
 import { errorText } from "../errors";
 import { formatDateTime } from "../format-datetime";
+import { toast } from "../toast";
 import { Avatar, Button, Field, Logo, Notice, PublicHeader, Tabs } from "../ui";
 import { passwordPolicyError } from "../password-policy";
 import { PasswordField, fieldErrorProps } from "../password-field";
@@ -464,6 +465,7 @@ export function Join() {
         queryKey: ["bootstrap"],
         refetchType: "all",
       });
+      toast.success(`已加入工作空间「${result.workspace.name}」`);
       navigate(
         result.conversations[0]
           ? `/app/w/${result.workspace.id}/c/${result.conversations[0].id}`

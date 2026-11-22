@@ -5,7 +5,9 @@ import { chatStore, compareTimestampsDesc } from "../store";
 import { Button } from "../ui";
 import { MobileNavButton } from "./page-header";
 import { ICON } from "../icons";
+import { clearPersistedShellNav } from "../logout-cleanup";
 import { pickAdjacentConversation, route } from "../shell-sidebar";
+export { clearPersistedShellNav };
 
 const navStorageKey = (userId: string) => `teamie.nav.${userId}`;
 
@@ -71,15 +73,6 @@ export function writePersistedShellNav(userId: string, nav: PersistedShellNav) {
   if (!userId) return;
   try {
     localStorage.setItem(navStorageKey(userId), JSON.stringify(nav));
-  } catch {
-    /* Ignore storage access errors. */
-  }
-}
-
-export function clearPersistedShellNav(userId?: string) {
-  if (!userId) return;
-  try {
-    localStorage.removeItem(navStorageKey(userId));
   } catch {
     /* Ignore storage access errors. */
   }
