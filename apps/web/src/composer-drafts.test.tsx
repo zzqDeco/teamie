@@ -9,6 +9,7 @@ import { readComposerDraft } from "./composer-drafts";
 import { ConversationView } from "./messages";
 import { chatStore } from "./store";
 import type { LocalMessage } from "./store";
+import { toast } from "./toast";
 
 const user: User = {
   id: "human", kind: "human", platformRole: "user", displayName: "Human",
@@ -353,41 +354,56 @@ describe("permanently failed messages", () => {
 });
 
 describe("message copy actions", () => {
-  const button = (label: string) =>
-    host.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`);
+  const openOverflowMenu = async (messageId: string) => {
+    const trigger = host.querySelector<HTMLButtonElement>(
+      `#message-${messageId} [aria-label="更多操作"]`,
+    );
+    expect(trigger).not.toBeNull();
+    await act(async () => { trigger!.click(); });
+  };
+  const menuItem = (messageId: string, label: string) =>
+    Array.from(
+      host.querySelectorAll<HTMLButtonElement>(
+        `#message-${messageId} .message-overflow-menu [role="menuitem"]`,
+      ),
+    ).find((item) => item.textContent?.trim() === label);
 
-  it("copies the raw body and an absolute message deep link", async () => {
+  it("copies the raw body and an absolute message deep link from overflow menu with toast feedback", async () => {
     const writeText = vi.fn(async () => {});
     vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    const toastSuccess = vi.spyOn(toast, "success");
     latest[conversation.id] = [{ ...source, body: "**raw** body" }];
     await show();
-    await act(async () => { button("复制文本")!.click(); });
+    await openOverflowMenu(source.id);
+    await act(async () => { menuItem(source.id, "复制文本")!.click(); });
     expect(writeText).toHaveBeenLastCalledWith("**raw** body");
-    expect(host.querySelector('[role="status"].send-status')?.textContent).toBe("已复制消息文本");
-    await act(async () => { button("复制消息链接")!.click(); });
+    expect(toastSuccess).toHaveBeenLastCalledWith("已复制消息文本");
+    await openOverflowMenu(source.id);
+    await act(async () => { menuItem(source.id, "复制消息链接")!.click(); });
     expect(writeText).toHaveBeenLastCalledWith(
       `${window.location.origin}/app/w/team/c/current?message=source`,
     );
-    expect(host.querySelector('[role="status"].send-status')?.textContent).toBe("已复制消息链接");
-    await act(async () => { vi.advanceTimersByTime(3000); });
+    expect(toastSuccess).toHaveBeenLastCalledWith("已复制消息链接");
     expect(host.querySelector(".send-status")).toBeNull();
   });
 
-  it("reports clipboard failures and hides text copy for retracted messages", async () => {
+  it("reports clipboard failures via toast and hides actions for retracted messages", async () => {
     vi.stubGlobal("navigator", {
       ...navigator,
       clipboard: { writeText: vi.fn(async () => { throw new Error("denied"); }) },
     });
+    const toastError = vi.spyOn(toast, "error");
     latest[conversation.id] = [
       source,
       { ...source, id: "gone", clientMessageId: "gone-request", seq: 3, body: "", retractedAt: user.createdAt },
     ];
     await show();
     expect(host.textContent).toContain("这条消息已撤回");
-    expect(host.querySelectorAll('[aria-label="复制消息链接"]')).toHaveLength(1);
-    expect(host.querySelectorAll('[aria-label="复制文本"]')).toHaveLength(1);
-    await act(async () => { button("复制文本")!.click(); });
-    const alert = host.querySelector('[role="alert"].send-status');
-    expect(alert?.textContent).toContain("无法访问剪贴板");
+    expect(host.querySelector('#message-gone [aria-label="更多操作"]')).toBeNull();
+    await openOverflowMenu(source.id);
+    expect(menuItem(source.id, "复制消息链接")).toBeDefined();
+    expect(menuItem(source.id, "复制文本")).toBeDefined();
+    await act(async () => { menuItem(source.id, "复制文本")!.click(); });
+    expect(toastError).toHaveBeenLastCalledWith("无法访问剪贴板，请手动选择内容复制。");
   });
 });

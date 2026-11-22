@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { RefObject } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Blocks, LoaderCircle, Plus, RefreshCw, X } from "lucide-react";
+import { Blocks, LoaderCircle, PauseCircle, Plus, RefreshCw, Settings2, X } from "lucide-react";
 import { api, ApiError } from "@teamie/api-client";
 import type {
   Conversation,
@@ -374,7 +374,7 @@ function ConversationAppsForeground({
               label="管理工作空间应用"
               onClick={onOpenWorkspaceApps}
             >
-              <Plus size={ICON.md} />
+              <Settings2 size={ICON.md} />
             </IconButton>
           )}
           <IconButton label="关闭小组应用面板" onClick={onClose}>
@@ -475,7 +475,15 @@ function ConversationAppsForeground({
                           }
                         }}
                       >
+                        {!tab.live && (
+                          <PauseCircle
+                            size={ICON.xs}
+                            className="mp-tab-hibernated-icon"
+                            aria-hidden="true"
+                          />
+                        )}
                         <span className="mp-tab-title">{tab.app.name}</span>
+                        {!tab.live && <span className="sr-only">（已休眠）</span>}
                       </button>
                       <button
                         type="button"
@@ -594,7 +602,7 @@ function ConversationAppsLauncher({
   return (
     <div className="mp-launcher">
       <p className="mp-launcher-hint field-help">
-        点击应用在标签页中启动，切换小组或收起面板后继续后台保活。
+        点击应用在标签页中打开，切换小组后应用仍保持打开。
       </p>
       <ul className="mp-launcher-list" aria-label="已安装小组应用列表">
         {apps.map((app) => {

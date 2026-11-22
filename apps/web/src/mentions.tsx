@@ -2,6 +2,7 @@ import { Fragment, useId, useLayoutEffect, useRef, useState } from "react";
 import type { ClipboardEvent, KeyboardEvent, RefObject } from "react";
 import type { Member, Mention } from "@teamie/api-client";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
+import { plainPreview } from "./chat/plain-preview";
 import { agentDisabledState, isDisabledAgent, matchPinyinText } from "./member-picker";
 import { isUserMentioned } from "./notification-model";
 import { usePinyin } from "./shell/pinyin-match";
@@ -102,6 +103,70 @@ export function MentionText({
     <>
       {parts}
       {body.slice(end)}
+    </>
+  );
+}
+
+function previewSlice(
+  slice: string,
+  hasPrecedingMention: boolean,
+  hasFollowingMention: boolean,
+): string {
+  if (!slice) return "";
+  const cleaned = plainPreview(slice);
+  if (!cleaned) {
+    return hasPrecedingMention && hasFollowingMention && /\s/.test(slice) ? " " : "";
+  }
+  const leading = hasPrecedingMention && /^\s/.test(slice) ? " " : "";
+  const trailing = hasFollowingMention && /\s$/.test(slice) ? " " : "";
+  return `${leading}${cleaned}${trailing}`;
+}
+
+/**
+ * Strips Markdown from non-mention text slices while preserving structured
+ * mention pills from the original UTF-16 `start`/`end` offsets.
+ */
+export function PlainMentionText({
+  body,
+  mentions = [],
+  userId,
+}: {
+  body: string;
+  mentions?: Mention[];
+  userId: string;
+}) {
+  const parts = [];
+  let end = 0;
+  let hadMention = false;
+  for (const m of mentions) {
+    if (
+      !Number.isInteger(m.start) ||
+      !Number.isInteger(m.end) ||
+      m.start < end ||
+      m.end <= m.start ||
+      m.end > body.length ||
+      body[m.start] !== "@"
+    )
+      continue;
+    parts.push(
+      <Fragment key={`${m.start}-${m.end}`}>
+        {previewSlice(body.slice(end, m.start), hadMention, true)}
+        <span
+          className={`message-mention mention-pill${isUserMentioned([m], userId) ? " mention-self" : ""}`}
+          data-user-id={m.userId}
+          data-mention-kind={m.kind}
+        >
+          {body.slice(m.start, m.end)}
+        </span>
+      </Fragment>,
+    );
+    end = m.end;
+    hadMention = true;
+  }
+  return (
+    <>
+      {parts}
+      {previewSlice(body.slice(end), hadMention, false)}
     </>
   );
 }

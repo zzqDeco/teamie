@@ -7,7 +7,7 @@ import type {
   User,
 } from "@teamie/api-client";
 import { errorText } from "../errors";
-import { BadgePill, IconButton, Notice } from "../ui";
+import { BadgePill, Button, IconButton, Notice } from "../ui";
 import { ICON } from "../icons";
 
 // Each (userId, workspaceId, conversationId, appId, webUrl, mcpUrl) mounts an
@@ -31,6 +31,7 @@ export function ConversationAppFrame({
   const [session, setSession] = useState<ConversationAppSessionResp | null>(
     null,
   );
+  const [reloadNonce, setReloadNonce] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -168,25 +169,48 @@ export function ConversationAppFrame({
     return () => window.removeEventListener("message", onMessage);
   }, [app.webUrl, fetchSession, postContext, sameOriginBlocked, session]);
 
+  const reloadApp = useCallback(() => {
+    setSession(null);
+    setReloadNonce((value) => value + 1);
+    void fetchSession();
+  }, [fetchSession]);
+
   return (
     <>
-      <Notice kind="error">
-        {sameOriginBlocked
-          ? "安全限制：小组应用 Web UI 必须部署在独立跨源域名上，禁止与当前主站同源挂载。"
-          : error}
-      </Notice>
+      {sameOriginBlocked ? (
+        <Notice kind="error">
+          安全限制：小组应用 Web UI 必须部署在独立跨源域名上，禁止与当前主站同源挂载。
+        </Notice>
+      ) : error ? (
+        <div className="mp-frame-error">
+          <Notice kind="error">{error}</Notice>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={loading}
+            onClick={reloadApp}
+          >
+            <RefreshCw size={ICON.xs} aria-hidden="true" />
+            重试
+          </Button>
+        </div>
+      ) : null}
       <div className="mp-frame-bar">
         <span className="mp-frame-meta">
-          <b>{app.name}</b>
-          <small>· {app.slug}</small>
           {(app.servingDraft || session?.app.servingDraft) && (
             <BadgePill tone="neutral">测试草稿</BadgePill>
           )}
+          {loading && session && (
+            <span className="mp-frame-status" role="status">
+              正在刷新会话…
+            </span>
+          )}
         </span>
         <IconButton
-          label="刷新应用会话"
+          label="重新加载应用"
           disabled={loading || sameOriginBlocked}
-          onClick={() => void fetchSession()}
+          onClick={reloadApp}
         >
           <RefreshCw size={ICON.xs} />
         </IconButton>
@@ -199,6 +223,7 @@ export function ConversationAppFrame({
       )}
       {!sameOriginBlocked && session && (
         <iframe
+          key={reloadNonce}
           ref={iframeRef}
           tabIndex={0}
           title={`小组应用：${app.name}`}

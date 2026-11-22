@@ -14,6 +14,7 @@ import { projectReactionList } from "./reactions";
 import { MessageBody } from "./markdown";
 export { MessageBody };
 import { Notice } from "./ui";
+import { toast } from "./toast";
 import { ConversationSearch } from "./conversation-search";
 import { ICON } from "./icons";
 import {
@@ -302,12 +303,12 @@ export function ConversationView({
           (m) => !m.status && m.seq > locatedBaseline && m.senderId !== userId && !m.retractedAt,
         ).length
       : 0;
-  const canEdit = !!data?.capabilities["im.message.edit"];
-  const canRetract = !!data?.capabilities["im.message.retract"];
-  const canReact = !!data?.capabilities["im.reactions.create"];
-  const canViewReceipts = !!data?.capabilities["im.read_receipts.view"];
-  const canConfigureNotifications = !!data?.capabilities["im.notifications.configure"];
-  const presenceEnabled = data?.capabilities["im.presence.publish"] !== false;
+  const canEdit = Boolean(data?.capabilities["im.message.edit"]);
+  const canRetract = Boolean(data?.capabilities["im.message.retract"]);
+  const canReact = Boolean(data?.capabilities["im.reactions.create"]);
+  const canViewReceipts = Boolean(data?.capabilities["im.read_receipts.view"]);
+  const canConfigureNotifications = Boolean(data?.capabilities["im.notifications.configure"]);
+  const presenceEnabled = Boolean(data?.capabilities["im.presence.publish"]);
   const canForward = data?.capabilities["im.messages.forward"] !== false;
   const canPin = data?.capabilities["im.messages.pin"] !== false;
   const canSave = data?.capabilities["im.messages.save"] !== false;
@@ -436,13 +437,17 @@ export function ConversationView({
       className="conversation-view"
       aria-label={name}
       onDragEnter={(event) => {
-        if (!uploadsEnabled || !hasFileTransfer(event)) return;
+        if (!hasFileTransfer(event)) return;
         event.preventDefault();
-        setDraggingFiles(true);
+        if (uploadsEnabled) setDraggingFiles(true);
       }}
       onDragOver={(event) => {
-        if (!uploadsEnabled || !hasFileTransfer(event)) return;
+        if (!hasFileTransfer(event)) return;
         event.preventDefault();
+        if (!uploadsEnabled) {
+          if (event.dataTransfer) event.dataTransfer.dropEffect = "none";
+          return;
+        }
         if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
         if (!draggingFiles) setDraggingFiles(true);
       }}
@@ -453,8 +458,12 @@ export function ConversationView({
       }}
       onDrop={(event) => {
         setDraggingFiles(false);
-        if (!uploadsEnabled || !hasFileTransfer(event)) return;
+        if (!hasFileTransfer(event)) return;
         event.preventDefault();
+        if (!uploadsEnabled) {
+          toast.error("文件上传已关闭");
+          return;
+        }
         const files = Array.from(event.dataTransfer?.files || []);
         if (files.length > 0) {
           attachments.add(files);
@@ -463,11 +472,7 @@ export function ConversationView({
       }}
     >
       {uploadsEnabled && draggingFiles && (
-        <div
-          className="conversation-drop-overlay"
-          role="region"
-          aria-label="释放文件以上传到当前对话"
-        >
+        <div className="conversation-drop-overlay" role="region" aria-label="释放文件以上传到当前对话">
           <span>释放文件以上传到当前对话</span>
         </div>
       )}
@@ -477,7 +482,7 @@ export function ConversationView({
         onMenu={onMenu} onSearchOpen={() => setSearchOpen(true)} onMembers={onMembers}
         members={mentionMembers} userId={userId}
         canConfigureNotifications={canConfigureNotifications}
-        presenceEnabled={!!data?.capabilities["im.presence.publish"]}
+        presenceEnabled={presenceEnabled}
       />
       <PinnedMessagesBar
         conversationId={conversation.id}
@@ -624,12 +629,8 @@ export function ConversationView({
         </div>
       </div>
       <div className="sr-only" data-message-live-announcer="">
-        <div role="status" aria-live="polite" aria-atomic="true">
-          {liveAnnouncement.slot === 0 ? liveAnnouncement.text : ""}
-        </div>
-        <div role="status" aria-live="polite" aria-atomic="true">
-          {liveAnnouncement.slot === 1 ? liveAnnouncement.text : ""}
-        </div>
+        <div role="status" aria-live="polite" aria-atomic="true">{liveAnnouncement.slot === 0 ? liveAnnouncement.text : ""}</div>
+        <div role="status" aria-live="polite" aria-atomic="true">{liveAnnouncement.slot === 1 ? liveAnnouncement.text : ""}</div>
       </div>
       {!atBottom && !located && !locating && (
         <JumpLatestButton

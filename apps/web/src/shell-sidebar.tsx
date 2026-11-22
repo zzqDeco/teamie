@@ -41,6 +41,7 @@ import {
 } from "./engagement-store";
 import { Avatar, IconButton, Logo } from "./ui";
 import { ICON } from "./icons";
+import { WorkspaceHeaderMenu } from "./shell/workspace-header-menu";
 import {
   computePageTitle,
   computeShellAttention,
@@ -482,12 +483,18 @@ export function ShellSidebar({
       </nav>
       <aside className="navigation-sidebar" aria-label="空间导航">
         <div className="workspace-header">
-          <div className="workspace-title" title={workspace?.name}>
-            <b>{workspace?.name || "我的 Teamie"}</b>
-          </div>
+          <WorkspaceHeaderMenu
+            key={`workspace-menu-${workspace?.id || "none"}`}
+            workspace={workspace}
+            owner={owner}
+            canCreateChannel={!!caps["im.channel.create"]}
+            active={(!mobile || sidebar) && !hasOverlayModal}
+            onOpenDialog={onOpenDialog}
+            onNavigate={onCloseSidebar}
+          />
           {workspace && (caps["im.dm.create"] || caps["im.group.create"]) && (
             <ConversationActions
-              key={workspace.id}
+              key={`conversation-actions-${workspace.id}`}
               active={(!mobile || sidebar) && !hasOverlayModal}
               canDirect={!!caps["im.dm.create"]}
               canGroup={!!caps["im.group.create"]}

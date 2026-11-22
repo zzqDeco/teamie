@@ -69,18 +69,25 @@
     min-width: 0;
   }
   .member-row b {
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: var(--space-1_5);
+    min-width: 0;
     font-weight: 600;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
     font-size: var(--font-base);
     color: var(--text-strong);
   }
+  .member-row-name {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .member-row b > small {
     color: var(--text-muted);
-    margin-left: var(--space-1_5);
     font-size: var(--font-sm);
+    flex-shrink: 0;
   }
   .member-row > .member-row-info > span {
     display: block;
@@ -205,14 +212,10 @@
     font-size: var(--font-sm);
     padding: var(--space-2);
   }
-  .member-row b:has(.agent-badge) {
-    display: flex;
-    align-items: center;
-    gap: var(--space-1_5);
-  }
   .member-row b > .agent-badge {
     font-size: var(--font-sm);
     padding: var(--space-0_5) var(--space-1);
+    flex-shrink: 0;
   }
   .conversation-link > .agent-badge {
     font-size: var(--font-sm);

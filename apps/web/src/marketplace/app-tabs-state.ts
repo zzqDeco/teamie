@@ -602,6 +602,10 @@ export function ConversationAppTabsProvider({
   return createElement(ConversationAppTabsContext.Provider, { value }, children);
 }
 
+export function useOptionalConversationAppTabs(): ConversationAppTabsController | null {
+  return useContext(ConversationAppTabsContext);
+}
+
 export function useConversationOpenAppCount(conversationId?: string): number {
   const controller = useContext(ConversationAppTabsContext);
   return controller ? controller.getOpenCount(conversationId) : 0;

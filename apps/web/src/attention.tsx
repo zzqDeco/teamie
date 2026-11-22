@@ -18,7 +18,8 @@ import {
 import type { ChatSnapshot } from "./store";
 import { fetchAttentionCount } from "./notification-projection";
 import { AgentAvatar, AgentBadge } from "./agent-ui";
-import { MentionText } from "./mentions";
+import { plainPreview } from "./chat/plain-preview";
+import { PlainMentionText } from "./mentions";
 import { Avatar, Button, date, IconButton, Notice, Tabs, time } from "./ui";
 import { ICON } from "./icons";
 import { MobileNavButton } from "./shell/page-header";
@@ -160,6 +161,7 @@ export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
   const [savedLoading, setSavedLoading] = useState(false);
   const [savedError, setSavedError] = useState("");
   const [savedCursor, setSavedCursor] = useState<string | undefined>(undefined);
+  const [savedRefreshNonce, setSavedRefreshNonce] = useState(0);
   const [loadingMoreSaved, setLoadingMoreSaved] = useState(false);
   const [markingRead, setMarkingRead] = useState(false);
   const [markReadError, setMarkReadError] = useState("");
@@ -168,6 +170,7 @@ export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
   );
   const markReadAbort = useRef<AbortController | null>(null);
   const savedBaselineSeq = useRef(0);
+  const savedLoadGen = useRef(0);
 
   useEffect(() => {
     if (new URLSearchParams(location.search).get("tab") === "saved") {
@@ -178,12 +181,14 @@ export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
   useEffect(() => {
     if (!isSavedTab || !scope.enabled || typeof api.listSavedMessages !== "function") return;
     let active = true;
+    savedLoadGen.current += 1;
     const controller = new AbortController();
     const token = chatStore.generation;
     const expectedAccess = scope.access;
     const startDeltaSeq = chatStore.getSnapshot().savedDeltaSeq ?? 0;
     savedBaselineSeq.current = startDeltaSeq;
     setSavedLoading(true);
+    setLoadingMoreSaved(false);
     setSavedError("");
     setSavedCursor(undefined);
     void Promise.resolve(api.listSavedMessages({ limit: 50 }, controller.signal))
@@ -212,9 +217,17 @@ export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
       });
     return () => {
       active = false;
+      savedLoadGen.current += 1;
       controller.abort();
     };
-  }, [isSavedTab, scope.enabled, scope.userId, scope.generation, scope.access]);
+  }, [
+    isSavedTab,
+    savedRefreshNonce,
+    scope.enabled,
+    scope.userId,
+    scope.generation,
+    scope.access,
+  ]);
 
   async function loadMoreSaved() {
     if (
@@ -226,6 +239,7 @@ export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
       return;
     const token = chatStore.generation;
     const expectedAccess = scope.access;
+    const loadGen = savedLoadGen.current;
     setLoadingMoreSaved(true);
     setSavedError("");
     try {
@@ -237,7 +251,11 @@ export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
         .sort((a, b) => a.id.localeCompare(b.id))
         .map((c) => c.id)
         .join("|");
-      if (token !== chatStore.generation || currentAccess !== expectedAccess)
+      if (
+        loadGen !== savedLoadGen.current ||
+        token !== chatStore.generation ||
+        currentAccess !== expectedAccess
+      )
         return;
       if (page && Array.isArray(page.items)) {
         const existing = chatStore.getSnapshot().savedMessages || [];
@@ -257,11 +275,11 @@ export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
         setSavedCursor(page.cursor || undefined);
       }
     } catch (e) {
-      if (token === chatStore.generation) {
+      if (loadGen === savedLoadGen.current && token === chatStore.generation) {
         setSavedError(errorText(e));
       }
     } finally {
-      if (token === chatStore.generation) {
+      if (loadGen === savedLoadGen.current && token === chatStore.generation) {
         setLoadingMoreSaved(false);
       }
     }
@@ -479,26 +497,36 @@ export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
           <h1 tabIndex={-1}>提及与回复</h1>
         </div>
         <div className="conversation-header-actions">
-          <Button
-            variant="secondary"
-            size="sm"
-            className="attention-mark-all-read"
-            busy={markingRead}
-            disabled={markingRead || query.isPending || !hasUnread}
-            title="将各会话标为已读至最新提及或回复位置，之后的普通消息仍保持未读"
-            onClick={() => void markAllRead(activeRemaining.length > 0)}
-          >
-            <CheckCheck size={ICON.sm} aria-hidden="true" />
-            {activeRemaining.length > 0
-              ? `已处理 ${completedCount} / ${batchFailure!.total}，重试剩余`
-              : "全部标为已读"}
-          </Button>
+          {!isSavedTab && (
+            <Button
+              variant="secondary"
+              size="sm"
+              className="attention-mark-all-read"
+              busy={markingRead}
+              disabled={markingRead || query.isPending || !hasUnread}
+              title="将各会话标为已读至最新提及或回复位置，之后的普通消息仍保持未读"
+              onClick={() => void markAllRead(activeRemaining.length > 0)}
+            >
+              <CheckCheck size={ICON.sm} aria-hidden="true" />
+              {activeRemaining.length > 0
+                ? `已处理 ${completedCount} / ${batchFailure!.total}，重试剩余`
+                : "全部标为已读"}
+            </Button>
+          )}
           <IconButton
-            label="刷新提醒"
-            disabled={query.isFetching}
-            onClick={() => void query.refetch()}
+            label={isSavedTab ? "刷新收藏" : "刷新提醒"}
+            disabled={isSavedTab ? savedLoading : query.isFetching}
+            onClick={() => {
+              if (isSavedTab) setSavedRefreshNonce((value) => value + 1);
+              else void query.refetch();
+            }}
           >
-            <RefreshCw size={ICON.md} className={query.isFetching ? "spin" : ""} />
+            <RefreshCw
+              size={ICON.md}
+              className={
+                (isSavedTab ? savedLoading : query.isFetching) ? "spin" : ""
+              }
+            />
           </IconButton>
         </div>
       </header>
@@ -510,12 +538,12 @@ export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
         onChange={setTab}
         items={[
           { value: "all", label: "全部" },
-          { value: "saved", label: "收藏" },
           {
             value: "unread",
             label: "未读",
             badge: <UnreadBadge count={serverUnread} variant="mention" />,
           },
+          { value: "saved", label: "收藏" },
         ]}
       />
       {isSavedTab ? (
@@ -586,13 +614,26 @@ export function AttentionInbox({ onMenu }: { onMenu: () => void }) {
                     </div>
                     <p className="attention-item-body">
                       {message.body ? (
-                        <MentionText
+                        <PlainMentionText
                           body={message.body}
                           mentions={message.mentions}
                           userId={scope.userId}
                         />
+                      ) : message.forwarded ? (
+                        (() => {
+                          const snippet =
+                            plainPreview(message.forwarded.body) ||
+                            (message.forwarded.attachments?.length
+                              ? `${message.forwarded.attachments.length} 个文件`
+                              : "");
+                          return snippet
+                            ? `转发自 ${message.forwarded.senderName}：${snippet}`
+                            : `转发自 ${message.forwarded.senderName}`;
+                        })()
+                      ) : message.attachments?.length ? (
+                        `${message.attachments.length} 个文件`
                       ) : (
-                        `${message.attachments?.length || 0} 个文件`
+                        "查看消息"
                       )}
                     </p>
                     <span className="attention-source">

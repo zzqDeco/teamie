@@ -152,6 +152,13 @@
   .member-manage-link:hover {
     background: var(--hover-bg);
   }
+  .member-remove-button {
+    color: var(--danger-text);
+  }
+  .member-remove-button:hover:not(:disabled) {
+    background: var(--danger-bg);
+    color: var(--danger-text);
+  }
   .member-unavailable {
     font-size: var(--font-sm);
     color: var(--text-muted);

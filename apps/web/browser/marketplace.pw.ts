@@ -17,13 +17,13 @@ test("keyboard enters and leaves the cross-origin app, then closes the pane whil
   expect(state.sessionRequests).toEqual(["group:board"]);
   await expect(page.locator('#mp-pane-panel-group-board iframe')).toHaveAttribute("sandbox", "allow-scripts allow-forms allow-same-origin");
 
-  await pane.getByRole("button", { name: "刷新应用会话", exact: true }).focus();
+  await pane.getByRole("button", { name: "重新加载应用", exact: true }).focus();
   await page.keyboard.press("Tab");
   await expect(activeFrameLocator.locator("#app-input")).toBeFocused();
   await page.keyboard.type("editable in the app");
   await expect(activeFrameLocator.locator("#app-input")).toHaveValue("editable in the app");
   await page.keyboard.press("Shift+Tab");
-  await expect(pane.getByRole("button", { name: "刷新应用会话", exact: true })).toBeFocused();
+  await expect(pane.getByRole("button", { name: "重新加载应用", exact: true })).toBeFocused();
   await page.keyboard.press("Tab");
   await page.keyboard.press("Tab");
   await expect(activeFrameLocator.locator("#app-save")).toBeFocused();
@@ -91,6 +91,8 @@ test("nested management dialog and breakpoint changes preserve focus and chat ac
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(pane).toHaveAttribute("role", "dialog");
   await expect(page.locator("main")).toHaveAttribute("inert");
+  const mobileBox = await pane.boundingBox();
+  expect(mobileBox?.width).toBeGreaterThanOrEqual(388);
   await pane.getByRole("button", { name: "关闭小组应用面板", exact: true }).click();
   await page.locator("main textarea").fill("usable after resize");
   expect(state.errors).toEqual([]);

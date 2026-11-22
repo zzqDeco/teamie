@@ -1,10 +1,12 @@
-import { useCallback, useState } from "react";
+import { useCallback, useContext, useState } from "react";
+import { QueryClientContext } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowRight,
   LoaderCircle,
   MessageCircle,
   Search,
+  UserMinus,
   UserPlus,
   Users,
 } from "lucide-react";
@@ -24,12 +26,13 @@ import { rankParticipantsByQuery } from "./member-picker";
 import type { Participant } from "./participants";
 import { usePinyin } from "./shell/pinyin-match";
 import { chatStore } from "./store";
+import { toast } from "./toast";
 import {
   formatPresenceLabel,
   presenceClassName,
   usePresenceMap,
 } from "./engagement-store";
-import { BadgePill, Button, DataList, EmptyState, Notice } from "./ui";
+import { BadgePill, Button, ConfirmDialog, DataList, EmptyState, Notice } from "./ui";
 import { ICON } from "./icons";
 
 export function WorkspaceMembers({
@@ -48,7 +51,8 @@ export function WorkspaceMembers({
   onRetry: () => void;
 }) {
   const { user } = useAuth();
-  const { data, refresh } = useChat();
+  const { data, refresh, sync } = useChat();
+  const queryClient = useContext(QueryClientContext);
   const presenceEnabled = !!data?.capabilities["im.presence.publish"];
   const presenceMap = usePresenceMap(presenceEnabled);
   const navigate = useNavigate();
@@ -59,9 +63,18 @@ export function WorkspaceMembers({
   const [inviting, setInviting] = useState(false);
   const [groupMemberId, setGroupMemberId] = useState("");
   const [newGroupMemberId, setNewGroupMemberId] = useState("");
+  const [removingMember, setRemovingMember] = useState<Participant | null>(null);
+  const [removeBusy, setRemoveBusy] = useState(false);
+  const [removeError, setRemoveError] = useState("");
   const closeInviting = useCallback(() => setInviting(false), []);
   const closeGroup = useCallback(() => setGroupMemberId(""), []);
   const closeNewGroup = useCallback(() => setNewGroupMemberId(""), []);
+  const closeRemove = useCallback(() => {
+    if (!removeBusy) {
+      setRemovingMember(null);
+      setRemoveError("");
+    }
+  }, [removeBusy]);
   const eligibleMember = (id: string) =>
     members.find(
       (member) => member.userId === id && member.selectable !== false,
@@ -91,6 +104,31 @@ export function WorkspaceMembers({
       if (generation === chatStore.generation) setError(errorText(e));
     } finally {
       setBusyId("");
+    }
+  }
+
+  async function confirmRemoveWorkspaceMember() {
+    if (!removingMember || removeBusy) return;
+    const target = removingMember;
+    const generation = chatStore.generation;
+    setRemoveBusy(true);
+    setRemoveError("");
+    try {
+      await api.removeMember(workspace.id, target.userId);
+      if (generation !== chatStore.generation) return;
+      setRemovingMember(null);
+      toast.success(`已将 ${target.displayName} 移出工作空间`);
+      await Promise.all([
+        queryClient?.invalidateQueries({ queryKey: ["members"] }),
+        queryClient?.invalidateQueries({ queryKey: ["attention"] }),
+        refresh(),
+      ]);
+      if (!queryClient) onRetry();
+      sync();
+    } catch (e) {
+      if (generation === chatStore.generation) setRemoveError(errorText(e));
+    } finally {
+      setRemoveBusy(false);
     }
   }
 
@@ -213,6 +251,25 @@ export function WorkspaceMembers({
                       管理 <ArrowRight size={ICON.xs} />
                     </Link>
                   )}
+                  {owner &&
+                    !self &&
+                    member.role !== "owner" &&
+                    member.workspaceMember !== false && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="member-remove-button"
+                        disabled={!!busyId || removeBusy}
+                        aria-label={`将 ${member.displayName} 移出工作空间`}
+                        onClick={() => {
+                          setRemoveError("");
+                          setRemovingMember(member);
+                        }}
+                      >
+                        <UserMinus size={ICON.sm} /> 移出工作空间
+                      </Button>
+                    )}
                 </div>
               </li>
             );
@@ -251,6 +308,22 @@ export function WorkspaceMembers({
           kind="invite"
           workspace={workspace}
           onClose={closeInviting}
+        />
+      )}
+      {removingMember && owner && (
+        <ConfirmDialog
+          tone="danger"
+          title={`将 ${removingMember.displayName} 移出工作空间？`}
+          subtitle="移除后该成员将无法继续访问这个工作空间及其中的对话。"
+          impact={[
+            "立即撤销其对该工作空间频道与私信/小组的访问权限。",
+            "如需再次加入，需要由空间所有者重新发送邀请链接。",
+          ]}
+          confirmLabel="确认移出"
+          busy={removeBusy}
+          error={removeError}
+          onCancel={closeRemove}
+          onConfirm={() => void confirmRemoveWorkspaceMember()}
         />
       )}
     </div>

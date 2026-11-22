@@ -1,13 +1,9 @@
 import { Fragment, memo, useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent, RefObject } from "react";
 import {
-  Copy,
   CornerUpLeft,
-  Link2,
   MoreHorizontal,
-  Pencil,
   SmilePlus,
-  Trash2,
 } from "lucide-react";
 import { api, ApiError } from "@teamie/api-client";
 import type {
@@ -40,9 +36,12 @@ import { AgentAvatar, AgentBadge } from "./agent-ui";
 import { ICON } from "./icons";
 import {
   ForwardedMessageCard,
+  markMessageAsUnread,
   MessageCollaborationActions,
   MessageCollaborationIndicators,
+  toggleMessagePin,
 } from "./chat/collaboration-ui";
+import { MessageOverflowMenu } from "./chat/message-overflow-menu";
 import {
   ConversationBanners,
   ConversationEmptyStart,
@@ -176,11 +175,8 @@ export const MessageItem = memo(function MessageItem({
   onRetractRequest: (message: Message) => void;
 }) {
   const actionTabIndex = isRovingTarget || actionsOpen ? 0 : -1;
-  const [copyFeedback, setCopyFeedback] = useState<{
-    ok: boolean;
-    text: string;
-  } | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [overflowOpen, setOverflowOpen] = useState(false);
   const [reactionBusy, setReactionBusy] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const isOwn = message.senderId === userId;
@@ -208,12 +204,6 @@ export const MessageItem = memo(function MessageItem({
   useEffect(() => {
     if (isEditingMessage) editInputRef.current?.focus();
   }, [isEditingMessage]);
-
-  useEffect(() => {
-    if (!copyFeedback) return;
-    const timer = window.setTimeout(() => setCopyFeedback(null), 2400);
-    return () => window.clearTimeout(timer);
-  }, [copyFeedback]);
 
   async function toggleReaction(emoji: string) {
     if (reactionBusy || message.retractedAt || message.status) {
@@ -251,12 +241,9 @@ export const MessageItem = memo(function MessageItem({
   async function copy(text: string, success: string) {
     try {
       await copyToClipboard(text);
-      setCopyFeedback({ ok: true, text: success });
+      toast.success(success);
     } catch {
-      setCopyFeedback({
-        ok: false,
-        text: "无法访问剪贴板，请手动选择内容复制。",
-      });
+      toast.error("无法访问剪贴板，请手动选择内容复制。");
     }
   }
   const senderElId = `message-sender-${message.id}`;
@@ -325,11 +312,12 @@ export const MessageItem = memo(function MessageItem({
             event.preventDefault();
             event.stopPropagation();
             setPickerOpen(false);
+            setOverflowOpen(false);
             setActionMessageId("");
             inputRef.current?.focus();
           }
         }}
-        className={`message ${highlighted ? "located" : ""} ${compact ? "compact" : ""} ${relevantToMe ? "relevant-to-me" : ""} ${message.status || ""} ${message.retractedAt ? "retracted" : ""} ${actionsOpen || pickerOpen ? "actions-open" : ""}`}
+        className={`message ${highlighted ? "located" : ""} ${compact ? "compact" : ""} ${relevantToMe ? "relevant-to-me" : ""} ${message.status || ""} ${message.retractedAt ? "retracted" : ""} ${actionsOpen || pickerOpen || overflowOpen ? "actions-open" : ""}`}
       >
         <div className="message-avatar">
           {!compact ? (
@@ -520,14 +508,6 @@ export const MessageItem = memo(function MessageItem({
             conversationId={conversationId}
             inputRef={inputRef}
           />
-          {copyFeedback && (
-            <span
-              className={`send-status ${copyFeedback.ok ? "" : "failed-status"}`}
-              role={copyFeedback.ok ? "status" : "alert"}
-            >
-              {copyFeedback.text}
-            </span>
-          )}
         </div>
         {!message.retractedAt &&
           !message.status &&
@@ -551,7 +531,10 @@ export const MessageItem = memo(function MessageItem({
                       aria-expanded={pickerOpen}
                       aria-haspopup="dialog"
                       disabled={reactionBusy}
-                      onClick={() => setPickerOpen((open) => !open)}
+                      onClick={() => {
+                        setOverflowOpen(false);
+                        setPickerOpen((open) => !open);
+                      }}
                     >
                       <SmilePlus size={ICON.sm} />
                     </IconButton>
@@ -577,54 +560,40 @@ export const MessageItem = memo(function MessageItem({
                   conversationId={conversationId}
                   message={message}
                   actionTabIndex={actionTabIndex}
-                  isPinned={isPinned}
                   isSaved={isSaved}
                   canForward={canForward && Boolean(onForward)}
-                  canPin={canPin}
                   canSave={canSave}
-                  canMarkUnread={canMarkUnread}
                   onForward={(msg) => onForward?.(msg)}
                 />
-                {!!message.body && (
-                  <IconButton
-                    label="复制文本"
-                    tabIndex={actionTabIndex}
-                    onClick={() => void copy(message.body, "已复制消息文本")}
-                  >
-                    <Copy size={ICON.xs} />
-                  </IconButton>
-                )}
-                <IconButton
-                  label="复制消息链接"
+                <MessageOverflowMenu
+                  open={overflowOpen}
+                  onOpenChange={(next) => {
+                    if (next) setPickerOpen(false);
+                    setOverflowOpen(next);
+                  }}
                   tabIndex={actionTabIndex}
-                  onClick={() =>
+                  canPin={canPin}
+                  isPinned={isPinned}
+                  canMarkUnread={canMarkUnread}
+                  hasBody={!!message.body}
+                  canEdit={isOwn && canEdit}
+                  canRetract={isOwn && canRetract}
+                  onTogglePin={() =>
+                    void toggleMessagePin(conversationId, message, isPinned)
+                  }
+                  onMarkUnread={() =>
+                    void markMessageAsUnread(conversationId, message)
+                  }
+                  onCopyText={() => void copy(message.body, "已复制消息文本")}
+                  onCopyLink={() =>
                     void copy(
                       messageLink(workspaceId, conversationId, message.id),
                       "已复制消息链接",
                     )
                   }
-                >
-                  <Link2 size={ICON.xs} />
-                </IconButton>
-                {isOwn && canEdit && (
-                  <IconButton
-                    label="编辑消息"
-                    tabIndex={actionTabIndex}
-                    onClick={() => startEdit(message)}
-                  >
-                    <Pencil size={ICON.xs} />
-                  </IconButton>
-                )}
-                {isOwn && canRetract && (
-                  <IconButton
-                    label="撤回消息"
-                    className="danger-hover"
-                    tabIndex={actionTabIndex}
-                    onClick={() => onRetractRequest(message)}
-                  >
-                    <Trash2 size={ICON.xs} />
-                  </IconButton>
-                )}
+                  onEdit={() => startEdit(message)}
+                  onRetract={() => onRetractRequest(message)}
+                />
               </div>
             </Fragment>
           )}

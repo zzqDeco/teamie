@@ -52,7 +52,9 @@ export function ModelGatewaySettings() {
   const [denied, setDenied] = useState(false),
     [searchBusy, setSearchBusy] = useState(false),
     [searchError, setSearchError] = useState(""),
+    [searchSaved, setSearchSaved] = useState(false),
     [testing, setTesting] = useState(false),
+    [testError, setTestError] = useState(""),
     [providerBusyId, setProviderBusyId] = useState<string | null>(null),
     [modelBusyId, setModelBusyId] = useState<string | null>(null),
     [creatingProvider, setCreatingProvider] = useState(false),
@@ -87,6 +89,7 @@ export function ModelGatewaySettings() {
   function invalidateTests(ids: string[]) {
     defaultTestVersion.current++;
     setTest(null);
+    setTestError("");
     setTesting(false);
     for (const id of ids)
       testVersions.current.set(id, (testVersions.current.get(id) || 0) + 1);
@@ -109,12 +112,12 @@ export function ModelGatewaySettings() {
     const sessionToken = api.csrfToken;
     setSearchBusy(true);
     setSearchError("");
-    setSaved(false);
+    setSearchSaved(false);
     try {
       const response = await api.saveWebSearch(webSearchInput(value));
       if (sessionToken !== api.csrfToken) return false;
       await syncGatewayResponse(response);
-      setSaved(true);
+      setSearchSaved(true);
       return true;
     } catch (e) {
       if (sessionToken === api.csrfToken) {
@@ -133,7 +136,7 @@ export function ModelGatewaySettings() {
       sessionToken === api.csrfToken &&
       defaultTestVersion.current === version;
     setTesting(true);
-    setError("");
+    setTestError("");
     setTest(null);
     try {
       const result = await api.testModelGateway();
@@ -148,7 +151,7 @@ export function ModelGatewaySettings() {
     } catch (e) {
       if (current()) {
         if (e instanceof ApiError && e.status === 403) setDenied(true);
-        setError(gatewayFailureText(e));
+        setTestError(gatewayFailureText(e));
         if (!(e instanceof ApiError && e.status === 403)) {
           await client.invalidateQueries({ queryKey: key });
         }
@@ -444,13 +447,6 @@ export function ModelGatewaySettings() {
           />
           <Notice kind="error">{confirmation ? "" : error}</Notice>
           <Notice kind="success">{saved ? "配置已保存。" : ""}</Notice>
-          <Notice kind={test?.ok ? "success" : "error"}>
-            {test
-              ? test.ok
-                ? `连接测试通过 · ${test.model} · ${Math.round(test.latencyMs)} ms`
-                : "连接测试未通过，请检查服务地址、模型和密钥。"
-              : ""}
-          </Notice>
           <section className="gateway-models-section">
             <div className="gateway-models-header">
               <div>
@@ -528,6 +524,7 @@ export function ModelGatewaySettings() {
             initial={query.data.webSearch}
             onSave={save}
             error={searchError}
+            saved={searchSaved}
             busy={searchBusy}
           />
           <div className="gateway-test-panel">
@@ -545,6 +542,14 @@ export function ModelGatewaySettings() {
             >
               测试连接
             </Button>
+            <Notice kind="error">{testError}</Notice>
+            <Notice kind={test?.ok ? "success" : "error"}>
+              {test
+                ? test.ok
+                  ? `连接测试通过 · ${test.model} · ${Math.round(test.latencyMs)} ms`
+                  : "连接测试未通过，请检查服务地址、模型和密钥。"
+                : ""}
+            </Notice>
           </div>
           {creatingProvider && (
             <ProviderProfileDialog

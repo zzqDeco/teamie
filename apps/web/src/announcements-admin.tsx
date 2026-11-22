@@ -8,7 +8,7 @@ import type { Announcement, User } from "@teamie/api-client";
 import { useAuth } from "./auth";
 import { errorText } from "./errors";
 import { MessageBody } from "./markdown";
-import { BadgePill, Button, EmptyState, Modal, Notice, Tabs } from "./ui";
+import { BadgePill, Button, ConfirmDialog, EmptyState, Notice, Tabs } from "./ui";
 import { ICON } from "./icons";
 import {
   announcementsHistoryQueryKey,
@@ -344,40 +344,22 @@ function AdminAnnouncementsManager({
       </section>
 
       {deletingTarget && (
-        <Modal
+        <ConfirmDialog
+          tone="danger"
           title="删除平台公告"
           subtitle="删除后不可恢复，尚未阅读该公告的用户与尚未消费的 Agent 将不再收到此条通知。"
-          onClose={() => {
+          confirmLabel="确认删除"
+          busy={deleteBusy}
+          error={deleteError}
+          onCancel={() => {
             if (!deleteBusy) setDeletingTarget(null);
           }}
-          busy={deleteBusy}
+          onConfirm={() => void handleConfirmDelete()}
         >
-          <Notice kind="error">{deleteError}</Notice>
           <p>
             确定要删除公告 <b>「{deletingTarget.title}」</b> 吗？
           </p>
-          <div className="announcement-modal-actions">
-            <span />
-            <div className="announcement-modal-actions-right">
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={deleteBusy}
-                onClick={() => setDeletingTarget(null)}
-              >
-                取消
-              </Button>
-              <Button
-                type="button"
-                variant="danger"
-                busy={deleteBusy}
-                onClick={() => void handleConfirmDelete()}
-              >
-                确认删除
-              </Button>
-            </div>
-          </div>
-        </Modal>
+        </ConfirmDialog>
       )}
     </div>
   );

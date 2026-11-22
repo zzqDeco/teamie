@@ -534,10 +534,20 @@ describe("#119 IM Collaboration Web UI", () => {
       host.querySelector("#message-msg-1 .message-pin-badge")?.textContent,
     ).toContain("已置顶");
 
-    // Pin m2 from message action button
-    const pinM2Btn = host.querySelector<HTMLButtonElement>(
-      '#message-msg-2 button[aria-label="置顶"]',
+    // Pin m2 from message overflow menu
+    const moreM2Btn = host.querySelector<HTMLButtonElement>(
+      '#message-msg-2 button[aria-label="更多操作"]',
     )!;
+    expect(moreM2Btn).not.toBeNull();
+    await act(async () => {
+      moreM2Btn.click();
+    });
+    const pinM2Btn = Array.from(
+      host.querySelectorAll<HTMLButtonElement>(
+        '#message-msg-2 .message-overflow-menu [role="menuitem"]',
+      ),
+    ).find((el) => el.textContent?.trim() === "置顶")!;
+    expect(pinM2Btn).not.toBeUndefined();
     await act(async () => {
       pinM2Btn.click();
     });
@@ -706,10 +716,19 @@ describe("#119 IM Collaboration Web UI", () => {
     await flush();
     readSpy.mockClear();
 
-    const markUnreadBtn = host.querySelector<HTMLButtonElement>(
-      '#message-msg-2 button[aria-label="标为未读"]',
+    const moreM2Btn = host.querySelector<HTMLButtonElement>(
+      '#message-msg-2 button[aria-label="更多操作"]',
     )!;
-    expect(markUnreadBtn).not.toBeNull();
+    expect(moreM2Btn).not.toBeNull();
+    await act(async () => {
+      moreM2Btn.click();
+    });
+    const markUnreadBtn = Array.from(
+      host.querySelectorAll<HTMLButtonElement>(
+        '#message-msg-2 .message-overflow-menu [role="menuitem"]',
+      ),
+    ).find((el) => el.textContent?.trim() === "标为未读")!;
+    expect(markUnreadBtn).toBeDefined();
     await act(async () => {
       markUnreadBtn.click();
     });

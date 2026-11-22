@@ -1,7 +1,7 @@
 import { useContext, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, UNSAFE_NavigationContext, useInRouterContext } from "react-router-dom";
-import { Bookmark, CornerUpRight, MailWarning, Pin as PinIcon, X } from "lucide-react";
+import { Bookmark, CornerUpRight, Pin as PinIcon, X } from "lucide-react";
 import { api } from "@teamie/api-client";
 import type { Conversation, ForwardedSnapshot, Member, Mention, Message } from "@teamie/api-client";
 import { AgentAvatar, AgentBadge } from "../agent-ui";
@@ -11,7 +11,8 @@ import { errorText } from "../errors";
 import { ICON } from "../icons";
 import { MessageBody } from "../markdown";
 import { ConversationTargetPicker } from "../member-picker";
-import { MentionInput, MentionText, trimMentionDraft } from "../mentions";
+import { MentionInput, PlainMentionText, trimMentionDraft } from "../mentions";
+import { plainPreview } from "./plain-preview";
 import { chatStore, pinMessageId, savedItemConversationId, savedItemMessageId } from "../store";
 import type { PinnedMessage, SavedMessage } from "../store";
 import { toast } from "../toast";
@@ -482,23 +483,17 @@ export function MessageCollaborationActions({
   conversationId,
   message,
   actionTabIndex,
-  isPinned,
   isSaved,
   canForward,
-  canPin,
   canSave,
-  canMarkUnread,
   onForward,
 }: {
   conversationId: string;
   message: Message;
   actionTabIndex: number;
-  isPinned: boolean;
   isSaved: boolean;
   canForward: boolean;
-  canPin: boolean;
   canSave: boolean;
-  canMarkUnread: boolean;
   onForward: (message: Message) => void;
 }) {
   return (
@@ -512,17 +507,6 @@ export function MessageCollaborationActions({
           <CornerUpRight size={ICON.xs} />
         </IconButton>
       )}
-      {(canPin || isPinned) && (
-        <IconButton
-          label={isPinned ? "取消置顶" : "置顶"}
-          tabIndex={actionTabIndex}
-          onClick={() =>
-            void toggleMessagePin(conversationId, message, isPinned)
-          }
-        >
-          <PinIcon size={ICON.xs} />
-        </IconButton>
-      )}
       {(canSave || isSaved) && (
         <IconButton
           label={isSaved ? "取消收藏" : "收藏"}
@@ -532,15 +516,6 @@ export function MessageCollaborationActions({
           }
         >
           <Bookmark size={ICON.xs} />
-        </IconButton>
-      )}
-      {canMarkUnread && (
-        <IconButton
-          label="标为未读"
-          tabIndex={actionTabIndex}
-          onClick={() => void markMessageAsUnread(conversationId, message)}
-        >
-          <MailWarning size={ICON.xs} />
         </IconButton>
       )}
     </>
@@ -607,11 +582,22 @@ export function SavedMessagesList({
                   </div>
                   <p className="attention-item-body">
                     {msg?.body ? (
-                      <MentionText body={msg.body} mentions={msg.mentions} userId={userId} />
+                      <PlainMentionText body={msg.body} mentions={msg.mentions} userId={userId} />
                     ) : msg?.forwarded ? (
-                      `[转发自 ${msg.forwarded.senderName}] ${msg.forwarded.body || ""}`
+                      (() => {
+                        const snippet =
+                          plainPreview(msg.forwarded.body) ||
+                          (msg.forwarded.attachments?.length
+                            ? `${msg.forwarded.attachments.length} 个文件`
+                            : "");
+                        return snippet
+                          ? `转发自 ${msg.forwarded.senderName}：${snippet}`
+                          : `转发自 ${msg.forwarded.senderName}`;
+                      })()
+                    ) : msg?.attachments?.length ? (
+                      `${msg.attachments.length} 个文件`
                     ) : (
-                      `${msg?.attachments?.length || 0} 个文件`
+                      "查看消息"
                     )}
                   </p>
                   <span className="attention-source">

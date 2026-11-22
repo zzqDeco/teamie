@@ -260,7 +260,16 @@ describe("mentions and replies inbox", () => {
     );
     expect(host.querySelectorAll(".attention-item")).toHaveLength(2);
     expect(api.read).not.toHaveBeenCalled();
-    await click(".attention-filters button:last-child");
+    const filterButtons = Array.from(
+      host.querySelectorAll<HTMLButtonElement>(".attention-filters button"),
+    );
+    expect(filterButtons).toHaveLength(3);
+    expect(filterButtons[0].textContent?.trim()).toBe("全部");
+    expect(filterButtons[1].textContent?.trim()).toContain("未读");
+    expect(filterButtons[2].textContent?.trim()).toBe("收藏");
+    await act(async () => {
+      filterButtons[1].click();
+    });
     await settle();
     expect(api.attention).toHaveBeenCalledWith(
       { cursor: undefined, unreadOnly: true, limit: 50 },
@@ -436,5 +445,75 @@ describe("mentions and replies inbox", () => {
     expect(api.read).not.toHaveBeenCalled();
     expect(around).not.toHaveBeenCalled();
     expect(host.querySelector(".attention-view")).not.toBeNull();
+  });
+  it("strips Markdown while keeping @ mention pills, previews forwarded-only items, and binds refresh to the saved tab", async () => {
+    const markdownItem = item(10, {
+      message: message(10, {
+        body: "@Member 请看\n```ts\nconst ok = true;\n```\n**重点** [文档](https://example.test)",
+        mentions: [{ userId: user.id, start: 0, end: 7 }],
+      }),
+      reasons: ["mention"],
+    });
+    const forwardedOnlyItem = item(11, {
+      message: message(11, {
+        body: "",
+        mentions: [],
+        replyToId: "my-msg",
+        forwarded: {
+          sourceConversationId: "other-conv",
+          sourceMessageId: "orig-1",
+          senderId: "alice",
+          senderName: "Alice",
+          senderKind: "human",
+          body: "**发布说明** 请确认",
+          createdAt: user.createdAt,
+        },
+      }),
+      reasons: ["reply"],
+    });
+    vi.mocked(api.attention).mockImplementation(async (options) =>
+      options?.limit === 1
+        ? { items: [], unreadCount: 2 }
+        : { items: [markdownItem, forwardedOnlyItem], unreadCount: 2 },
+    );
+    const savedSpy = vi
+      .spyOn(api, "listSavedMessages")
+      .mockResolvedValue({ items: [] });
+
+    await mount();
+    const previews = Array.from(host.querySelectorAll(".attention-item-body")).map(
+      (node) => node.textContent || "",
+    );
+    expect(previews[0]).toContain("@Member");
+    expect(previews[0]).toContain("const ok = true;");
+    expect(previews[0]).toContain("重点");
+    expect(previews[0]).toContain("文档");
+    expect(previews[0]).not.toContain("```");
+    expect(previews[0]).not.toContain("**");
+    expect(host.querySelector(".attention-item-body .mention-self")?.textContent).toBe(
+      "@Member",
+    );
+    expect(previews[1]).toBe("转发自 Alice：发布说明 请确认");
+
+    // Mark-all-read is visible on 全部, hidden on 收藏, and refresh targets savedMessages on 收藏
+    expect(host.querySelector(".attention-mark-all-read")).not.toBeNull();
+    expect(host.querySelector('[aria-label="刷新提醒"]')).not.toBeNull();
+
+    const savedTab = Array.from(
+      host.querySelectorAll<HTMLButtonElement>(".attention-filters button"),
+    ).find((btn) => btn.textContent?.trim() === "收藏")!;
+    await act(async () => {
+      savedTab.click();
+    });
+    await settle();
+    expect(host.querySelector(".attention-mark-all-read")).toBeNull();
+    const refreshSavedBtn = host.querySelector<HTMLButtonElement>('[aria-label="刷新收藏"]');
+    expect(refreshSavedBtn).not.toBeNull();
+    const callsBefore = savedSpy.mock.calls.length;
+    await act(async () => {
+      refreshSavedBtn!.click();
+    });
+    await settle();
+    expect(savedSpy.mock.calls.length).toBeGreaterThan(callsBefore);
   });
 });
