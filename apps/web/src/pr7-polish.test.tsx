@@ -376,6 +376,10 @@ describe("PR 7 polish & IA", () => {
     });
     expect(parentKeyDown).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(items[1]);
+    await act(async () => {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    });
+    expect(document.activeElement).toBe(items[1]);
 
     await act(async () => items[items.length - 1].click());
     expect(onRetract).toHaveBeenCalledTimes(1);

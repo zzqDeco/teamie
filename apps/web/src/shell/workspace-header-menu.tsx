@@ -51,12 +51,16 @@ export function WorkspaceHeaderMenu({
     };
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown, true);
-    requestAnimationFrame(() => {
-      menuRef.current
-        ?.querySelector<HTMLElement>('[role="menuitem"]')
-        ?.focus({ preventScroll: true });
+    const raf = requestAnimationFrame(() => {
+      const menu = menuRef.current;
+      if (menu && !menu.contains(document.activeElement)) {
+        menu
+          .querySelector<HTMLElement>('[role="menuitem"]')
+          ?.focus({ preventScroll: true });
+      }
     });
     return () => {
+      cancelAnimationFrame(raf);
       document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown, true);
     };
