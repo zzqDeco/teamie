@@ -242,6 +242,8 @@ for (const theme of ["light", "dark"] as const) {
     test("chat, search modal, attention, members, settings, and admin have zero critical/serious WCAG 2.1 AA violations", async ({
       page,
     }) => {
+      // Runs 7 full Axe WCAG 2.1 AA page scans sequentially; give 2-vCPU CI runners 3x timeout.
+      test.slow();
       await mockAuthenticatedRoutes(page);
 
       // 1. Main conversation timeline
