@@ -106,6 +106,8 @@ function LiveConversationView() {
 async function settle(action?: () => void | Promise<void>) {
   await act(async () => {
     await action?.();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
 }
@@ -305,7 +307,9 @@ describe("Authoritative bootstrap & manual unread concurrency (#129)", () => {
       void client.invalidateQueries({ queryKey: ["bootstrap", auth.user.id] });
     });
     // Server has not committed POST /unread yet, so bootstrap returns without manualUnreadSeq.
+    const versionBeforeA = chatStore.conversationVersion;
     await settle(() => midFlightBootstrapA.resolve(makeBootstrap([{ ...baseConversation }])));
+    await vi.waitFor(() => expect(chatStore.conversationVersion).toBe(versionBeforeA + 1));
     expect(markDoneA).toBe(false);
     expect(chatStore.getSnapshot().conversations[baseConversation.id].manualUnreadSeq).toBe(3);
     expect(chatStore.getSnapshot().manualUnreadByConversation[baseConversation.id]).toBe(3);
