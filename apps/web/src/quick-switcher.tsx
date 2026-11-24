@@ -31,6 +31,7 @@ import {
 import type { QuickGroup, QuickItem } from "./shell/quick-switcher-items";
 import { usePinyin } from "./shell/pinyin-match";
 import { conversationUnreadSummary } from "./unread-badge";
+import { matchesSearchTerms, parseSearchTerms } from "./search/search-highlight";
 import type {
   GroupedMessageResult,
   MessageOption,
@@ -66,6 +67,9 @@ export function QuickSwitcher({
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<"jump" | "messages">("jump");
+  const [searchScope, setSearchScope] = useState<"workspace" | "all">(() =>
+    currentWorkspaceId || workspaces.length > 0 ? "workspace" : "all",
+  );
   const [query, setQuery] = useState("");
   const [activeId, setActiveId] = useState("");
   const [searchResult, setSearchResult] =
@@ -198,14 +202,22 @@ export function QuickSwitcher({
 
   const trimmedQuery = query.trim();
   const termLower = trimmedQuery.toLocaleLowerCase();
+  const parsedTerms = parseSearchTerms(trimmedQuery);
   const validQuery = Array.from(trimmedQuery).length <= 200;
+  const effectiveScope: "workspace" | "all" =
+    searchScope === "workspace" && targetWorkspace ? "workspace" : "all";
   const searchEnabled =
     mode === "messages" &&
-    Boolean(targetWorkspace && validQuery && trimmedQuery);
+    Boolean(
+      validQuery &&
+        trimmedQuery &&
+        (effectiveScope === "all" ? workspaces.length > 0 : targetWorkspace),
+    );
   const searchKey = JSON.stringify([
     userId,
     generation,
-    targetWorkspace?.id || "",
+    effectiveScope,
+    effectiveScope === "workspace" ? targetWorkspace?.id || "" : "",
     mode,
     trimmedQuery,
   ]);
@@ -221,40 +233,45 @@ export function QuickSwitcher({
       !controller.signal.aborted &&
       generation === chatStore.generation &&
       operation === sequence.current;
-    const timer =
-      searchEnabled && targetWorkspace
-        ? setTimeout(() => {
-            activeRequests.add(controller);
-            void api
-              .searchWorkspaceMessages(
-                targetWorkspace.id,
-                { q: trimmedQuery, limit: 20 },
-                controller.signal,
-              )
-              .then((response) => {
-                if (isCurrent()) {
-                  setSearchResult({
-                    key: searchKey,
-                    items: response.items,
-                    cursor: response.cursor,
-                    error: "",
-                    loadingMore: false,
-                  });
-                }
-              })
-              .catch((error) => {
-                if (isCurrent()) {
-                  setSearchResult({
-                    key: searchKey,
-                    items: [],
-                    error: errorText(error),
-                    loadingMore: false,
-                  });
-                }
-              })
-              .finally(() => activeRequests.delete(controller));
-          }, 250)
-        : undefined;
+    const timer = searchEnabled
+      ? setTimeout(() => {
+          activeRequests.add(controller);
+          const req =
+            effectiveScope === "workspace" && targetWorkspace
+              ? api.searchWorkspaceMessages(
+                  targetWorkspace.id,
+                  { q: trimmedQuery, limit: 20 },
+                  controller.signal,
+                )
+              : api.searchGlobalMessages(
+                  { q: trimmedQuery, limit: 20 },
+                  controller.signal,
+                );
+          void req
+            .then((response) => {
+              if (isCurrent()) {
+                setSearchResult({
+                  key: searchKey,
+                  items: response.items,
+                  cursor: response.cursor,
+                  error: "",
+                  loadingMore: false,
+                });
+              }
+            })
+            .catch((error) => {
+              if (isCurrent()) {
+                setSearchResult({
+                  key: searchKey,
+                  items: [],
+                  error: errorText(error),
+                  loadingMore: false,
+                });
+              }
+            })
+            .finally(() => activeRequests.delete(controller));
+        }, 250)
+      : undefined;
     return () => {
       clearTimeout(timer);
       controller.abort();
@@ -262,6 +279,7 @@ export function QuickSwitcher({
       activeRequests.clear();
     };
   }, [
+    effectiveScope,
     generation,
     mode,
     retryNonce,
@@ -272,11 +290,10 @@ export function QuickSwitcher({
   ]);
 
   async function loadMoreMessages() {
-    if (
-      !targetWorkspace ||
-      !currentSearchPage?.cursor ||
-      currentSearchPage.loadingMore
-    ) {
+    if (!currentSearchPage?.cursor || currentSearchPage.loadingMore) {
+      return;
+    }
+    if (effectiveScope === "workspace" && !targetWorkspace) {
       return;
     }
     const operation = sequence.current;
@@ -288,11 +305,17 @@ export function QuickSwitcher({
     requests.current.add(controller);
     setSearchResult({ ...currentSearchPage, error: "", loadingMore: true });
     try {
-      const response = await api.searchWorkspaceMessages(
-        targetWorkspace.id,
-        { q: trimmedQuery, cursor: currentSearchPage.cursor, limit: 20 },
-        controller.signal,
-      );
+      const response =
+        effectiveScope === "workspace" && targetWorkspace
+          ? await api.searchWorkspaceMessages(
+              targetWorkspace.id,
+              { q: trimmedQuery, cursor: currentSearchPage.cursor, limit: 20 },
+              controller.signal,
+            )
+          : await api.searchGlobalMessages(
+              { q: trimmedQuery, cursor: currentSearchPage.cursor, limit: 20 },
+              controller.signal,
+            );
       if (isCurrent()) {
         setSearchResult((old) => {
           if (!old || old.key !== searchKey) return old;
@@ -336,10 +359,16 @@ export function QuickSwitcher({
 
   const queryLower = trimmedQuery.toLowerCase();
   const reconciledMessageOptions: MessageOption[] = [];
-  if (mode === "messages" && currentSearchPage && targetWorkspace) {
-    const wsMembers = membersByWorkspace.get(targetWorkspace.id) || [];
+  if (mode === "messages" && currentSearchPage) {
     for (const rawItem of currentSearchPage.items) {
-      if (rawItem.conversation.workspaceId !== targetWorkspace.id) continue;
+      if (
+        effectiveScope === "workspace" &&
+        targetWorkspace &&
+        rawItem.conversation.workspaceId !== targetWorkspace.id
+      ) {
+        continue;
+      }
+      if (!workspaceMap.has(rawItem.conversation.workspaceId)) continue;
       const liveConv = authorizedConvMap.get(rawItem.conversation.id);
       if (!liveConv && Object.keys(snapshot.conversations).length > 0) continue;
       const cached = (snapshot.messages[rawItem.conversation.id] || []).filter(
@@ -355,11 +384,15 @@ export function QuickSwitcher({
           : { ...reconciled, forwarded: rawItem.message.forwarded };
       const bodyChanged = message.body !== rawItem.message.body;
       const matchesQuery =
-        message.body.toLowerCase().includes(queryLower) ||
-        (message.forwarded?.body || "").toLowerCase().includes(queryLower);
+        effectiveScope === "all"
+          ? matchesSearchTerms(message, parsedTerms)
+          : message.body.toLowerCase().includes(queryLower) ||
+            (message.forwarded?.body || "").toLowerCase().includes(queryLower);
       if (bodyChanged && !matchesQuery) {
         continue;
       }
+      const wsMembers =
+        membersByWorkspace.get(rawItem.conversation.workspaceId) || [];
       const convForName: Conversation = liveConv || {
         id: rawItem.conversation.id,
         workspaceId: rawItem.conversation.workspaceId,
@@ -380,6 +413,9 @@ export function QuickSwitcher({
         message,
         conversation: rawItem.conversation,
         conversationLabel,
+        workspaceName:
+          rawItem.workspaceName ||
+          workspaceMap.get(rawItem.conversation.workspaceId)?.name,
         path: `/app/w/${encodeURIComponent(rawItem.conversation.workspaceId)}/c/${encodeURIComponent(rawItem.conversation.id)}?message=${encodeURIComponent(message.id)}`,
       });
     }
@@ -397,6 +433,7 @@ export function QuickSwitcher({
         conversationId: opt.conversation.id,
         conversationType: opt.conversation.type,
         conversationLabel: opt.conversationLabel,
+        workspaceName: opt.workspaceName,
         options: [],
       };
       groupByConv.set(opt.conversation.id, group);
@@ -477,31 +514,70 @@ export function QuickSwitcher({
     }
   }
 
+  const fullSearchParams = new URLSearchParams();
+  if (trimmedQuery) fullSearchParams.set("q", trimmedQuery);
+  if (effectiveScope === "workspace" && targetWorkspace) {
+    fullSearchParams.set("workspaceId", targetWorkspace.id);
+  }
+  const fullSearchPath = `/app/search${fullSearchParams.size ? `?${fullSearchParams}` : ""}`;
+
   return (
     <Modal
       title="快速跳转"
       subtitle={
-        mode === "messages" && targetWorkspace
-          ? `在 ${targetWorkspace.name} 中搜索消息`
+        mode === "messages"
+          ? effectiveScope === "all"
+            ? "在全部已授权工作空间中搜索消息"
+            : targetWorkspace
+              ? `在 ${targetWorkspace.name} 中搜索消息`
+              : "当前没有可搜索的工作空间"
           : "搜索对话、工作空间或常用页面"
       }
       onClose={onClose}
     >
       <div className="quick-switcher">
-        <Tabs
-          mode="group"
-          className="search-modes quick-switcher-modes"
-          ariaLabel="快速跳转模式"
-          value={mode}
-          onChange={(next) => {
-            setMode(next);
-            setActiveId("");
-          }}
-          items={[
-            { value: "jump", label: "跳转" },
-            { value: "messages", label: "搜索消息", disabled: !targetWorkspace },
-          ]}
-        />
+        <div className="quick-switcher-mode-bar">
+          <Tabs
+            mode="group"
+            className="search-modes quick-switcher-modes"
+            ariaLabel="快速跳转模式"
+            value={mode}
+            onChange={(next) => {
+              setMode(next);
+              setActiveId("");
+            }}
+            items={[
+              { value: "jump", label: "跳转" },
+              { value: "messages", label: "搜索消息", disabled: workspaces.length === 0 },
+            ]}
+          />
+          {mode === "messages" && targetWorkspace && (
+            <div className="quick-switcher-scope-row" role="group" aria-label="消息搜索范围">
+              <button
+                type="button"
+                className={`quick-switcher-scope-btn ${effectiveScope === "workspace" ? "active" : ""}`}
+                aria-pressed={effectiveScope === "workspace"}
+                onClick={() => {
+                  setSearchScope("workspace");
+                  setActiveId("");
+                }}
+              >
+                当前工作空间
+              </button>
+              <button
+                type="button"
+                className={`quick-switcher-scope-btn ${effectiveScope === "all" ? "active" : ""}`}
+                aria-pressed={effectiveScope === "all"}
+                onClick={() => {
+                  setSearchScope("all");
+                  setActiveId("");
+                }}
+              >
+                全部工作空间
+              </button>
+            </div>
+          )}
+        </div>
         <label className="quick-switcher-input">
           {searchPending ? (
             <LoaderCircle size={ICON.md} className="spin" aria-hidden="true" />
@@ -527,9 +603,11 @@ export function QuickSwitcher({
             onKeyDown={handleKeyDown}
             placeholder={
               mode === "messages"
-                ? targetWorkspace
-                  ? `在 ${targetWorkspace.name} 中搜索消息关键词…`
-                  : "当前没有可搜索的工作空间"
+                ? effectiveScope === "all"
+                  ? "在全部工作空间中搜索消息关键词…"
+                  : targetWorkspace
+                    ? `在 ${targetWorkspace.name} 中搜索消息关键词…`
+                    : "当前没有可搜索的工作空间"
                 : "输入名称、拼音或首字母…"
             }
             aria-label={mode === "messages" ? "搜索工作空间消息" : "快速跳转搜索"}
@@ -559,6 +637,8 @@ export function QuickSwitcher({
           <QuickSwitcherMessageResults
             searchPending={searchPending}
             trimmedQuery={trimmedQuery}
+            searchScope={effectiveScope}
+            fullSearchPath={fullSearchPath}
             groupedMessageResults={groupedMessageResults}
             listRef={listRef}
             activeItemId={activeItemId}

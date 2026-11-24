@@ -15,6 +15,7 @@ const STATIC_APP_PATHS = new Set([
   "/app/admin/marketplace",
   "/app/admin/announcements",
   "/app/attention",
+  "/app/search",
 ]);
 
 /** Route flags for the authenticated shell, derived from the current URL. */
@@ -48,6 +49,7 @@ export function useShellRoutes() {
   const isDirectoryPage = !!directoryMatch;
   const isAppsPage = !!appsMatch;
   const isAttentionPage = pathname === "/app/attention";
+  const isSearchPage = pathname === "/app/search";
   const isKnownRoute =
     !!(match || directoryMatch || appsMatch || legacyDirectoryMatch || agentMatch ||
       developerAppMatch || workspaceRootMatch) || STATIC_APP_PATHS.has(pathname);
@@ -73,6 +75,7 @@ export function useShellRoutes() {
     isDirectoryPage,
     isAppsPage,
     isAttentionPage,
+    isSearchPage,
     /** Pages reached from the account (avatar) menu. */
     isAccountPage: isSettings || isDevelopersPage || isAdminArea,
     isManagement:

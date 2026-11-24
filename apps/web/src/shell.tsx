@@ -29,12 +29,14 @@ import { useShellRoutes } from "./shell/shell-routes";
 import {
   computePageTitle,
   computeShellAttention,
+  GlobalSearchView,
   resolveWorkspaceTarget,
   route,
   ShellManagementView,
   ShellSidebar,
   useShellViewportAndFocus,
 } from "./shell-sidebar";
+import { RouteBoundary } from "./route-boundary";
 import { RemoveMemberModal, ShellMembersPane } from "./shell-members-pane";
 import { logoutAndCleanup } from "./logout-cleanup";
 import {
@@ -211,6 +213,7 @@ export function Shell() {
     setDirectError("");
     if (
       location.pathname === "/app/attention" ||
+      location.pathname === "/app/search" ||
       new URLSearchParams(location.search).has("message")
     )
       setDetails(false);
@@ -224,7 +227,7 @@ export function Shell() {
   }, [closeAllOpenAppPanes, conversation, setAppPaneOpen]);
   const baseOverlayModal =
     !!dialog || quickSwitcherOpen || shortcutsOpen || managingGroup || !!groupExit || managingWorkspaceApps || !!removing;
-  const { isAnnouncementsAdminPage, isAttentionPage, isAgentsPage, isManagement } = routes;
+  const { isAnnouncementsAdminPage, isAttentionPage, isSearchPage, isAgentsPage, isManagement } = routes;
   const announcementPopupVisible =
     !announcementsHistoryOpen &&
     !baseOverlayModal &&
@@ -434,7 +437,7 @@ export function Shell() {
         navigationRef={navigationRef} mobile={mobile} sidebar={sidebar}
         hasOverlayModal={hasOverlayModal} user={user!} busy={busy}
         connection={chat.connection} connectionLabel={connectionLabel}
-        isAttentionPage={isAttentionPage} isAgentsPage={isAgentsPage}
+        isAttentionPage={isAttentionPage} isSearchPage={isSearchPage} isAgentsPage={isAgentsPage}
         isAccountPage={routes.isAccountPage} isAppsPage={routes.isAppsPage}
         attentionUnreadCount={attentionCount.data?.unreadCount}
         attentionProjection={attentionCount.data?.attentionUnreadByConversation}
@@ -468,7 +471,7 @@ export function Shell() {
       >
         <ConnectionBanner
           connection={chat.connection} syncError={chat.syncError}
-          showSyncError={!conversation || isManagement || isAttentionPage || routes.isNotFound}
+          showSyncError={!conversation || isManagement || isAttentionPage || isSearchPage || routes.isNotFound}
           onRetry={chat.reconnect ?? chat.sync}
         />
         {error && !removing && <Notice kind="error">{error}</Notice>}
@@ -478,6 +481,10 @@ export function Shell() {
           <NotFoundView onOpenNavigation={() => setSidebar(true)} />
         ) : isAttentionPage ? (
           <AttentionInbox key={user!.id} onMenu={() => setSidebar(true)} />
+        ) : isSearchPage ? (
+          <RouteBoundary>
+            <GlobalSearchView key={user!.id} onMenu={() => setSidebar(true)} />
+          </RouteBoundary>
         ) : isManagement ? (
           <ShellManagementView
             user={user!} routes={routes}

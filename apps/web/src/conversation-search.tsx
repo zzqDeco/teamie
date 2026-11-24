@@ -297,13 +297,17 @@ export function ConversationSearch({
             ? { ...message, forwarded: fromPage.forwarded }
             : message;
         })
-        .filter(
-          (message) =>
-            !message.retractedAt &&
-            (mode === "files"
-              ? matchingAttachments(message, termLower).length > 0
-              : matchesMessageBody(message, termLower)),
-        )
+        .filter((message) => {
+          if (message.retractedAt) return false;
+          if (mode === "files") {
+            return matchingAttachments(message, termLower).length > 0;
+          }
+          const fromPage = pageById.get(message.id);
+          if (fromPage && message.body === fromPage.body) {
+            return true;
+          }
+          return matchesMessageBody(message, termLower);
+        })
         .reverse()
     : [];
   return (

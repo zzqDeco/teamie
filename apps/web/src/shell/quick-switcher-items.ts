@@ -58,6 +58,7 @@ export function buildPageItems({
       : []),
     page("attention", "提及与回复", "收件箱", "/app/attention"),
     page("saved", "收藏", "收藏的消息", "/app/attention?tab=saved"),
+    page("search", "全局消息搜索", "跨工作空间检索与筛选", "/app/search"),
     page("agents", "个人 Agent", "管理你的 Agent", "/app/agents"),
     page("settings", "账号设置", "个人资料与密码", "/app/settings"),
     page("developers", "开发者平台", "应用开发与提审", "/app/developers"),

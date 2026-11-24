@@ -387,6 +387,23 @@ export function useShellKeyboardShortcuts({
         setQuickSwitcherOpen((open) => !open);
         return;
       }
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        event.shiftKey &&
+        !event.altKey &&
+        event.key.toLowerCase() === "f"
+      ) {
+        if (anyModalOpen && !quickSwitcherOpen && !shortcutsOpen) return;
+        event.preventDefault();
+        setShortcutsOpen(false);
+        setQuickSwitcherOpen(false);
+        if (window.location.pathname.replace(/\/+$/, "") === "/app/search") {
+          window.dispatchEvent(new CustomEvent("teamie:focus-global-search"));
+        } else {
+          navigate("/app/search");
+        }
+        return;
+      }
       const target = event.target as HTMLElement | null;
       const inEditable =
         !!target &&
