@@ -54,6 +54,9 @@ const MyAgents = lazyView(() =>
 const WorkspaceMembers = lazyView(() =>
   import("../members").then((m) => ({ default: m.WorkspaceMembers })),
 );
+export const GlobalSearchView = lazyView(() =>
+  import("../search/global-search").then((m) => ({ default: m.GlobalSearchView })),
+);
 
 
 export function ShellManagementView({
@@ -233,6 +236,7 @@ export function computePageTitle({
 }) {
   if (routes.isNotFound) return "页面不存在";
   if (routes.isAttentionPage) return "提及与回复";
+  if (routes.isSearchPage) return "全局搜索";
   if (routes.isManagement) {
     const { title } = managementPageMeta(routes, { workspace, isPlatformAdmin: false });
     if (routes.isDirectoryPage || routes.isAppsPage)

@@ -38,6 +38,7 @@ const modularFeatureFiles = [
   "styles/attachments.css",
   "styles/connection-banner.css",
   "styles/conversation-search.css",
+  "styles/global-search.css",
   "styles/mentions.css",
   "styles/password-recovery.css",
   "styles/feedback.css",

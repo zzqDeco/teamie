@@ -11,6 +11,7 @@ import {
   PencilLine,
   Plus,
   Search,
+  SlidersHorizontal,
   Users,
   X,
 } from "lucide-react";
@@ -45,6 +46,7 @@ import { WorkspaceHeaderMenu } from "./shell/workspace-header-menu";
 import {
   computePageTitle,
   computeShellAttention,
+  GlobalSearchView,
   pickAdjacentConversation,
   resolveWorkspaceTarget,
   route,
@@ -54,6 +56,7 @@ import {
 export {
   computePageTitle,
   computeShellAttention,
+  GlobalSearchView,
   pickAdjacentConversation,
   resolveWorkspaceTarget,
   route,
@@ -284,6 +287,7 @@ export function ShellSidebar({
   connection,
   connectionLabel,
   isAttentionPage,
+  isSearchPage = false,
   isAgentsPage,
   isAccountPage = false,
   isAppsPage = false,
@@ -317,6 +321,7 @@ export function ShellSidebar({
   connection: Connection;
   connectionLabel: string;
   isAttentionPage: boolean;
+  isSearchPage?: boolean;
   isAgentsPage: boolean;
   /** Settings, developer platform and admin pages (reached from the avatar menu). */
   isAccountPage?: boolean;
@@ -509,17 +514,34 @@ export function ShellSidebar({
             <X size={ICON.md} />
           </IconButton>
         </div>
-        <button
-          type="button"
-          className="sidebar-quick-switcher"
-          aria-haspopup="dialog"
-          aria-keyshortcuts="Control+K Meta+K"
-          onClick={onOpenQuickSwitcher}
-        >
-          <Search size={ICON.sm} aria-hidden="true" />
-          <span>搜索与切换</span>
-          <kbd aria-hidden="true">{/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘ K" : "Ctrl K"}</kbd>
-        </button>
+        <div className="sidebar-search-row">
+          <button
+            type="button"
+            className="sidebar-quick-switcher"
+            aria-haspopup="dialog"
+            aria-keyshortcuts="Control+K Meta+K"
+            onClick={onOpenQuickSwitcher}
+          >
+            <Search size={ICON.sm} aria-hidden="true" />
+            <span>搜索与切换</span>
+            <kbd aria-hidden="true">{/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘ K" : "Ctrl K"}</kbd>
+          </button>
+          <Link
+            to="/app/search"
+            className={`sidebar-global-search-link ${isSearchPage ? "active" : ""}`}
+            title={
+              /Mac|iPhone|iPad/.test(navigator.platform)
+                ? "全局消息搜索 (⌘⇧F)"
+                : "全局消息搜索 (Ctrl+Shift+F)"
+            }
+            aria-label="全局消息搜索"
+            aria-keyshortcuts="Control+Shift+F Meta+Shift+F"
+            aria-current={isSearchPage ? "page" : undefined}
+            onClick={onCloseSidebar}
+          >
+            <SlidersHorizontal size={ICON.sm} aria-hidden="true" />
+          </Link>
+        </div>
         {workspace && (
           <Link
             to={`/app/w/${workspace.id}/apps`}

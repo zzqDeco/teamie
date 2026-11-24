@@ -1,6 +1,36 @@
 /* Components layer: global quick switcher (Cmd/Ctrl+K) and keyboard shortcuts dialog. */
 
 @layer components {
+  .sidebar-search-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1_5);
+    flex-shrink: 0;
+    margin: var(--space-3_5) var(--space-3) var(--space-2);
+  }
+  .sidebar-global-search-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    min-height: 40px;
+    flex-shrink: 0;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-md);
+    background: var(--surface);
+    color: var(--text-muted);
+    transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast);
+  }
+  .sidebar-global-search-link:hover {
+    background: var(--hover-bg);
+    border-color: var(--brand);
+    color: var(--brand-text);
+  }
+  .sidebar-global-search-link.active {
+    background: var(--selected-bg);
+    border-color: var(--brand);
+    color: var(--brand-text);
+  }
   .quick-switcher {
     display: flex;
     flex-direction: column;
@@ -91,8 +121,69 @@
     font-size: var(--font-base);
     color: var(--text);
   }
+  .quick-switcher-mode-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
   .quick-switcher-modes {
     margin-bottom: 0;
+  }
+  .quick-switcher-scope-row {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+  }
+  .quick-switcher-scope-btn {
+    padding: var(--space-1) var(--space-2_5);
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    background: var(--surface);
+    color: var(--text-muted);
+    font-size: var(--font-sm);
+    font-weight: 500;
+    cursor: pointer;
+    transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast);
+  }
+  .quick-switcher-scope-btn:hover {
+    background: var(--hover-bg);
+    color: var(--brand-text);
+  }
+  .quick-switcher-scope-btn.active {
+    border-color: var(--brand);
+    background: var(--selected-bg);
+    color: var(--brand-text);
+    font-weight: 600;
+  }
+  .quick-switcher-group-workspace {
+    padding: var(--space-0_5) var(--space-1_5);
+    border-radius: var(--r-pill);
+    background: var(--surface-sunken);
+    color: var(--text);
+    font-size: var(--font-sm);
+  }
+  .quick-switcher-full-search {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-1);
+    width: 100%;
+    margin-top: var(--space-1);
+    padding: var(--space-2) var(--space-3);
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--r-md);
+    background: transparent;
+    color: var(--brand-text);
+    font-size: var(--font-sm);
+    font-weight: 600;
+    cursor: pointer;
+    transition: background var(--dur-fast), border-color var(--dur-fast);
+  }
+  .quick-switcher-full-search:hover {
+    background: var(--hover-bg);
+    border-color: var(--brand);
   }
   .quick-switcher-group {
     display: flex;

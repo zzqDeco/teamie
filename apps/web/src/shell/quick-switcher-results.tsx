@@ -1,5 +1,6 @@
 import type { RefObject } from "react";
 import {
+  ArrowUpRight,
   AtSign,
   Bell,
   Blocks,
@@ -10,6 +11,7 @@ import {
   Hash,
   Keyboard,
   MessageCircle,
+  Search,
   Settings,
   ShieldCheck,
   Users,
@@ -18,16 +20,22 @@ import type { LucideIcon } from "lucide-react";
 import type { Conversation, Message, WorkspaceSearchItem } from "@teamie/api-client";
 import { AgentBadge } from "../agent-ui";
 import { ICON } from "../icons";
+import { MultiTermHighlight, parseSearchTerms } from "../search/search-highlight";
 import { Button, date, Modal, Notice, time } from "../ui";
 import type { ConversationUnreadSummary } from "../notification-model";
 import { UnreadBadge } from "../unread-badge";
 import type { QuickGroup, QuickItem } from "./quick-switcher-items";
+
+export type QuickSearchItem = WorkspaceSearchItem & {
+  workspaceName?: string;
+};
 
 export type MessageOption = {
   id: string;
   message: Message;
   conversation: WorkspaceSearchItem["conversation"];
   conversationLabel: string;
+  workspaceName?: string;
   path: string;
 };
 
@@ -35,28 +43,27 @@ export type GroupedMessageResult = {
   conversationId: string;
   conversationType: Conversation["type"];
   conversationLabel: string;
+  workspaceName?: string;
   options: MessageOption[];
 };
 
 export type WorkspaceSearchState = {
   key: string;
-  items: WorkspaceSearchItem[];
+  items: QuickSearchItem[];
   cursor?: string;
   error: string;
   loadingMore: boolean;
 };
 
 export function Highlight({ text, query }: { text: string; query: string }) {
-  if (!query) return text;
-  const literal = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return text
-    .split(new RegExp(`(${literal})`, "giu"))
-    .map((part, i) => (i % 2 ? <mark key={i}>{part}</mark> : part));
+  return <MultiTermHighlight text={text} query={query} maxLength={140} />;
 }
 
 export function QuickSwitcherMessageResults({
   searchPending,
   trimmedQuery,
+  searchScope = "workspace",
+  fullSearchPath = "/app/search",
   groupedMessageResults,
   listRef,
   activeItemId,
@@ -68,6 +75,8 @@ export function QuickSwitcherMessageResults({
 }: {
   searchPending: boolean;
   trimmedQuery: string;
+  searchScope?: "workspace" | "all";
+  fullSearchPath?: string;
   groupedMessageResults: GroupedMessageResult[];
   listRef: RefObject<HTMLUListElement | null>;
   activeItemId?: string;
@@ -77,11 +86,14 @@ export function QuickSwitcherMessageResults({
   onLoadMore: () => void;
   onRetry: () => void;
 }) {
+  const terms = parseSearchTerms(trimmedQuery);
   return (
     <div className="quick-switcher-search-body" aria-busy={searchPending}>
       {!trimmedQuery ? (
         <div className="quick-switcher-empty" role="status">
-          输入关键词搜索当前工作空间的消息
+          {searchScope === "all"
+            ? "输入关键词搜索全部已授权工作空间的消息"
+            : "输入关键词搜索当前工作空间的消息"}
         </div>
       ) : searchPending ? (
         <div className="quick-switcher-empty" role="status">
@@ -95,7 +107,9 @@ export function QuickSwitcherMessageResults({
               ref={listRef}
               className="quick-switcher-list quick-switcher-message-groups"
               role="listbox"
-              aria-label="工作空间消息搜索结果"
+              aria-label={
+                searchScope === "all" ? "全局消息搜索结果" : "工作空间消息搜索结果"
+              }
             >
               {groupedMessageResults.map((group) => (
                 <li
@@ -104,6 +118,11 @@ export function QuickSwitcherMessageResults({
                   role="presentation"
                 >
                   <div className="quick-switcher-group-header">
+                    {searchScope === "all" && group.workspaceName && (
+                      <span className="quick-switcher-group-workspace">
+                        {group.workspaceName}
+                      </span>
+                    )}
                     {group.conversationType === "channel" ? (
                       <Hash size={ICON.xs} aria-hidden="true" />
                     ) : group.conversationType === "group" ? (
@@ -120,17 +139,20 @@ export function QuickSwitcherMessageResults({
                   >
                     {group.options.map((opt) => {
                       const selected = opt.id === activeItemId;
-                      const queryLower = trimmedQuery.toLowerCase();
                       const forwarded = opt.message.forwarded;
+                      const bodyLower = opt.message.body.toLowerCase();
+                      const forwardedLower = (forwarded?.body || "").toLowerCase();
                       const bodyMatches = Boolean(
                         opt.message.body &&
-                          (!queryLower ||
-                            opt.message.body.toLowerCase().includes(queryLower)),
+                          (!terms.length ||
+                            terms.some((t) => bodyLower.includes(t.toLowerCase()))),
                       );
                       const forwardedMatches = Boolean(
                         forwarded?.body &&
-                          (!queryLower ||
-                            forwarded.body.toLowerCase().includes(queryLower)),
+                          (!terms.length ||
+                            terms.some((t) =>
+                              forwardedLower.includes(t.toLowerCase()),
+                            )),
                       );
                       const showForwarded = Boolean(
                         forwarded?.body && (forwardedMatches || !bodyMatches),
@@ -215,6 +237,14 @@ export function QuickSwitcherMessageResults({
           ) : null}
         </>
       )}
+      <button
+        type="button"
+        className="quick-switcher-full-search"
+        onClick={() => onSelect(fullSearchPath)}
+      >
+        <span>在完整搜索页查看与筛选</span>
+        <ArrowUpRight size={ICON.sm} aria-hidden="true" />
+      </button>
     </div>
   );
 }
@@ -224,6 +254,7 @@ const PAGE_ICONS: Record<string, LucideIcon> = {
   apps: Blocks,
   attention: AtSign,
   saved: Bookmark,
+  search: Search,
   agents: Bot,
   settings: Settings,
   developers: Code2,
@@ -328,6 +359,7 @@ export function QuickSwitcherJumpResults({
 
 const shortcuts = [
   { keys: ["⌘ / Ctrl", "K"], description: "打开快速跳转与工作空间搜索" },
+  { keys: ["⌘ / Ctrl", "Shift", "F"], description: "打开跨工作空间全局搜索" },
   { keys: ["Alt", "↑ / ↓"], description: "切换到上一个或下一个对话" },
   { keys: ["Alt", "Shift", "↑ / ↓"], description: "跳转到上一个或下一个未读对话" },
   { keys: ["↑"], description: "在空输入框中编辑上一条自己发送的消息" },
