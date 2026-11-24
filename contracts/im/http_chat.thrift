@@ -159,6 +159,23 @@ struct WorkspaceSearchItemDTO {
   2: required AttentionConversationDTO conversation (api.body="conversation")
 }
 
+struct GlobalSearchItemDTO {
+  1: required MessageDTO message (api.body="message")
+  2: required AttentionConversationDTO conversation (api.body="conversation")
+  3: required string workspaceName (api.body="workspaceName")
+}
+
+struct ConversationAttachmentItemDTO {
+  1: required AttachmentDTO attachment (api.body="attachment")
+  2: required string messageId (api.body="messageId")
+  3: required i64 messageSeq (api.body="messageSeq")
+  4: required string senderId (api.body="senderId")
+  5: required string senderName (api.body="senderName")
+  6: required string senderKind (api.body="senderKind")
+  7: required string createdAt (api.body="createdAt")
+  8: required bool isForwarded (api.body="isForwarded")
+}
+
 struct EmptyResp {}
 
 struct GetBootstrapReq {}
@@ -370,6 +387,36 @@ struct SearchWorkspaceMessagesReq {
 
 struct WorkspaceSearchPageResp {
   1: required list<WorkspaceSearchItemDTO> items (api.body="items")
+  2: optional string cursor (api.body="cursor")
+}
+
+struct SearchMessagesReq {
+  1: optional string q (api.query="q")
+  2: optional string workspaceId (api.query="workspaceId")
+  3: optional string conversationId (api.query="conversationId")
+  4: optional string senderId (api.query="senderId")
+  5: optional string hasFiles (api.query="hasFiles")
+  6: optional string after (api.query="after")
+  7: optional string before (api.query="before")
+  8: optional string cursor (api.query="cursor")
+  9: optional string limit (api.query="limit")
+}
+
+struct GlobalSearchPageResp {
+  1: required list<GlobalSearchItemDTO> items (api.body="items")
+  2: optional string cursor (api.body="cursor")
+}
+
+struct ListConversationAttachmentsReq {
+  1: required string id (api.path="id")
+  2: optional string kind (api.query="kind")
+  3: optional string q (api.query="q")
+  4: optional string cursor (api.query="cursor")
+  5: optional string limit (api.query="limit")
+}
+
+struct ListConversationAttachmentsResp {
+  1: required list<ConversationAttachmentItemDTO> items (api.body="items")
   2: optional string cursor (api.body="cursor")
 }
 
@@ -610,8 +657,10 @@ service ChatHTTPService {
   ReadReceiptsResp GetReadReceipts(1: GetReadReceiptsReq req) (api.get="/api/v1/conversations/:id/read-receipts")
   NotificationLevelResp SetNotificationLevel(1: SetNotificationLevelReq req) (api.put="/api/v1/conversations/:id/notification-level")
   WorkspaceSearchPageResp SearchWorkspaceMessages(1: SearchWorkspaceMessagesReq req) (api.get="/api/v1/workspaces/:id/messages/search")
+  GlobalSearchPageResp SearchMessages(1: SearchMessagesReq req) (api.get="/api/v1/messages/search")
   AttentionPageResp GetAttention(1: GetAttentionReq req) (api.get="/api/v1/attention")
   SyncResp Sync(1: SyncReq req) (api.get="/api/v1/sync")
+  ListConversationAttachmentsResp ListConversationAttachments(1: ListConversationAttachmentsReq req) (api.get="/api/v1/conversations/:id/attachments")
   AttachmentResp UploadAttachment(1: UploadAttachmentReq req) (api.post="/api/v1/conversations/:id/attachments")
   AttachmentResp GetAttachmentUpload(1: GetAttachmentUploadReq req) (api.get="/api/v1/conversations/:id/attachment-uploads/:uploadKey")
   EmptyResp DeletePendingAttachment(1: DeletePendingAttachmentReq req) (api.delete="/api/v1/conversations/:id/attachments/:attachmentId")

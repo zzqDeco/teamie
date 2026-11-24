@@ -483,6 +483,8 @@ export class TeamieClient {
   markAnnouncementsRead = this.#collaboration.markAnnouncementsRead;
   createAnnouncement = this.#collaboration.createAnnouncement;
   deleteAnnouncement = this.#collaboration.deleteAnnouncement;
+  searchGlobalMessages = this.#collaboration.searchGlobalMessages;
+  listConversationAttachments = this.#collaboration.listConversationAttachments;
   sync = (cursor: string) =>
     this.#request<SyncPage>(
       `${IDL_ROUTES.Sync.clientPath}?cursor=${part(cursor)}&limit=100`,

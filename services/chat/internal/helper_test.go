@@ -32,6 +32,7 @@ var (
 	schemaV4            = pg.SchemaV4
 	schemaV5            = pg.SchemaV5
 	attachmentTransfers = httpadapter.DefaultTransfers
+	thumbnailTransfers  = httpadapter.DefaultThumbnailTransfers
 )
 
 type Workspace = domain.Workspace
@@ -400,6 +401,16 @@ func (s *Store) Read(ctx context.Context, user, conversation string, seq int64) 
 	return n, compatErr(err)
 }
 
+func (s *Store) SearchMessages(ctx context.Context, user, query, workspaceID, conversationID, senderID, hasFiles, after, before, rawCursor string, limit int) (domain.GlobalSearchPage, error) {
+	page, err := s.App(nil, "").SearchMessages(ctx, user, query, workspaceID, conversationID, senderID, hasFiles, after, before, rawCursor, limit)
+	return page, compatErr(err)
+}
+
+func (s *Store) ListConversationAttachments(ctx context.Context, user, conversationID, kind, query, rawCursor string, limit int) (domain.ConversationAttachmentPage, error) {
+	page, err := s.App(nil, "").ListConversationAttachments(ctx, user, conversationID, kind, query, rawCursor, limit)
+	return page, compatErr(err)
+}
+
 func (s *Store) SearchWorkspaceMessages(ctx context.Context, user, workspaceID, query, rawCursor string, limit int) (WorkspaceSearchPage, error) {
 	page, err := s.App(nil, "").SearchWorkspaceMessages(ctx, user, workspaceID, query, rawCursor, limit)
 	if err != nil {
@@ -503,10 +514,11 @@ func (h *Handler) Routes() http.Handler {
 		svc.Presence = h.Presence
 	}
 	adapter := &httpadapter.Adapter{
-		App:       svc,
-		Auth:      h.Identity,
-		Origin:    h.Origin,
-		Transfers: attachmentTransfers,
+		App:                svc,
+		Auth:               h.Identity,
+		Origin:             h.Origin,
+		Transfers:          attachmentTransfers,
+		ThumbnailTransfers: thumbnailTransfers,
 	}
 	return adapter.Routes()
 }
