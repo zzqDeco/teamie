@@ -3,10 +3,14 @@ import { executeTransportRequest, routePath } from "./transport";
 import type { HttpTransportState } from "./transport";
 import type {
   AnnouncementsPage,
+  ConversationAttachmentOptions,
+  ConversationAttachmentPage,
   ConversationSavedIds,
   CreateAnnouncementInput,
   CreatedAnnouncement,
   DeletePinResult,
+  GlobalSearchOptions,
+  GlobalSearchPage,
   MarkAnnouncementsReadResult,
   MarkUnreadResult,
   PinsList,
@@ -128,5 +132,43 @@ export function createCollaborationClient(state: HttpTransportState) {
       request<void>(routePath(IDL_ROUTES.DeleteAnnouncement, { id }), {
         method: IDL_ROUTES.DeleteAnnouncement.method,
       }),
+    searchGlobalMessages: (
+      options: GlobalSearchOptions = {},
+      signal?: AbortSignal,
+    ) => {
+      const params = new URLSearchParams();
+      if (options.q) params.set("q", options.q);
+      if (options.workspaceId) params.set("workspaceId", options.workspaceId);
+      if (options.conversationId)
+        params.set("conversationId", options.conversationId);
+      if (options.senderId) params.set("senderId", options.senderId);
+      if (options.hasFiles !== undefined)
+        params.set("hasFiles", String(options.hasFiles));
+      if (options.after) params.set("after", options.after);
+      if (options.before) params.set("before", options.before);
+      if (options.cursor) params.set("cursor", options.cursor);
+      if (options.limit !== undefined)
+        params.set("limit", String(options.limit));
+      return request<GlobalSearchPage>(
+        `${IDL_ROUTES.SearchMessages.clientPath}${params.size ? `?${params}` : ""}`,
+        { signal },
+      );
+    },
+    listConversationAttachments: (
+      conversationId: string,
+      options: ConversationAttachmentOptions = {},
+      signal?: AbortSignal,
+    ) => {
+      const params = new URLSearchParams();
+      if (options.kind) params.set("kind", options.kind);
+      if (options.q) params.set("q", options.q);
+      if (options.cursor) params.set("cursor", options.cursor);
+      if (options.limit !== undefined)
+        params.set("limit", String(options.limit));
+      return request<ConversationAttachmentPage>(
+        `${routePath(IDL_ROUTES.ListConversationAttachments, { id: conversationId })}${params.size ? `?${params}` : ""}`,
+        { signal },
+      );
+    },
   };
 }

@@ -17,6 +17,7 @@ import type {
   AttentionItemDTO,
   AttentionPageResp,
   BootstrapResp,
+  ConversationAttachmentItemDTO,
   ConversationDTO,
   CreateAdminModelProfileReq,
   CreateAdminModelProviderReq,
@@ -26,7 +27,10 @@ import type {
   EventDTO,
   ForwardedSnapshotDTO,
   ForwardSourceDTO,
+  GlobalSearchItemDTO,
+  GlobalSearchPageResp,
   ListAnnouncementsResp,
+  ListConversationAttachmentsResp,
   ListConversationSavedResp,
   ListMessagesResp,
   ListPinsResp,
@@ -234,6 +238,46 @@ export type WorkspaceSearchItem = Omit<
 };
 export type WorkspaceSearchPage = Omit<WorkspaceSearchPageResp, "items"> & {
   items: WorkspaceSearchItem[];
+};
+export type GlobalSearchItem = Omit<
+  GlobalSearchItemDTO,
+  "message" | "conversation"
+> & {
+  message: Message;
+  conversation: Pick<Conversation, "id" | "workspaceId" | "name" | "type">;
+};
+export type GlobalSearchPage = Omit<GlobalSearchPageResp, "items"> & {
+  items: GlobalSearchItem[];
+};
+export type GlobalSearchOptions = {
+  q?: string;
+  workspaceId?: string;
+  conversationId?: string;
+  senderId?: string;
+  hasFiles?: boolean;
+  after?: string;
+  before?: string;
+  cursor?: string;
+  limit?: number;
+};
+export type ConversationAttachmentKind = "all" | "image" | "file";
+export type ConversationAttachmentItem = Omit<
+  ConversationAttachmentItemDTO,
+  "senderKind"
+> & {
+  senderKind: "human" | "agent";
+};
+export type ConversationAttachmentPage = Omit<
+  ListConversationAttachmentsResp,
+  "items"
+> & {
+  items: ConversationAttachmentItem[];
+};
+export type ConversationAttachmentOptions = {
+  kind?: ConversationAttachmentKind;
+  q?: string;
+  cursor?: string;
+  limit?: number;
 };
 
 export type MarketplaceApp = MarketplaceAppDTO;

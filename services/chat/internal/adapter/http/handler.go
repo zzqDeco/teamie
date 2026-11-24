@@ -54,23 +54,42 @@ func responseStatusFromContext(ctx context.Context, fallback int) int {
 // Adapter implements the generated chatgen.ChatHTTPService contract and wires
 // HTTP routes to the Chat application service.
 type Adapter struct {
-	App       *app.Service
-	Auth      httpx.Identity
-	Origin    string
-	Transfers chan struct{}
+	App                *app.Service
+	Auth               httpx.Identity
+	Origin             string
+	Transfers          chan struct{}
+	ThumbnailTransfers chan struct{}
 }
 
 // Compile-time verification that Adapter implements the generated Thrift HTTP service interface.
 var _ chatgen.ChatHTTPService = (*Adapter)(nil)
 
-// DefaultTransfers bounds concurrent upload/download bytea buffers under Chat's
-// 144 MiB Go memory budget when Adapter.Transfers is not explicitly overridden.
+// DefaultTransfers bounds concurrent 4 MiB upload/download bytea buffers under
+// Chat's memory budget when Adapter.Transfers is not explicitly overridden.
 var DefaultTransfers = make(chan struct{}, 2)
+
+// DefaultThumbnailTransfers bounds concurrent <=256 KiB thumbnail transfers
+// separately from heavy 4 MiB uploads/downloads so media galleries never starve
+// file uploads (4 * 256 KiB <= 1 MiB peak buffer).
+var DefaultThumbnailTransfers = make(chan struct{}, 4)
 
 func (a *Adapter) acquireTransfer() (func(), error) {
 	ch := a.Transfers
 	if ch == nil {
 		ch = DefaultTransfers
+	}
+	select {
+	case ch <- struct{}{}:
+		return func() { <-ch }, nil
+	default:
+		return nil, domain.ErrAttachmentBusy()
+	}
+}
+
+func (a *Adapter) acquireThumbnailTransfer() (func(), error) {
+	ch := a.ThumbnailTransfers
+	if ch == nil {
+		ch = DefaultThumbnailTransfers
 	}
 	select {
 	case ch <- struct{}{}:

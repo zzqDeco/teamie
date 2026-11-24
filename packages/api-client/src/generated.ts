@@ -307,6 +307,23 @@ export interface WorkspaceSearchItemDTO {
   conversation: AttentionConversationDTO;
 }
 
+export interface GlobalSearchItemDTO {
+  message: MessageDTO;
+  conversation: AttentionConversationDTO;
+  workspaceName: string;
+}
+
+export interface ConversationAttachmentItemDTO {
+  attachment: AttachmentDTO;
+  messageId: string;
+  messageSeq: number;
+  senderId: string;
+  senderName: string;
+  senderKind: string;
+  createdAt: string;
+  isForwarded: boolean;
+}
+
 export type GetBootstrapReq = Record<string, never>;
 
 export interface BootstrapResp {
@@ -516,6 +533,36 @@ export interface SearchWorkspaceMessagesReq {
 
 export interface WorkspaceSearchPageResp {
   items: WorkspaceSearchItemDTO[];
+  cursor?: string;
+}
+
+export interface SearchMessagesReq {
+  q?: string;
+  workspaceId?: string;
+  conversationId?: string;
+  senderId?: string;
+  hasFiles?: string;
+  after?: string;
+  before?: string;
+  cursor?: string;
+  limit?: string;
+}
+
+export interface GlobalSearchPageResp {
+  items: GlobalSearchItemDTO[];
+  cursor?: string;
+}
+
+export interface ListConversationAttachmentsReq {
+  id: string;
+  kind?: string;
+  q?: string;
+  cursor?: string;
+  limit?: string;
+}
+
+export interface ListConversationAttachmentsResp {
+  items: ConversationAttachmentItemDTO[];
   cursor?: string;
 }
 
@@ -1634,6 +1681,15 @@ export const IDL_ROUTES = {
     requestType: "SearchWorkspaceMessagesReq",
     responseType: "WorkspaceSearchPageResp",
   },
+  SearchMessages: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "GET",
+    path: "/api/v1/messages/search",
+    clientPath: "/messages/search",
+    requestType: "SearchMessagesReq",
+    responseType: "GlobalSearchPageResp",
+  },
   GetAttention: {
     service: "ChatHTTPService",
     namespace: "im.chat",
@@ -1651,6 +1707,15 @@ export const IDL_ROUTES = {
     clientPath: "/sync",
     requestType: "SyncReq",
     responseType: "SyncResp",
+  },
+  ListConversationAttachments: {
+    service: "ChatHTTPService",
+    namespace: "im.chat",
+    method: "GET",
+    path: "/api/v1/conversations/:id/attachments",
+    clientPath: "/conversations/:id/attachments",
+    requestType: "ListConversationAttachmentsReq",
+    responseType: "ListConversationAttachmentsResp",
   },
   UploadAttachment: {
     service: "ChatHTTPService",

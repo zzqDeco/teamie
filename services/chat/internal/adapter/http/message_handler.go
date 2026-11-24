@@ -6,6 +6,7 @@ import (
 	"mime"
 	"net/http"
 	"strconv"
+	"time"
 
 	chatgen "teamie/contracts/gen/im/hertz_gen/im/chat"
 	"teamie/pkg/httpx"
@@ -221,6 +222,85 @@ func (a *Adapter) SearchWorkspaceMessages(ctx context.Context, req *chatgen.Sear
 	}, nil
 }
 
+func (a *Adapter) SearchMessages(ctx context.Context, req *chatgen.SearchMessagesReq) (*chatgen.GlobalSearchPageResp, error) {
+	user, ok := actorFromContext(ctx)
+	if !ok {
+		return nil, domain.Err(401, "unauthenticated", "Sign in to continue")
+	}
+	limit, err := parseIntParam(req.GetLimit(), "limit", 20, 1, 50)
+	if err != nil {
+		return nil, err
+	}
+	page, err := a.App.SearchMessages(
+		ctx,
+		user.ID,
+		req.GetQ(),
+		req.GetWorkspaceId(),
+		req.GetConversationId(),
+		req.GetSenderId(),
+		req.GetHasFiles(),
+		req.GetAfter(),
+		req.GetBefore(),
+		req.GetCursor(),
+		int(limit),
+	)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]*chatgen.GlobalSearchItemDTO, 0, len(page.Items))
+	for _, it := range page.Items {
+		items = append(items, &chatgen.GlobalSearchItemDTO{
+			Message:       toMessageDTO(it.Message),
+			Conversation:  toAttentionConversationDTO(it.Conversation),
+			WorkspaceName: it.WorkspaceName,
+		})
+	}
+	return &chatgen.GlobalSearchPageResp{
+		Items:  items,
+		Cursor: optString(page.Cursor),
+	}, nil
+}
+
+func (a *Adapter) ListConversationAttachments(ctx context.Context, req *chatgen.ListConversationAttachmentsReq) (*chatgen.ListConversationAttachmentsResp, error) {
+	user, ok := actorFromContext(ctx)
+	if !ok {
+		return nil, domain.Err(401, "unauthenticated", "Sign in to continue")
+	}
+	limit, err := parseIntParam(req.GetLimit(), "limit", 40, 1, 60)
+	if err != nil {
+		return nil, err
+	}
+	page, err := a.App.ListConversationAttachments(
+		ctx,
+		user.ID,
+		req.ID,
+		req.GetKind(),
+		req.GetQ(),
+		req.GetCursor(),
+		int(limit),
+	)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]*chatgen.ConversationAttachmentItemDTO, 0, len(page.Items))
+	for _, it := range page.Items {
+		items = append(items, &chatgen.ConversationAttachmentItemDTO{
+			Attachment:  toAttachmentDTO(it.Attachment),
+			MessageId:   it.MessageID,
+			MessageSeq:  it.MessageSeq,
+			SenderId:    it.SenderID,
+			SenderName:  it.SenderName,
+			SenderKind:  it.SenderKind,
+			CreatedAt:   it.CreatedAt.UTC().Format(time.RFC3339Nano),
+			IsForwarded: it.IsForwarded,
+		})
+	}
+	return &chatgen.ListConversationAttachmentsResp{
+		Items:  items,
+		Cursor: optString(page.Cursor),
+	}, nil
+}
+
 func (a *Adapter) GetAttention(ctx context.Context, req *chatgen.GetAttentionReq) (*chatgen.AttentionPageResp, error) {
 	user, ok := actorFromContext(ctx)
 	if !ok {
@@ -423,7 +503,7 @@ func (a *Adapter) downloadAttachmentHTTP(w http.ResponseWriter, r *http.Request,
 }
 
 func (a *Adapter) downloadAttachmentThumbnailHTTP(w http.ResponseWriter, r *http.Request, ctx context.Context, _ httpx.Session) error {
-	release, err := a.acquireTransfer()
+	release, err := a.acquireThumbnailTransfer()
 	if err != nil {
 		return err
 	}

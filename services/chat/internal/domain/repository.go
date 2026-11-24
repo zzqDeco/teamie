@@ -115,6 +115,10 @@ type MessageRepository interface {
 	SearchWorkspaceCandidateIDs(ctx context.Context, userID, workspaceID, query string, before any, cursorID string, limit int) ([]string, error)
 	LockSearchConversationsForShare(ctx context.Context, userID, workspaceID string, candidateMessageIDs []string) ([]string, error)
 	QueryVerifiedWorkspaceSearchItems(ctx context.Context, userID, query string, before any, cursorID string, limit int, candidateMessageIDs, conversationIDs []string) ([]WorkspaceSearchItem, error)
+	SearchGlobalCandidateIDs(ctx context.Context, userID string, q GlobalSearchQuery, limit int) ([]string, error)
+	LockGlobalSearchWorkspacesForShare(ctx context.Context, userID string, candidateMessageIDs []string) ([]string, error)
+	LockGlobalSearchConversationsForShare(ctx context.Context, userID string, workspaceIDs, candidateMessageIDs []string) ([]string, error)
+	QueryVerifiedGlobalSearchItems(ctx context.Context, userID string, q GlobalSearchQuery, limit int, candidateMessageIDs, conversationIDs []string) ([]GlobalSearchItem, error)
 	LockUserWorkspacesForShare(ctx context.Context, userID string) ([]string, error)
 	LockUserConversationsForShare(ctx context.Context, userID string, workspaceIDs []string) ([]string, error)
 	QueryAttentionProjection(ctx context.Context, userID string, before any, cursorID string, unreadOnly bool, limit int, conversationIDs []string, messageID string) (unreadCount, channelUnreadCount int64, items []AttentionItem, unreadByConversation []AttentionUnread, err error)
@@ -151,6 +155,7 @@ type AttachmentRepository interface {
 	AttachFilesToMessage(ctx context.Context, userID, conversationID, messageID string, attachmentIDs []string) ([]Attachment, error)
 	GetAuthorizedAttachmentContent(ctx context.Context, attachmentID, conversationID, userID string) (Attachment, []byte, error)
 	GetAuthorizedAttachmentThumbnail(ctx context.Context, attachmentID, conversationID, userID string) (mediaType string, content []byte, sha256 string, err error)
+	ListConversationAttachments(ctx context.Context, conversationID string, q AttachmentGalleryQuery, limit int) ([]ConversationAttachmentItem, error)
 }
 
 // OutboxRepository defines persistence operations for the durable realtime hint outbox.

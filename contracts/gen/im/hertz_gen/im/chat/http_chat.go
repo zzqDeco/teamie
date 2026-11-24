@@ -1163,6 +1163,122 @@ func (p *WorkspaceSearchItemDTO) String() string {
 	return fmt.Sprintf("WorkspaceSearchItemDTO(%+v)", *p)
 }
 
+type GlobalSearchItemDTO struct {
+	Message       *MessageDTO               `thrift:"message,1,required" json:"message"`
+	Conversation  *AttentionConversationDTO `thrift:"conversation,2,required" json:"conversation"`
+	WorkspaceName string                    `thrift:"workspaceName,3,required" json:"workspaceName"`
+}
+
+func NewGlobalSearchItemDTO() *GlobalSearchItemDTO {
+	return &GlobalSearchItemDTO{}
+}
+
+func (p *GlobalSearchItemDTO) InitDefault() {
+}
+
+var GlobalSearchItemDTO_Message_DEFAULT *MessageDTO
+
+func (p *GlobalSearchItemDTO) GetMessage() (v *MessageDTO) {
+	if !p.IsSetMessage() {
+		return GlobalSearchItemDTO_Message_DEFAULT
+	}
+	return p.Message
+}
+
+var GlobalSearchItemDTO_Conversation_DEFAULT *AttentionConversationDTO
+
+func (p *GlobalSearchItemDTO) GetConversation() (v *AttentionConversationDTO) {
+	if !p.IsSetConversation() {
+		return GlobalSearchItemDTO_Conversation_DEFAULT
+	}
+	return p.Conversation
+}
+
+func (p *GlobalSearchItemDTO) GetWorkspaceName() (v string) {
+	return p.WorkspaceName
+}
+
+func (p *GlobalSearchItemDTO) IsSetMessage() bool {
+	return p.Message != nil
+}
+
+func (p *GlobalSearchItemDTO) IsSetConversation() bool {
+	return p.Conversation != nil
+}
+
+func (p *GlobalSearchItemDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("GlobalSearchItemDTO(%+v)", *p)
+}
+
+type ConversationAttachmentItemDTO struct {
+	Attachment  *AttachmentDTO `thrift:"attachment,1,required" json:"attachment"`
+	MessageId   string         `thrift:"messageId,2,required" json:"messageId"`
+	MessageSeq  int64          `thrift:"messageSeq,3,required" json:"messageSeq"`
+	SenderId    string         `thrift:"senderId,4,required" json:"senderId"`
+	SenderName  string         `thrift:"senderName,5,required" json:"senderName"`
+	SenderKind  string         `thrift:"senderKind,6,required" json:"senderKind"`
+	CreatedAt   string         `thrift:"createdAt,7,required" json:"createdAt"`
+	IsForwarded bool           `thrift:"isForwarded,8,required" json:"isForwarded"`
+}
+
+func NewConversationAttachmentItemDTO() *ConversationAttachmentItemDTO {
+	return &ConversationAttachmentItemDTO{}
+}
+
+func (p *ConversationAttachmentItemDTO) InitDefault() {
+}
+
+var ConversationAttachmentItemDTO_Attachment_DEFAULT *AttachmentDTO
+
+func (p *ConversationAttachmentItemDTO) GetAttachment() (v *AttachmentDTO) {
+	if !p.IsSetAttachment() {
+		return ConversationAttachmentItemDTO_Attachment_DEFAULT
+	}
+	return p.Attachment
+}
+
+func (p *ConversationAttachmentItemDTO) GetMessageId() (v string) {
+	return p.MessageId
+}
+
+func (p *ConversationAttachmentItemDTO) GetMessageSeq() (v int64) {
+	return p.MessageSeq
+}
+
+func (p *ConversationAttachmentItemDTO) GetSenderId() (v string) {
+	return p.SenderId
+}
+
+func (p *ConversationAttachmentItemDTO) GetSenderName() (v string) {
+	return p.SenderName
+}
+
+func (p *ConversationAttachmentItemDTO) GetSenderKind() (v string) {
+	return p.SenderKind
+}
+
+func (p *ConversationAttachmentItemDTO) GetCreatedAt() (v string) {
+	return p.CreatedAt
+}
+
+func (p *ConversationAttachmentItemDTO) GetIsForwarded() (v bool) {
+	return p.IsForwarded
+}
+
+func (p *ConversationAttachmentItemDTO) IsSetAttachment() bool {
+	return p.Attachment != nil
+}
+
+func (p *ConversationAttachmentItemDTO) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ConversationAttachmentItemDTO(%+v)", *p)
+}
+
 type EmptyResp struct {
 }
 
@@ -2577,6 +2693,299 @@ func (p *WorkspaceSearchPageResp) String() string {
 	return fmt.Sprintf("WorkspaceSearchPageResp(%+v)", *p)
 }
 
+type SearchMessagesReq struct {
+	Q              *string `thrift:"q,1,optional" json:"q,omitempty"`
+	WorkspaceId    *string `thrift:"workspaceId,2,optional" json:"workspaceId,omitempty"`
+	ConversationId *string `thrift:"conversationId,3,optional" json:"conversationId,omitempty"`
+	SenderId       *string `thrift:"senderId,4,optional" json:"senderId,omitempty"`
+	HasFiles       *string `thrift:"hasFiles,5,optional" json:"hasFiles,omitempty"`
+	After          *string `thrift:"after,6,optional" json:"after,omitempty"`
+	Before         *string `thrift:"before,7,optional" json:"before,omitempty"`
+	Cursor         *string `thrift:"cursor,8,optional" json:"cursor,omitempty"`
+	Limit          *string `thrift:"limit,9,optional" json:"limit,omitempty"`
+}
+
+func NewSearchMessagesReq() *SearchMessagesReq {
+	return &SearchMessagesReq{}
+}
+
+func (p *SearchMessagesReq) InitDefault() {
+}
+
+var SearchMessagesReq_Q_DEFAULT string
+
+func (p *SearchMessagesReq) GetQ() (v string) {
+	if !p.IsSetQ() {
+		return SearchMessagesReq_Q_DEFAULT
+	}
+	return *p.Q
+}
+
+var SearchMessagesReq_WorkspaceId_DEFAULT string
+
+func (p *SearchMessagesReq) GetWorkspaceId() (v string) {
+	if !p.IsSetWorkspaceId() {
+		return SearchMessagesReq_WorkspaceId_DEFAULT
+	}
+	return *p.WorkspaceId
+}
+
+var SearchMessagesReq_ConversationId_DEFAULT string
+
+func (p *SearchMessagesReq) GetConversationId() (v string) {
+	if !p.IsSetConversationId() {
+		return SearchMessagesReq_ConversationId_DEFAULT
+	}
+	return *p.ConversationId
+}
+
+var SearchMessagesReq_SenderId_DEFAULT string
+
+func (p *SearchMessagesReq) GetSenderId() (v string) {
+	if !p.IsSetSenderId() {
+		return SearchMessagesReq_SenderId_DEFAULT
+	}
+	return *p.SenderId
+}
+
+var SearchMessagesReq_HasFiles_DEFAULT string
+
+func (p *SearchMessagesReq) GetHasFiles() (v string) {
+	if !p.IsSetHasFiles() {
+		return SearchMessagesReq_HasFiles_DEFAULT
+	}
+	return *p.HasFiles
+}
+
+var SearchMessagesReq_After_DEFAULT string
+
+func (p *SearchMessagesReq) GetAfter() (v string) {
+	if !p.IsSetAfter() {
+		return SearchMessagesReq_After_DEFAULT
+	}
+	return *p.After
+}
+
+var SearchMessagesReq_Before_DEFAULT string
+
+func (p *SearchMessagesReq) GetBefore() (v string) {
+	if !p.IsSetBefore() {
+		return SearchMessagesReq_Before_DEFAULT
+	}
+	return *p.Before
+}
+
+var SearchMessagesReq_Cursor_DEFAULT string
+
+func (p *SearchMessagesReq) GetCursor() (v string) {
+	if !p.IsSetCursor() {
+		return SearchMessagesReq_Cursor_DEFAULT
+	}
+	return *p.Cursor
+}
+
+var SearchMessagesReq_Limit_DEFAULT string
+
+func (p *SearchMessagesReq) GetLimit() (v string) {
+	if !p.IsSetLimit() {
+		return SearchMessagesReq_Limit_DEFAULT
+	}
+	return *p.Limit
+}
+
+func (p *SearchMessagesReq) IsSetQ() bool {
+	return p.Q != nil
+}
+
+func (p *SearchMessagesReq) IsSetWorkspaceId() bool {
+	return p.WorkspaceId != nil
+}
+
+func (p *SearchMessagesReq) IsSetConversationId() bool {
+	return p.ConversationId != nil
+}
+
+func (p *SearchMessagesReq) IsSetSenderId() bool {
+	return p.SenderId != nil
+}
+
+func (p *SearchMessagesReq) IsSetHasFiles() bool {
+	return p.HasFiles != nil
+}
+
+func (p *SearchMessagesReq) IsSetAfter() bool {
+	return p.After != nil
+}
+
+func (p *SearchMessagesReq) IsSetBefore() bool {
+	return p.Before != nil
+}
+
+func (p *SearchMessagesReq) IsSetCursor() bool {
+	return p.Cursor != nil
+}
+
+func (p *SearchMessagesReq) IsSetLimit() bool {
+	return p.Limit != nil
+}
+
+func (p *SearchMessagesReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("SearchMessagesReq(%+v)", *p)
+}
+
+type GlobalSearchPageResp struct {
+	Items  []*GlobalSearchItemDTO `thrift:"items,1,required,list<GlobalSearchItemDTO>" json:"items"`
+	Cursor *string                `thrift:"cursor,2,optional" json:"cursor,omitempty"`
+}
+
+func NewGlobalSearchPageResp() *GlobalSearchPageResp {
+	return &GlobalSearchPageResp{}
+}
+
+func (p *GlobalSearchPageResp) InitDefault() {
+}
+
+func (p *GlobalSearchPageResp) GetItems() (v []*GlobalSearchItemDTO) {
+	return p.Items
+}
+
+var GlobalSearchPageResp_Cursor_DEFAULT string
+
+func (p *GlobalSearchPageResp) GetCursor() (v string) {
+	if !p.IsSetCursor() {
+		return GlobalSearchPageResp_Cursor_DEFAULT
+	}
+	return *p.Cursor
+}
+
+func (p *GlobalSearchPageResp) IsSetCursor() bool {
+	return p.Cursor != nil
+}
+
+func (p *GlobalSearchPageResp) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("GlobalSearchPageResp(%+v)", *p)
+}
+
+type ListConversationAttachmentsReq struct {
+	ID     string  `thrift:"id,1,required" json:"id"`
+	Kind   *string `thrift:"kind,2,optional" json:"kind,omitempty"`
+	Q      *string `thrift:"q,3,optional" json:"q,omitempty"`
+	Cursor *string `thrift:"cursor,4,optional" json:"cursor,omitempty"`
+	Limit  *string `thrift:"limit,5,optional" json:"limit,omitempty"`
+}
+
+func NewListConversationAttachmentsReq() *ListConversationAttachmentsReq {
+	return &ListConversationAttachmentsReq{}
+}
+
+func (p *ListConversationAttachmentsReq) InitDefault() {
+}
+
+func (p *ListConversationAttachmentsReq) GetID() (v string) {
+	return p.ID
+}
+
+var ListConversationAttachmentsReq_Kind_DEFAULT string
+
+func (p *ListConversationAttachmentsReq) GetKind() (v string) {
+	if !p.IsSetKind() {
+		return ListConversationAttachmentsReq_Kind_DEFAULT
+	}
+	return *p.Kind
+}
+
+var ListConversationAttachmentsReq_Q_DEFAULT string
+
+func (p *ListConversationAttachmentsReq) GetQ() (v string) {
+	if !p.IsSetQ() {
+		return ListConversationAttachmentsReq_Q_DEFAULT
+	}
+	return *p.Q
+}
+
+var ListConversationAttachmentsReq_Cursor_DEFAULT string
+
+func (p *ListConversationAttachmentsReq) GetCursor() (v string) {
+	if !p.IsSetCursor() {
+		return ListConversationAttachmentsReq_Cursor_DEFAULT
+	}
+	return *p.Cursor
+}
+
+var ListConversationAttachmentsReq_Limit_DEFAULT string
+
+func (p *ListConversationAttachmentsReq) GetLimit() (v string) {
+	if !p.IsSetLimit() {
+		return ListConversationAttachmentsReq_Limit_DEFAULT
+	}
+	return *p.Limit
+}
+
+func (p *ListConversationAttachmentsReq) IsSetKind() bool {
+	return p.Kind != nil
+}
+
+func (p *ListConversationAttachmentsReq) IsSetQ() bool {
+	return p.Q != nil
+}
+
+func (p *ListConversationAttachmentsReq) IsSetCursor() bool {
+	return p.Cursor != nil
+}
+
+func (p *ListConversationAttachmentsReq) IsSetLimit() bool {
+	return p.Limit != nil
+}
+
+func (p *ListConversationAttachmentsReq) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ListConversationAttachmentsReq(%+v)", *p)
+}
+
+type ListConversationAttachmentsResp struct {
+	Items  []*ConversationAttachmentItemDTO `thrift:"items,1,required,list<ConversationAttachmentItemDTO>" json:"items"`
+	Cursor *string                          `thrift:"cursor,2,optional" json:"cursor,omitempty"`
+}
+
+func NewListConversationAttachmentsResp() *ListConversationAttachmentsResp {
+	return &ListConversationAttachmentsResp{}
+}
+
+func (p *ListConversationAttachmentsResp) InitDefault() {
+}
+
+func (p *ListConversationAttachmentsResp) GetItems() (v []*ConversationAttachmentItemDTO) {
+	return p.Items
+}
+
+var ListConversationAttachmentsResp_Cursor_DEFAULT string
+
+func (p *ListConversationAttachmentsResp) GetCursor() (v string) {
+	if !p.IsSetCursor() {
+		return ListConversationAttachmentsResp_Cursor_DEFAULT
+	}
+	return *p.Cursor
+}
+
+func (p *ListConversationAttachmentsResp) IsSetCursor() bool {
+	return p.Cursor != nil
+}
+
+func (p *ListConversationAttachmentsResp) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ListConversationAttachmentsResp(%+v)", *p)
+}
+
 type GetAttentionReq struct {
 	Cursor     *string `thrift:"cursor,1,optional" json:"cursor,omitempty"`
 	Limit      *string `thrift:"limit,2,optional" json:"limit,omitempty"`
@@ -3938,9 +4347,13 @@ type ChatHTTPService interface {
 
 	SearchWorkspaceMessages(ctx context.Context, req *SearchWorkspaceMessagesReq) (r *WorkspaceSearchPageResp, err error)
 
+	SearchMessages(ctx context.Context, req *SearchMessagesReq) (r *GlobalSearchPageResp, err error)
+
 	GetAttention(ctx context.Context, req *GetAttentionReq) (r *AttentionPageResp, err error)
 
 	Sync(ctx context.Context, req *SyncReq) (r *SyncResp, err error)
+
+	ListConversationAttachments(ctx context.Context, req *ListConversationAttachmentsReq) (r *ListConversationAttachmentsResp, err error)
 
 	UploadAttachment(ctx context.Context, req *UploadAttachmentReq) (r *AttachmentResp, err error)
 

@@ -79,8 +79,10 @@ const (
 	PatternGetReadReceipts = "GET /api/v1/conversations/{id}/read-receipts"
 	PatternSetNotificationLevel = "PUT /api/v1/conversations/{id}/notification-level"
 	PatternSearchWorkspaceMessages = "GET /api/v1/workspaces/{id}/messages/search"
+	PatternSearchMessages = "GET /api/v1/messages/search"
 	PatternGetAttention = "GET /api/v1/attention"
 	PatternSync = "GET /api/v1/sync"
+	PatternListConversationAttachments = "GET /api/v1/conversations/{id}/attachments"
 	PatternUploadAttachment = "POST /api/v1/conversations/{id}/attachments"
 	PatternGetAttachmentUpload = "GET /api/v1/conversations/{id}/attachment-uploads/{uploadKey}"
 	PatternDeletePendingAttachment = "DELETE /api/v1/conversations/{id}/attachments/{attachmentId}"
@@ -92,7 +94,7 @@ const (
 	PatternDeleteAnnouncement = "DELETE /api/v1/admin/announcements/{id}"
 )
 
-// ChatHTTPServiceRoutes lists all 43 route specifications declared on ChatHTTPService.
+// ChatHTTPServiceRoutes lists all 45 route specifications declared on ChatHTTPService.
 var ChatHTTPServiceRoutes = []RouteSpec{
 	{Name: "GetBootstrap", Method: "GET", Path: "/api/v1/bootstrap", MuxPattern: PatternGetBootstrap, RequestType: "GetBootstrapReq", ResponseType: "BootstrapResp"},
 	{Name: "CreateWorkspace", Method: "POST", Path: "/api/v1/workspaces", MuxPattern: PatternCreateWorkspace, RequestType: "CreateWorkspaceReq", ResponseType: "CreateWorkspaceResp"},
@@ -126,8 +128,10 @@ var ChatHTTPServiceRoutes = []RouteSpec{
 	{Name: "GetReadReceipts", Method: "GET", Path: "/api/v1/conversations/:id/read-receipts", MuxPattern: PatternGetReadReceipts, RequestType: "GetReadReceiptsReq", ResponseType: "ReadReceiptsResp"},
 	{Name: "SetNotificationLevel", Method: "PUT", Path: "/api/v1/conversations/:id/notification-level", MuxPattern: PatternSetNotificationLevel, RequestType: "SetNotificationLevelReq", ResponseType: "NotificationLevelResp"},
 	{Name: "SearchWorkspaceMessages", Method: "GET", Path: "/api/v1/workspaces/:id/messages/search", MuxPattern: PatternSearchWorkspaceMessages, RequestType: "SearchWorkspaceMessagesReq", ResponseType: "WorkspaceSearchPageResp"},
+	{Name: "SearchMessages", Method: "GET", Path: "/api/v1/messages/search", MuxPattern: PatternSearchMessages, RequestType: "SearchMessagesReq", ResponseType: "GlobalSearchPageResp"},
 	{Name: "GetAttention", Method: "GET", Path: "/api/v1/attention", MuxPattern: PatternGetAttention, RequestType: "GetAttentionReq", ResponseType: "AttentionPageResp"},
 	{Name: "Sync", Method: "GET", Path: "/api/v1/sync", MuxPattern: PatternSync, RequestType: "SyncReq", ResponseType: "SyncResp"},
+	{Name: "ListConversationAttachments", Method: "GET", Path: "/api/v1/conversations/:id/attachments", MuxPattern: PatternListConversationAttachments, RequestType: "ListConversationAttachmentsReq", ResponseType: "ListConversationAttachmentsResp"},
 	{Name: "UploadAttachment", Method: "POST", Path: "/api/v1/conversations/:id/attachments", MuxPattern: PatternUploadAttachment, RequestType: "UploadAttachmentReq", ResponseType: "AttachmentResp"},
 	{Name: "GetAttachmentUpload", Method: "GET", Path: "/api/v1/conversations/:id/attachment-uploads/:uploadKey", MuxPattern: PatternGetAttachmentUpload, RequestType: "GetAttachmentUploadReq", ResponseType: "AttachmentResp"},
 	{Name: "DeletePendingAttachment", Method: "DELETE", Path: "/api/v1/conversations/:id/attachments/:attachmentId", MuxPattern: PatternDeletePendingAttachment, RequestType: "DeletePendingAttachmentReq", ResponseType: "EmptyResp"},
@@ -173,8 +177,10 @@ type ChatHTTPServiceRouteHandlers struct {
 	GetReadReceipts http.HandlerFunc
 	SetNotificationLevel http.HandlerFunc
 	SearchWorkspaceMessages http.HandlerFunc
+	SearchMessages http.HandlerFunc
 	GetAttention http.HandlerFunc
 	Sync http.HandlerFunc
+	ListConversationAttachments http.HandlerFunc
 	UploadAttachment http.HandlerFunc
 	GetAttachmentUpload http.HandlerFunc
 	DeletePendingAttachment http.HandlerFunc
@@ -316,6 +322,10 @@ func RegisterChatHTTPServiceRoutes(mux *http.ServeMux, h ChatHTTPServiceRouteHan
 		panic("ChatHTTPServiceRouteHandlers.SearchWorkspaceMessages (" + PatternSearchWorkspaceMessages + ") is nil")
 	}
 	mux.HandleFunc(PatternSearchWorkspaceMessages, h.SearchWorkspaceMessages)
+	if h.SearchMessages == nil {
+		panic("ChatHTTPServiceRouteHandlers.SearchMessages (" + PatternSearchMessages + ") is nil")
+	}
+	mux.HandleFunc(PatternSearchMessages, h.SearchMessages)
 	if h.GetAttention == nil {
 		panic("ChatHTTPServiceRouteHandlers.GetAttention (" + PatternGetAttention + ") is nil")
 	}
@@ -324,6 +334,10 @@ func RegisterChatHTTPServiceRoutes(mux *http.ServeMux, h ChatHTTPServiceRouteHan
 		panic("ChatHTTPServiceRouteHandlers.Sync (" + PatternSync + ") is nil")
 	}
 	mux.HandleFunc(PatternSync, h.Sync)
+	if h.ListConversationAttachments == nil {
+		panic("ChatHTTPServiceRouteHandlers.ListConversationAttachments (" + PatternListConversationAttachments + ") is nil")
+	}
+	mux.HandleFunc(PatternListConversationAttachments, h.ListConversationAttachments)
 	if h.UploadAttachment == nil {
 		panic("ChatHTTPServiceRouteHandlers.UploadAttachment (" + PatternUploadAttachment + ") is nil")
 	}
@@ -1746,6 +1760,93 @@ func RegisterChatHTTPServiceHertzServer(r *route.RouterGroup, srv ChatHTTPServer
 		})
 	}
 	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "SearchMessages", Method: "GET", Path: "/api/v1/messages/search", MuxPattern: PatternSearchMessages, RequestType: "SearchMessagesReq", ResponseType: "GlobalSearchPageResp"}); hfn != nil {
+			r.GET("/api/v1/messages/search", hfn)
+		} else {
+			r.GET("/api/v1/messages/search", func(ctx context.Context, c *app.RequestContext) {
+				var req SearchMessagesReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if v := c.Query("q"); v != "" {
+					req.Q = &v
+				}
+				if v := c.Query("workspaceId"); v != "" {
+					req.WorkspaceId = &v
+				}
+				if v := c.Query("conversationId"); v != "" {
+					req.ConversationId = &v
+				}
+				if v := c.Query("senderId"); v != "" {
+					req.SenderId = &v
+				}
+				if v := c.Query("hasFiles"); v != "" {
+					req.HasFiles = &v
+				}
+				if v := c.Query("after"); v != "" {
+					req.After = &v
+				}
+				if v := c.Query("before"); v != "" {
+					req.Before = &v
+				}
+				if v := c.Query("cursor"); v != "" {
+					req.Cursor = &v
+				}
+				if v := c.Query("limit"); v != "" {
+					req.Limit = &v
+				}
+				resp, err := srv.SearchMessages(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.GET("/api/v1/messages/search", func(ctx context.Context, c *app.RequestContext) {
+			var req SearchMessagesReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if v := c.Query("q"); v != "" {
+				req.Q = &v
+			}
+			if v := c.Query("workspaceId"); v != "" {
+				req.WorkspaceId = &v
+			}
+			if v := c.Query("conversationId"); v != "" {
+				req.ConversationId = &v
+			}
+			if v := c.Query("senderId"); v != "" {
+				req.SenderId = &v
+			}
+			if v := c.Query("hasFiles"); v != "" {
+				req.HasFiles = &v
+			}
+			if v := c.Query("after"); v != "" {
+				req.After = &v
+			}
+			if v := c.Query("before"); v != "" {
+				req.Before = &v
+			}
+			if v := c.Query("cursor"); v != "" {
+				req.Cursor = &v
+			}
+			if v := c.Query("limit"); v != "" {
+				req.Limit = &v
+			}
+			resp, err := srv.SearchMessages(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
 		if hfn := hmw.HertzHandler(RouteSpec{Name: "GetAttention", Method: "GET", Path: "/api/v1/attention", MuxPattern: PatternGetAttention, RequestType: "GetAttentionReq", ResponseType: "AttentionPageResp"}); hfn != nil {
 			r.GET("/api/v1/attention", hfn)
 		} else {
@@ -1840,6 +1941,69 @@ func RegisterChatHTTPServiceHertzServer(r *route.RouterGroup, srv ChatHTTPServer
 				req.Limit = &v
 			}
 			resp, err := srv.Sync(ctx, &req)
+			if err != nil {
+				m.WriteDomainError(ctx, c, err)
+				return
+			}
+			m.WriteOK(ctx, c, resp)
+		})
+	}
+	if hasHMW {
+		if hfn := hmw.HertzHandler(RouteSpec{Name: "ListConversationAttachments", Method: "GET", Path: "/api/v1/conversations/:id/attachments", MuxPattern: PatternListConversationAttachments, RequestType: "ListConversationAttachmentsReq", ResponseType: "ListConversationAttachmentsResp"}); hfn != nil {
+			r.GET("/api/v1/conversations/:id/attachments", hfn)
+		} else {
+			r.GET("/api/v1/conversations/:id/attachments", func(ctx context.Context, c *app.RequestContext) {
+				var req ListConversationAttachmentsReq
+				if err := c.BindAndValidate(&req); err != nil {
+					m.WriteBindError(ctx, c, err)
+					return
+				}
+				if req.ID == "" {
+					req.ID = c.Param("id")
+				}
+				if v := c.Query("kind"); v != "" {
+					req.Kind = &v
+				}
+				if v := c.Query("q"); v != "" {
+					req.Q = &v
+				}
+				if v := c.Query("cursor"); v != "" {
+					req.Cursor = &v
+				}
+				if v := c.Query("limit"); v != "" {
+					req.Limit = &v
+				}
+				resp, err := srv.ListConversationAttachments(ctx, &req)
+				if err != nil {
+					m.WriteDomainError(ctx, c, err)
+					return
+				}
+				m.WriteOK(ctx, c, resp)
+			})
+		}
+	} else {
+		r.GET("/api/v1/conversations/:id/attachments", func(ctx context.Context, c *app.RequestContext) {
+			var req ListConversationAttachmentsReq
+			if err := c.BindAndValidate(&req); err != nil {
+				m.WriteBindError(ctx, c, err)
+				return
+			}
+			if req.ID == "" {
+				req.ID = c.Param("id")
+			}
+			if v := c.Query("kind"); v != "" {
+				req.Kind = &v
+			}
+			if v := c.Query("q"); v != "" {
+				req.Q = &v
+			}
+			if v := c.Query("cursor"); v != "" {
+				req.Cursor = &v
+			}
+			if v := c.Query("limit"); v != "" {
+				req.Limit = &v
+			}
+			resp, err := srv.ListConversationAttachments(ctx, &req)
 			if err != nil {
 				m.WriteDomainError(ctx, c, err)
 				return
@@ -2824,6 +2988,49 @@ func RegisterChatHTTPServer(mux *http.ServeMux, srv ChatHTTPServer, m HTTPRespon
 		}
 		h.SearchWorkspaceMessages = fn
 	}
+	if h.SearchMessages == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req SearchMessagesReq
+			q := r.URL.Query()
+			if v := q.Get("q"); v != "" {
+				req.Q = &v
+			}
+			if v := q.Get("workspaceId"); v != "" {
+				req.WorkspaceId = &v
+			}
+			if v := q.Get("conversationId"); v != "" {
+				req.ConversationId = &v
+			}
+			if v := q.Get("senderId"); v != "" {
+				req.SenderId = &v
+			}
+			if v := q.Get("hasFiles"); v != "" {
+				req.HasFiles = &v
+			}
+			if v := q.Get("after"); v != "" {
+				req.After = &v
+			}
+			if v := q.Get("before"); v != "" {
+				req.Before = &v
+			}
+			if v := q.Get("cursor"); v != "" {
+				req.Cursor = &v
+			}
+			if v := q.Get("limit"); v != "" {
+				req.Limit = &v
+			}
+			resp, err := srv.SearchMessages(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "SearchMessages", Method: "GET", Path: "/api/v1/messages/search", MuxPattern: PatternSearchMessages, RequestType: "SearchMessagesReq", ResponseType: "GlobalSearchPageResp"}, fn)
+		}
+		h.SearchMessages = fn
+	}
 	if h.GetAttention == nil {
 		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var req GetAttentionReq
@@ -2873,6 +3080,35 @@ func RegisterChatHTTPServer(mux *http.ServeMux, srv ChatHTTPServer, m HTTPRespon
 			fn = mw.WrapRoute(RouteSpec{Name: "Sync", Method: "GET", Path: "/api/v1/sync", MuxPattern: PatternSync, RequestType: "SyncReq", ResponseType: "SyncResp"}, fn)
 		}
 		h.Sync = fn
+	}
+	if h.ListConversationAttachments == nil {
+		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req ListConversationAttachmentsReq
+			req.ID = r.PathValue("id")
+			q := r.URL.Query()
+			if v := q.Get("kind"); v != "" {
+				req.Kind = &v
+			}
+			if v := q.Get("q"); v != "" {
+				req.Q = &v
+			}
+			if v := q.Get("cursor"); v != "" {
+				req.Cursor = &v
+			}
+			if v := q.Get("limit"); v != "" {
+				req.Limit = &v
+			}
+			resp, err := srv.ListConversationAttachments(r.Context(), &req)
+			if err != nil {
+				m.WriteDomainErrorHTTP(w, r, err)
+				return
+			}
+			m.WriteOKHTTP(w, r, http.StatusOK, resp)
+		})
+		if hasMW {
+			fn = mw.WrapRoute(RouteSpec{Name: "ListConversationAttachments", Method: "GET", Path: "/api/v1/conversations/:id/attachments", MuxPattern: PatternListConversationAttachments, RequestType: "ListConversationAttachmentsReq", ResponseType: "ListConversationAttachmentsResp"}, fn)
+		}
+		h.ListConversationAttachments = fn
 	}
 	if h.UploadAttachment == nil {
 		fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

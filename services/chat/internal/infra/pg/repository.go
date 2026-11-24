@@ -50,6 +50,9 @@ var SchemaV12 string
 //go:embed migrations/013_group_deletion.sql
 var SchemaV13 string
 
+//go:embed migrations/014_search_and_gallery_indexes.sql
+var SchemaV14 string
+
 // Migrate applies all Chat PostgreSQL schema migrations under advisory lock 704102.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	return postgres.Migrate(ctx, pool, 704102, "chat_schema_migrations", []postgres.Migration{
@@ -66,6 +69,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		{Version: 11, SQL: SchemaV11},
 		{Version: 12, SQL: SchemaV12},
 		{Version: 13, SQL: SchemaV13},
+		{Version: 14, SQL: SchemaV14},
 	})
 }
 
