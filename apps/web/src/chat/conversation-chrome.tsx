@@ -8,6 +8,7 @@ import {
   Blocks,
   Check,
   Hash,
+  Images,
   MessageCircle,
   RefreshCw,
   Search,
@@ -202,10 +203,12 @@ export function ConversationHeader({
   conversation,
   name,
   membersOpen,
+  galleryOpen = false,
   appsOpen = false,
   openAppsCount,
   onMenu,
   onSearchOpen,
+  onGallery,
   onMembers,
   onApps,
   members,
@@ -216,10 +219,12 @@ export function ConversationHeader({
   conversation: Conversation;
   name: string;
   membersOpen: boolean;
+  galleryOpen?: boolean;
   appsOpen?: boolean;
   openAppsCount?: number;
   onMenu: () => void;
   onSearchOpen: () => void;
+  onGallery?: () => void;
   onMembers: () => void;
   onApps?: () => void;
   members?: Participant[];
@@ -414,6 +419,15 @@ export function ConversationHeader({
         >
           <Search size={ICON.lg} />
         </IconButton>
+        {onGallery && (
+          <IconButton
+            label="媒体与文件"
+            onClick={onGallery}
+            aria-expanded={galleryOpen}
+          >
+            <Images size={ICON.lg} />
+          </IconButton>
+        )}
         {conversation.type === "group" && onApps && (
           <>
             <IconButton

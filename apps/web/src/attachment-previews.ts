@@ -15,8 +15,12 @@ type Entry = {
   bytes?: number;
 };
 const entries = new Map<string, Entry>();
-const queue: Entry[] = [];
-let running = false;
+const contentQueue: Entry[] = [];
+const thumbnailQueue: Entry[] = [];
+const CONTENT_CONCURRENCY = 1;
+const THUMBNAIL_CONCURRENCY = 2;
+let contentRunning = 0;
+let thumbnailRunning = 0;
 
 /**
  * Loaded previews whose last subscriber left (row unmounted, conversation
@@ -69,7 +73,13 @@ function publish(entry: Entry, preview: Preview) {
   entry.preview = preview;
   for (const listener of entry.listeners) listener(preview);
 }
+function dequeue(entry: Entry) {
+  const target = entry.kind === "thumbnail" ? thumbnailQueue : contentQueue;
+  const idx = target.indexOf(entry);
+  if (idx >= 0) target.splice(idx, 1);
+}
 function dispose(entry: Entry) {
+  dequeue(entry);
   entry.controller.abort();
   if (entry.preview.url) URL.revokeObjectURL(entry.preview.url);
   if (entries.get(entry.key) === entry) entries.delete(entry.key);
@@ -78,7 +88,8 @@ function dispose(entry: Entry) {
 export function clearAttachmentPreviews() {
   for (const entry of entries.values()) dispose(entry);
   retained.clear();
-  queue.length = 0;
+  contentQueue.length = 0;
+  thumbnailQueue.length = 0;
 }
 /** Test/diagnostic hook: number of loaded previews cached without subscribers. */
 export const retainedPreviewCount = () => retained.size;
@@ -122,21 +133,36 @@ async function load(entry: Entry) {
     }
   }
 }
-// One preview transfer leaves the server's second slot for explicit file actions.
-function pump() {
-  if (running) return;
-  const entry = queue.shift();
-  if (!entry) return;
-  if (entry.controller.signal.aborted || !entry.listeners.size) { pump(); return; }
-  running = true;
-  void load(entry).catch((error: unknown) => {
-    if (!entry.controller.signal.aborted) {
-      const denied = error instanceof ApiError && [401, 403, 404, 409].includes(error.status);
-      publish(entry, { retryable: !denied });
-      // Failed requests are not cached: a manual retry gets a fresh ACL check.
-      if (entries.get(entry.key) === entry) entries.delete(entry.key);
-    }
-  }).finally(() => { running = false; pump(); });
+// Keep heavy full-content previews at concurrency 1 (leaving the server's
+// second DefaultTransfers slot free for uploads/downloads), while <=256 KiB
+// thumbnails use their isolated 4-slot server pool at concurrency 2.
+function pump(kind: "content" | "thumbnail") {
+  const isThumb = kind === "thumbnail";
+  const targetQueue = isThumb ? thumbnailQueue : contentQueue;
+  const maxConcurrency = isThumb ? THUMBNAIL_CONCURRENCY : CONTENT_CONCURRENCY;
+  while ((isThumb ? thumbnailRunning : contentRunning) < maxConcurrency) {
+    const entry = targetQueue.shift();
+    if (!entry) return;
+    if (entry.controller.signal.aborted || !entry.listeners.size) continue;
+    if (isThumb) thumbnailRunning += 1;
+    else contentRunning += 1;
+    void load(entry)
+      .catch((error: unknown) => {
+        if (!entry.controller.signal.aborted) {
+          const denied =
+            error instanceof ApiError &&
+            [401, 403, 404, 409].includes(error.status);
+          publish(entry, { retryable: !denied });
+          // Failed requests are not cached: a manual retry gets a fresh ACL check.
+          if (entries.get(entry.key) === entry) entries.delete(entry.key);
+        }
+      })
+      .finally(() => {
+        if (isThumb) thumbnailRunning = Math.max(0, thumbnailRunning - 1);
+        else contentRunning = Math.max(0, contentRunning - 1);
+        pump(kind);
+      });
+  }
 }
 export function subscribeAttachmentPreview(conversationId: string, attachmentId: string, listener: Listener) {
   const key = JSON.stringify(["content", api.csrfToken, conversationId, attachmentId]);
@@ -144,12 +170,12 @@ export function subscribeAttachmentPreview(conversationId: string, attachmentId:
   if (!entry) {
     entry = { key, conversationId, attachmentId, kind: "content", session: api.csrfToken, controller: new AbortController(), listeners: new Set(), preview: {} };
     entries.set(key, entry);
-    queue.push(entry);
+    contentQueue.push(entry);
   }
   revive(entry);
   entry.listeners.add(listener);
   listener(entry.preview);
-  pump();
+  pump("content");
   return () => {
     entry.listeners.delete(listener);
     if (!entry.listeners.size) release(entry);
@@ -176,12 +202,12 @@ export function subscribeAttachmentThumbnail(
       preview: {},
     };
     entries.set(key, entry);
-    queue.push(entry);
+    thumbnailQueue.push(entry);
   }
   revive(entry);
   entry.listeners.add(listener);
   listener(entry.preview);
-  pump();
+  pump("thumbnail");
   return () => {
     entry.listeners.delete(listener);
     if (!entry.listeners.size) release(entry);

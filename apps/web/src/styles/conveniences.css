@@ -73,20 +73,27 @@
 }
 
 .modal.attachment-lightbox-modal {
-  width: min(92vw, 860px);
+  width: min(94vw, 920px);
 }
 
 .attachment-lightbox-body {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin: var(--space-3) 0 var(--space-4);
+  margin: var(--space-3) 0 var(--space-2_5);
   padding: var(--space-2);
   border-radius: var(--r-md);
   background: var(--surface-sunken);
   border: 1px solid var(--border);
+  min-height: 220px;
   max-height: min(68dvh, 640px);
   overflow: auto;
+}
+
+.attachment-lightbox-body.is-zoomed {
+  align-items: flex-start;
+  justify-content: flex-start;
 }
 
 .attachment-lightbox-image {
@@ -97,6 +104,83 @@
   height: auto;
   border-radius: var(--r-sm);
   object-fit: contain;
+  cursor: zoom-in;
+}
+
+.attachment-lightbox-image.is-zoomed {
+  max-width: none;
+  max-height: none;
+  cursor: zoom-out;
+}
+
+.attachment-lightbox-nav {
+  position: sticky;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: var(--z-local);
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.attachment-lightbox-nav.prev {
+  left: var(--space-2);
+  margin-right: auto;
+}
+
+.attachment-lightbox-nav.next {
+  right: var(--space-2);
+  margin-left: auto;
+}
+
+.attachment-lightbox-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-8);
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+}
+
+.attachment-lightbox-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2_5);
+  margin-bottom: var(--space-3);
+  min-height: 28px;
+}
+
+.attachment-lightbox-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1_5);
+  margin-right: auto;
+  font-size: var(--font-sm);
+  color: var(--text-muted);
+}
+
+.attachment-lightbox-retry,
+.attachment-lightbox-zoom-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1_5);
+  padding: var(--space-1) var(--space-2_5);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--font-sm);
+  cursor: pointer;
+}
+
+.attachment-lightbox-retry:hover,
+.attachment-lightbox-zoom-btn:hover {
+  background: var(--hover-bg);
+  color: var(--brand-text);
 }
 
 .conversation-view > .jump-latest,

@@ -48,11 +48,11 @@ const noMembers: Member[] = [];
 const noMentions: Mention[] = [];
 
 export function ConversationView({
-  conversation, members, onMembers, membersOpen, appsOpen = false, onApps, onMenu,
+  conversation, members, onMembers, membersOpen, galleryOpen = false, onGallery, appsOpen = false, onApps, onMenu,
   initialMessageId = "", onClearMessageTarget, isWorkspaceOwner, onInvite,
 }: {
   conversation: Conversation; members: Member[]; onMembers: () => void;
-  membersOpen: boolean; appsOpen?: boolean; onApps?: () => void; onMenu: () => void; initialMessageId?: string;
+  membersOpen: boolean; galleryOpen?: boolean; onGallery?: () => void; appsOpen?: boolean; onApps?: () => void; onMenu: () => void; initialMessageId?: string;
   onClearMessageTarget?: () => void; isWorkspaceOwner?: boolean; onInvite?: () => void;
 }) {
   const { user } = useAuth();
@@ -178,7 +178,7 @@ export function ConversationView({
     initialMessageId,
     onClearMessageTarget,
     visible,
-    membersOpen,
+    membersOpen: membersOpen || galleryOpen || appsOpen,
     highlightId,
     setHighlightId,
     setEntry,
@@ -266,7 +266,7 @@ export function ConversationView({
     latest,
     generation,
     highlightId,
-    membersOpen,
+    membersOpen: membersOpen || galleryOpen || appsOpen,
     scrollRef,
     contentRef,
     initialScrollRef: initialScroll,
@@ -478,6 +478,7 @@ export function ConversationView({
       )}
       <ConversationHeader
         conversation={conversation} name={name} membersOpen={membersOpen}
+        galleryOpen={galleryOpen} onGallery={onGallery}
         appsOpen={appsOpen} onApps={onApps}
         onMenu={onMenu} onSearchOpen={() => setSearchOpen(true)} onMembers={onMembers}
         members={mentionMembers} userId={userId}
