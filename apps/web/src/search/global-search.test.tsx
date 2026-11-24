@@ -395,8 +395,8 @@ describe("PR-2 global cross-conversation search UI", () => {
     );
   });
 
-  it("keeps multi-term server hits in ConversationSearch, filters out non-matching mock rows, and drops non-matching local edits", async () => {
-    const serverHit = makeMessage("m-20", "c-1", 11, "发布记录：v0.4.11 上线成功");
+  it("preserves literal matching in ConversationSearch including quoted literals and drops non-matching edits", async () => {
+    const serverHit = makeMessage("m-20", "c-1", 11, '检查 "" 空引号字面量');
     const unrelatedMock = makeMessage("m-21", "c-1", 12, "无关讨论内容");
     vi.spyOn(api, "searchMessages").mockResolvedValue({
       messages: [serverHit, unrelatedMock],
@@ -415,13 +415,13 @@ describe("PR-2 global cross-conversation search UI", () => {
 
     const input = host.querySelector<HTMLInputElement>('input[type="search"]')!;
     await act(async () => {
-      setInputValue(input, "发布 上线");
+      setInputValue(input, '""');
     });
     await flush(350);
-    // Multi-term hit is preserved while non-matching row is filtered out.
+    // Literal `""` hit is preserved while non-matching row is filtered out.
     expect(host.querySelectorAll("[data-search-result]")).toHaveLength(1);
 
-    // Local sync edit removing the matched words still drops the stale hit.
+    // Local sync edit removing the literal substring drops the stale hit.
     await act(async () => {
       chatStore.merge([
         { ...serverHit, body: "已修改为无关内容", editedAt: "2026-11-24T09:10:00Z" },
@@ -544,6 +544,34 @@ describe("PR-2 global cross-conversation search UI", () => {
     expect(senderSelect.value).toBe("");
     expect(host.querySelector('[data-testid="loc"]')?.textContent).not.toContain(
       "senderId=",
+    );
+
+    // 5) Custom date boundaries use local calendar-day start/end rather than hardcoded UTC.
+    const dateSelect = host.querySelector<HTMLSelectElement>(
+      'select[aria-label="按时间范围筛选"]',
+    )!;
+    await act(async () => {
+      setInputValue(dateSelect, "custom");
+    });
+    const afterInput = host.querySelector<HTMLInputElement>(
+      'input[aria-label="起始日期"]',
+    )!;
+    const beforeInput = host.querySelector<HTMLInputElement>(
+      'input[aria-label="结束日期"]',
+    )!;
+    await act(async () => {
+      setInputValue(afterInput, "2026-11-24");
+    });
+    await act(async () => {
+      setInputValue(beforeInput, "2026-11-24");
+    });
+    await flush(300);
+    expect(searchSpy).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        after: new Date(2026, 10, 24, 0, 0, 0, 0).toISOString(),
+        before: new Date(2026, 10, 24, 23, 59, 59, 999).toISOString(),
+      }),
+      expect.any(AbortSignal),
     );
   });
 });

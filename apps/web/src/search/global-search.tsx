@@ -46,11 +46,22 @@ function parsePreset(raw: string | null, after: string, before: string): DatePre
 }
 
 function isoDateBoundary(rawDate: string, endOfDay: boolean): string | undefined {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) return undefined;
-  const parsed = new Date(
-    endOfDay ? `${rawDate}T23:59:59.999Z` : `${rawDate}T00:00:00.000Z`,
-  );
-  if (Number.isNaN(parsed.getTime())) return undefined;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(rawDate);
+  if (!match) return undefined;
+  const year = Number(match[1]);
+  const month = Number(match[2]) - 1;
+  const day = Number(match[3]);
+  const parsed = endOfDay
+    ? new Date(year, month, day, 23, 59, 59, 999)
+    : new Date(year, month, day, 0, 0, 0, 0);
+  if (
+    Number.isNaN(parsed.getTime()) ||
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month ||
+    parsed.getDate() !== day
+  ) {
+    return undefined;
+  }
   return parsed.toISOString();
 }
 

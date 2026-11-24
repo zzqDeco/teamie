@@ -398,7 +398,14 @@ export function useShellKeyboardShortcuts({
         setShortcutsOpen(false);
         setQuickSwitcherOpen(false);
         if (window.location.pathname.replace(/\/+$/, "") === "/app/search") {
-          window.dispatchEvent(new CustomEvent("teamie:focus-global-search"));
+          const dispatchFocus = () => {
+            window.dispatchEvent(new CustomEvent("teamie:focus-global-search"));
+          };
+          if (quickSwitcherOpen || shortcutsOpen) {
+            requestAnimationFrame(dispatchFocus);
+          } else {
+            dispatchFocus();
+          }
         } else {
           navigate("/app/search");
         }
