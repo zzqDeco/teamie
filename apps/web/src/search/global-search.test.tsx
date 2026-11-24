@@ -2,7 +2,7 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@teamie/api-client";
@@ -395,10 +395,11 @@ describe("PR-2 global cross-conversation search UI", () => {
     );
   });
 
-  it("keeps unedited multi-term server hits in ConversationSearch while dropping non-matching local edits", async () => {
+  it("keeps multi-term server hits in ConversationSearch, filters out non-matching mock rows, and drops non-matching local edits", async () => {
     const serverHit = makeMessage("m-20", "c-1", 11, "发布记录：v0.4.11 上线成功");
+    const unrelatedMock = makeMessage("m-21", "c-1", 12, "无关讨论内容");
     vi.spyOn(api, "searchMessages").mockResolvedValue({
-      messages: [serverHit],
+      messages: [serverHit, unrelatedMock],
       hasMore: false,
     });
 
@@ -414,10 +415,10 @@ describe("PR-2 global cross-conversation search UI", () => {
 
     const input = host.querySelector<HTMLInputElement>('input[type="search"]')!;
     await act(async () => {
-      // Non-contiguous query: server matched it, local body wasn't edited, so ConversationSearch must NOT drop it.
       setInputValue(input, "发布 上线");
     });
     await flush(350);
+    // Multi-term hit is preserved while non-matching row is filtered out.
     expect(host.querySelectorAll("[data-search-result]")).toHaveLength(1);
 
     // Local sync edit removing the matched words still drops the stale hit.
@@ -427,5 +428,122 @@ describe("PR-2 global cross-conversation search UI", () => {
       ]);
     });
     expect(host.querySelectorAll("[data-search-result]")).toHaveLength(0);
+  });
+
+  it("handles external URL navigation, final conversation revocation, empty-page pagination, and selected sender preservation", async () => {
+    const hitA: GlobalSearchItem = {
+      message: makeMessage("m-a", "c-1", 10, "first-query hit"),
+      conversation: { id: "c-1", workspaceId: "ws-1", name: "general", type: "channel" },
+      workspaceName: "研发工作空间",
+    };
+    const hitB: GlobalSearchItem = {
+      message: makeMessage("m-b", "c-1", 9, "second-query page2"),
+      conversation: { id: "c-1", workspaceId: "ws-1", name: "general", type: "channel" },
+      workspaceName: "研发工作空间",
+    };
+
+    const searchSpy = vi
+      .spyOn(api, "searchGlobalMessages")
+      .mockImplementation(async (options) => {
+        if (options?.cursor === "next-page") {
+          return { items: [hitB] };
+        }
+        return { items: [hitA], cursor: "next-page" };
+      });
+
+    function NavTrigger() {
+      const navigate = useNavigate();
+      return (
+        <button
+          type="button"
+          data-testid="ext-nav"
+          onClick={() => navigate("/app/search?q=second")}
+        >
+          nav
+        </button>
+      );
+    }
+
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={["/app/search?q=first"]}>
+            <GlobalSearchView onMenu={vi.fn()} />
+            <LocationProbe />
+            <NavTrigger />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+    });
+    await flush(300);
+    expect(host.querySelectorAll(".global-search-card")).toHaveLength(1);
+
+    // 1) External navigation to /app/search?q=second is adopted cleanly without being overwritten by old state.
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>('[data-testid="ext-nav"]')!.click();
+    });
+    await flush(300);
+    expect(host.querySelector('[data-testid="loc"]')?.textContent).toBe(
+      "/app/search?q=second",
+    );
+    expect(
+      host.querySelector<HTMLInputElement>("#global-search-input")?.value,
+    ).toBe("second");
+
+    // 2) Retracting every hit on page 1 while cursor exists keeps "加载更多" visible and loads page 2!
+    await act(async () => {
+      chatStore.merge([
+        { ...hitA.message, body: "", retractedAt: "2026-11-24T09:30:00Z" },
+      ]);
+    });
+    expect(host.querySelectorAll(".global-search-card")).toHaveLength(0);
+    const loadMoreBtn = host.querySelector<HTMLButtonElement>(".global-search-more");
+    expect(loadMoreBtn).not.toBeNull();
+    await act(async () => {
+      loadMoreBtn!.click();
+      await Promise.resolve();
+    });
+    expect(searchSpy).toHaveBeenLastCalledWith(
+      { q: "second", cursor: "next-page", limit: 20 },
+      expect.any(AbortSignal),
+    );
+    expect(host.querySelectorAll(".global-search-card")).toHaveLength(1);
+
+    // 3) Authoritative empty conversation list after final membership revocation hides all hits!
+    await act(async () => {
+      chatStore.replaceConversations([]);
+    });
+    expect(host.querySelectorAll(".global-search-card")).toHaveLength(0);
+
+    // 4) Selected sender stays represented in <select> when pinyin filter narrows options, and clears on workspace change.
+    const senderSelect = host.querySelector<HTMLSelectElement>(
+      "#global-search-sender-select",
+    )!;
+    await act(async () => {
+      setInputValue(senderSelect, "u-2");
+    });
+    expect(senderSelect.value).toBe("u-2");
+    const senderFilterInput = host.querySelector<HTMLInputElement>(
+      ".search-sender-filter-input",
+    )!;
+    await act(async () => {
+      setInputValue(senderFilterInput, "不存在的姓名");
+    });
+    expect(senderSelect.value).toBe("u-2");
+    expect(
+      Array.from(senderSelect.options).some((opt) => opt.value === "u-2"),
+    ).toBe(true);
+
+    // Switching workspace clears senderId cleanly.
+    const wsSelect = host.querySelector<HTMLSelectElement>(
+      'select[aria-label="按工作空间筛选"]',
+    )!;
+    await act(async () => {
+      setInputValue(wsSelect, "ws-2");
+    });
+    expect(senderSelect.value).toBe("");
+    expect(host.querySelector('[data-testid="loc"]')?.textContent).not.toContain(
+      "senderId=",
+    );
   });
 });

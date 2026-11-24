@@ -370,7 +370,12 @@ export function QuickSwitcher({
       }
       if (!workspaceMap.has(rawItem.conversation.workspaceId)) continue;
       const liveConv = authorizedConvMap.get(rawItem.conversation.id);
-      if (!liveConv && Object.keys(snapshot.conversations).length > 0) continue;
+      if (
+        !liveConv &&
+        (chatStore.hasAuthoritativeConversations ||
+          Object.keys(snapshot.conversations).length > 0)
+      )
+        continue;
       const cached = (snapshot.messages[rawItem.conversation.id] || []).filter(
         (m) => m.id === rawItem.message.id,
       );

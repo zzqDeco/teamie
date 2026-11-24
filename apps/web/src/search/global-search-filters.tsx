@@ -120,6 +120,10 @@ export function GlobalSearchFilters({
             onChange={(event) => onSenderChange(event.target.value)}
           >
             <option value="">全部成员</option>
+            {senderId &&
+              !filteredSenders.some((member) => member.userId === senderId) && (
+                <option value={senderId}>已选成员</option>
+              )}
             {filteredSenders.map((member) => (
               <option key={member.userId} value={member.userId}>
                 {member.displayName}

@@ -13,6 +13,7 @@ import { ICON } from "./icons";
 import { plainPreview, searchSnippet } from "./chat/plain-preview";
 import { formatDateTime } from "./format-datetime";
 import { isComposingKey } from "./mentions";
+import { matchesSearchTerms, parseSearchTerms } from "./search/search-highlight";
 import "./styles/conversation-search.css";
 
 type SearchResult = MessagePage & {
@@ -84,12 +85,9 @@ function matchingAttachments(
     : files;
 }
 
-function matchesMessageBody(message: Message, termLower: string): boolean {
-  return (
-    Boolean(termLower) &&
-    (message.body.toLowerCase().includes(termLower) ||
-      Boolean(message.forwarded?.body.toLowerCase().includes(termLower)))
-  );
+function matchesMessageBody(message: Message, term: string): boolean {
+  const terms = parseSearchTerms(term);
+  return terms.length > 0 && matchesSearchTerms(message, terms);
 }
 
 export function ConversationSearch({
@@ -302,11 +300,7 @@ export function ConversationSearch({
           if (mode === "files") {
             return matchingAttachments(message, termLower).length > 0;
           }
-          const fromPage = pageById.get(message.id);
-          if (fromPage && message.body === fromPage.body) {
-            return true;
-          }
-          return matchesMessageBody(message, termLower);
+          return matchesMessageBody(message, term);
         })
         .reverse()
     : [];

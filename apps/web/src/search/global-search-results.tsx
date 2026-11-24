@@ -51,9 +51,25 @@ export function GlobalSearchResults({
           </Button>
         </div>
       ) : items.length === 0 ? (
-        <p className="global-search-empty" role="status">
-          没有找到匹配的消息
-        </p>
+        <>
+          <p className="global-search-empty" role="status">
+            {hasMore
+              ? "当前页匹配消息已被撤回或变更，可继续加载更早结果"
+              : "没有找到匹配的消息"}
+          </p>
+          {error && <Notice kind="error">{error}</Notice>}
+          {hasMore && (
+            <Button
+              type="button"
+              variant="secondary"
+              className="global-search-more"
+              busy={loadingMore}
+              onClick={onLoadMore}
+            >
+              加载更多
+            </Button>
+          )}
+        </>
       ) : (
         <>
           <ol className="global-search-list" aria-label="全局搜索结果">

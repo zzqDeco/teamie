@@ -70,60 +70,58 @@ export function GlobalSearchView({
   const [searchParams, setSearchParams] = useSearchParams();
   const toPinyin = usePinyin();
 
-  const [query, setQuery] = useState(() => searchParams.get("q") || "");
-  const [workspaceId, setWorkspaceId] = useState(
-    () => searchParams.get("workspaceId") || "",
+  const urlQuery = searchParams.get("q") || "";
+  const workspaceId = searchParams.get("workspaceId") || "";
+  const conversationId = searchParams.get("conversationId") || "";
+  const senderId = searchParams.get("senderId") || "";
+  const hasFiles = searchParams.get("hasFiles") === "true";
+  const customAfter = searchParams.get("after") || "";
+  const customBefore = searchParams.get("before") || "";
+  const datePreset = parsePreset(
+    searchParams.get("range"),
+    customAfter,
+    customBefore,
   );
-  const [conversationId, setConversationId] = useState(
-    () => searchParams.get("conversationId") || "",
-  );
-  const [senderId, setSenderId] = useState(
-    () => searchParams.get("senderId") || "",
-  );
+
+  // URL searchParams are the single source of truth for filters so external
+  // navigations (e.g. from QuickSwitcher) are never overwritten by an effect.
+  // Keep a local draft only to preserve raw typing (like trailing spaces).
+  const [queryDraft, setQueryDraft] = useState({ url: urlQuery, text: urlQuery });
+  if (queryDraft.url !== urlQuery) {
+    setQueryDraft({ url: urlQuery, text: urlQuery });
+  }
+  const query = queryDraft.text;
   const [senderFilterText, setSenderFilterText] = useState("");
-  const [hasFiles, setHasFiles] = useState(
-    () => searchParams.get("hasFiles") === "true",
-  );
-  const [datePreset, setDatePreset] = useState<DatePreset>(() =>
-    parsePreset(
-      searchParams.get("range"),
-      searchParams.get("after") || "",
-      searchParams.get("before") || "",
-    ),
-  );
-  const [customAfter, setCustomAfter] = useState(
-    () => searchParams.get("after") || "",
-  );
-  const [customBefore, setCustomBefore] = useState(
-    () => searchParams.get("before") || "",
-  );
   const [page, setPage] = useState<SearchPageState | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const requests = useRef(new Set<AbortController>());
   const sequence = useRef(0);
-  const lastWrittenSearch = useRef(searchParams.toString());
   const generation = chatStore.generation;
   const userId = user!.id;
 
-  // Adopt externally navigated /app/search?q=... changes (e.g. from QuickSwitcher).
-  const currentSearchString = searchParams.toString();
-  useEffect(() => {
-    if (currentSearchString === lastWrittenSearch.current) return;
-    lastWrittenSearch.current = currentSearchString;
-    const params = new URLSearchParams(currentSearchString);
-    setQuery(params.get("q") || "");
-    setWorkspaceId(params.get("workspaceId") || "");
-    setConversationId(params.get("conversationId") || "");
-    setSenderId(params.get("senderId") || "");
-    setHasFiles(params.get("hasFiles") === "true");
-    const nextAfter = params.get("after") || "";
-    const nextBefore = params.get("before") || "";
-    setDatePreset(parsePreset(params.get("range"), nextAfter, nextBefore));
-    setCustomAfter(nextAfter);
-    setCustomBefore(nextBefore);
-  }, [currentSearchString]);
+  function patchParams(updates: Record<string, string | null | undefined>) {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        for (const [key, value] of Object.entries(updates)) {
+          if (!value) next.delete(key);
+          else next.set(key, value);
+        }
+        return next;
+      },
+      { replace: true },
+    );
+  }
+
+  function updateQuery(nextText: string) {
+    const nextTrimmed = nextText.trim();
+    setQueryDraft({ url: nextTrimmed, text: nextText });
+    if (nextTrimmed !== urlQuery) {
+      patchParams({ q: nextTrimmed || null });
+    }
+  }
 
   // Focus input on mount and when Cmd/Ctrl+Shift+F fires while already on /app/search.
   useEffect(() => {
@@ -137,35 +135,6 @@ export function GlobalSearchView({
       window.removeEventListener("teamie:focus-global-search", onFocusShortcut);
     };
   }, []);
-
-  // Sync URL query params when filters change so browser history & reloads restore state.
-  useEffect(() => {
-    const next = new URLSearchParams();
-    if (query.trim()) next.set("q", query.trim());
-    if (workspaceId) next.set("workspaceId", workspaceId);
-    if (conversationId) next.set("conversationId", conversationId);
-    if (senderId) next.set("senderId", senderId);
-    if (hasFiles) next.set("hasFiles", "true");
-    if (datePreset !== "any") next.set("range", datePreset);
-    if (datePreset === "custom" && customAfter) next.set("after", customAfter);
-    if (datePreset === "custom" && customBefore)
-      next.set("before", customBefore);
-    const nextString = next.toString();
-    if (nextString !== lastWrittenSearch.current) {
-      lastWrittenSearch.current = nextString;
-      setSearchParams(next, { replace: true });
-    }
-  }, [
-    query,
-    workspaceId,
-    conversationId,
-    senderId,
-    hasFiles,
-    datePreset,
-    customAfter,
-    customBefore,
-    setSearchParams,
-  ]);
 
   const workspaces: Workspace[] = useMemo(
     () => chat.data?.workspaces || [],
@@ -237,18 +206,28 @@ export function GlobalSearchView({
   const allSenders = [...senderOptionsMap.values()].sort((a, b) =>
     a.displayName.localeCompare(b.displayName, "zh-Hans-CN"),
   );
+  const selectedSender = senderId
+    ? allSenders.find((member) => member.userId === senderId)
+    : undefined;
   const senderNeedle = senderFilterText.trim().toLowerCase();
   const senderCompact = senderNeedle.replace(/\s+/gu, "");
   const filteredSenders = senderNeedle
-    ? allSenders.filter((member) => {
-        if (member.displayName.toLowerCase().includes(senderNeedle)) return true;
-        const forms = toPinyin?.(member.displayName);
-        return Boolean(
-          forms &&
-            (forms.full.includes(senderCompact) ||
-              forms.initials.includes(senderCompact)),
-        );
-      })
+    ? [
+        ...(selectedSender ? [selectedSender] : []),
+        ...allSenders.filter((member) => {
+          if (selectedSender && member.userId === selectedSender.userId) {
+            return false;
+          }
+          if (member.displayName.toLowerCase().includes(senderNeedle))
+            return true;
+          const forms = toPinyin?.(member.displayName);
+          return Boolean(
+            forms &&
+              (forms.full.includes(senderCompact) ||
+                forms.initials.includes(senderCompact)),
+          );
+        }),
+      ]
     : allSenders;
 
   const parsed = useMemo(() => parseSearchQuery(query), [query]);
@@ -437,12 +416,14 @@ export function GlobalSearchView({
   }
 
   // Reconcile server hits against live chatStore edits, retractions, and revocations.
-  const hasSnapshotConvs = Object.keys(snapshot.conversations).length > 0;
+  const enforceMembership =
+    chatStore.hasAuthoritativeConversations ||
+    Object.keys(snapshot.conversations).length > 0;
   const visibleItems: VisibleGlobalSearchHit[] = [];
   if (currentPage) {
     for (const rawItem of currentPage.items) {
       const liveConv = snapshot.conversations[rawItem.conversation.id];
-      if (!liveConv && hasSnapshotConvs) continue;
+      if (!liveConv && enforceMembership) continue;
       if (liveConv && liveConv.workspaceId !== rawItem.conversation.workspaceId) {
         continue;
       }
@@ -485,14 +466,16 @@ export function GlobalSearchView({
     workspaceId || conversationId || senderId || hasFiles || datePreset !== "any",
   );
   function resetFilters() {
-    setWorkspaceId("");
-    setConversationId("");
-    setSenderId("");
     setSenderFilterText("");
-    setHasFiles(false);
-    setDatePreset("any");
-    setCustomAfter("");
-    setCustomBefore("");
+    patchParams({
+      workspaceId: null,
+      conversationId: null,
+      senderId: null,
+      hasFiles: null,
+      range: null,
+      after: null,
+      before: null,
+    });
   }
 
   return (
@@ -530,7 +513,7 @@ export function GlobalSearchView({
               ref={inputRef}
               type="search"
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => updateQuery(event.target.value)}
               placeholder='输入关键词（空格分隔多词，如：发布 v0.4.11 或 "error code"）'
               aria-label="搜索全部工作空间消息"
             />
@@ -538,7 +521,7 @@ export function GlobalSearchView({
               <IconButton
                 label="清空搜索词"
                 onClick={() => {
-                  setQuery("");
+                  updateQuery("");
                   inputRef.current?.focus();
                 }}
               >
@@ -568,16 +551,36 @@ export function GlobalSearchView({
           customBefore={customBefore}
           hasAnyFilter={hasAnyFilter}
           onWorkspaceChange={(nextWs) => {
-            setWorkspaceId(nextWs);
-            setConversationId("");
+            setSenderFilterText("");
+            patchParams({
+              workspaceId: nextWs || null,
+              conversationId: null,
+              senderId: null,
+            });
           }}
-          onConversationChange={setConversationId}
+          onConversationChange={(nextConv) =>
+            patchParams({ conversationId: nextConv || null })
+          }
           onSenderFilterTextChange={setSenderFilterText}
-          onSenderChange={setSenderId}
-          onDatePresetChange={setDatePreset}
-          onCustomAfterChange={setCustomAfter}
-          onCustomBeforeChange={setCustomBefore}
-          onToggleHasFiles={() => setHasFiles((value) => !value)}
+          onSenderChange={(nextSender) =>
+            patchParams({ senderId: nextSender || null })
+          }
+          onDatePresetChange={(nextPreset) =>
+            patchParams({
+              range: nextPreset === "any" ? null : nextPreset,
+              after: nextPreset === "custom" ? customAfter || null : null,
+              before: nextPreset === "custom" ? customBefore || null : null,
+            })
+          }
+          onCustomAfterChange={(nextAfter) =>
+            patchParams({ range: "custom", after: nextAfter || null })
+          }
+          onCustomBeforeChange={(nextBefore) =>
+            patchParams({ range: "custom", before: nextBefore || null })
+          }
+          onToggleHasFiles={() =>
+            patchParams({ hasFiles: hasFiles ? null : "true" })
+          }
           onReset={resetFilters}
         />
 
