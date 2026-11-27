@@ -35,6 +35,7 @@ type GalleryTab = "image" | "file";
 
 type GalleryPageState = {
   key: string;
+  loaded: boolean;
   items: ConversationAttachmentItem[];
   watermarkSeq: number;
   cursor?: string;
@@ -128,6 +129,7 @@ export function ConversationGalleryPane({
             );
             setPage({
               key: queryKey,
+              loaded: true,
               items: response.items,
               watermarkSeq: Math.max(startLastSeq, maxItemSeq),
               cursor: response.cursor,
@@ -140,6 +142,7 @@ export function ConversationGalleryPane({
           if (isCurrent()) {
             setPage({
               key: queryKey,
+              loaded: false,
               items: [],
               watermarkSeq: 0,
               error: errorText(err),
@@ -211,7 +214,7 @@ export function ConversationGalleryPane({
   // and prepend newly arrived live attachments when unfiltered.
   const storeMessages = snapshot.messages[conversationId];
   const visibleItems = useMemo(() => {
-    if (!currentPage) return [];
+    if (!currentPage?.loaded) return [];
     const liveMsgs = storeMessages || [];
     const retractedIds = new Set<string>();
     for (const msg of liveMsgs) {
@@ -449,7 +452,7 @@ export function ConversationGalleryPane({
               <LoaderCircle size={ICON.sm} className="spin" aria-hidden="true" />
               正在加载{tab === "image" ? "图片" : "文件"}…
             </p>
-          ) : currentPage?.error && !visibleItems.length ? (
+          ) : currentPage?.error && (!currentPage.loaded || !visibleItems.length) ? (
             <div className="gallery-error">
               <Notice kind="error">{currentPage.error}</Notice>
               <Button

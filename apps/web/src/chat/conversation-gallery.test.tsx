@@ -394,4 +394,58 @@ describe("PR-3 conversation media/file gallery pane and shared full-res lightbox
     expect(modal.textContent).toContain("Second_Shot.png");
     expect(modal.textContent).toContain("2 / 2");
   });
+
+  it("keeps initial-load retry visible even when chatStore already holds cached attachments", async () => {
+    chatStore.merge([
+      {
+        id: "m-1",
+        conversationId: "c-gallery",
+        senderId: "u-1",
+        senderName: "林夕",
+        senderKind: "human",
+        clientMessageId: "c-m-1",
+        seq: 10,
+        body: "cached image",
+        attachments: [imgItem1.attachment],
+        createdAt: imgItem1.createdAt,
+      },
+    ]);
+    const listSpy = vi
+      .spyOn(api, "listConversationAttachments")
+      .mockRejectedValueOnce(new Error("network failed"))
+      .mockResolvedValueOnce({ items: [imgItem1] });
+    vi.spyOn(api, "attachmentThumbnail").mockResolvedValue(
+      new Blob(["thumb"], { type: "image/jpeg" }),
+    );
+
+    await act(async () => {
+      root.render(
+        <ConversationGalleryPane
+          paneRef={createRef<HTMLElement>()}
+          overlayMembers={false}
+          mobile={false}
+          sidebar={false}
+          conversation={conv}
+          onClose={vi.fn()}
+          onLocateMessage={vi.fn()}
+        />,
+      );
+    });
+    await flush(50);
+
+    expect(listSpy).toHaveBeenCalledTimes(1);
+    const retryBtn = host.querySelector<HTMLButtonElement>(".gallery-error button");
+    expect(retryBtn).not.toBeNull();
+    expect(retryBtn!.textContent).toContain("重试");
+    expect(host.querySelectorAll(".gallery-image-tile")).toHaveLength(0);
+
+    await act(async () => {
+      retryBtn!.click();
+    });
+    await flush(50);
+
+    expect(listSpy).toHaveBeenCalledTimes(2);
+    expect(host.querySelector(".gallery-error")).toBeNull();
+    expect(host.querySelectorAll(".gallery-image-tile")).toHaveLength(1);
+  });
 });
