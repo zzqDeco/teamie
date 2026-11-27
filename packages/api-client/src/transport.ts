@@ -36,9 +36,43 @@ export function routePath(
 
 export interface HttpTransportState {
   csrfToken: string;
+  /**
+   * True while the UI is booted from an unverified local offline cache.
+   * Blocks all protected reads and writes until `/auth/session` verifies the
+   * current browser cookie belongs to the cached account.
+   */
+  sessionUnverified?: boolean;
   onUnauthorized?: () => void;
   onForbidden?: () => void;
   onSessionChanged?: () => void;
+}
+
+function isAllowedWhileSessionUnverified(
+  path: string,
+  method: string | undefined,
+  authentication: "session" | "capability",
+  sessionToken: string,
+): boolean {
+  if (authentication === "capability") return true;
+  const pathname = path.split("?")[0];
+  if (
+    pathname === IDL_ROUTES.GetSession.clientPath ||
+    pathname === IDL_ROUTES.Login.clientPath ||
+    pathname === IDL_ROUTES.Register.clientPath ||
+    pathname === IDL_ROUTES.GetRegistrationMetadata.clientPath
+  ) {
+    return true;
+  }
+  if (pathname === IDL_ROUTES.Logout.clientPath && Boolean(sessionToken)) {
+    return true;
+  }
+  if (
+    (!method || method.toUpperCase() === "GET") &&
+    /^\/invites\/[^/]+$/.test(pathname)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 export async function executeTransportRequest<T>(
@@ -49,6 +83,21 @@ export async function executeTransportRequest<T>(
   authentication: "session" | "capability" = "session",
 ): Promise<T> {
   const sessionToken = state.csrfToken;
+  if (
+    state.sessionUnverified &&
+    !isAllowedWhileSessionUnverified(
+      path,
+      options.method,
+      authentication,
+      sessionToken,
+    )
+  ) {
+    throw new ApiError(
+      503,
+      "offline_unverified",
+      "当前处于离线模式，正在等待验证登录状态。",
+    );
+  }
   const headers = new Headers(options.headers);
   if (options.body && !(options.body instanceof FormData))
     headers.set("Content-Type", "application/json");

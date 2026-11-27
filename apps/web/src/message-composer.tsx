@@ -58,6 +58,7 @@ export function MessageComposer({
   latestLoaded,
   latest,
   canEdit,
+  offline = false,
   messages,
   sendTyping,
   onClearReply,
@@ -87,6 +88,7 @@ export function MessageComposer({
   latestLoaded: boolean;
   latest: number;
   canEdit: boolean;
+  offline?: boolean;
   messages: LocalMessage[];
   sendTyping: (conversationId: string, active: boolean) => void;
   onClearReply: () => void;
@@ -163,7 +165,7 @@ export function MessageComposer({
       createdAt: new Date().toISOString(),
       ...(replyToId ? { replyToId } : {}),
     };
-    void sendMessage(message, chatStore.generation);
+    void sendMessage(message, chatStore.generation, { offline });
     writeComposerDraft(conversation.id, {
       body: "",
       mentions: [],
@@ -289,8 +291,13 @@ export function MessageComposer({
             const files = event.clipboardData?.files;
             if (!files || files.length === 0) return;
             event.preventDefault();
-            if (uploadsEnabled) attachments.add(Array.from(files));
-            else toast.error("文件上传已关闭，无法粘贴文件");
+            if (!uploadsEnabled) {
+              toast.error("文件上传已关闭，无法粘贴文件");
+            } else if (offline) {
+              toast.info("当前处于离线状态，恢复网络后可上传附件");
+            } else {
+              attachments.add(Array.from(files));
+            }
           }}
           placeholder={
             conversation.type === "channel"
@@ -302,7 +309,13 @@ export function MessageComposer({
         <div className="composer-tools">
           {uploadsEnabled && (
             <AttachmentPicker
-              onSelect={attachments.add}
+              onSelect={(selected) => {
+                if (offline) {
+                  toast.info("当前处于离线状态，恢复网络后可上传附件");
+                  return;
+                }
+                attachments.add(selected);
+              }}
               disabled={
                 attachments.files.length >= attachmentLimits.maxFilesPerMessage
               }

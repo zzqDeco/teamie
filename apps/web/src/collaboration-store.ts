@@ -3,10 +3,10 @@ import type { NotificationProjection } from "./notification-model";
 import type { ReactionStates } from "./reactions";
 
 export type LocalMessage = Message & {
-  status?: "sending" | "failed";
+  status?: "queued" | "sending" | "failed";
   error?: string;
   // A failure the same idempotent retry cannot fix (conflict, lost access,
-  // expired file, disabled feature). Only transient failures auto-retry.
+  // expired file, disabled feature). Only queued/transient failures auto-retry.
   permanent?: boolean;
 };
 

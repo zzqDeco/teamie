@@ -263,7 +263,8 @@
     font-size: var(--font-sm);
     color: var(--text-subtle);
   }
-  .message.sending .message-text {
+  .message.sending .message-text,
+  .message.queued .message-text {
     color: var(--text-muted);
   }
   .message.failed .message-text {
@@ -386,6 +387,21 @@
     align-items: center;
     gap: var(--space-1);
     margin-top: var(--space-1);
+    font-size: var(--font-sm);
+  }
+  .queued-status {
+    color: var(--text-muted);
+    line-height: var(--lh-body);
+    flex-wrap: wrap;
+  }
+  .queued-status > button {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    text-decoration: underline;
+    color: var(--brand-text);
+    margin-left: var(--space-1_5);
+    padding: 0 var(--space-1);
     font-size: var(--font-sm);
   }
   .failed-status {

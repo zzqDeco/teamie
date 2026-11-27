@@ -56,7 +56,8 @@ export function ConversationView({
   onClearMessageTarget?: () => void; isWorkspaceOwner?: boolean; onInvite?: () => void;
 }) {
   const { user } = useAuth();
-  const { data, syncError, sync, sendTyping } = useChat();
+  const { data, syncError, sync, sendTyping, connection, offlineMode } = useChat();
+  const isOffline = offlineMode || connection === "offline";
   const attachmentLimits = data?.attachmentLimits || defaultAttachmentLimits;
   const attachments = useAttachmentDraft(conversation.id, attachmentLimits);
   const uploadsEnabled = !!data?.capabilities["im.attachments.upload"];
@@ -179,6 +180,7 @@ export function ConversationView({
     onClearMessageTarget,
     visible,
     membersOpen: membersOpen || galleryOpen || appsOpen,
+    offlineMode,
     highlightId,
     setHighlightId,
     setEntry,
@@ -460,10 +462,8 @@ export function ConversationView({
         setDraggingFiles(false);
         if (!hasFileTransfer(event)) return;
         event.preventDefault();
-        if (!uploadsEnabled) {
-          toast.error("文件上传已关闭");
-          return;
-        }
+        if (!uploadsEnabled) { toast.error("文件上传已关闭"); return; }
+        if (isOffline) { toast.info("当前处于离线状态，恢复网络后可上传附件"); return; }
         const files = Array.from(event.dataTransfer?.files || []);
         if (files.length > 0) {
           attachments.add(files);
@@ -659,9 +659,8 @@ export function ConversationView({
         allowHereMention={presenceEnabled}
         inputRef={inputRef} editing={editing}
         located={!!located} latestLoaded={latestLoaded} latest={latest}
-        canEdit={canEdit} messages={messages} sendTyping={sendTyping}
-        onClearReply={clearReply}
-        onStartEdit={startEdit}
+        canEdit={canEdit} offline={isOffline} messages={messages} sendTyping={sendTyping}
+        onClearReply={clearReply} onStartEdit={startEdit}
         onSent={() => {
           if (located) returnToLatest();
           setAtBottom(true);

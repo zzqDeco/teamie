@@ -42,6 +42,7 @@ const modularFeatureFiles = [
   "styles/global-search.css",
   "styles/mentions.css",
   "styles/password-recovery.css",
+  "styles/pwa.css",
   "styles/feedback.css",
   "styles/conveniences.css",
 ];

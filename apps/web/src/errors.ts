@@ -97,6 +97,7 @@ export const errorMessages: Record<string, string> = {
   attachment_upload_not_found: "没有找到这次上传，请重新上传。",
   invalid_reset_link: "重置链接无效或已过期，请联系管理员重新生成。",
   session_changed: "登录状态已变化，请刷新页面后重试。",
+  offline_unverified: "当前处于离线模式，恢复网络并验证登录后可用。",
 };
 
 export function errorText(error: unknown) {

@@ -1,7 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Hash } from "lucide-react";
-import type { Conversation, Workspace } from "@teamie/api-client";
+import type { Conversation, Member, Workspace } from "@teamie/api-client";
 import { chatStore, compareTimestampsDesc } from "../store";
+import { syncAppBadge } from "../pwa/badge";
+import {
+  readOfflineWorkspaceMembers,
+  saveOfflineWorkspaceMembers,
+} from "../pwa/offline-cache";
 import { Button } from "../ui";
 import { MobileNavButton } from "./page-header";
 import { ICON } from "../icons";
@@ -289,6 +294,23 @@ chatStore.subscribe(() => {
   }
 });
 
+export function useOfflineWorkspaceMembers(
+  userId: string | undefined,
+  workspaceId: string | undefined,
+  liveMembers: Member[] | undefined,
+): Member[] {
+  useEffect(() => {
+    if (userId && workspaceId && liveMembers) {
+      saveOfflineWorkspaceMembers(userId, workspaceId, liveMembers);
+    }
+  }, [userId, workspaceId, liveMembers]);
+  return useMemo(() => {
+    if (liveMembers) return liveMembers;
+    if (!userId || !workspaceId) return [];
+    return readOfflineWorkspaceMembers(userId, workspaceId);
+  }, [liveMembers, userId, workspaceId]);
+}
+
 export function useDocumentTitle(
   pageTitle: string,
   urgentCount: number,
@@ -303,10 +325,12 @@ export function useDocumentTitle(
           ? "• "
           : "";
     document.title = `${prefix}${base}`;
+    syncAppBadge(urgentCount);
   }, [pageTitle, urgentCount, hasChannelUnread]);
   useEffect(
     () => () => {
       document.title = "Teamie";
+      syncAppBadge(0);
     },
     [],
   );

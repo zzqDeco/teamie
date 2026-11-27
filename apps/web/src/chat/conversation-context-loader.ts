@@ -17,6 +17,7 @@ export function useConversationContextLoader({
   onClearMessageTarget,
   visible,
   membersOpen,
+  offlineMode = false,
   highlightId,
   setHighlightId,
   setEntry,
@@ -49,6 +50,7 @@ export function useConversationContextLoader({
   onClearMessageTarget?: () => void;
   visible: boolean;
   membersOpen: boolean;
+  offlineMode?: boolean;
   highlightId: string;
   setHighlightId: (id: string) => void;
   setEntry: (entry: { readSeq: number; lastSeq: number } | null) => void;
@@ -423,6 +425,10 @@ export function useConversationContextLoader({
   }, [conversation.id]);
 
   useEffect(() => {
+    if (offlineMode) {
+      setLoading(false);
+      return;
+    }
     if (initialMessageId) {
       skipNextFetchLatestRef.current = null;
       void loadContext(initialMessageId, true);
@@ -432,7 +438,7 @@ export function useConversationContextLoader({
       skipNextFetchLatestRef.current = null;
       void fetchLatest();
     }
-  }, [conversation.id, fetchLatest, loadContext, initialMessageId, skipNextFetchLatestRef]);
+  }, [conversation.id, fetchLatest, loadContext, initialMessageId, offlineMode, setLoading, skipNextFetchLatestRef]);
 
   return {
     fetchLatest,

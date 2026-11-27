@@ -1,0 +1,76 @@
+@layer features {
+  .pwa-install-banner {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2_5);
+    padding: var(--space-2_5) var(--space-3_5);
+    border-bottom: 1px solid var(--border);
+    background: var(--lavender);
+    color: var(--text-strong);
+    flex-shrink: 0;
+  }
+
+  .pwa-install-banner > svg {
+    color: var(--brand-text);
+    flex-shrink: 0;
+  }
+
+  .pwa-install-banner-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0_5);
+  }
+
+  .pwa-install-banner-text b {
+    font-size: var(--font-sm);
+    font-weight: 600;
+    color: var(--text-strong);
+  }
+
+  .pwa-install-banner-text span {
+    font-size: var(--font-sm);
+    color: var(--text-muted);
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+  }
+
+  .pwa-install-banner-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1_5);
+    flex-shrink: 0;
+  }
+
+  .pwa-install-card {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .pwa-install-status {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--r-md);
+    background: var(--surface-sunken);
+    color: var(--text);
+    font-size: var(--font-sm);
+  }
+
+  .pwa-install-steps {
+    margin: 0;
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    color: var(--text-muted);
+    font-size: var(--font-sm);
+    line-height: var(--lh-relaxed);
+  }
+}
