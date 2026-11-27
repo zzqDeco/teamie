@@ -1560,4 +1560,309 @@ describe("composer offline staging, idempotent replay, edit/cancel, and cleanup"
     expect(draftApi.ready).toBe(false);
     expect(draftApi.blocked).toBe(true);
   });
+
+  it("blocks composer submission while offline file staging writes are still in flight", async () => {
+    const base = createMemoryOfflineAttachmentBackend();
+    let releaseStage!: () => void;
+    const stageGate = new Promise<void>((resolve) => {
+      releaseStage = resolve;
+    });
+    setOfflineAttachmentBackendForTest({
+      ...base,
+      async stage(record, now) {
+        await stageGate;
+        return base.stage(record, now);
+      },
+    });
+
+    const inputRef = createRef<HTMLTextAreaElement>();
+    let draftApi!: ReturnType<typeof useAttachmentDraft>;
+    function Harness() {
+      draftApi = useAttachmentDraft("c-stage", defaultAttachmentLimits, true);
+      return (
+        <MessageComposer
+          conversation={conv}
+          user={user}
+          name={conv.name}
+          draftEpoch={composerDraftEpoch("c-stage")}
+          replyToId=""
+          attachments={draftApi}
+          attachmentLimits={defaultAttachmentLimits}
+          uploadsEnabled
+          attachmentBlocked={draftApi.blocked}
+          mentionMembers={[]}
+          mentionsEnabled={false}
+          inputRef={inputRef}
+          editing={null}
+          located={false}
+          latestLoaded
+          latest={1}
+          canEdit={false}
+          offline
+          messages={[]}
+          sendTyping={vi.fn()}
+          onClearReply={vi.fn()}
+          onStartEdit={vi.fn()}
+          onSent={vi.fn()}
+        />
+      );
+    }
+
+    await act(async () => {
+      root.render(<Harness />);
+    });
+    await flush();
+
+    const textarea = host.querySelector<HTMLTextAreaElement>("textarea")!;
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "value",
+    )!.set!;
+    await act(async () => {
+      setter.call(textarea, "附带附件的文本");
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    // Kick off offline staging (paused on stageGate).
+    await act(async () => {
+      draftApi.add([new File(["img"], "slow.png", { type: "image/png" })]);
+    });
+    expect(draftApi.blocked).toBe(true);
+    const sendBtn = host.querySelector<HTMLButtonElement>(".send-button")!;
+    expect(sendBtn.disabled).toBe(true);
+
+    // Even attempting form submit while staging is pending MUST NOT queue a text-only message!
+    const form = host.querySelector<HTMLFormElement>("form")!;
+    await act(async () => {
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    expect(chatStore.getSnapshot().messages["c-stage"] || []).toHaveLength(0);
+
+    // Once staging finishes, submission unblocks and queues text + attachment together.
+    releaseStage();
+    await flush();
+    expect(draftApi.blocked).toBe(false);
+    expect(sendBtn.disabled).toBe(false);
+    await act(async () => {
+      sendBtn.click();
+    });
+    await flush();
+    const queued = chatStore.getSnapshot().messages["c-stage"] || [];
+    expect(queued).toHaveLength(1);
+    expect(queued[0].body).toBe("附带附件的文本");
+    expect(queued[0].stagedAttachments?.map((a) => a.filename)).toEqual(["slow.png"]);
+  });
+
+  it("exposes a Retry action when an online staged draft upload encounters a transient network error", async () => {
+    const now = Date.now();
+    await stageOfflineAttachment({
+      id: "st-online-retry",
+      uploadKey: "uk-online-retry",
+      userId: user.id,
+      conversationId: "c-stage",
+      clientMessageId: "",
+      name: "retry.pdf",
+      type: "application/pdf",
+      size: 6,
+      lastModified: now,
+      blob: new Blob(["%PDF-1"], { type: "application/pdf" }),
+      createdAt: now,
+    });
+    const att: Attachment = {
+      id: "att-online-retry",
+      filename: "retry.pdf",
+      mediaType: "application/pdf",
+      sizeBytes: 6,
+      sha256: "h-r",
+    };
+    const uploadSpy = vi
+      .spyOn(attachmentTransport, "upload")
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce({ attachment: att });
+
+    let draftApi!: ReturnType<typeof useAttachmentDraft>;
+    function Harness() {
+      draftApi = useAttachmentDraft("c-stage", defaultAttachmentLimits, false);
+      return (
+        <AttachmentDraft
+          files={draftApi.files}
+          error={draftApi.error}
+          onRemove={draftApi.remove}
+          onRetry={draftApi.retry}
+        />
+      );
+    }
+
+    await act(async () => {
+      root.render(<Harness />);
+    });
+    await flush();
+
+    // Online upload failed transiently: stays "staged" (still durable if offline next) AND exposes Retry button!
+    expect(uploadSpy).toHaveBeenCalledTimes(1);
+    expect(draftApi.files[0].state).toBe("staged");
+    const retryBtn = host.querySelector<HTMLButtonElement>(
+      'button[aria-label="重试上传 retry.pdf"]',
+    );
+    expect(retryBtn).not.toBeNull();
+
+    await act(async () => {
+      retryBtn!.click();
+    });
+    await flush();
+
+    expect(uploadSpy).toHaveBeenCalledTimes(2);
+    expect(draftApi.files[0].state).toBe("ready");
+    expect(draftApi.files[0].attachment?.id).toBe("att-online-retry");
+  });
+
+  it("preserves exact composer order across mixed staged and already-uploaded attachments through send replay", async () => {
+    const now = Date.now();
+    await stageOfflineAttachment({
+      id: "ord-1",
+      uploadKey: "uk-ord-1",
+      userId: user.id,
+      conversationId: "c-stage",
+      clientMessageId: "",
+      name: "first.txt",
+      type: "text/plain",
+      size: 5,
+      lastModified: now,
+      blob: new Blob(["first"], { type: "text/plain" }),
+      createdAt: now,
+    });
+    await stageOfflineAttachment({
+      id: "ord-3",
+      uploadKey: "uk-ord-3",
+      userId: user.id,
+      conversationId: "c-stage",
+      clientMessageId: "",
+      name: "third.txt",
+      type: "text/plain",
+      size: 5,
+      lastModified: now + 2,
+      blob: new Blob(["third"], { type: "text/plain" }),
+      createdAt: now + 2,
+    });
+
+    const att1: Attachment = {
+      id: "att-ord-1",
+      filename: "first.txt",
+      mediaType: "text/plain",
+      sizeBytes: 5,
+      sha256: "h1",
+    };
+    const att2: Attachment = {
+      id: "att-ord-2",
+      filename: "second.txt",
+      mediaType: "text/plain",
+      sizeBytes: 6,
+      sha256: "h2",
+    };
+    const att3: Attachment = {
+      id: "att-ord-3",
+      filename: "third.txt",
+      mediaType: "text/plain",
+      sizeBytes: 5,
+      sha256: "h3",
+    };
+
+    // Seed draft in exact order: [first (staged), second (already ready), third (staged)].
+    addAttachmentDraftFiles("c-stage", [
+      {
+        id: "ord-1",
+        uploadKey: "uk-ord-1",
+        file: new File(["first"], "first.txt", { type: "text/plain" }),
+        state: "staged",
+        stagedOffline: true,
+      },
+      {
+        id: "ord-2",
+        uploadKey: "uk-ord-2",
+        file: new File(["second"], "second.txt", { type: "text/plain" }),
+        state: "ready",
+        attachment: att2,
+        uploadedAt: now,
+      },
+      {
+        id: "ord-3",
+        uploadKey: "uk-ord-3",
+        file: new File(["third"], "third.txt", { type: "text/plain" }),
+        state: "staged",
+        stagedOffline: true,
+      },
+    ]);
+
+    const inputRef = createRef<HTMLTextAreaElement>();
+    let draftApi!: ReturnType<typeof useAttachmentDraft>;
+    function Harness() {
+      draftApi = useAttachmentDraft("c-stage", defaultAttachmentLimits, true);
+      return (
+        <MessageComposer
+          conversation={conv}
+          user={user}
+          name={conv.name}
+          draftEpoch={composerDraftEpoch("c-stage")}
+          replyToId=""
+          attachments={draftApi}
+          attachmentLimits={defaultAttachmentLimits}
+          uploadsEnabled
+          attachmentBlocked={draftApi.blocked}
+          mentionMembers={[]}
+          mentionsEnabled={false}
+          inputRef={inputRef}
+          editing={null}
+          located={false}
+          latestLoaded
+          latest={1}
+          canEdit={false}
+          offline
+          messages={[]}
+          sendTyping={vi.fn()}
+          onClearReply={vi.fn()}
+          onStartEdit={vi.fn()}
+          onSent={vi.fn()}
+        />
+      );
+    }
+
+    await act(async () => {
+      root.render(<Harness />);
+    });
+    await flush();
+
+    const sendBtn = host.querySelector<HTMLButtonElement>(".send-button")!;
+    await act(async () => {
+      sendBtn.click();
+    });
+    await flush();
+
+    const uploadSpy = vi
+      .spyOn(api, "uploadAttachment")
+      .mockResolvedValueOnce({ attachment: att1 })
+      .mockResolvedValueOnce({ attachment: att3 });
+    const sendSpy = vi.spyOn(api, "send").mockResolvedValueOnce({
+      message: {
+        id: "srv-ord",
+        conversationId: "c-stage",
+        senderId: user.id,
+        senderName: user.displayName,
+        senderKind: "human",
+        clientMessageId: chatStore.getSnapshot().messages["c-stage"][0].clientMessageId,
+        seq: 9,
+        body: "",
+        attachments: [att1, att2, att3],
+        createdAt: "2026-11-27T09:55:00Z",
+      },
+    });
+
+    await retryTransientFailures(chatStore.generation);
+
+    expect(uploadSpy).toHaveBeenCalledTimes(2);
+    expect(sendSpy).toHaveBeenCalledWith(
+      "c-stage",
+      expect.objectContaining({
+        attachmentIds: ["att-ord-1", "att-ord-2", "att-ord-3"],
+      }),
+    );
+  });
 });

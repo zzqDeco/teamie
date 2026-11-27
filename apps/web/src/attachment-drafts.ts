@@ -57,6 +57,7 @@ type Entry = {
 
 const entries = new Map<string, Entry>();
 const listeners = new Set<() => void>();
+const pendingStagingCounts = new Map<string, number>();
 const EMPTY: DraftFile[] = [];
 let draftUserId = chatStore.getSnapshot().userId;
 let lastPrunedSignature = "";
@@ -66,6 +67,30 @@ const keyFor = (conversationId: string, userId = chatStore.getSnapshot().userId)
   `${userId}\u0000${conversationId}`;
 const notify = () => listeners.forEach((listener) => listener());
 const live = (entry: Entry) => entries.get(entry.key) === entry;
+
+export function beginOfflineAttachmentStaging(
+  conversationId: string,
+  userId = chatStore.getSnapshot().userId,
+): void {
+  const key = keyFor(conversationId, userId);
+  pendingStagingCounts.set(key, (pendingStagingCounts.get(key) ?? 0) + 1);
+  notify();
+}
+
+export function endOfflineAttachmentStaging(
+  conversationId: string,
+  userId = chatStore.getSnapshot().userId,
+): void {
+  const key = keyFor(conversationId, userId);
+  const next = (pendingStagingCounts.get(key) ?? 0) - 1;
+  if (next <= 0) pendingStagingCounts.delete(key);
+  else pendingStagingCounts.set(key, next);
+  notify();
+}
+
+export function hasPendingOfflineStaging(conversationId: string): boolean {
+  return (pendingStagingCounts.get(keyFor(conversationId)) ?? 0) > 0;
+}
 
 function entryFor(conversationId: string) {
   const userId = chatStore.getSnapshot().userId;
@@ -123,6 +148,7 @@ chatStore.subscribe(() => {
     draftUserId = snapshot.userId;
     lastPrunedSignature = "";
     reconciledGeneration = -1;
+    pendingStagingCounts.clear();
     for (const entry of [...entries.values()]) dropEntry(entry, false);
     if (previousUserId) {
       void clearStagedAttachmentsForUser(previousUserId);
@@ -219,12 +245,21 @@ async function upload(entry: Entry, id: string) {
         file.stagedOffline &&
         ((e instanceof ApiError && e.code === "offline_unverified") ||
           isNetworkError(e));
+      const onlineUploadFailure =
+        stagedInterrupted &&
+        !api.sessionUnverified &&
+        (typeof navigator === "undefined" || navigator.onLine !== false);
       update(
         entry,
         entry.files.map((f) =>
           f.id === id
             ? stagedInterrupted
-              ? { ...f, state: "staged", error: undefined, progress: undefined }
+              ? {
+                  ...f,
+                  state: "staged",
+                  error: onlineUploadFailure ? errorText(e) : undefined,
+                  progress: undefined,
+                }
               : { ...f, state: "failed", error: errorText(e), progress: undefined }
             : f,
         ),
@@ -536,33 +571,37 @@ export function consumeAttachmentDraft(conversationId: string): Attachment[] {
   return attachments;
 }
 
-/** Consumes already-uploaded descriptors and (optionally filtered) offline-staged files for send. */
+/** Consumes already-uploaded descriptors and (optionally filtered) offline-staged files in original draft order. */
 export function consumeAttachmentDraftForSend(
   conversationId: string,
   allowedStagedIds?: Set<string>,
 ): {
   uploaded: Attachment[];
   staged: DraftFile[];
+  ordered: DraftFile[];
 } {
   const entry = entries.get(keyFor(conversationId));
-  if (!entry) return { uploaded: [], staged: [] };
+  if (!entry) return { uploaded: [], staged: [], ordered: [] };
   const uploaded: Attachment[] = [];
   const staged: DraftFile[] = [];
+  const ordered: DraftFile[] = [];
   const remaining: DraftFile[] = [];
   for (const file of entry.files) {
     if (file.state === "ready" && file.attachment) {
       uploaded.push(file.attachment);
+      ordered.push(file);
     } else if (
       file.state === "staged" &&
       (!allowedStagedIds || allowedStagedIds.has(file.id))
     ) {
       staged.push(file);
+      ordered.push(file);
     } else {
       remaining.push(file);
     }
   }
   update(entry, remaining);
-  return { uploaded, staged };
+  return { uploaded, staged, ordered };
 }
 
 /** Drops ready files whose pending upload has (nearly) expired server-side. */
@@ -586,6 +625,7 @@ export function pruneExpiredAttachmentDrafts(
  */
 export async function discardAttachmentDrafts() {
   const currentUserId = draftUserId || chatStore.getSnapshot().userId || undefined;
+  pendingStagingCounts.clear();
   const deletes = [...entries.values()].flatMap((entry) =>
     dropEntry(entry, true),
   );

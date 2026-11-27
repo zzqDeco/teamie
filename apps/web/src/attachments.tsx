@@ -5,7 +5,8 @@ import type { Attachment, AttachmentLimits } from "@teamie/api-client";
 import { errorText } from "./errors";
 import { subscribeAttachmentPreview, subscribeAttachmentThumbnail } from "./attachment-previews";
 import {
-  addAttachmentDraftFiles, consumeAttachmentDraft, consumeAttachmentDraftForSend,
+  addAttachmentDraftFiles, beginOfflineAttachmentStaging, consumeAttachmentDraft,
+  consumeAttachmentDraftForSend, endOfflineAttachmentStaging, hasPendingOfflineStaging,
   hydrateStagedAttachmentDrafts, promoteStagedAttachmentDrafts, pruneExpiredAttachmentDrafts,
   queueAttachmentUpload, readAttachmentDraft, removeAttachmentDraftFile, subscribeAttachmentDrafts,
 } from "./attachment-drafts";
@@ -70,6 +71,9 @@ export function useAttachmentDraft(
   const files = useSyncExternalStore(subscribeAttachmentDrafts, () =>
     readAttachmentDraft(conversationId),
   );
+  const stagingPending = useSyncExternalStore(subscribeAttachmentDrafts, () =>
+    hasPendingOfflineStaging(conversationId),
+  );
   const [error, setError] = useState({ conversationId, message: "" });
   const offlineRef = useRef(offline);
   useEffect(() => {
@@ -133,64 +137,69 @@ export function useAttachmentDraft(
     const userId = chatStore.getSnapshot().userId;
     const generation = chatStore.generation;
     if (!userId) return;
+    beginOfflineAttachmentStaging(conversationId, userId);
     void (async () => {
-      const staged: DraftFile[] = [];
-      let lastErr = "";
-      const baseCreatedAt = Date.now();
-      for (let i = 0; i < accepted.length; i++) {
-        const item = accepted[i];
-        if (chatStore.generation !== generation) return;
-        try {
-          await stageOfflineAttachment({
-            id: item.id,
-            uploadKey: item.uploadKey,
-            userId,
-            conversationId,
-            clientMessageId: "",
-            name: item.file.name,
-            type: item.file.type || "application/octet-stream",
-            size: item.file.size,
-            lastModified: item.file.lastModified || baseCreatedAt,
-            blob: item.file,
-            createdAt: baseCreatedAt + i,
-          });
-          if (chatStore.generation !== generation) {
-            void deleteStagedAttachment(userId, item.id);
-            for (const prev of staged) void deleteStagedAttachment(userId, prev.id);
-            return;
+      try {
+        const staged: DraftFile[] = [];
+        let lastErr = "";
+        const baseCreatedAt = Date.now();
+        for (let i = 0; i < accepted.length; i++) {
+          const item = accepted[i];
+          if (chatStore.generation !== generation) return;
+          try {
+            await stageOfflineAttachment({
+              id: item.id,
+              uploadKey: item.uploadKey,
+              userId,
+              conversationId,
+              clientMessageId: "",
+              name: item.file.name,
+              type: item.file.type || "application/octet-stream",
+              size: item.file.size,
+              lastModified: item.file.lastModified || baseCreatedAt,
+              blob: item.file,
+              createdAt: baseCreatedAt + i,
+            });
+            if (chatStore.generation !== generation) {
+              void deleteStagedAttachment(userId, item.id);
+              for (const prev of staged) void deleteStagedAttachment(userId, prev.id);
+              return;
+            }
+            staged.push(item);
+          } catch (err) {
+            lastErr =
+              err instanceof OfflineAttachmentStoreError
+                ? err.message
+                : "暂存离线附件失败，请重试。";
+            break;
           }
-          staged.push(item);
-        } catch (err) {
-          lastErr =
-            err instanceof OfflineAttachmentStoreError
-              ? err.message
-              : "暂存离线附件失败，请重试。";
-          break;
         }
+        if (chatStore.generation !== generation) {
+          for (const prev of staged) void deleteStagedAttachment(userId, prev.id);
+          return;
+        }
+        const existingIds = new Set(
+          readAttachmentDraft(conversationId).map((f) => f.id),
+        );
+        const novel = staged.filter((item) => !existingIds.has(item.id));
+        const available = Math.max(
+          0,
+          limits.maxFilesPerMessage - existingIds.size,
+        );
+        const kept = novel.slice(0, available);
+        const overflow = novel.slice(available);
+        for (const extra of overflow) void deleteStagedAttachment(userId, extra.id);
+        if (kept.length) {
+          addAttachmentDraftFiles(conversationId, kept);
+          if (!offlineRef.current) promoteStagedAttachmentDrafts();
+        }
+        if (overflow.length && !lastErr) {
+          lastErr = `每条消息最多 ${limits.maxFilesPerMessage} 个文件`;
+        }
+        if (lastErr) showError(lastErr);
+      } finally {
+        endOfflineAttachmentStaging(conversationId, userId);
       }
-      if (chatStore.generation !== generation) {
-        for (const prev of staged) void deleteStagedAttachment(userId, prev.id);
-        return;
-      }
-      const existingIds = new Set(
-        readAttachmentDraft(conversationId).map((f) => f.id),
-      );
-      const novel = staged.filter((item) => !existingIds.has(item.id));
-      const available = Math.max(
-        0,
-        limits.maxFilesPerMessage - existingIds.size,
-      );
-      const kept = novel.slice(0, available);
-      const overflow = novel.slice(available);
-      for (const extra of overflow) void deleteStagedAttachment(userId, extra.id);
-      if (kept.length) {
-        addAttachmentDraftFiles(conversationId, kept);
-        if (!offlineRef.current) promoteStagedAttachmentDrafts();
-      }
-      if (overflow.length && !lastErr) {
-        lastErr = `每条消息最多 ${limits.maxFilesPerMessage} 个文件`;
-      }
-      if (lastErr) showError(lastErr);
     })();
   }
   const canSendStaged =
@@ -238,8 +247,8 @@ export function useAttachmentDraft(
       hydrateOverflow();
       return result;
     },
-    ready: files.length > 0 && !overFileLimit && files.every(isSendable),
-    blocked: overFileLimit || files.some((f) => !isSendable(f)),
+    ready: !stagingPending && files.length > 0 && !overFileLimit && files.every(isSendable),
+    blocked: stagingPending || overFileLimit || files.some((f) => !isSendable(f)),
   };
 }
 
@@ -306,7 +315,9 @@ export function AttachmentDraft({
                   role={file.state === "failed" ? "alert" : "status"}
                 >
                   {file.state === "staged"
-                    ? `${fileSize(file.file.size)} · 已暂存，联网后自动上传`
+                    ? file.error
+                      ? `${file.error}（已暂存，可重试）`
+                      : `${fileSize(file.file.size)} · 已暂存，联网后自动上传`
                     : file.state === "uploading"
                       ? file.progress === undefined
                         ? "正在上传…"
@@ -328,13 +339,14 @@ export function AttachmentDraft({
                   </span>
                 )}
               </span>
-              {file.state === "staged" && (
+              {file.state === "staged" && !file.error && (
                 <Clock size={ICON.sm} aria-hidden="true" />
               )}
               {file.state === "uploading" && (
                 <LoaderCircle size={ICON.sm} className="spin" />
               )}
-              {file.state === "failed" && (
+              {(file.state === "failed" ||
+                (file.state === "staged" && Boolean(file.error))) && (
                 <button
                   type="button"
                   aria-label={`重试上传 ${file.file.name}`}

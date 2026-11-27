@@ -19,7 +19,10 @@ import {
   markStagedMessageQueued,
   unbindStagedAttachmentsToDraft,
 } from "./pwa/offline-attachments";
-import { readAttachmentDraft } from "./attachment-drafts";
+import {
+  hasPendingOfflineStaging,
+  readAttachmentDraft,
+} from "./attachment-drafts";
 import { AttachmentDraft, AttachmentPicker } from "./attachments";
 import type { useAttachmentDraft } from "./attachments";
 import { isComposingKey, MentionInput, trimMentionDraft } from "./mentions";
@@ -157,7 +160,7 @@ export function MessageComposer({
 
   function submit(event?: FormEvent) {
     event?.preventDefault();
-    if (submittingStaged.current) return;
+    if (submittingStaged.current || hasPendingOfflineStaging(conversation.id)) return;
     const trimmed = trimMentionDraft(body, mentions);
     const text = trimmed.body;
     if (
@@ -266,14 +269,25 @@ export function MessageComposer({
           return;
         }
         const consumed = attachments.consumeForSend(boundIds);
-        const summaries = consumed.staged.map((f) => ({
-          id: f.id,
-          uploadKey: f.uploadKey,
-          filename: f.file.name,
-          mediaType: f.file.type || "application/octet-stream",
-          sizeBytes: f.file.size,
-        }));
-        if (!text && !consumed.uploaded.length && !summaries.length) {
+        const summaries = consumed.ordered.map((f) =>
+          f.state === "ready" && f.attachment
+            ? {
+                id: f.id,
+                uploadKey: f.uploadKey,
+                filename: f.attachment.filename,
+                mediaType: f.attachment.mediaType,
+                sizeBytes: f.attachment.sizeBytes,
+                attachment: f.attachment,
+              }
+            : {
+                id: f.id,
+                uploadKey: f.uploadKey,
+                filename: f.file.name,
+                mediaType: f.file.type || "application/octet-stream",
+                sizeBytes: f.file.size,
+              },
+        );
+        if (!text && !summaries.length) {
           void unbindStagedAttachmentsToDraft(
             user.id,
             conversation.id,
@@ -281,7 +295,7 @@ export function MessageComposer({
           ).catch(() => {});
           return;
         }
-        finalizeLocalSend(consumed.uploaded, summaries);
+        finalizeLocalSend([], summaries);
         chatStore.flush();
         markStagedMessageQueued(user.id, clientMessageId);
       })
