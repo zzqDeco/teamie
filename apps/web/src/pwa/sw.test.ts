@@ -29,7 +29,10 @@ class FakeCache {
   }
 }
 
-function createSwHarness(origin = "https://teamie.example") {
+function createSwHarness(
+  origin = "https://teamie.example",
+  stampedAssets: string[] = [],
+) {
   const listeners = new Map<string, Array<(event: unknown) => void>>();
   const cacheBuckets = new Map<string, FakeCache>();
   const skipWaiting = vi.fn();
@@ -71,7 +74,20 @@ function createSwHarness(origin = "https://teamie.example") {
     },
   };
 
-  const fn = new Function("self", "caches", "fetch", "Response", "URL", swSource);
+  const runtimeSource = stampedAssets.length
+    ? swSource.replace(
+        "/*__TEAMIE_SW_ASSETS__*/ []",
+        JSON.stringify(stampedAssets),
+      )
+    : swSource;
+  const fn = new Function(
+    "self",
+    "caches",
+    "fetch",
+    "Response",
+    "URL",
+    runtimeSource,
+  );
   fn(selfObj, caches, fetchMock, Response, URL);
 
   async function dispatchExtendable(type: string, extra: Record<string, unknown> = {}) {
@@ -226,6 +242,27 @@ describe("public/sw.js security and offline behavior", () => {
 
     sw.dispatchMessage({ type: "TEAMIE_SKIP_WAITING" });
     expect(sw.skipWaiting).toHaveBeenCalledOnce();
+  });
+
+  it("precaches stamped built JS/CSS assets during install so offline boot works right after activation", async () => {
+    const sw = createSwHarness("https://teamie.example", [
+      "/assets/index-new.js",
+      "/assets/index-new.css",
+    ]);
+    sw.cacheBuckets.set("teamie-shell-old", new FakeCache());
+
+    await sw.dispatchExtendable("install");
+    await sw.dispatchExtendable("activate");
+
+    expect(sw.cacheBuckets.has("teamie-shell-old")).toBe(false);
+    sw.fetchMock.mockRejectedValue(new TypeError("Offline"));
+    const js = await sw.dispatchFetch("https://teamie.example/assets/index-new.js");
+    const css = await sw.dispatchFetch("https://teamie.example/assets/index-new.css");
+    expect(js.intercepted).toBe(true);
+    expect(await js.response!.text()).toBe("precached:/assets/index-new.js");
+    expect(css.intercepted).toBe(true);
+    expect(await css.response!.text()).toBe("precached:/assets/index-new.css");
+    expect(sw.fetchMock).not.toHaveBeenCalled();
   });
 
   it("handles notificationclick by focusing same-origin app window, posting safe relative URL, or opening window", async () => {

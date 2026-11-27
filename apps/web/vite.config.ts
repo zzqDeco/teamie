@@ -21,18 +21,24 @@ function stampServiceWorkerVersion() {
         hash.update(readFileSync(indexPath));
       }
       const assetsDir = join(outDir, "assets");
+      const precacheAssets: string[] = [];
       if (existsSync(assetsDir)) {
         for (const name of readdirSync(assetsDir).sort()) {
           hash.update(name);
+          if (name.endsWith(".js") || name.endsWith(".css")) {
+            precacheAssets.push(`/assets/${name}`);
+          }
         }
       }
       const version = hash.digest("hex").slice(0, 12);
       const source = readFileSync(swPath, "utf8");
-      writeFileSync(
-        swPath,
-        source.replace("__TEAMIE_SW_VERSION__", version),
-        "utf8",
-      );
+      const stamped = source
+        .replace("__TEAMIE_SW_VERSION__", version)
+        .replace(
+          "/*__TEAMIE_SW_ASSETS__*/ []",
+          JSON.stringify(precacheAssets),
+        );
+      writeFileSync(swPath, stamped, "utf8");
     },
   };
 }

@@ -27,9 +27,11 @@ import { _resetPwaInstallForTest } from "./install";
 import { PwaInstallBanner, PwaInstallSettingsCard } from "./install-prompt";
 import {
   clearOfflineShellSnapshot,
+  clearPendingOfflineLogout,
   readOfflineBootstrap,
   readOfflineShellSnapshot,
   readOfflineWorkspaceMembers,
+  readPendingOfflineLogout,
   saveOfflineBootstrap,
   saveOfflineUser,
   saveOfflineWorkspaceMembers,
@@ -100,6 +102,7 @@ beforeEach(() => {
   localStorage.clear();
   chatStore.clear();
   clearOfflineShellSnapshot();
+  clearPendingOfflineLogout();
   resetNotificationSession(null);
   setNotificationServiceWorkerRegistration(null);
   toast.clear();
@@ -115,6 +118,7 @@ afterEach(async () => {
   host.remove();
   chatStore.clear();
   clearOfflineShellSnapshot();
+  clearPendingOfflineLogout();
   resetNotificationSession(null);
   setNotificationServiceWorkerRegistration(null);
   toast.clear();
@@ -223,6 +227,70 @@ describe("offline shell cache & warm offline boot", () => {
     expect(authSnapshot!.user).toBeNull();
     expect(authSnapshot!.offlineMode).toBe(false);
     expect(readOfflineShellSnapshot()).toBeNull();
+  });
+
+  it("persists offline logout intent, blocks silent cookie re-auth on reconnect, and completes server logout", async () => {
+    saveOfflineBootstrap(bootstrapFixture);
+    let authSnapshot: ReturnType<typeof useAuth> | null = null;
+    function Probe() {
+      authSnapshot = useAuth();
+      return <div>{authSnapshot.user?.displayName || "signed-out"}</div>;
+    }
+
+    const sessionSpy = vi
+      .spyOn(api, "session")
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce({ user: user1, csrfToken: "stale-cookie-csrf" });
+    const logoutSpy = vi.spyOn(api, "logout").mockResolvedValue(undefined);
+
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={qc}>
+          <MemoryRouter initialEntries={["/app"]}>
+            <AuthProvider>
+              <Probe />
+            </AuthProvider>
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(authSnapshot!.offlineMode).toBe(true);
+    expect(authSnapshot!.user?.id).toBe("u-1");
+
+    // Sign out while offline: clears local cache and records pending server revocation.
+    await act(async () => {
+      await authSnapshot!.logout();
+    });
+    expect(authSnapshot!.user).toBeNull();
+    expect(readOfflineShellSnapshot()).toBeNull();
+    expect(readPendingOfflineLogout()?.userId).toBe("u-1");
+    expect(logoutSpy).not.toHaveBeenCalled();
+
+    // Reload after connectivity returns: live HttpOnly cookie must NOT silently sign back in;
+    // AuthProvider must instead complete api.logout() and stay signed out.
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={qc}>
+          <MemoryRouter initialEntries={["/login"]}>
+            <AuthProvider>
+              <Probe />
+            </AuthProvider>
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(sessionSpy).toHaveBeenCalledTimes(2);
+    expect(logoutSpy).toHaveBeenCalledOnce();
+    expect(authSnapshot!.user).toBeNull();
+    expect(api.csrfToken).toBe("");
+    expect(readPendingOfflineLogout()).toBeNull();
   });
 
   it("renders offline warm-boot banner copy and retry action when offlineCached is true", async () => {
@@ -425,6 +493,54 @@ describe("SW notifications, SW update lifecycle, app badge, and PWA install UI",
     resetNotificationSession(null);
     await new Promise((r) => setTimeout(r, 0));
     expect(closeSw).toHaveBeenCalledOnce();
+  });
+
+  it("drops delayed SW showNotification fallback if session was reset or notifications were disabled", async () => {
+    let rejectSw!: (err: Error) => void;
+    const showNotification = vi.fn(
+      () => new Promise<void>((_res, rej) => { rejectSw = rej; }),
+    );
+    setNotificationServiceWorkerRegistration({
+      showNotification,
+    } as unknown as ServiceWorkerRegistration);
+
+    const windowNotify = vi.fn();
+    vi.stubGlobal(
+      "Notification",
+      Object.assign(windowNotify, { permission: "granted" }),
+    );
+
+    chatStore.begin("u-1");
+    chatStore.replaceConversations([{ ...conv1, readSeq: 0 }]);
+    const incoming: Message = {
+      id: "m-101",
+      conversationId: "c-1",
+      senderId: "u-2",
+      senderName: "周晴",
+      senderKind: "human",
+      clientMessageId: "srv-101",
+      seq: 7,
+      body: "@林夕 机密内容",
+      mentions: [{ userId: "u-1", start: 0, end: 3 }],
+      createdAt: "2026-11-20T09:11:00Z",
+    };
+    chatStore.merge([incoming]);
+    setActiveNotificationContext(null);
+    setNotificationPreferences({ enabled: true, showPreview: true }, "u-1");
+
+    notifySyncedMessages(
+      [{ conversationId: "c-1", messageId: "m-101" }],
+      chatStore.getSnapshot(),
+      "u-1",
+    );
+    expect(showNotification).toHaveBeenCalledOnce();
+
+    // User signs out BEFORE showNotification rejects: fallback must NOT fire!
+    resetNotificationSession(null);
+    chatStore.clear();
+    rejectSw(new Error("SW unavailable"));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(windowNotify).not.toHaveBeenCalled();
   });
 
   it("handles waiting SW updates via toast action and routes SW notification clicks", async () => {

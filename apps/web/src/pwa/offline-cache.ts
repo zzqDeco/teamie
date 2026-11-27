@@ -8,7 +8,13 @@ import type {
 
 const META_KEY = "teamie.offline.meta.v1";
 const SHELL_PREFIX = "teamie.offline.shell.v1.";
+const PENDING_LOGOUT_KEY = "teamie.offline.pendingLogout.v1";
 const shellKey = (userId: string) => `${SHELL_PREFIX}${userId}`;
+
+export type PendingOfflineLogout = {
+  userId: string;
+  requestedAt: string;
+};
 
 export type OfflineShellSnapshot = {
   version: 1;
@@ -253,6 +259,50 @@ export function clearOfflineShellSnapshot(userId?: string): void {
         storage.removeItem(key);
       }
     }
+  } catch {
+    // Ignore storage access errors.
+  }
+}
+
+export function markPendingOfflineLogout(userId: string): void {
+  const storage = getStorage();
+  if (!storage || !userId) return;
+  try {
+    const payload: PendingOfflineLogout = {
+      userId,
+      requestedAt: new Date().toISOString(),
+    };
+    storage.setItem(PENDING_LOGOUT_KEY, JSON.stringify(payload));
+  } catch {
+    // Ignore storage access errors.
+  }
+}
+
+export function readPendingOfflineLogout(): PendingOfflineLogout | null {
+  const storage = getStorage();
+  if (!storage) return null;
+  try {
+    const raw = storage.getItem(PENDING_LOGOUT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<PendingOfflineLogout>;
+    if (typeof parsed?.userId === "string" && parsed.userId) {
+      return {
+        userId: parsed.userId,
+        requestedAt:
+          typeof parsed.requestedAt === "string" ? parsed.requestedAt : "",
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearPendingOfflineLogout(): void {
+  const storage = getStorage();
+  if (!storage) return;
+  try {
+    storage.removeItem(PENDING_LOGOUT_KEY);
   } catch {
     // Ignore storage access errors.
   }

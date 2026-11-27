@@ -357,10 +357,10 @@ export function notifySyncedMessages(
     const targetUrl = `/app/w/${encodeURIComponent(conversation.workspaceId)}/c/${encodeURIComponent(conversation.id)}?message=${encodeURIComponent(message.id)}`;
 
     const tag = `teamie-message-${message.id}`;
-    const showWindowNotification = () => {
+    const showWindowNotification = (fallbackBody: string) => {
       try {
         const instance = new window.Notification(title, {
-          body,
+          body: fallbackBody,
           icon: "/icon-192.png",
           tag,
         });
@@ -392,6 +392,8 @@ export function notifySyncedMessages(
       activeSwRegistration &&
       typeof activeSwRegistration.showNotification === "function"
     ) {
+      const capturedEpoch = notificationEpoch;
+      const capturedGeneration = chatStore.generation;
       void activeSwRegistration
         .showNotification(title, {
           body,
@@ -401,10 +403,24 @@ export function notifySyncedMessages(
           data: { url: targetUrl },
         })
         .catch(() => {
-          showWindowNotification();
+          if (
+            capturedEpoch !== notificationEpoch ||
+            capturedGeneration !== chatStore.generation ||
+            notifiedUserId !== currentUserId ||
+            chatStore.getSnapshot().userId !== currentUserId
+          ) {
+            return;
+          }
+          const latestPrefs = getNotificationPreferences(currentUserId);
+          if (!latestPrefs.enabled || getNotificationPermission() !== "granted") {
+            return;
+          }
+          showWindowNotification(
+            latestPrefs.showPreview ? previewText : reasonText,
+          );
         });
     } else {
-      showWindowNotification();
+      showWindowNotification(body);
     }
   }
 }

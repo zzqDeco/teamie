@@ -7,15 +7,21 @@ const CACHE_PREFIX = "teamie-shell-";
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 
 const APP_SHELL_PATH = "/index.html";
-const PRECACHE_PATHS = [
-  APP_SHELL_PATH,
-  "/manifest.webmanifest",
-  "/favicon.svg",
-  "/icon-192.png",
-  "/icon-512.png",
-  "/icon-maskable-512.png",
-  "/apple-touch-icon.png",
-];
+// Built JS/CSS assets stamped at production build time so a newly installed
+// worker can cold-boot offline immediately after activating and pruning old caches.
+const PRECACHE_ASSETS = /*__TEAMIE_SW_ASSETS__*/ [];
+const PRECACHE_PATHS = Array.from(
+  new Set([
+    APP_SHELL_PATH,
+    "/manifest.webmanifest",
+    "/favicon.svg",
+    "/icon-192.png",
+    "/icon-512.png",
+    "/icon-maskable-512.png",
+    "/apple-touch-icon.png",
+    ...PRECACHE_ASSETS,
+  ]),
+);
 const STATIC_META_PATHS = new Set([
   "/manifest.webmanifest",
   "/favicon.svg",
@@ -132,11 +138,12 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.startsWith("/assets/")) {
     event.respondWith(
       caches.open(CACHE_NAME).then(async (cache) => {
-        const cached = await cache.match(request);
+        const cached =
+          (await cache.match(url.pathname)) || (await cache.match(request));
         if (cached) return cached;
         const response = await fetch(request);
         if (response.ok && response.type === "basic") {
-          event.waitUntil(cache.put(request, response.clone()));
+          event.waitUntil(cache.put(url.pathname, response.clone()));
         }
         return response;
       }),

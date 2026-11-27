@@ -19,7 +19,10 @@ import { isNetworkError } from "./errors";
 import { syncAppBadge } from "./pwa/badge";
 import {
   clearOfflineShellSnapshot,
+  clearPendingOfflineLogout,
+  markPendingOfflineLogout,
   readOfflineShellSnapshot,
+  readPendingOfflineLogout,
   saveOfflineUser,
 } from "./pwa/offline-cache";
 import { markSessionExpired } from "./session-notice";
@@ -48,6 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const generation = useRef(0);
   const subject = useRef<string | null>(null);
   const offlineReconciling = useRef(false);
+  const pendingLogoutInFlight = useRef(false);
   const client = useQueryClient();
   const navigate = useNavigate();
   const reset = useCallback(() => {
@@ -67,6 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const setSession = useCallback(
     (session: Session) => {
       clearAttachmentPreviews();
+      clearPendingOfflineLogout();
       generation.current += 1;
       subject.current = session.user.id;
       client.clear();
@@ -138,6 +143,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
   }, [expire, setSession]);
 
+  const completePendingLogout = useCallback(
+    async (session: Session, isCurrent: () => boolean) => {
+      if (pendingLogoutInFlight.current) return;
+      pendingLogoutInFlight.current = true;
+      api.csrfToken = session.csrfToken;
+      try {
+        await api.logout();
+        if (isCurrent()) {
+          clearPendingOfflineLogout();
+          reset();
+        }
+      } catch (err) {
+        if (!isCurrent()) return;
+        if (err instanceof ApiError && err.status === 401) {
+          clearPendingOfflineLogout();
+        }
+        // Keep the local session cleared even if revocation must be retried.
+        reset();
+      } finally {
+        pendingLogoutInFlight.current = false;
+      }
+    },
+    [reset],
+  );
+
   useEffect(() => {
     let active = true;
     const requestGeneration = generation.current;
@@ -148,14 +178,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setError("");
     api
       .session()
-      .then((session) => {
-        if (isCurrent()) setSession(session);
+      .then(async (session) => {
+        if (!isCurrent()) return;
+        const pendingLogout = readPendingOfflineLogout();
+        if (pendingLogout && pendingLogout.userId === session.user.id) {
+          await completePendingLogout(session, isCurrent);
+          return;
+        }
+        setSession(session);
       })
       .catch((e) => {
         if (!isCurrent()) return;
         if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+          clearPendingOfflineLogout();
           clearOfflineShellSnapshot();
           chatStore.clear();
+          syncAppBadge(0);
+          setOfflineMode(false);
+          return;
+        }
+        if (readPendingOfflineLogout()) {
+          clearOfflineShellSnapshot();
+          chatStore.clear();
+          syncAppBadge(0);
           setOfflineMode(false);
           return;
         }
@@ -195,7 +240,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (api.onSessionChanged === reconcileSession)
         api.onSessionChanged = undefined;
     };
-  }, [attempt, expire, reconcileSession, setSession]);
+  }, [attempt, completePendingLogout, expire, reconcileSession, setSession]);
+
+  useEffect(() => {
+    if (user || !readPendingOfflineLogout()) return;
+    let active = true;
+    const drainPendingLogout = () => {
+      const pending = readPendingOfflineLogout();
+      if (!pending || subject.current) return;
+      const requestGeneration = generation.current;
+      const isCurrent = () =>
+        active && requestGeneration === generation.current && !subject.current;
+      void api
+        .session()
+        .then(async (session) => {
+          if (!isCurrent()) return;
+          if (session.user.id === pending.userId) {
+            await completePendingLogout(session, isCurrent);
+          } else {
+            clearPendingOfflineLogout();
+          }
+        })
+        .catch((err) => {
+          if (err instanceof ApiError && err.status === 401) {
+            clearPendingOfflineLogout();
+          }
+        });
+    };
+    window.addEventListener("online", drainPendingLogout);
+    return () => {
+      active = false;
+      window.removeEventListener("online", drainPendingLogout);
+    };
+  }, [completePendingLogout, user]);
 
   useEffect(() => {
     if (!offlineMode) return;
@@ -207,14 +284,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     const request = captureSession();
     if (offlineMode && !api.csrfToken) {
+      if (request.subject) markPendingOfflineLogout(request.subject);
       reset();
       return;
     }
     // Delete pending uploads while this session can still authorize it.
     await discardAttachmentDrafts();
     if (!request.isCurrent()) return;
-    await api.logout();
+    try {
+      await api.logout();
+    } catch (err) {
+      if (
+        request.isCurrent() &&
+        request.subject &&
+        (isNetworkError(err) ||
+          (typeof navigator !== "undefined" && navigator.onLine === false))
+      ) {
+        markPendingOfflineLogout(request.subject);
+        reset();
+        return;
+      }
+      throw err;
+    }
     if (!request.isCurrent()) return;
+    clearPendingOfflineLogout();
     reset();
   };
   const changePassword = async (
