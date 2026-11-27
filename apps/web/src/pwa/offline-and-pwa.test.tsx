@@ -543,6 +543,67 @@ describe("SW notifications, SW update lifecycle, app badge, and PWA install UI",
     expect(windowNotify).not.toHaveBeenCalled();
   });
 
+  it("closes a stale SW notification if showNotification resolves after sign-out", async () => {
+    let resolveSw!: () => void;
+    const staleClose = vi.fn();
+    const showNotification = vi.fn(
+      () => new Promise<void>((res) => { resolveSw = res; }),
+    );
+    const getNotifications = vi.fn(async (filter?: { tag?: string }) =>
+      filter?.tag === "teamie-message-m-102"
+        ? [{ tag: "teamie-message-m-102", close: staleClose }]
+        : [],
+    );
+    setNotificationServiceWorkerRegistration({
+      showNotification,
+      getNotifications,
+    } as unknown as ServiceWorkerRegistration);
+
+    vi.stubGlobal(
+      "Notification",
+      Object.assign(vi.fn(), { permission: "granted" }),
+    );
+
+    chatStore.begin("u-1");
+    chatStore.replaceConversations([{ ...conv1, readSeq: 0 }]);
+    const incoming: Message = {
+      id: "m-102",
+      conversationId: "c-1",
+      senderId: "u-2",
+      senderName: "周晴",
+      senderKind: "human",
+      clientMessageId: "srv-102",
+      seq: 8,
+      body: "@林夕 仅限当前会话",
+      mentions: [{ userId: "u-1", start: 0, end: 3 }],
+      createdAt: "2026-11-20T09:12:00Z",
+    };
+    chatStore.merge([incoming]);
+    setActiveNotificationContext(null);
+    setNotificationPreferences({ enabled: true, showPreview: true }, "u-1");
+
+    notifySyncedMessages(
+      [{ conversationId: "c-1", messageId: "m-102" }],
+      chatStore.getSnapshot(),
+      "u-1",
+    );
+    expect(showNotification).toHaveBeenCalledOnce();
+
+    // User signs out while showNotification() is still pending (getNotifications returns empty first).
+    resetNotificationSession(null);
+    chatStore.clear();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(staleClose).not.toHaveBeenCalled();
+
+    // Now showNotification() succeeds: stale cleanup must close the tagged notification.
+    resolveSw();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(getNotifications).toHaveBeenCalledWith({
+      tag: "teamie-message-m-102",
+    });
+    expect(staleClose).toHaveBeenCalledOnce();
+  });
+
   it("handles waiting SW updates via toast action and routes SW notification clicks", async () => {
     const swListeners = new Map<string, Array<(e: Event) => void>>();
     const waitingPost = vi.fn();

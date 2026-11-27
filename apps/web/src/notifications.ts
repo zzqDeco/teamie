@@ -392,9 +392,17 @@ export function notifySyncedMessages(
       activeSwRegistration &&
       typeof activeSwRegistration.showNotification === "function"
     ) {
+      const reg = activeSwRegistration;
       const capturedEpoch = notificationEpoch;
       const capturedGeneration = chatStore.generation;
-      void activeSwRegistration
+      const capturedShowPreview = prefs.showPreview;
+      const isSessionValid = () =>
+        capturedEpoch === notificationEpoch &&
+        capturedGeneration === chatStore.generation &&
+        notifiedUserId === currentUserId &&
+        chatStore.getSnapshot().userId === currentUserId;
+
+      void reg
         .showNotification(title, {
           body,
           icon: "/icon-192.png",
@@ -402,15 +410,30 @@ export function notifySyncedMessages(
           tag,
           data: { url: targetUrl },
         })
-        .catch(() => {
-          if (
-            capturedEpoch !== notificationEpoch ||
-            capturedGeneration !== chatStore.generation ||
-            notifiedUserId !== currentUserId ||
-            chatStore.getSnapshot().userId !== currentUserId
-          ) {
-            return;
+        .then(() => {
+          const latestPrefs = getNotificationPreferences(currentUserId);
+          const stale =
+            !isSessionValid() ||
+            !latestPrefs.enabled ||
+            getNotificationPermission() !== "granted" ||
+            (capturedShowPreview && !latestPrefs.showPreview);
+          if (stale && typeof reg.getNotifications === "function") {
+            void reg
+              .getNotifications({ tag })
+              .then((list) => {
+                for (const n of list) {
+                  try {
+                    n.close();
+                  } catch {
+                    // Ignore close errors
+                  }
+                }
+              })
+              .catch(() => {});
           }
+        })
+        .catch(() => {
+          if (!isSessionValid()) return;
           const latestPrefs = getNotificationPreferences(currentUserId);
           if (!latestPrefs.enabled || getNotificationPermission() !== "granted") {
             return;
