@@ -131,6 +131,7 @@ export function useAttachmentDraft(
         uploadKey: crypto.randomUUID(),
         file,
         state: isOfflineNow ? "staged" : "uploading",
+        ...(isOfflineNow ? { stagedOffline: true } : {}),
       });
       count++;
     }

@@ -6,7 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, ApiError, defaultAttachmentLimits } from "@teamie/api-client";
 import type { Attachment, Conversation, User } from "@teamie/api-client";
 import {
+  addAttachmentDraftFiles,
   hydrateStagedAttachmentDrafts,
+  promoteStagedAttachmentDrafts,
   readAttachmentDraft,
 } from "../attachment-drafts";
 import {
@@ -17,6 +19,11 @@ import {
 import { retryTransientFailures, sendMessage } from "../chat";
 import { attachmentTransport } from "../chat/attachment-upload";
 import { MessageSendStatus } from "../chat/message-send-status";
+import {
+  composerDraftEpoch,
+  flushComposerDrafts,
+  readComposerDraft,
+} from "../composer-drafts";
 import { clearUserLocalUiState } from "../logout-cleanup";
 import { MessageComposer } from "../message-composer";
 import { chatStore } from "../store";
@@ -24,7 +31,6 @@ import type { LocalMessage } from "../store";
 import {
   bindStagedAttachmentsToMessage,
   createIndexedDbBackend,
-  createMemoryOfflineAttachmentBackend,
   listStagedDraftAttachments,
   listStagedMessageAttachments,
   MAX_STAGED_ATTACHMENTS_PER_USER,
@@ -34,6 +40,7 @@ import {
   stageOfflineAttachment,
 } from "./offline-attachments";
 import type { StagedAttachmentRecord } from "./offline-attachments";
+import { createMemoryOfflineAttachmentBackend } from "./offline-attachments-memory";
 
 const user: User = {
   id: "u-stage",
@@ -1033,5 +1040,360 @@ describe("composer offline staging, idempotent replay, edit/cancel, and cleanup"
       "c-stage",
       expect.objectContaining({ clientMessageId: "cmid-rollback" }),
     );
+  });
+
+  it("rejects binding records already owned by another message on both IDB and memory backends", async () => {
+    const now = Date.now();
+    const backends = [
+      createIndexedDbBackend(() => createFakeIndexedDbFactory()),
+      createMemoryOfflineAttachmentBackend(),
+    ];
+    for (const backend of backends) {
+      await backend.stage(
+        {
+          id: "shared-1",
+          uploadKey: "uk-shared-1",
+          userId: user.id,
+          conversationId: "c-stage",
+          clientMessageId: "",
+          name: "shared.png",
+          type: "image/png",
+          size: 4,
+          lastModified: now,
+          blob: new Blob(["data"], { type: "image/png" }),
+          createdAt: now,
+        },
+        now,
+      );
+      await backend.stage(
+        {
+          id: "shared-2",
+          uploadKey: "uk-shared-2",
+          userId: user.id,
+          conversationId: "c-stage",
+          clientMessageId: "",
+          name: "other.png",
+          type: "image/png",
+          size: 4,
+          lastModified: now,
+          blob: new Blob(["more"], { type: "image/png" }),
+          createdAt: now + 1,
+        },
+        now,
+      );
+      const first = await backend.bindToMessage(user.id, "c-stage", ["shared-1"], "msg-tab-1");
+      expect(first.map((r) => r.id)).toEqual(["shared-1"]);
+
+      // Second tab trying to bind shared-1 + shared-2 fails atomically without stealing shared-1 or partially binding shared-2.
+      const second = await backend.bindToMessage(
+        user.id,
+        "c-stage",
+        ["shared-1", "shared-2"],
+        "msg-tab-2",
+      );
+      expect(second).toEqual([]);
+      expect((await backend.listForMessage(user.id, "msg-tab-1", now)).map((r) => r.id)).toEqual([
+        "shared-1",
+      ]);
+      expect(await backend.listForMessage(user.id, "msg-tab-2", now)).toEqual([]);
+      expect((await backend.listDrafts(user.id, "c-stage", now)).map((r) => r.id)).toEqual([
+        "shared-2",
+      ]);
+    }
+  });
+
+  it("preserves text typed into the composer while staged attachments are awaiting bind", async () => {
+    const base = createMemoryOfflineAttachmentBackend();
+    let releaseBind!: () => void;
+    const bindGate = new Promise<void>((resolve) => {
+      releaseBind = resolve;
+    });
+    setOfflineAttachmentBackendForTest({
+      ...base,
+      async bindToMessage(uid, cid, ids, cmid) {
+        await bindGate;
+        return base.bindToMessage(uid, cid, ids, cmid);
+      },
+    });
+
+    let draftApi!: ReturnType<typeof useAttachmentDraft>;
+    const inputRef = createRef<HTMLTextAreaElement>();
+    function Harness() {
+      draftApi = useAttachmentDraft("c-stage", defaultAttachmentLimits, true);
+      return (
+        <MessageComposer
+          conversation={conv}
+          user={user}
+          name={conv.name}
+          draftEpoch={composerDraftEpoch("c-stage")}
+          replyToId=""
+          attachments={draftApi}
+          attachmentLimits={defaultAttachmentLimits}
+          uploadsEnabled
+          attachmentBlocked={draftApi.blocked}
+          mentionMembers={[]}
+          mentionsEnabled={false}
+          inputRef={inputRef}
+          editing={null}
+          located={false}
+          latestLoaded
+          latest={1}
+          canEdit={false}
+          offline
+          messages={[]}
+          sendTyping={vi.fn()}
+          onClearReply={vi.fn()}
+          onStartEdit={vi.fn()}
+          onSent={vi.fn()}
+        />
+      );
+    }
+
+    await act(async () => {
+      root.render(<Harness />);
+    });
+    await flush();
+
+    await act(async () => {
+      draftApi.add([new File(["pic"], "pic.png", { type: "image/png" })]);
+    });
+    await flush();
+
+    const textarea = host.querySelector<HTMLTextAreaElement>("textarea")!;
+    const setTextareaValue = (val: string) => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        "value",
+      )!.set!;
+      setter.call(textarea, val);
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+
+    await act(async () => {
+      setTextareaValue("原始提交文本");
+    });
+    const sendBtn = host.querySelector<HTMLButtonElement>(".send-button")!;
+    await act(async () => {
+      sendBtn.click();
+    });
+    // Send button is disabled while binding is in flight.
+    expect(sendBtn.disabled).toBe(true);
+
+    // User starts typing the next message before IDB bind completes.
+    await act(async () => {
+      setTextareaValue("下一条草稿文本");
+    });
+
+    releaseBind();
+    await flush();
+    await flush();
+
+    const queued = chatStore.getSnapshot().messages["c-stage"] || [];
+    expect(queued).toHaveLength(1);
+    expect(queued[0].body).toBe("原始提交文本");
+    expect(textarea.value).toBe("下一条草稿文本");
+    flushComposerDrafts();
+    expect(readComposerDraft("c-stage").body).toBe("下一条草稿文本");
+  });
+
+  it("rejects queued message Edit when capacity would be exceeded or a staged blob is missing, keeping queue intact", async () => {
+    const now = Date.now();
+    await stageOfflineAttachment({
+      id: "st-cap-1",
+      uploadKey: "uk-cap-1",
+      userId: user.id,
+      conversationId: "c-stage",
+      clientMessageId: "cmid-cap",
+      name: "extra.txt",
+      type: "text/plain",
+      size: 4,
+      lastModified: now,
+      blob: new Blob(["data"], { type: "text/plain" }),
+      createdAt: now,
+    });
+    // Fill composer draft with 8 already-ready files (exact backend max).
+    addAttachmentDraftFiles(
+      "c-stage",
+      Array.from({ length: 8 }, (_, idx) => ({
+        id: `existing-${idx}`,
+        uploadKey: `uk-ex-${idx}`,
+        file: new File(["x"], `ex-${idx}.txt`, { type: "text/plain" }),
+        state: "ready" as const,
+        attachment: {
+          id: `att-ex-${idx}`,
+          filename: `ex-${idx}.txt`,
+          mediaType: "text/plain",
+          sizeBytes: 1,
+          sha256: `h-${idx}`,
+        },
+        uploadedAt: now,
+      })),
+    );
+    const queuedCap: LocalMessage = {
+      id: "local:cmid-cap",
+      clientMessageId: "cmid-cap",
+      conversationId: "c-stage",
+      senderId: user.id,
+      senderName: user.displayName,
+      senderKind: "human",
+      seq: Number.MAX_SAFE_INTEGER,
+      body: "超限恢复测试",
+      createdAt: "2026-11-27T09:40:00Z",
+      status: "queued",
+      permanent: false,
+      stagedAttachments: [
+        {
+          id: "st-cap-1",
+          uploadKey: "uk-cap-1",
+          filename: "extra.txt",
+          mediaType: "text/plain",
+          sizeBytes: 4,
+        },
+      ],
+    };
+    chatStore.merge([queuedCap]);
+    const sendSpy = vi.spyOn(api, "send");
+
+    const inputRef = createRef<HTMLTextAreaElement>();
+    await act(async () => {
+      root.render(
+        <>
+          <textarea ref={inputRef} />
+          <MessageSendStatus
+            message={queuedCap}
+            conversationId="c-stage"
+            inputRef={inputRef}
+          />
+        </>,
+      );
+    });
+    const editBtn = Array.from(host.querySelectorAll<HTMLButtonElement>("button")).find(
+      (b) => b.textContent?.includes("编辑"),
+    )!;
+    await act(async () => {
+      editBtn.click();
+    });
+    await flush();
+
+    // Queue remains intact, draft stays at 8 (NOT 9), IDB blob stays bound, and send is NOT triggered.
+    expect(readAttachmentDraft("c-stage")).toHaveLength(8);
+    expect(chatStore.getSnapshot().messages["c-stage"]).toHaveLength(1);
+    expect((await listStagedMessageAttachments(user.id, "cmid-cap")).map((r) => r.id)).toEqual([
+      "st-cap-1",
+    ]);
+    expect(sendSpy).not.toHaveBeenCalled();
+
+    // Missing/expired staged attachment rejects Edit atomically without unbinding surviving blobs or discarding queue.
+    chatStore.clear();
+    chatStore.begin(user.id);
+    chatStore.replaceConversations([conv]);
+    await stageOfflineAttachment({
+      id: "st-alive",
+      uploadKey: "uk-alive",
+      userId: user.id,
+      conversationId: "c-stage",
+      clientMessageId: "cmid-missing",
+      name: "alive.txt",
+      type: "text/plain",
+      size: 4,
+      lastModified: now,
+      blob: new Blob(["ok!!"], { type: "text/plain" }),
+      createdAt: now,
+    });
+    const queuedMissing: LocalMessage = {
+      ...queuedCap,
+      id: "local:cmid-missing",
+      clientMessageId: "cmid-missing",
+      stagedAttachments: [
+        {
+          id: "st-alive",
+          uploadKey: "uk-alive",
+          filename: "alive.txt",
+          mediaType: "text/plain",
+          sizeBytes: 4,
+        },
+        {
+          id: "st-gone",
+          uploadKey: "uk-gone",
+          filename: "gone.txt",
+          mediaType: "text/plain",
+          sizeBytes: 4,
+        },
+      ],
+    };
+    chatStore.merge([queuedMissing]);
+    await act(async () => {
+      root.render(
+        <>
+          <textarea ref={inputRef} />
+          <MessageSendStatus
+            message={queuedMissing}
+            conversationId="c-stage"
+            inputRef={inputRef}
+          />
+        </>,
+      );
+    });
+    const editBtn2 = Array.from(host.querySelectorAll<HTMLButtonElement>("button")).find(
+      (b) => b.textContent?.includes("编辑"),
+    )!;
+    await act(async () => {
+      editBtn2.click();
+    });
+    await flush();
+
+    expect(chatStore.getSnapshot().messages["c-stage"]).toHaveLength(1);
+    expect(readAttachmentDraft("c-stage")).toHaveLength(0);
+    // Surviving blob stayed bound to cmid-missing (no partial unbind).
+    expect((await listStagedMessageAttachments(user.id, "cmid-missing")).map((r) => r.id)).toEqual([
+      "st-alive",
+    ]);
+  });
+
+  it("restores interrupted staged draft uploads back to staged on network outage and resumes automatically on reconnect", async () => {
+    const now = Date.now();
+    await stageOfflineAttachment({
+      id: "st-flaky",
+      uploadKey: "uk-flaky",
+      userId: user.id,
+      conversationId: "c-stage",
+      clientMessageId: "",
+      name: "flaky.pdf",
+      type: "application/pdf",
+      size: 6,
+      lastModified: now,
+      blob: new Blob(["%PDF-1"], { type: "application/pdf" }),
+      createdAt: now,
+    });
+    const att: Attachment = {
+      id: "att-flaky",
+      filename: "flaky.pdf",
+      mediaType: "application/pdf",
+      sizeBytes: 6,
+      sha256: "h-flaky",
+    };
+    const uploadSpy = vi
+      .spyOn(attachmentTransport, "upload")
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce({ attachment: att });
+
+    // First reconnect attempt drops mid-upload with a network error.
+    await hydrateStagedAttachmentDrafts("c-stage", true);
+    await flush();
+
+    expect(uploadSpy).toHaveBeenCalledTimes(1);
+    // Returns to "staged" (NOT "failed") so it remains sendable offline and eligible for next reconnect.
+    expect(readAttachmentDraft("c-stage")[0].state).toBe("staged");
+    expect((await listStagedDraftAttachments(user.id, "c-stage")).map((r) => r.id)).toEqual([
+      "st-flaky",
+    ]);
+
+    // Next reconnect promotes it automatically and finishes upload!
+    promoteStagedAttachmentDrafts();
+    await flush();
+    expect(uploadSpy).toHaveBeenCalledTimes(2);
+    expect(readAttachmentDraft("c-stage")[0].state).toBe("ready");
+    expect(readAttachmentDraft("c-stage")[0].attachment?.id).toBe("att-flaky");
+    expect(await listStagedDraftAttachments(user.id, "c-stage")).toHaveLength(0);
   });
 });

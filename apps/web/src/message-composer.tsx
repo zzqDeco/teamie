@@ -104,6 +104,8 @@ export function MessageComposer({
 }) {
   const lastTyping = useRef(0);
   const submittingStaged = useRef(false);
+  const [bindingStaged, setBindingStaged] = useState(false);
+  const draftEditSeqRef = useRef(0);
   // Text lives here so keystrokes re-render only the composer, not the
   // conversation timeline. The parent remounts this component per
   // conversation and draft epoch, so the initial read is always current.
@@ -113,6 +115,10 @@ export function MessageComposer({
     subscribeDrafts,
     useCallback(() => composerTextRevision(conversation.id), [conversation.id]),
   );
+  const latestTextRevisionRef = useRef(textRevision);
+  useEffect(() => {
+    latestTextRevisionRef.current = textRevision;
+  }, [textRevision]);
   const [draft, setDraft] = useState(() => {
     const stored = readComposerDraft(conversation.id);
     return { body: stored.body, mentions: stored.mentions, revision: textRevision };
@@ -126,6 +132,7 @@ export function MessageComposer({
   const overLimit = trimmedLength > MESSAGE_MAX_CHARS;
 
   function changeDraft(value: string, nextMentions: Mention[]) {
+    draftEditSeqRef.current += 1;
     setDraft({ body: value, mentions: nextMentions, revision: textRevision });
     writeComposerText(conversation.id, draftEpoch, value, nextMentions);
   }
@@ -161,6 +168,9 @@ export function MessageComposer({
     const hasStaged = attachments.files.some((f) => f.state === "staged");
     const clientMessageId = crypto.randomUUID();
     const generation = chatStore.generation;
+    const submittedEditSeq = draftEditSeqRef.current;
+    const submittedTextRevision = textRevision;
+    const submittedReplyToId = replyToId;
 
     const finalizeLocalSend = (
       uploadedFiles: ReturnType<typeof attachments.consume>,
@@ -179,18 +189,37 @@ export function MessageComposer({
         senderKind: user.kind,
         seq: Number.MAX_SAFE_INTEGER,
         createdAt: new Date().toISOString(),
-        ...(replyToId ? { replyToId } : {}),
+        ...(submittedReplyToId ? { replyToId: submittedReplyToId } : {}),
       };
       void sendMessage(message, generation, { offline });
-      writeComposerDraft(conversation.id, {
-        body: "",
-        mentions: [],
-        replyToId: "",
-      });
-      setDraft({ body: "", mentions: [], revision: textRevision });
-      lastTyping.current = 0;
-      sendTyping(conversation.id, false);
-      onSent();
+      const editedDuringBind =
+        draftEditSeqRef.current !== submittedEditSeq ||
+        latestTextRevisionRef.current !== submittedTextRevision;
+      if (!editedDuringBind) {
+        writeComposerDraft(conversation.id, {
+          body: "",
+          mentions: [],
+          replyToId: "",
+        });
+        setDraft({
+          body: "",
+          mentions: [],
+          revision: latestTextRevisionRef.current,
+        });
+        lastTyping.current = 0;
+        sendTyping(conversation.id, false);
+        onSent();
+      } else if (submittedReplyToId) {
+        flushComposerDrafts();
+        const currentStored = readComposerDraft(conversation.id);
+        if (currentStored.replyToId === submittedReplyToId) {
+          writeComposerDraft(conversation.id, {
+            ...currentStored,
+            replyToId: "",
+          });
+          onSent();
+        }
+      }
       inputRef.current?.focus();
     };
 
@@ -202,6 +231,7 @@ export function MessageComposer({
 
     const stagedDrafts = attachments.files.filter((f) => f.state === "staged");
     submittingStaged.current = true;
+    setBindingStaged(true);
     beginStagedMessageBind(clientMessageId);
     void bindStagedAttachmentsToMessage(
       user.id,
@@ -261,6 +291,7 @@ export function MessageComposer({
       .finally(() => {
         endStagedMessageBind(clientMessageId);
         submittingStaged.current = false;
+        setBindingStaged(false);
       });
   }
 
@@ -411,7 +442,10 @@ export function MessageComposer({
             className="send-button"
             type="submit"
             disabled={
-              (!body.trim() && !attachments.ready) || attachmentBlocked || overLimit
+              bindingStaged ||
+              (!body.trim() && !attachments.ready) ||
+              attachmentBlocked ||
+              overLimit
             }
             aria-describedby={overLimit ? `composer-count-${conversation.id}` : undefined}
             aria-label="发送消息"

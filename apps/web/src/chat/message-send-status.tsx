@@ -8,6 +8,7 @@ import {
   releaseQueuedMessageForEdit,
   reserveQueuedMessageForEdit,
 } from "../pwa/offline-attachment-send";
+import { OfflineAttachmentStoreError } from "../pwa/offline-attachments";
 import { chatStore } from "../store";
 import type { LocalMessage } from "../store";
 import { restoreComposerDraft } from "../composer-drafts";
@@ -53,6 +54,7 @@ export function MessageSendStatus({
                 (typeof navigator !== "undefined" && navigator.onLine === false);
               void (async () => {
                 let restored = false;
+                let shouldRetryReplay = false;
                 try {
                   if (hasStaged || current.attachments?.length) {
                     await restoreMessageAttachmentsToDraft(
@@ -70,9 +72,16 @@ export function MessageSendStatus({
                   chatStore.discardLocal(conversationId, message.clientMessageId);
                   restored = true;
                   inputRef.current?.focus();
-                } catch {
+                } catch (err) {
+                  shouldRetryReplay =
+                    !(err instanceof OfflineAttachmentStoreError) ||
+                    err.code === "storage_unavailable";
                   if (chatStore.generation === generation) {
-                    toast.error("恢复附件失败，请稍后重试。");
+                    toast.error(
+                      err instanceof OfflineAttachmentStoreError
+                        ? err.message
+                        : "恢复附件失败，请稍后重试。",
+                    );
                   }
                 } finally {
                   releaseQueuedMessageForEdit(message.clientMessageId);
@@ -80,6 +89,7 @@ export function MessageSendStatus({
                   setRestoring(false);
                   if (
                     !restored &&
+                    shouldRetryReplay &&
                     chatStore.generation === generation &&
                     !api.sessionUnverified &&
                     (typeof navigator === "undefined" || navigator.onLine !== false)

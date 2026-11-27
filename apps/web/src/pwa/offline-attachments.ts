@@ -36,7 +36,8 @@ export type StagedAttachmentRecord = {
 export type OfflineAttachmentStoreErrorCode =
   | "storage_unavailable"
   | "capacity_exceeded"
-  | "quota_exceeded";
+  | "quota_exceeded"
+  | "missing_attachment";
 
 export class OfflineAttachmentStoreError extends Error {
   code: OfflineAttachmentStoreErrorCode;
@@ -69,6 +70,8 @@ export interface OfflineAttachmentBackend {
     userId: string,
     conversationId: string,
     clientMessageId: string,
+    requiredIds?: string[],
+    now?: number,
   ): Promise<StagedAttachmentRecord[]>;
   reconcileOrphanedBindings(
     userId: string,
@@ -86,13 +89,22 @@ export interface OfflineAttachmentBackend {
   clearExceptUser(userId: string): Promise<void>;
 }
 
-function isExpired(record: StagedAttachmentRecord, now: number): boolean {
+export function isStagedAttachmentExpired(
+  record: StagedAttachmentRecord,
+  now: number,
+): boolean {
   return !Number.isFinite(record.createdAt) || now - record.createdAt >= STAGED_ATTACHMENT_TTL_MS;
 }
 
-function sortByCreated(a: StagedAttachmentRecord, b: StagedAttachmentRecord) {
+export function sortStagedAttachments(
+  a: StagedAttachmentRecord,
+  b: StagedAttachmentRecord,
+) {
   return a.createdAt - b.createdAt || a.id.localeCompare(b.id);
 }
+
+const isExpired = isStagedAttachmentExpired;
+const sortByCreated = sortStagedAttachments;
 
 function mapDomError(err: unknown): OfflineAttachmentStoreError {
   if (err instanceof OfflineAttachmentStoreError) return err;
@@ -273,18 +285,23 @@ export function createIndexedDbBackend(
     async bindToMessage(userId, conversationId, ids, clientMessageId) {
       if (!userId || !ids.length || !clientMessageId) return [];
       return withStore("readwrite", async (store) => {
-        const bound: StagedAttachmentRecord[] = [];
+        const candidates: StagedAttachmentRecord[] = [];
         for (const id of ids) {
-          const row = (await requestPromise(
-            store.get(id),
-          )) as StagedAttachmentRecord | undefined;
+          const row = (await requestPromise(store.get(id))) as
+            | StagedAttachmentRecord
+            | undefined;
           if (
             !row ||
             row.userId !== userId ||
-            row.conversationId !== conversationId
+            row.conversationId !== conversationId ||
+            (row.clientMessageId !== "" && row.clientMessageId !== clientMessageId)
           ) {
-            continue;
+            return [];
           }
+          candidates.push(row);
+        }
+        const bound: StagedAttachmentRecord[] = [];
+        for (const row of candidates) {
           const updated: StagedAttachmentRecord = { ...row, clientMessageId };
           store.put(updated);
           bound.push(updated);
@@ -293,20 +310,29 @@ export function createIndexedDbBackend(
       });
     },
 
-    async unbindToDraft(userId, conversationId, clientMessageId) {
+    async unbindToDraft(userId, conversationId, clientMessageId, requiredIds, now) {
       if (!userId || !clientMessageId) return [];
       return withStore("readwrite", async (store) => {
-        const idx = store.index("byUserMessage");
         const rows = (await requestPromise(
-          idx.getAll([userId, clientMessageId]),
+          store.index("byUserMessage").getAll([userId, clientMessageId]),
         )) as StagedAttachmentRecord[];
+        const liveRows = rows.filter(
+          (row) =>
+            row.conversationId === conversationId &&
+            (now === undefined || !isExpired(row, now)),
+        );
+        if (requiredIds?.length) {
+          const liveIds = new Set(liveRows.map((row) => row.id));
+          if (requiredIds.some((id) => !liveIds.has(id))) {
+            throw new OfflineAttachmentStoreError(
+              "missing_attachment",
+              "部分离线暂存附件已过期或丢失，无法恢复编辑，请取消发送后重新添加。",
+            );
+          }
+        }
         const restored: StagedAttachmentRecord[] = [];
-        for (const row of rows) {
-          if (row.conversationId !== conversationId) continue;
-          const updated: StagedAttachmentRecord = {
-            ...row,
-            clientMessageId: "",
-          };
+        for (const row of liveRows) {
+          const updated: StagedAttachmentRecord = { ...row, clientMessageId: "" };
           store.put(updated);
           restored.push(updated);
         }
@@ -447,132 +473,6 @@ export function createIndexedDbBackend(
   };
 }
 
-/** In-memory test backend mirroring IndexedDB semantics without browser IDB. */
-export function createMemoryOfflineAttachmentBackend(): OfflineAttachmentBackend {
-  const rows = new Map<string, StagedAttachmentRecord>();
-  return {
-    async stage(record, now = Date.now()) {
-      let active = 0;
-      for (const item of [...rows.values()]) {
-        if (item.userId !== record.userId) continue;
-        if (isExpired(item, now)) rows.delete(item.id);
-        else if (item.id !== record.id) active += 1;
-      }
-      if (active >= MAX_STAGED_ATTACHMENTS_PER_USER) {
-        throw new OfflineAttachmentStoreError(
-          "capacity_exceeded",
-          `离线暂存附件已达上限（${MAX_STAGED_ATTACHMENTS_PER_USER} 个），请先移除部分待发送文件。`,
-        );
-      }
-      rows.set(record.id, { ...record });
-    },
-    async listDrafts(userId, conversationId, now = Date.now()) {
-      const result: StagedAttachmentRecord[] = [];
-      for (const item of [...rows.values()]) {
-        if (item.userId !== userId || item.conversationId !== conversationId) continue;
-        if (isExpired(item, now)) rows.delete(item.id);
-        else if (item.clientMessageId === "") result.push({ ...item });
-      }
-      return result.sort(sortByCreated);
-    },
-    async listForMessage(userId, clientMessageId, now = Date.now()) {
-      const result: StagedAttachmentRecord[] = [];
-      for (const item of [...rows.values()]) {
-        if (item.userId !== userId || item.clientMessageId !== clientMessageId) continue;
-        if (isExpired(item, now)) rows.delete(item.id);
-        else result.push({ ...item });
-      }
-      return result.sort(sortByCreated);
-    },
-    async bindToMessage(userId, conversationId, ids, clientMessageId) {
-      const bound: StagedAttachmentRecord[] = [];
-      for (const id of ids) {
-        const item = rows.get(id);
-        if (!item || item.userId !== userId || item.conversationId !== conversationId) continue;
-        const next = { ...item, clientMessageId };
-        rows.set(id, next);
-        bound.push({ ...next });
-      }
-      return bound;
-    },
-    async unbindToDraft(userId, conversationId, clientMessageId) {
-      const restored: StagedAttachmentRecord[] = [];
-      for (const item of [...rows.values()]) {
-        if (
-          item.userId !== userId ||
-          item.conversationId !== conversationId ||
-          item.clientMessageId !== clientMessageId
-        )
-          continue;
-        const next = { ...item, clientMessageId: "" };
-        rows.set(item.id, next);
-        restored.push({ ...next });
-      }
-      return restored.sort(sortByCreated);
-    },
-    async reconcileOrphanedBindings(
-      userId,
-      activeClientMessageIds,
-      now = Date.now(),
-    ) {
-      const recovered: StagedAttachmentRecord[] = [];
-      for (const item of [...rows.values()]) {
-        if (item.userId !== userId) continue;
-        if (isExpired(item, now)) {
-          rows.delete(item.id);
-        } else if (
-          item.clientMessageId !== "" &&
-          !activeClientMessageIds.has(item.clientMessageId)
-        ) {
-          const next = { ...item, clientMessageId: "" };
-          rows.set(item.id, next);
-          recovered.push({ ...next });
-        }
-      }
-      return recovered.sort(sortByCreated);
-    },
-    async deleteById(userId, id) {
-      const item = rows.get(id);
-      if (item && item.userId === userId) rows.delete(id);
-    },
-    async deleteForMessage(userId, clientMessageId) {
-      for (const item of [...rows.values()]) {
-        if (item.userId === userId && item.clientMessageId === clientMessageId) {
-          rows.delete(item.id);
-        }
-      }
-    },
-    async deleteForConversation(userId, conversationId) {
-      for (const item of [...rows.values()]) {
-        if (item.userId === userId && item.conversationId === conversationId) {
-          rows.delete(item.id);
-        }
-      }
-    },
-    async pruneToConversations(userId, allowedConversationIds) {
-      for (const item of [...rows.values()]) {
-        if (item.userId === userId && !allowedConversationIds.has(item.conversationId)) {
-          rows.delete(item.id);
-        }
-      }
-    },
-    async clearForUser(userId) {
-      if (!userId) {
-        rows.clear();
-        return;
-      }
-      for (const item of [...rows.values()]) {
-        if (item.userId === userId) rows.delete(item.id);
-      }
-    },
-    async clearExceptUser(userId) {
-      for (const item of [...rows.values()]) {
-        if (item.userId !== userId) rows.delete(item.id);
-      }
-    },
-  };
-}
-
 let activeBackend: OfflineAttachmentBackend = createIndexedDbBackend();
 const inFlightBindMessageIds = new Set<string>();
 
@@ -634,8 +534,16 @@ export function unbindStagedAttachmentsToDraft(
   userId: string,
   conversationId: string,
   clientMessageId: string,
+  requiredIds?: string[],
+  now?: number,
 ): Promise<StagedAttachmentRecord[]> {
-  return activeBackend.unbindToDraft(userId, conversationId, clientMessageId);
+  return activeBackend.unbindToDraft(
+    userId,
+    conversationId,
+    clientMessageId,
+    requiredIds,
+    now,
+  );
 }
 
 export function reconcileOrphanedStagedAttachments(

@@ -1,13 +1,15 @@
-import { api } from "@teamie/api-client";
+import { api, ApiError, defaultAttachmentLimits } from "@teamie/api-client";
 import type { Attachment } from "@teamie/api-client";
-import { errorText } from "./errors";
+import { errorText, isNetworkError } from "./errors";
 import { chatStore } from "./store";
 import type { LocalMessage } from "./store";
 import { attachmentTransport } from "./chat/attachment-upload";
 import {
+  bindStagedAttachmentsToMessage,
   clearStagedAttachmentsForUser,
   deleteStagedAttachment,
   listStagedDraftAttachments,
+  OfflineAttachmentStoreError,
   pruneStagedAttachmentsToConversations,
   reconcileOrphanedStagedAttachments,
   stagedRecordToFile,
@@ -22,6 +24,8 @@ export type DraftFile = {
   uploadKey: string;
   file: File;
   state: "staged" | "uploading" | "ready" | "failed";
+  /** True while a durable copy of this draft's blob resides in IndexedDB. */
+  stagedOffline?: boolean;
   attachment?: Attachment;
   error?: string;
   /** Epoch ms when the server accepted the upload (pending files expire). */
@@ -197,6 +201,7 @@ async function upload(entry: Entry, id: string) {
           ? {
               ...f,
               state: "ready",
+              stagedOffline: false,
               attachment: result.attachment,
               uploadedAt: Date.now(),
               progress: undefined,
@@ -208,13 +213,22 @@ async function upload(entry: Entry, id: string) {
       void deleteStagedAttachment(entry.userId, id);
     }
   } catch (e) {
-    if (live(entry) && !controller.signal.aborted)
+    if (live(entry) && !controller.signal.aborted) {
+      const stagedInterrupted =
+        file.stagedOffline &&
+        ((e instanceof ApiError && e.code === "offline_unverified") ||
+          isNetworkError(e));
       update(
         entry,
         entry.files.map((f) =>
-          f.id === id ? { ...f, state: "failed", error: errorText(e), progress: undefined } : f,
+          f.id === id
+            ? stagedInterrupted
+              ? { ...f, state: "staged", error: undefined, progress: undefined }
+              : { ...f, state: "failed", error: errorText(e), progress: undefined }
+            : f,
         ),
       );
+    }
   } finally {
     entry.controllers.delete(id);
     if (live(entry) && entry.files.length === 0 && entry.controllers.size === 0)
@@ -306,6 +320,7 @@ export async function hydrateStagedAttachmentDrafts(
       uploadKey: rec.uploadKey,
       file: stagedRecordToFile(rec),
       state: autoUpload ? "uploading" : "staged",
+      stagedOffline: true,
     });
   }
   if (!additions.length) return;
@@ -341,21 +356,82 @@ export async function restoreMessageAttachmentsToDraft(
   conversationId: string,
   message: LocalMessage,
   offline: boolean,
+  maxFilesPerMessage = defaultAttachmentLimits.maxFilesPerMessage,
 ): Promise<void> {
   const userId = chatStore.getSnapshot().userId;
   const generation = chatStore.generation;
   if (!userId) return;
+
+  const checkCapacity = () => {
+    const existingIds = new Set(
+      readAttachmentDraft(conversationId).map((f) => f.id),
+    );
+    const incomingIds = new Set<string>();
+    for (const att of message.attachments || []) {
+      if (!existingIds.has(att.id)) incomingIds.add(att.id);
+    }
+    for (const staged of message.stagedAttachments || []) {
+      if (!existingIds.has(staged.id)) incomingIds.add(staged.id);
+    }
+    if (existingIds.size + incomingIds.size > maxFilesPerMessage) {
+      throw new OfflineAttachmentStoreError(
+        "capacity_exceeded",
+        `输入框已有 ${existingIds.size} 个待发送文件，恢复后将超过每条消息最多 ${maxFilesPerMessage} 个文件的上限。`,
+      );
+    }
+  };
+
+  checkCapacity();
+
+  const requiredStagedIds = (message.stagedAttachments || [])
+    .filter((staged) => !staged.attachment)
+    .map((staged) => staged.id);
+
   const restoredRecords = message.stagedAttachments?.length
     ? await unbindStagedAttachmentsToDraft(
         userId,
         conversationId,
         message.clientMessageId,
+        requiredStagedIds,
+        Date.now(),
       )
     : [];
   if (chatStore.generation !== generation || chatStore.getSnapshot().userId !== userId) {
     return;
   }
+
+  try {
+    checkCapacity();
+  } catch (err) {
+    if (restoredRecords.length) {
+      void bindStagedAttachmentsToMessage(
+        userId,
+        conversationId,
+        restoredRecords.map((r) => r.id),
+        message.clientMessageId,
+      ).catch(() => {});
+    }
+    throw err;
+  }
+
   const byId = new Map(restoredRecords.map((r) => [r.id, r]));
+  for (const reqId of requiredStagedIds) {
+    if (!byId.has(reqId)) {
+      if (restoredRecords.length) {
+        void bindStagedAttachmentsToMessage(
+          userId,
+          conversationId,
+          restoredRecords.map((r) => r.id),
+          message.clientMessageId,
+        ).catch(() => {});
+      }
+      throw new OfflineAttachmentStoreError(
+        "missing_attachment",
+        "部分离线暂存附件已过期或丢失，无法恢复编辑，请取消发送后重新添加。",
+      );
+    }
+  }
+
   const entry = entryFor(conversationId);
   const existingIds = new Set(entry.files.map((f) => f.id));
   const additions: DraftFile[] = [];
@@ -391,14 +467,14 @@ export async function restoreMessageAttachmentsToDraft(
       });
       continue;
     }
-    const rec = byId.get(staged.id);
-    if (!rec) continue;
+    const rec = byId.get(staged.id)!;
     existingIds.add(rec.id);
     additions.push({
       id: rec.id,
       uploadKey: rec.uploadKey,
       file: stagedRecordToFile(rec),
       state: offline ? "staged" : "uploading",
+      stagedOffline: true,
     });
   }
 
