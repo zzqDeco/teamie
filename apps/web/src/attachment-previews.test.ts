@@ -114,3 +114,49 @@ it("does not cache a load that was abandoned before it finished", async () => {
   expect(retainedPreviewCount()).toBe(0);
   expect(URL.createObjectURL).not.toHaveBeenCalled();
 });
+it("runs up to two thumbnail previews concurrently without blocking full-content previews", async () => {
+  let activeThumbs = 0;
+  let peakThumbs = 0;
+  const finishThumbs: (() => void)[] = [];
+  vi.spyOn(api, "attachmentThumbnail").mockImplementation(() => {
+    activeThumbs++;
+    peakThumbs = Math.max(peakThumbs, activeThumbs);
+    return new Promise<Blob>((resolve) =>
+      finishThumbs.push(() => {
+        activeThumbs--;
+        resolve(blob);
+      }),
+    );
+  });
+  let contentStarted = false;
+  const contentReq = vi.spyOn(api, "attachmentContent").mockImplementation(async () => {
+    contentStarted = true;
+    return blob;
+  });
+
+  const thumbListeners = Array.from({ length: 4 }, () => vi.fn());
+  thumbListeners.forEach((listener, i) =>
+    releases.push(subscribeAttachmentThumbnail("c1", `thumb-${i}`, "image/png", listener)),
+  );
+  // Two thumbnails start immediately; remaining two stay queued.
+  expect(peakThumbs).toBe(2);
+  expect(finishThumbs).toHaveLength(2);
+
+  // A full-content preview (e.g. lightbox upgrade) starts immediately despite saturated thumbnail queue.
+  const contentListener = vi.fn();
+  releases.push(subscribeAttachmentPreview("c1", "full-1", contentListener));
+  await flush();
+  expect(contentStarted).toBe(true);
+  expect(contentReq).toHaveBeenCalledTimes(1);
+  expect(contentListener).toHaveBeenLastCalledWith({ url: expect.stringContaining("blob:") });
+
+  // Drain remaining thumbnails.
+  for (let i = 0; i < 4; i++) {
+    finishThumbs.shift()!();
+    await flush();
+  }
+  expect(peakThumbs).toBe(2);
+  thumbListeners.forEach((listener) =>
+    expect(listener).toHaveBeenLastCalledWith({ url: expect.stringContaining("blob:") }),
+  );
+});

@@ -38,6 +38,7 @@ import {
 } from "./shell-sidebar";
 import { RouteBoundary } from "./route-boundary";
 import { RemoveMemberModal, ShellMembersPane } from "./shell-members-pane";
+import { ConversationGalleryPane } from "./chat/conversation-gallery-pane";
 import { logoutAndCleanup } from "./logout-cleanup";
 import {
   clearPersistedAppPaneWidth,
@@ -81,7 +82,7 @@ export function Shell() {
   const announcements = usePlatformAnnouncements(user?.id);
   const [dialog, setDialog] = useState<DialogKind | null>(null),
     [sidebar, setSidebar] = useState(false),
-    [details, setDetails] = useState(false),
+    [rightPane, setRightPane] = useState<null | "members" | "gallery">(null),
     [managingWorkspaceApps, setManagingWorkspaceApps] = useState(false),
     [managingGroup, setManagingGroup] = useState(false),
     [groupExit, setGroupExit] = useState<"leave" | "dissolve" | null>(null),
@@ -216,11 +217,11 @@ export function Shell() {
       location.pathname === "/app/search" ||
       new URLSearchParams(location.search).has("message")
     )
-      setDetails(false);
+      setRightPane(null);
   }, [closeAllOpenAppPanes, location.pathname, location.search, overlayMembers]);
   const closeSidebar = useCallback(() => setSidebar(false), []);
   const closeDetails = useCallback(() => {
-    setDetails(false);
+    setRightPane(null);
     if (conversation) setAppPaneOpen(conversation.id, false);
     else closeAllOpenAppPanes();
     setDirectError("");
@@ -266,9 +267,11 @@ export function Shell() {
     setViewKey({ conversation: viewConversationId, target: initialMessageId });
   const appsAvailable = !isManagement && !routes.isNotFound && !!workspace && conversation?.type === "group";
   const appsOpen = appsAvailable && appTabs.isPaneOpen(conversation?.id);
-  const appsVisible = appsOpen && !details && appsAvailable;
-  const membersVisible = details && !isManagement && !routes.isNotFound && !!workspace && !!conversation;
-  const rightPaneVisible = appsVisible || membersVisible;
+  const appsVisible = appsOpen && !rightPane && appsAvailable;
+  const paneAvailable = !isManagement && !routes.isNotFound && !!workspace && !!conversation;
+  const membersVisible = rightPane === "members" && paneAvailable;
+  const galleryVisible = rightPane === "gallery" && paneAvailable;
+  const rightPaneVisible = appsVisible || membersVisible || galleryVisible;
   useEffect(() => {
     if (user) {
       client.setQueryData(["capability", "im.marketplace.enabled", user.id], marketplaceEnabled);
@@ -312,7 +315,7 @@ export function Shell() {
       chatStore.addConversation(result.conversation);
       await chat.refresh();
       if (generation !== chatStore.generation) return;
-      if (overlayMembers) setDetails(false);
+      if (overlayMembers) setRightPane(null);
       navigate(route(result.conversation));
     } catch (e) {
       if (generation === chatStore.generation) setDirectError(errorText(e));
@@ -346,7 +349,7 @@ export function Shell() {
     nav.pruneConversation(removedId, fallbackConv ? route(fallbackConv) : "");
     setGroupExit(null);
     setManagingGroup(false);
-    setDetails(false);
+    setRightPane(null);
     appTabs.purgeConversation(removedId);
     chatStore.removeConversation(removedId);
     navigate(fallbackTarget, { replace: true });
@@ -512,19 +515,26 @@ export function Shell() {
             onClearMessageTarget={() => navigate(location.pathname, { replace: true })}
             members={members}
             onMembers={() => {
-              const nextDetails = !details;
+              const next = rightPane === "members" ? null : "members";
               setSidebar(false);
               setDirectError("");
-              if (nextDetails) appTabs.setPaneOpen(conversation.id, false);
-              setDetails(nextDetails);
+              if (next) appTabs.setPaneOpen(conversation.id, false);
+              setRightPane(next);
             }}
-            membersOpen={details}
+            membersOpen={rightPane === "members"}
+            galleryOpen={rightPane === "gallery"}
+            onGallery={() => {
+              const next = rightPane === "gallery" ? null : "gallery";
+              setSidebar(false);
+              if (next) appTabs.setPaneOpen(conversation.id, false);
+              setRightPane(next);
+            }}
             appsOpen={appsVisible}
             onApps={
               conversation.type === "group"
                 ? () => {
                     setSidebar(false);
-                    setDetails(false);
+                    setRightPane(null);
                     appTabs.setPaneOpen(conversation.id, !appsVisible);
                   }
                 : undefined
@@ -567,6 +577,14 @@ export function Shell() {
           onLeaveGroup={() => setGroupExit("leave")}
           onDissolveGroup={() => setGroupExit("dissolve")}
           onInvite={() => setDialog("invite")}
+        />
+      )}
+      {galleryVisible && workspace && conversation && (
+        <ConversationGalleryPane
+          key={`${user!.id}:${conversation.id}`}
+          paneRef={membersRef} overlayMembers={overlayMembers} mobile={mobile} sidebar={sidebar}
+          conversation={conversation} onClose={closeDetails}
+          onLocateMessage={(id) => navigate(`${route(conversation)}?message=${encodeURIComponent(id)}`)}
         />
       )}
       <ConversationAppsPane

@@ -28,7 +28,8 @@ import {
 } from "./attachment-drafts";
 import type { DraftFile } from "./attachment-drafts";
 import { ICON } from "./icons";
-import { Button, Modal } from "./ui";
+import { AttachmentLightbox } from "./chat/attachment-lightbox";
+import type { LightboxImageItem } from "./chat/attachment-lightbox";
 import "./styles/attachments.css";
 
 const SAFE_IMAGE_MEDIA_TYPES = new Set([
@@ -429,9 +430,16 @@ export function MessageAttachments({
   const handleFailed = useCallback((id: string) => {
     setThumbFallbacks((prev) => (prev[id] ? prev : { ...prev, [id]: true }));
   }, []);
-  const activePreviewUrl = previewFile
-    ? thumbUrls[previewFile.id] || previewUrls[previewFile.id]
-    : undefined;
+  const lightboxItems: LightboxImageItem[] = attachments
+    .filter((attachment) => isPreviewableImage(attachment.mediaType))
+    .map((attachment) => ({
+      attachment,
+      conversationId,
+      thumbnailUrl: thumbUrls[attachment.id] || previewUrls[attachment.id],
+    }));
+  const lightboxIndex = previewFile
+    ? lightboxItems.findIndex((item) => item.attachment.id === previewFile.id)
+    : -1;
   return (
     <>
       <ul ref={listRef} className="message-attachments" aria-label="消息附件">
@@ -505,37 +513,18 @@ export function MessageAttachments({
           );
         })}
       </ul>
-      {previewFile && activePreviewUrl && (
-        <Modal
-          title={previewFile.filename}
-          subtitle={fileSize(previewFile.sizeBytes)}
+      {lightboxIndex >= 0 && (
+        <AttachmentLightbox
+          items={lightboxItems}
+          index={lightboxIndex}
+          onIndexChange={(nextIndex) => {
+            const next = lightboxItems[nextIndex];
+            if (next) setPreviewFile(next.attachment);
+          }}
           onClose={() => setPreviewFile(null)}
-          className="attachment-lightbox-modal"
-        >
-          <div className="attachment-lightbox-body">
-            <img
-              className="attachment-lightbox-image"
-              src={activePreviewUrl}
-              alt={previewFile.filename}
-            />
-          </div>
-          <div className="modal-actions">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => setPreviewFile(null)}
-            >
-              关闭
-            </Button>
-            <Button
-              type="button"
-              busy={busy === previewFile.id}
-              onClick={() => void download(previewFile)}
-            >
-              下载原图
-            </Button>
-          </div>
-        </Modal>
+          onDownload={(att) => void download(att)}
+          downloadingId={busy}
+        />
       )}
       {error && (
         <p role="alert" className="attachment-error">
