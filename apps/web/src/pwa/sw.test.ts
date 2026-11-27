@@ -189,11 +189,11 @@ describe("public/sw.js security and offline behavior", () => {
     expect(sw.fetchMock).not.toHaveBeenCalled();
   });
 
-  it("handles navigation network-first, caches only canonical /index.html without query secrets, and falls back offline", async () => {
+  it("handles navigation network-first, preserves version-matched precached /index.html without query secrets, and falls back offline", async () => {
     const sw = createSwHarness();
     await sw.dispatchExtendable("install");
 
-    const htmlRes = new Response("<html>fresh</html>", {
+    const htmlRes = new Response("<html>release-b</html>", {
       status: 200,
       headers: { "content-type": "text/html; charset=utf-8" },
     });
@@ -205,7 +205,7 @@ describe("public/sw.js security and offline behavior", () => {
       { mode: "navigate" },
     );
     expect(onlineNav.intercepted).toBe(true);
-    expect(await onlineNav.response!.text()).toBe("<html>fresh</html>");
+    expect(await onlineNav.response!.text()).toBe("<html>release-b</html>");
 
     const active = sw.cacheBuckets.get("teamie-shell-__TEAMIE_SW_VERSION__")!;
     for (const key of active.store.keys()) {
@@ -213,13 +213,14 @@ describe("public/sw.js security and offline behavior", () => {
       expect(key).not.toContain("inviteCode");
     }
 
-    // Offline navigation falls back to cached /index.html
+    // Offline navigation falls back to this worker's version-matched precached /index.html
+    // (NOT overwritten by release B's HTML whose hashed bundles belong to a newer worker).
     sw.fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     const offlineNav = await sw.dispatchFetch("https://teamie.example/app/w/w1/c/c1", {
       mode: "navigate",
     });
     expect(offlineNav.intercepted).toBe(true);
-    expect(await offlineNav.response!.text()).toBe("<html>fresh</html>");
+    expect(await offlineNav.response!.text()).toBe("precached:/index.html");
   });
 
   it("serves hashed /assets/* cache-first and skips waiting on TEAMIE_SKIP_WAITING", async () => {

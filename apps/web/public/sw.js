@@ -99,8 +99,9 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
   if (isBypassPath(url.pathname)) return;
 
-  // Navigation requests: Network-First, caching only the canonical /index.html
-  // app shell key so URL query parameters (e.g. invite codes) are never stored.
+  // Navigation requests: Network-First. Never overwrite this worker's
+  // version-matched precached /index.html so offline fallback stays paired
+  // with this worker's PRECACHE_ASSETS (only seed if cache was evicted).
   if (request.mode === "navigate") {
     event.respondWith(
       fetch(request)
@@ -113,9 +114,12 @@ self.addEventListener("fetch", (event) => {
           ) {
             const copy = response.clone();
             event.waitUntil(
-              caches
-                .open(CACHE_NAME)
-                .then((cache) => cache.put(APP_SHELL_PATH, copy)),
+              caches.open(CACHE_NAME).then(async (cache) => {
+                const existing = await cache.match(APP_SHELL_PATH);
+                if (!existing) {
+                  await cache.put(APP_SHELL_PATH, copy);
+                }
+              }),
             );
           }
           return response;

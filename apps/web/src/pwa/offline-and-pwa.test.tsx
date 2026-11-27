@@ -107,6 +107,7 @@ beforeEach(() => {
   setNotificationServiceWorkerRegistration(null);
   toast.clear();
   api.csrfToken = "";
+  api.sessionUnverified = false;
   _resetPwaInstallForTest();
   host = document.createElement("div");
   document.body.append(host);
@@ -123,7 +124,9 @@ afterEach(async () => {
   setNotificationServiceWorkerRegistration(null);
   toast.clear();
   api.csrfToken = "";
+  api.sessionUnverified = false;
   localStorage.clear();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -291,6 +294,64 @@ describe("offline shell cache & warm offline boot", () => {
     expect(authSnapshot!.user).toBeNull();
     expect(api.csrfToken).toBe("");
     expect(readPendingOfflineLogout()).toBeNull();
+  });
+
+  it("globally blocks protected reads while session is unverified and automatically retries offline session verification", async () => {
+    vi.useFakeTimers();
+    saveOfflineBootstrap(bootstrapFixture);
+    let authSnapshot: ReturnType<typeof useAuth> | null = null;
+    function Probe() {
+      authSnapshot = useAuth();
+      return <div>{authSnapshot.user?.displayName || "none"}</div>;
+    }
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const sessionSpy = vi
+      .spyOn(api, "session")
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockRejectedValueOnce(new TypeError("Still unreachable"))
+      .mockResolvedValueOnce({ user: user1, csrfToken: "verified-csrf" });
+
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={qc}>
+          <MemoryRouter initialEntries={["/app"]}>
+            <AuthProvider>
+              <Probe />
+            </AuthProvider>
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      await Promise.resolve();
+    });
+
+    expect(authSnapshot!.offlineMode).toBe(true);
+    expect(api.sessionUnverified).toBe(true);
+
+    // Protected reads (e.g. listSavedMessages) must be blocked before fetch()
+    // so another tab's cookie for account B can never leak into account A's offline view.
+    await expect(api.listSavedMessages()).rejects.toMatchObject({
+      status: 503,
+      code: "offline_unverified",
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    // First automatic retry after 2s fails transiently; second retry after 4s succeeds.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    expect(sessionSpy).toHaveBeenCalledTimes(2);
+    expect(authSnapshot!.offlineMode).toBe(true);
+    expect(api.sessionUnverified).toBe(true);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4_000);
+    });
+    expect(sessionSpy).toHaveBeenCalledTimes(3);
+    expect(authSnapshot!.offlineMode).toBe(false);
+    expect(api.sessionUnverified).toBe(false);
+    expect(api.csrfToken).toBe("verified-csrf");
   });
 
   it("renders offline warm-boot banner copy and retry action when offlineCached is true", async () => {

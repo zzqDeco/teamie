@@ -54,6 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const pendingLogoutInFlight = useRef(false);
   const client = useQueryClient();
   const navigate = useNavigate();
+  useEffect(() => () => { api.sessionUnverified = false; }, []);
   const reset = useCallback(() => {
     clearAttachmentPreviews();
     clearOfflineShellSnapshot();
@@ -61,6 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     generation.current += 1;
     subject.current = null;
     api.csrfToken = "";
+    api.sessionUnverified = false;
     chatStore.clear();
     client.clear();
     setUser(null);
@@ -77,6 +79,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       client.clear();
       chatStore.begin(session.user.id);
       api.csrfToken = session.csrfToken;
+      api.sessionUnverified = false;
       saveOfflineUser(session.user);
       setUser(session.user);
       setOfflineMode(false);
@@ -112,36 +115,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     reset();
   }, [reset]);
 
-  const verifyOfflineSession = useCallback(() => {
-    if (offlineReconciling.current) return;
-    const requestGeneration = generation.current;
-    const expectedUserId = subject.current;
-    if (!expectedUserId) return;
-    offlineReconciling.current = true;
-    void api
-      .session()
-      .then((session) => {
-        if (requestGeneration !== generation.current) return;
-        if (session.user.id === expectedUserId) {
-          api.csrfToken = session.csrfToken;
-          saveOfflineUser(session.user);
-          setUser(session.user);
-          setOfflineMode(false);
-          setError("");
-        } else {
-          setSession(session);
-        }
-      })
-      .catch((err) => {
-        if (requestGeneration !== generation.current) return;
-        if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
-          expire();
-        }
-      })
-      .finally(() => {
-        offlineReconciling.current = false;
-      });
-  }, [expire, setSession]);
+  const verifyOfflineSession = useCallback(
+    (onTransientFailure?: () => void) => {
+      if (offlineReconciling.current) return;
+      const requestGeneration = generation.current;
+      const expectedUserId = subject.current;
+      if (!expectedUserId) return;
+      offlineReconciling.current = true;
+      void api
+        .session()
+        .then((session) => {
+          if (requestGeneration !== generation.current) return;
+          if (session.user.id === expectedUserId) {
+            api.csrfToken = session.csrfToken;
+            api.sessionUnverified = false;
+            saveOfflineUser(session.user);
+            setUser(session.user);
+            setOfflineMode(false);
+            setError("");
+          } else {
+            setSession(session);
+          }
+        })
+        .catch((err) => {
+          if (requestGeneration !== generation.current) return;
+          if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+            expire();
+            return;
+          }
+          onTransientFailure?.();
+        })
+        .finally(() => {
+          offlineReconciling.current = false;
+        });
+    },
+    [expire, setSession],
+  );
 
   const completePendingLogout = useCallback(
     async (session: Session, isCurrent: () => boolean) => {
@@ -213,6 +222,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             generation.current += 1;
             subject.current = cached.user.id;
             api.csrfToken = "";
+            api.sessionUnverified = true;
             chatStore.begin(cached.user.id);
             if (
               Object.keys(chatStore.getSnapshot().conversations).length === 0 &&
@@ -276,9 +286,72 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!offlineMode) return;
-    const onOnline = () => verifyOfflineSession();
-    window.addEventListener("online", onOnline);
-    return () => window.removeEventListener("online", onOnline);
+    let cancelled = false;
+    let retryAttempt = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const clearTimer = () => {
+      if (retryTimer !== undefined) {
+        clearTimeout(retryTimer);
+        retryTimer = undefined;
+      }
+    };
+
+    const scheduleRetry = () => {
+      clearTimer();
+      if (
+        cancelled ||
+        (typeof navigator !== "undefined" && navigator.onLine === false)
+      ) {
+        return;
+      }
+      const delayMs = Math.min(30_000, 2_000 * 2 ** Math.min(retryAttempt, 4));
+      retryAttempt += 1;
+      retryTimer = setTimeout(() => {
+        retryTimer = undefined;
+        if (
+          cancelled ||
+          (typeof navigator !== "undefined" && navigator.onLine === false)
+        ) {
+          return;
+        }
+        verifyOfflineSession(scheduleRetry);
+      }, delayMs);
+    };
+
+    const triggerNow = () => {
+      if (
+        cancelled ||
+        (typeof navigator !== "undefined" && navigator.onLine === false)
+      ) {
+        return;
+      }
+      retryAttempt = 0;
+      clearTimer();
+      verifyOfflineSession(scheduleRetry);
+    };
+
+    const onOffline = () => clearTimer();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") triggerNow();
+    };
+
+    // If navigator already reports online (e.g. initial transient server error
+    // during warm offline boot), schedule bounded automatic verification retries.
+    if (typeof navigator === "undefined" || navigator.onLine !== false) {
+      scheduleRetry();
+    }
+
+    window.addEventListener("online", triggerNow);
+    window.addEventListener("offline", onOffline);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      cancelled = true;
+      clearTimer();
+      window.removeEventListener("online", triggerNow);
+      window.removeEventListener("offline", onOffline);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [offlineMode, verifyOfflineSession]);
 
   const logout = async () => {

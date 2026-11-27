@@ -31,6 +31,7 @@ export * from "./normalizers";
 
 export class TeamieClient {
   csrfToken = "";
+  sessionUnverified = false;
   onUnauthorized?: () => void;
   onForbidden?: () => void;
   onSessionChanged?: () => void;
