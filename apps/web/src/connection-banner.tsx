@@ -22,11 +22,13 @@ const MESSAGES: Record<Exclude<Shown, null>, string> = {
 // every state change.
 export function ConnectionBanner({
   connection,
+  offlineCached = false,
   syncError,
   showSyncError,
   onRetry,
 }: {
   connection: Connection;
+  offlineCached?: boolean;
   syncError: string;
   showSyncError: boolean;
   onRetry: () => void;
@@ -59,7 +61,14 @@ export function ConnectionBanner({
   }, [shown]);
   const syncVisible = showSyncError && !!syncError && connection === "connected";
   const kind = shown || (syncVisible ? "sync" : null);
-  const message = shown ? MESSAGES[shown] : syncVisible ? syncError : "";
+  const message =
+    shown === "offline" && offlineCached
+      ? "离线模式（已展示本地缓存，联网后自动同步）"
+      : shown
+        ? MESSAGES[shown]
+        : syncVisible
+          ? syncError
+          : "";
   return (
     <>
       {/* Portaled so the region stays announced while <main> is inert. */}
@@ -81,9 +90,9 @@ export function ConnectionBanner({
             />
           ) : null}
           <span aria-hidden="true">{message}</span>
-          {kind !== "offline" && kind !== "restored" && (
+          {(kind !== "offline" || offlineCached) && kind !== "restored" && (
             <button type="button" onClick={onRetry}>
-              立即重试
+              {kind === "offline" ? "重试连接" : "立即重试"}
             </button>
           )}
         </div>

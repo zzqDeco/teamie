@@ -54,10 +54,12 @@ import {
   UnavailableConversationView,
   useDocumentTitle,
   useMediaQuery,
+  useOfflineWorkspaceMembers,
   useShellKeyboardShortcuts,
   useShellPersistedNav,
   useSyncShellPersistedNav,
 } from "./shell/shell-hooks";
+import { PwaInstallBanner } from "./pwa/install-prompt";
 import { MAX_WIDTH_QUERY } from "./breakpoints";
 export { parseInviteCode, clearPersistedShellNav };
 
@@ -141,14 +143,14 @@ export function Shell() {
   const membersQuery = useQuery({
     queryKey: ["members", user!.id, workspace?.id],
     queryFn: () => api.members(workspace!.id),
-    enabled: !!workspace,
+    enabled: !!workspace && !chat.offlineMode,
     refetchInterval: 60_000,
   });
   const discoveryAllowed = !!chat.data?.capabilities["agents.discover"];
   const workspaceAgentsQuery = useQuery({
     queryKey: ["workspaceAgents", user!.id, workspace?.id],
     queryFn: () => api.workspaceAgents(workspace!.id),
-    enabled: !!workspace && discoveryAllowed,
+    enabled: !!workspace && discoveryAllowed && !chat.offlineMode,
     refetchInterval: 30_000,
   });
   const workspaceAgents = discoveryAllowed ? workspaceAgentsQuery.data?.agents || [] : [];
@@ -156,7 +158,7 @@ export function Shell() {
   const workspacePresenceQuery = useQuery({
     queryKey: ["workspacePresence", user!.id, workspace?.id],
     queryFn: () => api.workspacePresence(workspace!.id),
-    enabled: !!workspace && presenceAllowed,
+    enabled: !!workspace && presenceAllowed && !chat.offlineMode,
     refetchInterval: 60_000,
   });
   useEffect(() => {
@@ -175,8 +177,13 @@ export function Shell() {
     workspacePresenceQuery.data,
     membersQuery.data,
   ]);
+  const cachedOrLiveMembers = useOfflineWorkspaceMembers(
+    user!.id,
+    workspace?.id,
+    membersQuery.data?.members,
+  );
   const members: Participant[] = enrichParticipants(
-    membersQuery.data?.members || [],
+    cachedOrLiveMembers,
     workspaceAgents,
   );
   const visibleMembers: Participant[] =
@@ -473,10 +480,11 @@ export function Shell() {
         inert={(mobile && sidebar) || (overlayMembers && rightPaneVisible)}
       >
         <ConnectionBanner
-          connection={chat.connection} syncError={chat.syncError}
+          connection={chat.connection} offlineCached={chat.offlineMode} syncError={chat.syncError}
           showSyncError={!conversation || isManagement || isAttentionPage || isSearchPage || routes.isNotFound}
           onRetry={chat.reconnect ?? chat.sync}
         />
+        <PwaInstallBanner mobile={mobile} />
         {error && !removing && <Notice kind="error">{error}</Notice>}
         {redirectTarget ? (
           <Navigate to={redirectTarget} replace />

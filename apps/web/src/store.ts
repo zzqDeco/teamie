@@ -284,18 +284,11 @@ export class ChatStore {
             Object.entries(data.messages).map(([id, messages]) => [
               id,
               messages.map((m) =>
-                m.status
-                  ? {
-                      ...m,
-                      status: "failed" as const,
-                      error:
-                        m.status === "failed" &&
-                        typeof m.permanent === "boolean" &&
-                        m.error
-                          ? m.error
-                          : "上次发送未确认，请重试",
-                    }
-                  : m,
+                m.status === "sending" || m.status === "queued"
+                  ? { ...m, status: "queued" as const, error: undefined, permanent: false }
+                  : m.status === "failed"
+                    ? { ...m, status: "failed" as const, error: typeof m.permanent === "boolean" && m.error ? m.error : "上次发送未确认，请重试" }
+                    : m,
               ),
             ]),
           ),
@@ -356,7 +349,7 @@ export class ChatStore {
     const current = this.snapshot.messages[conversationId];
     if (!current) return;
     const kept = current.filter(
-      (m) => !(m.status === "failed" && m.clientMessageId === clientMessageId),
+      (m) => !((m.status === "failed" || m.status === "queued") && m.clientMessageId === clientMessageId),
     );
     if (kept.length === current.length) return;
     this.commit({

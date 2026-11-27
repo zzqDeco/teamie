@@ -310,7 +310,8 @@ describe("durable message reconciliation", () => {
     expect(persistedMessages[199].body).toBe("edited-250");
     expect(persistedMessages[200]).toMatchObject({
       clientMessageId: "req-pending",
-      status: "failed",
+      status: "queued",
+      permanent: false,
     });
   });
 });

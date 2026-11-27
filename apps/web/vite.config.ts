@@ -1,8 +1,44 @@
+import { createHash } from "node:crypto";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath, URL } from "node:url";
+
+function stampServiceWorkerVersion() {
+  let outDir = "dist";
+  return {
+    name: "teamie-stamp-sw-version",
+    configResolved(config: { build: { outDir: string } }) {
+      outDir = config.build.outDir;
+    },
+    closeBundle() {
+      const swPath = join(outDir, "sw.js");
+      if (!existsSync(swPath)) return;
+      const hash = createHash("sha256");
+      const indexPath = join(outDir, "index.html");
+      if (existsSync(indexPath)) {
+        hash.update(readFileSync(indexPath));
+      }
+      const assetsDir = join(outDir, "assets");
+      if (existsSync(assetsDir)) {
+        for (const name of readdirSync(assetsDir).sort()) {
+          hash.update(name);
+        }
+      }
+      const version = hash.digest("hex").slice(0, 12);
+      const source = readFileSync(swPath, "utf8");
+      writeFileSync(
+        swPath,
+        source.replace("__TEAMIE_SW_VERSION__", version),
+        "utf8",
+      );
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), stampServiceWorkerVersion()],
   build: {
     chunkSizeWarningLimit: 500,
     rolldownOptions: {

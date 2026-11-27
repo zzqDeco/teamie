@@ -30,6 +30,28 @@ const pendingMessages = new Map<string, AbortController>();
 let notificationEpoch = 0;
 let registeredConversationId: string | null | undefined = undefined;
 let registeredNavigate: ((to: string) => void) | null = null;
+let activeSwRegistration: ServiceWorkerRegistration | null = null;
+
+export function setNotificationServiceWorkerRegistration(
+  registration: ServiceWorkerRegistration | null,
+): void {
+  activeSwRegistration = registration;
+}
+
+export function navigateFromNotification(rawUrl: string): void {
+  const trimmed = rawUrl.trim();
+  const safeUrl =
+    trimmed.startsWith("/") &&
+    !trimmed.startsWith("//") &&
+    !trimmed.includes("\\")
+      ? trimmed
+      : "/app";
+  if (registeredNavigate) {
+    registeredNavigate(safeUrl);
+  } else if (typeof window !== "undefined") {
+    window.location.assign(safeUrl);
+  }
+}
 
 function resolveUserId(userId?: string | null): string | null {
   if (userId !== undefined) return userId || null;
@@ -85,6 +107,24 @@ export function closeActiveNotifications(): void {
     }
   }
   activeNotifications.clear();
+  if (
+    activeSwRegistration &&
+    typeof activeSwRegistration.getNotifications === "function"
+  ) {
+    void activeSwRegistration
+      .getNotifications()
+      .then((list) => {
+        for (const n of list) {
+          if (n.tag && !n.tag.startsWith("teamie-")) continue;
+          try {
+            n.close();
+          } catch {
+            // Ignore close errors
+          }
+        }
+      })
+      .catch(() => {});
+  }
 }
 
 export function resetNotificationSession(userId: string | null = null): void {
@@ -316,36 +356,55 @@ export function notifySyncedMessages(
     const body = prefs.showPreview ? previewText : reasonText;
     const targetUrl = `/app/w/${encodeURIComponent(conversation.workspaceId)}/c/${encodeURIComponent(conversation.id)}?message=${encodeURIComponent(message.id)}`;
 
-    try {
-      const instance = new window.Notification(title, {
-        body,
-        tag: `teamie-message-${message.id}`,
-      });
-      activeNotifications.add(instance);
-      instance.onclose = () => {
-        activeNotifications.delete(instance);
-      };
-      instance.onclick = (event) => {
-        event?.preventDefault?.();
-        try {
-          window.focus?.();
-        } catch {
-          // Ignore focus errors
-        }
-        try {
-          instance.close?.();
-        } catch {
-          // Ignore close errors
-        }
-        activeNotifications.delete(instance);
-        if (registeredNavigate) {
-          registeredNavigate(targetUrl);
-        } else if (typeof window !== "undefined") {
-          window.location.assign(targetUrl);
-        }
-      };
-    } catch {
-      // Ignore Notification constructor errors in restricted environments
+    const tag = `teamie-message-${message.id}`;
+    const showWindowNotification = () => {
+      try {
+        const instance = new window.Notification(title, {
+          body,
+          icon: "/icon-192.png",
+          tag,
+        });
+        activeNotifications.add(instance);
+        instance.onclose = () => {
+          activeNotifications.delete(instance);
+        };
+        instance.onclick = (event) => {
+          event?.preventDefault?.();
+          try {
+            window.focus?.();
+          } catch {
+            // Ignore focus errors
+          }
+          try {
+            instance.close?.();
+          } catch {
+            // Ignore close errors
+          }
+          activeNotifications.delete(instance);
+          navigateFromNotification(targetUrl);
+        };
+      } catch {
+        // Ignore Notification constructor errors in restricted environments
+      }
+    };
+
+    if (
+      activeSwRegistration &&
+      typeof activeSwRegistration.showNotification === "function"
+    ) {
+      void activeSwRegistration
+        .showNotification(title, {
+          body,
+          icon: "/icon-192.png",
+          badge: "/icon-192.png",
+          tag,
+          data: { url: targetUrl },
+        })
+        .catch(() => {
+          showWindowNotification();
+        });
+    } else {
+      showWindowNotification();
     }
   }
 }

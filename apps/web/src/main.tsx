@@ -15,6 +15,8 @@ import { AuthProvider, useAuth } from "./auth";
 import { lazyView } from "./lazy-view";
 import { RouteBoundary } from "./route-boundary";
 import { applyTheme, useThemePreference } from "./theme";
+import { initPwaInstallCapture } from "./pwa/install";
+import { registerServiceWorker } from "./pwa/register";
 import { Button, Loading, Logo, Notice } from "./ui";
 import { Toaster } from "./toast";
 import "@fontsource-variable/dm-sans";
@@ -25,6 +27,8 @@ import "./styles/password-recovery.css";
 import "./styles/feedback.css";
 import "./styles/conveniences.css";
 applyTheme();
+initPwaInstallCapture();
+registerServiceWorker();
 const loadAuthenticatedApp = () =>
   import("./authenticated-app").then((m) => ({ default: m.AuthenticatedApp }));
 if (

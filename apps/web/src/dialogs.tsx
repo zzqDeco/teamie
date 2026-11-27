@@ -41,6 +41,7 @@ import { ICON } from "./icons";
 import { useThemePreference } from "./theme";
 import type { ThemePreference } from "./theme";
 import { useNotificationPreferences } from "./notifications";
+import { PwaInstallSettingsCard } from "./pwa/install-prompt";
 export type DialogKind =
   | "workspace"
   | "channel"
@@ -546,6 +547,7 @@ export function ProfileSettings() {
           }
         />
       </section>
+      <PwaInstallSettingsCard />
       <PasswordSettings />
       <Link to="/app/developers" className="platform-management-link">
         <Code2 size={ICON.lg} aria-hidden="true" />

@@ -2,6 +2,8 @@ import { api } from "@teamie/api-client";
 import type { NavigateFunction } from "react-router-dom";
 import type { ConversationAppTabsController } from "./marketplace/app-tabs-state";
 import { clearPersistedAppPaneWidth } from "./marketplace/app-pane-resize";
+import { syncAppBadge } from "./pwa/badge";
+import { clearOfflineShellSnapshot } from "./pwa/offline-cache";
 
 const navStorageKey = (userId: string) => `teamie.nav.${userId}`;
 
@@ -29,6 +31,8 @@ export function clearUserLocalUiState(
   if (options?.clearNav) options.clearNav(userId);
   else clearPersistedShellNav(userId);
   clearPersistedAppPaneWidth(userId);
+  clearOfflineShellSnapshot(userId);
+  syncAppBadge(0);
   if (!userId) return;
   try {
     localStorage.removeItem(`teamie.sidebarSections.${userId}`);

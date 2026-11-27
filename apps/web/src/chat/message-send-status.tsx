@@ -1,5 +1,5 @@
 import type { RefObject } from "react";
-import { LoaderCircle, PencilLine, RefreshCw, Trash2 } from "lucide-react";
+import { Clock, LoaderCircle, PencilLine, RefreshCw, Trash2 } from "lucide-react";
 import { sendMessage } from "../chat";
 import { chatStore } from "../store";
 import type { LocalMessage } from "../store";
@@ -7,7 +7,7 @@ import { restoreComposerDraft } from "../composer-drafts";
 import { ICON } from "../icons";
 import { discardFailedMessage } from "./conversation-chrome";
 
-/** Sending spinner or the failed-send actions (retry / edit and resend / delete). */
+/** Outbound message status: queued (offline), sending spinner, or failed actions. */
 export function MessageSendStatus({
   message,
   conversationId,
@@ -17,6 +17,34 @@ export function MessageSendStatus({
   conversationId: string;
   inputRef: RefObject<HTMLTextAreaElement | null>;
 }) {
+  if (message.status === "queued") {
+    return (
+      <span className="send-status queued-status">
+        <Clock size={ICON.xs} aria-hidden="true" />
+        等待网络恢复后发送
+        {!!message.body && (
+          <button
+            type="button"
+            onClick={() => {
+              restoreComposerDraft(conversationId, message);
+              discardFailedMessage(conversationId, message);
+              inputRef.current?.focus();
+            }}
+          >
+            <PencilLine size={ICON.xs} aria-hidden="true" />
+            编辑
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => discardFailedMessage(conversationId, message)}
+        >
+          <Trash2 size={ICON.xs} aria-hidden="true" />
+          取消发送
+        </button>
+      </span>
+    );
+  }
   if (message.status === "sending") {
     return (
       <span className="send-status">

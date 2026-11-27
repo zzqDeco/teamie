@@ -18,6 +18,10 @@ import {
   resetNotificationSession,
 } from "./notifications";
 import { chatStore } from "./store";
+import {
+  readOfflineBootstrap,
+  saveOfflineBootstrap,
+} from "./pwa/offline-cache";
 import { refreshConversationPins } from "./chat/conversation-context-loader";
 import { typingStore } from "./typing-store";
 import { presenceStore, receiptStore } from "./engagement-store";
@@ -28,6 +32,7 @@ export type Connection =
 type Chat = {
   data?: Bootstrap;
   loading: boolean;
+  offlineMode: boolean;
   error: string;
   connection: Connection;
   syncError: string;
@@ -51,25 +56,33 @@ async function observedBootstrap(): Promise<ObservedBootstrap> {
 export const useChatState = () =>
   useSyncExternalStore(chatStore.subscribe, chatStore.getSnapshot);
 export function ChatProvider({ children }: { children: ReactNode }) {
-  const { user, reconcileSession } = useAuth();
+  const { user, offlineMode: rawOfflineMode, reconcileSession, retry: retryAuth } = useAuth();
+  const offlineMode = Boolean(rawOfflineMode);
   const client = useQueryClient();
   const appliedBootstrap = useRef<ObservedBootstrap | null>(null);
+  const userId = user!.id;
+  const cachedBootstrap = useMemo(
+    () => readOfflineBootstrap(userId),
+    [userId],
+  );
   const query = useQuery({
-    queryKey: ["bootstrap", user!.id],
+    queryKey: ["bootstrap", userId],
     queryFn: observedBootstrap,
+    enabled: !offlineMode,
     structuralSharing: false,
     staleTime: 30_000,
     refetchInterval: 60_000,
     retry: (count, e) =>
       !(e instanceof ApiError && [401, 403].includes(e.status)) && count < 2,
   });
-  const [connection, setConnection] = useState<Connection>("connecting");
+  const [connection, setConnection] = useState<Connection>(
+    offlineMode ? "offline" : "connecting",
+  );
   const [syncError, setSyncError] = useState("");
   const socket = useRef<WebSocket | null>(null);
   const syncRef = useRef<() => void>(() => {});
   const reconnectRef = useRef<() => void>(() => {});
   const capabilities = useRef<Record<string, boolean>>({});
-  const userId = user!.id;
   const completedInitialSyncUser = useRef<string | null>(null);
   useEffect(() => {
     if (query.data) {
@@ -89,7 +102,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
       appliedBootstrap.current = query.data;
       capabilities.current = query.data.capabilities;
+      saveOfflineBootstrap(query.data);
       if (changedReaders) receiptStore.invalidateAll(true);
+      if (
+        api.csrfToken &&
+        (typeof navigator === "undefined" || navigator.onLine !== false)
+      ) {
+        void retryTransientFailures(chatStore.generation);
+      }
     }
   }, [client, query.data, reconcileSession, userId]);
   useEffect(() => {
@@ -98,6 +118,22 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     if (completedInitialSyncUser.current !== userId) {
       completedInitialSyncUser.current = null;
     }
+    if (offlineMode) {
+      chatOfflineMode = true;
+      setConnection("offline");
+      setSyncError("");
+      syncRef.current = () => {
+        retryAuth?.();
+      };
+      reconnectRef.current = () => {
+        retryAuth?.();
+      };
+      return () => {
+        chatOfflineMode = false;
+        resetNotificationSession(null);
+      };
+    }
+    chatOfflineMode = false;
     let stopped = false,
       syncing = false,
       requested = false,
@@ -196,6 +232,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
               }
               appliedBootstrap.current = fresh;
               capabilities.current = fresh.capabilities;
+              saveOfflineBootstrap(fresh);
               receiptStore.invalidateAll(true);
               resetNotificationSession(userId);
               const allowed = new Set(fresh.conversations.map((c) => c.id));
@@ -373,6 +410,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
       connect();
       void sync();
+      if (api.csrfToken) {
+        void retryTransientFailures(chatStore.generation);
+      }
     };
     reconnectRef.current = () => {
       if (stopped) return;
@@ -428,7 +468,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       document.removeEventListener("visibilitychange", focus);
       resetNotificationSession(null);
     };
-  }, [userId, client, reconcileSession]);
+  }, [userId, client, reconcileSession, offlineMode, retryAuth]);
   const sendTyping = useCallback((conversationId: string, value: boolean) => {
     if (
       capabilities.current["im.typing.publish"] &&
@@ -444,12 +484,20 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const reconnect = useCallback(() => {
     reconnectRef.current();
   }, []);
-  const data = query.data?.user.id === user!.id ? query.data : undefined;
-  const error = query.error ? "无法加载你的工作空间，请稍后重试。" : "";
+  const liveData = query.data?.user.id === user!.id ? query.data : undefined;
+  const fallbackBootstrap =
+    offlineMode || (connection === "offline" && !liveData)
+      ? cachedBootstrap || undefined
+      : undefined;
+  const data = liveData ?? fallbackBootstrap;
+  const error =
+    !data && query.error ? "无法加载你的工作空间，请稍后重试。" : "";
+  const effectiveOfflineMode = offlineMode || (!liveData && !!fallbackBootstrap);
   const value = useMemo(
     () => ({
       data,
-      loading: query.isLoading,
+      loading: !data && query.isLoading,
+      offlineMode: effectiveOfflineMode,
       error,
       connection,
       syncError,
@@ -461,6 +509,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     [
       data,
       query.isLoading,
+      effectiveOfflineMode,
       error,
       connection,
       syncError,
@@ -485,13 +534,24 @@ export function isPermanentSendError(error: unknown) {
     error.status !== 401
   );
 }
+let chatOfflineMode = false;
+
 export async function sendMessage(
   message: Message & {
     forwardOf?: { conversationId: string; messageId: string };
   },
   generation: number,
+  options?: { offline?: boolean },
 ) {
   chatStore.setManualUnread(message.conversationId, undefined);
+  const navigatorOffline =
+    typeof navigator !== "undefined" && navigator.onLine === false;
+  if (options?.offline || chatOfflineMode || navigatorOffline) {
+    chatStore.merge([
+      { ...message, status: "queued", error: undefined, permanent: false },
+    ]);
+    return;
+  }
   chatStore.merge([
     { ...message, status: "sending", error: undefined, permanent: undefined },
   ]);
@@ -518,6 +578,16 @@ export async function sendMessage(
       chatStore.merge([response.message]);
   } catch (error) {
     if (chatStore.generation === generation) {
+      if (
+        isNetworkError(error) &&
+        typeof navigator !== "undefined" &&
+        navigator.onLine === false
+      ) {
+        chatStore.merge([
+          { ...message, status: "queued", error: undefined, permanent: false },
+        ]);
+        return;
+      }
       const permanent = isPermanentSendError(error);
       const text = errorText(error);
       chatStore.merge([
@@ -538,10 +608,18 @@ let activeRetryDrain: Promise<void> | null = null;
 let activeRetryGeneration = -1;
 let retryDrainRequested = false;
 
-// Transient failures retry with the same clientMessageId, which the server
-// treats idempotently, so a retry after a lost response cannot duplicate.
+function isDrainableOutbound(m: { status?: string; permanent?: boolean }) {
+  return (
+    m.status === "queued" || (m.status === "failed" && m.permanent === false)
+  );
+}
+
+// Queued messages and transient failures retry serially with the same
+// clientMessageId, which the server treats idempotently, so replay after
+// offline periods or a lost response cannot duplicate.
 export async function retryTransientFailures(generation: number) {
   if (chatStore.generation !== generation) return;
+  if (chatOfflineMode || (typeof navigator !== "undefined" && navigator.onLine === false)) return;
   if (activeRetryDrain && activeRetryGeneration === generation) {
     retryDrainRequested = true;
     return activeRetryDrain;
@@ -550,22 +628,30 @@ export async function retryTransientFailures(generation: number) {
     do {
       retryDrainRequested = false;
       if (chatStore.generation !== generation) return;
-      const queued = Object.values(chatStore.getSnapshot().messages).flatMap(
-        (messages) =>
-          messages.filter(
-            (m) => m.status === "failed" && m.permanent === false,
-          ),
-      );
+      if (chatOfflineMode || (typeof navigator !== "undefined" && navigator.onLine === false)) return;
+      const snapshot = chatStore.getSnapshot();
+      const queued = Object.values(snapshot.messages)
+        .flatMap((messages) => messages.filter(isDrainableOutbound))
+        .sort(
+          (a, b) =>
+            a.createdAt.localeCompare(b.createdAt) ||
+            a.clientMessageId.localeCompare(b.clientMessageId),
+        );
       for (const item of queued) {
         if (chatStore.generation !== generation) return;
-        const current = (
-          chatStore.getSnapshot().messages[item.conversationId] || []
-        ).find((m) => m.clientMessageId === item.clientMessageId);
+        if (chatOfflineMode || (typeof navigator !== "undefined" && navigator.onLine === false))
+          return;
+        const latestSnapshot = chatStore.getSnapshot();
         if (
-          current &&
-          current.status === "failed" &&
-          current.permanent === false
-        )
+          chatStore.hasAuthoritativeConversations &&
+          !latestSnapshot.conversations[item.conversationId]
+        ) {
+          continue;
+        }
+        const current = (latestSnapshot.messages[item.conversationId] || []).find(
+          (m) => m.clientMessageId === item.clientMessageId,
+        );
+        if (current && isDrainableOutbound(current))
           await sendMessage(current, generation);
       }
     } while (retryDrainRequested && chatStore.generation === generation);
