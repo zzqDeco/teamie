@@ -70,6 +70,11 @@ export interface OfflineAttachmentBackend {
     conversationId: string,
     clientMessageId: string,
   ): Promise<StagedAttachmentRecord[]>;
+  reconcileOrphanedBindings(
+    userId: string,
+    activeClientMessageIds: ReadonlySet<string>,
+    now?: number,
+  ): Promise<StagedAttachmentRecord[]>;
   deleteById(userId: string, id: string): Promise<void>;
   deleteForMessage(userId: string, clientMessageId: string): Promise<void>;
   deleteForConversation(userId: string, conversationId: string): Promise<void>;
@@ -248,25 +253,21 @@ export function createIndexedDbBackend(
 
     async listForMessage(userId, clientMessageId, now = Date.now()) {
       if (!userId || !clientMessageId) return [];
-      try {
-        return await withStore("readwrite", async (store) => {
-          const idx = store.index("byUserMessage");
-          const rows = (await requestPromise(
-            idx.getAll([userId, clientMessageId]),
-          )) as StagedAttachmentRecord[];
-          const kept: StagedAttachmentRecord[] = [];
-          for (const row of rows) {
-            if (isExpired(row, now)) {
-              store.delete(row.id);
-            } else {
-              kept.push(row);
-            }
+      return withStore("readwrite", async (store) => {
+        const idx = store.index("byUserMessage");
+        const rows = (await requestPromise(
+          idx.getAll([userId, clientMessageId]),
+        )) as StagedAttachmentRecord[];
+        const kept: StagedAttachmentRecord[] = [];
+        for (const row of rows) {
+          if (isExpired(row, now)) {
+            store.delete(row.id);
+          } else {
+            kept.push(row);
           }
-          return kept.sort(sortByCreated);
-        });
-      } catch {
-        return [];
-      }
+        }
+        return kept.sort(sortByCreated);
+      });
     },
 
     async bindToMessage(userId, conversationId, ids, clientMessageId) {
@@ -294,23 +295,54 @@ export function createIndexedDbBackend(
 
     async unbindToDraft(userId, conversationId, clientMessageId) {
       if (!userId || !clientMessageId) return [];
+      return withStore("readwrite", async (store) => {
+        const idx = store.index("byUserMessage");
+        const rows = (await requestPromise(
+          idx.getAll([userId, clientMessageId]),
+        )) as StagedAttachmentRecord[];
+        const restored: StagedAttachmentRecord[] = [];
+        for (const row of rows) {
+          if (row.conversationId !== conversationId) continue;
+          const updated: StagedAttachmentRecord = {
+            ...row,
+            clientMessageId: "",
+          };
+          store.put(updated);
+          restored.push(updated);
+        }
+        return restored.sort(sortByCreated);
+      });
+    },
+
+    async reconcileOrphanedBindings(
+      userId,
+      activeClientMessageIds,
+      now = Date.now(),
+    ) {
+      if (!userId) return [];
       try {
         return await withStore("readwrite", async (store) => {
-          const idx = store.index("byUserMessage");
+          const idx = store.index("byUser");
           const rows = (await requestPromise(
-            idx.getAll([userId, clientMessageId]),
+            idx.getAll(userId),
           )) as StagedAttachmentRecord[];
-          const restored: StagedAttachmentRecord[] = [];
+          const recovered: StagedAttachmentRecord[] = [];
           for (const row of rows) {
-            if (row.conversationId !== conversationId) continue;
-            const updated: StagedAttachmentRecord = {
-              ...row,
-              clientMessageId: "",
-            };
-            store.put(updated);
-            restored.push(updated);
+            if (isExpired(row, now)) {
+              store.delete(row.id);
+            } else if (
+              row.clientMessageId !== "" &&
+              !activeClientMessageIds.has(row.clientMessageId)
+            ) {
+              const updated: StagedAttachmentRecord = {
+                ...row,
+                clientMessageId: "",
+              };
+              store.put(updated);
+              recovered.push(updated);
+            }
           }
-          return restored.sort(sortByCreated);
+          return recovered.sort(sortByCreated);
         });
       } catch {
         return [];
@@ -478,6 +510,27 @@ export function createMemoryOfflineAttachmentBackend(): OfflineAttachmentBackend
       }
       return restored.sort(sortByCreated);
     },
+    async reconcileOrphanedBindings(
+      userId,
+      activeClientMessageIds,
+      now = Date.now(),
+    ) {
+      const recovered: StagedAttachmentRecord[] = [];
+      for (const item of [...rows.values()]) {
+        if (item.userId !== userId) continue;
+        if (isExpired(item, now)) {
+          rows.delete(item.id);
+        } else if (
+          item.clientMessageId !== "" &&
+          !activeClientMessageIds.has(item.clientMessageId)
+        ) {
+          const next = { ...item, clientMessageId: "" };
+          rows.set(item.id, next);
+          recovered.push({ ...next });
+        }
+      }
+      return recovered.sort(sortByCreated);
+    },
     async deleteById(userId, id) {
       const item = rows.get(id);
       if (item && item.userId === userId) rows.delete(id);
@@ -521,10 +574,20 @@ export function createMemoryOfflineAttachmentBackend(): OfflineAttachmentBackend
 }
 
 let activeBackend: OfflineAttachmentBackend = createIndexedDbBackend();
+const inFlightBindMessageIds = new Set<string>();
+
+export function beginStagedMessageBind(clientMessageId: string): void {
+  if (clientMessageId) inFlightBindMessageIds.add(clientMessageId);
+}
+
+export function endStagedMessageBind(clientMessageId: string): void {
+  inFlightBindMessageIds.delete(clientMessageId);
+}
 
 export function setOfflineAttachmentBackendForTest(
   backend: OfflineAttachmentBackend | null,
 ): void {
+  inFlightBindMessageIds.clear();
   activeBackend = backend ?? createIndexedDbBackend();
 }
 
@@ -573,6 +636,16 @@ export function unbindStagedAttachmentsToDraft(
   clientMessageId: string,
 ): Promise<StagedAttachmentRecord[]> {
   return activeBackend.unbindToDraft(userId, conversationId, clientMessageId);
+}
+
+export function reconcileOrphanedStagedAttachments(
+  userId: string,
+  activeClientMessageIds: ReadonlySet<string>,
+  now?: number,
+): Promise<StagedAttachmentRecord[]> {
+  const protectedIds = new Set(activeClientMessageIds);
+  for (const id of inFlightBindMessageIds) protectedIds.add(id);
+  return activeBackend.reconcileOrphanedBindings(userId, protectedIds, now);
 }
 
 export function deleteStagedAttachment(

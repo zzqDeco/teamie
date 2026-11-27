@@ -9,6 +9,7 @@ import {
   deleteStagedAttachment,
   listStagedDraftAttachments,
   pruneStagedAttachmentsToConversations,
+  reconcileOrphanedStagedAttachments,
   stagedRecordToFile,
   unbindStagedAttachmentsToDraft,
 } from "./pwa/offline-attachments";
@@ -54,6 +55,7 @@ const listeners = new Set<() => void>();
 const EMPTY: DraftFile[] = [];
 let draftUserId = chatStore.getSnapshot().userId;
 let lastPrunedSignature = "";
+let reconciledGeneration = -1;
 
 const keyFor = (conversationId: string, userId = chatStore.getSnapshot().userId) =>
   `${userId}\u0000${conversationId}`;
@@ -115,6 +117,7 @@ chatStore.subscribe(() => {
     const previousUserId = draftUserId;
     draftUserId = snapshot.userId;
     lastPrunedSignature = "";
+    reconciledGeneration = -1;
     for (const entry of [...entries.values()]) dropEntry(entry, false);
     if (previousUserId) {
       void clearStagedAttachmentsForUser(previousUserId);
@@ -245,8 +248,11 @@ export function addAttachmentDraftFiles(
 ) {
   if (!files.length) return;
   const entry = entryFor(conversationId);
-  update(entry, [...entry.files, ...files]);
-  for (const file of files) {
+  const existingIds = new Set(entry.files.map((f) => f.id));
+  const additions = files.filter((f) => !existingIds.has(f.id));
+  if (!additions.length) return;
+  update(entry, [...entry.files, ...additions]);
+  for (const file of additions) {
     if (file.state === "uploading") queueAttachmentUpload(conversationId, file.id);
   }
 }
@@ -260,6 +266,28 @@ export async function hydrateStagedAttachmentDrafts(
   const userId = snapshot.userId;
   const generation = chatStore.generation;
   if (!userId || !conversationId) return;
+  if (reconciledGeneration !== generation) {
+    const activeIds = new Set<string>();
+    for (const list of Object.values(snapshot.messages)) {
+      for (const msg of list) {
+        if (
+          msg.status === "queued" ||
+          msg.status === "sending" ||
+          msg.status === "failed"
+        ) {
+          activeIds.add(msg.clientMessageId);
+        }
+      }
+    }
+    await reconcileOrphanedStagedAttachments(userId, activeIds);
+    if (
+      chatStore.generation !== generation ||
+      chatStore.getSnapshot().userId !== userId
+    ) {
+      return;
+    }
+    reconciledGeneration = generation;
+  }
   const records = await listStagedDraftAttachments(userId, conversationId);
   if (
     !records.length ||

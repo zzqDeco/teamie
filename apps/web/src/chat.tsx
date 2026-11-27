@@ -8,7 +8,10 @@ import { useAuth } from "./auth";
 import { notifySyncedMessages, resetNotificationSession } from "./notifications";
 import { chatStore } from "./store";
 import type { LocalMessage } from "./store";
-import { resolveStagedAttachmentsForSend } from "./pwa/offline-attachment-send";
+import {
+  isQueuedMessageReservedForEdit,
+  resolveStagedAttachmentsForSend,
+} from "./pwa/offline-attachment-send";
 import { deleteStagedAttachmentsForMessage } from "./pwa/offline-attachments";
 import { readOfflineBootstrap, saveOfflineBootstrap } from "./pwa/offline-cache";
 import { refreshConversationPins } from "./chat/conversation-context-loader";
@@ -536,6 +539,7 @@ export async function sendMessage(
   generation: number,
   options?: { offline?: boolean },
 ) {
+  if (isQueuedMessageReservedForEdit(message.clientMessageId, generation)) return;
   chatStore.setManualUnread(message.conversationId, undefined);
   const navigatorOffline =
     typeof navigator !== "undefined" && navigator.onLine === false;
@@ -625,7 +629,11 @@ let activeRetryDrain: Promise<void> | null = null;
 let activeRetryGeneration = -1;
 let retryDrainRequested = false;
 
-function isDrainableOutbound(m: { status?: string; permanent?: boolean }) {
+function isDrainableOutbound(
+  m: { clientMessageId: string; status?: string; permanent?: boolean },
+  generation: number,
+) {
+  if (isQueuedMessageReservedForEdit(m.clientMessageId, generation)) return false;
   return (
     m.status === "queued" || (m.status === "failed" && m.permanent === false)
   );
@@ -648,7 +656,9 @@ export async function retryTransientFailures(generation: number) {
       if (chatOfflineMode || (typeof navigator !== "undefined" && navigator.onLine === false)) return;
       const snapshot = chatStore.getSnapshot();
       const queued = Object.values(snapshot.messages)
-        .flatMap((messages) => messages.filter(isDrainableOutbound))
+        .flatMap((messages) =>
+          messages.filter((m) => isDrainableOutbound(m, generation)),
+        )
         .sort(
           (a, b) =>
             a.createdAt.localeCompare(b.createdAt) ||
@@ -668,7 +678,7 @@ export async function retryTransientFailures(generation: number) {
         const current = (latestSnapshot.messages[item.conversationId] || []).find(
           (m) => m.clientMessageId === item.clientMessageId,
         );
-        if (current && isDrainableOutbound(current))
+        if (current && isDrainableOutbound(current, generation))
           await sendMessage(current, generation);
       }
     } while (retryDrainRequested && chatStore.generation === generation);

@@ -656,4 +656,382 @@ describe("composer offline staging, idempotent replay, edit/cancel, and cleanup"
     expect(sendSpy).not.toHaveBeenCalled();
     expect(chatStore.getSnapshot().messages["c-stage"][0].status).toBe("queued");
   });
+
+  it("deduplicates concurrent draft hydration against an in-flight multi-file staging batch without false overflow", async () => {
+    const base = createMemoryOfflineAttachmentBackend();
+    let stageCalls = 0;
+    let releaseThird!: () => void;
+    const thirdGate = new Promise<void>((resolve) => {
+      releaseThird = resolve;
+    });
+    setOfflineAttachmentBackendForTest({
+      ...base,
+      async stage(record, now) {
+        stageCalls += 1;
+        if (stageCalls === 3) await thirdGate;
+        return base.stage(record, now);
+      },
+    });
+
+    const uploadSpy = vi
+      .spyOn(attachmentTransport, "upload")
+      .mockImplementation(async (_convId, file) => ({
+        attachment: {
+          id: `srv-${file.name}`,
+          filename: file.name,
+          mediaType: file.type || "application/octet-stream",
+          sizeBytes: file.size,
+          sha256: "h",
+        },
+      }));
+
+    let draftApi!: ReturnType<typeof useAttachmentDraft>;
+    function Harness({ offline }: { offline: boolean }) {
+      draftApi = useAttachmentDraft(
+        "c-stage",
+        { ...defaultAttachmentLimits, maxFilesPerMessage: 3 },
+        offline,
+      );
+      return (
+        <AttachmentDraft
+          files={draftApi.files}
+          error={draftApi.error}
+          onRemove={draftApi.remove}
+          onRetry={draftApi.retry}
+        />
+      );
+    }
+
+    await act(async () => {
+      root.render(<Harness offline={true} />);
+    });
+    await flush();
+
+    // Select 3 files (exact per-message limit) while offline; 3rd write pauses.
+    await act(async () => {
+      draftApi.add([
+        new File(["a"], "f1.txt", { type: "text/plain" }),
+        new File(["b"], "f2.txt", { type: "text/plain" }),
+        new File(["c"], "f3.txt", { type: "text/plain" }),
+      ]);
+    });
+    await flush();
+
+    // Connectivity returns mid-loop: reconnect hydration loads f1 & f2 first.
+    await act(async () => {
+      root.render(<Harness offline={false} />);
+    });
+    await flush();
+    expect(readAttachmentDraft("c-stage").map((f) => f.file.name)).toEqual([
+      "f1.txt",
+      "f2.txt",
+    ]);
+
+    // Now the 3rd file finishes staging: no duplicates and f3 is NOT dropped as overflow!
+    releaseThird();
+    await flush();
+    await flush();
+
+    const names = readAttachmentDraft("c-stage").map((f) => f.file.name);
+    expect(names).toEqual(["f1.txt", "f2.txt", "f3.txt"]);
+    expect(draftApi.error).toBe("");
+    expect(uploadSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it("treats temporary IndexedDB read failures as retryable instead of permanently failing queued sends", async () => {
+    const base = createMemoryOfflineAttachmentBackend();
+    let failReads = true;
+    setOfflineAttachmentBackendForTest({
+      ...base,
+      async listForMessage(uid, cmid, now) {
+        if (failReads) {
+          throw new OfflineAttachmentStoreError(
+            "storage_unavailable",
+            "idb busy",
+          );
+        }
+        return base.listForMessage(uid, cmid, now);
+      },
+    });
+
+    await stageOfflineAttachment({
+      id: "st-idb-err",
+      uploadKey: "uk-idb-err",
+      userId: user.id,
+      conversationId: "c-stage",
+      clientMessageId: "cmid-idb-err",
+      name: "doc.pdf",
+      type: "application/pdf",
+      size: 4,
+      lastModified: Date.now(),
+      blob: new Blob(["pdf!"], { type: "application/pdf" }),
+      createdAt: Date.now(),
+    });
+    const queued: LocalMessage = {
+      id: "local:cmid-idb-err",
+      clientMessageId: "cmid-idb-err",
+      conversationId: "c-stage",
+      senderId: user.id,
+      senderName: user.displayName,
+      senderKind: "human",
+      seq: Number.MAX_SAFE_INTEGER,
+      body: "重试存储异常",
+      createdAt: "2026-11-27T09:20:00Z",
+      status: "queued",
+      permanent: false,
+      stagedAttachments: [
+        {
+          id: "st-idb-err",
+          uploadKey: "uk-idb-err",
+          filename: "doc.pdf",
+          mediaType: "application/pdf",
+          sizeBytes: 4,
+        },
+      ],
+    };
+    chatStore.merge([queued]);
+
+    const att: Attachment = {
+      id: "att-recovered",
+      filename: "doc.pdf",
+      mediaType: "application/pdf",
+      sizeBytes: 4,
+      sha256: "h-rec",
+    };
+    const uploadSpy = vi
+      .spyOn(api, "uploadAttachment")
+      .mockResolvedValueOnce({ attachment: att });
+    const sendSpy = vi.spyOn(api, "send").mockResolvedValueOnce({
+      message: {
+        id: "srv-msg-rec",
+        conversationId: "c-stage",
+        senderId: user.id,
+        senderName: user.displayName,
+        senderKind: "human",
+        clientMessageId: "cmid-idb-err",
+        seq: 3,
+        body: "重试存储异常",
+        attachments: [att],
+        createdAt: "2026-11-27T09:21:00Z",
+      },
+    });
+
+    // First replay hits transient IDB error → retryable failure (permanent: false).
+    await retryTransientFailures(chatStore.generation);
+    const afterErr = chatStore.getSnapshot().messages["c-stage"][0];
+    expect(afterErr.status).toBe("failed");
+    expect(afterErr.permanent).toBe(false);
+    expect(uploadSpy).not.toHaveBeenCalled();
+
+    // Once storage recovers, automatic replay uploads and sends cleanly!
+    failReads = false;
+    await retryTransientFailures(chatStore.generation);
+    expect(uploadSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(chatStore.getSnapshot().messages["c-stage"][0].id).toBe("srv-msg-rec");
+  });
+
+  it("recovers orphaned message bindings left by a crash before queue persistence on startup hydration", async () => {
+    // Simulate a crash after bindStagedAttachmentsToMessage committed but before LocalMessage persisted.
+    await stageOfflineAttachment({
+      id: "st-orphan",
+      uploadKey: "uk-orphan",
+      userId: user.id,
+      conversationId: "c-stage",
+      clientMessageId: "cmid-never-persisted",
+      name: "recovered.png",
+      type: "image/png",
+      size: 5,
+      lastModified: Date.now(),
+      blob: new Blob(["image"], { type: "image/png" }),
+      createdAt: Date.now(),
+    });
+    // Also store a legitimate queued message binding that MUST stay bound.
+    await stageOfflineAttachment({
+      id: "st-live",
+      uploadKey: "uk-live",
+      userId: user.id,
+      conversationId: "c-stage",
+      clientMessageId: "cmid-persisted",
+      name: "queued.png",
+      type: "image/png",
+      size: 5,
+      lastModified: Date.now(),
+      blob: new Blob(["valid"], { type: "image/png" }),
+      createdAt: Date.now(),
+    });
+    chatStore.merge([
+      {
+        id: "local:cmid-persisted",
+        clientMessageId: "cmid-persisted",
+        conversationId: "c-stage",
+        senderId: user.id,
+        senderName: user.displayName,
+        senderKind: "human",
+        seq: Number.MAX_SAFE_INTEGER,
+        body: "",
+        createdAt: "2026-11-27T09:25:00Z",
+        status: "queued",
+        permanent: false,
+        stagedAttachments: [
+          {
+            id: "st-live",
+            uploadKey: "uk-live",
+            filename: "queued.png",
+            mediaType: "image/png",
+            sizeBytes: 5,
+          },
+        ],
+      },
+    ]);
+
+    await hydrateStagedAttachmentDrafts("c-stage", false);
+
+    // Orphaned binding was recovered into the composer draft; live queued binding stayed intact.
+    expect(readAttachmentDraft("c-stage").map((f) => f.id)).toEqual(["st-orphan"]);
+    expect((await listStagedDraftAttachments(user.id, "c-stage")).map((r) => r.id)).toEqual([
+      "st-orphan",
+    ]);
+    expect(
+      (await listStagedMessageAttachments(user.id, "cmid-persisted")).map((r) => r.id),
+    ).toEqual(["st-live"]);
+  });
+
+  it("reserves queued messages against automatic replay while Edit awaits restoration and rolls back on failure", async () => {
+    const base = createMemoryOfflineAttachmentBackend();
+    let resolveUnbind!: (rows: StagedAttachmentRecord[]) => void;
+    let rejectUnbind!: (err: unknown) => void;
+    let mode: "hold" | "reject" = "hold";
+    setOfflineAttachmentBackendForTest({
+      ...base,
+      unbindToDraft(uid, cid, cmid) {
+        if (mode === "hold") {
+          return new Promise<StagedAttachmentRecord[]>((resolve, reject) => {
+            resolveUnbind = (rows) => resolve(rows);
+            rejectUnbind = reject;
+          });
+        }
+        return base.unbindToDraft(uid, cid, cmid);
+      },
+    });
+
+    const att: Attachment = {
+      id: "att-preuploaded",
+      filename: "ready.png",
+      mediaType: "image/png",
+      sizeBytes: 1024,
+      sha256: "h-pre",
+    };
+    const queuedMsg: LocalMessage = {
+      id: "local:cmid-race",
+      clientMessageId: "cmid-race",
+      conversationId: "c-stage",
+      senderId: user.id,
+      senderName: user.displayName,
+      senderKind: "human",
+      seq: Number.MAX_SAFE_INTEGER,
+      body: "正在编辑",
+      createdAt: "2026-11-27T09:30:00Z",
+      status: "queued",
+      permanent: false,
+      stagedAttachments: [
+        {
+          id: "st-race",
+          uploadKey: "uk-race",
+          filename: "ready.png",
+          mediaType: "image/png",
+          sizeBytes: 1024,
+          attachment: att,
+        },
+      ],
+    };
+    chatStore.merge([queuedMsg]);
+
+    const sendSpy = vi.spyOn(api, "send").mockResolvedValue({
+      message: {
+        id: "srv-race",
+        conversationId: "c-stage",
+        senderId: user.id,
+        senderName: user.displayName,
+        senderKind: "human",
+        clientMessageId: "cmid-race",
+        seq: 4,
+        body: "正在编辑",
+        attachments: [att],
+        createdAt: "2026-11-27T09:31:00Z",
+      },
+    });
+
+    const inputRef = createRef<HTMLTextAreaElement>();
+    await act(async () => {
+      root.render(
+        <>
+          <textarea ref={inputRef} />
+          <MessageSendStatus
+            message={queuedMsg}
+            conversationId="c-stage"
+            inputRef={inputRef}
+          />
+        </>,
+      );
+    });
+
+    const editBtn = Array.from(host.querySelectorAll<HTMLButtonElement>("button")).find(
+      (b) => b.textContent?.includes("编辑"),
+    )!;
+    // Start Edit (awaits unbindToDraft) and concurrently kick off automatic replay.
+    await act(async () => {
+      editBtn.click();
+    });
+    await retryTransientFailures(chatStore.generation);
+    expect(sendSpy).not.toHaveBeenCalled();
+
+    // Complete restoration: message is removed from queue and attachment restored without sending!
+    resolveUnbind([]);
+    await flush();
+    await flush();
+    expect(sendSpy).not.toHaveBeenCalled();
+    expect(chatStore.getSnapshot().messages["c-stage"] || []).toHaveLength(0);
+    expect(readAttachmentDraft("c-stage").map((f) => f.attachment?.id)).toEqual([
+      "att-preuploaded",
+    ]);
+
+    // Rollback test: if unbind fails, reservation releases and message stays queued / replayable.
+    const queuedMsg2: LocalMessage = {
+      ...queuedMsg,
+      id: "local:cmid-rollback",
+      clientMessageId: "cmid-rollback",
+    };
+    chatStore.merge([queuedMsg2]);
+    await act(async () => {
+      root.render(
+        <>
+          <textarea ref={inputRef} />
+          <MessageSendStatus
+            message={queuedMsg2}
+            conversationId="c-stage"
+            inputRef={inputRef}
+          />
+        </>,
+      );
+    });
+    const editBtn2 = Array.from(host.querySelectorAll<HTMLButtonElement>("button")).find(
+      (b) => b.textContent?.includes("编辑"),
+    )!;
+    mode = "hold";
+    await act(async () => {
+      editBtn2.click();
+    });
+    rejectUnbind(
+      new OfflineAttachmentStoreError("storage_unavailable", "idb failed"),
+    );
+    await flush();
+    await flush();
+    // Because navigator.onLine is true in jsdom, releasing reservation after rollback triggers replay!
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy).toHaveBeenCalledWith(
+      "c-stage",
+      expect.objectContaining({ clientMessageId: "cmid-rollback" }),
+    );
+  });
 });

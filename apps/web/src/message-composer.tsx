@@ -13,7 +13,9 @@ import { sendMessage } from "./chat";
 import { chatStore } from "./store";
 import type { LocalMessage } from "./store";
 import {
+  beginStagedMessageBind,
   bindStagedAttachmentsToMessage,
+  endStagedMessageBind,
   unbindStagedAttachmentsToDraft,
 } from "./pwa/offline-attachments";
 import { readAttachmentDraft } from "./attachment-drafts";
@@ -200,6 +202,7 @@ export function MessageComposer({
 
     const stagedDrafts = attachments.files.filter((f) => f.state === "staged");
     submittingStaged.current = true;
+    beginStagedMessageBind(clientMessageId);
     void bindStagedAttachmentsToMessage(
       user.id,
       conversation.id,
@@ -215,7 +218,7 @@ export function MessageComposer({
               user.id,
               conversation.id,
               clientMessageId,
-            );
+            ).catch(() => {});
           }
           toast.error("部分离线附件暂存已失效，请移除后重新选择。");
           return;
@@ -228,7 +231,7 @@ export function MessageComposer({
             user.id,
             conversation.id,
             clientMessageId,
-          );
+          ).catch(() => {});
           return;
         }
         const consumed = attachments.consumeForSend(boundIds);
@@ -244,10 +247,11 @@ export function MessageComposer({
             user.id,
             conversation.id,
             clientMessageId,
-          );
+          ).catch(() => {});
           return;
         }
         finalizeLocalSend(consumed.uploaded, summaries);
+        chatStore.flush();
       })
       .catch(() => {
         if (chatStore.generation === generation) {
@@ -255,6 +259,7 @@ export function MessageComposer({
         }
       })
       .finally(() => {
+        endStagedMessageBind(clientMessageId);
         submittingStaged.current = false;
       });
   }

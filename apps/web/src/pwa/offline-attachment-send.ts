@@ -9,6 +9,27 @@ import {
   stagedRecordToFile,
 } from "./offline-attachments";
 
+const editingQueuedMessages = new Map<string, number>();
+
+/** Reserves a queued message against automatic replay while Edit restores its attachments. */
+export function reserveQueuedMessageForEdit(
+  clientMessageId: string,
+  generation: number,
+): void {
+  editingQueuedMessages.set(clientMessageId, generation);
+}
+
+export function releaseQueuedMessageForEdit(clientMessageId: string): void {
+  editingQueuedMessages.delete(clientMessageId);
+}
+
+export function isQueuedMessageReservedForEdit(
+  clientMessageId: string,
+  generation: number,
+): boolean {
+  return editingQueuedMessages.get(clientMessageId) === generation;
+}
+
 function isPermanentUploadError(error: unknown): boolean {
   if (!(error instanceof ApiError)) return false;
   if (error.code === "offline_unverified") return false;
@@ -38,12 +59,26 @@ export async function resolveStagedAttachmentsForSend(
   const recordsById = new Map<string, Awaited<ReturnType<typeof listStagedMessageAttachments>>[number]>();
 
   if (needsUpload) {
-    const records = await listStagedMessageAttachments(
-      message.senderId,
-      message.clientMessageId,
-    );
-    if (chatStore.generation !== generation) return { ok: false, aborted: true };
-    for (const rec of records) recordsById.set(rec.id, rec);
+    try {
+      const records = await listStagedMessageAttachments(
+        message.senderId,
+        message.clientMessageId,
+      );
+      if (chatStore.generation !== generation) return { ok: false, aborted: true };
+      for (const rec of records) recordsById.set(rec.id, rec);
+    } catch {
+      if (chatStore.generation !== generation) return { ok: false, aborted: true };
+      chatStore.merge([
+        {
+          ...message,
+          stagedAttachments: nextStaged,
+          status: "failed",
+          permanent: false,
+          error: "离线附件存储暂时不可用，请稍后重试。",
+        },
+      ]);
+      return { ok: false };
+    }
   }
 
   for (let i = 0; i < nextStaged.length; i++) {

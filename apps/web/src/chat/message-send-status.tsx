@@ -1,13 +1,18 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import type { RefObject } from "react";
 import { Clock, LoaderCircle, PencilLine, RefreshCw, Trash2 } from "lucide-react";
 import { api } from "@teamie/api-client";
 import { restoreMessageAttachmentsToDraft } from "../attachment-drafts";
-import { sendMessage } from "../chat";
+import { retryTransientFailures, sendMessage } from "../chat";
+import {
+  releaseQueuedMessageForEdit,
+  reserveQueuedMessageForEdit,
+} from "../pwa/offline-attachment-send";
 import { chatStore } from "../store";
 import type { LocalMessage } from "../store";
 import { restoreComposerDraft } from "../composer-drafts";
 import { ICON } from "../icons";
+import { toast } from "../toast";
 import { discardFailedMessage } from "./conversation-chrome";
 
 /** Outbound message status: queued (offline), sending spinner, or failed actions. */
@@ -21,6 +26,7 @@ export function MessageSendStatus({
   inputRef: RefObject<HTMLTextAreaElement | null>;
 }) {
   const restoringRef = useRef(false);
+  const [restoring, setRestoring] = useState(false);
   const hasStaged = Boolean(message.stagedAttachments?.length);
   if (message.status === "queued") {
     const canEdit = Boolean(message.body || hasStaged || message.attachments?.length);
@@ -31,28 +37,55 @@ export function MessageSendStatus({
         {canEdit && (
           <button
             type="button"
+            disabled={restoring}
             onClick={() => {
               if (restoringRef.current) return;
-              restoringRef.current = true;
               const generation = chatStore.generation;
+              const current = (
+                chatStore.getSnapshot().messages[conversationId] || []
+              ).find((m) => m.clientMessageId === message.clientMessageId);
+              if (!current || current.status !== "queued") return;
+              restoringRef.current = true;
+              setRestoring(true);
+              reserveQueuedMessageForEdit(message.clientMessageId, generation);
               const offline =
                 api.sessionUnverified ||
                 (typeof navigator !== "undefined" && navigator.onLine === false);
               void (async () => {
+                let restored = false;
                 try {
-                  if (hasStaged || message.attachments?.length) {
+                  if (hasStaged || current.attachments?.length) {
                     await restoreMessageAttachmentsToDraft(
                       conversationId,
-                      message,
+                      current,
                       offline,
                     );
                   }
                   if (chatStore.generation !== generation) return;
-                  restoreComposerDraft(conversationId, message);
+                  const latest = (
+                    chatStore.getSnapshot().messages[conversationId] || []
+                  ).find((m) => m.clientMessageId === message.clientMessageId);
+                  if (!latest || latest.status !== "queued") return;
+                  restoreComposerDraft(conversationId, latest);
                   chatStore.discardLocal(conversationId, message.clientMessageId);
+                  restored = true;
                   inputRef.current?.focus();
+                } catch {
+                  if (chatStore.generation === generation) {
+                    toast.error("恢复附件失败，请稍后重试。");
+                  }
                 } finally {
+                  releaseQueuedMessageForEdit(message.clientMessageId);
                   restoringRef.current = false;
+                  setRestoring(false);
+                  if (
+                    !restored &&
+                    chatStore.generation === generation &&
+                    !api.sessionUnverified &&
+                    (typeof navigator === "undefined" || navigator.onLine !== false)
+                  ) {
+                    void retryTransientFailures(generation);
+                  }
                 }
               })();
             }}
@@ -63,6 +96,7 @@ export function MessageSendStatus({
         )}
         <button
           type="button"
+          disabled={restoring}
           onClick={() => discardFailedMessage(conversationId, message)}
         >
           <Trash2 size={ICON.xs} aria-hidden="true" />

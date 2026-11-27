@@ -96,11 +96,13 @@ export function useAttachmentDraft(
     readAttachmentDraft(conversationId),
   );
   const [error, setError] = useState({ conversationId, message: "" });
+  const offlineRef = useRef(offline);
   useEffect(() => {
     pruneExpiredAttachmentDrafts(conversationId);
     void hydrateStagedAttachmentDrafts(conversationId, !offline);
   }, [conversationId, offline]);
   useEffect(() => {
+    offlineRef.current = offline;
     if (!offline) {
       promoteStagedAttachmentDrafts();
     }
@@ -143,7 +145,9 @@ export function useAttachmentDraft(
     void (async () => {
       const staged: DraftFile[] = [];
       let lastErr = "";
-      for (const item of accepted) {
+      const baseCreatedAt = Date.now();
+      for (let i = 0; i < accepted.length; i++) {
+        const item = accepted[i];
         if (chatStore.generation !== generation) return;
         try {
           await stageOfflineAttachment({
@@ -155,9 +159,9 @@ export function useAttachmentDraft(
             name: item.file.name,
             type: item.file.type || "application/octet-stream",
             size: item.file.size,
-            lastModified: item.file.lastModified || Date.now(),
+            lastModified: item.file.lastModified || baseCreatedAt,
             blob: item.file,
-            createdAt: Date.now(),
+            createdAt: baseCreatedAt + i,
           });
           if (chatStore.generation !== generation) {
             void deleteStagedAttachment(userId, item.id);
@@ -177,14 +181,21 @@ export function useAttachmentDraft(
         for (const prev of staged) void deleteStagedAttachment(userId, prev.id);
         return;
       }
+      const existingIds = new Set(
+        readAttachmentDraft(conversationId).map((f) => f.id),
+      );
+      const novel = staged.filter((item) => !existingIds.has(item.id));
       const available = Math.max(
         0,
-        limits.maxFilesPerMessage - readAttachmentDraft(conversationId).length,
+        limits.maxFilesPerMessage - existingIds.size,
       );
-      const kept = staged.slice(0, available);
-      const overflow = staged.slice(available);
+      const kept = novel.slice(0, available);
+      const overflow = novel.slice(available);
       for (const extra of overflow) void deleteStagedAttachment(userId, extra.id);
-      if (kept.length) addAttachmentDraftFiles(conversationId, kept);
+      if (kept.length) {
+        addAttachmentDraftFiles(conversationId, kept);
+        if (!offlineRef.current) promoteStagedAttachmentDrafts();
+      }
       if (overflow.length && !lastErr) {
         lastErr = `每条消息最多 ${limits.maxFilesPerMessage} 个文件`;
       }
