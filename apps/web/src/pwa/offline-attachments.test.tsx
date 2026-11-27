@@ -29,17 +29,24 @@ import { MessageComposer } from "../message-composer";
 import { chatStore } from "../store";
 import type { LocalMessage } from "../store";
 import {
+  beginStagedMessageBind,
   bindStagedAttachmentsToMessage,
   createIndexedDbBackend,
   listStagedDraftAttachments,
   listStagedMessageAttachments,
+  markStagedMessageQueued,
   MAX_STAGED_ATTACHMENTS_PER_USER,
   OfflineAttachmentStoreError,
+  reconcileOrphanedStagedAttachments,
   setOfflineAttachmentBackendForTest,
   STAGED_ATTACHMENT_TTL_MS,
   stageOfflineAttachment,
 } from "./offline-attachments";
 import type { StagedAttachmentRecord } from "./offline-attachments";
+import {
+  clearInFlightStagedBindsForTest,
+  setOfflineAttachmentTabIdForTest,
+} from "./offline-attachment-leases";
 import { createMemoryOfflineAttachmentBackend } from "./offline-attachments-memory";
 
 const user: User = {
@@ -212,9 +219,11 @@ afterEach(async () => {
   host.remove();
   chatStore.clear();
   setOfflineAttachmentBackendForTest(null);
+  setOfflineAttachmentTabIdForTest(null);
   api.csrfToken = "";
   api.sessionUnverified = false;
   localStorage.clear();
+  sessionStorage.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -1395,5 +1404,160 @@ describe("composer offline staging, idempotent replay, edit/cancel, and cleanup"
     expect(readAttachmentDraft("c-stage")[0].state).toBe("ready");
     expect(readAttachmentDraft("c-stage")[0].attachment?.id).toBe("att-flaky");
     expect(await listStagedDraftAttachments(user.id, "c-stage")).toHaveLength(0);
+  });
+
+  it("protects sibling-tab queued and binding attachments during startup reconciliation while recovering crashed same-tab binds", async () => {
+    const now = Date.now();
+    // Tab A commits one queued message and starts binding a second message.
+    setOfflineAttachmentTabIdForTest("tab-a");
+    await stageOfflineAttachment({
+      id: "st-tab-a-queued",
+      uploadKey: "uk-a-q",
+      userId: user.id,
+      conversationId: "c-stage",
+      clientMessageId: "cmid-tab-a-queued",
+      name: "tab-a-queued.png",
+      type: "image/png",
+      size: 4,
+      lastModified: now,
+      blob: new Blob(["aaa!"], { type: "image/png" }),
+      createdAt: now,
+    });
+    markStagedMessageQueued(user.id, "cmid-tab-a-queued", now);
+
+    await stageOfflineAttachment({
+      id: "st-tab-a-binding",
+      uploadKey: "uk-a-b",
+      userId: user.id,
+      conversationId: "c-stage",
+      clientMessageId: "cmid-tab-a-binding",
+      name: "tab-a-binding.png",
+      type: "image/png",
+      size: 4,
+      lastModified: now,
+      blob: new Blob(["bbb!"], { type: "image/png" }),
+      createdAt: now + 1,
+    });
+    beginStagedMessageBind(user.id, "cmid-tab-a-binding", now);
+
+    // Tab B opens fresh (empty in-memory chatStore, distinct tab ID) and reconciles.
+    clearInFlightStagedBindsForTest();
+    setOfflineAttachmentTabIdForTest("tab-b");
+
+    const recoveredByTabB = await reconcileOrphanedStagedAttachments(
+      user.id,
+      new Set(),
+      now,
+    );
+    await hydrateStagedAttachmentDrafts("c-stage", false);
+
+    // Tab B must NOT reclaim either Tab A's queued message OR Tab A's active bind!
+    expect(recoveredByTabB).toEqual([]);
+    expect(readAttachmentDraft("c-stage")).toHaveLength(0);
+    expect(
+      (await listStagedMessageAttachments(user.id, "cmid-tab-a-queued")).map((r) => r.id),
+    ).toEqual(["st-tab-a-queued"]);
+    expect(
+      (await listStagedMessageAttachments(user.id, "cmid-tab-a-binding")).map((r) => r.id),
+    ).toEqual(["st-tab-a-binding"]);
+
+    // Now simulate Tab A reloading after crashing mid-bind (same tab-a ID, empty in-flight set).
+    setOfflineAttachmentTabIdForTest("tab-a");
+
+    const recoveredByTabA = await reconcileOrphanedStagedAttachments(
+      user.id,
+      new Set(),
+      now,
+    );
+    await hydrateStagedAttachmentDrafts("c-stage", false);
+
+    // Tab A recovers its own crashed binding immediately while keeping its queued message bound!
+    expect(recoveredByTabA.map((r) => r.id)).toEqual(["st-tab-a-binding"]);
+    expect(readAttachmentDraft("c-stage").map((f) => f.id)).toEqual([
+      "st-tab-a-binding",
+    ]);
+    expect(
+      (await listStagedMessageAttachments(user.id, "cmid-tab-a-queued")).map((r) => r.id),
+    ).toEqual(["st-tab-a-queued"]);
+  });
+
+  it("caps hydrated staged drafts to maxFilesPerMessage, preserves excess blobs for recovery, and blocks oversized drafts", async () => {
+    const now = Date.now();
+    // Simulate two offline tabs staging 6 total files when maxFilesPerMessage is 4.
+    for (let i = 1; i <= 6; i++) {
+      await stageOfflineAttachment({
+        id: `st-excess-${i}`,
+        uploadKey: `uk-excess-${i}`,
+        userId: user.id,
+        conversationId: "c-stage",
+        clientMessageId: "",
+        name: `file-${i}.txt`,
+        type: "text/plain",
+        size: 3,
+        lastModified: now + i,
+        blob: new Blob([`f-${i}`], { type: "text/plain" }),
+        createdAt: now + i,
+      });
+    }
+
+    const customLimits = { ...defaultAttachmentLimits, maxFilesPerMessage: 4 };
+    let draftApi!: ReturnType<typeof useAttachmentDraft>;
+    function Harness() {
+      draftApi = useAttachmentDraft("c-stage", customLimits, true);
+      return (
+        <AttachmentDraft
+          files={draftApi.files}
+          error={draftApi.error}
+          onRemove={draftApi.remove}
+          onRetry={draftApi.retry}
+        />
+      );
+    }
+
+    await act(async () => {
+      root.render(<Harness />);
+    });
+    await flush();
+
+    // Only the first 4 hydrate into the composer; the remaining 2 stay preserved in IDB.
+    expect(draftApi.files.map((f) => f.id)).toEqual([
+      "st-excess-1",
+      "st-excess-2",
+      "st-excess-3",
+      "st-excess-4",
+    ]);
+    expect(draftApi.ready).toBe(true);
+    expect(draftApi.blocked).toBe(false);
+    expect(draftApi.error).toContain("2");
+    expect(await listStagedDraftAttachments(user.id, "c-stage")).toHaveLength(6);
+
+    // Removing one file frees a slot and automatically hydrates st-excess-5 from IDB.
+    await act(async () => {
+      draftApi.remove("st-excess-1");
+    });
+    await flush();
+    await flush();
+    expect(draftApi.files.map((f) => f.id)).toEqual([
+      "st-excess-2",
+      "st-excess-3",
+      "st-excess-4",
+      "st-excess-5",
+    ]);
+
+    // Defensive check: if a draft ever holds > maxFilesPerMessage, submission is blocked!
+    await act(async () => {
+      addAttachmentDraftFiles("c-stage", [
+        {
+          id: "st-over-limit",
+          uploadKey: "uk-over",
+          file: new File(["x"], "over.txt", { type: "text/plain" }),
+          state: "staged",
+          stagedOffline: true,
+        },
+      ]);
+    });
+    expect(draftApi.files).toHaveLength(5);
+    expect(draftApi.ready).toBe(false);
+    expect(draftApi.blocked).toBe(true);
   });
 });

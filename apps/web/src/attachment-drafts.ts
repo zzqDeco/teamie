@@ -9,6 +9,7 @@ import {
   clearStagedAttachmentsForUser,
   deleteStagedAttachment,
   listStagedDraftAttachments,
+  markStagedMessageQueued,
   OfflineAttachmentStoreError,
   pruneStagedAttachmentsToConversations,
   reconcileOrphanedStagedAttachments,
@@ -271,15 +272,20 @@ export function addAttachmentDraftFiles(
   }
 }
 
-/** Hydrates offline-staged composer draft blobs from IndexedDB for one conversation. */
+/**
+ * Hydrates offline-staged composer draft blobs from IndexedDB for one conversation,
+ * respecting `maxFilesPerMessage` and leaving any excess records in IndexedDB for
+ * recovery after files are sent or removed. Returns the count of preserved excess files.
+ */
 export async function hydrateStagedAttachmentDrafts(
   conversationId: string,
   autoUpload = false,
-): Promise<void> {
+  maxFilesPerMessage = defaultAttachmentLimits.maxFilesPerMessage,
+): Promise<number> {
   const snapshot = chatStore.getSnapshot();
   const userId = snapshot.userId;
   const generation = chatStore.generation;
-  if (!userId || !conversationId) return;
+  if (!userId || !conversationId) return 0;
   if (reconciledGeneration !== generation) {
     const activeIds = new Set<string>();
     for (const list of Object.values(snapshot.messages)) {
@@ -298,7 +304,7 @@ export async function hydrateStagedAttachmentDrafts(
       chatStore.generation !== generation ||
       chatStore.getSnapshot().userId !== userId
     ) {
-      return;
+      return 0;
     }
     reconciledGeneration = generation;
   }
@@ -308,26 +314,28 @@ export async function hydrateStagedAttachmentDrafts(
     chatStore.generation !== generation ||
     chatStore.getSnapshot().userId !== userId
   ) {
-    return;
+    return 0;
   }
   const entry = entryFor(conversationId);
   const existingIds = new Set(entry.files.map((f) => f.id));
-  const additions: DraftFile[] = [];
-  for (const rec of records) {
-    if (existingIds.has(rec.id)) continue;
-    additions.push({
-      id: rec.id,
-      uploadKey: rec.uploadKey,
-      file: stagedRecordToFile(rec),
-      state: autoUpload ? "uploading" : "staged",
-      stagedOffline: true,
-    });
-  }
-  if (!additions.length) return;
+  const novelRecords = records.filter((rec) => !existingIds.has(rec.id));
+  if (!novelRecords.length) return 0;
+  const remainingSlots = Math.max(0, maxFilesPerMessage - entry.files.length);
+  const toLoad = novelRecords.slice(0, remainingSlots);
+  const overflowCount = novelRecords.length - toLoad.length;
+  if (!toLoad.length) return overflowCount;
+  const additions: DraftFile[] = toLoad.map((rec) => ({
+    id: rec.id,
+    uploadKey: rec.uploadKey,
+    file: stagedRecordToFile(rec),
+    state: autoUpload ? "uploading" : "staged",
+    stagedOffline: true,
+  }));
   update(entry, [...entry.files, ...additions]);
   if (autoUpload) {
     for (const file of additions) queueAttachmentUpload(conversationId, file.id);
   }
+  return overflowCount;
 }
 
 /** Promotes all in-memory `"staged"` draft files to active uploads once online. */
@@ -409,7 +417,13 @@ export async function restoreMessageAttachmentsToDraft(
         conversationId,
         restoredRecords.map((r) => r.id),
         message.clientMessageId,
-      ).catch(() => {});
+      )
+        .then((rebound) => {
+          if (rebound.length) {
+            markStagedMessageQueued(userId, message.clientMessageId);
+          }
+        })
+        .catch(() => {});
     }
     throw err;
   }
@@ -423,7 +437,13 @@ export async function restoreMessageAttachmentsToDraft(
           conversationId,
           restoredRecords.map((r) => r.id),
           message.clientMessageId,
-        ).catch(() => {});
+        )
+          .then((rebound) => {
+            if (rebound.length) {
+              markStagedMessageQueued(userId, message.clientMessageId);
+            }
+          })
+          .catch(() => {});
       }
       throw new OfflineAttachmentStoreError(
         "missing_attachment",
@@ -488,9 +508,12 @@ export async function restoreMessageAttachmentsToDraft(
 }
 
 /** The user removed a file: abort its upload, delete server pending upload and local IDB blob. */
-export function removeAttachmentDraftFile(conversationId: string, id: string) {
+export function removeAttachmentDraftFile(
+  conversationId: string,
+  id: string,
+): Promise<void> {
   const entry = entries.get(keyFor(conversationId));
-  if (!entry) return;
+  if (!entry) return Promise.resolve();
   const file = entry.files.find((f) => f.id === id);
   entry.controllers.get(id)?.abort();
   entry.waiting = entry.waiting.filter((waiting) => waiting !== id);
@@ -499,7 +522,7 @@ export function removeAttachmentDraftFile(conversationId: string, id: string) {
     entry.files.filter((f) => f.id !== id),
   );
   if (file?.attachment) void deleteRemote(entry, file.attachment.id);
-  if (entry.userId) void deleteStagedAttachment(entry.userId, id);
+  return entry.userId ? deleteStagedAttachment(entry.userId, id) : Promise.resolve();
 }
 
 /** A send links the ready descriptors; nothing is deleted server-side. */

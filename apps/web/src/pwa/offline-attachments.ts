@@ -1,4 +1,20 @@
 import type { Attachment } from "@teamie/api-client";
+import {
+  beginStagedMessageBind,
+  clearInFlightStagedBindsForTest,
+  clearStagedMessageOwnershipExceptUser,
+  clearStagedMessageOwnershipForUser,
+  collectCrossTabProtectedMessageIds,
+  endStagedMessageBind,
+  markStagedMessageQueued,
+  releaseStagedMessageOwnership,
+} from "./offline-attachment-leases";
+
+export {
+  beginStagedMessageBind,
+  endStagedMessageBind,
+  markStagedMessageQueued,
+};
 
 const DB_NAME = "teamie-offline-attachments-v1";
 const DB_VERSION = 1;
@@ -474,20 +490,11 @@ export function createIndexedDbBackend(
 }
 
 let activeBackend: OfflineAttachmentBackend = createIndexedDbBackend();
-const inFlightBindMessageIds = new Set<string>();
-
-export function beginStagedMessageBind(clientMessageId: string): void {
-  if (clientMessageId) inFlightBindMessageIds.add(clientMessageId);
-}
-
-export function endStagedMessageBind(clientMessageId: string): void {
-  inFlightBindMessageIds.delete(clientMessageId);
-}
 
 export function setOfflineAttachmentBackendForTest(
   backend: OfflineAttachmentBackend | null,
 ): void {
-  inFlightBindMessageIds.clear();
+  clearInFlightStagedBindsForTest();
   activeBackend = backend ?? createIndexedDbBackend();
 }
 
@@ -530,29 +537,35 @@ export function bindStagedAttachmentsToMessage(
   return activeBackend.bindToMessage(userId, conversationId, ids, clientMessageId);
 }
 
-export function unbindStagedAttachmentsToDraft(
+export async function unbindStagedAttachmentsToDraft(
   userId: string,
   conversationId: string,
   clientMessageId: string,
   requiredIds?: string[],
   now?: number,
 ): Promise<StagedAttachmentRecord[]> {
-  return activeBackend.unbindToDraft(
+  const restored = await activeBackend.unbindToDraft(
     userId,
     conversationId,
     clientMessageId,
     requiredIds,
     now,
   );
+  releaseStagedMessageOwnership(userId, clientMessageId);
+  return restored;
 }
 
 export function reconcileOrphanedStagedAttachments(
   userId: string,
   activeClientMessageIds: ReadonlySet<string>,
-  now?: number,
+  now = Date.now(),
 ): Promise<StagedAttachmentRecord[]> {
-  const protectedIds = new Set(activeClientMessageIds);
-  for (const id of inFlightBindMessageIds) protectedIds.add(id);
+  const protectedIds = collectCrossTabProtectedMessageIds(
+    userId,
+    activeClientMessageIds,
+    now,
+  );
+  if (protectedIds === null) return Promise.resolve([]);
   return activeBackend.reconcileOrphanedBindings(userId, protectedIds, now);
 }
 
@@ -563,10 +576,11 @@ export function deleteStagedAttachment(
   return activeBackend.deleteById(userId, id);
 }
 
-export function deleteStagedAttachmentsForMessage(
+export async function deleteStagedAttachmentsForMessage(
   userId: string,
   clientMessageId: string,
 ): Promise<void> {
+  releaseStagedMessageOwnership(userId, clientMessageId);
   return activeBackend.deleteForMessage(userId, clientMessageId);
 }
 
@@ -585,9 +599,11 @@ export function pruneStagedAttachmentsToConversations(
 }
 
 export function clearStagedAttachmentsForUser(userId?: string): Promise<void> {
+  clearStagedMessageOwnershipForUser(userId);
   return activeBackend.clearForUser(userId);
 }
 
 export function clearStagedAttachmentsExceptUser(userId: string): Promise<void> {
+  clearStagedMessageOwnershipExceptUser(userId);
   return activeBackend.clearExceptUser(userId);
 }

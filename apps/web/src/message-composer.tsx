@@ -16,6 +16,7 @@ import {
   beginStagedMessageBind,
   bindStagedAttachmentsToMessage,
   endStagedMessageBind,
+  markStagedMessageQueued,
   unbindStagedAttachmentsToDraft,
 } from "./pwa/offline-attachments";
 import { readAttachmentDraft } from "./attachment-drafts";
@@ -232,7 +233,7 @@ export function MessageComposer({
     const stagedDrafts = attachments.files.filter((f) => f.state === "staged");
     submittingStaged.current = true;
     setBindingStaged(true);
-    beginStagedMessageBind(clientMessageId);
+    beginStagedMessageBind(user.id, clientMessageId);
     void bindStagedAttachmentsToMessage(
       user.id,
       conversation.id,
@@ -282,6 +283,7 @@ export function MessageComposer({
         }
         finalizeLocalSend(consumed.uploaded, summaries);
         chatStore.flush();
+        markStagedMessageQueued(user.id, clientMessageId);
       })
       .catch(() => {
         if (chatStore.generation === generation) {
@@ -289,7 +291,7 @@ export function MessageComposer({
         }
       })
       .finally(() => {
-        endStagedMessageBind(clientMessageId);
+        endStagedMessageBind(user.id, clientMessageId);
         submittingStaged.current = false;
         setBindingStaged(false);
       });

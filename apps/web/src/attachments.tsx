@@ -1,41 +1,16 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
-import {
-  Clock,
-  Download,
-  File as FileIcon,
-  LoaderCircle,
-  Paperclip,
-  RefreshCw,
-  X,
-} from "lucide-react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { Clock, Download, File as FileIcon, LoaderCircle, Paperclip, RefreshCw, X } from "lucide-react";
 import { api } from "@teamie/api-client";
 import type { Attachment, AttachmentLimits } from "@teamie/api-client";
 import { errorText } from "./errors";
 import { subscribeAttachmentPreview, subscribeAttachmentThumbnail } from "./attachment-previews";
 import {
-  addAttachmentDraftFiles,
-  consumeAttachmentDraft,
-  consumeAttachmentDraftForSend,
-  hydrateStagedAttachmentDrafts,
-  promoteStagedAttachmentDrafts,
-  pruneExpiredAttachmentDrafts,
-  queueAttachmentUpload,
-  readAttachmentDraft,
-  removeAttachmentDraftFile,
-  subscribeAttachmentDrafts,
+  addAttachmentDraftFiles, consumeAttachmentDraft, consumeAttachmentDraftForSend,
+  hydrateStagedAttachmentDrafts, promoteStagedAttachmentDrafts, pruneExpiredAttachmentDrafts,
+  queueAttachmentUpload, readAttachmentDraft, removeAttachmentDraftFile, subscribeAttachmentDrafts,
 } from "./attachment-drafts";
 import type { DraftFile } from "./attachment-drafts";
-import {
-  deleteStagedAttachment,
-  OfflineAttachmentStoreError,
-  stageOfflineAttachment,
-} from "./pwa/offline-attachments";
+import { deleteStagedAttachment, OfflineAttachmentStoreError, stageOfflineAttachment } from "./pwa/offline-attachments";
 import type { StagedAttachmentSummary } from "./pwa/offline-attachments";
 import { chatStore } from "./store";
 import { ICON } from "./icons";
@@ -98,9 +73,24 @@ export function useAttachmentDraft(
   const [error, setError] = useState({ conversationId, message: "" });
   const offlineRef = useRef(offline);
   useEffect(() => {
+    let active = true;
     pruneExpiredAttachmentDrafts(conversationId);
-    void hydrateStagedAttachmentDrafts(conversationId, !offline);
-  }, [conversationId, offline]);
+    void hydrateStagedAttachmentDrafts(
+      conversationId,
+      !offline,
+      limits.maxFilesPerMessage,
+    ).then((overflow) => {
+      if (active && overflow > 0) {
+        setError({
+          conversationId,
+          message: `本地还有 ${overflow} 个暂存文件超出单条上限（${limits.maxFilesPerMessage} 个），发送或移除后将自动加载。`,
+        });
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [conversationId, offline, limits.maxFilesPerMessage]);
   useEffect(() => {
     offlineRef.current = offline;
     if (!offline) {
@@ -207,24 +197,49 @@ export function useAttachmentDraft(
     offline ||
     api.sessionUnverified ||
     (typeof navigator !== "undefined" && navigator.onLine === false);
+  const overFileLimit = files.length > limits.maxFilesPerMessage;
   const isSendable = (f: DraftFile) =>
     f.state === "ready" || (canSendStaged && f.state === "staged");
+  const hydrateOverflow = () => {
+    const generation = chatStore.generation;
+    void hydrateStagedAttachmentDrafts(
+      conversationId,
+      !offlineRef.current,
+      limits.maxFilesPerMessage,
+    ).then((overflow) => {
+      if (chatStore.generation !== generation) return;
+      if (overflow > 0) {
+        showError(
+          `本地还有 ${overflow} 个暂存文件超出单条上限（${limits.maxFilesPerMessage} 个），发送或移除后将自动加载。`,
+        );
+      }
+    });
+  };
   return {
     files,
     error: error.conversationId === conversationId ? error.message : "",
     add,
-    remove: (id: string) => removeAttachmentDraftFile(conversationId, id),
+    remove: (id: string) => {
+      void removeAttachmentDraftFile(conversationId, id).finally(hydrateOverflow);
+    },
     retry: (file: DraftFile) => queueAttachmentUpload(conversationId, file.id),
     consume: () => {
       showError("");
-      return consumeAttachmentDraft(conversationId);
+      const result = consumeAttachmentDraft(conversationId);
+      hydrateOverflow();
+      return result;
     },
     consumeForSend: (allowedStagedIds?: Set<string>) => {
       showError("");
-      return consumeAttachmentDraftForSend(conversationId, allowedStagedIds);
+      const result = consumeAttachmentDraftForSend(
+        conversationId,
+        allowedStagedIds,
+      );
+      hydrateOverflow();
+      return result;
     },
-    ready: files.length > 0 && files.every(isSendable),
-    blocked: files.some((f) => !isSendable(f)),
+    ready: files.length > 0 && !overFileLimit && files.every(isSendable),
+    blocked: overFileLimit || files.some((f) => !isSendable(f)),
   };
 }
 
