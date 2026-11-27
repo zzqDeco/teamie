@@ -94,7 +94,8 @@ export interface OfflineAttachmentBackend {
     activeClientMessageIds: ReadonlySet<string>,
     now?: number,
   ): Promise<StagedAttachmentRecord[]>;
-  deleteById(userId: string, id: string): Promise<void>;
+  isBoundToMessage(userId: string, id: string): Promise<boolean>;
+  deleteById(userId: string, id: string, onlyIfUnbound?: boolean): Promise<void>;
   deleteForMessage(userId: string, clientMessageId: string): Promise<void>;
   deleteForConversation(userId: string, conversationId: string): Promise<void>;
   pruneToConversations(
@@ -391,14 +392,34 @@ export function createIndexedDbBackend(
       }
     },
 
-    async deleteById(userId, id) {
+    async isBoundToMessage(userId, id) {
+      if (!userId || !id) return false;
+      try {
+        return await withStore("readonly", async (store) => {
+          const row = (await requestPromise(
+            store.get(id),
+          )) as StagedAttachmentRecord | undefined;
+          return Boolean(row && row.userId === userId && row.clientMessageId !== "");
+        });
+      } catch {
+        return false;
+      }
+    },
+
+    async deleteById(userId, id, onlyIfUnbound = false) {
       if (!userId || !id) return;
       try {
         await withStore("readwrite", async (store) => {
           const row = (await requestPromise(
             store.get(id),
           )) as StagedAttachmentRecord | undefined;
-          if (row && row.userId === userId) store.delete(id);
+          if (
+            row &&
+            row.userId === userId &&
+            (!onlyIfUnbound || row.clientMessageId === "")
+          ) {
+            store.delete(id);
+          }
         });
       } catch {
         // Ignore cleanup failure when storage is unavailable.
@@ -569,11 +590,19 @@ export function reconcileOrphanedStagedAttachments(
   return activeBackend.reconcileOrphanedBindings(userId, protectedIds, now);
 }
 
+export function isStagedAttachmentBoundToMessage(
+  userId: string,
+  id: string,
+): Promise<boolean> {
+  return activeBackend.isBoundToMessage(userId, id);
+}
+
 export function deleteStagedAttachment(
   userId: string,
   id: string,
+  onlyIfUnbound = false,
 ): Promise<void> {
-  return activeBackend.deleteById(userId, id);
+  return activeBackend.deleteById(userId, id, onlyIfUnbound);
 }
 
 export async function deleteStagedAttachmentsForMessage(

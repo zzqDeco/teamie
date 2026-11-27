@@ -161,8 +161,8 @@ export function useAttachmentDraft(
               createdAt: baseCreatedAt + i,
             });
             if (chatStore.generation !== generation) {
-              void deleteStagedAttachment(userId, item.id);
-              for (const prev of staged) void deleteStagedAttachment(userId, prev.id);
+              void deleteStagedAttachment(userId, item.id, true);
+              for (const prev of staged) void deleteStagedAttachment(userId, prev.id, true);
               return;
             }
             staged.push(item);
@@ -175,7 +175,7 @@ export function useAttachmentDraft(
           }
         }
         if (chatStore.generation !== generation) {
-          for (const prev of staged) void deleteStagedAttachment(userId, prev.id);
+          for (const prev of staged) void deleteStagedAttachment(userId, prev.id, true);
           return;
         }
         const existingIds = new Set(
@@ -188,7 +188,7 @@ export function useAttachmentDraft(
         );
         const kept = novel.slice(0, available);
         const overflow = novel.slice(available);
-        for (const extra of overflow) void deleteStagedAttachment(userId, extra.id);
+        for (const extra of overflow) void deleteStagedAttachment(userId, extra.id, true);
         if (kept.length) {
           addAttachmentDraftFiles(conversationId, kept);
           if (!offlineRef.current) promoteStagedAttachmentDrafts();

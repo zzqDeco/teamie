@@ -1865,4 +1865,163 @@ describe("composer offline staging, idempotent replay, edit/cancel, and cleanup"
       }),
     );
   });
+
+  it("prevents a sibling tab's stale draft promotion or mid-flight upload from deleting another tab's bound message blob", async () => {
+    const now = Date.now();
+    await stageOfflineAttachment({
+      id: "st-sibling-bound",
+      uploadKey: "uk-sibling-bound",
+      userId: user.id,
+      conversationId: "c-stage",
+      clientMessageId: "",
+      name: "shared.png",
+      type: "image/png",
+      size: 4,
+      lastModified: now,
+      blob: new Blob(["img1"], { type: "image/png" }),
+      createdAt: now,
+    });
+    // Tab B hydrates while unbound.
+    await hydrateStagedAttachmentDrafts("c-stage", false);
+    expect(readAttachmentDraft("c-stage").map((f) => f.id)).toEqual([
+      "st-sibling-bound",
+    ]);
+
+    // Tab A binds st-sibling-bound to a queued message before Tab B reconnects.
+    await bindStagedAttachmentsToMessage(
+      user.id,
+      "c-stage",
+      ["st-sibling-bound"],
+      "cmid-tab-a",
+    );
+
+    const uploadSpy = vi.spyOn(attachmentTransport, "upload");
+    promoteStagedAttachmentDrafts();
+    await flush();
+
+    // Tab B drops its stale draft without uploading or deleting Tab A's IDB record!
+    expect(uploadSpy).not.toHaveBeenCalled();
+    expect(readAttachmentDraft("c-stage")).toHaveLength(0);
+    expect(
+      (await listStagedMessageAttachments(user.id, "cmid-tab-a")).map((r) => r.id),
+    ).toEqual(["st-sibling-bound"]);
+
+    // Mid-flight race: Tab B begins uploading while unbound, Tab A binds before upload resolves.
+    await stageOfflineAttachment({
+      id: "st-midflight-bound",
+      uploadKey: "uk-midflight-bound",
+      userId: user.id,
+      conversationId: "c-stage",
+      clientMessageId: "",
+      name: "race.png",
+      type: "image/png",
+      size: 4,
+      lastModified: now + 1,
+      blob: new Blob(["img2"], { type: "image/png" }),
+      createdAt: now + 1,
+    });
+    await hydrateStagedAttachmentDrafts("c-stage", false);
+    let resolveUpload!: (v: { attachment: Attachment }) => void;
+    uploadSpy.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveUpload = resolve;
+        }),
+    );
+    const deleteRemoteSpy = vi.spyOn(api, "deletePendingAttachment");
+    promoteStagedAttachmentDrafts();
+    await flush();
+
+    await bindStagedAttachmentsToMessage(
+      user.id,
+      "c-stage",
+      ["st-midflight-bound"],
+      "cmid-tab-a-2",
+    );
+    resolveUpload({
+      attachment: {
+        id: "att-shared-idempotent",
+        filename: "race.png",
+        mediaType: "image/png",
+        sizeBytes: 4,
+        sha256: "h-race",
+      },
+    });
+    await flush();
+
+    expect(readAttachmentDraft("c-stage")).toHaveLength(0);
+    expect(deleteRemoteSpy).not.toHaveBeenCalled();
+    expect(
+      (await listStagedMessageAttachments(user.id, "cmid-tab-a-2")).map((r) => r.id),
+    ).toEqual(["st-midflight-bound"]);
+  });
+
+  it("retains the staged IndexedDB blob when localStorage is full and cannot persist the uploaded descriptor", async () => {
+    const now = Date.now();
+    await stageOfflineAttachment({
+      id: "st-ls-full",
+      uploadKey: "uk-ls-full",
+      userId: user.id,
+      conversationId: "c-stage",
+      clientMessageId: "cmid-ls-full",
+      name: "quota.pdf",
+      type: "application/pdf",
+      size: 6,
+      lastModified: now,
+      blob: new Blob(["%PDF-Q"], { type: "application/pdf" }),
+      createdAt: now,
+    });
+    const queued: LocalMessage = {
+      id: "local:cmid-ls-full",
+      clientMessageId: "cmid-ls-full",
+      conversationId: "c-stage",
+      senderId: user.id,
+      senderName: user.displayName,
+      senderKind: "human",
+      seq: Number.MAX_SAFE_INTEGER,
+      body: "存储已满测试",
+      createdAt: "2026-11-27T10:00:00Z",
+      status: "queued",
+      permanent: false,
+      stagedAttachments: [
+        {
+          id: "st-ls-full",
+          uploadKey: "uk-ls-full",
+          filename: "quota.pdf",
+          mediaType: "application/pdf",
+          sizeBytes: 6,
+        },
+      ],
+    };
+    chatStore.merge([queued]);
+    chatStore.flush();
+
+    // Simulate localStorage full during upload descriptor persistence.
+    const setItemSpy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new DOMException("QuotaExceededError", "QuotaExceededError");
+      });
+    const att: Attachment = {
+      id: "att-ls-full",
+      filename: "quota.pdf",
+      mediaType: "application/pdf",
+      sizeBytes: 6,
+      sha256: "h-ls-full",
+    };
+    const uploadSpy = vi
+      .spyOn(api, "uploadAttachment")
+      .mockResolvedValue({ attachment: att });
+    vi.spyOn(api, "send").mockRejectedValueOnce(new ApiError(503, "busy", "busy"));
+
+    await retryTransientFailures(chatStore.generation);
+
+    // Upload succeeded, send failed, localStorage failed to persist descriptor → IDB blob MUST still exist!
+    expect(uploadSpy).toHaveBeenCalledTimes(1);
+    expect(
+      (await listStagedMessageAttachments(user.id, "cmid-ls-full")).map((r) => r.id),
+    ).toEqual(["st-ls-full"]);
+
+    setItemSpy.mockRestore();
+  });
 });

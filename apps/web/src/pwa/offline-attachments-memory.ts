@@ -114,9 +114,19 @@ export function createMemoryOfflineAttachmentBackend(): OfflineAttachmentBackend
       }
       return recovered.sort(sortStagedAttachments);
     },
-    async deleteById(userId, id) {
+    async isBoundToMessage(userId, id) {
       const item = rows.get(id);
-      if (item && item.userId === userId) rows.delete(id);
+      return Boolean(item && item.userId === userId && item.clientMessageId !== "");
+    },
+    async deleteById(userId, id, onlyIfUnbound = false) {
+      const item = rows.get(id);
+      if (
+        item &&
+        item.userId === userId &&
+        (!onlyIfUnbound || item.clientMessageId === "")
+      ) {
+        rows.delete(id);
+      }
     },
     async deleteForMessage(userId, clientMessageId) {
       for (const item of [...rows.values()]) {

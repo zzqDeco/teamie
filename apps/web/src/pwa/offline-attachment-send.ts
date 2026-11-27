@@ -36,6 +36,32 @@ function isPermanentUploadError(error: unknown): boolean {
   return error.status !== 429 && error.status !== 401 && error.status < 500;
 }
 
+function isUploadedDescriptorPersisted(
+  userId: string,
+  conversationId: string,
+  clientMessageId: string,
+  stagedId: string,
+  attachmentId: string,
+): boolean {
+  try {
+    const raw = localStorage.getItem(`teamie.sync.v1.${userId}`);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw) as {
+      messages?: Record<string, LocalMessage[]>;
+    };
+    const msg = parsed?.messages?.[conversationId]?.find(
+      (m) => m.clientMessageId === clientMessageId,
+    );
+    return Boolean(
+      msg?.stagedAttachments?.some(
+        (s) => s.id === stagedId && s.attachment?.id === attachmentId,
+      ),
+    );
+  } catch {
+    return false;
+  }
+}
+
 export type StagedUploadOutcome =
   | { ok: true; attachments: Attachment[]; stagedAttachments: StagedAttachmentSummary[] }
   | { ok: false; aborted?: boolean };
@@ -118,7 +144,18 @@ export async function resolveStagedAttachmentsForSend(
           permanent: undefined,
         },
       ]);
-      void deleteStagedAttachment(message.senderId, item.id);
+      chatStore.flush();
+      if (
+        isUploadedDescriptorPersisted(
+          message.senderId,
+          message.conversationId,
+          message.clientMessageId,
+          item.id,
+          response.attachment.id,
+        )
+      ) {
+        void deleteStagedAttachment(message.senderId, item.id);
+      }
     } catch (error) {
       if (chatStore.generation !== generation) return { ok: false, aborted: true };
       const offlineNow =

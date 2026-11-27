@@ -8,6 +8,7 @@ import {
   bindStagedAttachmentsToMessage,
   clearStagedAttachmentsForUser,
   deleteStagedAttachment,
+  isStagedAttachmentBoundToMessage,
   listStagedDraftAttachments,
   markStagedMessageQueued,
   OfflineAttachmentStoreError,
@@ -209,6 +210,20 @@ async function upload(entry: Entry, id: string) {
     );
   };
   try {
+    if (
+      file.stagedOffline &&
+      entry.userId &&
+      (await isStagedAttachmentBoundToMessage(entry.userId, id))
+    ) {
+      if (live(entry)) {
+        update(
+          entry,
+          entry.files.filter((f) => f.id !== id),
+        );
+      }
+      return;
+    }
+    if (!live(entry) || controller.signal.aborted) return;
     const result = await attachmentTransport.upload(
       entry.conversationId,
       file.file,
@@ -216,6 +231,21 @@ async function upload(entry: Entry, id: string) {
       file.uploadKey,
       onProgress,
     );
+    if (
+      file.stagedOffline &&
+      entry.userId &&
+      (await isStagedAttachmentBoundToMessage(entry.userId, id))
+    ) {
+      // Bound by a sibling tab while in flight: drop stale draft without deleting
+      // the sibling message's IDB blob or shared idempotent remote upload.
+      if (live(entry)) {
+        update(
+          entry,
+          entry.files.filter((f) => f.id !== id),
+        );
+      }
+      return;
+    }
     if (!live(entry) || !entry.files.some((f) => f.id === id)) {
       // Removed or cleared while in flight: the late upload is orphaned.
       void deleteRemote(entry, result.attachment.id);
@@ -237,7 +267,7 @@ async function upload(entry: Entry, id: string) {
       ),
     );
     if (entry.userId) {
-      void deleteStagedAttachment(entry.userId, id);
+      void deleteStagedAttachment(entry.userId, id, true);
     }
   } catch (e) {
     if (live(entry) && !controller.signal.aborted) {
@@ -557,7 +587,9 @@ export function removeAttachmentDraftFile(
     entry.files.filter((f) => f.id !== id),
   );
   if (file?.attachment) void deleteRemote(entry, file.attachment.id);
-  return entry.userId ? deleteStagedAttachment(entry.userId, id) : Promise.resolve();
+  return entry.userId
+    ? deleteStagedAttachment(entry.userId, id, true)
+    : Promise.resolve();
 }
 
 /** A send links the ready descriptors; nothing is deleted server-side. */
