@@ -84,6 +84,10 @@
     background: var(--brand);
     transition: width var(--dur-base) ease;
   }
+  .attachment-draft.staged {
+    border-style: dashed;
+    border-color: var(--border-strong);
+  }
   .attachment-draft.failed {
     border-color: var(--danger-border);
   }
@@ -136,6 +140,30 @@
   .message-attachments button:disabled {
     opacity: 0.65;
     cursor: wait;
+  }
+  .message-staged-attachments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    list-style: none;
+    margin: var(--space-1_5) 0 0;
+    padding: 0;
+  }
+  .message-staged-attachment {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--r-md);
+    background: var(--surface);
+    color: var(--text-muted);
+    max-width: 340px;
+    min-width: 0;
+  }
+  .staged-attachment-tag {
+    color: var(--brand-text);
+    font-weight: 500;
   }
 }
 

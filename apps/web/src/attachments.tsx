@@ -6,6 +6,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import {
+  Clock,
   Download,
   File as FileIcon,
   LoaderCircle,
@@ -20,6 +21,9 @@ import { subscribeAttachmentPreview, subscribeAttachmentThumbnail } from "./atta
 import {
   addAttachmentDraftFiles,
   consumeAttachmentDraft,
+  consumeAttachmentDraftForSend,
+  hydrateStagedAttachmentDrafts,
+  promoteStagedAttachmentDrafts,
   pruneExpiredAttachmentDrafts,
   queueAttachmentUpload,
   readAttachmentDraft,
@@ -27,6 +31,13 @@ import {
   subscribeAttachmentDrafts,
 } from "./attachment-drafts";
 import type { DraftFile } from "./attachment-drafts";
+import {
+  deleteStagedAttachment,
+  OfflineAttachmentStoreError,
+  stageOfflineAttachment,
+} from "./pwa/offline-attachments";
+import type { StagedAttachmentSummary } from "./pwa/offline-attachments";
+import { chatStore } from "./store";
 import { ICON } from "./icons";
 import { AttachmentLightbox } from "./chat/attachment-lightbox";
 import type { LightboxImageItem } from "./chat/attachment-lightbox";
@@ -79,6 +90,7 @@ export function validateFile(
 export function useAttachmentDraft(
   conversationId: string,
   limits: AttachmentLimits,
+  offline = false,
 ) {
   const files = useSyncExternalStore(subscribeAttachmentDrafts, () =>
     readAttachmentDraft(conversationId),
@@ -86,10 +98,20 @@ export function useAttachmentDraft(
   const [error, setError] = useState({ conversationId, message: "" });
   useEffect(() => {
     pruneExpiredAttachmentDrafts(conversationId);
-  }, [conversationId]);
+    void hydrateStagedAttachmentDrafts(conversationId, !offline);
+  }, [conversationId, offline]);
+  useEffect(() => {
+    if (!offline) {
+      promoteStagedAttachmentDrafts();
+    }
+  }, [offline]);
   const showError = (message: string) => setError({ conversationId, message });
   function add(selected: FileList | File[]) {
     showError("");
+    const isOfflineNow =
+      offline ||
+      api.sessionUnverified ||
+      (typeof navigator !== "undefined" && navigator.onLine === false);
     const accepted: DraftFile[] = [];
     let count = readAttachmentDraft(conversationId).length;
     for (const file of Array.from(selected)) {
@@ -106,12 +128,75 @@ export function useAttachmentDraft(
         id: crypto.randomUUID(),
         uploadKey: crypto.randomUUID(),
         file,
-        state: "uploading",
+        state: isOfflineNow ? "staged" : "uploading",
       });
       count++;
     }
-    addAttachmentDraftFiles(conversationId, accepted);
+    if (!accepted.length) return;
+    if (!isOfflineNow) {
+      addAttachmentDraftFiles(conversationId, accepted);
+      return;
+    }
+    const userId = chatStore.getSnapshot().userId;
+    const generation = chatStore.generation;
+    if (!userId) return;
+    void (async () => {
+      const staged: DraftFile[] = [];
+      let lastErr = "";
+      for (const item of accepted) {
+        if (chatStore.generation !== generation) return;
+        try {
+          await stageOfflineAttachment({
+            id: item.id,
+            uploadKey: item.uploadKey,
+            userId,
+            conversationId,
+            clientMessageId: "",
+            name: item.file.name,
+            type: item.file.type || "application/octet-stream",
+            size: item.file.size,
+            lastModified: item.file.lastModified || Date.now(),
+            blob: item.file,
+            createdAt: Date.now(),
+          });
+          if (chatStore.generation !== generation) {
+            void deleteStagedAttachment(userId, item.id);
+            for (const prev of staged) void deleteStagedAttachment(userId, prev.id);
+            return;
+          }
+          staged.push(item);
+        } catch (err) {
+          lastErr =
+            err instanceof OfflineAttachmentStoreError
+              ? err.message
+              : "暂存离线附件失败，请重试。";
+          break;
+        }
+      }
+      if (chatStore.generation !== generation) {
+        for (const prev of staged) void deleteStagedAttachment(userId, prev.id);
+        return;
+      }
+      const available = Math.max(
+        0,
+        limits.maxFilesPerMessage - readAttachmentDraft(conversationId).length,
+      );
+      const kept = staged.slice(0, available);
+      const overflow = staged.slice(available);
+      for (const extra of overflow) void deleteStagedAttachment(userId, extra.id);
+      if (kept.length) addAttachmentDraftFiles(conversationId, kept);
+      if (overflow.length && !lastErr) {
+        lastErr = `每条消息最多 ${limits.maxFilesPerMessage} 个文件`;
+      }
+      if (lastErr) showError(lastErr);
+    })();
   }
+  const canSendStaged =
+    offline ||
+    api.sessionUnverified ||
+    (typeof navigator !== "undefined" && navigator.onLine === false);
+  const isSendable = (f: DraftFile) =>
+    f.state === "ready" || (canSendStaged && f.state === "staged");
   return {
     files,
     error: error.conversationId === conversationId ? error.message : "",
@@ -122,8 +207,12 @@ export function useAttachmentDraft(
       showError("");
       return consumeAttachmentDraft(conversationId);
     },
-    ready: files.length > 0 && files.every((f) => f.state === "ready"),
-    blocked: files.some((f) => f.state !== "ready"),
+    consumeForSend: (allowedStagedIds?: Set<string>) => {
+      showError("");
+      return consumeAttachmentDraftForSend(conversationId, allowedStagedIds);
+    },
+    ready: files.length > 0 && files.every(isSendable),
+    blocked: files.some((f) => !isSendable(f)),
   };
 }
 
@@ -189,13 +278,15 @@ export function AttachmentDraft({
                   className="attachment-meta"
                   role={file.state === "failed" ? "alert" : "status"}
                 >
-                  {file.state === "uploading"
-                    ? file.progress === undefined
-                      ? "正在上传…"
-                      : `正在上传… ${file.progress}%`
-                    : file.state === "ready"
-                      ? `${fileSize(file.file.size)} · 已就绪`
-                      : file.error || "上传失败"}
+                  {file.state === "staged"
+                    ? `${fileSize(file.file.size)} · 已暂存，联网后自动上传`
+                    : file.state === "uploading"
+                      ? file.progress === undefined
+                        ? "正在上传…"
+                        : `正在上传… ${file.progress}%`
+                      : file.state === "ready"
+                        ? `${fileSize(file.attachment?.sizeBytes ?? file.file.size)} · 已就绪`
+                        : file.error || "上传失败"}
                 </span>
                 {file.state === "uploading" && (
                   <span
@@ -210,6 +301,9 @@ export function AttachmentDraft({
                   </span>
                 )}
               </span>
+              {file.state === "staged" && (
+                <Clock size={ICON.sm} aria-hidden="true" />
+              )}
               {file.state === "uploading" && (
                 <LoaderCircle size={ICON.sm} className="spin" />
               )}
@@ -239,6 +333,31 @@ export function AttachmentDraft({
         </p>
       )}
     </>
+  );
+}
+
+export function StagedMessageAttachments({
+  items,
+}: {
+  items: StagedAttachmentSummary[];
+}) {
+  return (
+    <ul className="message-staged-attachments" aria-label="等待上传的附件">
+      {items.map((item) => (
+        <li key={item.id} className="message-staged-attachment">
+          <FileIcon size={ICON.md} aria-hidden="true" />
+          <span className="attachment-details">
+            <span className="attachment-name">{item.filename}</span>
+            <span className="attachment-meta">
+              {fileSize(item.sizeBytes)} ·{" "}
+              <span className="staged-attachment-tag">
+                {item.attachment ? "已上传" : "待上传"}
+              </span>
+            </span>
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 

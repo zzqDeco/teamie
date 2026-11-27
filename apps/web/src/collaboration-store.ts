@@ -1,6 +1,9 @@
 import type { Conversation, Message, Pin, SavedItem } from "@teamie/api-client";
 import type { NotificationProjection } from "./notification-model";
+import type { StagedAttachmentSummary } from "./pwa/offline-attachments";
 import type { ReactionStates } from "./reactions";
+
+export type { StagedAttachmentSummary };
 
 export type LocalMessage = Message & {
   status?: "queued" | "sending" | "failed";
@@ -8,6 +11,7 @@ export type LocalMessage = Message & {
   // A failure the same idempotent retry cannot fix (conflict, lost access,
   // expired file, disabled feature). Only queued/transient failures auto-retry.
   permanent?: boolean;
+  stagedAttachments?: StagedAttachmentSummary[];
 };
 
 export type PinnedMessage = Pin & { messageId?: string; conversationId?: string };

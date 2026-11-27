@@ -1,5 +1,8 @@
+import { useRef } from "react";
 import type { RefObject } from "react";
 import { Clock, LoaderCircle, PencilLine, RefreshCw, Trash2 } from "lucide-react";
+import { api } from "@teamie/api-client";
+import { restoreMessageAttachmentsToDraft } from "../attachment-drafts";
 import { sendMessage } from "../chat";
 import { chatStore } from "../store";
 import type { LocalMessage } from "../store";
@@ -17,18 +20,41 @@ export function MessageSendStatus({
   conversationId: string;
   inputRef: RefObject<HTMLTextAreaElement | null>;
 }) {
+  const restoringRef = useRef(false);
+  const hasStaged = Boolean(message.stagedAttachments?.length);
   if (message.status === "queued") {
+    const canEdit = Boolean(message.body || hasStaged || message.attachments?.length);
     return (
       <span className="send-status queued-status">
         <Clock size={ICON.xs} aria-hidden="true" />
-        等待网络恢复后发送
-        {!!message.body && (
+        {hasStaged ? "等待网络恢复后上传附件并发送" : "等待网络恢复后发送"}
+        {canEdit && (
           <button
             type="button"
             onClick={() => {
-              restoreComposerDraft(conversationId, message);
-              discardFailedMessage(conversationId, message);
-              inputRef.current?.focus();
+              if (restoringRef.current) return;
+              restoringRef.current = true;
+              const generation = chatStore.generation;
+              const offline =
+                api.sessionUnverified ||
+                (typeof navigator !== "undefined" && navigator.onLine === false);
+              void (async () => {
+                try {
+                  if (hasStaged || message.attachments?.length) {
+                    await restoreMessageAttachmentsToDraft(
+                      conversationId,
+                      message,
+                      offline,
+                    );
+                  }
+                  if (chatStore.generation !== generation) return;
+                  restoreComposerDraft(conversationId, message);
+                  chatStore.discardLocal(conversationId, message.clientMessageId);
+                  inputRef.current?.focus();
+                } finally {
+                  restoringRef.current = false;
+                }
+              })();
             }}
           >
             <PencilLine size={ICON.xs} aria-hidden="true" />
@@ -48,7 +74,8 @@ export function MessageSendStatus({
   if (message.status === "sending") {
     return (
       <span className="send-status">
-        <LoaderCircle size={ICON.xs} className="spin" /> 正在发送
+        <LoaderCircle size={ICON.xs} className="spin" />{" "}
+        {hasStaged ? "正在上传附件并发送…" : "正在发送"}
       </span>
     );
   }
@@ -69,7 +96,7 @@ export function MessageSendStatus({
         <button
           type="button"
           title={
-            message.attachments?.length
+            message.attachments?.length || hasStaged
               ? "恢复文字到输入框，附件需要重新添加"
               : undefined
           }

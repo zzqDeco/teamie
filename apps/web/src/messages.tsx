@@ -59,7 +59,7 @@ export function ConversationView({
   const { data, syncError, sync, sendTyping, connection, offlineMode } = useChat();
   const isOffline = offlineMode || connection === "offline";
   const attachmentLimits = data?.attachmentLimits || defaultAttachmentLimits;
-  const attachments = useAttachmentDraft(conversation.id, attachmentLimits);
+  const attachments = useAttachmentDraft(conversation.id, attachmentLimits, isOffline);
   const uploadsEnabled = !!data?.capabilities["im.attachments.upload"];
   const attachmentBlocked =
     attachments.blocked || (attachments.files.length > 0 && !uploadsEnabled);
@@ -463,7 +463,6 @@ export function ConversationView({
         if (!hasFileTransfer(event)) return;
         event.preventDefault();
         if (!uploadsEnabled) { toast.error("文件上传已关闭"); return; }
-        if (isOffline) { toast.info("当前处于离线状态，恢复网络后可上传附件"); return; }
         const files = Array.from(event.dataTransfer?.files || []);
         if (files.length > 0) {
           attachments.add(files);

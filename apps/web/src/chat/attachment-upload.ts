@@ -28,6 +28,16 @@ function xhrUpload(
 ): Promise<UploadResult> {
   const sessionToken = api.csrfToken;
   return new Promise<UploadResult>((resolve, reject) => {
+    if (api.sessionUnverified) {
+      reject(
+        new ApiError(
+          503,
+          "offline_unverified",
+          "当前处于离线模式，正在等待验证登录状态。",
+        ),
+      );
+      return;
+    }
     if (signal?.aborted) {
       reject(new DOMException("Aborted", "AbortError"));
       return;

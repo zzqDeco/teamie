@@ -12,6 +12,11 @@ import type {
 import { sendMessage } from "./chat";
 import { chatStore } from "./store";
 import type { LocalMessage } from "./store";
+import {
+  bindStagedAttachmentsToMessage,
+  unbindStagedAttachmentsToDraft,
+} from "./pwa/offline-attachments";
+import { readAttachmentDraft } from "./attachment-drafts";
 import { AttachmentDraft, AttachmentPicker } from "./attachments";
 import type { useAttachmentDraft } from "./attachments";
 import { isComposingKey, MentionInput, trimMentionDraft } from "./mentions";
@@ -96,6 +101,7 @@ export function MessageComposer({
   onSent: () => void;
 }) {
   const lastTyping = useRef(0);
+  const submittingStaged = useRef(false);
   // Text lives here so keystrokes re-render only the composer, not the
   // conversation timeline. The parent remounts this component per
   // conversation and draft epoch, so the initial read is always current.
@@ -141,6 +147,7 @@ export function MessageComposer({
 
   function submit(event?: FormEvent) {
     event?.preventDefault();
+    if (submittingStaged.current) return;
     const trimmed = trimMentionDraft(body, mentions);
     const text = trimmed.body;
     if (
@@ -149,33 +156,107 @@ export function MessageComposer({
       attachmentBlocked
     )
       return;
-    const files = attachments.consume();
+    const hasStaged = attachments.files.some((f) => f.state === "staged");
     const clientMessageId = crypto.randomUUID();
-    const message: Message = {
-      id: `local:${clientMessageId}`,
-      clientMessageId,
-      conversationId: conversation.id,
-      body: text,
-      ...(trimmed.mentions.length ? { mentions: trimmed.mentions } : {}),
-      ...(files.length ? { attachments: files } : {}),
-      senderId: user.id,
-      senderName: user.displayName,
-      senderKind: user.kind,
-      seq: Number.MAX_SAFE_INTEGER,
-      createdAt: new Date().toISOString(),
-      ...(replyToId ? { replyToId } : {}),
+    const generation = chatStore.generation;
+
+    const finalizeLocalSend = (
+      uploadedFiles: ReturnType<typeof attachments.consume>,
+      stagedSummaries?: LocalMessage["stagedAttachments"],
+    ) => {
+      const message: LocalMessage = {
+        id: `local:${clientMessageId}`,
+        clientMessageId,
+        conversationId: conversation.id,
+        body: text,
+        ...(trimmed.mentions.length ? { mentions: trimmed.mentions } : {}),
+        ...(uploadedFiles.length ? { attachments: uploadedFiles } : {}),
+        ...(stagedSummaries?.length ? { stagedAttachments: stagedSummaries } : {}),
+        senderId: user.id,
+        senderName: user.displayName,
+        senderKind: user.kind,
+        seq: Number.MAX_SAFE_INTEGER,
+        createdAt: new Date().toISOString(),
+        ...(replyToId ? { replyToId } : {}),
+      };
+      void sendMessage(message, generation, { offline });
+      writeComposerDraft(conversation.id, {
+        body: "",
+        mentions: [],
+        replyToId: "",
+      });
+      setDraft({ body: "", mentions: [], revision: textRevision });
+      lastTyping.current = 0;
+      sendTyping(conversation.id, false);
+      onSent();
+      inputRef.current?.focus();
     };
-    void sendMessage(message, chatStore.generation, { offline });
-    writeComposerDraft(conversation.id, {
-      body: "",
-      mentions: [],
-      replyToId: "",
-    });
-    setDraft({ body: "", mentions: [], revision: textRevision });
-    lastTyping.current = 0;
-    sendTyping(conversation.id, false);
-    onSent();
-    inputRef.current?.focus();
+
+    if (!hasStaged) {
+      const files = attachments.consume();
+      finalizeLocalSend(files);
+      return;
+    }
+
+    const stagedDrafts = attachments.files.filter((f) => f.state === "staged");
+    submittingStaged.current = true;
+    void bindStagedAttachmentsToMessage(
+      user.id,
+      conversation.id,
+      stagedDrafts.map((f) => f.id),
+      clientMessageId,
+    )
+      .then((bound) => {
+        if (chatStore.generation !== generation) return;
+        const boundIds = new Set(bound.map((r) => r.id));
+        if (stagedDrafts.some((f) => !boundIds.has(f.id))) {
+          if (bound.length) {
+            void unbindStagedAttachmentsToDraft(
+              user.id,
+              conversation.id,
+              clientMessageId,
+            );
+          }
+          toast.error("部分离线附件暂存已失效，请移除后重新选择。");
+          return;
+        }
+        const currentById = new Map(
+          readAttachmentDraft(conversation.id).map((f) => [f.id, f]),
+        );
+        if (stagedDrafts.some((f) => currentById.get(f.id)?.state === "uploading")) {
+          void unbindStagedAttachmentsToDraft(
+            user.id,
+            conversation.id,
+            clientMessageId,
+          );
+          return;
+        }
+        const consumed = attachments.consumeForSend(boundIds);
+        const summaries = consumed.staged.map((f) => ({
+          id: f.id,
+          uploadKey: f.uploadKey,
+          filename: f.file.name,
+          mediaType: f.file.type || "application/octet-stream",
+          sizeBytes: f.file.size,
+        }));
+        if (!text && !consumed.uploaded.length && !summaries.length) {
+          void unbindStagedAttachmentsToDraft(
+            user.id,
+            conversation.id,
+            clientMessageId,
+          );
+          return;
+        }
+        finalizeLocalSend(consumed.uploaded, summaries);
+      })
+      .catch(() => {
+        if (chatStore.generation === generation) {
+          toast.error("离线暂存附件绑定失败，请稍后重试。");
+        }
+      })
+      .finally(() => {
+        submittingStaged.current = false;
+      });
   }
 
   function keyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -291,13 +372,8 @@ export function MessageComposer({
             const files = event.clipboardData?.files;
             if (!files || files.length === 0) return;
             event.preventDefault();
-            if (!uploadsEnabled) {
-              toast.error("文件上传已关闭，无法粘贴文件");
-            } else if (offline) {
-              toast.info("当前处于离线状态，恢复网络后可上传附件");
-            } else {
-              attachments.add(Array.from(files));
-            }
+            if (uploadsEnabled) attachments.add(Array.from(files));
+            else toast.error("文件上传已关闭，无法粘贴文件");
           }}
           placeholder={
             conversation.type === "channel"
@@ -309,13 +385,7 @@ export function MessageComposer({
         <div className="composer-tools">
           {uploadsEnabled && (
             <AttachmentPicker
-              onSelect={(selected) => {
-                if (offline) {
-                  toast.info("当前处于离线状态，恢复网络后可上传附件");
-                  return;
-                }
-                attachments.add(selected);
-              }}
+              onSelect={attachments.add}
               disabled={
                 attachments.files.length >= attachmentLimits.maxFilesPerMessage
               }
