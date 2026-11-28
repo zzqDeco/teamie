@@ -18,7 +18,7 @@ import { toast } from "./toast";
 import type { LocalMessage } from "./store";
 import { ReactionPicker } from "./chat/reaction-picker";
 import { MentionInput } from "./mentions";
-import { MessageAttachments } from "./attachments";
+import { MessageAttachments, StagedMessageAttachments } from "./attachments";
 import { MessageBody } from "./markdown";
 import { Avatar, BadgePill, Button, date, IconButton, Notice, time } from "./ui";
 import { formatDateTime } from "./format-datetime";
@@ -478,6 +478,9 @@ export const MessageItem = memo(function MessageItem({
               conversationId={conversationId}
               attachments={message.attachments}
             />
+          )}
+          {!message.retractedAt && !!message.stagedAttachments?.length && (
+            <StagedMessageAttachments items={message.stagedAttachments} />
           )}
           {!message.retractedAt && !!message.reactions?.length && (
             <ReactionChips

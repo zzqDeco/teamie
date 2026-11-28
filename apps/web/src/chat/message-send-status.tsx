@@ -1,10 +1,19 @@
+import { useRef, useState } from "react";
 import type { RefObject } from "react";
 import { Clock, LoaderCircle, PencilLine, RefreshCw, Trash2 } from "lucide-react";
-import { sendMessage } from "../chat";
+import { api } from "@teamie/api-client";
+import { restoreMessageAttachmentsToDraft } from "../attachment-drafts";
+import { retryTransientFailures, sendMessage } from "../chat";
+import {
+  releaseQueuedMessageForEdit,
+  reserveQueuedMessageForEdit,
+} from "../pwa/offline-attachment-send";
+import { OfflineAttachmentStoreError } from "../pwa/offline-attachments";
 import { chatStore } from "../store";
 import type { LocalMessage } from "../store";
 import { restoreComposerDraft } from "../composer-drafts";
 import { ICON } from "../icons";
+import { toast } from "../toast";
 import { discardFailedMessage } from "./conversation-chrome";
 
 /** Outbound message status: queued (offline), sending spinner, or failed actions. */
@@ -17,18 +26,78 @@ export function MessageSendStatus({
   conversationId: string;
   inputRef: RefObject<HTMLTextAreaElement | null>;
 }) {
+  const restoringRef = useRef(false);
+  const [restoring, setRestoring] = useState(false);
+  const hasStaged = Boolean(message.stagedAttachments?.length);
   if (message.status === "queued") {
+    const canEdit = Boolean(message.body || hasStaged || message.attachments?.length);
     return (
       <span className="send-status queued-status">
         <Clock size={ICON.xs} aria-hidden="true" />
-        等待网络恢复后发送
-        {!!message.body && (
+        {hasStaged ? "等待网络恢复后上传附件并发送" : "等待网络恢复后发送"}
+        {canEdit && (
           <button
             type="button"
+            disabled={restoring}
             onClick={() => {
-              restoreComposerDraft(conversationId, message);
-              discardFailedMessage(conversationId, message);
-              inputRef.current?.focus();
+              if (restoringRef.current) return;
+              const generation = chatStore.generation;
+              const current = (
+                chatStore.getSnapshot().messages[conversationId] || []
+              ).find((m) => m.clientMessageId === message.clientMessageId);
+              if (!current || current.status !== "queued") return;
+              restoringRef.current = true;
+              setRestoring(true);
+              reserveQueuedMessageForEdit(message.clientMessageId, generation);
+              const offline =
+                api.sessionUnverified ||
+                (typeof navigator !== "undefined" && navigator.onLine === false);
+              void (async () => {
+                let restored = false;
+                let shouldRetryReplay = false;
+                try {
+                  if (hasStaged || current.attachments?.length) {
+                    await restoreMessageAttachmentsToDraft(
+                      conversationId,
+                      current,
+                      offline,
+                    );
+                  }
+                  if (chatStore.generation !== generation) return;
+                  const latest = (
+                    chatStore.getSnapshot().messages[conversationId] || []
+                  ).find((m) => m.clientMessageId === message.clientMessageId);
+                  if (!latest || latest.status !== "queued") return;
+                  restoreComposerDraft(conversationId, latest);
+                  chatStore.discardLocal(conversationId, message.clientMessageId);
+                  restored = true;
+                  inputRef.current?.focus();
+                } catch (err) {
+                  shouldRetryReplay =
+                    !(err instanceof OfflineAttachmentStoreError) ||
+                    err.code === "storage_unavailable";
+                  if (chatStore.generation === generation) {
+                    toast.error(
+                      err instanceof OfflineAttachmentStoreError
+                        ? err.message
+                        : "恢复附件失败，请稍后重试。",
+                    );
+                  }
+                } finally {
+                  releaseQueuedMessageForEdit(message.clientMessageId);
+                  restoringRef.current = false;
+                  setRestoring(false);
+                  if (
+                    !restored &&
+                    shouldRetryReplay &&
+                    chatStore.generation === generation &&
+                    !api.sessionUnverified &&
+                    (typeof navigator === "undefined" || navigator.onLine !== false)
+                  ) {
+                    void retryTransientFailures(generation);
+                  }
+                }
+              })();
             }}
           >
             <PencilLine size={ICON.xs} aria-hidden="true" />
@@ -37,6 +106,7 @@ export function MessageSendStatus({
         )}
         <button
           type="button"
+          disabled={restoring}
           onClick={() => discardFailedMessage(conversationId, message)}
         >
           <Trash2 size={ICON.xs} aria-hidden="true" />
@@ -48,7 +118,8 @@ export function MessageSendStatus({
   if (message.status === "sending") {
     return (
       <span className="send-status">
-        <LoaderCircle size={ICON.xs} className="spin" /> 正在发送
+        <LoaderCircle size={ICON.xs} className="spin" />{" "}
+        {hasStaged ? "正在上传附件并发送…" : "正在发送"}
       </span>
     );
   }
@@ -69,7 +140,7 @@ export function MessageSendStatus({
         <button
           type="button"
           title={
-            message.attachments?.length
+            message.attachments?.length || hasStaged
               ? "恢复文字到输入框，附件需要重新添加"
               : undefined
           }

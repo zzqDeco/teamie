@@ -1,27 +1,19 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@teamie/api-client";
-import type { Bootstrap, Message } from "@teamie/api-client";
+import type { Bootstrap } from "@teamie/api-client";
+import { promoteStagedAttachmentDrafts } from "./attachment-drafts";
 import { useAuth } from "./auth";
-import {
-  notifySyncedMessages,
-  resetNotificationSession,
-} from "./notifications";
+import { notifySyncedMessages, resetNotificationSession } from "./notifications";
 import { chatStore } from "./store";
+import type { LocalMessage } from "./store";
 import {
-  readOfflineBootstrap,
-  saveOfflineBootstrap,
-} from "./pwa/offline-cache";
+  isQueuedMessageReservedForEdit,
+  resolveStagedAttachmentsForSend,
+} from "./pwa/offline-attachment-send";
+import { deleteStagedAttachmentsForMessage } from "./pwa/offline-attachments";
+import { readOfflineBootstrap, saveOfflineBootstrap } from "./pwa/offline-cache";
 import { refreshConversationPins } from "./chat/conversation-context-loader";
 import { typingStore } from "./typing-store";
 import { presenceStore, receiptStore } from "./engagement-store";
@@ -106,8 +98,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       if (changedReaders) receiptStore.invalidateAll(true);
       if (
         api.csrfToken &&
+        !api.sessionUnverified &&
         (typeof navigator === "undefined" || navigator.onLine !== false)
       ) {
+        promoteStagedAttachmentDrafts();
         void retryTransientFailures(chatStore.generation);
       }
     }
@@ -328,6 +322,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         lastPresenceSent = { state: "", at: 0 };
         setConnection("connected");
         void sync();
+        promoteStagedAttachmentDrafts();
         void retryTransientFailures(chatStore.generation);
         if (capabilities.current["im.read_receipts.view"]) {
           receiptStore.invalidateAll();
@@ -410,7 +405,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
       connect();
       void sync();
-      if (api.csrfToken) {
+      if (api.csrfToken && !api.sessionUnverified) {
+        promoteStagedAttachmentDrafts();
         void retryTransientFailures(chatStore.generation);
       }
     };
@@ -537,16 +533,22 @@ export function isPermanentSendError(error: unknown) {
 let chatOfflineMode = false;
 
 export async function sendMessage(
-  message: Message & {
+  message: LocalMessage & {
     forwardOf?: { conversationId: string; messageId: string };
   },
   generation: number,
   options?: { offline?: boolean },
 ) {
+  if (isQueuedMessageReservedForEdit(message.clientMessageId, generation)) return;
   chatStore.setManualUnread(message.conversationId, undefined);
   const navigatorOffline =
     typeof navigator !== "undefined" && navigator.onLine === false;
-  if (options?.offline || chatOfflineMode || navigatorOffline) {
+  if (
+    options?.offline ||
+    chatOfflineMode ||
+    navigatorOffline ||
+    api.sessionUnverified
+  ) {
     chatStore.merge([
       { ...message, status: "queued", error: undefined, permanent: false },
     ]);
@@ -555,6 +557,14 @@ export async function sendMessage(
   chatStore.merge([
     { ...message, status: "sending", error: undefined, permanent: undefined },
   ]);
+  let resolvedStaged = message.stagedAttachments;
+  let sendAttachments = message.attachments;
+  if (message.stagedAttachments?.length) {
+    const outcome = await resolveStagedAttachmentsForSend(message, generation);
+    if (!outcome.ok) return;
+    resolvedStaged = outcome.stagedAttachments;
+    sendAttachments = outcome.attachments;
+  }
   try {
     const forwardOf =
       message.forwardOf ||
@@ -569,22 +579,33 @@ export async function sendMessage(
       body: message.body,
       replyToId: message.replyToId,
       ...(message.mentions?.length ? { mentions: message.mentions } : {}),
-      ...(message.attachments?.length
-        ? { attachmentIds: message.attachments.map((a) => a.id) }
+      ...(sendAttachments?.length
+        ? { attachmentIds: sendAttachments.map((a) => a.id) }
         : {}),
       ...(forwardOf ? { forwardOf } : {}),
     });
-    if (chatStore.generation === generation)
+    if (chatStore.generation === generation) {
       chatStore.merge([response.message]);
+      if (message.stagedAttachments?.length) {
+        void deleteStagedAttachmentsForMessage(
+          message.senderId,
+          message.clientMessageId,
+        );
+      }
+    }
   } catch (error) {
     if (chatStore.generation === generation) {
+      const nextMessage: LocalMessage = resolvedStaged?.length
+        ? { ...message, stagedAttachments: resolvedStaged }
+        : message;
       if (
-        isNetworkError(error) &&
-        typeof navigator !== "undefined" &&
-        navigator.onLine === false
+        (error instanceof ApiError && error.code === "offline_unverified") ||
+        (isNetworkError(error) &&
+          typeof navigator !== "undefined" &&
+          navigator.onLine === false)
       ) {
         chatStore.merge([
-          { ...message, status: "queued", error: undefined, permanent: false },
+          { ...nextMessage, status: "queued", error: undefined, permanent: false },
         ]);
         return;
       }
@@ -592,7 +613,7 @@ export async function sendMessage(
       const text = errorText(error);
       chatStore.merge([
         {
-          ...message,
+          ...nextMessage,
           status: "failed",
           error:
             permanent && text === "请求失败，请稍后重试。"
@@ -608,7 +629,11 @@ let activeRetryDrain: Promise<void> | null = null;
 let activeRetryGeneration = -1;
 let retryDrainRequested = false;
 
-function isDrainableOutbound(m: { status?: string; permanent?: boolean }) {
+function isDrainableOutbound(
+  m: { clientMessageId: string; status?: string; permanent?: boolean },
+  generation: number,
+) {
+  if (isQueuedMessageReservedForEdit(m.clientMessageId, generation)) return false;
   return (
     m.status === "queued" || (m.status === "failed" && m.permanent === false)
   );
@@ -631,7 +656,9 @@ export async function retryTransientFailures(generation: number) {
       if (chatOfflineMode || (typeof navigator !== "undefined" && navigator.onLine === false)) return;
       const snapshot = chatStore.getSnapshot();
       const queued = Object.values(snapshot.messages)
-        .flatMap((messages) => messages.filter(isDrainableOutbound))
+        .flatMap((messages) =>
+          messages.filter((m) => isDrainableOutbound(m, generation)),
+        )
         .sort(
           (a, b) =>
             a.createdAt.localeCompare(b.createdAt) ||
@@ -651,7 +678,7 @@ export async function retryTransientFailures(generation: number) {
         const current = (latestSnapshot.messages[item.conversationId] || []).find(
           (m) => m.clientMessageId === item.clientMessageId,
         );
-        if (current && isDrainableOutbound(current))
+        if (current && isDrainableOutbound(current, generation))
           await sendMessage(current, generation);
       }
     } while (retryDrainRequested && chatStore.generation === generation);

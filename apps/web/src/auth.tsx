@@ -18,6 +18,10 @@ import { discardAttachmentDrafts } from "./attachment-drafts";
 import { isNetworkError } from "./errors";
 import { syncAppBadge } from "./pwa/badge";
 import {
+  clearStagedAttachmentsExceptUser,
+  clearStagedAttachmentsForUser,
+} from "./pwa/offline-attachments";
+import {
   clearOfflineShellSnapshot,
   clearPendingOfflineLogout,
   markPendingOfflineLogout,
@@ -58,6 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const reset = useCallback(() => {
     clearAttachmentPreviews();
     clearOfflineShellSnapshot();
+    void clearStagedAttachmentsForUser();
     syncAppBadge(0);
     generation.current += 1;
     subject.current = null;
@@ -74,6 +79,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     (session: Session) => {
       clearAttachmentPreviews();
       clearPendingOfflineLogout();
+      void clearStagedAttachmentsExceptUser(session.user.id);
       generation.current += 1;
       subject.current = session.user.id;
       client.clear();
@@ -201,6 +207,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
           clearPendingOfflineLogout();
           clearOfflineShellSnapshot();
+          void clearStagedAttachmentsForUser();
           chatStore.clear();
           syncAppBadge(0);
           setOfflineMode(false);
@@ -208,6 +215,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         if (readPendingOfflineLogout()) {
           clearOfflineShellSnapshot();
+          void clearStagedAttachmentsForUser();
           chatStore.clear();
           syncAppBadge(0);
           setOfflineMode(false);

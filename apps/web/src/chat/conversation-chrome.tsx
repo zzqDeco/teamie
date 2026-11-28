@@ -23,6 +23,7 @@ import type {
   NotificationLevel,
 } from "@teamie/api-client";
 import { errorText } from "../errors";
+import { deleteStagedAttachmentsForMessage } from "../pwa/offline-attachments";
 import { chatStore, effectiveNotificationLevel } from "../store";
 import type { LocalMessage } from "../store";
 import {
@@ -167,6 +168,19 @@ export function discardFailedMessage(conversationId: string, message: LocalMessa
     void api
       .deletePendingAttachment(conversationId, attachment.id)
       .catch(() => {});
+  }
+  for (const staged of message.stagedAttachments || []) {
+    if (staged.attachment) {
+      void api
+        .deletePendingAttachment(conversationId, staged.attachment.id)
+        .catch(() => {});
+    }
+  }
+  if (message.stagedAttachments?.length) {
+    void deleteStagedAttachmentsForMessage(
+      message.senderId,
+      message.clientMessageId,
+    );
   }
   chatStore.discardLocal(conversationId, message.clientMessageId);
 }

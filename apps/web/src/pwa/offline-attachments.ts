@@ -1,0 +1,638 @@
+import type { Attachment } from "@teamie/api-client";
+import {
+  beginStagedMessageBind,
+  clearInFlightStagedBindsForTest,
+  clearStagedMessageOwnershipExceptUser,
+  clearStagedMessageOwnershipForUser,
+  collectCrossTabProtectedMessageIds,
+  endStagedMessageBind,
+  markStagedMessageQueued,
+  releaseStagedMessageOwnership,
+} from "./offline-attachment-leases";
+
+export {
+  beginStagedMessageBind,
+  endStagedMessageBind,
+  markStagedMessageQueued,
+};
+
+const DB_NAME = "teamie-offline-attachments-v1";
+const DB_VERSION = 1;
+const STORE_NAME = "staged";
+
+/** Matches backend sender-wide pending upload cap. */
+export const MAX_STAGED_ATTACHMENTS_PER_USER = 32;
+/** Matches `PENDING_ATTACHMENT_TTL_MS` (23h). */
+export const STAGED_ATTACHMENT_TTL_MS = 23 * 60 * 60 * 1000;
+
+export type StagedAttachmentSummary = {
+  id: string;
+  uploadKey: string;
+  filename: string;
+  mediaType: string;
+  sizeBytes: number;
+  attachment?: Attachment;
+};
+
+export type StagedAttachmentRecord = {
+  id: string;
+  uploadKey: string;
+  userId: string;
+  conversationId: string;
+  /** Empty string while held in composer draft; set to clientMessageId when queued to send. */
+  clientMessageId: string;
+  name: string;
+  type: string;
+  size: number;
+  lastModified: number;
+  blob: Blob;
+  createdAt: number;
+};
+
+export type OfflineAttachmentStoreErrorCode =
+  | "storage_unavailable"
+  | "capacity_exceeded"
+  | "quota_exceeded"
+  | "missing_attachment";
+
+export class OfflineAttachmentStoreError extends Error {
+  code: OfflineAttachmentStoreErrorCode;
+  constructor(code: OfflineAttachmentStoreErrorCode, message: string) {
+    super(message);
+    this.name = "OfflineAttachmentStoreError";
+    this.code = code;
+  }
+}
+
+export interface OfflineAttachmentBackend {
+  stage(record: StagedAttachmentRecord, now?: number): Promise<void>;
+  listDrafts(
+    userId: string,
+    conversationId: string,
+    now?: number,
+  ): Promise<StagedAttachmentRecord[]>;
+  listForMessage(
+    userId: string,
+    clientMessageId: string,
+    now?: number,
+  ): Promise<StagedAttachmentRecord[]>;
+  bindToMessage(
+    userId: string,
+    conversationId: string,
+    ids: string[],
+    clientMessageId: string,
+  ): Promise<StagedAttachmentRecord[]>;
+  unbindToDraft(
+    userId: string,
+    conversationId: string,
+    clientMessageId: string,
+    requiredIds?: string[],
+    now?: number,
+  ): Promise<StagedAttachmentRecord[]>;
+  reconcileOrphanedBindings(
+    userId: string,
+    activeClientMessageIds: ReadonlySet<string>,
+    now?: number,
+  ): Promise<StagedAttachmentRecord[]>;
+  isBoundToMessage(userId: string, id: string): Promise<boolean>;
+  deleteById(userId: string, id: string, onlyIfUnbound?: boolean): Promise<void>;
+  deleteForMessage(userId: string, clientMessageId: string): Promise<void>;
+  deleteForConversation(userId: string, conversationId: string): Promise<void>;
+  pruneToConversations(
+    userId: string,
+    allowedConversationIds: ReadonlySet<string>,
+  ): Promise<void>;
+  clearForUser(userId?: string): Promise<void>;
+  clearExceptUser(userId: string): Promise<void>;
+}
+
+export function isStagedAttachmentExpired(
+  record: StagedAttachmentRecord,
+  now: number,
+): boolean {
+  return !Number.isFinite(record.createdAt) || now - record.createdAt >= STAGED_ATTACHMENT_TTL_MS;
+}
+
+export function sortStagedAttachments(
+  a: StagedAttachmentRecord,
+  b: StagedAttachmentRecord,
+) {
+  return a.createdAt - b.createdAt || a.id.localeCompare(b.id);
+}
+
+const isExpired = isStagedAttachmentExpired;
+const sortByCreated = sortStagedAttachments;
+
+function mapDomError(err: unknown): OfflineAttachmentStoreError {
+  if (err instanceof OfflineAttachmentStoreError) return err;
+  const name = (err as { name?: string } | null)?.name || "";
+  if (name === "QuotaExceededError") {
+    return new OfflineAttachmentStoreError(
+      "quota_exceeded",
+      "本地离线存储空间不足，请移除部分待发送文件后重试。",
+    );
+  }
+  return new OfflineAttachmentStoreError(
+    "storage_unavailable",
+    "当前浏览器不支持离线暂存附件，请恢复网络后再添加。",
+  );
+}
+
+function requestPromise<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("IDB request failed"));
+  });
+}
+
+function transactionDone(tx: IDBTransaction): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error || new Error("IDB transaction failed"));
+    tx.onabort = () => reject(tx.error || new Error("IDB transaction aborted"));
+  });
+}
+
+export function createIndexedDbBackend(
+  getFactory: () => IDBFactory | undefined = () =>
+    typeof globalThis !== "undefined" ? globalThis.indexedDB : undefined,
+): OfflineAttachmentBackend {
+  let dbPromise: Promise<IDBDatabase> | null = null;
+
+  function openDb(): Promise<IDBDatabase> {
+    if (dbPromise) return dbPromise;
+    const factory = getFactory();
+    if (!factory || typeof factory.open !== "function") {
+      return Promise.reject(
+        new OfflineAttachmentStoreError(
+          "storage_unavailable",
+          "当前浏览器不支持离线暂存附件，请恢复网络后再添加。",
+        ),
+      );
+    }
+    dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
+      try {
+        const req = factory.open(DB_NAME, DB_VERSION);
+        req.onupgradeneeded = () => {
+          const db = req.result;
+          if (!db.objectStoreNames.contains(STORE_NAME)) {
+            const store = db.createObjectStore(STORE_NAME, { keyPath: "id" });
+            store.createIndex("byUser", "userId", { unique: false });
+            store.createIndex("byUserConversation", ["userId", "conversationId"], {
+              unique: false,
+            });
+            store.createIndex("byUserMessage", ["userId", "clientMessageId"], {
+              unique: false,
+            });
+          }
+        };
+        req.onsuccess = () => {
+          const db = req.result;
+          db.onversionchange = () => {
+            db.close();
+            dbPromise = null;
+          };
+          resolve(db);
+        };
+        req.onerror = () => {
+          dbPromise = null;
+          reject(mapDomError(req.error));
+        };
+        req.onblocked = () => {
+          dbPromise = null;
+          reject(
+            new OfflineAttachmentStoreError(
+              "storage_unavailable",
+              "离线附件存储正被占用，请稍后重试。",
+            ),
+          );
+        };
+      } catch (err) {
+        dbPromise = null;
+        reject(mapDomError(err));
+      }
+    });
+    return dbPromise;
+  }
+
+  async function withStore<T>(
+    mode: IDBTransactionMode,
+    run: (store: IDBObjectStore) => Promise<T>,
+  ): Promise<T> {
+    const db = await openDb();
+    try {
+      const tx = db.transaction(STORE_NAME, mode);
+      const store = tx.objectStore(STORE_NAME);
+      const done = transactionDone(tx);
+      const value = await run(store);
+      await done;
+      return value;
+    } catch (err) {
+      throw mapDomError(err);
+    }
+  }
+
+  return {
+    async stage(record, now = Date.now()) {
+      await withStore("readwrite", async (store) => {
+        const byUser = store.index("byUser");
+        const existing = (await requestPromise(
+          byUser.getAll(record.userId),
+        )) as StagedAttachmentRecord[];
+        let activeCount = 0;
+        for (const item of existing) {
+          if (isExpired(item, now)) {
+            store.delete(item.id);
+          } else if (item.id !== record.id) {
+            activeCount += 1;
+          }
+        }
+        if (activeCount >= MAX_STAGED_ATTACHMENTS_PER_USER) {
+          throw new OfflineAttachmentStoreError(
+            "capacity_exceeded",
+            `离线暂存附件已达上限（${MAX_STAGED_ATTACHMENTS_PER_USER} 个），请先移除部分待发送文件。`,
+          );
+        }
+        store.put(record);
+      });
+    },
+
+    async listDrafts(userId, conversationId, now = Date.now()) {
+      if (!userId || !conversationId) return [];
+      try {
+        return await withStore("readwrite", async (store) => {
+          const idx = store.index("byUserConversation");
+          const rows = (await requestPromise(
+            idx.getAll([userId, conversationId]),
+          )) as StagedAttachmentRecord[];
+          const kept: StagedAttachmentRecord[] = [];
+          for (const row of rows) {
+            if (isExpired(row, now)) {
+              store.delete(row.id);
+            } else if (row.clientMessageId === "") {
+              kept.push(row);
+            }
+          }
+          return kept.sort(sortByCreated);
+        });
+      } catch {
+        return [];
+      }
+    },
+
+    async listForMessage(userId, clientMessageId, now = Date.now()) {
+      if (!userId || !clientMessageId) return [];
+      return withStore("readwrite", async (store) => {
+        const idx = store.index("byUserMessage");
+        const rows = (await requestPromise(
+          idx.getAll([userId, clientMessageId]),
+        )) as StagedAttachmentRecord[];
+        const kept: StagedAttachmentRecord[] = [];
+        for (const row of rows) {
+          if (isExpired(row, now)) {
+            store.delete(row.id);
+          } else {
+            kept.push(row);
+          }
+        }
+        return kept.sort(sortByCreated);
+      });
+    },
+
+    async bindToMessage(userId, conversationId, ids, clientMessageId) {
+      if (!userId || !ids.length || !clientMessageId) return [];
+      return withStore("readwrite", async (store) => {
+        const candidates: StagedAttachmentRecord[] = [];
+        for (const id of ids) {
+          const row = (await requestPromise(store.get(id))) as
+            | StagedAttachmentRecord
+            | undefined;
+          if (
+            !row ||
+            row.userId !== userId ||
+            row.conversationId !== conversationId ||
+            (row.clientMessageId !== "" && row.clientMessageId !== clientMessageId)
+          ) {
+            return [];
+          }
+          candidates.push(row);
+        }
+        const bound: StagedAttachmentRecord[] = [];
+        for (const row of candidates) {
+          const updated: StagedAttachmentRecord = { ...row, clientMessageId };
+          store.put(updated);
+          bound.push(updated);
+        }
+        return bound;
+      });
+    },
+
+    async unbindToDraft(userId, conversationId, clientMessageId, requiredIds, now) {
+      if (!userId || !clientMessageId) return [];
+      return withStore("readwrite", async (store) => {
+        const rows = (await requestPromise(
+          store.index("byUserMessage").getAll([userId, clientMessageId]),
+        )) as StagedAttachmentRecord[];
+        const liveRows = rows.filter(
+          (row) =>
+            row.conversationId === conversationId &&
+            (now === undefined || !isExpired(row, now)),
+        );
+        if (requiredIds?.length) {
+          const liveIds = new Set(liveRows.map((row) => row.id));
+          if (requiredIds.some((id) => !liveIds.has(id))) {
+            throw new OfflineAttachmentStoreError(
+              "missing_attachment",
+              "部分离线暂存附件已过期或丢失，无法恢复编辑，请取消发送后重新添加。",
+            );
+          }
+        }
+        const restored: StagedAttachmentRecord[] = [];
+        for (const row of liveRows) {
+          const updated: StagedAttachmentRecord = { ...row, clientMessageId: "" };
+          store.put(updated);
+          restored.push(updated);
+        }
+        return restored.sort(sortByCreated);
+      });
+    },
+
+    async reconcileOrphanedBindings(
+      userId,
+      activeClientMessageIds,
+      now = Date.now(),
+    ) {
+      if (!userId) return [];
+      try {
+        return await withStore("readwrite", async (store) => {
+          const idx = store.index("byUser");
+          const rows = (await requestPromise(
+            idx.getAll(userId),
+          )) as StagedAttachmentRecord[];
+          const recovered: StagedAttachmentRecord[] = [];
+          for (const row of rows) {
+            if (isExpired(row, now)) {
+              store.delete(row.id);
+            } else if (
+              row.clientMessageId !== "" &&
+              !activeClientMessageIds.has(row.clientMessageId)
+            ) {
+              const updated: StagedAttachmentRecord = {
+                ...row,
+                clientMessageId: "",
+              };
+              store.put(updated);
+              recovered.push(updated);
+            }
+          }
+          return recovered.sort(sortByCreated);
+        });
+      } catch {
+        return [];
+      }
+    },
+
+    async isBoundToMessage(userId, id) {
+      if (!userId || !id) return false;
+      try {
+        return await withStore("readonly", async (store) => {
+          const row = (await requestPromise(
+            store.get(id),
+          )) as StagedAttachmentRecord | undefined;
+          return Boolean(row && row.userId === userId && row.clientMessageId !== "");
+        });
+      } catch {
+        return false;
+      }
+    },
+
+    async deleteById(userId, id, onlyIfUnbound = false) {
+      if (!userId || !id) return;
+      try {
+        await withStore("readwrite", async (store) => {
+          const row = (await requestPromise(
+            store.get(id),
+          )) as StagedAttachmentRecord | undefined;
+          if (
+            row &&
+            row.userId === userId &&
+            (!onlyIfUnbound || row.clientMessageId === "")
+          ) {
+            store.delete(id);
+          }
+        });
+      } catch {
+        // Ignore cleanup failure when storage is unavailable.
+      }
+    },
+
+    async deleteForMessage(userId, clientMessageId) {
+      if (!userId || !clientMessageId) return;
+      try {
+        await withStore("readwrite", async (store) => {
+          const idx = store.index("byUserMessage");
+          const rows = (await requestPromise(
+            idx.getAll([userId, clientMessageId]),
+          )) as StagedAttachmentRecord[];
+          for (const row of rows) store.delete(row.id);
+        });
+      } catch {
+        // Ignore cleanup failure.
+      }
+    },
+
+    async deleteForConversation(userId, conversationId) {
+      if (!userId || !conversationId) return;
+      try {
+        await withStore("readwrite", async (store) => {
+          const idx = store.index("byUserConversation");
+          const rows = (await requestPromise(
+            idx.getAll([userId, conversationId]),
+          )) as StagedAttachmentRecord[];
+          for (const row of rows) store.delete(row.id);
+        });
+      } catch {
+        // Ignore cleanup failure.
+      }
+    },
+
+    async pruneToConversations(userId, allowedConversationIds) {
+      if (!userId) return;
+      try {
+        await withStore("readwrite", async (store) => {
+          const idx = store.index("byUser");
+          const rows = (await requestPromise(
+            idx.getAll(userId),
+          )) as StagedAttachmentRecord[];
+          for (const row of rows) {
+            if (!allowedConversationIds.has(row.conversationId)) {
+              store.delete(row.id);
+            }
+          }
+        });
+      } catch {
+        // Ignore cleanup failure.
+      }
+    },
+
+    async clearForUser(userId) {
+      try {
+        await withStore("readwrite", async (store) => {
+          if (!userId) {
+            store.clear();
+            return;
+          }
+          const idx = store.index("byUser");
+          const rows = (await requestPromise(
+            idx.getAll(userId),
+          )) as StagedAttachmentRecord[];
+          for (const row of rows) store.delete(row.id);
+        });
+      } catch {
+        // Ignore cleanup failure.
+      }
+    },
+
+    async clearExceptUser(userId) {
+      try {
+        await withStore("readwrite", async (store) => {
+          const rows = (await requestPromise(
+            store.getAll(),
+          )) as StagedAttachmentRecord[];
+          for (const row of rows) {
+            if (row.userId !== userId) store.delete(row.id);
+          }
+        });
+      } catch {
+        // Ignore cleanup failure.
+      }
+    },
+  };
+}
+
+let activeBackend: OfflineAttachmentBackend = createIndexedDbBackend();
+
+export function setOfflineAttachmentBackendForTest(
+  backend: OfflineAttachmentBackend | null,
+): void {
+  clearInFlightStagedBindsForTest();
+  activeBackend = backend ?? createIndexedDbBackend();
+}
+
+export function stagedRecordToFile(record: StagedAttachmentRecord): File {
+  return new File([record.blob], record.name, {
+    type: record.type || "application/octet-stream",
+    lastModified: record.lastModified || record.createdAt,
+  });
+}
+
+export function stageOfflineAttachment(
+  record: StagedAttachmentRecord,
+  now?: number,
+): Promise<void> {
+  return activeBackend.stage(record, now);
+}
+
+export function listStagedDraftAttachments(
+  userId: string,
+  conversationId: string,
+  now?: number,
+): Promise<StagedAttachmentRecord[]> {
+  return activeBackend.listDrafts(userId, conversationId, now);
+}
+
+export function listStagedMessageAttachments(
+  userId: string,
+  clientMessageId: string,
+  now?: number,
+): Promise<StagedAttachmentRecord[]> {
+  return activeBackend.listForMessage(userId, clientMessageId, now);
+}
+
+export function bindStagedAttachmentsToMessage(
+  userId: string,
+  conversationId: string,
+  ids: string[],
+  clientMessageId: string,
+): Promise<StagedAttachmentRecord[]> {
+  return activeBackend.bindToMessage(userId, conversationId, ids, clientMessageId);
+}
+
+export async function unbindStagedAttachmentsToDraft(
+  userId: string,
+  conversationId: string,
+  clientMessageId: string,
+  requiredIds?: string[],
+  now?: number,
+): Promise<StagedAttachmentRecord[]> {
+  const restored = await activeBackend.unbindToDraft(
+    userId,
+    conversationId,
+    clientMessageId,
+    requiredIds,
+    now,
+  );
+  releaseStagedMessageOwnership(userId, clientMessageId);
+  return restored;
+}
+
+export function reconcileOrphanedStagedAttachments(
+  userId: string,
+  activeClientMessageIds: ReadonlySet<string>,
+  now = Date.now(),
+): Promise<StagedAttachmentRecord[]> {
+  const protectedIds = collectCrossTabProtectedMessageIds(
+    userId,
+    activeClientMessageIds,
+    now,
+  );
+  if (protectedIds === null) return Promise.resolve([]);
+  return activeBackend.reconcileOrphanedBindings(userId, protectedIds, now);
+}
+
+export function isStagedAttachmentBoundToMessage(
+  userId: string,
+  id: string,
+): Promise<boolean> {
+  return activeBackend.isBoundToMessage(userId, id);
+}
+
+export function deleteStagedAttachment(
+  userId: string,
+  id: string,
+  onlyIfUnbound = false,
+): Promise<void> {
+  return activeBackend.deleteById(userId, id, onlyIfUnbound);
+}
+
+export async function deleteStagedAttachmentsForMessage(
+  userId: string,
+  clientMessageId: string,
+): Promise<void> {
+  releaseStagedMessageOwnership(userId, clientMessageId);
+  return activeBackend.deleteForMessage(userId, clientMessageId);
+}
+
+export function deleteStagedAttachmentsForConversation(
+  userId: string,
+  conversationId: string,
+): Promise<void> {
+  return activeBackend.deleteForConversation(userId, conversationId);
+}
+
+export function pruneStagedAttachmentsToConversations(
+  userId: string,
+  allowedConversationIds: ReadonlySet<string>,
+): Promise<void> {
+  return activeBackend.pruneToConversations(userId, allowedConversationIds);
+}
+
+export function clearStagedAttachmentsForUser(userId?: string): Promise<void> {
+  clearStagedMessageOwnershipForUser(userId);
+  return activeBackend.clearForUser(userId);
+}
+
+export function clearStagedAttachmentsExceptUser(userId: string): Promise<void> {
+  clearStagedMessageOwnershipExceptUser(userId);
+  return activeBackend.clearExceptUser(userId);
+}
