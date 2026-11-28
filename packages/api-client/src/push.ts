@@ -28,10 +28,11 @@ export function createPushClient(state: HttpTransportState) {
           body: JSON.stringify(input),
         },
       ),
-    deletePushSubscription: (endpoint: string) =>
+    deletePushSubscription: (endpoint: string, signal?: AbortSignal) =>
       request<void>(IDL_ROUTES.DeletePushSubscription.clientPath, {
         method: IDL_ROUTES.DeletePushSubscription.method,
         body: JSON.stringify({ endpoint }),
+        signal,
       }),
   };
 }

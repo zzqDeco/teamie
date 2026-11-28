@@ -264,6 +264,30 @@ describe("Web Push helper & settings UI", () => {
     expect(activeSub.unsubscribe).toHaveBeenCalledOnce();
   });
 
+  it("revokeWebPushOnLogout aborts hanging server DELETE and completes local unsubscribe before returning", async () => {
+    const sub = makeFakeSubscription();
+    activeSub = sub;
+    let capturedSignal: AbortSignal | undefined;
+    let unsubscribedBeforeReturn = false;
+    (sub.unsubscribe as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      unsubscribedBeforeReturn = true;
+      return true;
+    });
+    vi.spyOn(api, "deletePushSubscription").mockImplementation(
+      (_endpoint, signal) => {
+        capturedSignal = signal;
+        return new Promise<void>(() => {
+          // Intentionally never settles to simulate a stalled network request.
+        });
+      },
+    );
+
+    await revokeWebPushOnLogout(30);
+    expect(capturedSignal?.aborted).toBe(true);
+    expect(unsubscribedBeforeReturn).toBe(true);
+    expect(sub.unsubscribe).toHaveBeenCalledOnce();
+  });
+
   it("hides WebPushSettingsControl when im.push.web is false and toggles when enabled", async () => {
     const session: Session = { user: alice, csrfToken: "csrf-1" };
     vi.spyOn(api, "session").mockResolvedValue(session);

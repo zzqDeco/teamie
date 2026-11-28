@@ -1,6 +1,8 @@
 import { api } from "@teamie/api-client";
 
-const LOGOUT_UNSUBSCRIBE_TIMEOUT_MS = 2_000;
+const LOGOUT_DELETE_TIMEOUT_MS = 2_000;
+const LOGOUT_UNSUBSCRIBE_TIMEOUT_MS = 1_000;
+const LOGOUT_LOOKUP_TIMEOUT_MS = 1_000;
 
 export function isWebPushSupported(): boolean {
   return (
@@ -179,22 +181,63 @@ export async function unsubscribeLocalWebPushOnly(): Promise<void> {
   await subscription.unsubscribe().catch(() => {});
 }
 
-export async function revokeWebPushOnLogout(): Promise<void> {
-  const work = (async () => {
-    const subscription = await getExistingPushSubscription();
-    if (!subscription) return;
-    try {
-      await api.deletePushSubscription(subscription.endpoint);
-    } catch {
-      // Never block logout on transient push server errors.
+export async function revokeWebPushOnLogout(
+  deleteTimeoutMs = LOGOUT_DELETE_TIMEOUT_MS,
+): Promise<void> {
+  let lookupTimer: ReturnType<typeof setTimeout> | undefined;
+  let subscription: PushSubscription | null = null;
+  try {
+    subscription = await Promise.race([
+      getExistingPushSubscription().catch(() => null),
+      new Promise<null>((resolve) => {
+        lookupTimer = setTimeout(() => resolve(null), LOGOUT_LOOKUP_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (lookupTimer !== undefined) {
+      clearTimeout(lookupTimer);
     }
-    await subscription.unsubscribe().catch(() => {});
-  })();
+  }
+  if (!subscription) return;
 
-  await Promise.race([
-    work,
-    new Promise<void>((resolve) =>
-      setTimeout(resolve, LOGOUT_UNSUBSCRIBE_TIMEOUT_MS),
-    ),
-  ]);
+  // Bound and abort the backend DELETE independently so logout never hangs
+  // and no detached request can outlive logout.
+  const controller =
+    typeof AbortController !== "undefined" ? new AbortController() : null;
+  let deleteTimer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const deletePromise = api
+      .deletePushSubscription(subscription.endpoint, controller?.signal)
+      .catch(() => {});
+    await Promise.race([
+      deletePromise,
+      new Promise<void>((resolve) => {
+        deleteTimer = setTimeout(() => {
+          controller?.abort();
+          resolve();
+        }, deleteTimeoutMs);
+      }),
+    ]);
+  } finally {
+    if (deleteTimer !== undefined) {
+      clearTimeout(deleteTimer);
+    }
+  }
+
+  // Always revoke the local browser subscription BEFORE logout cleanup returns
+  // so no notifications continue after logout and no later task can unsubscribe
+  // another account's reclaimed registration.
+  let unsubTimer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      subscription.unsubscribe().catch(() => false),
+      new Promise<void>((resolve) => {
+        unsubTimer = setTimeout(resolve, LOGOUT_UNSUBSCRIBE_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (unsubTimer !== undefined) {
+      clearTimeout(unsubTimer);
+    }
+  }
 }

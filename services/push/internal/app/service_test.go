@@ -298,3 +298,67 @@ func TestPushService_LifecycleQuotaReclaimAndDelivery(t *testing.T) {
 		t.Fatalf("expected 8 remaining subscriptions after delete, got %d", len(subsA))
 	}
 }
+
+type slowSender struct {
+	delay time.Duration
+}
+
+func (s *slowSender) Send(ctx context.Context, _ domain.PushSubscription, _ domain.VAPIDConfig, _ domain.PushWakePayload) (domain.DeliveryResult, error) {
+	select {
+	case <-time.After(s.delay):
+		return domain.DeliveryResult{StatusCode: 201, Reason: "ok"}, nil
+	case <-ctx.Done():
+		return domain.DeliveryResult{Reason: "transport_error"}, ctx.Err()
+	}
+}
+
+func TestHandleMessageHint_QueuedWavesReceiveFullPerDeliveryBudget(t *testing.T) {
+	p256dh, auth, vapid := testKeys(t)
+	repo := newMemRepo()
+	chat := &fakeChat{
+		result: domain.PushEvaluationResult{
+			WorkspaceID:      "w1",
+			ConversationID:   "c1",
+			MessageID:        "m-waves",
+			RecipientUserIDs: []string{"u1", "u2", "u3"},
+		},
+	}
+	flags := &fakeFlags{enabled: true}
+
+	// 3 users x 2 devices = 6 targets; concurrency=2 => 3 serial waves.
+	// Each delivery takes 40ms (120ms total wall time), while per-delivery timeout is 80ms.
+	// Because each target's 80ms budget begins strictly upon semaphore admission, all 6 succeed.
+	svc := &app.Service{
+		Tx:                     repo,
+		Subscriptions:          repo,
+		Chat:                   chat,
+		Flags:                  flags,
+		Sender:                 &slowSender{delay: 40 * time.Millisecond},
+		VAPID:                  vapid,
+		MaxDeliveryConcurrency: 2,
+		DeliveryTimeout:        80 * time.Millisecond,
+	}
+	for _, uid := range []string{"u1", "u2", "u3"} {
+		for d := 0; d < 2; d++ {
+			_, err := svc.UpsertSubscription(context.Background(), domain.User{ID: uid, Kind: "human"}, domain.UpsertSubscriptionInput{
+				Endpoint: fmt.Sprintf("https://fcm.googleapis.com/fcm/send/%s-%d", uid, d),
+				P256DH:   p256dh,
+				Auth:     auth,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	out, err := svc.HandleMessageHint(context.Background(), domain.PushMessageHint{
+		Type: "push.message", WorkspaceID: "w1", ConversationID: "c1", MessageID: "m-waves",
+		SenderID: "uSender", UserIDs: []string{"u1", "u2", "u3"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Attempted != 6 || out.Succeeded != 6 || out.Failed != 0 {
+		t.Fatalf("expected all 6 queued wave deliveries to succeed, got %+v", out)
+	}
+}

@@ -120,6 +120,7 @@ func main() {
 	httpx.ServeLifecycle(
 		httpx.Env("HTTP_ADDR", ":8089"),
 		httpHandler,
+		httpx.OnDrainStart(cancel),
 		httpx.OnShutdown(func(context.Context) {
 			cancel()
 		}),

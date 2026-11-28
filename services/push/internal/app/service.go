@@ -204,7 +204,9 @@ func (s *Service) HandleMessageHint(ctx context.Context, hint domain.PushMessage
 	}
 
 	// Only evaluate users who actually have at least one stored push subscription.
-	subs, err := s.Subscriptions.ListByUserIDs(ctx, candidates)
+	listCtx, listCancel := context.WithTimeout(ctx, 5*time.Second)
+	subs, err := s.Subscriptions.ListByUserIDs(listCtx, candidates)
+	listCancel()
 	if err != nil {
 		return outcome, err
 	}
@@ -227,7 +229,9 @@ func (s *Service) HandleMessageHint(ctx context.Context, hint domain.PushMessage
 	recipientUserIDs := make([]string, 0)
 	for start := 0; start < len(subscribedUserIDs); start += maxEvaluateBatchSize {
 		end := min(start+maxEvaluateBatchSize, len(subscribedUserIDs))
-		eval, evalErr := s.Chat.EvaluatePushRecipients(ctx, convID, msgID, subscribedUserIDs[start:end])
+		evalCtx, evalCancel := context.WithTimeout(ctx, 5*time.Second)
+		eval, evalErr := s.Chat.EvaluatePushRecipients(evalCtx, convID, msgID, subscribedUserIDs[start:end])
+		evalCancel()
 		if evalErr != nil {
 			return outcome, evalErr
 		}
@@ -264,25 +268,37 @@ func (s *Service) HandleMessageHint(ctx context.Context, hint domain.PushMessage
 
 	for _, target := range targets {
 		sub := target
+		select {
+		case <-ctx.Done():
+			mu.Lock()
+			outcome.Failed++
+			mu.Unlock()
+			continue
+		case sem <- struct{}{}:
+		}
 		wg.Add(1)
-		sem <- struct{}{}
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
 
+			// Start the per-delivery timeout strictly after semaphore admission
+			// so later waves receive a full delivery budget instead of expiring while queued.
 			sendCtx, cancel := context.WithTimeout(ctx, s.deliveryTimeout())
 			res, sendErr := s.Sender.Send(sendCtx, sub, s.VAPID, payload)
 			cancel()
 
+			recCtx, recCancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer recCancel()
+
 			if res.Gone {
-				_ = s.Subscriptions.DeleteByID(ctx, sub.ID)
+				_ = s.Subscriptions.DeleteByID(recCtx, sub.ID)
 				mu.Lock()
 				outcome.PrunedGone++
 				mu.Unlock()
 				return
 			}
 			if sendErr == nil && res.StatusCode >= 200 && res.StatusCode < 300 {
-				_ = s.Subscriptions.RecordDeliveryResult(ctx, sub.ID, true, "")
+				_ = s.Subscriptions.RecordDeliveryResult(recCtx, sub.ID, true, "")
 				mu.Lock()
 				outcome.Succeeded++
 				mu.Unlock()
@@ -292,7 +308,7 @@ func (s *Service) HandleMessageHint(ctx context.Context, hint domain.PushMessage
 			if errCode == "" {
 				errCode = "delivery_failed"
 			}
-			_ = s.Subscriptions.RecordDeliveryResult(ctx, sub.ID, false, errCode)
+			_ = s.Subscriptions.RecordDeliveryResult(recCtx, sub.ID, false, errCode)
 			mu.Lock()
 			outcome.Failed++
 			mu.Unlock()
