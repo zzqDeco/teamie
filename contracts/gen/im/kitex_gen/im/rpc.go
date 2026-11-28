@@ -1154,6 +1154,136 @@ var fieldIDToName_PrincipalWorkspacesRequest = map[int16]string{
 	5: "revision",
 }
 
+type PushEvaluateRequest struct {
+	ServiceToken     string   `thrift:"serviceToken,1,required" frugal:"1,required,string" json:"serviceToken"`
+	ConversationId   string   `thrift:"conversationId,2,required" frugal:"2,required,string" json:"conversationId"`
+	MessageId        string   `thrift:"messageId,3,required" frugal:"3,required,string" json:"messageId"`
+	CandidateUserIds []string `thrift:"candidateUserIds,4,required" frugal:"4,required,list<string>" json:"candidateUserIds"`
+}
+
+func NewPushEvaluateRequest() *PushEvaluateRequest {
+	return &PushEvaluateRequest{}
+}
+
+func (p *PushEvaluateRequest) InitDefault() {
+}
+
+func (p *PushEvaluateRequest) GetServiceToken() (v string) {
+	return p.ServiceToken
+}
+
+func (p *PushEvaluateRequest) GetConversationId() (v string) {
+	return p.ConversationId
+}
+
+func (p *PushEvaluateRequest) GetMessageId() (v string) {
+	return p.MessageId
+}
+
+func (p *PushEvaluateRequest) GetCandidateUserIds() (v []string) {
+	return p.CandidateUserIds
+}
+func (p *PushEvaluateRequest) SetServiceToken(val string) {
+	p.ServiceToken = val
+}
+func (p *PushEvaluateRequest) SetConversationId(val string) {
+	p.ConversationId = val
+}
+func (p *PushEvaluateRequest) SetMessageId(val string) {
+	p.MessageId = val
+}
+func (p *PushEvaluateRequest) SetCandidateUserIds(val []string) {
+	p.CandidateUserIds = val
+}
+
+func (p *PushEvaluateRequest) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PushEvaluateRequest(%+v)", *p)
+}
+
+var fieldIDToName_PushEvaluateRequest = map[int16]string{
+	1: "serviceToken",
+	2: "conversationId",
+	3: "messageId",
+	4: "candidateUserIds",
+}
+
+type PushEvaluateResponse struct {
+	Ok               bool     `thrift:"ok,1,required" frugal:"1,required,bool" json:"ok"`
+	ErrorCode        string   `thrift:"errorCode,2,required" frugal:"2,required,string" json:"errorCode"`
+	WorkspaceId      string   `thrift:"workspaceId,3,required" frugal:"3,required,string" json:"workspaceId"`
+	ConversationId   string   `thrift:"conversationId,4,required" frugal:"4,required,string" json:"conversationId"`
+	MessageId        string   `thrift:"messageId,5,required" frugal:"5,required,string" json:"messageId"`
+	RecipientUserIds []string `thrift:"recipientUserIds,6,required" frugal:"6,required,list<string>" json:"recipientUserIds"`
+}
+
+func NewPushEvaluateResponse() *PushEvaluateResponse {
+	return &PushEvaluateResponse{}
+}
+
+func (p *PushEvaluateResponse) InitDefault() {
+}
+
+func (p *PushEvaluateResponse) GetOk() (v bool) {
+	return p.Ok
+}
+
+func (p *PushEvaluateResponse) GetErrorCode() (v string) {
+	return p.ErrorCode
+}
+
+func (p *PushEvaluateResponse) GetWorkspaceId() (v string) {
+	return p.WorkspaceId
+}
+
+func (p *PushEvaluateResponse) GetConversationId() (v string) {
+	return p.ConversationId
+}
+
+func (p *PushEvaluateResponse) GetMessageId() (v string) {
+	return p.MessageId
+}
+
+func (p *PushEvaluateResponse) GetRecipientUserIds() (v []string) {
+	return p.RecipientUserIds
+}
+func (p *PushEvaluateResponse) SetOk(val bool) {
+	p.Ok = val
+}
+func (p *PushEvaluateResponse) SetErrorCode(val string) {
+	p.ErrorCode = val
+}
+func (p *PushEvaluateResponse) SetWorkspaceId(val string) {
+	p.WorkspaceId = val
+}
+func (p *PushEvaluateResponse) SetConversationId(val string) {
+	p.ConversationId = val
+}
+func (p *PushEvaluateResponse) SetMessageId(val string) {
+	p.MessageId = val
+}
+func (p *PushEvaluateResponse) SetRecipientUserIds(val []string) {
+	p.RecipientUserIds = val
+}
+
+func (p *PushEvaluateResponse) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("PushEvaluateResponse(%+v)", *p)
+}
+
+var fieldIDToName_PushEvaluateResponse = map[int16]string{
+	1: "ok",
+	2: "errorCode",
+	3: "workspaceId",
+	4: "conversationId",
+	5: "messageId",
+	6: "recipientUserIds",
+}
+
 type PresenceRequest struct {
 	ServiceToken string   `thrift:"serviceToken,1,required" frugal:"1,required,string" json:"serviceToken"`
 	UserIds      []string `thrift:"userIds,2,required" frugal:"2,required,list<string>" json:"userIds"`
@@ -1765,6 +1895,8 @@ type ChatService interface {
 	GetWorkspaceParticipants(ctx context.Context, request *WorkspaceParticipantsRequest) (r *WorkspaceParticipantsResponse, err error)
 
 	SetPrincipalWorkspaces(ctx context.Context, request *PrincipalWorkspacesRequest) (r *ParticipantWorkspacesResponse, err error)
+
+	EvaluatePushRecipients(ctx context.Context, request *PushEvaluateRequest) (r *PushEvaluateResponse, err error)
 }
 
 type ChatServiceCheckAccessArgs struct {
@@ -2448,6 +2580,82 @@ func (p *ChatServiceSetPrincipalWorkspacesResult) String() string {
 }
 
 var fieldIDToName_ChatServiceSetPrincipalWorkspacesResult = map[int16]string{
+	0: "success",
+}
+
+type ChatServiceEvaluatePushRecipientsArgs struct {
+	Request *PushEvaluateRequest `thrift:"request,1" frugal:"1,default,PushEvaluateRequest" json:"request"`
+}
+
+func NewChatServiceEvaluatePushRecipientsArgs() *ChatServiceEvaluatePushRecipientsArgs {
+	return &ChatServiceEvaluatePushRecipientsArgs{}
+}
+
+func (p *ChatServiceEvaluatePushRecipientsArgs) InitDefault() {
+}
+
+var ChatServiceEvaluatePushRecipientsArgs_Request_DEFAULT *PushEvaluateRequest
+
+func (p *ChatServiceEvaluatePushRecipientsArgs) GetRequest() (v *PushEvaluateRequest) {
+	if !p.IsSetRequest() {
+		return ChatServiceEvaluatePushRecipientsArgs_Request_DEFAULT
+	}
+	return p.Request
+}
+func (p *ChatServiceEvaluatePushRecipientsArgs) SetRequest(val *PushEvaluateRequest) {
+	p.Request = val
+}
+
+func (p *ChatServiceEvaluatePushRecipientsArgs) IsSetRequest() bool {
+	return p.Request != nil
+}
+
+func (p *ChatServiceEvaluatePushRecipientsArgs) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ChatServiceEvaluatePushRecipientsArgs(%+v)", *p)
+}
+
+var fieldIDToName_ChatServiceEvaluatePushRecipientsArgs = map[int16]string{
+	1: "request",
+}
+
+type ChatServiceEvaluatePushRecipientsResult struct {
+	Success *PushEvaluateResponse `thrift:"success,0,optional" frugal:"0,optional,PushEvaluateResponse" json:"success,omitempty"`
+}
+
+func NewChatServiceEvaluatePushRecipientsResult() *ChatServiceEvaluatePushRecipientsResult {
+	return &ChatServiceEvaluatePushRecipientsResult{}
+}
+
+func (p *ChatServiceEvaluatePushRecipientsResult) InitDefault() {
+}
+
+var ChatServiceEvaluatePushRecipientsResult_Success_DEFAULT *PushEvaluateResponse
+
+func (p *ChatServiceEvaluatePushRecipientsResult) GetSuccess() (v *PushEvaluateResponse) {
+	if !p.IsSetSuccess() {
+		return ChatServiceEvaluatePushRecipientsResult_Success_DEFAULT
+	}
+	return p.Success
+}
+func (p *ChatServiceEvaluatePushRecipientsResult) SetSuccess(x interface{}) {
+	p.Success = x.(*PushEvaluateResponse)
+}
+
+func (p *ChatServiceEvaluatePushRecipientsResult) IsSetSuccess() bool {
+	return p.Success != nil
+}
+
+func (p *ChatServiceEvaluatePushRecipientsResult) String() string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("ChatServiceEvaluatePushRecipientsResult(%+v)", *p)
+}
+
+var fieldIDToName_ChatServiceEvaluatePushRecipientsResult = map[int16]string{
 	0: "success",
 }
 

@@ -992,6 +992,51 @@ export interface ConversationAppSessionResp {
 }
 
 // ============================================================================
+// Source: contracts/im/http_push.thrift (namespace im.push)
+// ============================================================================
+
+export type EmptyPushReq = Record<string, never>;
+
+export interface PushConfigResp {
+  enabled: boolean;
+  vapidPublicKey?: string;
+  maxSubscriptions: number;
+}
+
+export interface PushSubscriptionKeysReq {
+  p256dh: string;
+  auth: string;
+}
+
+export interface UpsertPushSubscriptionReq {
+  endpoint: string;
+  keys: PushSubscriptionKeysReq;
+  userAgent?: string;
+}
+
+export interface DeletePushSubscriptionReq {
+  endpoint: string;
+}
+
+export interface PushSubscriptionDTO {
+  id: string;
+  endpointHash: string;
+  endpointHost: string;
+  userAgent: string;
+  createdAt: string;
+  updatedAt: string;
+  lastSuccessAt?: string;
+}
+
+export interface PushSubscriptionResp {
+  subscription: PushSubscriptionDTO;
+}
+
+export interface ListPushSubscriptionsResp {
+  subscriptions: PushSubscriptionDTO[];
+}
+
+// ============================================================================
 // Source: contracts/im/ws_realtime.thrift (namespace im.realtime)
 // ============================================================================
 
@@ -2031,6 +2076,42 @@ export const IDL_ROUTES = {
     clientPath: "/conversations/:id/apps/:appId/session",
     requestType: "CreateConversationAppSessionReq",
     responseType: "ConversationAppSessionResp",
+  },
+  GetPushConfig: {
+    service: "PushHTTPService",
+    namespace: "im.push",
+    method: "GET",
+    path: "/api/v1/push/config",
+    clientPath: "/push/config",
+    requestType: "EmptyPushReq",
+    responseType: "PushConfigResp",
+  },
+  ListPushSubscriptions: {
+    service: "PushHTTPService",
+    namespace: "im.push",
+    method: "GET",
+    path: "/api/v1/push/subscriptions",
+    clientPath: "/push/subscriptions",
+    requestType: "EmptyPushReq",
+    responseType: "ListPushSubscriptionsResp",
+  },
+  UpsertPushSubscription: {
+    service: "PushHTTPService",
+    namespace: "im.push",
+    method: "PUT",
+    path: "/api/v1/push/subscriptions",
+    clientPath: "/push/subscriptions",
+    requestType: "UpsertPushSubscriptionReq",
+    responseType: "PushSubscriptionResp",
+  },
+  DeletePushSubscription: {
+    service: "PushHTTPService",
+    namespace: "im.push",
+    method: "DELETE",
+    path: "/api/v1/push/subscriptions",
+    clientPath: "/push/subscriptions",
+    requestType: "DeletePushSubscriptionReq",
+    responseType: "EmptyResp",
   },
   ConnectWS: {
     service: "RealtimeWSService",

@@ -13,6 +13,7 @@ const CONTRACT_FILES = [
   "im/http_identity.thrift",
   "im/http_chat.thrift",
   "im/http_marketplace.thrift",
+  "im/http_push.thrift",
   "im/ws_realtime.thrift",
   "agent/http_control.thrift",
   "agent/http_gateway.thrift",

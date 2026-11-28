@@ -44,6 +44,20 @@ struct PrincipalWorkspacesRequest {
  1: required string serviceToken, 2: required string principalId, 3: required string grantorUserId,
  4: required list<string> workspaceIds, 5: required i64 revision
 }
+struct PushEvaluateRequest {
+  1: required string serviceToken
+  2: required string conversationId
+  3: required string messageId
+  4: required list<string> candidateUserIds
+}
+struct PushEvaluateResponse {
+  1: required bool ok
+  2: required string errorCode
+  3: required string workspaceId
+  4: required string conversationId
+  5: required string messageId
+  6: required list<string> recipientUserIds
+}
 service ChatService {
   AccessResponse CheckAccess(1: AccessRequest request)
   WorkspaceAccessResponse CheckWorkspaceAccess(1: WorkspaceAccessRequest request)
@@ -54,4 +68,5 @@ service ChatService {
   ParticipantWorkspacesResponse GetParticipantWorkspaces(1: ParticipantWorkspacesRequest request)
   WorkspaceParticipantsResponse GetWorkspaceParticipants(1: WorkspaceParticipantsRequest request)
   ParticipantWorkspacesResponse SetPrincipalWorkspaces(1: PrincipalWorkspacesRequest request)
+  PushEvaluateResponse EvaluatePushRecipients(1: PushEvaluateRequest request)
 }
