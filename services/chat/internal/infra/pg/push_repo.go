@@ -41,7 +41,7 @@ WHERE (t.conversation_type = 'channel' OR EXISTS(
   AND COALESCE(rc.seq, 0) < t.seq
   AND COALESCE(nl.level, 'all') <> 'none'
   AND (
-    (COALESCE(nl.level, 'all') = 'all' AND t.conversation_type <> 'channel')
+    t.conversation_type <> 'channel'
     OR t.mentions @> jsonb_build_array(jsonb_build_object('userId', u.user_id))
     OR u.user_id = ANY(t.broadcast_recipient_ids)
     OR (t.parent_sender_id = u.user_id AND t.parent_retracted_at IS NULL)
