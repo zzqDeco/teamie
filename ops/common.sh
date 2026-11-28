@@ -6,7 +6,7 @@ export TEAMIE_ROOT
 HOST_ENV="$TEAMIE_ROOT/config/production.env"
 export COMPOSE_PARALLEL_LIMIT=1
 
-ONLINE_AB_SERVICES=(identity chat marketplace realtime web agent-control llm-gateway)
+ONLINE_AB_SERVICES=(identity chat marketplace push realtime web agent-control llm-gateway)
 
 compose_for() {
   local recipe=$1 image_env=$2
@@ -85,7 +85,7 @@ rollout_fenced() {
   "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 postgres redis || return
   local services
   services=$("${COMPOSE[@]}" config --services) || return
-  if [[ $services == *llm-gateway* || $services == *marketplace* ]]; then
+  if [[ $services == *llm-gateway* || $services == *marketplace* || $services == *push* ]]; then
     "${COMPOSE[@]}" exec -T postgres env TEAMIE_VERIFY_DB_CREDENTIALS=1 bash -s < "${COMPOSE_RECIPE}/deploy/postgres/01-databases.sh" || return
   fi
   if [[ $services == *llm-gateway* ]]; then
@@ -110,6 +110,9 @@ rollout_fenced() {
   "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 chat || return
   if [[ $services == *marketplace* ]]; then
     "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 marketplace || return
+  fi
+  if [[ $services == *push* ]]; then
+    "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 push || return
   fi
   "${COMPOSE[@]}" up -d --no-deps --wait --wait-timeout 180 realtime web || return
   if [[ $services == *llm-gateway* ]]; then
@@ -169,7 +172,7 @@ rollout() {
      python3 "$manifest_tool" online-memory-ready "$compose_json"; then
     local services
     services=$("${COMPOSE[@]}" config --services) || return
-    if [[ $services == *llm-gateway* || $services == *marketplace* ]]; then
+    if [[ $services == *llm-gateway* || $services == *marketplace* || $services == *push* ]]; then
       "${COMPOSE[@]}" exec -T postgres env TEAMIE_VERIFY_DB_CREDENTIALS=1 bash -s < "${COMPOSE_RECIPE}/deploy/postgres/01-databases.sh" || return
     fi
     local has_legacy_marketplace=f

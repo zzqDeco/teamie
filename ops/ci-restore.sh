@@ -7,13 +7,14 @@ trap 'rm -rf "$scratch"' EXIT
 pg=(docker exec -i "$POSTGRES_CONTAINER_ID" env PGOPTIONS="-c teamie.runtime_writer_schema=16")
 "${pg[@]}" env TEAMIE_VERIFY_DB_CREDENTIALS=1 POSTGRES_IDENTITY_PASSWORD=ci-identity-disposable-password \
   POSTGRES_CHAT_PASSWORD=ci-chat-disposable-password POSTGRES_MARKETPLACE_PASSWORD=ci-marketplace-disposable-password \
+  POSTGRES_PUSH_PASSWORD=ci-push-disposable-password \
   POSTGRES_AGENT_CONTROL_PASSWORD=ci-control-disposable-password \
   POSTGRES_AGENT_RUNTIME_PASSWORD=ci-runtime-disposable-password POSTGRES_GATEWAY_PASSWORD=ci-gateway-disposable-password \
   bash -s < deploy/postgres/01-databases.sh
-for suffix in identity chat marketplace agent_control agent_runtime gateway; do
+for suffix in identity chat marketplace push agent_control agent_runtime gateway; do
   # Compare the real restored migration ledger with the generated release
   # contract, so updating a migration without its manifest fails before deploy.
-  version=$(python3 -c 'import sys; from ops.manifest import SCHEMA_V3; print(SCHEMA_V3[sys.argv[1]])' "$suffix")
+  version=$(python3 -c 'import sys; from ops.manifest import SCHEMA_V4; print(SCHEMA_V4[sys.argv[1]])' "$suffix")
   # Use a known fixture table so the restore asserts data and binary values.
   "${pg[@]}" psql -U postgres -d "teamie_$suffix" -v ON_ERROR_STOP=1 <<'SQL'
 CREATE TABLE restore_fixture(id INTEGER PRIMARY KEY,payload JSONB NOT NULL,encrypted_value BYTEA NOT NULL);
@@ -106,6 +107,14 @@ INSERT INTO workspace_marketplace_apps(workspace_id,app_id,installed_by)
 VALUES('restore-workspace','restore-app','owner');
 INSERT INTO marketplace_app_reviews(id,app_id,revision,action,actor_id,note,web_url,mcp_url)
 VALUES('restore-review','restore-app',1,'approve','admin','Initial release','https://game.example.test/ui','https://game.example.test/mcp');
+SQL
+  fi
+  if [[ $suffix == push ]]; then
+    "${pg[@]}" env PGPASSWORD=ci-push-disposable-password psql -h 127.0.0.1 -U teamie_push -d teamie_push -v ON_ERROR_STOP=1 < services/push/internal/infra/pg/migrations/001_push.sql >/dev/null
+    "${pg[@]}" env PGPASSWORD=ci-push-disposable-password psql -h 127.0.0.1 -U teamie_push -d teamie_push -v ON_ERROR_STOP=1 <<'SQL'
+INSERT INTO push_schema_migrations(version) VALUES(1) ON CONFLICT DO NOTHING;
+INSERT INTO push_subscriptions(id,user_id,endpoint_hash,endpoint,endpoint_host,p256dh,auth,user_agent)
+VALUES('restore-push-sub','restore-owner',repeat('p',64),'https://fcm.googleapis.com/fcm/send/restore','fcm.googleapis.com','p256dh-fixture','auth-fixture','TeamiePWA');
 SQL
   fi
   if [[ $suffix == agent_control ]]; then
@@ -271,6 +280,14 @@ SQL
       "SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename IN ('marketplace_schema_migrations','marketplace_apps','workspace_marketplace_apps','marketplace_app_reviews') AND tableowner='teamie_marketplace';")
     [[ $actual == '4' ]] || { echo 'Marketplace migrated table ownership verification failed.' >&2; exit 1; }
   fi
+  if [[ $suffix == push ]]; then
+    actual=$("${pg[@]}" psql -U postgres -d restore_push -At -v ON_ERROR_STOP=1 -c \
+      "SELECT (SELECT string_agg(version::text,',' ORDER BY version) FROM push_schema_migrations)||':'||user_id||':'||endpoint_host FROM push_subscriptions WHERE id='restore-push-sub';")
+    [[ $actual == '1:restore-owner:fcm.googleapis.com' ]] || { echo 'Push subscription restore verification failed.' >&2; exit 1; }
+    actual=$("${pg[@]}" psql -U postgres -d teamie_push -At -v ON_ERROR_STOP=1 -c \
+      "SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename IN ('push_schema_migrations','push_subscriptions') AND tableowner='teamie_push';")
+    [[ $actual == '2' ]] || { echo 'Push table ownership verification failed.' >&2; exit 1; }
+  fi
   if [[ $suffix == agent_runtime ]]; then
     actual=$("${pg[@]}" psql -U postgres -d restore_agent_runtime -At -v ON_ERROR_STOP=1 -v frozen_budget="$runtime_context_budget" <<'SQL'
 SELECT (SELECT string_agg(version::text,',' ORDER BY version) FROM agent_runtime_schema_migrations)||':'||r.context_profile||':'||(r.context_budget=:'frozen_budget'::jsonb)::text||':'||encode(a.content,'hex')||':'||(a.sources->0->>'eventId')||':'||a.source_event_seq||':'||c.model_step||':'||c.error_code||':'||c.streaming::text||':'||(c.decision_json=jsonb_build_object('version',1,'action','compact_prefix','budget',:'frozen_budget'::jsonb))::text FROM runtime_runs r JOIN runtime_context_artifacts a ON a.run_id=r.id JOIN runtime_context_recoveries c ON c.run_id=r.id WHERE r.id='20000000-0000-4000-8000-000000000001';
@@ -362,7 +379,7 @@ done
 
 backup_bundle="$scratch/backup-bundle"
 mkdir -m 0700 "$backup_bundle"
-for suffix in identity chat marketplace agent_control agent_runtime gateway; do
+for suffix in identity chat marketplace push agent_control agent_runtime gateway; do
   cp "$scratch/$suffix.dump" "$backup_bundle/teamie_$suffix.dump"
   chmod 0600 "$backup_bundle/teamie_$suffix.dump"
 done

@@ -20,6 +20,7 @@ type Client interface {
 	GetParticipantWorkspaces(ctx context.Context, request *im.ParticipantWorkspacesRequest, callOptions ...callopt.Option) (r *im.ParticipantWorkspacesResponse, err error)
 	GetWorkspaceParticipants(ctx context.Context, request *im.WorkspaceParticipantsRequest, callOptions ...callopt.Option) (r *im.WorkspaceParticipantsResponse, err error)
 	SetPrincipalWorkspaces(ctx context.Context, request *im.PrincipalWorkspacesRequest, callOptions ...callopt.Option) (r *im.ParticipantWorkspacesResponse, err error)
+	EvaluatePushRecipients(ctx context.Context, request *im.PushEvaluateRequest, callOptions ...callopt.Option) (r *im.PushEvaluateResponse, err error)
 }
 
 // NewClient creates a client for the service defined in IDL.
@@ -94,4 +95,9 @@ func (p *kChatServiceClient) GetWorkspaceParticipants(ctx context.Context, reque
 func (p *kChatServiceClient) SetPrincipalWorkspaces(ctx context.Context, request *im.PrincipalWorkspacesRequest, callOptions ...callopt.Option) (r *im.ParticipantWorkspacesResponse, err error) {
 	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
 	return p.kClient.SetPrincipalWorkspaces(ctx, request)
+}
+
+func (p *kChatServiceClient) EvaluatePushRecipients(ctx context.Context, request *im.PushEvaluateRequest, callOptions ...callopt.Option) (r *im.PushEvaluateResponse, err error) {
+	ctx = client.NewCtxWithCallOptions(ctx, callOptions)
+	return p.kClient.EvaluatePushRecipients(ctx, request)
 }

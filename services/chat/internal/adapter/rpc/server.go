@@ -152,3 +152,33 @@ func (s *Server) SetPrincipalWorkspaces(ctx context.Context, r *im.PrincipalWork
 	}
 	return &im.ParticipantWorkspacesResponse{Ok: true, WorkspaceIds: ids}, nil
 }
+
+func (s *Server) EvaluatePushRecipients(ctx context.Context, r *im.PushEvaluateRequest) (*im.PushEvaluateResponse, error) {
+	if !domain.ValidServiceKey(s.App.PushToken, r.ServiceToken) {
+		return &im.PushEvaluateResponse{
+			Ok:               false,
+			ErrorCode:        "forbidden",
+			ConversationId:   r.ConversationId,
+			MessageId:        r.MessageId,
+			RecipientUserIds: []string{},
+		}, nil
+	}
+	res, err := s.App.EvaluatePushRecipients(ctx, r.ConversationId, r.MessageId, r.CandidateUserIds)
+	if err != nil {
+		return &im.PushEvaluateResponse{
+			Ok:               false,
+			ErrorCode:        errorCode(err),
+			ConversationId:   r.ConversationId,
+			MessageId:        r.MessageId,
+			RecipientUserIds: []string{},
+		}, nil
+	}
+	return &im.PushEvaluateResponse{
+		Ok:               true,
+		ErrorCode:        "",
+		WorkspaceId:      res.WorkspaceID,
+		ConversationId:   res.ConversationID,
+		MessageId:        res.MessageID,
+		RecipientUserIds: res.RecipientUserIDs,
+	}, nil
+}

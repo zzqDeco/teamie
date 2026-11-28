@@ -122,6 +122,7 @@ type MessageRepository interface {
 	LockUserWorkspacesForShare(ctx context.Context, userID string) ([]string, error)
 	LockUserConversationsForShare(ctx context.Context, userID string, workspaceIDs []string) ([]string, error)
 	QueryAttentionProjection(ctx context.Context, userID string, before any, cursorID string, unreadOnly bool, limit int, conversationIDs []string, messageID string) (unreadCount, channelUnreadCount int64, items []AttentionItem, unreadByConversation []AttentionUnread, err error)
+	EvaluatePushRecipients(ctx context.Context, conversationID, messageID string, candidateUserIDs []string) (workspaceID string, eligibleUserIDs []string, err error)
 
 	// Pins: mutations run under the conversation row lock so the counter,
 	// pin rows and durable event commit together.

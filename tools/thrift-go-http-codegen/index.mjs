@@ -22,6 +22,10 @@ const HTTP_IDL_TARGETS = [
     outDir: "gen/im/hertz_gen/im/marketplace",
   },
   {
+    idl: "im/http_push.thrift",
+    outDir: "gen/im/hertz_gen/im/push",
+  },
+  {
     idl: "im/ws_realtime.thrift",
     outDir: "gen/im/hertz_gen/im/realtime",
   },

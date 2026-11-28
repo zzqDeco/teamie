@@ -57,8 +57,8 @@ func TestPrivateContextFlagDoesNotBecomeBrowserCapability(t *testing.T) {
 func TestDefaultFeatureFlagsEnableIMCollaborationCapabilities(t *testing.T) {
 	defaultPath := filepath.Join("..", "..", "deploy", "feature-flags.default.json")
 	loaded := (Flags{Path: defaultPath}).Load()
-	if loaded.Revision != "im-collab-v1" {
-		t.Fatalf("expected revision im-collab-v1, got %q", loaded.Revision)
+	if loaded.Revision != "im-collab-v2" {
+		t.Fatalf("expected revision im-collab-v2, got %q", loaded.Revision)
 	}
 	for _, key := range []string{
 		"im.messages.forward",
@@ -73,5 +73,11 @@ func TestDefaultFeatureFlagsEnableIMCollaborationCapabilities(t *testing.T) {
 		if !(Flags{}).Load().Flags[key] {
 			t.Fatalf("expected %s enabled in built-in default snapshot", key)
 		}
+	}
+	if loaded.Flags["im.push.web"] {
+		t.Fatal("expected im.push.web disabled by default in shipped feature flags")
+	}
+	if (Flags{}).Load().Flags["im.push.web"] {
+		t.Fatal("expected im.push.web disabled by default in built-in snapshot")
 	}
 }

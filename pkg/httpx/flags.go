@@ -28,7 +28,7 @@ var Implemented = map[string]bool{
 	"im.read_receipts.view": true, "im.notifications.configure": true, "im.marketplace.enabled": true,
 	"im.announcements.publish": true,
 	"im.messages.forward": true, "im.messages.pin": true, "im.messages.save": true,
-	"im.unread.mark": true, "im.mentions.broadcast": true,
+	"im.unread.mark": true, "im.mentions.broadcast": true, "im.push.web": true,
 }
 
 var defaultEnabledWhenOmitted = map[string]bool{
@@ -39,7 +39,7 @@ var defaultEnabledWhenOmitted = map[string]bool{
 func (f Flags) Load() Snapshot {
 	s := Snapshot{Revision: "default-v1", Flags: map[string]bool{}}
 	for k, v := range Implemented {
-		s.Flags[k] = v && k != "auth.public_signup" && !strings.HasPrefix(k, "agents.")
+		s.Flags[k] = v && k != "auth.public_signup" && k != "im.push.web" && !strings.HasPrefix(k, "agents.")
 	}
 	if f.Path == "" {
 		return s

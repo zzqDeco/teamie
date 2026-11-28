@@ -63,7 +63,12 @@ function isAllowedWhileSessionUnverified(
   ) {
     return true;
   }
-  if (pathname === IDL_ROUTES.Logout.clientPath && Boolean(sessionToken)) {
+  if (
+    (pathname === IDL_ROUTES.Logout.clientPath ||
+      (pathname === IDL_ROUTES.DeletePushSubscription.clientPath &&
+        method?.toUpperCase() === "DELETE")) &&
+    Boolean(sessionToken)
+  ) {
     return true;
   }
   if (

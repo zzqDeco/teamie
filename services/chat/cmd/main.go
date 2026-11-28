@@ -77,6 +77,7 @@ func main() {
 		SniffMediaType:    fs.SniffMediaType,
 		GenerateThumbnail: fs.GenerateThumbnail,
 		ControlToken:      httpx.Env("IM_PRINCIPAL_CONTROL_TOKEN", ""),
+		PushToken:         httpx.Env("PUSH_SERVICE_TOKEN", ""),
 	}
 
 	rdb := goredis.NewClient(&goredis.Options{Addr: httpx.Env("REDIS_ADDR", "redis:6379")})

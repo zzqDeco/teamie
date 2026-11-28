@@ -76,6 +76,13 @@ var serviceMethods = map[string]kitex.MethodInfo{
 		false,
 		kitex.WithStreamingMode(kitex.StreamingNone),
 	),
+	"EvaluatePushRecipients": kitex.NewMethodInfo(
+		evaluatePushRecipientsHandler,
+		newChatServiceEvaluatePushRecipientsArgs,
+		newChatServiceEvaluatePushRecipientsResult,
+		false,
+		kitex.WithStreamingMode(kitex.StreamingNone),
+	),
 }
 
 var (
@@ -304,6 +311,24 @@ func newChatServiceSetPrincipalWorkspacesResult() interface{} {
 	return im.NewChatServiceSetPrincipalWorkspacesResult()
 }
 
+func evaluatePushRecipientsHandler(ctx context.Context, handler interface{}, arg, result interface{}) error {
+	realArg := arg.(*im.ChatServiceEvaluatePushRecipientsArgs)
+	realResult := result.(*im.ChatServiceEvaluatePushRecipientsResult)
+	success, err := handler.(im.ChatService).EvaluatePushRecipients(ctx, realArg.Request)
+	if err != nil {
+		return err
+	}
+	realResult.Success = success
+	return nil
+}
+func newChatServiceEvaluatePushRecipientsArgs() interface{} {
+	return im.NewChatServiceEvaluatePushRecipientsArgs()
+}
+
+func newChatServiceEvaluatePushRecipientsResult() interface{} {
+	return im.NewChatServiceEvaluatePushRecipientsResult()
+}
+
 type kClient struct {
 	c client.Client
 }
@@ -399,6 +424,16 @@ func (p *kClient) SetPrincipalWorkspaces(ctx context.Context, request *im.Princi
 	_args.Request = request
 	var _result im.ChatServiceSetPrincipalWorkspacesResult
 	if err = p.c.Call(ctx, "SetPrincipalWorkspaces", &_args, &_result); err != nil {
+		return
+	}
+	return _result.GetSuccess(), nil
+}
+
+func (p *kClient) EvaluatePushRecipients(ctx context.Context, request *im.PushEvaluateRequest) (r *im.PushEvaluateResponse, err error) {
+	var _args im.ChatServiceEvaluatePushRecipientsArgs
+	_args.Request = request
+	var _result im.ChatServiceEvaluatePushRecipientsResult
+	if err = p.c.Call(ctx, "EvaluatePushRecipients", &_args, &_result); err != nil {
 		return
 	}
 	return _result.GetSuccess(), nil

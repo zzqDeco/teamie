@@ -302,6 +302,20 @@ func (s *Service) SendMessage(ctx context.Context, user domain.User, req domain.
 		}); err != nil {
 			return err
 		}
+		if s.Flags != nil && s.Flags.Enabled("im.push.web") {
+			if other := candidateMemberIDs(c.MemberIDs, user.ID); len(other) > 0 {
+				if err = s.Conversations.EnqueueOutboxHint(txCtx, map[string]any{
+					"type":           "push.message",
+					"workspaceId":    c.WorkspaceID,
+					"conversationId": conversationID,
+					"messageId":      m.ID,
+					"senderId":       user.ID,
+					"userIds":        other,
+				}); err != nil {
+					return err
+				}
+			}
+		}
 		created = true
 		return nil
 	})

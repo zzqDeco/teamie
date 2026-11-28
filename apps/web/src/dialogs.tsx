@@ -42,6 +42,7 @@ import { useThemePreference } from "./theme";
 import type { ThemePreference } from "./theme";
 import { useNotificationPreferences } from "./notifications";
 import { PwaInstallSettingsCard } from "./pwa/install-prompt";
+import { WebPushSettingsControl } from "./pwa/push-settings";
 export type DialogKind =
   | "workspace"
   | "channel"
@@ -545,6 +546,9 @@ export function ProfileSettings() {
           onChange={(checked) =>
             setNotificationPrefs({ showPreview: checked })
           }
+        />
+        <WebPushSettingsControl
+          notificationPermission={notificationPermission}
         />
       </section>
       <PwaInstallSettingsCard />
