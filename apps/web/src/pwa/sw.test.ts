@@ -38,8 +38,11 @@ function createSwHarness(
   const skipWaiting = vi.fn();
   const claim = vi.fn(async () => {});
   const openWindow = vi.fn(async (url: string) => ({ url }));
+  const showNotification = vi.fn(async () => {});
   const windowClients: Array<{
     url: string;
+    visibilityState?: string;
+    focused?: boolean;
     focus: ReturnType<typeof vi.fn>;
     postMessage: ReturnType<typeof vi.fn>;
   }> = [];
@@ -62,6 +65,9 @@ function createSwHarness(
   const selfObj = {
     location: { origin },
     skipWaiting,
+    registration: {
+      showNotification,
+    },
     clients: {
       claim,
       matchAll: vi.fn(async () => windowClients),
@@ -136,6 +142,7 @@ function createSwHarness(
     skipWaiting,
     claim,
     openWindow,
+    showNotification,
     windowClients,
     dispatchExtendable,
     dispatchFetch,
@@ -306,5 +313,73 @@ describe("public/sw.js security and offline behavior", () => {
       },
     });
     expect(sw.openWindow).toHaveBeenLastCalledWith("/app");
+  });
+
+  it("handles push events with privacy-safe wake notifications, sanitizes URLs, and suppresses active foreground conversation", async () => {
+    const sw = createSwHarness();
+
+    // 1. Background push shows generic privacy-safe copy and never renders untrusted body text.
+    await sw.dispatchExtendable("push", {
+      data: {
+        json: () => ({
+          type: "message.wake",
+          workspaceId: "w1",
+          conversationId: "c1",
+          messageId: "m1",
+          url: "/app/w/w1/c/c1",
+          body: "SECRET SHOULD NEVER APPEAR",
+        }),
+      },
+    });
+    expect(sw.showNotification).toHaveBeenCalledTimes(1);
+    expect(sw.showNotification).toHaveBeenLastCalledWith("Teamie", {
+      body: "你有一条新消息",
+      icon: "/icon-192.png",
+      badge: "/icon-192.png",
+      tag: "teamie-push-c1",
+      renotify: true,
+      data: { url: "/app/w/w1/c/c1" },
+    });
+
+    // 2. Active visible & focused window already viewing the same conversation suppresses duplicate notification.
+    sw.windowClients.push({
+      url: "https://teamie.example/app/w/w1/c/c1",
+      visibilityState: "visible",
+      focused: true,
+      focus: vi.fn(async () => {}),
+      postMessage: vi.fn(),
+    });
+    await sw.dispatchExtendable("push", {
+      data: {
+        json: () => ({
+          type: "message.wake",
+          workspaceId: "w1",
+          conversationId: "c1",
+          messageId: "m2",
+          url: "/app/w/w1/c/c1",
+        }),
+      },
+    });
+    expect(sw.showNotification).toHaveBeenCalledTimes(1);
+
+    // 3. Push for a different conversation still wakes, and unsafe URLs sanitize to /app.
+    await sw.dispatchExtendable("push", {
+      data: {
+        json: () => ({
+          type: "message.wake",
+          conversationId: "c2",
+          url: "https://evil.example/steal",
+        }),
+      },
+    });
+    expect(sw.showNotification).toHaveBeenCalledTimes(2);
+    expect(sw.showNotification).toHaveBeenLastCalledWith("Teamie", {
+      body: "你有一条新消息",
+      icon: "/icon-192.png",
+      badge: "/icon-192.png",
+      tag: "teamie-push-c2",
+      renotify: true,
+      data: { url: "/app" },
+    });
   });
 });

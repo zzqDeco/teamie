@@ -1,6 +1,7 @@
 import { createCollaborationClient } from "./collaboration";
 import { createModelGatewayClient } from "./model-gateway";
 import { createMarketplaceClient } from "./marketplace";
+import { createPushClient } from "./push";
 import {
   IDL_ROUTES, type AgentListResp, type AgentResp, type AttachmentResp,
   type ChangePasswordReq, type CreateAgentReq, type CreateWorkspaceReq,
@@ -367,28 +368,14 @@ export class TeamieClient {
       { signal },
       "blob",
     );
-  edit = (
-    conversationId: string,
-    id: string,
-    body: string,
-    mentions?: Mention[],
-  ) =>
+  edit = (conversationId: string, id: string, body: string, mentions?: Mention[]) =>
     this.#request<{ message: Message }>(
       routePath(IDL_ROUTES.EditMessage, { id: conversationId, messageId: id }),
-      {
-        method: IDL_ROUTES.EditMessage.method,
-        body: JSON.stringify({
-          body,
-          ...(mentions?.length ? { mentions } : {}),
-        }),
-      },
+      { method: IDL_ROUTES.EditMessage.method, body: JSON.stringify({ body, ...(mentions?.length ? { mentions } : {}) }) },
     );
   retract = (conversationId: string, id: string) =>
     this.#request<{ message: Message }>(
-      routePath(IDL_ROUTES.RetractMessage, {
-        id: conversationId,
-        messageId: id,
-      }),
+      routePath(IDL_ROUTES.RetractMessage, { id: conversationId, messageId: id }),
       { method: IDL_ROUTES.RetractMessage.method },
     );
   read = (id: string, seq: number) =>
@@ -398,25 +385,13 @@ export class TeamieClient {
     });
   putReaction = (conversationId: string, messageId: string, emoji: string) =>
     this.#request<ReactionsResp>(
-      routePath(IDL_ROUTES.PutReaction, {
-        id: conversationId,
-        messageId,
-        emoji,
-      }),
-      {
-        method: IDL_ROUTES.PutReaction.method,
-      },
+      routePath(IDL_ROUTES.PutReaction, { id: conversationId, messageId, emoji }),
+      { method: IDL_ROUTES.PutReaction.method },
     );
   deleteReaction = (conversationId: string, messageId: string, emoji: string) =>
     this.#request<ReactionsResp>(
-      routePath(IDL_ROUTES.DeleteReaction, {
-        id: conversationId,
-        messageId,
-        emoji,
-      }),
-      {
-        method: IDL_ROUTES.DeleteReaction.method,
-      },
+      routePath(IDL_ROUTES.DeleteReaction, { id: conversationId, messageId, emoji }),
+      { method: IDL_ROUTES.DeleteReaction.method },
     );
   readReceipts = (conversationId: string, signal?: AbortSignal) =>
     this.#request<ReadReceipts>(
@@ -486,6 +461,11 @@ export class TeamieClient {
   deleteAnnouncement = this.#collaboration.deleteAnnouncement;
   searchGlobalMessages = this.#collaboration.searchGlobalMessages;
   listConversationAttachments = this.#collaboration.listConversationAttachments;
+  #push = createPushClient(this);
+  pushConfig = this.#push.pushConfig;
+  pushSubscriptions = this.#push.pushSubscriptions;
+  upsertPushSubscription = this.#push.upsertPushSubscription;
+  deletePushSubscription = this.#push.deletePushSubscription;
   sync = (cursor: string) =>
     this.#request<SyncPage>(
       `${IDL_ROUTES.Sync.clientPath}?cursor=${part(cursor)}&limit=100`,

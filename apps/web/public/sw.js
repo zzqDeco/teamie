@@ -181,6 +181,63 @@ self.addEventListener("fetch", (event) => {
   }
 });
 
+self.addEventListener("push", (event) => {
+  let payload = null;
+  if (event.data) {
+    try {
+      payload = event.data.json();
+    } catch {
+      payload = null;
+    }
+  }
+  const targetUrl = sanitizeRelativeAppUrl(payload?.url);
+  const conversationId =
+    typeof payload?.conversationId === "string" && payload.conversationId
+      ? payload.conversationId
+      : "";
+  const tag = conversationId ? `teamie-push-${conversationId}` : "teamie-push";
+
+  event.waitUntil(
+    self.clients
+      .matchAll({ type: "window", includeUncontrolled: true })
+      .then((windowClients) => {
+        const targetPath = new URL(targetUrl, self.location.origin).pathname;
+        const alreadyViewing = windowClients.some((client) => {
+          try {
+            const parsed = new URL(client.url);
+            return (
+              parsed.origin === self.location.origin &&
+              client.visibilityState === "visible" &&
+              client.focused === true &&
+              parsed.pathname === targetPath
+            );
+          } catch {
+            return false;
+          }
+        });
+        if (alreadyViewing) {
+          return undefined;
+        }
+        if (
+          !self.registration ||
+          typeof self.registration.showNotification !== "function"
+        ) {
+          return undefined;
+        }
+        // Privacy invariant: background wake notifications never display message text,
+        // sender names, or conversation titles on the OS lock screen.
+        return self.registration.showNotification("Teamie", {
+          body: "你有一条新消息",
+          icon: "/icon-192.png",
+          badge: "/icon-192.png",
+          tag,
+          renotify: true,
+          data: { url: targetUrl },
+        });
+      }),
+  );
+});
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const targetUrl = sanitizeRelativeAppUrl(event.notification.data?.url);

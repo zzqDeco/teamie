@@ -29,6 +29,10 @@ import {
   readPendingOfflineLogout,
   saveOfflineUser,
 } from "./pwa/offline-cache";
+import {
+  revokeWebPushOnLogout,
+  unsubscribeLocalWebPushOnly,
+} from "./pwa/push";
 import { markSessionExpired } from "./session-notice";
 
 type Auth = {
@@ -164,6 +168,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       pendingLogoutInFlight.current = true;
       api.csrfToken = session.csrfToken;
       try {
+        await revokeWebPushOnLogout();
         await api.logout();
         if (isCurrent()) {
           clearPendingOfflineLogout();
@@ -366,11 +371,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const request = captureSession();
     if (offlineMode && !api.csrfToken) {
       if (request.subject) markPendingOfflineLogout(request.subject);
+      void unsubscribeLocalWebPushOnly();
       reset();
       return;
     }
-    // Delete pending uploads while this session can still authorize it.
-    await discardAttachmentDrafts();
+    // Delete pending uploads and background Web Push subscription while this session can still authorize them.
+    await Promise.all([discardAttachmentDrafts(), revokeWebPushOnLogout()]);
     if (!request.isCurrent()) return;
     try {
       await api.logout();

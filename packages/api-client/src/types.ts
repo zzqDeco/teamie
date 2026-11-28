@@ -50,6 +50,11 @@ import type {
   PublicAgentDTO,
   PublicModelOptionDTO,
   PutPinResp,
+  PushConfigResp,
+  PushSubscriptionDTO,
+  PushSubscriptionResp,
+  ListPushSubscriptionsResp,
+  UpsertPushSubscriptionReq,
   ReactionDTO,
   ReadReceiptsResp,
   ReadSeqCountDTO,
@@ -302,3 +307,9 @@ export type AnnouncementsPage = ListAnnouncementsResp;
 export type CreateAnnouncementInput = CreateAnnouncementReq;
 export type CreatedAnnouncement = AnnouncementResp;
 export type MarkAnnouncementsReadResult = MarkAnnouncementsReadResp;
+
+export type PushConfig = PushConfigResp;
+export type PushSubscriptionItem = PushSubscriptionDTO;
+export type PushSubscriptionList = ListPushSubscriptionsResp;
+export type UpsertPushSubscriptionInput = UpsertPushSubscriptionReq;
+export type PushSubscriptionResult = PushSubscriptionResp;
