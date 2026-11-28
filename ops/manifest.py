@@ -17,12 +17,14 @@ from urllib.parse import unquote, urlsplit
 LEGACY_SERVICES = ("identity", "chat", "realtime", "web", "caddy", "postgres", "redis")
 SERVICES = LEGACY_SERVICES + ("agent-control", "agent-runtime", "llm-gateway", "sandbox", "sandbox-runner")
 SERVICES_V3 = SERVICES + ("marketplace",)
-ONLINE_AB_SERVICES = ("identity", "chat", "marketplace", "realtime", "web", "agent-control", "llm-gateway")
+SERVICES_V4 = SERVICES_V3 + ("push",)
+ONLINE_AB_SERVICES = ("identity", "chat", "marketplace", "push", "realtime", "web", "agent-control", "llm-gateway")
 SINGLE_INSTANCE_SERVICES = ("postgres", "redis", "sandbox", "agent-runtime")
 MAX_CONTAINER_BUDGET_BYTES = 1600 * 1024 * 1024
 SANDBOX_CHILD_RESERVE_BYTES = 128 * 1024 * 1024
 SCHEMA_V2 = {"identity": 3, "chat": 9, "agent_control": 3, "agent_runtime": 15, "gateway": 6}
 SCHEMA_V3 = {"identity": 3, "chat": 14, "marketplace": 1, "agent_control": 3, "agent_runtime": 16, "gateway": 7}
+SCHEMA_V4 = {**SCHEMA_V3, "push": 1}
 VERSION = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 SHA = re.compile(r"[0-9a-f]{40}$")
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}$")
@@ -60,7 +62,7 @@ def validate_registry(registry):
 def release_registry(data):
     if "registry" not in data:
         return {"provider": "ghcr", "pullHost": "ghcr.io"}
-    require(data["manifestVersion"] in (2, 3), "registry metadata requires manifest version 2 or 3")
+    require(data["manifestVersion"] in (2, 3, 4), "registry metadata requires manifest version 2, 3 or 4")
     return validate_registry(data["registry"])
 
 
@@ -122,7 +124,9 @@ def services_for_manifest_version(manifest_version):
         return LEGACY_SERVICES
     if manifest_version == 2:
         return SERVICES
-    return SERVICES_V3
+    if manifest_version == 3:
+        return SERVICES_V3
+    return SERVICES_V4
 
 
 def schema_for_manifest_version(manifest_version):
@@ -130,11 +134,13 @@ def schema_for_manifest_version(manifest_version):
         return {"identity": 1, "chat": 1}
     if manifest_version == 2:
         return dict(SCHEMA_V2)
-    return dict(SCHEMA_V3)
+    if manifest_version == 3:
+        return dict(SCHEMA_V3)
+    return dict(SCHEMA_V4)
 
 
 def validate(data):
-    require(type(data.get("manifestVersion")) is int and data["manifestVersion"] in (1, 2, 3), "unsupported manifest version")
+    require(type(data.get("manifestVersion")) is int and data["manifestVersion"] in (1, 2, 3, 4), "unsupported manifest version")
     services = services_for_manifest_version(data["manifestVersion"])
     version(data["version"])
     source = data["source"]
@@ -161,8 +167,8 @@ def validate(data):
                 "minCompatibleVersion cannot exceed manifest version")
     if "onlineRollout" in data:
         require(
-            data["manifestVersion"] == 3 and data["onlineRollout"] is True,
-            "onlineRollout capability requires manifestVersion 3 and boolean true",
+            data["manifestVersion"] in (3, 4) and data["onlineRollout"] is True,
+            "onlineRollout capability requires manifestVersion 3 or 4 and boolean true",
         )
     return data
 
@@ -249,7 +255,7 @@ def validate_config(config, host_env, release_manifest=None):
     require(services["caddy"]["environment"].get("TLS_SERVER_NAME") == parsed.hostname,
             "TLS_SERVER_NAME must equal the APP_ORIGIN hostname without scheme or port")
     pg_env = services["postgres"]["environment"]
-    for name in ("identity", "chat", "realtime", "marketplace", "agent-control", "llm-gateway"):
+    for name in ("identity", "chat", "realtime", "marketplace", "push", "agent-control", "llm-gateway"):
         if name not in services:
             continue
         env = services[name]["environment"]
@@ -258,6 +264,8 @@ def validate_config(config, host_env, release_manifest=None):
     db_services = {"identity": "identity", "chat": "chat"}
     if "marketplace" in services:
         db_services["marketplace"] = "marketplace"
+    if "push" in services:
+        db_services["push"] = "push"
     if "agent-control" in services:
         db_services.update({"agent-control": "agent_control", "agent-runtime": "agent_runtime", "llm-gateway": "gateway"})
     for name, suffix in db_services.items():
@@ -273,6 +281,31 @@ def validate_config(config, host_env, release_manifest=None):
         require("egress" in services["marketplace"].get("networks", ()), "marketplace requires endpoint egress")
         chat_nets = services["chat"].get("networks")
         require(not chat_nets or set(chat_nets) == {"private"}, "chat must stay on private network without egress")
+    push_tokens = []
+    if "push" in services or "PUSH_SERVICE_TOKEN" in services["chat"]["environment"]:
+        require("push" in services, "PUSH_SERVICE_TOKEN requires push service")
+        require("egress" in services["push"].get("networks", ()), "push requires relay egress")
+        chat_nets = services["chat"].get("networks")
+        require(not chat_nets or set(chat_nets) == {"private"}, "chat must stay on private network without egress")
+        rt_nets = services["realtime"].get("networks")
+        require(not rt_nets or set(rt_nets) == {"private"}, "realtime must stay on private network without egress")
+        push_env = services["push"]["environment"]
+        chat_env = services["chat"]["environment"]
+        push_token = chat_env.get("PUSH_SERVICE_TOKEN", "")
+        require(isinstance(push_token, str) and len(push_token) >= 24 and "REPLACE" not in push_token, "replace push service credential")
+        require(push_env.get("PUSH_SERVICE_TOKEN") == push_token, "push service credential mismatch")
+        for name, svc in services.items():
+            if name not in ("chat", "push"):
+                svc_env = svc.get("environment") or {}
+                require("PUSH_SERVICE_TOKEN" not in svc_env, "push service credential belongs to chat and push only")
+        vapid_pub = str(push_env.get("PUSH_VAPID_PUBLIC_KEY") or "").strip()
+        vapid_priv = str(push_env.get("PUSH_VAPID_PRIVATE_KEY") or "").strip()
+        vapid_sub = str(push_env.get("PUSH_VAPID_SUBJECT") or "").strip()
+        if any((vapid_pub, vapid_priv, vapid_sub)):
+            require(all((vapid_pub, vapid_priv, vapid_sub)), "VAPID public key, private key and subject must all be set together")
+            require(vapid_sub.lower().startswith(("mailto:", "https://")), "PUSH_VAPID_SUBJECT must start with mailto: or https://")
+        push_tokens.append(push_token)
+        require(len(set(credentials + push_tokens)) == len(credentials + push_tokens), "database and push credentials must be independent")
     requires_realtime_rpc = (
         (release_manifest is not None and release_manifest["schema"].get("chat", 0) >= 12)
         or (release_manifest is None and "marketplace" in services)
@@ -297,7 +330,7 @@ def validate_config(config, host_env, release_manifest=None):
                 require("REALTIME_RPC_TOKEN" not in svc_env and "REALTIME_RPC_ADDR" not in svc_env,
                         "realtime rpc credential and address belong to chat and realtime only")
         realtime_tokens.append(rt_token)
-        require(len(set(credentials + realtime_tokens)) == len(credentials + realtime_tokens), "database and service credentials must be independent")
+        require(len(set(credentials + realtime_tokens + push_tokens)) == len(credentials + realtime_tokens + push_tokens), "database and service credentials must be independent")
     if "llm-gateway" in services:
         gateway = services["llm-gateway"]["environment"]
         runtime = services["agent-runtime"]["environment"]
@@ -308,7 +341,7 @@ def validate_config(config, host_env, release_manifest=None):
         require(re.fullmatch(r"[0-9a-fA-F]{64}", master), "gateway encryption key must be 64 hex characters")
         tokens = [control["AGENT_RUNTIME_TOKEN"], identity["IM_PRINCIPAL_CONTROL_TOKEN"], identity["IM_PRINCIPAL_RUNTIME_TOKEN"], gateway["GATEWAY_RUNTIME_TOKEN"], sandbox["SANDBOX_RUNTIME_TOKEN"]]
         require(all(len(v) >= 24 and "REPLACE" not in v for v in tokens), "replace every internal service credential")
-        all_secrets = credentials + tokens + realtime_tokens + [master]
+        all_secrets = credentials + tokens + realtime_tokens + push_tokens + [master]
         require(len(set(all_secrets)) == len(all_secrets), "database, encryption and service credentials must be independent")
         for key, source in (("AGENT_RUNTIME_TOKEN",control),("GATEWAY_RUNTIME_TOKEN",gateway),("SANDBOX_RUNTIME_TOKEN",sandbox),("IM_PRINCIPAL_RUNTIME_TOKEN",identity)):
             require(runtime[key] == source[key], "runtime scoped credential mismatch")
@@ -336,8 +369,9 @@ def ensure_host_env(host_env, release_manifest):
     env_path = Path(host_env)
     require((env_path.stat().st_mode & 0o777) == 0o600, "production.env must have mode 0600")
     needs_marketplace = "marketplace" in release_manifest["images"]
+    needs_push = "push" in release_manifest["images"]
     needs_realtime_rpc = release_manifest["schema"].get("chat", 0) >= 12
-    if not needs_marketplace and not needs_realtime_rpc:
+    if not needs_marketplace and not needs_push and not needs_realtime_rpc:
         return False
     raw_text = env_path.read_text(encoding="utf-8")
     entries = {}
@@ -354,6 +388,10 @@ def ensure_host_env(host_env, release_manifest):
     has_mkt_url = bool(entries.get("MARKETPLACE_DATABASE_URL"))
     if needs_marketplace and has_mkt_pw != has_mkt_url:
         return False
+    has_push_pw = bool(entries.get("POSTGRES_PUSH_PASSWORD"))
+    has_push_url = bool(entries.get("PUSH_DATABASE_URL"))
+    if needs_push and has_push_pw != has_push_url:
+        return False
     existing_values = {v for v in entries.values() if v}
     addition_lines = []
     if needs_marketplace and not has_mkt_pw and not has_mkt_url:
@@ -365,6 +403,21 @@ def ensure_host_env(host_env, release_manifest):
             f"POSTGRES_MARKETPLACE_PASSWORD={password}\n"
             f"MARKETPLACE_DATABASE_URL=postgres://teamie_marketplace:{password}@postgres:5432/teamie_marketplace?sslmode=disable\n"
         )
+    if needs_push and not has_push_pw and not has_push_url:
+        push_pw = secrets.token_hex(32)
+        while push_pw in existing_values:
+            push_pw = secrets.token_hex(32)
+        existing_values.add(push_pw)
+        addition_lines.append(
+            f"POSTGRES_PUSH_PASSWORD={push_pw}\n"
+            f"PUSH_DATABASE_URL=postgres://teamie_push:{push_pw}@postgres:5432/teamie_push?sslmode=disable\n"
+        )
+    if needs_push and not entries.get("PUSH_SERVICE_TOKEN"):
+        push_token = secrets.token_hex(32)
+        while push_token in existing_values:
+            push_token = secrets.token_hex(32)
+        existing_values.add(push_token)
+        addition_lines.append(f"PUSH_SERVICE_TOKEN={push_token}\n")
     if needs_realtime_rpc and not entries.get("REALTIME_RPC_TOKEN"):
         rt_token = secrets.token_hex(32)
         while rt_token in existing_values:
@@ -1321,7 +1374,7 @@ def main():
     create = sub.add_parser("create")
     for arg in ("repository", "version", "sha", "main-sha", "digests", "flags"):
         create.add_argument("--" + arg, required=True)
-    create.add_argument("--manifest-version", type=int, choices=(1, 2, 3), default=3)
+    create.add_argument("--manifest-version", type=int, choices=(1, 2, 3, 4), default=4)
     create.add_argument("--min-compatible-version")
     registry_check = sub.add_parser("registry-check")
     for command in (create, registry_check):
@@ -1373,7 +1426,7 @@ def main():
                         schema=schema_for_manifest_version(args.manifest_version), storage=dict(postgresMajor=17),
                         featureFlags=dict(revision=flags["revision"], sha256=hashlib.sha256(flags_path.read_bytes()).hexdigest()),
                         images=images)
-            if args.manifest_version == 3:
+            if args.manifest_version in (3, 4):
                 data["onlineRollout"] = True
             if args.min_compatible_version is not None:
                 data["minCompatibleVersion"] = args.min_compatible_version
@@ -1414,7 +1467,7 @@ def main():
             print(image_env(read(args.manifest)), end="")
         elif args.command == "ensure-host-env":
             if ensure_host_env(args.host_env, read(args.manifest)):
-                print("Provisioned missing teamie_marketplace role credentials in host environment.", file=sys.stderr)
+                print("Provisioned missing host role/service credentials in host environment.", file=sys.stderr)
         else:
             print(validate_config(read(args.config), args.host_env, read(args.manifest) if args.manifest else None))
     except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError) as error:

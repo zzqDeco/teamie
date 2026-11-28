@@ -101,6 +101,22 @@
 			}
 		}
 	}
+	@push path /api/v1/push /api/v1/push/*
+	handle @push {
+		reverse_proxy push:8089 push-canary:8089 {
+			lb_policy first
+			lb_try_duration 5s
+			lb_try_interval 100ms
+			health_uri /readyz
+			health_interval 500ms
+			health_timeout 1s
+			fail_duration 5s
+			transport http {
+				dial_timeout 1s
+				keepalive 30s
+			}
+		}
+	}
 	handle /api/* {
 		reverse_proxy chat:8082 chat-canary:8082 {
 			lb_policy first

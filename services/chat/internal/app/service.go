@@ -25,6 +25,7 @@ type Service struct {
 	SniffMediaType    func([]byte) string
 	GenerateThumbnail func(context.Context, string, []byte) *domain.AttachmentThumbnail
 	ControlToken      string
+	PushToken         string
 }
 
 // MessageApp is an alias for Service focusing on message send/edit/retract/locate use cases.

@@ -11,6 +11,7 @@ EXPECTED_ROUTER_UPSTREAMS = {
     "contracts/gen/im/hertz_gen/im/chat/router.go": "chat:8082",
     "contracts/gen/im/hertz_gen/im/realtime/router.go": "realtime:8083",
     "contracts/gen/im/hertz_gen/im/marketplace/router.go": "marketplace:8088",
+    "contracts/gen/im/hertz_gen/im/push/router.go": "push:8089",
     "contracts/gen/agent/hertz_gen/agent/control/router.go": "agent-control:8084",
     "contracts/gen/agent/hertz_gen/agent/gateway/router.go": "llm-gateway:8086",
 }

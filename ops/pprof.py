@@ -13,6 +13,7 @@ SERVICES = (
     "chat",
     "realtime",
     "marketplace",
+    "push",
     "agent-control",
     "agent-runtime",
     "llm-gateway",

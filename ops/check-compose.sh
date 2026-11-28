@@ -3,7 +3,7 @@ set -euo pipefail
 umask 077
 scratch=$(mktemp -d)
 trap 'rm -rf -- "$scratch"' EXIT
-for service in identity chat realtime marketplace web caddy postgres redis agent-control agent-runtime llm-gateway sandbox sandbox-runner; do
+for service in identity chat realtime marketplace push web caddy postgres redis agent-control agent-runtime llm-gateway sandbox sandbox-runner; do
   key=$(printf '%s' "$service" | tr '[:lower:]-' '[:upper:]_')
   printf '%s_IMAGE=ghcr.io/zzqdeco/teamie-%s@sha256:%064d\n' "$key" "$service" 0 >> "$scratch/images.env"
 done
@@ -18,12 +18,14 @@ for name,service in config['services'].items():
         assert mount.startswith('/'), 'tmpfs entries must preserve their quoted comma-separated options'
     assert int(service['mem_limit'])>0
 assert sum(int(s['mem_limit']) for s in config['services'].values())==1344*1024*1024
-assert max(int(config['services'][s]['mem_limit']) for s in ('identity','chat','marketplace','realtime','web','agent-control','llm-gateway'))==128*1024*1024
+assert max(int(config['services'][s]['mem_limit']) for s in ('identity','chat','marketplace','push','realtime','web','agent-control','llm-gateway'))==128*1024*1024
+assert int(config['services']['push']['mem_limit'])==32*1024*1024
 assert int(config['services']['agent-runtime']['mem_limit'])==256*1024*1024
 assert int(config['services']['llm-gateway']['mem_limit'])==128*1024*1024
 assert config['networks']['private']['internal'] is True
 assert set(config['services']['llm-gateway']['networks'])=={'private','egress'}
 assert set(config['services']['marketplace']['networks'])=={'private','egress'}
+assert set(config['services']['push']['networks'])=={'private','egress'}
 assert set(config['services']['agent-runtime']['networks'])=={'private','egress'}
 assert set(config['services']['identity']['networks'])=={'private'}
 assert set(config['services']['chat']['networks'])=={'private'}
@@ -32,17 +34,21 @@ assert set(config['services']['sandbox']['networks'])=={'private'}
 assert config['services']['chat']['environment']['REALTIME_RPC_ADDR']=='realtime:8883'
 assert config['services']['realtime']['environment']['RPC_ADDR']==':8883'
 assert config['services']['chat']['environment']['REALTIME_RPC_TOKEN']==config['services']['realtime']['environment']['REALTIME_RPC_TOKEN']
+assert config['services']['chat']['environment']['PUSH_SERVICE_TOKEN']==config['services']['push']['environment']['PUSH_SERVICE_TOKEN']
 for svc_name,svc_cfg in config['services'].items():
     if svc_name not in ('chat','realtime'):
         svc_env=svc_cfg.get('environment') or {}
         assert 'REALTIME_RPC_TOKEN' not in svc_env and 'REALTIME_RPC_ADDR' not in svc_env, f'{svc_name} received realtime RPC config'
+    if svc_name not in ('chat','push'):
+        svc_env=svc_cfg.get('environment') or {}
+        assert 'PUSH_SERVICE_TOKEN' not in svc_env, f'{svc_name} received push service token'
 assert config['services']['sandbox']['environment']['SANDBOX_RUNNER_IMAGE'].startswith('ghcr.io/zzqdeco/teamie-sandbox-runner@sha256:')
 for name,service in config['services'].items():
     assert name=='sandbox' or not any(v.get('target')=='/var/run/docker.sock' for v in service.get('volumes',[]))
 assert config['services']['caddy']['environment']['TLS_SERVER_NAME']=='YOUR_PUBLIC_IP'
 assert config['services']['identity']['environment']['BOOTSTRAP_INVITE_CODE']
 assert 'REGISTRATION_CODE' not in config['services']['identity']['environment']
-for svc in ('identity','chat','realtime','marketplace','agent-control','agent-runtime','llm-gateway','sandbox'):
+for svc in ('identity','chat','realtime','marketplace','push','agent-control','agent-runtime','llm-gateway','sandbox'):
     assert config['services'][svc]['environment']['PPROF_ADDR']=='127.0.0.1:6060', f'{svc} missing default loopback PPROF_ADDR'
 PY
 # Verify both default (empty) and explicit disable (off) propagate to every Go service.
@@ -54,7 +60,7 @@ for pprof_val in '' off; do
   python3 - "$scratch/pprof.json" "${pprof_val:-127.0.0.1:6060}" <<'PY_PPROF'
 import json,sys
 services=json.load(open(sys.argv[1]))['services']
-for svc in ('identity','chat','realtime','marketplace','agent-control','agent-runtime','llm-gateway','sandbox'):
+for svc in ('identity','chat','realtime','marketplace','push','agent-control','agent-runtime','llm-gateway','sandbox'):
     assert services[svc]['environment']['PPROF_ADDR']==sys.argv[2], f'{svc} PPROF_ADDR mismatch'
 PY_PPROF
 done
@@ -107,6 +113,11 @@ for mutate in (
     lambda s:s['chat']['environment'].update(REALTIME_RPC_ADDR='realtime:9999'),
     lambda s:s['realtime']['environment'].update(RPC_ADDR=':9999'),
     lambda s:s['marketplace']['environment'].update(DATABASE_URL=s['chat']['environment']['DATABASE_URL']),
+    lambda s:s['push'].update(networks={'private':{}}),
+    lambda s:s['push']['environment'].update(DATABASE_URL=s['chat']['environment']['DATABASE_URL']),
+    lambda s:s['push']['environment'].update(PUSH_SERVICE_TOKEN='z'*64),
+    lambda s:s['realtime']['environment'].update(PUSH_SERVICE_TOKEN=s['chat']['environment']['PUSH_SERVICE_TOKEN']),
+    lambda s:s['push']['environment'].update(PUSH_VAPID_PUBLIC_KEY='only-pub-set'),
 ):
     changed=copy.deepcopy(c);mutate(changed['services'])
     try:m.validate_config(changed,sys.argv[2])
@@ -159,7 +170,7 @@ python3 - "$scratch/acr-digests" "$scratch/acr-images.env" <<'PY'
 import importlib.util,json,pathlib,sys
 spec=importlib.util.spec_from_file_location('manifest','ops/manifest.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 prefix='crpi-teamie-vpc.cn-shenzhen.personal.cr.aliyuncs.com/teamie/teamie-'
-images={name:prefix+name+'@sha256:'+'0'*64 for name in m.SERVICES_V3}
+images={name:prefix+name+'@sha256:'+'0'*64 for name in m.SERVICES_V4}
 for name,image in images.items():
     (pathlib.Path(sys.argv[1])/(name+'.json')).write_text(json.dumps({'service':name,'image':image}))
 pathlib.Path(sys.argv[2]).write_text(''.join(name.upper().replace('-','_')+'_IMAGE='+image+'\n' for name,image in images.items()))

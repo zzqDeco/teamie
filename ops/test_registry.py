@@ -34,13 +34,13 @@ def registry(public=PUBLIC, pull=PRIVATE, namespace=NAMESPACE):
 def release(acr=True, release_version="v0.5.0", sha="a" * 40):
     prefix = PRIVATE + "/" + NAMESPACE + "/teamie-" if acr else "ghcr.io/zzqdeco/teamie-"
     value = {
-        "manifestVersion": 3, "version": release_version,
+        "manifestVersion": 4, "version": release_version,
         "source": {"repository": "zzqDeco/teamie", "sha": sha, "mainSha": sha,
                    "ref": "refs/heads/release/" + release_version},
         "createdAt": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "schema": dict(manifest.SCHEMA_V3), "storage": {"postgresMajor": 17},
-        "featureFlags": {"revision": "agents-v2", "sha256": "f" * 64},
-        "images": {name: prefix + name + "@sha256:" + "1" * 64 for name in manifest.SERVICES_V3},
+        "schema": dict(manifest.SCHEMA_V4), "storage": {"postgresMajor": 17},
+        "featureFlags": {"revision": "im-collab-v2", "sha256": "f" * 64},
+        "images": {name: prefix + name + "@sha256:" + "1" * 64 for name in manifest.SERVICES_V4},
     }
     if acr:
         value["registry"] = registry()
@@ -56,7 +56,7 @@ def production_config(data):
     services = {name: {"image": image, "environment": {}}
                 for name, image in data["images"].items() if name != "sandbox-runner"}
     origin = "https://teamie.example.com"
-    for name in ("identity", "chat", "realtime", "marketplace", "agent-control", "llm-gateway"):
+    for name in ("identity", "chat", "realtime", "marketplace", "push", "agent-control", "llm-gateway"):
         if name in services:
             services[name]["environment"].update(APP_ORIGIN=origin, COOKIE_SECURE="true")
     services["caddy"]["environment"].update(SITE_ADDRESS=origin, TLS_SERVER_NAME="teamie.example.com")
@@ -70,6 +70,13 @@ def production_config(data):
         db_specs.append(("marketplace", "marketplace", "m"))
         services["marketplace"]["networks"] = ["private", "egress"]
         services["chat"]["networks"] = ["private"]
+    if "push" in services:
+        db_specs.append(("push", "push", "k"))
+        services["push"]["networks"] = ["private", "egress"]
+        services["push"]["environment"]["PUSH_SERVICE_TOKEN"] = "s" * 64
+        services["chat"]["environment"]["PUSH_SERVICE_TOKEN"] = "s" * 64
+        services["chat"]["networks"] = ["private"]
+        services["realtime"]["networks"] = ["private"]
     if data["schema"].get("chat", 0) >= 12:
         services["chat"]["environment"]["REALTIME_RPC_ADDR"] = "realtime:8883"
         services["chat"]["environment"]["REALTIME_RPC_TOKEN"] = "q" * 64
@@ -155,6 +162,11 @@ class RegistryManifestTest(unittest.TestCase):
                 changed = copy.deepcopy(old)
                 changed["images"]["chat"] = changed["images"]["chat"].replace("ghcr.io", host)
                 manifest.validate(changed)
+        v3 = copy.deepcopy(old)
+        v3["manifestVersion"] = 3
+        v3["schema"] = dict(manifest.SCHEMA_V3)
+        v3["images"] = {key: value for key, value in v3["images"].items() if key in manifest.SERVICES_V3}
+        manifest.validate(v3)
         v2 = copy.deepcopy(old)
         v2["manifestVersion"] = 2
         v2["schema"] = dict(manifest.SCHEMA_V2)

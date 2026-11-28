@@ -1,5 +1,5 @@
 {
-  "revision": "im-collab-v1",
+  "revision": "im-collab-v2",
   "flags": {
     "auth.public_signup": false,
     "auth.password_reset": true,
@@ -35,6 +35,7 @@
     "im.messages.pin": true,
     "im.messages.save": true,
     "im.unread.mark": true,
-    "im.mentions.broadcast": true
+    "im.mentions.broadcast": true,
+    "im.push.web": false
   }
 }

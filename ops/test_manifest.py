@@ -1133,4 +1133,65 @@ class ServiceUpToDateRuntimeSettingsTest(unittest.TestCase):
                 )
 
 
+class PushManifestV4Test(unittest.TestCase):
+    def _v4_manifest(self, ver="v0.5.0", sha_char="a"):
+        sha = sha_char * 40
+        return {
+            "manifestVersion": 4,
+            "version": ver,
+            "source": {
+                "repository": "zzqDeco/teamie",
+                "sha": sha,
+                "mainSha": sha,
+                "ref": "refs/heads/release/" + ver,
+            },
+            "createdAt": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "schema": dict(manifest.SCHEMA_V4),
+            "storage": {"postgresMajor": 17},
+            "featureFlags": {"revision": "im-collab-v2", "sha256": "f" * 64},
+            "onlineRollout": True,
+            "images": {
+                svc: f"ghcr.io/zzqdeco/teamie-{svc}@sha256:" + sha_char * 64
+                for svc in manifest.SERVICES_V4
+            },
+        }
+
+    def test_v3_to_v4_transition_and_online_compatibility(self):
+        v3 = self._v4_manifest("v0.4.11", "a")
+        v3["manifestVersion"] = 3
+        v3["schema"] = dict(manifest.SCHEMA_V3)
+        del v3["images"]["push"]
+        v4a = self._v4_manifest("v0.5.0", "b")
+        v4b = self._v4_manifest("v0.5.1", "c")
+
+        manifest.validate(v3)
+        manifest.validate(v4a)
+        manifest.check_transition(v4a, v3, v3)
+        # v3 -> v4 must fence because manifestVersion and schema changed; v4 -> v4 is online-compatible.
+        self.assertFalse(manifest.online_compatible(v4a, v3))
+        self.assertTrue(manifest.online_compatible(v4b, v4a))
+        with self.assertRaises(ValueError):
+            manifest.check_transition(v3, v4a, rollback=True)
+
+    def test_ensure_host_env_provisions_push_db_and_service_token(self):
+        v4 = self._v4_manifest("v0.5.0", "a")
+        with tempfile.TemporaryDirectory() as tmp:
+            env_file = Path(tmp) / "production.env"
+            env_file.write_text(
+                "POSTGRES_MARKETPLACE_PASSWORD=" + "m" * 64 + "\n"
+                "MARKETPLACE_DATABASE_URL=postgres://teamie_marketplace:" + "m" * 64 + "@postgres:5432/teamie_marketplace?sslmode=disable\n"
+                "REALTIME_RPC_TOKEN=" + "r" * 64 + "\n",
+                encoding="utf-8",
+            )
+            env_file.chmod(0o600)
+            changed = manifest.ensure_host_env(str(env_file), v4)
+            self.assertTrue(changed)
+            text = env_file.read_text(encoding="utf-8")
+            self.assertIn("POSTGRES_PUSH_PASSWORD=", text)
+            self.assertIn("PUSH_DATABASE_URL=postgres://teamie_push:", text)
+            self.assertIn("PUSH_SERVICE_TOKEN=", text)
+            # Second run is idempotent.
+            self.assertFalse(manifest.ensure_host_env(str(env_file), v4))
+
+
 if __name__ == "__main__": unittest.main()
